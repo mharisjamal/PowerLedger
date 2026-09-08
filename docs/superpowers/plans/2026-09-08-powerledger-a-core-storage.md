@@ -1355,7 +1355,7 @@ public static class EnergyIntegrator
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter EnergyIntegratorTests`
-Expected: `Passed! - Failed: 0, Passed: 9`.
+Expected: `Passed! - Failed: 0, Passed: 6`.
 
 - [ ] **Step 5: Commit**
 
@@ -1750,7 +1750,7 @@ public static class Comparisons
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter TariffScheduleTests`
-Expected: `Passed! - Failed: 0, Passed: 9`.
+Expected: `Passed! - Failed: 0, Passed: 6`.
 
 - [ ] **Step 5: Run the whole Core suite and commit**
 
