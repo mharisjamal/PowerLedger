@@ -604,7 +604,7 @@ git commit -m "Add Core records: Sample, Components, Reading, HardwareFacts, cal
 - Create: `src/PowerLedger.Core/PsuEfficiency.cs`
 - Test: `tests/PowerLedger.Core.Tests/DisplayModelTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Contracts;
@@ -658,12 +658,12 @@ public class DisplayModelTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter DisplayModelTests`
 Expected: build error, `DisplayModel` not found.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/PowerLedger.Core/PsuEfficiency.cs`
 ```csharp
@@ -702,7 +702,7 @@ public static class DisplayModel
     public static double PanelWatts(MachineProfile profile, double? brightness, bool displayOn)
     {
         if (profile.Chassis != ChassisKind.Laptop || !displayOn) return 0;
-        var b = Math.Clamp(brightness ?? 0.5, 0, 1);
+        var b = brightness is { } value && !double.IsNaN(value) ? Math.Clamp(value, 0, 1) : 0.5;
         return (PanelBaseW + PanelRangeW * b) * SizeFactor(profile.DisplayDiagonalInches);
     }
 
@@ -722,12 +722,12 @@ public static class DisplayModel
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter DisplayModelTests`
 Expected: `Passed! - Failed: 0, Passed: 9`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Core/DisplayModel.cs src/PowerLedger.Core/PsuEfficiency.cs tests/PowerLedger.Core.Tests/DisplayModelTests.cs
