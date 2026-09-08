@@ -384,7 +384,7 @@ git commit -m "Add Contracts: Quality, SessionReason, MachineProfile"
 - Create: `tests/PowerLedger.Core.Tests/TestData.cs`
 - Test: `tests/PowerLedger.Core.Tests/ComponentsTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Core.Tests/ComponentsTests.cs`
 ```csharp
@@ -442,12 +442,12 @@ internal sealed class FixedBaseline(double? value) : IBaselineProvider
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter ComponentsTests`
 Expected: build error, `Components` and `CalibrationBuckets` not found.
 
-- [ ] **Step 3: Write the records**
+- [x] **Step 3: Write the records**
 
 `src/PowerLedger.Core/Sample.cs`
 ```csharp
@@ -568,12 +568,12 @@ public static class CalibrationBuckets
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter ComponentsTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
