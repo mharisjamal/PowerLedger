@@ -88,7 +88,7 @@ Expected: one line starting with `10.0.` (open a new shell if the PATH did not r
 - Create: `src/PowerLedger.Contracts/PowerLedger.Contracts.csproj`, `src/PowerLedger.Core/PowerLedger.Core.csproj`, `src/PowerLedger.Storage/PowerLedger.Storage.csproj`
 - Create: `tests/PowerLedger.Core.Tests/PowerLedger.Core.Tests.csproj`, `tests/PowerLedger.Storage.Tests/PowerLedger.Storage.Tests.csproj`
 
-- [ ] **Step 1: Create solution and projects**
+- [x] **Step 1: Create solution and projects**
 
 Run from `D:\PowerLedger`:
 ```bash
@@ -103,7 +103,7 @@ rm tests/PowerLedger.Core.Tests/UnitTest1.cs tests/PowerLedger.Storage.Tests/Uni
 dotnet sln add src/PowerLedger.Contracts src/PowerLedger.Core src/PowerLedger.Storage tests/PowerLedger.Core.Tests tests/PowerLedger.Storage.Tests
 ```
 
-- [ ] **Step 2: Wire references and packages**
+- [x] **Step 2: Wire references and packages**
 
 ```bash
 dotnet add src/PowerLedger.Core reference src/PowerLedger.Contracts
@@ -116,7 +116,7 @@ dotnet add tests/PowerLedger.Storage.Tests reference src/PowerLedger.Storage src
 dotnet add tests/PowerLedger.Storage.Tests package Shouldly
 ```
 
-- [ ] **Step 3: Write `Directory.Build.props`**
+- [x] **Step 3: Write `Directory.Build.props`**
 
 ```xml
 <Project>
@@ -132,7 +132,7 @@ dotnet add tests/PowerLedger.Storage.Tests package Shouldly
 </Project>
 ```
 
-- [ ] **Step 4: Write `.editorconfig`**
+- [x] **Step 4: Write `.editorconfig`**
 
 ```ini
 root = true
@@ -149,7 +149,7 @@ csharp_style_namespace_declarations = file_scoped:warning
 dotnet_sort_system_directives_first = true
 ```
 
-- [ ] **Step 5: Build and run the (empty) test suites**
+- [x] **Step 5: Build and run the (empty) test suites**
 
 Run: `dotnet build`
 Expected: `Build succeeded.` with 0 warnings.
@@ -157,7 +157,7 @@ Expected: `Build succeeded.` with 0 warnings.
 Run: `dotnet test`
 Expected: both test projects report `Passed! - Failed: 0, Passed: 0` (or "No test is available" — both are fine at this point).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
