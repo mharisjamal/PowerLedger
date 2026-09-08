@@ -18,6 +18,8 @@
 PowerLedger.sln
 Directory.Build.props                              shared build settings (nullable, warnings as errors, version)
 .editorconfig                                      formatting rules
+.gitattributes                                     text=auto; .sln checked out CRLF
+global.json                                        pins SDK 10.0.400, rollForward latestFeature
 src/PowerLedger.Contracts/
   Quality.cs                                       enum Quality
   SessionReason.cs                                 enum SessionReason
@@ -147,12 +149,24 @@ charset = utf-8
 indent_size = 2
 [*.sln]
 indent_style = tab
-[*.{csproj,props,targets,sln}]
+[*.{csproj,sln}]
 charset = utf-8-bom
 [*.cs]
 csharp_style_namespace_declarations = file_scoped:warning
 dotnet_sort_system_directives_first = true
 ```
+
+
+- [x] **Step 4b: Pin the SDK band and the line-ending policy**
+
+Run: `dotnet new globaljson --sdk-version 10.0.400 --roll-forward latestFeature`
+
+Write `.gitattributes`:
+```
+* text=auto
+*.sln text eol=crlf
+```
+Git owns line endings (index is always LF); `.editorconfig` no longer sets `end_of_line`.
 
 - [x] **Step 5: Build and run the (empty) test suites**
 
