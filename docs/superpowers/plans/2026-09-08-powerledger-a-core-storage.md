@@ -193,7 +193,7 @@ git commit -m "Scaffold solution with Contracts, Core, Storage and test projects
 - Create: `src/PowerLedger.Contracts/MachineProfile.cs`
 - Test: `tests/PowerLedger.Core.Tests/MachineProfileTests.cs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```csharp
 using PowerLedger.Contracts;
@@ -222,12 +222,12 @@ public class MachineProfileTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter MachineProfileTests`
 Expected: build error `The type or namespace name 'MachineProfile' could not be found`.
 
-- [ ] **Step 3: Write the contracts**
+- [x] **Step 3: Write the contracts**
 
 `src/PowerLedger.Contracts/Quality.cs`
 ```csharp
@@ -298,12 +298,12 @@ public sealed record MachineProfile(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter MachineProfileTests`
 Expected: `Passed! - Failed: 0, Passed: 2`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Contracts tests/PowerLedger.Core.Tests/MachineProfileTests.cs
