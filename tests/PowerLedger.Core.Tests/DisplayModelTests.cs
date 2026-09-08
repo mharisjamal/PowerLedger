@@ -19,6 +19,17 @@ public class DisplayModelTests
         DisplayModel.PanelWatts(large, 1.0, true).ShouldBe(6.0 * 1.3, 0.001);
     }
 
+    [Theory]
+    [InlineData(0, 1.0)]
+    [InlineData(double.NaN, 1.0)]
+    [InlineData(13.3, 0.8)]
+    [InlineData(14.0, 0.8)]
+    [InlineData(14.1, 1.0)]
+    [InlineData(16.9, 1.0)]
+    [InlineData(17.0, 1.3)]
+    public void Size_factor_boundaries(double diagonal, double expected)
+        => DisplayModel.SizeFactor(diagonal).ShouldBe(expected);
+
     [Fact]
     public void Panel_is_zero_when_display_is_off_or_machine_is_a_desktop()
     {
@@ -29,6 +40,10 @@ public class DisplayModelTests
     [Fact]
     public void Unknown_brightness_assumes_fifty_percent()
         => DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, null, true).ShouldBe(1.5 + 4.5 * 0.5, 0.001);
+
+    [Fact]
+    public void NaN_brightness_counts_as_fifty_percent()
+        => DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, double.NaN, true).ShouldBe(3.75, 0.001);
 
     [Fact]
     public void External_monitors_count_only_when_opted_in()
@@ -42,8 +57,14 @@ public class DisplayModelTests
     [Theory]
     [InlineData(PsuTier.White, 0.82)]
     [InlineData(PsuTier.Bronze, 0.85)]
+    [InlineData(PsuTier.Silver, 0.87)]
     [InlineData(PsuTier.Gold, 0.90)]
+    [InlineData(PsuTier.Platinum, 0.92)]
     [InlineData(PsuTier.Titanium, 0.94)]
     public void Psu_efficiency_by_tier(PsuTier tier, double expected)
         => PsuEfficiency.For(tier).ShouldBe(expected);
+
+    [Fact]
+    public void Unknown_psu_tier_falls_back_to_bronze()
+        => PsuEfficiency.For((PsuTier)99).ShouldBe(0.85);
 }

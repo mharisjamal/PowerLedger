@@ -130,7 +130,7 @@ Reading { ts, totalW, quality, components: { cpu, gpu, display, ram, storage, bo
 ### Modes
 
 1. **Laptop on battery** → `totalW = |batteryRateW|`. Quality **Measured** (±3 %). Components are still computed for the breakdown; `rest = measured − cpu − gpu − display`.
-2. **Any machine on AC** → `totalW = (cpu + gpu + display + baseline + monitors) / psuEfficiency`.
+2. **Any machine on AC** → `totalW = (cpu + gpu + display + baseline) / psuEfficiency + monitors`. External monitors are wall-powered, so they are added after the supply-efficiency division and never contribute to PSU loss.
    - Quality **Calibrated** (±10 %) when a learned baseline exists for the current brightness bucket (see below).
    - Quality **Estimated** (±20 %) otherwise.
 
@@ -147,7 +147,7 @@ A bucket counts as calibrated once it holds ≥ 5 minutes of samples and the mac
 | Component | Default |
 |---|---|
 | Laptop baseline (board, RAM, SSD, radios) | 5 W |
-| Laptop internal panel | `1.5 W + 4.5 W × brightness`, scaled ×0.8 for ≤ 14", ×1.0 for 15–16", ×1.3 for ≥ 17" (diagonal from EDID) |
+| Laptop internal panel | `1.5 W + 4.5 W × brightness`, scaled ×0.8 up to 14", ×1.0 above 14" and below 17", ×1.3 from 17" (diagonal from EDID; unknown = ×1.0) |
 | Desktop board | 12 W |
 | RAM per stick | DDR4 2.5 W, DDR5 1.5 W (`Win32_PhysicalMemory.SMBIOSMemoryType`) |
 | Drive | SSD 2 W, HDD 6 W (`MSFT_PhysicalDisk.MediaType`) |

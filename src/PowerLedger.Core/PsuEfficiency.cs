@@ -2,6 +2,7 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.Core;
 
+/// <summary>Supply efficiency per 80 PLUS tier (spec §5). Unknown tiers from a newer profile fall back to Bronze.</summary>
 public static class PsuEfficiency
 {
     public static double For(PsuTier tier) => tier switch

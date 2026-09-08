@@ -628,6 +628,17 @@ public class DisplayModelTests
         DisplayModel.PanelWatts(large, 1.0, true).ShouldBe(6.0 * 1.3, 0.001);
     }
 
+    [Theory]
+    [InlineData(0, 1.0)]
+    [InlineData(double.NaN, 1.0)]
+    [InlineData(13.3, 0.8)]
+    [InlineData(14.0, 0.8)]
+    [InlineData(14.1, 1.0)]
+    [InlineData(16.9, 1.0)]
+    [InlineData(17.0, 1.3)]
+    public void Size_factor_boundaries(double diagonal, double expected)
+        => DisplayModel.SizeFactor(diagonal).ShouldBe(expected);
+
     [Fact]
     public void Panel_is_zero_when_display_is_off_or_machine_is_a_desktop()
     {
@@ -638,6 +649,10 @@ public class DisplayModelTests
     [Fact]
     public void Unknown_brightness_assumes_fifty_percent()
         => DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, null, true).ShouldBe(1.5 + 4.5 * 0.5, 0.001);
+
+    [Fact]
+    public void NaN_brightness_counts_as_fifty_percent()
+        => DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, double.NaN, true).ShouldBe(3.75, 0.001);
 
     [Fact]
     public void External_monitors_count_only_when_opted_in()
@@ -651,10 +666,16 @@ public class DisplayModelTests
     [Theory]
     [InlineData(PsuTier.White, 0.82)]
     [InlineData(PsuTier.Bronze, 0.85)]
+    [InlineData(PsuTier.Silver, 0.87)]
     [InlineData(PsuTier.Gold, 0.90)]
+    [InlineData(PsuTier.Platinum, 0.92)]
     [InlineData(PsuTier.Titanium, 0.94)]
     public void Psu_efficiency_by_tier(PsuTier tier, double expected)
         => PsuEfficiency.For(tier).ShouldBe(expected);
+
+    [Fact]
+    public void Unknown_psu_tier_falls_back_to_bronze()
+        => PsuEfficiency.For((PsuTier)99).ShouldBe(0.85);
 }
 ```
 
@@ -671,6 +692,7 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.Core;
 
+/// <summary>Supply efficiency per 80 PLUS tier (spec §5). Unknown tiers from a newer profile fall back to Bronze.</summary>
 public static class PsuEfficiency
 {
     public static double For(PsuTier tier) => tier switch
@@ -699,6 +721,7 @@ public static class DisplayModel
     public const double PanelRangeW = 4.5;
     public const double MonitorSleepW = 0.5;
 
+    /// <summary>Internal panel watts: 0 for desktops or while the display is off; unknown or NaN brightness counts as 50 %.</summary>
     public static double PanelWatts(MachineProfile profile, double? brightness, bool displayOn)
     {
         if (profile.Chassis != ChassisKind.Laptop || !displayOn) return 0;
@@ -706,14 +729,16 @@ public static class DisplayModel
         return (PanelBaseW + PanelRangeW * b) * SizeFactor(profile.DisplayDiagonalInches);
     }
 
+    /// <summary>Panel size class: up to 14" ×0.8, above 14" and below 17" ×1.0, 17" and larger ×1.3. Unknown (0 or NaN) ×1.0.</summary>
     public static double SizeFactor(double diagonalInches) => diagonalInches switch
     {
-        <= 0 => 1.0,
+        double.NaN or <= 0 => 1.0,
         <= 14.0 => 0.8,
         < 17.0 => 1.0,
         _ => 1.3,
     };
 
+    /// <summary>Total watts for all opted-in external monitors (profile.MonitorWatts is per monitor); 0 when not opted in.</summary>
     public static double MonitorWatts(MachineProfile profile, bool displayOn)
     {
         if (!profile.IncludeMonitors || profile.ExternalMonitors <= 0) return 0;
@@ -725,7 +750,7 @@ public static class DisplayModel
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter DisplayModelTests`
-Expected: `Passed! - Failed: 0, Passed: 9`.
+Expected: `Passed! - Failed: 0, Passed: 20`.
 
 - [x] **Step 5: Commit**
 
@@ -814,6 +839,19 @@ public class PowerModelTests
         r.Components.Storage.ShouldBe(2.0);
         r.Components.Board.ShouldBe(15.0);
         r.TotalW.ShouldBe(beforePsu / 0.85, 0.001);
+    }
+
+    [Fact]
+    public void External_monitors_are_added_after_the_supply_efficiency_division()
+    {
+        var profile = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 25 };
+        var model = new PowerModel(profile, HardwareFacts.DesktopDefaults, new PowerModelOptions(), new FixedBaseline(null));
+        var r = model.Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
+        var pcParts = 50 + 120 + 2 * 2.5 + 2 + (12 + 3 * 1);
+        r.Components.Monitors.ShouldBe(50);
+        r.Components.PsuLoss.ShouldBe(pcParts / 0.85 - pcParts, 0.001);
+        r.TotalW.ShouldBe(pcParts / 0.85 + 50, 0.001);
+        r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
 
     [Fact]
@@ -932,12 +970,14 @@ public sealed class PowerModel
             quality = Quality.Estimated;
         }
 
-        var beforePsu = parts.Sum;
+        // External monitors are wall-powered: they sit outside the PC's supply, so they are added after the efficiency division.
+        var beforePsu = parts.Sum - parts.Monitors;
         var efficiency = isLaptop
             ? (s.OnBattery ? 1.0 : _options.LaptopAdapterEfficiency)
             : PsuEfficiency.For(_profile.PsuTier);
-        var total = beforePsu / efficiency;
-        return Build(s, total, quality, parts with { PsuLoss = total - beforePsu }, userIdle);
+        var psuLoss = beforePsu / efficiency - beforePsu;
+        var total = beforePsu + psuLoss + parts.Monitors;
+        return Build(s, total, quality, parts with { PsuLoss = psuLoss }, userIdle);
     }
 
     private static Reading Build(Sample s, double total, Quality quality, Components parts, bool userIdle)
@@ -969,7 +1009,7 @@ public sealed class PowerModel
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter PowerModelTests`
-Expected: `Passed! - Failed: 0, Passed: 10`.
+Expected: `Passed! - Failed: 0, Passed: 11`.
 
 - [ ] **Step 5: Commit**
 
@@ -1755,7 +1795,7 @@ Expected: `Passed! - Failed: 0, Passed: 6`.
 - [ ] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 59`.
+Expected: `Passed! - Failed: 0, Passed: 71`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -3287,7 +3327,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 61`, Storage `Passed: 26`, no failures, no skipped tests.
+Expected: Core `Passed: 73`, Storage `Passed: 26`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 
