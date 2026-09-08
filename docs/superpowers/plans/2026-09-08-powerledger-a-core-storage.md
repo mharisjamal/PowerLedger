@@ -66,7 +66,7 @@ tests/PowerLedger.Storage.Tests/                   one test class per repository
 
 The machine has the .NET 10 Desktop Runtime but no SDK (`dotnet --list-sdks` prints nothing). This is a system install, so ask the owner to run it or get explicit approval first.
 
-- [ ] **Step 1: Install the SDK**
+- [x] **Step 1: Install the SDK**
 
 Run (PowerShell, as the user):
 ```powershell
@@ -74,7 +74,7 @@ winget install Microsoft.DotNet.SDK.10 --silent --accept-package-agreements --ac
 ```
 Expected: `Successfully installed`.
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 Run: `dotnet --list-sdks`
 Expected: one line starting with `10.0.` (open a new shell if the PATH did not refresh).
@@ -92,7 +92,7 @@ Expected: one line starting with `10.0.` (open a new shell if the PATH did not r
 
 Run from `D:\PowerLedger`:
 ```bash
-dotnet new sln -n PowerLedger
+dotnet new sln -n PowerLedger --format sln
 dotnet new classlib -n PowerLedger.Contracts -o src/PowerLedger.Contracts -f net10.0
 dotnet new classlib -n PowerLedger.Core -o src/PowerLedger.Core -f net10.0
 dotnet new classlib -n PowerLedger.Storage -o src/PowerLedger.Storage -f net10.0
@@ -125,6 +125,8 @@ dotnet add tests/PowerLedger.Storage.Tests package Shouldly
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <Version>0.1.0</Version>
     <Authors>PowerLedger</Authors>
     <RootNamespace>$(MSBuildProjectName)</RootNamespace>
@@ -139,11 +141,14 @@ root = true
 [*]
 indent_style = space
 indent_size = 4
-end_of_line = crlf
 insert_final_newline = true
 charset = utf-8
 [*.{json,yml,yaml,xml,csproj,props}]
 indent_size = 2
+[*.sln]
+indent_style = tab
+[*.{csproj,props,targets,sln}]
+charset = utf-8-bom
 [*.cs]
 csharp_style_namespace_declarations = file_scoped:warning
 dotnet_sort_system_directives_first = true
