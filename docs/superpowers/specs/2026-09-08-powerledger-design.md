@@ -297,7 +297,7 @@ Logging: Serilog rolling files in `C:\ProgramData\PowerLedger\logs`, 7 days or 5
 
 ## 12. Testing
 
-Framework: xUnit, FluentAssertions, FsCheck for property tests, `Microsoft.Extensions.TimeProvider.Testing` for a fake clock.
+Framework: xUnit, Shouldly (BSD; FluentAssertions 8+ requires a paid commercial license), FsCheck for property tests, `Microsoft.Extensions.TimeProvider.Testing` for a fake clock.
 
 - **Core**: `PowerModel` table tests (sample → reading for each mode); integrator invariants (energy ≥ 0, Δt cap, gap yields zero, resume reset); downsampler conservation (Σ 1-minute Wh equals the raw integral); tariff-at-time cost across rate changes; calibration convergence on synthetic battery traces; report and comparison math; property tests on the integrator.
 - **Sensors**: validator driven by fake sources with glitch sequences (wrap, blip, spike, transition). Real-hardware adapter tests carry `Trait("Category","Hardware")` and are skipped in CI.
