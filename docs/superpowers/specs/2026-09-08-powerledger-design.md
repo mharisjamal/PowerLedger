@@ -1,0 +1,365 @@
+# PowerLedger — Design Specification
+
+**Date:** 2026-09-08
+**Status:** Approved in brainstorm, awaiting implementation plan
+**Placeholder name:** PowerLedger (rename any time; only the solution/namespace prefix changes)
+
+## 1. Summary
+
+PowerLedger is a free Windows desktop application that records how much electrical power a PC draws over time and turns that record into an energy bill: kilowatt-hours, cost at the user's tariff, CO₂, and a breakdown by component. Tools such as HWMonitor and HWiNFO show instantaneous voltages and watts but keep no history and produce no report. PowerLedger fills that gap.
+
+The core loop is: **sample sensors once per second → convert to a whole-system power reading with an honesty label → integrate to energy → store → show live and historical views → export reports.**
+
+### Goals (v1)
+
+- Continuous logging from boot, without the UI open, surviving sleep and resume.
+- Whole-system watts with an explicit quality label: **Measured**, **Calibrated**, or **Estimated**.
+- Energy bill for any range: kWh, cost, average and peak watts, hours on / idle / asleep.
+- Component breakdown over time: CPU, GPU, display, rest of system.
+- Extras: CO₂ estimate, everyday comparisons, idle-waste detection with a concrete saving suggestion.
+- Exports: PDF, CSV, PNG. Automatic monthly PDF.
+- Lightweight: service under 0.5 % CPU and 50 MB RAM at idle.
+- Commercial-grade quality, free to the public, no GPL dependencies, no paid SDKs.
+
+### Non-goals (v1)
+
+- Per-application energy attribution (planned v1.1).
+- Smart-plug or PSU telemetry integration (planned v1.1).
+- Time-of-use tariffs (schema leaves room; UI later).
+- macOS, Linux, ARM64.
+- Cloud sync, accounts, telemetry.
+
+## 2. Users and scope decisions
+
+| Decision | Choice |
+|---|---|
+| Audience | Free public Windows app, laptops and desktops |
+| Measurement sources v1 | Sensors + estimate model only; zero extra hardware |
+| Report content v1 | Energy bill + component breakdown + extras (CO₂, comparisons, idle waste) |
+| Per-app attribution | v1.1 |
+| Stack | .NET 10 LTS, WPF + WPF-UI, LibreHardwareMonitorLib, SQLite |
+| Process model | Windows Service (sampler) + unelevated WPF tray app (UI) |
+| Visual direction | "Meter & Ledger": instrument-panel dark theme, bench-sheet light theme |
+| Repo | `D:\PowerLedger`, license MIT unless the owner decides otherwise |
+
+## 3. Architecture
+
+```
+┌──────────────── PowerLedger.Service (Windows Service, LocalSystem) ────────────────┐
+│  Sensors ──► Sampler (1/s) ──► Validator ──► PowerModel ──► Writer ──► SQLite (WAL)  │
+│   LHM (CPU/GPU)                                  │             ▲                     │
+│   Battery, Display, Activity                     ▼        Downsampler + retention    │
+│                                    NamedPipe server: live readings, status, settings │
+└──────────────────────────────────────────┬────────────────────┬─────────────────────┘
+                                           │ pipe (live)        │ SQLite read-only (history)
+┌──────────────────────────────────────────▼────────────────────▼─────────────────────┐
+│  PowerLedger.App (WPF, user session, unelevated)                                    │
+│  Tray icon · Now · Breakdown · Report · Settings · First-run wizard · Monthly PDF   │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Projects
+
+| Project | Purpose | Depends on |
+|---|---|---|
+| `PowerLedger.Core` | Pure domain: `PowerModel`, calibration learner, energy integrator, downsampler, tariff/cost/CO₂ math, report builder. No I/O. | nothing |
+| `PowerLedger.Contracts` | Pipe message DTOs, settings model, shared enums (`Quality`, `SessionReason`). | nothing |
+| `PowerLedger.Sensors` | `ISensorSource` and adapters: `LhmSource` (CPU, GPU, fans), `BatterySource`, `DisplaySource`, `ActivitySource`, `HardwareInventory`. Validator lives here. | Core, LibreHardwareMonitorLib |
+| `PowerLedger.Storage` | SQLite schema, migrations, batched writer, retention jobs, read-side query API. | Core |
+| `PowerLedger.Service` | Worker host: sampler loop, writer, downsample scheduler, pipe server, power/session event handling. | all above |
+| `PowerLedger.App` | WPF UI, tray icon, charts, exports, monthly report, wizard. | Core, Contracts, Storage (read-only) |
+| `installer/` | Inno Setup script, PawnIO driver bundle, runtime bootstrap. | build output |
+| `tests/*` | One xUnit project per library plus a Service integration test project. | |
+
+### Rules
+
+- `Core` never touches sensors or the database; it is 100 % unit-testable.
+- `Sensors` never computes totals; each adapter returns nullable raw values and a capability flag.
+- The App never writes the database. Settings changes travel over the pipe to the Service, which writes them.
+- One adapter per file, one job per adapter. A file that grows past a few hundred lines is a signal to split.
+
+## 4. Sensors and sampling
+
+Sampling runs at 1 Hz (configurable 1–5 s). Every source is read inside its own try/catch with a per-source timeout; a failing source yields `null` for that tick and retries with backoff. A failing source never stops the loop.
+
+| Source | Reads | Mechanism | Needs driver |
+|---|---|---|---|
+| CPU | package W, iGPU W (Intel PP1 where exposed), load | LibreHardwareMonitorLib (RAPL / AMD SMU via kernel driver), `GetSystemTimes` for load | yes |
+| Discrete GPU | power W, load, present | LibreHardwareMonitorLib (NVML / ADL). Optimus-off dGPU → 0 W | no |
+| Battery | discharge/charge rate mW, AC line status | `CallNtPowerInformation(SystemBatteryState)` (Rate is negative when discharging), `GetSystemPowerStatus` | no |
+| Display | brightness %, display on/off, monitor count and size | WMI `WmiMonitorBrightness`, `RegisterPowerSettingNotification(GUID_CONSOLE_DISPLAY_STATE)` with service handle, `WmiMonitorID` + `WmiMonitorBasicDisplayParams` | no |
+| Activity | user idle seconds, session locked | `WTSQuerySessionInformation(WTSSessionInfo).LastInputTime` for the console session (works from session 0), `WTSRegisterSessionNotification` | no |
+| Fans | count only, at startup | LibreHardwareMonitorLib SuperIO read, once | yes |
+
+### Performance rules
+
+- Only CPU, GPU, and battery are updated every tick (about 2 ms).
+- Motherboard / SuperIO chips are read once at startup for fan count, then disabled.
+- SMART / storage sensors are never polled (slow, can spin up disks).
+- `HardwareInventory` runs at service start and on resume, not per tick.
+
+### Sample record
+
+```
+Sample {
+  ts (UTC), monotonicΔt,
+  cpuPackageW?, iGpuW?, cpuLoad, dGpuW?, dGpuLoad?, dGpuPresent,
+  batteryRateW?, onBattery, brightness?, displayOn, monitorCount,
+  userIdleSeconds, sessionLocked
+}
+```
+
+### Validator
+
+Runs before the model. Rejects implausible values and marks the sample **suspect** rather than throwing.
+
+- Plausible ranges: CPU 0–400 W, GPU 0–700 W, battery 0–300 W.
+- Single-tick outlier: value more than 3× the rolling 30-sample median → reuse last good value, count as suspect.
+- Negative RAPL deltas (counter wrap) → drop that tick's CPU value.
+- First 3 s after an AC↔battery transition: battery value excluded from calibration; quality still switches immediately.
+- Suspect counts are exposed in status so users can see sensor health.
+
+## 5. Power model and calibration
+
+The model converts a `Sample` into a `Reading`:
+
+```
+Reading { ts, totalW, quality, components: { cpu, gpu, display, ram, storage, board, extras, psuLoss, monitors, rest }, flags }
+```
+
+### Modes
+
+1. **Laptop on battery** → `totalW = |batteryRateW|`. Quality **Measured** (±3 %). Components are still computed for the breakdown; `rest = measured − cpu − gpu − display`.
+2. **Any machine on AC** → `totalW = (cpu + gpu + display + baseline + monitors) / psuEfficiency`.
+   - Quality **Calibrated** (±10 %) when a learned baseline exists for the current brightness bucket (see below).
+   - Quality **Estimated** (±20 %) otherwise.
+
+Desktops divide by PSU efficiency; laptops use 1.0 on battery and 0.90 (adapter efficiency) on AC.
+
+### Baseline auto-calibration (laptops)
+
+Every second on battery provides ground truth: `baselineObserved = measured − cpu − dGpu − displayModel`. The learner keeps one running average per brightness bucket (10 % steps, plus a display-off bucket), keyed by the hardware inventory hash, with an exponential weighting whose half-life is 10 minutes of samples. Suspect samples and the 3 s after transitions are excluded.
+
+A bucket counts as calibrated once it holds ≥ 5 minutes of samples and the machine has ≥ 30 minutes of battery samples in total. Calibrated baselines replace the defaults in AC mode. Calibration progress and a reset button appear in Settings.
+
+### Default estimate values (used until calibrated, or on desktops)
+
+| Component | Default |
+|---|---|
+| Laptop baseline (board, RAM, SSD, radios) | 5 W |
+| Laptop internal panel | `1.5 W + 4.5 W × brightness`, scaled ×0.8 for ≤ 14", ×1.0 for 15–16", ×1.3 for ≥ 17" (diagonal from EDID) |
+| Desktop board | 12 W |
+| RAM per stick | DDR4 2.5 W, DDR5 1.5 W (`Win32_PhysicalMemory.SMBIOSMemoryType`) |
+| Drive | SSD 2 W, HDD 6 W (`MSFT_PhysicalDisk.MediaType`) |
+| Fan | 1 W each (LHM count at startup) |
+| Extras (RGB, pumps, USB devices) | user slider 0–100 W, default 0 |
+| External monitors | opt-in, default 25 W each while display on, 0.5 W when off |
+| PSU efficiency | 80+ White 82 %, Bronze 85 % (default), Silver 87 %, Gold 90 %, Platinum 92 %, Titanium 94 % |
+| dGPU without power sensor | `3 W + (TDP − 3 W) × load`; TDP from a bundled model table, else 25 W laptop / 75 W desktop; user override |
+| CPU without power sensor | `idle + (TDP − idle) × load`, idle 2 W laptop / 8 W desktop; TDP from bundled table, else 15 W laptop / 65 W desktop; user override |
+
+The model tables ship as JSON resources in `Sensors` (`tdp-table.json`) and are editable via Settings overrides.
+
+### Machine profile detection
+
+Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence decides laptop vs desktop. The wizard shows what was detected and lets the user correct it. Detected items: CPU and GPU names, RAM sticks and type, drives and media type, monitors and sizes, fan count, PSU tier (asked, not detectable).
+
+## 6. Energy accounting
+
+- Energy is integrated per tick: `Wh += totalW × Δt / 3600`, with Δt from a monotonic clock.
+- If Δt ≤ 5 s the tick is counted at the current reading. If Δt > 5 s (sleep, hibernate, service stop, Modern Standby throttling) the tick contributes zero energy and the interval is recorded as a gap.
+- Suspend and resume are handled through `SERVICE_CONTROL_POWEREVENT`: on suspend the write buffer is flushed and the session row closed; on resume a new session row opens, the Δt clock resets, sensor handles are re-opened, and the hardware inventory re-runs.
+- Idle waste = energy of samples where `userIdleSeconds ≥ idleThreshold` (default 5 min, configurable 1–30), split into display-on and display-off. The saving suggestion reads the current Windows sleep timeout (`powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE`) so it can say "Windows currently sleeps after 30 min" or "never".
+- Timestamps are stored in UTC; the UI converts to local time. Wall-clock jumps produce a session note, never negative energy.
+
+### Sessions
+
+`sessions` records the power-state timeline with reasons: `boot`, `service-start`, `resume`, `suspend`, `shutdown`, `service-stop`, `crash-recovered`. "Asleep" hours in reports come from gaps between sessions.
+
+## 7. Storage
+
+- Engine: SQLite via `Microsoft.Data.Sqlite`, hand-written SQL (no EF Core), WAL mode, `synchronous=NORMAL`, `auto_vacuum=INCREMENTAL`.
+- File: `C:\ProgramData\PowerLedger\power.db`. ACL: SYSTEM full control, Users read.
+- Writes are batched: 60 samples per transaction (one per minute). The buffer flushes on suspend, `PRESHUTDOWN`, and service stop.
+
+### Tables
+
+| Table | Grain | Retention | Notes |
+|---|---|---|---|
+| `samples_raw` | 1 s: `ts`, `total_w`, `quality`, per-component W, `on_battery`, `user_idle`, `display_on`, `locked`, loads, brightness, `suspect` | 48 h | ~25 MB |
+| `samples_1m` | 1 min: avg/max W, `energy_wh` (integrated, not avg×60), per-component Wh, idle Wh (display on/off), battery seconds, dominant quality, gap seconds, sample count | 2 years | ~60 MB |
+| `samples_1h` | 1 h: same aggregates | forever | tiny |
+| `sessions` | `start_ts`, `end_ts`, `reason` | forever | |
+| `tariffs` | `effective_from`, `price_per_kwh` (decimal as integer micro-units), `currency` (ISO 4217) | forever | |
+| `calibration` | `inventory_hash`, `bucket`, `baseline_w`, `weight`, `updated_ts` | — | |
+| `hardware_inventory` | `hash`, `detected_ts`, `json` | forever | one row per distinct hardware set |
+| `settings` | key / value | — | service-owned settings |
+| `schema_version` | | | migrations |
+
+Cost is computed at query time as `Σ energy × tariff effective at that time`, so rate changes never corrupt history and "what-if" comparisons are possible. A future time-of-use tariff adds an hours mask column without rewriting data.
+
+### Jobs
+
+- Every minute: aggregate the previous full minute of raw rows into `samples_1m`.
+- Every hour: aggregate `samples_1m` into `samples_1h`.
+- Daily at 03:00 local: purge raw rows older than the raw retention (default 48 h, configurable 24–168 h) and 1-minute rows older than the history retention (default 2 years, configurable 1–5 years); run `PRAGMA incremental_vacuum` weekly. Never a full `VACUUM`. Hourly rows are never purged.
+- Migrations run at service start inside a transaction, with `power.db.bak` written once per schema version bump.
+
+### Query API (Storage → App)
+
+`GetLive(seconds)`, `GetSeries(from, to, resolution)`, `GetTotals(range)` → kWh, cost, avg/peak W, hours on / idle / asleep, per-component kWh, quality mix; `GetIdleWaste(range)`; `GetDailyBuckets(range)`; `GetSessions(range)`; `GetTariffs()`; `GetCalibrationStatus()`.
+
+## 8. IPC
+
+- Named pipe `\\.\pipe\PowerLedger.v1`, ACL allowing local Authenticated Users, remote access denied.
+- Newline-delimited JSON with `System.Text.Json` source generation. Messages carry `type` and, for requests, `id`. Max message 64 KB.
+- Messages: `Subscribe` (server pushes a `Reading` frame each tick), `GetStatus` (service version, per-source health and suspect counts, driver state, calibration progress, DB size), `GetSettings`, `SetSettings`, `SetTariff` (inserts a `tariffs` row; `effective_from` defaults to now and may be backdated by the user), `ResetCalibration`.
+- Multiple clients supported. The App reconnects with backoff from 1 s to 30 s.
+- `SetSettings` accepts only tariff, machine profile, idle threshold, sample interval, and retention, each range-checked. No paths or commands travel over the pipe.
+
+## 9. UI
+
+### Stack
+
+WPF on .NET 10, WPF-UI for Fluent window chrome and controls, `CommunityToolkit.Mvvm`, LiveCharts2 (SkiaSharp) for charts, QuestPDF for PDF, `Microsoft.Toolkit.Uwp.Notifications` for toasts. One ViewModel per screen; no logic in code-behind. Custom lightweight controls: `MeterScale` (tick scale with needle and marks) and `BudgetBar` (segmented bar with watt ruler), drawn with `DrawingContext`.
+
+### Screens
+
+1. **Tray** — icon renders the live watts as text and updates only when the rounded value changes. Tooltip: now W and quality, today kWh and cost. Menu: Open, Start with Windows (on by default, set by the installer), Exit UI (service keeps logging).
+2. **Now** — large live watts with quality badge, 60 s sparkline, meter scale with average and peak marks, today ledger (kWh, cost, avg, peak, on, idle, asleep, CO₂), month-to-date with projected month cost, power-budget bar and per-component rows, today's stacked-area chart by component.
+3. **Breakdown** — stacked area CPU / GPU / display / rest over today / 7 d / 30 d / custom, W↔Wh toggle, per-component kWh and percentage table.
+4. **Report** — range summary: kWh, cost, CO₂ kg, avg/peak, on / idle / asleep hours, idle waste with saving suggestion, comparisons (LED-bulb hours at 10 W, phone charges at 15 Wh, EV km at 0.18 kWh/km), quality mix, daily bars. Export PDF, CSV (raw / 1 m / 1 h), PNG.
+5. **Settings** — tariff and currency with history, CO₂ factor (country picker with bundled table, default 0.40 kg/kWh, editable), machine profile (chassis, PSU tier, extras, monitors, GPU/CPU TDP overrides), idle threshold, sample interval, retention, calibration status and reset, theme, start with Windows. About: service, driver, and per-source health.
+6. **First-run wizard** — tariff (region → suggested rate) → confirm detected hardware → "Measured vs Estimated" explainer.
+
+UI-only preferences (theme, start with Windows, units) live in `%LOCALAPPDATA%\PowerLedger\ui.json`. Everything else is service-owned.
+
+### Monthly report
+
+The App checks at startup and once per hour while running. When a month has ended and `Documents\PowerLedger\PowerLedger-YYYY-MM.pdf` does not yet exist for it, the App generates that PDF and shows a toast with the headline numbers. The App owns this because the service runs as SYSTEM and has no user Documents folder.
+
+### States
+
+- Empty state on first minute: "Collecting… first numbers in about a minute."
+- Service down: "Service not running" with a Start button (UAC); history remains readable.
+- Sensorless environment (VM, ancient CPU): honest banner "Power sensors aren't available here", uptime and idle still logged.
+
+### Visual direction — "Meter & Ledger"
+
+The app looks like a bench instrument; the reports read like a utility bill. Reference mockup: `docs/design/mockup-1-now-screen.html` (also published as an artifact during the brainstorm).
+
+| Token | Dark (instrument) | Light (bench sheet) |
+|---|---|---|
+| Ground | `#1B1D1A` | `#E4E6E0` |
+| Panel | `#222522` | `#EFF0EC` |
+| Raised | `#2B2F2B` | `#F8F8F5` |
+| Hairline / strong | `#363B36` / `#4B514B` | `#CDD0C8` / `#AEB2A9` |
+| Ink / secondary / muted | `#ECE9DF` / `#A6A99E` / `#71766F` | `#1D1F1B` / `#575B53` / `#858980` |
+| Amber (live reading only) | `#F2B233` | `#A2680C` |
+| Measured / Calibrated / Estimated | `#8FCB8B` / `#8FB6D4` / `#B9AE93` | `#3E7E43` / `#35678A` / `#7C7355` |
+| CPU / GPU / Display / Rest | `#E39B3B` / `#6F97C4` / `#B5C46A` / `#6E736D` | `#C4761C` / `#4A76A6` / `#7C8A2E` / `#8E928A` |
+
+- Type: **Archivo** for UI and body, **Archivo Narrow** for uppercase tracked labels, **Martian Mono** (Light 300, Regular 400) for every number with tabular figures. All three are OFL and bundled as static TTFs, because WPF does not support variable-font axes.
+- Amber is spent only on the live reading and the current position (needle, "now" line). Semantic quality colors are separate from the accent.
+- Quality is encoded by color and by form: solid dot, half dot, dashed border.
+- Hairlines instead of shadows; corner radii 2–6 px; dotted leaders between ledger labels and values; tick rulers on the scale and budget bar; LED-style dots for navigation state.
+- Motion: the live number settles on open (900 ms ease-out) and ticks once per second; nothing else animates. `SystemParameters.ClientAreaAnimation` off → no animation.
+- Both themes follow the system by default and can be forced in Settings.
+
+## 10. Error handling and edge cases
+
+| Situation | Behaviour |
+|---|---|
+| Kernel driver won't load (PawnIO missing, HVCI, AV quarantine) | Service keeps running on driverless sources; CPU falls back to the load × TDP model; quality drops to Estimated; UI shows "CPU sensor unavailable" with an "Install driver" action (UAC). |
+| Sensor unsupported on this hardware (e.g. GeForce MX330 has no power readout) | Adapter reports `Supported=false` at startup; model uses the fallback; UI marks the value estimated. |
+| Glitch values | Validator rules in §4. |
+| AC ↔ battery switch | Quality flips immediately; first 3 s excluded from calibration. |
+| Suspend / resume, Modern Standby | §6. Gaps over 5 s count as asleep. |
+| Hardware change (dock, eGPU, monitor, RAM) | Inventory hash changes → new inventory row; calibration buckets are keyed by hash so stale baselines are never reused. |
+| Service crash | Windows service recovery restarts after 5 s, up to 3 times; at most 60 s of buffered samples lost; WAL keeps the DB consistent; `crash-recovered` session reason. |
+| Database corrupt | Rename to `power.corrupt-<date>.db`, start fresh, alert in UI. |
+| Disk full | Pause writes, keep a 1 h in-memory ring buffer, retry every minute, status badge. |
+| Schema migration | Transactional, `power.db.bak` before each version bump. |
+| App cannot reach the service | "Service not running" state with Start button; pipe reconnect backoff 1 → 30 s. |
+| Multiple user sessions | Pipe serves multiple clients; each subscribes independently. |
+| Multiple GPUs | Sum discrete GPU power; iGPU is inside the CPU package and never double-counted. |
+| Money | `decimal` end to end; ISO 4217 code; formatted with `CultureInfo`. |
+
+Logging: Serilog rolling files in `C:\ProgramData\PowerLedger\logs`, 7 days or 5 MB, hardware names only, no personal data.
+
+## 11. Security and privacy
+
+- The service runs as LocalSystem but exposes only a local named pipe with remote access denied.
+- Settings over the pipe are a closed, range-checked set; nothing executable or path-like.
+- The kernel driver is the signed PawnIO driver; the installer verifies its hash before running it.
+- All data stays on the machine. Exports happen only when the user asks. No telemetry in v1; a future opt-in crash reporter would be a separate decision.
+- The installer is code-signed (Azure Trusted Signing) before the first public release so SmartScreen does not flag it.
+
+## 12. Testing
+
+Framework: xUnit, FluentAssertions, FsCheck for property tests, `Microsoft.Extensions.TimeProvider.Testing` for a fake clock.
+
+- **Core**: `PowerModel` table tests (sample → reading for each mode); integrator invariants (energy ≥ 0, Δt cap, gap yields zero, resume reset); downsampler conservation (Σ 1-minute Wh equals the raw integral); tariff-at-time cost across rate changes; calibration convergence on synthetic battery traces; report and comparison math; property tests on the integrator.
+- **Sensors**: validator driven by fake sources with glitch sequences (wrap, blip, spike, transition). Real-hardware adapter tests carry `Trait("Category","Hardware")` and are skipped in CI.
+- **Storage**: temp-file SQLite; migration from every prior schema version; retention purge; a reader querying while the writer commits under WAL.
+- **Service**: host the worker with fake sources and a temp DB, advance the fake clock through 10 simulated minutes including a suspend/resume, assert rows, aggregates, and sessions. Pipe round-trip and reconnect tests.
+- **App**: ViewModel unit tests. A manual QA checklist per screen for v1.
+- **Accuracy (manual, once)**: battery mode within ±5 % of `powercfg /batteryreport`; calibrated AC estimate within ±15 % of an inexpensive wall meter, on the developer's Dell Inspiron 3501.
+- **Performance gate**: service < 0.5 % CPU and < 50 MB; App < 120 MB with a window open; measured with `dotnet-counters`; 7-day soak on the developer machine with zero crashes.
+
+## 13. Distribution
+
+- Requirements: Windows 10 1809 or later, Windows 11, x64 only.
+- Framework-dependent build; Inno Setup installs the .NET 10 Desktop Runtime if missing, so the installer stays around 15 MB.
+- The installer bundles the official signed PawnIO installer and runs it silently, registers the service with recovery options, adds the tray app to HKCU Run, and launches the first-run wizard. Uninstall stops the service and asks whether to keep the database.
+- Releases on GitHub with a winget manifest after the first stable build. v1 has a "check for updates" link; an in-app updater is v1.1.
+- CI (GitHub Actions): build, non-hardware tests, installer artifact.
+
+## 14. Repository layout and conventions
+
+```
+PowerLedger.sln
+Directory.Build.props        net10.0-windows, nullable enabled, warnings as errors, shared version
+src/
+  PowerLedger.Core/
+  PowerLedger.Contracts/
+  PowerLedger.Sensors/
+  PowerLedger.Storage/
+  PowerLedger.Service/
+  PowerLedger.App/
+tests/
+  PowerLedger.Core.Tests/
+  PowerLedger.Sensors.Tests/
+  PowerLedger.Storage.Tests/
+  PowerLedger.Service.Tests/
+  PowerLedger.App.Tests/
+installer/
+  setup.iss, driver/
+docs/
+  design/                    mockups
+  superpowers/specs/         this document
+.github/workflows/ci.yml
+```
+
+Third-party licenses in use: LibreHardwareMonitorLib (MPL-2.0), WPF-UI (MIT), LiveCharts2 (MIT), CommunityToolkit.Mvvm (MIT), Microsoft.Data.Sqlite (MIT), Serilog (Apache-2.0), QuestPDF (Community license, free below USD 1M revenue), FsCheck (BSD-3), fonts Archivo, Archivo Narrow, Martian Mono (OFL). No GPL.
+
+## 15. Success criteria for v1
+
+- Installs on a clean Windows 10/11 x64 machine in under a minute with no manual driver steps.
+- Logs from boot without the UI, survives sleep and resume, and keeps the database under 100 MB after two years of use.
+- Meets the performance gate and the accuracy targets in §12.
+- Runs a 7-day soak on the developer laptop with zero crashes.
+- Produces the monthly PDF automatically.
+
+## 16. Open decisions
+
+- Final product name (PowerLedger is a placeholder).
+- License: MIT by default; the owner may choose otherwise before the first public release.
+- Timing of code signing: optional for private testing, required before public release.
+- Source of the bundled CO₂ grid-intensity table (any published national averages; a world-average fallback of 0.40 kg/kWh applies regardless).
+
+## 17. Prerequisites to verify before implementation
+
+- The development machine has the .NET 10 Desktop Runtime (10.0.11) but no .NET SDK (`dotnet --list-sdks` is empty). Install the .NET 10 SDK first.
+- Confirm the current `LibreHardwareMonitorLib` NuGet release supports the PawnIO driver. If it still requires WinRing0, ship WinRing0 for v1 with a documented HVCI caveat and track the PawnIO migration.
+- Inno Setup 6 installed for the installer step.

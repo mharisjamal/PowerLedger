@@ -1,0 +1,353 @@
+<meta charset="utf-8">
+<title>PowerLedger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..700&family=Martian+Mono:wght@200..700&display=swap">
+<style>
+:root{
+  color-scheme:dark;
+  --ground:#1B1D1A;--panel:#222522;--raised:#2B2F2B;--line:#363B36;--line-strong:#4B514B;
+  --ink:#ECE9DF;--ink-2:#A6A99E;--ink-3:#71766F;
+  --amber:#F2B233;--on-amber:#1B1D1A;
+  --measured:#8FCB8B;--calibrated:#8FB6D4;--estimated:#B9AE93;
+  --c-cpu:#E39B3B;--c-gpu:#6F97C4;--c-disp:#B5C46A;--c-rest:#6E736D;
+  --shadow:0 28px 70px rgba(0,0,0,.5);
+  --font-ui:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --font-num:"Martian Mono","Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    color-scheme:light;
+    --ground:#E4E6E0;--panel:#EFF0EC;--raised:#F8F8F5;--line:#CDD0C8;--line-strong:#AEB2A9;
+    --ink:#1D1F1B;--ink-2:#575B53;--ink-3:#858980;
+    --amber:#A2680C;--on-amber:#FFFFFF;
+    --measured:#3E7E43;--calibrated:#35678A;--estimated:#7C7355;
+    --c-cpu:#C4761C;--c-gpu:#4A76A6;--c-disp:#7C8A2E;--c-rest:#8E928A;
+    --shadow:0 18px 44px rgba(30,32,28,.18);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --ground:#E4E6E0;--panel:#EFF0EC;--raised:#F8F8F5;--line:#CDD0C8;--line-strong:#AEB2A9;
+  --ink:#1D1F1B;--ink-2:#575B53;--ink-3:#858980;
+  --amber:#A2680C;--on-amber:#FFFFFF;
+  --measured:#3E7E43;--calibrated:#35678A;--estimated:#7C7355;
+  --c-cpu:#C4761C;--c-gpu:#4A76A6;--c-disp:#7C8A2E;--c-rest:#8E928A;
+  --shadow:0 18px 44px rgba(30,32,28,.18);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:14px/1.45 var(--font-ui);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.page{max-width:1180px;margin:0 auto;padding:28px 24px 56px}
+.pg-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.pg-name{font-variation-settings:'wdth' 90,'wght' 600;font-size:15px;margin-right:12px}
+.pg-sub{color:var(--ink-2);font-size:13px}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:3px;overflow:hidden}
+.seg button{background:transparent;border:0;padding:5px 11px;font-size:12px;color:var(--ink-2);cursor:pointer;font-variation-settings:'wdth' 90}
+.seg button+button{border-left:1px solid var(--line-strong)}
+.seg button.on{background:var(--raised);color:var(--ink)}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);font-variation-settings:'wdth' 80,'wght' 500}
+
+.win{background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;box-shadow:var(--shadow);animation:rise .5s ease-out}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}}
+.tbar{display:flex;justify-content:space-between;align-items:center;height:38px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--ground)}
+.tbar-l{display:flex;align-items:center;gap:9px}
+.mark{width:12px;height:12px;border:1.5px solid var(--amber);border-radius:2px;position:relative}
+.mark::after{content:"";position:absolute;left:5px;bottom:2px;width:1.5px;height:8px;background:var(--amber);transform:rotate(38deg);transform-origin:bottom center}
+.app{font-variation-settings:'wdth' 92,'wght' 600;font-size:13px}
+.ver{color:var(--ink-3);font-family:var(--font-num);font-size:11px}
+.tbar-r{display:flex;gap:22px;color:var(--ink-3);font-size:12px}
+.body{display:grid;grid-template-columns:168px minmax(0,1fr)}
+.rail{background:var(--ground);border-right:1px solid var(--line);padding:14px 0 0;display:flex;flex-direction:column}
+.ri{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;padding:9px 18px;font-size:13px;color:var(--ink-2);cursor:pointer;font-variation-settings:'wdth' 90}
+.ri:hover{color:var(--ink)}
+.ri.on{color:var(--ink)}
+.led{width:7px;height:7px;border-radius:50%;border:1px solid var(--ink-3);flex:none}
+.ri.on .led{background:var(--amber);border-color:var(--amber)}
+.rail-foot{margin-top:auto;padding:12px 18px;font-size:11px;color:var(--ink-3);display:flex;align-items:center;gap:7px;border-top:1px solid var(--line)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--measured);flex:none}
+.main{padding:22px 26px 18px;min-width:0}
+.top{display:grid;grid-template-columns:1.15fr 1fr;gap:34px}
+.big{display:flex;align-items:baseline;gap:8px;margin:6px 0 10px;font-family:var(--font-num);font-weight:300;font-size:clamp(56px,7.5vw,88px);line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.unit{font-size:26px;color:var(--ink-2);font-weight:400}
+.qrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.qual{display:inline-flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:3px 8px 3px 7px;border:1px solid currentColor;border-radius:2px;font-variation-settings:'wdth' 85,'wght' 500}
+.qual .q-dot{width:7px;height:7px;border-radius:50%;border:1px solid currentColor;background:currentColor}
+.qual.measured{color:var(--measured)}
+.qual.calibrated{color:var(--calibrated)}
+.qual.calibrated .q-dot{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
+.qual.estimated{color:var(--estimated);border-style:dashed}
+.qual.estimated .q-dot{background:transparent}
+.qual-note{font-size:12px;color:var(--ink-3)}
+.scale{width:100%;height:auto;display:block;margin:16px 0 14px}
+.spark{width:100%;height:auto;display:block;margin-top:6px}
+.bar{display:flex;gap:2px;height:14px;margin:12px 0 4px}
+.bar span{display:block;height:100%}
+.ruler{width:100%;height:auto;display:block;margin-bottom:10px}
+.brows{display:grid;grid-template-columns:10px minmax(0,1fr) auto auto;column-gap:12px;align-items:baseline}
+.brows>*{padding:8px 0;border-top:1px solid var(--line)}
+.brows .sw-c{width:10px;height:26px;position:relative}
+.brows .sw-c::after{content:"";position:absolute;left:0;top:12px;width:10px;height:10px;border-radius:1px;background:var(--c)}
+.brows .n{display:flex;flex-direction:column}
+.brows .n small{color:var(--ink-3);font-size:11px}
+.brows .v{font-family:var(--font-num);font-size:14px;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.brows .p{font-family:var(--font-num);font-size:12px;color:var(--ink-3);text-align:right;min-width:36px}
+.ledgers{display:grid;grid-template-columns:1fr 1fr;gap:34px;margin-top:26px}
+.ledger .eyebrow{display:flex;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid var(--line-strong)}
+.row{display:flex;align-items:baseline;gap:10px;padding:7px 0}
+.row .k{color:var(--ink-2);white-space:nowrap}
+.row .lead{flex:1;border-bottom:1px dotted var(--line-strong);position:relative;top:-4px;min-width:16px}
+.row .v{font-family:var(--font-num);font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.row .v small{font-family:var(--font-ui);color:var(--ink-3);font-size:12px;margin-left:6px;white-space:normal}
+.row.hero{padding:12px 0 8px}
+.row.hero .v{font-size:26px;font-weight:300;letter-spacing:-.01em}
+.row.hero .v small{font-size:13px}
+.chart{margin-top:26px}
+.chart-head{display:flex;justify-content:space-between;padding-bottom:8px}
+.day{width:100%;height:auto;display:block}
+.legend{display:flex;gap:22px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.legend i{width:10px;height:10px;border-radius:1px;display:inline-block}
+.legend b{font-family:var(--font-num);font-weight:400;color:var(--ink);font-variant-numeric:tabular-nums}
+.sbar{display:flex;gap:20px;flex-wrap:wrap;align-items:center;padding:8px 16px;border-top:1px solid var(--line);background:var(--ground);font-size:11px;color:var(--ink-2)}
+.sbar span{display:inline-flex;align-items:center;gap:7px}
+.tick{stroke:var(--line-strong);stroke-width:1}
+.mark-l{stroke:var(--ink-3);stroke-width:1}
+.needle{fill:var(--amber)}
+.ax{fill:var(--ink-3);font:10px var(--font-num)}
+.ax-amber{fill:var(--amber);font:10px var(--font-num)}
+.grid{stroke:var(--line);stroke-width:1}
+.hatch{stroke:var(--line-strong);stroke-width:1}
+.sp-area{fill:var(--amber);fill-opacity:.14}
+.sp-line{fill:none;stroke:var(--amber);stroke-width:1.6;stroke-linejoin:round}
+.sp-end{fill:var(--amber)}
+.a-cpu{fill:var(--c-cpu)}.a-gpu{fill:var(--c-gpu)}.a-disp{fill:var(--c-disp)}.a-rest{fill:var(--c-rest)}
+.nowline{stroke:var(--amber);stroke-width:1;stroke-dasharray:3 3}
+.pk{fill:var(--ink)}
+.tokens{margin-top:34px;padding-top:22px;border-top:1px solid var(--line-strong)}
+.tok-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:12px;margin-top:14px}
+.sw-chip{height:52px;border:1px solid var(--line-strong);border-radius:3px}
+.sw-name{font-size:12px;margin-top:6px}
+.sw-hex{font-family:var(--font-num);font-size:11px;color:var(--ink-3)}
+.type-row{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px}
+.ty-name{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);margin-bottom:6px;font-variation-settings:'wdth' 80,'wght' 500}
+.ty-sample{font-size:22px;font-variation-settings:'wdth' 100,'wght' 400}
+.ty-sample.num{font-family:var(--font-num);font-weight:300;font-variant-numeric:tabular-nums;font-variation-settings:normal}
+.badges{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px;align-items:center}
+.tok-note{color:var(--ink-2);max-width:68ch;font-size:13px;margin:18px 0 0}
+@media (max-width:820px){
+  .body{grid-template-columns:1fr}
+  .rail{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line);padding:6px 8px}
+  .ri{width:auto}
+  .rail-foot{margin-top:0;border-top:0;margin-left:auto}
+  .top,.ledgers,.type-row{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){.win{animation:none}}
+</style>
+
+<div class="page">
+  <header class="pg-head">
+    <div><span class="pg-name">PowerLedger</span><span class="pg-sub">UI direction · mockup 1 · Now screen · example data</span></div>
+    <div class="seg" role="group" aria-label="Preview theme">
+      <button type="button" data-t="">System</button><button type="button" data-t="dark">Dark</button><button type="button" data-t="light">Light</button>
+    </div>
+  </header>
+
+  <section class="win" aria-label="PowerLedger application window">
+    <div class="tbar">
+      <div class="tbar-l"><span class="mark" aria-hidden="true"></span><span class="app">PowerLedger</span><span class="ver">1.0</span></div>
+      <div class="tbar-r" aria-hidden="true"><span>—</span><span>☐</span><span>✕</span></div>
+    </div>
+    <div class="body">
+      <nav class="rail" aria-label="Screens">
+        <button type="button" class="ri on"><i class="led"></i>Now</button>
+        <button type="button" class="ri"><i class="led"></i>Breakdown</button>
+        <button type="button" class="ri"><i class="led"></i>Report</button>
+        <button type="button" class="ri"><i class="led"></i>Settings</button>
+        <div class="rail-foot"><span class="dot"></span>Service running</div>
+      </nav>
+      <main class="main">
+        <div class="top">
+          <div class="readout">
+            <div class="eyebrow">Live · battery discharge · <span id="clock">14:32:07</span></div>
+            <div class="big"><span id="liveW">0.0</span><span class="unit">W</span></div>
+            <div class="qrow"><span class="qual measured"><span class="q-dot"></span>Measured</span><span class="qual-note">Windows battery report · 1 s samples</span></div>
+            <svg id="scale" class="scale" viewBox="0 0 600 52" aria-label="Meter scale from 0 to 150 watts with current, average and peak marks"></svg>
+            <div class="eyebrow">Last 60 s</div>
+            <svg id="spark" class="spark" viewBox="0 0 600 84" aria-label="Sparkline of the last sixty seconds"></svg>
+          </div>
+          <div class="budget">
+            <div class="eyebrow">Power budget · now</div>
+            <div class="bar" aria-hidden="true">
+              <span style="width:42.7%;background:var(--c-cpu)"></span>
+              <span style="width:12%;background:var(--c-gpu)"></span>
+              <span style="width:11.7%;background:var(--c-disp)"></span>
+              <span style="width:33.6%;background:var(--c-rest)"></span>
+            </div>
+            <svg id="ruler" class="ruler" viewBox="0 0 600 22" aria-hidden="true"></svg>
+            <div class="brows">
+              <div class="sw-c" style="--c:var(--c-cpu)"></div><div class="n">CPU package<small>i7-1165G7 · incl. iGPU 2.1 W</small></div><div class="v">14.6 W</div><div class="p">43%</div>
+              <div class="sw-c" style="--c:var(--c-gpu)"></div><div class="n">GPU<small>GeForce MX330 · 31% load</small></div><div class="v">4.1 W</div><div class="p">12%</div>
+              <div class="sw-c" style="--c:var(--c-disp)"></div><div class="n">Display<small>15.6 in · brightness 60%</small></div><div class="v">4.0 W</div><div class="p">12%</div>
+              <div class="sw-c" style="--c:var(--c-rest)"></div><div class="n">Rest of system<small>RAM, SSD, board, radios · learned</small></div><div class="v">11.5 W</div><div class="p">34%</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ledgers">
+          <div class="ledger">
+            <div class="eyebrow"><span>Today</span><span>Tue 8 Sep</span></div>
+            <div class="row hero"><span class="k">Energy</span><span class="lead"></span><span class="v"><span id="t-energy">0.284</span><small>kWh</small></span></div>
+            <div class="row"><span class="k">Cost</span><span class="lead"></span><span class="v"><span id="t-cost">$0.05</span><small>at $0.17 / kWh</small></span></div>
+            <div class="row"><span class="k">Average</span><span class="lead"></span><span class="v"><span id="t-avg">41</span> W</span></div>
+            <div class="row"><span class="k">Peak</span><span class="lead"></span><span class="v"><span id="t-peak">68</span> W<small>at <span id="t-peak-at">14:00</span></small></span></div>
+            <div class="row"><span class="k">On</span><span class="lead"></span><span class="v" id="t-on">7h 05m</span></div>
+            <div class="row"><span class="k">Idle, display on</span><span class="lead"></span><span class="v"><span id="t-idle">45m</span><small><span id="t-idle-wh">11</span> Wh wasted</small></span></div>
+            <div class="row"><span class="k">Asleep</span><span class="lead"></span><span class="v" id="t-sleep">7h 30m</span></div>
+            <div class="row"><span class="k">CO₂</span><span class="lead"></span><span class="v"><span id="t-co2">0.11</span> kg<small>0.38 kg / kWh grid</small></span></div>
+          </div>
+          <div class="ledger">
+            <div class="eyebrow"><span>September</span><span>8 days · 62% measured</span></div>
+            <div class="row hero"><span class="k">Energy</span><span class="lead"></span><span class="v">2.74<small>kWh</small></span></div>
+            <div class="row"><span class="k">Cost</span><span class="lead"></span><span class="v">$0.47</span></div>
+            <div class="row"><span class="k">Projected month</span><span class="lead"></span><span class="v">$1.75<small>10.3 kWh</small></span></div>
+            <div class="row"><span class="k">Daily average</span><span class="lead"></span><span class="v">0.34 kWh</span></div>
+            <div class="row"><span class="k">Idle waste</span><span class="lead"></span><span class="v">0.21 kWh<small>$0.04 · sleep after 15 min saves most of it</small></span></div>
+            <div class="row"><span class="k">Lowest day</span><span class="lead"></span><span class="v">0.09 kWh<small>Sun 6 Sep</small></span></div>
+            <div class="row"><span class="k">Highest day</span><span class="lead"></span><span class="v">0.61 kWh<small>Wed 3 Sep</small></span></div>
+            <div class="row"><span class="k">Next report</span><span class="lead"></span><span class="v">1 Oct<small>PDF to Documents</small></span></div>
+          </div>
+        </div>
+
+        <div class="chart">
+          <div class="chart-head"><span class="eyebrow">Today · 5-min · stacked by component</span><span class="eyebrow">Watts</span></div>
+          <svg id="day" class="day" viewBox="0 0 900 250" aria-label="Stacked area chart of power by component through today"></svg>
+          <div class="legend" id="legend"></div>
+        </div>
+      </main>
+    </div>
+    <footer class="sbar">
+      <span><span class="dot"></span>Sampling 1 s</span>
+      <span>Driver PawnIO ok</span>
+      <span>Calibration 2h 14m on battery</span>
+      <span>Database 31 MB</span>
+      <span>Service 1.0.0</span>
+    </footer>
+  </section>
+
+  <section class="tokens" aria-label="Design tokens">
+    <div class="eyebrow">Tokens · values follow the active theme</div>
+    <div class="tok-row">
+      <div class="sw"><div class="sw-chip" style="background:var(--ground)"></div><div class="sw-name">Ground</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--panel)"></div><div class="sw-name">Panel</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--ink)"></div><div class="sw-name">Ink</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--amber)"></div><div class="sw-name">Amber · live</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--measured)"></div><div class="sw-name">Measured</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--calibrated)"></div><div class="sw-name">Calibrated</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--c-cpu)"></div><div class="sw-name">CPU</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--c-gpu)"></div><div class="sw-name">GPU</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--c-disp)"></div><div class="sw-name">Display</div><div class="sw-hex"></div></div>
+      <div class="sw"><div class="sw-chip" style="background:var(--c-rest)"></div><div class="sw-name">Rest</div><div class="sw-hex"></div></div>
+    </div>
+    <div class="type-row">
+      <div class="ty"><div class="ty-name">Archivo · UI and labels · width axis 62–125</div><div class="ty-sample">Power budget, tariffs, idle waste. Aa Bb Cc 0123</div></div>
+      <div class="ty"><div class="ty-name">Martian Mono · every number</div><div class="ty-sample num">0.284 kWh · 34.2 W · $0.05 · 14:32</div></div>
+    </div>
+    <div class="badges">
+      <span class="qual measured"><span class="q-dot"></span>Measured</span>
+      <span class="qual calibrated"><span class="q-dot"></span>Calibrated ±10%</span>
+      <span class="qual estimated"><span class="q-dot"></span>Estimated ±20%</span>
+      <span class="qual-note">Quality encoded by color and by form: solid, half, dashed.</span>
+    </div>
+    <p class="tok-note">Dark is the instrument panel; light is the bench sheet. Amber is spent on one thing only: the live reading and the current position. Everything else is graphite and ink, hairlines instead of shadows, and tabular numerals so columns line up like a bill.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  var doc=document.documentElement;
+  var reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var seed=11;function rnd(){seed=(seed*9301+49297)%233280;return seed/233280;}
+  var NS='http://www.w3.org/2000/svg';
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a){e.setAttribute(k,a[k]);}if(p){p.appendChild(e);}return e;}
+  function txt(p,x,y,s,cls,anchor){var t=el('text',{x:x,y:y,'class':cls||'ax','text-anchor':anchor||'start'},p);t.textContent=s;return t;}
+  function pad(n){return (n<10?'0':'')+n;}
+  function hm(min){var h=Math.floor(min/60),m=min%60;return (h?h+'h ':'')+pad(m)+'m';}
+  function money(x){return '$'+x.toFixed(2);}
+  function put(id,s){document.getElementById(id).textContent=s;}
+
+  var N=288,NOW=174,TARIFF=0.17,CO2=0.38;
+  var tot=[],cpu=[],gpu=[],disp=[],rest=[],i,w;
+  for(i=0;i<N;i++){
+    var T;
+    if(i<90)T=0;
+    else if(i<108)T=14+rnd()*3;
+    else if(i<150)T=38+10*Math.sin((i-108)/42*Math.PI)+(rnd()-0.5)*8;
+    else if(i<159)T=15+rnd()*2;
+    else if(i<=NOW)T=44+(rnd()-0.5)*6;
+    else T=-1;
+    if(i===168)T=68;if(i===167||i===169)T=57;
+    if(T<0){tot.push(-1);cpu.push(0);gpu.push(0);disp.push(0);rest.push(0);continue;}
+    var c=T?T*0.45+(rnd()-0.5)*2:0,g=T?T*0.11:0,d=T?4:0,r=T?Math.max(0,T-c-g-d):0;
+    tot.push(T);cpu.push(c);gpu.push(g);disp.push(d);rest.push(r);
+  }
+  var wh=0,cw=0,gw=0,dw=0,rw=0,peak=0,peakI=0,onSlots=0,idleWh=0;
+  for(i=0;i<=NOW;i++){if(tot[i]>0){wh+=tot[i]/12;cw+=cpu[i]/12;gw+=gpu[i]/12;dw+=disp[i]/12;rw+=rest[i]/12;onSlots++;if(i>=150&&i<159)idleWh+=tot[i]/12;if(tot[i]>peak){peak=tot[i];peakI=i;}}}
+  var onMin=onSlots*5,asleepMin=450,idleMin=45,kwh=wh/1000,avg=wh/(onMin/60);
+  put('t-energy',kwh.toFixed(3));put('t-cost',money(kwh*TARIFF));put('t-avg',Math.round(avg));put('t-peak',Math.round(peak));
+  put('t-peak-at',pad(Math.floor(peakI*5/60))+':'+pad(peakI*5%60));put('t-on',hm(onMin));put('t-idle',hm(idleMin));put('t-sleep',hm(asleepMin));
+  put('t-co2',(kwh*CO2).toFixed(2));put('t-idle-wh',Math.round(idleWh));
+
+  var scale=document.getElementById('scale'),sx0=10,sx1=590,base=28;
+  function sX(v){return sx0+(sx1-sx0)*v/150;}
+  el('line',{x1:sx0,y1:base,x2:sx1,y2:base,'class':'tick'},scale);
+  for(w=0;w<=150;w+=5){var mj=w%25===0;el('line',{x1:sX(w),y1:base,x2:sX(w),y2:base+(mj?11:5),'class':'tick'},scale);if(mj)txt(scale,sX(w),base+23,w,'ax','middle');}
+  function mark(v,l){var x=sX(v);el('line',{x1:x,y1:base-7,x2:x,y2:base,'class':'mark-l'},scale);txt(scale,x,base-11,l,'ax','middle');}
+  mark(avg,'avg '+Math.round(avg));mark(peak,'peak '+Math.round(peak));
+  var needle=el('path',{'class':'needle'},scale);
+  function setNeedle(v){var x=sX(v);needle.setAttribute('d','M'+(x-5).toFixed(1)+' '+(base-10)+'L'+(x+5).toFixed(1)+' '+(base-10)+'L'+x.toFixed(1)+' '+(base-1)+'Z');}
+
+  var spark=document.getElementById('spark');
+  function spY(v){return 74-64*(v-20)/30;}
+  [30,40].forEach(function(v){var y=spY(v);el('line',{x1:8,y1:y,x2:592,y2:y,'class':'grid'},spark);txt(spark,592,y-3,v,'ax','end');});
+  var vals=[],v=33;for(i=0;i<60;i++){v+=(rnd()-0.5)*3;v=Math.max(27,Math.min(41,v));vals.push(v);}
+  var area=el('path',{'class':'sp-area'},spark),line=el('path',{'class':'sp-line'},spark),end=el('circle',{r:3.5,'class':'sp-end'},spark);
+  function drawSpark(){var d='';for(var j=0;j<vals.length;j++){var x=8+584*j/(vals.length-1);d+=(j?'L':'M')+x.toFixed(1)+' '+spY(vals[j]).toFixed(1);}line.setAttribute('d',d);area.setAttribute('d',d+'L592 74L8 74Z');end.setAttribute('cx',592);end.setAttribute('cy',spY(vals[vals.length-1]).toFixed(1));}
+  drawSpark();
+
+  var ruler=document.getElementById('ruler'),TOTAL=34.2;
+  el('line',{x1:0,y1:1,x2:600,y2:1,'class':'tick'},ruler);
+  for(w=0;w<=30;w+=5){var rx=600*w/TOTAL;el('line',{x1:rx,y1:1,x2:rx,y2:w%10===0?9:5,'class':'tick'},ruler);if(w%10===0)txt(ruler,rx,19,w,'ax',w===0?'start':'middle');}
+  txt(ruler,600,19,TOTAL.toFixed(1)+' W','ax','end');
+
+  var day=document.getElementById('day'),L=36,R=886,Tp=16,B=222;
+  function dx(k){return L+(R-L)*k/N;}function dy(val){return B-(B-Tp)*val/80;}
+  var defs=el('defs',{},day),pat=el('pattern',{id:'hatch',width:6,height:6,patternUnits:'userSpaceOnUse',patternTransform:'rotate(45)'},defs);el('line',{x1:0,y1:0,x2:0,y2:6,'class':'hatch'},pat);
+  for(w=0;w<=80;w+=20){el('line',{x1:L,y1:dy(w),x2:R,y2:dy(w),'class':'grid'},day);txt(day,L-8,dy(w)+3.5,w,'ax','end');}
+  [0,72,144,216,288].forEach(function(k){txt(day,dx(k),B+18,pad(k*5/60)+':00','ax',k===0?'start':(k===288?'end':'middle'));});
+  el('rect',{x:dx(0),y:Tp,width:dx(90)-dx(0),height:B-Tp,fill:'url(#hatch)'},day);
+  txt(day,(dx(0)+dx(90))/2,Tp+14,'asleep · 7h 30m','ax','middle');
+  var layers=[[rest,'a-rest'],[disp,'a-disp'],[gpu,'a-gpu'],[cpu,'a-cpu']],cum=[];for(i=0;i<=NOW;i++)cum.push(0);
+  layers.forEach(function(ly){var s=ly[0],up=[],d='';for(var k=0;k<=NOW;k++){up.push(cum[k]+s[k]);d+=(k?'L':'M')+dx(k).toFixed(1)+' '+dy(up[k]).toFixed(1);}for(k=NOW;k>=0;k--){d+='L'+dx(k).toFixed(1)+' '+dy(cum[k]).toFixed(1);}el('path',{d:d+'Z','class':ly[1]},day);cum=up;});
+  el('line',{x1:dx(NOW),y1:Tp,x2:dx(NOW),y2:B,'class':'nowline'},day);txt(day,dx(NOW)+5,Tp+10,'now','ax-amber');
+  el('circle',{cx:dx(peakI),cy:dy(peak),r:2.5,'class':'pk'},day);txt(day,dx(peakI)-6,dy(peak)-6,'peak '+Math.round(peak)+' W','ax','end');
+  var lg=document.getElementById('legend');
+  [['CPU',cw,'--c-cpu'],['GPU',gw,'--c-gpu'],['Display',dw,'--c-disp'],['Rest',rw,'--c-rest']].forEach(function(x){var s=document.createElement('span');var sw=document.createElement('i');sw.style.background='var('+x[2]+')';s.appendChild(sw);s.appendChild(document.createTextNode(x[0]+' '));var b=document.createElement('b');b.textContent=Math.round(x[1])+' Wh';s.appendChild(b);lg.appendChild(s);});
+
+  var liveEl=document.getElementById('liveW'),live=vals[59];
+  function setLive(x){liveEl.textContent=x.toFixed(1);setNeedle(x);}
+  if(reduce){setLive(live);}else{var t0=performance.now();(function step(now){var p=Math.min(1,(now-t0)/900),e=1-Math.pow(1-p,3);setLive(live*e);if(p<1)requestAnimationFrame(step);})(t0);}
+  var clk={h:14,m:32,s:7};
+  setInterval(function(){live+=(rnd()-0.5)*1.6;live=Math.max(29,Math.min(39,live));vals.push(live);vals.shift();setLive(live);drawSpark();clk.s++;if(clk.s===60){clk.s=0;clk.m++;}put('clock',pad(clk.h)+':'+pad(clk.m)+':'+pad(clk.s));},1000);
+
+  function toHex(rgb){var m=rgb.match(/\d+/g);if(!m)return rgb;return '#'+m.slice(0,3).map(function(n){return ('0'+parseInt(n,10).toString(16)).slice(-2);}).join('').toUpperCase();}
+  function updateSwatches(){var sws=document.querySelectorAll('.sw');for(var j=0;j<sws.length;j++){sws[j].querySelector('.sw-hex').textContent=toHex(getComputedStyle(sws[j].querySelector('.sw-chip')).backgroundColor);}}
+  var segs=document.querySelectorAll('.seg button');
+  function markSeg(){var cur=doc.getAttribute('data-theme')||'';for(var j=0;j<segs.length;j++){segs[j].classList.toggle('on',segs[j].getAttribute('data-t')===cur);}}
+  for(i=0;i<segs.length;i++){segs[i].addEventListener('click',function(){var t=this.getAttribute('data-t');if(t){doc.setAttribute('data-theme',t);}else{doc.removeAttribute('data-theme');}markSeg();updateSwatches();});}
+  markSeg();updateSwatches();
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change',updateSwatches);
+  if(document.fonts&&document.fonts.ready){document.fonts.ready.then(updateSwatches);}
+})();
+</script>
