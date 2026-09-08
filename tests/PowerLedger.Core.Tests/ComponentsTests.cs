@@ -14,9 +14,12 @@ public class ComponentsTests
 
     [Theory]
     [InlineData(0.0, true, 0)]
+    [InlineData(0.05, true, 1)]
+    [InlineData(0.45, true, 5)]
     [InlineData(0.55, true, 6)]
     [InlineData(1.0, true, 10)]
     [InlineData(null, true, 5)]
+    [InlineData(double.NaN, true, 5)]
     [InlineData(0.9, false, -1)]
     public void Buckets_follow_brightness_in_ten_percent_steps_and_display_off_is_minus_one(double? brightness, bool displayOn, int expected)
     {

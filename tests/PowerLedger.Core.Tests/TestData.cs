@@ -13,8 +13,13 @@ internal static class TestData
         double? brightness = 0.6, bool displayOn = true,
         double idleSeconds = 0, double cpuLoad = 0.3, double? gpuLoad = 0.3,
         double delta = 1.0, DateTimeOffset? ts = null, bool suspect = false, bool locked = false)
-        => new(ts ?? T0, delta, cpu, 2.0, cpuLoad, gpu, gpuLoad, gpuPresent, battery, onBattery,
-               brightness, displayOn, 0, idleSeconds, locked, suspect);
+        => new(
+            Timestamp: ts ?? T0, DeltaSeconds: delta,
+            CpuPackageW: cpu, IGpuW: 2.0, CpuLoad: cpuLoad,
+            DGpuW: gpu, DGpuLoad: gpuLoad, DGpuPresent: gpuPresent,
+            BatteryRateW: battery, OnBattery: onBattery,
+            Brightness: brightness, DisplayOn: displayOn, MonitorCount: 0,
+            UserIdleSeconds: idleSeconds, SessionLocked: locked, Suspect: suspect);
 }
 
 internal sealed class FixedBaseline(double? value) : IBaselineProvider

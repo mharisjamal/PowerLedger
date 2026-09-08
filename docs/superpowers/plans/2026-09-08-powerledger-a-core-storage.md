@@ -404,9 +404,12 @@ public class ComponentsTests
 
     [Theory]
     [InlineData(0.0, true, 0)]
+    [InlineData(0.05, true, 1)]
+    [InlineData(0.45, true, 5)]
     [InlineData(0.55, true, 6)]
     [InlineData(1.0, true, 10)]
     [InlineData(null, true, 5)]
+    [InlineData(double.NaN, true, 5)]
     [InlineData(0.9, false, -1)]
     public void Buckets_follow_brightness_in_ten_percent_steps_and_display_off_is_minus_one(double? brightness, bool displayOn, int expected)
     {
@@ -432,8 +435,13 @@ internal static class TestData
         double? brightness = 0.6, bool displayOn = true,
         double idleSeconds = 0, double cpuLoad = 0.3, double? gpuLoad = 0.3,
         double delta = 1.0, DateTimeOffset? ts = null, bool suspect = false, bool locked = false)
-        => new(ts ?? T0, delta, cpu, 2.0, cpuLoad, gpu, gpuLoad, gpuPresent, battery, onBattery,
-               brightness, displayOn, 0, idleSeconds, locked, suspect);
+        => new(
+            Timestamp: ts ?? T0, DeltaSeconds: delta,
+            CpuPackageW: cpu, IGpuW: 2.0, CpuLoad: cpuLoad,
+            DGpuW: gpu, DGpuLoad: gpuLoad, DGpuPresent: gpuPresent,
+            BatteryRateW: battery, OnBattery: onBattery,
+            Brightness: brightness, DisplayOn: displayOn, MonitorCount: 0,
+            UserIdleSeconds: idleSeconds, SessionLocked: locked, Suspect: suspect);
 }
 
 internal sealed class FixedBaseline(double? value) : IBaselineProvider
@@ -455,6 +463,7 @@ namespace PowerLedger.Core;
 
 /// <summary>Raw sensor values for one tick. Null means the source had no value this tick.</summary>
 /// <param name="DeltaSeconds">Seconds since the previous tick, from a monotonic clock.</param>
+/// <param name="IGpuW">Informational only. On Intel it is already inside CpuPackageW; never add it to the CPU figure.</param>
 /// <param name="CpuLoad">0..1.</param>
 /// <param name="BatteryRateW">Discharge watts (positive) while on battery; null when unknown.</param>
 /// <param name="Brightness">0..1 for the internal panel; null when unavailable.</param>
@@ -483,11 +492,13 @@ public sealed record Sample(
 namespace PowerLedger.Core;
 
 /// <summary>Watts attributed to each part of the machine for one tick.</summary>
-/// <param name="Rest">Measured remainder (battery mode) or learned baseline (calibrated mode); 0 in estimated mode.</param>
+/// <param name="Rest">Watts not itemised elsewhere: the measured remainder (battery mode), the learned baseline (calibrated mode),
+/// or the default laptop baseline (estimated laptop). 0 for estimated desktops, whose parts are itemised.</param>
 public sealed record Components(
     double Cpu, double Gpu, double Display, double Ram, double Storage,
     double Board, double Extras, double Monitors, double PsuLoss, double Rest)
 {
+    /// <summary>Every part including PsuLoss and Rest. Equals TotalW once the model has filled PsuLoss; before that it is the pre-supply figure.</summary>
     public double Sum => Cpu + Gpu + Display + Ram + Storage + Board + Extras + Monitors + PsuLoss + Rest;
 
     public static Components Zero { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -533,6 +544,8 @@ public sealed record HardwareFacts(double CpuTdpW, double GpuTdpW)
 ```csharp
 namespace PowerLedger.Core;
 
+/// <param name="IdleThresholdSeconds">The user counts as idle after this many seconds without input (inclusive). User-configurable 60–1800 s; range-checked at the pipe.</param>
+/// <param name="LaptopAdapterEfficiency">Applied on AC only; battery mode uses 1.0. Must be in (0, 1]; range-checked at the pipe.</param>
 public sealed record PowerModelOptions(
     double IdleThresholdSeconds = 300,
     double LaptopAdapterEfficiency = 0.90);
@@ -557,13 +570,15 @@ namespace PowerLedger.Core;
 public static class CalibrationBuckets
 {
     public const int DisplayOff = -1;
-    public const int Count = 12;
+    public const int MaxBucket = 10;
+    /// <summary>Number of buckets: DisplayOff plus 0..MaxBucket.</summary>
+    public const int Count = MaxBucket + 2;
 
     public static int For(double? brightness, bool displayOn)
     {
         if (!displayOn) return DisplayOff;
-        var b = Math.Clamp(brightness ?? 0.5, 0, 1);
-        return (int)Math.Round(b * 10, MidpointRounding.AwayFromZero);
+        var b = brightness is { } value && !double.IsNaN(value) ? Math.Clamp(value, 0, 1) : 0.5;
+        return (int)Math.Round(b * MaxBucket, MidpointRounding.AwayFromZero);
     }
 }
 ```
@@ -571,7 +586,7 @@ public static class CalibrationBuckets
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter ComponentsTests`
-Expected: `Passed! - Failed: 0, Passed: 6`.
+Expected: `Passed! - Failed: 0, Passed: 9`.
 
 - [x] **Step 5: Commit**
 
@@ -764,7 +779,8 @@ public class PowerModelTests
         var beforePsu = 14.6 + 4.1 + 4.2 + 5.0;
         r.Quality.ShouldBe(Quality.Estimated);
         r.TotalW.ShouldBe(beforePsu / 0.9, 0.001);
-        r.Components.Board.ShouldBe(5.0);
+        r.Components.Rest.ShouldBe(5.0);
+        r.Components.Board.ShouldBe(0);
         r.Components.PsuLoss.ShouldBe(beforePsu / 0.9 - beforePsu, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
@@ -906,7 +922,7 @@ public sealed class PowerModel
         }
         else if (isLaptop)
         {
-            parts = new Components(cpu, gpu, display, 0, 0, LaptopBaselineW, _profile.ExtrasWatts, monitors, 0, 0);
+            parts = new Components(cpu, gpu, display, 0, 0, 0, _profile.ExtrasWatts, monitors, 0, Rest: LaptopBaselineW);
             quality = Quality.Estimated;
         }
         else
@@ -1176,7 +1192,7 @@ public sealed class CalibrationLearner : IBaselineProvider
         Array.Clear(_samples);
     }
 
-    private static int Index(int bucket) => Math.Clamp(bucket, CalibrationBuckets.DisplayOff, 10) + 1;
+    private static int Index(int bucket) => Math.Clamp(bucket, CalibrationBuckets.DisplayOff, CalibrationBuckets.MaxBucket) + 1;
 
     private static int BucketOf(int index) => index - 1;
 }
@@ -1290,7 +1306,8 @@ Expected: build error, `EnergyIntegrator` not found.
 ```csharp
 namespace PowerLedger.Core;
 
-/// <summary>Energy contributed by one tick. RestWh is everything that is not CPU, GPU or display.</summary>
+/// <summary>Energy contributed by one tick. RestWh is everything that is not CPU, GPU or display
+/// (broader than Components.Rest, which excludes the itemised parts such as RAM, board and PSU loss).</summary>
 public sealed record EnergySlice(
     double Wh, double CpuWh, double GpuWh, double DisplayWh, double RestWh,
     double IdleOnWh, double IdleOffWh,
@@ -1338,7 +1355,7 @@ public static class EnergyIntegrator
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter EnergyIntegratorTests`
-Expected: `Passed! - Failed: 0, Passed: 6`.
+Expected: `Passed! - Failed: 0, Passed: 9`.
 
 - [ ] **Step 5: Commit**
 
@@ -1733,12 +1750,12 @@ public static class Comparisons
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter TariffScheduleTests`
-Expected: `Passed! - Failed: 0, Passed: 6`.
+Expected: `Passed! - Failed: 0, Passed: 9`.
 
 - [ ] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 56`.
+Expected: `Passed! - Failed: 0, Passed: 59`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -2130,13 +2147,16 @@ public class RawSampleRepositoryTests
         using var t = new TestDatabase();
         var repo = new RawSampleRepository(t.Db);
         var batch = Fixtures.Minute(0);
-        repo.InsertBatch(batch);
+        // Flags deliberately differ from the batch (on battery, display off, idle, suspect, null loads) so a swapped column cannot round-trip.
+        var odd = Fixtures.Reading(60, idle: true, displayOn: false) with { Suspect = true, GpuLoad = null, Brightness = null };
+        repo.InsertBatch([.. batch, odd]);
 
-        var back = repo.Read(Fixtures.T0, Fixtures.T0.AddMinutes(1));
-        back.Count.ShouldBe(60);
+        var back = repo.Read(Fixtures.T0, Fixtures.T0.AddMinutes(2));
+        back.Count.ShouldBe(61);
         back[0].ShouldBe(batch[0]);
         back[59].ShouldBe(batch[59]);
-        repo.Count().ShouldBe(60);
+        back[60].ShouldBe(odd);
+        repo.Count().ShouldBe(61);
     }
 
     [Fact]
@@ -3267,7 +3287,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 58`, Storage `Passed: 26`, no failures, no skipped tests.
+Expected: Core `Passed: 61`, Storage `Passed: 26`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 
