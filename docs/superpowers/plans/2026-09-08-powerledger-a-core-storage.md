@@ -196,6 +196,7 @@ git commit -m "Scaffold solution with Contracts, Core, Storage and test projects
 - [x] **Step 1: Write the failing test**
 
 ```csharp
+using System.Text.Json;
 using PowerLedger.Contracts;
 using Shouldly;
 
@@ -219,6 +220,25 @@ public class MachineProfileTests
         MachineProfile.DefaultDesktop.Chassis.ShouldBe(ChassisKind.Desktop);
         MachineProfile.DefaultDesktop.DisplayDiagonalInches.ShouldBe(0);
     }
+
+    [Fact]
+    public void Quality_integer_values_are_pinned_because_they_are_stored_in_sqlite()
+    {
+        ((int)Quality.Estimated).ShouldBe(0);
+        ((int)Quality.Calibrated).ShouldBe(1);
+        ((int)Quality.Measured).ShouldBe(2);
+    }
+
+    [Fact]
+    public void Json_missing_properties_fall_back_to_documented_defaults_not_zero()
+    {
+        var p = JsonSerializer.Deserialize<MachineProfile>("""{"Chassis":0,"DisplayDiagonalInches":0}""")!;
+        p.Chassis.ShouldBe(ChassisKind.Desktop);
+        p.PsuTier.ShouldBe(PsuTier.Bronze);
+        p.MonitorWatts.ShouldBe(25);
+        p.RamSticks.ShouldBe(1);
+        p.CpuTdpOverrideW.ShouldBeNull();
+    }
 }
 ```
 
@@ -233,7 +253,10 @@ Expected: build error `The type or namespace name 'MachineProfile' could not be 
 ```csharp
 namespace PowerLedger.Contracts;
 
-/// <summary>How trustworthy a total-power reading is. Higher is better.</summary>
+/// <summary>
+/// How trustworthy a total-power reading is. Higher is better.
+/// Persisted in SQLite as the integer value: append new members, never renumber.
+/// </summary>
 public enum Quality
 {
     /// <summary>Component sum with default baselines (about ±20 %).</summary>
@@ -249,15 +272,26 @@ public enum Quality
 ```csharp
 namespace PowerLedger.Contracts;
 
+/// <summary>
+/// Why a power session started or ended. Persisted in SQLite by name (Enum.Parse):
+/// append new members, never rename existing ones.
+/// </summary>
 public enum SessionReason
 {
-    Boot,
-    ServiceStart,
-    Resume,
-    Suspend,
-    Shutdown,
-    ServiceStop,
-    CrashRecovered,
+    /// <summary>Started: the machine booted and the service came up with it.</summary>
+    Boot = 0,
+    /// <summary>Started: the service was (re)started on a machine that was already running.</summary>
+    ServiceStart = 1,
+    /// <summary>Started: the machine woke from sleep or hibernation.</summary>
+    Resume = 2,
+    /// <summary>Ended: the machine is going to sleep or hibernation.</summary>
+    Suspend = 3,
+    /// <summary>Ended: the machine is shutting down or restarting.</summary>
+    Shutdown = 4,
+    /// <summary>Ended: the service was stopped while the machine kept running.</summary>
+    ServiceStop = 5,
+    /// <summary>The previous session never wrote an end (crash or power loss): it is closed with this reason, and the new session starts with it too.</summary>
+    CrashRecovered = 6,
 }
 ```
 
@@ -265,43 +299,68 @@ public enum SessionReason
 ```csharp
 namespace PowerLedger.Contracts;
 
-public enum ChassisKind { Desktop, Laptop }
-
-public enum PsuTier { White, Bronze, Silver, Gold, Platinum, Titanium }
-
-/// <summary>What the machine is made of, as detected at install time and corrected by the user.</summary>
-public sealed record MachineProfile(
-    ChassisKind Chassis,
-    int RamSticks,
-    bool RamIsDdr5,
-    int SsdCount,
-    int HddCount,
-    int FanCount,
-    PsuTier PsuTier,
-    double ExtrasWatts,
-    int ExternalMonitors,
-    bool IncludeMonitors,
-    double MonitorWatts,
-    double DisplayDiagonalInches,
-    double? CpuTdpOverrideW,
-    double? GpuTdpOverrideW)
+/// <summary>Persisted and piped as an integer: append new members, never renumber.</summary>
+public enum ChassisKind
 {
-    public static MachineProfile DefaultLaptop { get; } = new(
-        ChassisKind.Laptop, RamSticks: 1, RamIsDdr5: false, SsdCount: 1, HddCount: 0, FanCount: 1,
-        PsuTier.Bronze, ExtrasWatts: 0, ExternalMonitors: 0, IncludeMonitors: false, MonitorWatts: 25,
-        DisplayDiagonalInches: 15.6, CpuTdpOverrideW: null, GpuTdpOverrideW: null);
+    Desktop = 0,
+    Laptop = 1,
+}
 
-    public static MachineProfile DefaultDesktop { get; } = new(
-        ChassisKind.Desktop, RamSticks: 2, RamIsDdr5: false, SsdCount: 1, HddCount: 0, FanCount: 3,
-        PsuTier.Bronze, ExtrasWatts: 0, ExternalMonitors: 1, IncludeMonitors: false, MonitorWatts: 25,
-        DisplayDiagonalInches: 0, CpuTdpOverrideW: null, GpuTdpOverrideW: null);
+/// <summary>80 PLUS tier of a desktop power supply. Persisted as an integer: append new members, never renumber.</summary>
+public enum PsuTier
+{
+    White = 0,
+    Bronze = 1,
+    Silver = 2,
+    Gold = 3,
+    Platinum = 4,
+    Titanium = 5,
+}
+
+/// <summary>
+/// What the machine is made of, as detected at install time and corrected by the user.
+/// Init-only properties with initialisers: a JSON blob that lacks a property (written by an older version)
+/// deserialises to the documented default instead of zero, and adding a property later is not a breaking change.
+/// </summary>
+public sealed record MachineProfile
+{
+    public ChassisKind Chassis { get; init; } = ChassisKind.Laptop;
+    public int RamSticks { get; init; } = 1;
+    public bool RamIsDdr5 { get; init; }
+    public int SsdCount { get; init; } = 1;
+    public int HddCount { get; init; }
+    public int FanCount { get; init; } = 1;
+    /// <summary>Only used for desktops; laptops use adapter efficiency instead.</summary>
+    public PsuTier PsuTier { get; init; } = PsuTier.Bronze;
+    /// <summary>User-declared extras (RGB, pumps, USB devices) in watts.</summary>
+    public double ExtrasWatts { get; init; }
+    public int ExternalMonitors { get; init; }
+    /// <summary>External monitors are self-powered; they count only when the user opts in.</summary>
+    public bool IncludeMonitors { get; init; }
+    /// <summary>Watts per external monitor while the display is on.</summary>
+    public double MonitorWatts { get; init; } = 25;
+    /// <summary>Internal panel diagonal. 0 means unknown or no internal panel (desktops).</summary>
+    public double DisplayDiagonalInches { get; init; } = 15.6;
+    public double? CpuTdpOverrideW { get; init; }
+    public double? GpuTdpOverrideW { get; init; }
+
+    public static MachineProfile DefaultLaptop { get; } = new();
+
+    public static MachineProfile DefaultDesktop { get; } = new()
+    {
+        Chassis = ChassisKind.Desktop,
+        RamSticks = 2,
+        FanCount = 3,
+        ExternalMonitors = 1,
+        DisplayDiagonalInches = 0,
+    };
 }
 ```
 
 - [x] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter MachineProfileTests`
-Expected: `Passed! - Failed: 0, Passed: 2`.
+Expected: `Passed! - Failed: 0, Passed: 4`.
 
 - [x] **Step 5: Commit**
 
@@ -1679,7 +1738,7 @@ Expected: `Passed! - Failed: 0, Passed: 6`.
 - [ ] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 54`.
+Expected: `Passed! - Failed: 0, Passed: 56`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -1848,10 +1907,11 @@ internal static class Schema
         );
 
         CREATE TABLE sessions (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            start_ms INTEGER NOT NULL,
-            end_ms   INTEGER,
-            reason   TEXT    NOT NULL
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            start_ms   INTEGER NOT NULL,
+            end_ms     INTEGER,
+            reason     TEXT    NOT NULL,
+            end_reason TEXT
         );
         CREATE INDEX ix_sessions_start ON sessions(start_ms);
 
@@ -2444,7 +2504,7 @@ public class SmallRepositoriesTests
         repo.OpenSession()!.Id.ShouldBe(id);
         repo.OpenSession()!.Reason.ShouldBe(SessionReason.Boot);
 
-        repo.Close(id, Fixtures.T0.AddHours(2));
+        repo.Close(id, Fixtures.T0.AddHours(2), SessionReason.Suspend);
         repo.OpenSession().ShouldBeNull();
         var second = repo.Open(SessionReason.Resume, Fixtures.T0.AddHours(5));
 
@@ -2452,7 +2512,9 @@ public class SmallRepositoriesTests
         overlapping.Select(s => s.Id).ShouldBe([id, second]);
         repo.List(Fixtures.T0.AddHours(2), Fixtures.T0.AddHours(5)).ShouldBeEmpty();
         overlapping[0].End.ShouldBe(Fixtures.T0.AddHours(2));
+        overlapping[0].EndReason.ShouldBe(SessionReason.Suspend);
         overlapping[1].End.ShouldBeNull();
+        overlapping[1].EndReason.ShouldBeNull();
     }
 
     [Fact]
@@ -2463,7 +2525,9 @@ public class SmallRepositoriesTests
         repo.Open(SessionReason.ServiceStart, Fixtures.T0);
         repo.CloseAllOpen(Fixtures.T0.AddMinutes(10)).ShouldBe(1);
         repo.CloseAllOpen(Fixtures.T0.AddMinutes(11)).ShouldBe(0);
-        repo.List(Fixtures.T0, Fixtures.T0.AddHours(1)).Single().End.ShouldBe(Fixtures.T0.AddMinutes(10));
+        var closed = repo.List(Fixtures.T0, Fixtures.T0.AddHours(1)).Single();
+        closed.End.ShouldBe(Fixtures.T0.AddMinutes(10));
+        closed.EndReason.ShouldBe(SessionReason.CrashRecovered);
     }
 
     [Fact]
@@ -2506,7 +2570,9 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.Storage;
 
-public sealed record Session(long Id, DateTimeOffset Start, DateTimeOffset? End, SessionReason Reason);
+/// <param name="Reason">Why the session started.</param>
+/// <param name="EndReason">Why it ended; null while the session is open.</param>
+public sealed record Session(long Id, DateTimeOffset Start, DateTimeOffset? End, SessionReason Reason, SessionReason? EndReason);
 
 /// <summary>Power-state timeline. A session is open from boot/resume until suspend/shutdown/stop.</summary>
 public sealed class SessionRepository(SqliteDatabase db)
@@ -2521,23 +2587,25 @@ public sealed class SessionRepository(SqliteDatabase db)
         return (long)cmd.ExecuteScalar()!;
     }
 
-    public void Close(long id, DateTimeOffset end)
+    public void Close(long id, DateTimeOffset end, SessionReason reason)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "UPDATE sessions SET end_ms = $end WHERE id = $id";
+        cmd.CommandText = "UPDATE sessions SET end_ms = $end, end_reason = $reason WHERE id = $id";
         Rows.Add(cmd, "$end", Rows.Ms(end));
+        Rows.Add(cmd, "$reason", reason.ToString());
         Rows.Add(cmd, "$id", id);
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>Closes every session still open (after a crash) and returns how many there were.</summary>
+    /// <summary>Closes every session still open (after a crash) with reason CrashRecovered and returns how many there were.</summary>
     public int CloseAllOpen(DateTimeOffset end)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "UPDATE sessions SET end_ms = $end WHERE end_ms IS NULL";
+        cmd.CommandText = "UPDATE sessions SET end_ms = $end, end_reason = $reason WHERE end_ms IS NULL";
         Rows.Add(cmd, "$end", Rows.Ms(end));
+        Rows.Add(cmd, "$reason", SessionReason.CrashRecovered.ToString());
         return cmd.ExecuteNonQuery();
     }
 
@@ -2545,7 +2613,7 @@ public sealed class SessionRepository(SqliteDatabase db)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id, start_ms, end_ms, reason FROM sessions WHERE end_ms IS NULL ORDER BY start_ms DESC LIMIT 1";
+        cmd.CommandText = "SELECT id, start_ms, end_ms, reason, end_reason FROM sessions WHERE end_ms IS NULL ORDER BY start_ms DESC LIMIT 1";
         using var r = cmd.ExecuteReader();
         return r.Read() ? Map(r) : null;
     }
@@ -2555,7 +2623,7 @@ public sealed class SessionRepository(SqliteDatabase db)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id, start_ms, end_ms, reason FROM sessions WHERE start_ms < $to AND (end_ms IS NULL OR end_ms > $from) ORDER BY start_ms";
+        cmd.CommandText = "SELECT id, start_ms, end_ms, reason, end_reason FROM sessions WHERE start_ms < $to AND (end_ms IS NULL OR end_ms > $from) ORDER BY start_ms";
         Rows.Add(cmd, "$from", Rows.Ms(from));
         Rows.Add(cmd, "$to", Rows.Ms(to));
         using var r = cmd.ExecuteReader();
@@ -2567,7 +2635,8 @@ public sealed class SessionRepository(SqliteDatabase db)
     private static Session Map(Microsoft.Data.Sqlite.SqliteDataReader r) => new(
         r.GetInt64(0), Rows.Time(r.GetInt64(1)),
         r.IsDBNull(2) ? null : Rows.Time(r.GetInt64(2)),
-        Enum.Parse<SessionReason>(r.GetString(3)));
+        Enum.Parse<SessionReason>(r.GetString(3)),
+        r.IsDBNull(4) ? null : Enum.Parse<SessionReason>(r.GetString(4)));
 }
 ```
 
@@ -3198,7 +3267,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 56`, Storage `Passed: 26`, no failures, no skipped tests.
+Expected: Core `Passed: 58`, Storage `Passed: 26`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 

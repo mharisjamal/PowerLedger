@@ -174,7 +174,7 @@ Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence dec
 
 ### Sessions
 
-`sessions` records the power-state timeline with reasons: `boot`, `service-start`, `resume`, `suspend`, `shutdown`, `service-stop`, `crash-recovered`. "Asleep" hours in reports come from gaps between sessions.
+`sessions` records the power-state timeline. Each row stores why it started (`boot`, `service-start`, `resume`, `crash-recovered`) and why it ended (`suspend`, `shutdown`, `service-stop`, or `crash-recovered` when the end was never written because the service died). "Asleep" hours in reports come from gaps between sessions.
 
 ## 7. Storage
 

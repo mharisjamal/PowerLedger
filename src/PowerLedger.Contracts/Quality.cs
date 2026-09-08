@@ -1,6 +1,9 @@
 namespace PowerLedger.Contracts;
 
-/// <summary>How trustworthy a total-power reading is. Higher is better.</summary>
+/// <summary>
+/// How trustworthy a total-power reading is. Higher is better.
+/// Persisted in SQLite as the integer value: append new members, never renumber.
+/// </summary>
 public enum Quality
 {
     /// <summary>Component sum with default baselines (about ±20 %).</summary>
