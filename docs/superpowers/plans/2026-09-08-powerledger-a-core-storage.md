@@ -2809,7 +2809,7 @@ git commit -m "Add RawSampleRepository with batched writes"
 - Create: `src/PowerLedger.Storage/AggregateRepository.cs`
 - Test: `tests/PowerLedger.Storage.Tests/AggregateRepositoryTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Contracts;
@@ -2894,12 +2894,12 @@ public class AggregateRepositoryTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter AggregateRepositoryTests`
 Expected: build error, `AggregateRepository` not found.
 
-- [ ] **Step 3: Write the repository**
+- [x] **Step 3: Write the repository**
 
 `src/PowerLedger.Storage/AggregateRepository.cs`
 ```csharp
@@ -2998,12 +2998,12 @@ public sealed class AggregateRepository(SqliteDatabase db)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter AggregateRepositoryTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Storage/AggregateRepository.cs tests/PowerLedger.Storage.Tests/AggregateRepositoryTests.cs
