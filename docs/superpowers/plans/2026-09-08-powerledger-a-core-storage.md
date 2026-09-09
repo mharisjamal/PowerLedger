@@ -1682,7 +1682,7 @@ git commit -m "Add EnergyIntegrator with delta cap and gap rule"
 - Create: `src/PowerLedger.Core/Downsampler.cs`
 - Test: `tests/PowerLedger.Core.Tests/DownsamplerTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Contracts;
@@ -1783,12 +1783,12 @@ public class DownsamplerTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter DownsamplerTests`
 Expected: build error, `Downsampler` not found.
 
-- [ ] **Step 3: Write the aggregate and downsampler**
+- [x] **Step 3: Write the aggregate and downsampler**
 
 `src/PowerLedger.Core/Aggregate.cs`
 ```csharp
@@ -1887,12 +1887,12 @@ public static class Downsampler
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter DownsamplerTests`
 Expected: `Passed! - Failed: 0, Passed: 7`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Core/Aggregate.cs src/PowerLedger.Core/Downsampler.cs tests/PowerLedger.Core.Tests/DownsamplerTests.cs
