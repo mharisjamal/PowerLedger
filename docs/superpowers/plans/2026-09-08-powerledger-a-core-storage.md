@@ -1693,10 +1693,10 @@ namespace PowerLedger.Core.Tests;
 
 public class DownsamplerTests
 {
-    private static Reading At(int second, double totalW, double delta = 1.0, Quality q = Quality.Measured, bool idle = false)
+    private static Reading At(int second, double totalW, double delta = 1.0, Quality q = Quality.Measured, bool idle = false, bool displayOn = true)
         => new(TestData.T0.AddSeconds(second), delta, totalW, q,
                new Components(Cpu: totalW * 0.4, Gpu: totalW * 0.1, Display: 4, 0, 0, 0, 0, 0, 0, Rest: totalW * 0.5 - 4),
-               OnBattery: q == Quality.Measured, DisplayOn: true, UserIdle: idle, SessionLocked: false, 0.3, 0.3, 0.6, false);
+               OnBattery: q == Quality.Measured, DisplayOn: displayOn, UserIdle: idle, SessionLocked: false, 0.3, 0.3, 0.6, false);
 
     [Fact]
     public void Sixty_seconds_at_thirty_watts_is_half_a_watt_hour()
@@ -1780,6 +1780,61 @@ public class DownsamplerTests
         h.SampleCount.ShouldBe(3600);
         h.DominantQuality.ShouldBe(Quality.Measured);
     }
+
+    [Fact]
+    public void Zero_delta_and_non_finite_ticks_do_not_set_the_peak()
+    {
+        var readings = new List<Reading> { At(0, 30), At(1, 999, delta: 0), At(2, double.NaN) };
+        var m = Downsampler.ToMinute(TestData.T0, readings);
+        m.MaxW.ShouldBe(30);
+        m.EnergyWh.ShouldBe(30.0 / 3600, 1e-9);
+        m.OnSeconds.ShouldBe(1);
+        m.SampleCount.ShouldBe(3);
+    }
+
+    [Fact]
+    public void Idle_with_the_display_off_lands_in_the_off_bucket()
+    {
+        var readings = Enumerable.Range(0, 60).Select(i => At(i, 30, idle: true, displayOn: false)).ToList();
+        var m = Downsampler.ToMinute(TestData.T0, readings);
+        m.IdleOffWh.ShouldBe(0.5, 1e-9);
+        m.IdleOffSeconds.ShouldBe(60);
+        m.IdleOnSeconds.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData(60, 0, 0, Quality.Measured)]
+    [InlineData(0, 60, 0, Quality.Calibrated)]
+    [InlineData(0, 0, 60, Quality.Estimated)]
+    [InlineData(30, 30, 0, Quality.Measured)]
+    [InlineData(0, 30, 30, Quality.Calibrated)]
+    [InlineData(0, 0, 0, Quality.Estimated)]
+    public void Dominant_quality_prefers_the_higher_quality_on_ties(double measured, double calibrated, double estimated, Quality expected)
+        => (Aggregate.Empty(TestData.T0) with { MeasuredSeconds = measured, CalibratedSeconds = calibrated, EstimatedSeconds = estimated })
+            .DominantQuality.ShouldBe(expected);
+
+    [Fact]
+    public void An_empty_hour_is_all_zeros()
+    {
+        var h = Downsampler.ToHour(TestData.T0, []);
+        h.Start.ShouldBe(TestData.T0);
+        h.EnergyWh.ShouldBe(0);
+        h.AvgW.ShouldBe(0);
+        h.SampleCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Hours_sum_gap_seconds_and_keep_the_peak_from_real_ticks()
+    {
+        var first = Downsampler.ToMinute(TestData.T0, [At(0, 30), At(1, 999, delta: 60)]);
+        var second = Downsampler.ToMinute(TestData.T0.AddMinutes(1), [At(60, 40)]);
+        var h = Downsampler.ToHour(TestData.T0, [first, second]);
+        h.GapSeconds.ShouldBe(60);
+        h.MaxW.ShouldBe(40);
+        h.OnSeconds.ShouldBe(2);
+        h.SampleCount.ShouldBe(3);
+        h.EnergyWh.ShouldBe((30.0 + 40.0) / 3600, 1e-9);
+    }
 }
 ```
 
@@ -1796,7 +1851,11 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.Core;
 
-/// <summary>One minute or one hour of energy. AvgW is energy-weighted over on-time, so gaps do not drag it down.</summary>
+/// <summary>
+/// One minute or one hour of energy (spec §7). AvgW is energy over on-time, so gaps do not drag it down.
+/// SampleCount counts every tick folded in, gaps included; GapSeconds is the length of gaps whose closing tick
+/// fell in this row, so it can exceed the row length after a long stall; the three quality-seconds partition OnSeconds.
+/// </summary>
 public sealed record Aggregate(
     DateTimeOffset Start,
     double AvgW, double MaxW,
@@ -1807,12 +1866,35 @@ public sealed record Aggregate(
     int SampleCount,
     double MeasuredSeconds, double CalibratedSeconds, double EstimatedSeconds)
 {
+    /// <summary>The quality with the most on-time; ties go to the higher quality, and an empty row is Estimated.</summary>
     public Quality DominantQuality =>
         MeasuredSeconds >= CalibratedSeconds && MeasuredSeconds >= EstimatedSeconds && MeasuredSeconds > 0 ? Quality.Measured
         : CalibratedSeconds >= EstimatedSeconds && CalibratedSeconds > 0 ? Quality.Calibrated
         : Quality.Estimated;
 
     public static Aggregate Empty(DateTimeOffset start) => new(start, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+    /// <summary>This row plus another: sums every additive field, keeps the larger peak and this Start. AvgW is left for the caller to recompute.</summary>
+    public Aggregate Plus(Aggregate other) => this with
+    {
+        MaxW = Math.Max(MaxW, other.MaxW),
+        EnergyWh = EnergyWh + other.EnergyWh,
+        CpuWh = CpuWh + other.CpuWh,
+        GpuWh = GpuWh + other.GpuWh,
+        DisplayWh = DisplayWh + other.DisplayWh,
+        RestWh = RestWh + other.RestWh,
+        IdleOnWh = IdleOnWh + other.IdleOnWh,
+        IdleOffWh = IdleOffWh + other.IdleOffWh,
+        IdleOnSeconds = IdleOnSeconds + other.IdleOnSeconds,
+        IdleOffSeconds = IdleOffSeconds + other.IdleOffSeconds,
+        OnSeconds = OnSeconds + other.OnSeconds,
+        BatterySeconds = BatterySeconds + other.BatterySeconds,
+        GapSeconds = GapSeconds + other.GapSeconds,
+        SampleCount = SampleCount + other.SampleCount,
+        MeasuredSeconds = MeasuredSeconds + other.MeasuredSeconds,
+        CalibratedSeconds = CalibratedSeconds + other.CalibratedSeconds,
+        EstimatedSeconds = EstimatedSeconds + other.EstimatedSeconds,
+    };
 }
 ```
 
@@ -1822,75 +1904,53 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.Core;
 
+/// <summary>Folds ticks into minute rows and minute rows into hour rows. Callers pass exactly the rows of that period;
+/// a tick straddling a boundary counts wholly in the period of its timestamp.</summary>
 public static class Downsampler
 {
+    /// <summary>One minute from its readings. Energy is integrated per tick, never avg × 60; only ticks that contribute on-time can set the peak.</summary>
     public static Aggregate ToMinute(DateTimeOffset minuteStart, IReadOnlyList<Reading> readings, double maxDeltaSeconds = EnergyIntegrator.MaxDeltaSeconds)
     {
         var a = Aggregate.Empty(minuteStart);
         foreach (var r in readings)
         {
-            var e = EnergyIntegrator.Integrate(r, maxDeltaSeconds);
-            a = a with
-            {
-                EnergyWh = a.EnergyWh + e.Wh,
-                CpuWh = a.CpuWh + e.CpuWh,
-                GpuWh = a.GpuWh + e.GpuWh,
-                DisplayWh = a.DisplayWh + e.DisplayWh,
-                RestWh = a.RestWh + e.RestWh,
-                IdleOnWh = a.IdleOnWh + e.IdleOnWh,
-                IdleOffWh = a.IdleOffWh + e.IdleOffWh,
-                IdleOnSeconds = a.IdleOnSeconds + e.IdleOnSeconds,
-                IdleOffSeconds = a.IdleOffSeconds + e.IdleOffSeconds,
-                OnSeconds = a.OnSeconds + e.OnSeconds,
-                BatterySeconds = a.BatterySeconds + e.BatterySeconds,
-                GapSeconds = a.GapSeconds + e.GapSeconds,
-                SampleCount = a.SampleCount + 1,
-                MaxW = e.Gap ? a.MaxW : Math.Max(a.MaxW, r.TotalW),
-                MeasuredSeconds = a.MeasuredSeconds + (r.Quality == Quality.Measured ? e.OnSeconds : 0),
-                CalibratedSeconds = a.CalibratedSeconds + (r.Quality == Quality.Calibrated ? e.OnSeconds : 0),
-                EstimatedSeconds = a.EstimatedSeconds + (r.Quality == Quality.Estimated ? e.OnSeconds : 0),
-            };
+            a = a.Plus(FromTick(minuteStart, r, EnergyIntegrator.Integrate(r, maxDeltaSeconds)));
         }
-        return a with { AvgW = Average(a.EnergyWh, a.OnSeconds) };
+        return WithAverage(a);
     }
 
+    /// <summary>One hour from its minute rows.</summary>
     public static Aggregate ToHour(DateTimeOffset hourStart, IReadOnlyList<Aggregate> minutes)
     {
         var a = Aggregate.Empty(hourStart);
         foreach (var m in minutes)
         {
-            a = a with
-            {
-                EnergyWh = a.EnergyWh + m.EnergyWh,
-                CpuWh = a.CpuWh + m.CpuWh,
-                GpuWh = a.GpuWh + m.GpuWh,
-                DisplayWh = a.DisplayWh + m.DisplayWh,
-                RestWh = a.RestWh + m.RestWh,
-                IdleOnWh = a.IdleOnWh + m.IdleOnWh,
-                IdleOffWh = a.IdleOffWh + m.IdleOffWh,
-                IdleOnSeconds = a.IdleOnSeconds + m.IdleOnSeconds,
-                IdleOffSeconds = a.IdleOffSeconds + m.IdleOffSeconds,
-                OnSeconds = a.OnSeconds + m.OnSeconds,
-                BatterySeconds = a.BatterySeconds + m.BatterySeconds,
-                GapSeconds = a.GapSeconds + m.GapSeconds,
-                SampleCount = a.SampleCount + m.SampleCount,
-                MaxW = Math.Max(a.MaxW, m.MaxW),
-                MeasuredSeconds = a.MeasuredSeconds + m.MeasuredSeconds,
-                CalibratedSeconds = a.CalibratedSeconds + m.CalibratedSeconds,
-                EstimatedSeconds = a.EstimatedSeconds + m.EstimatedSeconds,
-            };
+            a = a.Plus(m);
         }
-        return a with { AvgW = Average(a.EnergyWh, a.OnSeconds) };
+        return WithAverage(a);
     }
 
-    private static double Average(double wh, double onSeconds) => onSeconds > 0 ? wh / (onSeconds / 3600.0) : 0;
+    private static Aggregate FromTick(DateTimeOffset start, Reading r, EnergySlice e) => new(
+        start,
+        AvgW: 0,
+        MaxW: e.OnSeconds > 0 ? r.TotalW : 0,
+        e.Wh, e.CpuWh, e.GpuWh, e.DisplayWh, e.RestWh,
+        e.IdleOnWh, e.IdleOffWh,
+        e.IdleOnSeconds, e.IdleOffSeconds,
+        e.OnSeconds, e.BatterySeconds, e.GapSeconds,
+        SampleCount: 1,
+        MeasuredSeconds: r.Quality == Quality.Measured ? e.OnSeconds : 0,
+        CalibratedSeconds: r.Quality == Quality.Calibrated ? e.OnSeconds : 0,
+        EstimatedSeconds: r.Quality == Quality.Estimated ? e.OnSeconds : 0);
+
+    private static Aggregate WithAverage(Aggregate a) => a with { AvgW = a.OnSeconds > 0 ? a.EnergyWh / (a.OnSeconds / 3600.0) : 0 };
 }
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter DownsamplerTests`
-Expected: `Passed! - Failed: 0, Passed: 7`.
+Expected: `Passed! - Failed: 0, Passed: 17`.
 
 - [x] **Step 5: Commit**
 
@@ -2064,7 +2124,7 @@ Expected: `Passed! - Failed: 0, Passed: 6`.
 - [ ] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 93`.
+Expected: `Passed! - Failed: 0, Passed: 103`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -2683,6 +2743,19 @@ public class AggregateRepositoryTests
         repo.PurgeMinutesBefore(Fixtures.T0.AddMinutes(3)).ShouldBe(3);
         repo.ReadMinutes(Fixtures.T0, Fixtures.T0.AddHours(1)).Count.ShouldBe(2);
     }
+
+    [Fact]
+    public void Every_column_maps_to_its_own_field()
+    {
+        // Distinct value per field so any two swapped columns fail the round trip.
+        using var t = new TestDatabase();
+        var repo = new AggregateRepository(t.Db);
+        var distinct = new Aggregate(Fixtures.T0.AddMinutes(9), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18);
+        repo.UpsertMinute(distinct);
+        repo.UpsertHour(distinct);
+        repo.ReadMinutes(Fixtures.T0.AddMinutes(9), Fixtures.T0.AddMinutes(10)).Single().ShouldBe(distinct);
+        repo.ReadHours(Fixtures.T0.AddMinutes(9), Fixtures.T0.AddMinutes(10)).Single().ShouldBe(distinct);
+    }
 }
 ```
 
@@ -2793,7 +2866,7 @@ public sealed class AggregateRepository(SqliteDatabase db)
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter AggregateRepositoryTests`
-Expected: `Passed! - Failed: 0, Passed: 5`.
+Expected: `Passed! - Failed: 0, Passed: 6`.
 
 - [ ] **Step 5: Commit**
 
@@ -3567,7 +3640,9 @@ public class EnergyProperties
         var conserved = Math.Abs(m.EnergyWh - expected) < 1e-9;
         var partsAddUp = Math.Abs(m.CpuWh + m.GpuWh + m.DisplayWh + m.RestWh - m.EnergyWh) < 1e-9;
         var idleWithin = m.IdleOnWh + m.IdleOffWh <= m.EnergyWh + 1e-9;
-        return conserved && partsAddUp && idleWithin;
+        var qualityPartition = Math.Abs(m.MeasuredSeconds + m.CalibratedSeconds + m.EstimatedSeconds - m.OnSeconds) < 1e-9;
+        var gapsSummed = Math.Abs(m.GapSeconds - readings.Sum(r => EnergyIntegrator.Integrate(r).GapSeconds)) < 1e-9;
+        return conserved && partsAddUp && idleWithin && qualityPartition && gapsSummed;
     }
 }
 ```
@@ -3596,7 +3671,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 95`, Storage `Passed: 26`, no failures, no skipped tests.
+Expected: Core `Passed: 105`, Storage `Passed: 27`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 

@@ -2,66 +2,44 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.Core;
 
+/// <summary>Folds ticks into minute rows and minute rows into hour rows. Callers pass exactly the rows of that period;
+/// a tick straddling a boundary counts wholly in the period of its timestamp.</summary>
 public static class Downsampler
 {
+    /// <summary>One minute from its readings. Energy is integrated per tick, never avg × 60; only ticks that contribute on-time can set the peak.</summary>
     public static Aggregate ToMinute(DateTimeOffset minuteStart, IReadOnlyList<Reading> readings, double maxDeltaSeconds = EnergyIntegrator.MaxDeltaSeconds)
     {
         var a = Aggregate.Empty(minuteStart);
         foreach (var r in readings)
         {
-            var e = EnergyIntegrator.Integrate(r, maxDeltaSeconds);
-            a = a with
-            {
-                EnergyWh = a.EnergyWh + e.Wh,
-                CpuWh = a.CpuWh + e.CpuWh,
-                GpuWh = a.GpuWh + e.GpuWh,
-                DisplayWh = a.DisplayWh + e.DisplayWh,
-                RestWh = a.RestWh + e.RestWh,
-                IdleOnWh = a.IdleOnWh + e.IdleOnWh,
-                IdleOffWh = a.IdleOffWh + e.IdleOffWh,
-                IdleOnSeconds = a.IdleOnSeconds + e.IdleOnSeconds,
-                IdleOffSeconds = a.IdleOffSeconds + e.IdleOffSeconds,
-                OnSeconds = a.OnSeconds + e.OnSeconds,
-                BatterySeconds = a.BatterySeconds + e.BatterySeconds,
-                GapSeconds = a.GapSeconds + e.GapSeconds,
-                SampleCount = a.SampleCount + 1,
-                MaxW = e.Gap ? a.MaxW : Math.Max(a.MaxW, r.TotalW),
-                MeasuredSeconds = a.MeasuredSeconds + (r.Quality == Quality.Measured ? e.OnSeconds : 0),
-                CalibratedSeconds = a.CalibratedSeconds + (r.Quality == Quality.Calibrated ? e.OnSeconds : 0),
-                EstimatedSeconds = a.EstimatedSeconds + (r.Quality == Quality.Estimated ? e.OnSeconds : 0),
-            };
+            a = a.Plus(FromTick(minuteStart, r, EnergyIntegrator.Integrate(r, maxDeltaSeconds)));
         }
-        return a with { AvgW = Average(a.EnergyWh, a.OnSeconds) };
+        return WithAverage(a);
     }
 
+    /// <summary>One hour from its minute rows.</summary>
     public static Aggregate ToHour(DateTimeOffset hourStart, IReadOnlyList<Aggregate> minutes)
     {
         var a = Aggregate.Empty(hourStart);
         foreach (var m in minutes)
         {
-            a = a with
-            {
-                EnergyWh = a.EnergyWh + m.EnergyWh,
-                CpuWh = a.CpuWh + m.CpuWh,
-                GpuWh = a.GpuWh + m.GpuWh,
-                DisplayWh = a.DisplayWh + m.DisplayWh,
-                RestWh = a.RestWh + m.RestWh,
-                IdleOnWh = a.IdleOnWh + m.IdleOnWh,
-                IdleOffWh = a.IdleOffWh + m.IdleOffWh,
-                IdleOnSeconds = a.IdleOnSeconds + m.IdleOnSeconds,
-                IdleOffSeconds = a.IdleOffSeconds + m.IdleOffSeconds,
-                OnSeconds = a.OnSeconds + m.OnSeconds,
-                BatterySeconds = a.BatterySeconds + m.BatterySeconds,
-                GapSeconds = a.GapSeconds + m.GapSeconds,
-                SampleCount = a.SampleCount + m.SampleCount,
-                MaxW = Math.Max(a.MaxW, m.MaxW),
-                MeasuredSeconds = a.MeasuredSeconds + m.MeasuredSeconds,
-                CalibratedSeconds = a.CalibratedSeconds + m.CalibratedSeconds,
-                EstimatedSeconds = a.EstimatedSeconds + m.EstimatedSeconds,
-            };
+            a = a.Plus(m);
         }
-        return a with { AvgW = Average(a.EnergyWh, a.OnSeconds) };
+        return WithAverage(a);
     }
 
-    private static double Average(double wh, double onSeconds) => onSeconds > 0 ? wh / (onSeconds / 3600.0) : 0;
+    private static Aggregate FromTick(DateTimeOffset start, Reading r, EnergySlice e) => new(
+        start,
+        AvgW: 0,
+        MaxW: e.OnSeconds > 0 ? r.TotalW : 0,
+        e.Wh, e.CpuWh, e.GpuWh, e.DisplayWh, e.RestWh,
+        e.IdleOnWh, e.IdleOffWh,
+        e.IdleOnSeconds, e.IdleOffSeconds,
+        e.OnSeconds, e.BatterySeconds, e.GapSeconds,
+        SampleCount: 1,
+        MeasuredSeconds: r.Quality == Quality.Measured ? e.OnSeconds : 0,
+        CalibratedSeconds: r.Quality == Quality.Calibrated ? e.OnSeconds : 0,
+        EstimatedSeconds: r.Quality == Quality.Estimated ? e.OnSeconds : 0);
+
+    private static Aggregate WithAverage(Aggregate a) => a with { AvgW = a.OnSeconds > 0 ? a.EnergyWh / (a.OnSeconds / 3600.0) : 0 };
 }
