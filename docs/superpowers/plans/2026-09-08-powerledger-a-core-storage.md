@@ -2414,7 +2414,7 @@ internal static class Schema
             bucket         INTEGER NOT NULL,
             baseline_w     REAL    NOT NULL,
             samples        INTEGER NOT NULL,
-            updated_ms     INTEGER NOT NULL,
+            updated_ms     INTEGER NOT NULL,   -- diagnostic only: when this bucket was last saved
             PRIMARY KEY (inventory_hash, bucket)
         );
 
@@ -3682,7 +3682,8 @@ public class ReportQueriesTests
         totals.OnHours.ShouldBe(3, 1e-9);
         totals.IdleOnHours.ShouldBe(1, 1e-9);
         totals.IdleOffHours.ShouldBe(0);
-        totals.AsleepHours.ShouldBe(1, 1e-9);              // 4 h range − 3 h on
+        totals.AsleepHours.ShouldBe(0);                     // no gaps in the seeded ticks
+        totals.UnmonitoredHours.ShouldBe(1, 1e-9);          // 4 h range − 3 h on
         totals.IdleOnKwh.ShouldBe(0.06, 1e-9);
         totals.CpuKwh.ShouldBe(0.12 * 0.4, 1e-9);
         totals.DisplayKwh.ShouldBe(4.0 * 3 / 1000, 1e-9);
@@ -3741,7 +3742,59 @@ public class ReportQueriesTests
         totals.PeakAt.ShouldBeNull();
         totals.AvgW.ShouldBe(0);
         totals.MeasuredShare.ShouldBe(0);
-        totals.AsleepHours.ShouldBe(1, 1e-9);
+        totals.AsleepHours.ShouldBe(0);
+        totals.UnmonitoredHours.ShouldBe(1, 1e-9);
+    }
+
+    [Fact]
+    public void Sleep_shows_up_as_asleep_hours_not_unmonitored()
+    {
+        using var t = new TestDatabase();
+        var readings = Fixtures.Minute(0).Take(30).Append(Fixtures.Reading(30, delta: 1800)).ToList();
+        new AggregateRepository(t.Db).UpsertMinute(Downsampler.ToMinute(Fixtures.T0, readings, maxDeltaSeconds: 5));
+        var totals = new ReportQueries(t.Db).Totals(Fixtures.T0, Fixtures.T0.AddHours(1));
+        totals.AsleepHours.ShouldBe(0.5, 1e-9);
+        totals.OnHours.ShouldBe(30 / 3600.0, 1e-9);
+        totals.UnmonitoredHours.ShouldBe(1 - 0.5 - 30 / 3600.0, 1e-9);
+    }
+
+    [Fact]
+    public void A_short_range_over_purged_minutes_falls_back_to_hour_rows()
+    {
+        using var t = new TestDatabase();
+        new AggregateRepository(t.Db).UpsertHour(Downsampler.ToHour(Fixtures.T0, [Downsampler.ToMinute(Fixtures.T0, Fixtures.Minute(0, 100))]));
+        var totals = new ReportQueries(t.Db).Totals(Fixtures.T0, Fixtures.T0.AddHours(1));
+        totals.EnergyKwh.ShouldBe(100.0 / 60 / 1000, 1e-9);
+    }
+
+    [Fact]
+    public void Crossing_the_resolution_limit_switches_source_tables()
+    {
+        using var t = new TestDatabase();
+        var agg = new AggregateRepository(t.Db);
+        agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0, Fixtures.Minute(0, 30)));
+        agg.UpsertHour(Downsampler.ToHour(Fixtures.T0, [Downsampler.ToMinute(Fixtures.T0, Fixtures.Minute(0, 90))]));
+        var queries = new ReportQueries(t.Db);
+        queries.Totals(Fixtures.T0, Fixtures.T0 + ReportQueries.MinuteResolutionLimit).EnergyKwh.ShouldBe(30.0 / 60 / 1000, 1e-9);
+        queries.Totals(Fixtures.T0, Fixtures.T0 + ReportQueries.MinuteResolutionLimit + TimeSpan.FromMinutes(1)).EnergyKwh.ShouldBe(90.0 / 60 / 1000, 1e-9);
+    }
+
+    [Fact]
+    public void A_currency_change_flags_partial_cost_in_totals_and_days_and_days_conserve_energy()
+    {
+        using var t = new TestDatabase();
+        SeedThreeHours(t);
+        new TariffRepository(t.Db).Add(new Tariff(Fixtures.T0.AddHours(2), 0.50m, "EUR"));
+        var (totals, days) = new ReportQueries(t.Db).Report(Fixtures.T0, Fixtures.T0.AddHours(4), TimeZoneInfo.Utc);
+
+        totals.Currency.ShouldBe("EUR");
+        totals.CostIsPartial.ShouldBeTrue();
+        totals.Cost.ShouldBe(0.03m);                       // only the last hour is priced in EUR
+        days.Count.ShouldBe(1);
+        days[0].Currency.ShouldBe("EUR");
+        days[0].CostIsPartial.ShouldBeTrue();
+        days.Sum(d => d.EnergyKwh).ShouldBe(totals.EnergyKwh, 1e-9);
+        new ReportQueries(t.Db).DailyBuckets(Fixtures.T0.AddDays(-5), Fixtures.T0.AddDays(-4), TimeZoneInfo.Utc).ShouldBeEmpty();
     }
 }
 ```
@@ -3757,18 +3810,24 @@ Expected: build error, `ReportQueries` not found.
 ```csharp
 namespace PowerLedger.Storage;
 
-/// <summary>Everything the Report screen shows for one range. Asleep = range length minus on-time.
-/// CostIsPartial is true when some energy was priced under a different currency and left out of Cost.</summary>
+/// <summary>Everything the Report screen shows for one range. AsleepHours is time the machine slept while the service
+/// was running (gaps between ticks); UnmonitoredHours is range time that produced no rows at all, such as before install.
+/// CostIsPartial is true when some energy was priced under a different currency and left out of Cost.
+/// From and To are the window actually covered: the requested range widened to whole rows of the resolution used.</summary>
 public sealed record RangeTotals(
     DateTimeOffset From, DateTimeOffset To,
     double EnergyKwh, decimal Cost, string? Currency, bool CostIsPartial,
     double AvgW, double PeakW, DateTimeOffset? PeakAt,
-    double OnHours, double IdleOnHours, double IdleOffHours, double AsleepHours,
+    double OnHours, double IdleOnHours, double IdleOffHours, double AsleepHours, double UnmonitoredHours,
     double CpuKwh, double GpuKwh, double DisplayKwh, double RestKwh,
     double IdleOnKwh, double IdleOffKwh,
     double MeasuredShare, double CalibratedShare, double EstimatedShare);
 
-public sealed record DayTotals(DateOnly Day, double EnergyKwh, decimal Cost, double OnHours, double PeakW, double IdleOnKwh, double IdleOffKwh);
+/// <summary>One local calendar day of the report. Costs are rounded per day, so they need not sum to the range total
+/// exactly; the difference is below a millionth of a unit per day.</summary>
+public sealed record DayTotals(
+    DateOnly Day, double EnergyKwh, decimal Cost, string? Currency, bool CostIsPartial,
+    double OnHours, double PeakW, double IdleOnKwh, double IdleOffKwh);
 ```
 
 `src/PowerLedger.Storage/ReportQueries.cs`
@@ -3777,33 +3836,68 @@ using PowerLedger.Core;
 
 namespace PowerLedger.Storage;
 
+/// <summary>Read side of the report: range totals and daily bars, with cost priced at query time.</summary>
 public sealed class ReportQueries(SqliteDatabase db)
 {
     /// <summary>Ranges up to this length read minute rows; longer ranges read hour rows.</summary>
     public static readonly TimeSpan MinuteResolutionLimit = TimeSpan.FromDays(3);
 
-    public RangeTotals Totals(DateTimeOffset from, DateTimeOffset to)
+    /// <summary>Totals and daily bars from one read of the rows and one read of the tariffs, so the two always agree.</summary>
+    public (RangeTotals Totals, List<DayTotals> Days) Report(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo zone)
     {
-        var rows = Load(from, to);
+        var window = Load(from, to);
         var schedule = new TariffRepository(db).Schedule();
+        return (Summarise(window, schedule), Days(window.Rows, schedule, zone));
+    }
 
+    /// <summary>Totals for the range. The window is widened to whole rows of the resolution used, so no partial row is dropped.</summary>
+    public RangeTotals Totals(DateTimeOffset from, DateTimeOffset to)
+        => Summarise(Load(from, to), new TariffRepository(db).Schedule());
+
+    /// <summary>One bucket per local calendar day that has rows, oldest first. Days are cut at local midnight; in a zone
+    /// whose offset is not a whole number of hours, a range long enough to read hour rows shifts that cut to the enclosing UTC hour.</summary>
+    public List<DayTotals> DailyBuckets(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo zone)
+        => Days(Load(from, to).Rows, new TariffRepository(db).Schedule(), zone);
+
+    private Window Load(DateTimeOffset from, DateTimeOffset to)
+    {
+        var repo = new AggregateRepository(db);
+        var minute = TimeSpan.FromMinutes(1);
+        var hour = TimeSpan.FromHours(1);
+        var wantMinutes = to - from <= MinuteResolutionLimit;
+        if (wantMinutes)
+        {
+            var rows = repo.ReadMinutes(Floor(from, minute), Ceiling(to, minute));
+            if (rows.Count > 0) return new Window(Floor(from, minute), Ceiling(to, minute), rows);
+        }
+
+        // Minute rows are purged after a year or two; hour rows are kept forever, so an old short range still reports.
+        var hourRows = repo.ReadHours(Floor(from, hour), Ceiling(to, hour));
+        return hourRows.Count > 0 || !wantMinutes
+            ? new Window(Floor(from, hour), Ceiling(to, hour), hourRows)
+            : new Window(Floor(from, minute), Ceiling(to, minute), []);
+    }
+
+    private static RangeTotals Summarise(Window w, TariffSchedule schedule)
+    {
         double energy = 0, cpu = 0, gpu = 0, display = 0, rest = 0, idleOn = 0, idleOff = 0;
-        double onS = 0, idleOnS = 0, idleOffS = 0, measuredS = 0, calibratedS = 0, estimatedS = 0, peak = 0;
+        double onS = 0, idleOnS = 0, idleOffS = 0, gapS = 0, measuredS = 0, calibratedS = 0, estimatedS = 0, peak = 0;
         DateTimeOffset? peakAt = null;
-        foreach (var r in rows)
+        foreach (var r in w.Rows)
         {
             energy += r.EnergyWh; cpu += r.CpuWh; gpu += r.GpuWh; display += r.DisplayWh; rest += r.RestWh;
             idleOn += r.IdleOnWh; idleOff += r.IdleOffWh;
-            onS += r.OnSeconds; idleOnS += r.IdleOnSeconds; idleOffS += r.IdleOffSeconds;
+            onS += r.OnSeconds; idleOnS += r.IdleOnSeconds; idleOffS += r.IdleOffSeconds; gapS += r.GapSeconds;
             measuredS += r.MeasuredSeconds; calibratedS += r.CalibratedSeconds; estimatedS += r.EstimatedSeconds;
             if (r.MaxW > peak) { peak = r.MaxW; peakAt = r.Start; }
         }
 
         var qualityS = measuredS + calibratedS + estimatedS;
         var onHours = onS / 3600.0;
-        var cost = schedule.Cost(rows.Select(r => (r.Start, r.EnergyWh)));
+        var asleepHours = gapS / 3600.0;
+        var cost = schedule.Cost(w.Rows.Select(r => (r.Start, r.EnergyWh)));
         return new RangeTotals(
-            from, to,
+            From: w.From, To: w.To,
             EnergyKwh: energy / 1000,
             Cost: cost.Amount,
             Currency: cost.Currency,
@@ -3813,7 +3907,8 @@ public sealed class ReportQueries(SqliteDatabase db)
             OnHours: onHours,
             IdleOnHours: idleOnS / 3600.0,
             IdleOffHours: idleOffS / 3600.0,
-            AsleepHours: Math.Max(0, (to - from).TotalHours - onHours),
+            AsleepHours: asleepHours,
+            UnmonitoredHours: Math.Max(0, (w.To - w.From).TotalHours - onHours - asleepHours),
             CpuKwh: cpu / 1000, GpuKwh: gpu / 1000, DisplayKwh: display / 1000, RestKwh: rest / 1000,
             IdleOnKwh: idleOn / 1000, IdleOffKwh: idleOff / 1000,
             MeasuredShare: Share(measuredS, qualityS),
@@ -3821,38 +3916,44 @@ public sealed class ReportQueries(SqliteDatabase db)
             EstimatedShare: Share(estimatedS, qualityS));
     }
 
-    /// <summary>One bucket per local calendar day that has rows, oldest first.</summary>
-    public List<DayTotals> DailyBuckets(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo zone)
-    {
-        var schedule = new TariffRepository(db).Schedule();
-        return Load(from, to)
+    private static List<DayTotals> Days(List<Aggregate> rows, TariffSchedule schedule, TimeZoneInfo zone)
+        => rows
             .GroupBy(r => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(r.Start, zone).DateTime))
             .OrderBy(g => g.Key)
-            .Select(g => new DayTotals(
-                g.Key,
-                EnergyKwh: g.Sum(r => r.EnergyWh) / 1000,
-                Cost: schedule.Cost(g.Select(r => (r.Start, r.EnergyWh))).Amount,
-                OnHours: g.Sum(r => r.OnSeconds) / 3600.0,
-                PeakW: g.Max(r => r.MaxW),
-                IdleOnKwh: g.Sum(r => r.IdleOnWh) / 1000,
-                IdleOffKwh: g.Sum(r => r.IdleOffWh) / 1000))
+            .Select(g =>
+            {
+                var cost = schedule.Cost(g.Select(r => (r.Start, r.EnergyWh)));
+                return new DayTotals(
+                    g.Key,
+                    EnergyKwh: g.Sum(r => r.EnergyWh) / 1000,
+                    Cost: cost.Amount,
+                    Currency: cost.Currency,
+                    CostIsPartial: cost.Partial,
+                    OnHours: g.Sum(r => r.OnSeconds) / 3600.0,
+                    PeakW: g.Max(r => r.MaxW),
+                    IdleOnKwh: g.Sum(r => r.IdleOnWh) / 1000,
+                    IdleOffKwh: g.Sum(r => r.IdleOffWh) / 1000);
+            })
             .ToList();
-    }
 
-    private List<Aggregate> Load(DateTimeOffset from, DateTimeOffset to)
+    private static DateTimeOffset Floor(DateTimeOffset t, TimeSpan unit) => t.AddTicks(-(t.Ticks % unit.Ticks));
+
+    private static DateTimeOffset Ceiling(DateTimeOffset t, TimeSpan unit)
     {
-        var repo = new AggregateRepository(db);
-        return to - from <= MinuteResolutionLimit ? repo.ReadMinutes(from, to) : repo.ReadHours(from, to);
+        var remainder = t.Ticks % unit.Ticks;
+        return remainder == 0 ? t : t.AddTicks(unit.Ticks - remainder);
     }
 
     private static double Share(double part, double whole) => whole > 0 ? part / whole : 0;
+
+    private sealed record Window(DateTimeOffset From, DateTimeOffset To, List<Aggregate> Rows);
 }
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter ReportQueriesTests`
-Expected: `Passed! - Failed: 0, Passed: 5`.
+Expected: `Passed! - Failed: 0, Passed: 9`.
 
 - [x] **Step 5: Commit**
 
@@ -3942,7 +4043,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 109`, Storage `Passed: 36`, no failures, no skipped tests.
+Expected: Core `Passed: 109`, Storage `Passed: 40`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 
