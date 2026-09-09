@@ -4035,21 +4035,21 @@ git commit -m "Add property tests for energy integration invariants"
 
 ### Task 17: Final verification and handoff to Plan B
 
-- [ ] **Step 1: Clean build with warnings as errors**
+- [x] **Step 1: Clean build with warnings as errors**
 
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` and `0 Warning(s)`.
 
-- [ ] **Step 2: Full test run**
+- [x] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
 Expected: Core `Passed: 109`, Storage `Passed: 40`, no failures, no skipped tests.
 
-- [ ] **Step 3: Confirm the working tree is clean and every task is committed**
+- [x] **Step 3: Confirm the working tree is clean and every task is committed**
 
 Run: `git status --short` → no output. Run: `git log --oneline | head -n 20` → one commit per task from this plan, newest first.
 
-- [ ] **Step 4: Record the public surface Plan B will build on**
+- [x] **Step 4: Record the public surface Plan B will build on**
 
 Plan B (Sensors + Service) consumes exactly these types; do not rename them without updating both plans:
 
