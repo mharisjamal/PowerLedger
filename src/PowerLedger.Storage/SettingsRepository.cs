@@ -3,15 +3,17 @@ namespace PowerLedger.Storage;
 /// <summary>Service-owned settings. Keys are dotted names such as "tariff.currency"; values are strings.</summary>
 public sealed class SettingsRepository(SqliteDatabase db)
 {
+    /// <summary>The stored value, or null when the key is absent.</summary>
     public string? Get(string key)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT value FROM settings WHERE key = $key";
         Rows.Add(cmd, "$key", key);
-        return cmd.ExecuteScalar() as string;
+        return (string?)cmd.ExecuteScalar();
     }
 
+    /// <summary>Writes or replaces one key.</summary>
     public void Set(string key, string value)
     {
         using var c = db.Open();
@@ -22,6 +24,7 @@ public sealed class SettingsRepository(SqliteDatabase db)
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Every setting as a key/value map.</summary>
     public Dictionary<string, string> All()
     {
         using var c = db.Open();

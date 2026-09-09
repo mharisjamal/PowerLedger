@@ -1,7 +1,11 @@
+using Microsoft.Data.Sqlite;
 using PowerLedger.Contracts;
 
 namespace PowerLedger.Storage;
 
+/// <param name="Id">Row id.</param>
+/// <param name="Start">When the session began.</param>
+/// <param name="End">When it ended; null while the session is open.</param>
 /// <param name="Reason">Why the session started.</param>
 /// <param name="EndReason">Why it ended; null while the session is open.</param>
 public sealed record Session(long Id, DateTimeOffset Start, DateTimeOffset? End, SessionReason Reason, SessionReason? EndReason);
@@ -9,25 +13,27 @@ public sealed record Session(long Id, DateTimeOffset Start, DateTimeOffset? End,
 /// <summary>Power-state timeline. A session is open from boot/resume until suspend/shutdown/stop.</summary>
 public sealed class SessionRepository(SqliteDatabase db)
 {
+    /// <summary>Starts a session and returns its id.</summary>
     public long Open(SessionReason reason, DateTimeOffset start)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO sessions(start_ms, end_ms, reason) VALUES ($start, NULL, $reason); SELECT last_insert_rowid()";
+        cmd.CommandText = "INSERT INTO sessions(start_ms, end_ms, reason) VALUES ($start, NULL, $reason) RETURNING id";
         Rows.Add(cmd, "$start", Rows.Ms(start));
         Rows.Add(cmd, "$reason", reason.ToString());
         return (long)cmd.ExecuteScalar()!;
     }
 
-    public void Close(long id, DateTimeOffset end, SessionReason reason)
+    /// <summary>Ends an open session. Returns false when the id is unknown or already closed, which the caller should treat as a lost session.</summary>
+    public bool Close(long id, DateTimeOffset end, SessionReason reason)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "UPDATE sessions SET end_ms = $end, end_reason = $reason WHERE id = $id";
+        cmd.CommandText = "UPDATE sessions SET end_ms = $end, end_reason = $reason WHERE id = $id AND end_ms IS NULL";
         Rows.Add(cmd, "$end", Rows.Ms(end));
         Rows.Add(cmd, "$reason", reason.ToString());
         Rows.Add(cmd, "$id", id);
-        cmd.ExecuteNonQuery();
+        return cmd.ExecuteNonQuery() == 1;
     }
 
     /// <summary>Closes every session still open (after a crash) with reason CrashRecovered and returns how many there were.</summary>
@@ -41,6 +47,7 @@ public sealed class SessionRepository(SqliteDatabase db)
         return cmd.ExecuteNonQuery();
     }
 
+    /// <summary>The newest still-open session, or null when none is open.</summary>
     public Session? OpenSession()
     {
         using var c = db.Open();
@@ -64,9 +71,9 @@ public sealed class SessionRepository(SqliteDatabase db)
         return list;
     }
 
-    private static Session Map(Microsoft.Data.Sqlite.SqliteDataReader r) => new(
+    private static Session Map(SqliteDataReader r) => new(
         r.GetInt64(0), Rows.Time(r.GetInt64(1)),
         r.IsDBNull(2) ? null : Rows.Time(r.GetInt64(2)),
         Enum.Parse<SessionReason>(r.GetString(3)),
-        r.IsDBNull(4) ? null : Enum.Parse<SessionReason>(r.GetString(4)));
+        r.IsDBNull(4) || !Enum.TryParse<SessionReason>(r.GetString(4), out var endReason) ? null : endReason);
 }

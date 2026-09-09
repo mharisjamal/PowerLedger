@@ -2,8 +2,10 @@ using PowerLedger.Core;
 
 namespace PowerLedger.Storage;
 
+/// <summary>Tariff history. Prices are stored as integer micro-units; ordering by (effective_from, id) lets a later-inserted tariff win a tie.</summary>
 public sealed class TariffRepository(SqliteDatabase db)
 {
+    /// <summary>Appends a tariff. Existing rows are never modified, so history stays intact.</summary>
     public void Add(Tariff tariff)
     {
         using var c = db.Open();
@@ -15,6 +17,7 @@ public sealed class TariffRepository(SqliteDatabase db)
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Every tariff, oldest first.</summary>
     public List<Tariff> All()
     {
         using var c = db.Open();
@@ -26,5 +29,6 @@ public sealed class TariffRepository(SqliteDatabase db)
         return list;
     }
 
+    /// <summary>A schedule over every stored tariff. Build one per report and reuse it.</summary>
     public TariffSchedule Schedule() => new(All());
 }

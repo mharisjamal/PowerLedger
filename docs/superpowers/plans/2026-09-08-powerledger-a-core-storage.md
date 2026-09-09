@@ -3065,7 +3065,7 @@ public class SmallRepositoriesTests
         repo.OpenSession()!.Id.ShouldBe(id);
         repo.OpenSession()!.Reason.ShouldBe(SessionReason.Boot);
 
-        repo.Close(id, Fixtures.T0.AddHours(2), SessionReason.Suspend);
+        repo.Close(id, Fixtures.T0.AddHours(2), SessionReason.Suspend).ShouldBeTrue();
         repo.OpenSession().ShouldBeNull();
         var second = repo.Open(SessionReason.Resume, Fixtures.T0.AddHours(5));
 
@@ -3100,6 +3100,7 @@ public class SmallRepositoriesTests
         repo.Add(new Tariff(Fixtures.T0, 0.123456m, "USD"));
         var all = repo.All();
         all.Select(x => x.PricePerKwh).ShouldBe([0.123456m, 0.20m]);
+        all[0].Currency.ShouldBe("USD");
         repo.Schedule().At(Fixtures.T0.AddDays(1))!.PricePerKwh.ShouldBe(0.123456m);
     }
 
@@ -3115,6 +3116,31 @@ public class SmallRepositoriesTests
         repo.Set("idle.threshold", "300");
         repo.All().ShouldBe(new Dictionary<string, string> { ["tariff.currency"] = "EUR", ["idle.threshold"] = "300" });
     }
+
+    [Fact]
+    public void Sessions_come_back_in_start_order_and_the_newest_open_one_wins()
+    {
+        using var t = new TestDatabase();
+        var repo = new SessionRepository(t.Db);
+        var late = repo.Open(SessionReason.Resume, Fixtures.T0.AddHours(5));
+        var early = repo.Open(SessionReason.Boot, Fixtures.T0);
+        repo.List(Fixtures.T0, Fixtures.T0.AddHours(6)).Select(s => s.Id).ShouldBe([early, late]);
+        repo.OpenSession()!.Id.ShouldBe(late);
+        repo.CloseAllOpen(Fixtures.T0.AddHours(6)).ShouldBe(2);
+        repo.Close(early, Fixtures.T0.AddHours(7), SessionReason.Shutdown).ShouldBeFalse();
+        repo.Close(9999, Fixtures.T0.AddHours(7), SessionReason.Shutdown).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Empty_tables_read_as_empty()
+    {
+        using var t = new TestDatabase();
+        new TariffRepository(t.Db).All().ShouldBeEmpty();
+        new TariffRepository(t.Db).Schedule().At(Fixtures.T0).ShouldBeNull();
+        new SettingsRepository(t.Db).All().ShouldBeEmpty();
+        new SessionRepository(t.Db).List(Fixtures.T0, Fixtures.T0.AddHours(1)).ShouldBeEmpty();
+        new SessionRepository(t.Db).CloseAllOpen(Fixtures.T0).ShouldBe(0);
+    }
 }
 ```
 
@@ -3127,10 +3153,14 @@ Expected: build error, `SessionRepository` not found.
 
 `src/PowerLedger.Storage/SessionRepository.cs`
 ```csharp
+using Microsoft.Data.Sqlite;
 using PowerLedger.Contracts;
 
 namespace PowerLedger.Storage;
 
+/// <param name="Id">Row id.</param>
+/// <param name="Start">When the session began.</param>
+/// <param name="End">When it ended; null while the session is open.</param>
 /// <param name="Reason">Why the session started.</param>
 /// <param name="EndReason">Why it ended; null while the session is open.</param>
 public sealed record Session(long Id, DateTimeOffset Start, DateTimeOffset? End, SessionReason Reason, SessionReason? EndReason);
@@ -3138,25 +3168,27 @@ public sealed record Session(long Id, DateTimeOffset Start, DateTimeOffset? End,
 /// <summary>Power-state timeline. A session is open from boot/resume until suspend/shutdown/stop.</summary>
 public sealed class SessionRepository(SqliteDatabase db)
 {
+    /// <summary>Starts a session and returns its id.</summary>
     public long Open(SessionReason reason, DateTimeOffset start)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO sessions(start_ms, end_ms, reason) VALUES ($start, NULL, $reason); SELECT last_insert_rowid()";
+        cmd.CommandText = "INSERT INTO sessions(start_ms, end_ms, reason) VALUES ($start, NULL, $reason) RETURNING id";
         Rows.Add(cmd, "$start", Rows.Ms(start));
         Rows.Add(cmd, "$reason", reason.ToString());
         return (long)cmd.ExecuteScalar()!;
     }
 
-    public void Close(long id, DateTimeOffset end, SessionReason reason)
+    /// <summary>Ends an open session. Returns false when the id is unknown or already closed, which the caller should treat as a lost session.</summary>
+    public bool Close(long id, DateTimeOffset end, SessionReason reason)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "UPDATE sessions SET end_ms = $end, end_reason = $reason WHERE id = $id";
+        cmd.CommandText = "UPDATE sessions SET end_ms = $end, end_reason = $reason WHERE id = $id AND end_ms IS NULL";
         Rows.Add(cmd, "$end", Rows.Ms(end));
         Rows.Add(cmd, "$reason", reason.ToString());
         Rows.Add(cmd, "$id", id);
-        cmd.ExecuteNonQuery();
+        return cmd.ExecuteNonQuery() == 1;
     }
 
     /// <summary>Closes every session still open (after a crash) with reason CrashRecovered and returns how many there were.</summary>
@@ -3170,6 +3202,7 @@ public sealed class SessionRepository(SqliteDatabase db)
         return cmd.ExecuteNonQuery();
     }
 
+    /// <summary>The newest still-open session, or null when none is open.</summary>
     public Session? OpenSession()
     {
         using var c = db.Open();
@@ -3193,11 +3226,11 @@ public sealed class SessionRepository(SqliteDatabase db)
         return list;
     }
 
-    private static Session Map(Microsoft.Data.Sqlite.SqliteDataReader r) => new(
+    private static Session Map(SqliteDataReader r) => new(
         r.GetInt64(0), Rows.Time(r.GetInt64(1)),
         r.IsDBNull(2) ? null : Rows.Time(r.GetInt64(2)),
         Enum.Parse<SessionReason>(r.GetString(3)),
-        r.IsDBNull(4) ? null : Enum.Parse<SessionReason>(r.GetString(4)));
+        r.IsDBNull(4) || !Enum.TryParse<SessionReason>(r.GetString(4), out var endReason) ? null : endReason);
 }
 ```
 
@@ -3207,8 +3240,10 @@ using PowerLedger.Core;
 
 namespace PowerLedger.Storage;
 
+/// <summary>Tariff history. Prices are stored as integer micro-units; ordering by (effective_from, id) lets a later-inserted tariff win a tie.</summary>
 public sealed class TariffRepository(SqliteDatabase db)
 {
+    /// <summary>Appends a tariff. Existing rows are never modified, so history stays intact.</summary>
     public void Add(Tariff tariff)
     {
         using var c = db.Open();
@@ -3220,6 +3255,7 @@ public sealed class TariffRepository(SqliteDatabase db)
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Every tariff, oldest first.</summary>
     public List<Tariff> All()
     {
         using var c = db.Open();
@@ -3231,6 +3267,7 @@ public sealed class TariffRepository(SqliteDatabase db)
         return list;
     }
 
+    /// <summary>A schedule over every stored tariff. Build one per report and reuse it.</summary>
     public TariffSchedule Schedule() => new(All());
 }
 ```
@@ -3242,15 +3279,17 @@ namespace PowerLedger.Storage;
 /// <summary>Service-owned settings. Keys are dotted names such as "tariff.currency"; values are strings.</summary>
 public sealed class SettingsRepository(SqliteDatabase db)
 {
+    /// <summary>The stored value, or null when the key is absent.</summary>
     public string? Get(string key)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT value FROM settings WHERE key = $key";
         Rows.Add(cmd, "$key", key);
-        return cmd.ExecuteScalar() as string;
+        return (string?)cmd.ExecuteScalar();
     }
 
+    /// <summary>Writes or replaces one key.</summary>
     public void Set(string key, string value)
     {
         using var c = db.Open();
@@ -3261,6 +3300,7 @@ public sealed class SettingsRepository(SqliteDatabase db)
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Every setting as a key/value map.</summary>
     public Dictionary<string, string> All()
     {
         using var c = db.Open();
@@ -3277,7 +3317,7 @@ public sealed class SettingsRepository(SqliteDatabase db)
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter SmallRepositoriesTests`
-Expected: `Passed! - Failed: 0, Passed: 4`.
+Expected: `Passed! - Failed: 0, Passed: 6`.
 
 - [x] **Step 5: Commit**
 
@@ -3834,7 +3874,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 108`, Storage `Passed: 31`, no failures, no skipped tests.
+Expected: Core `Passed: 108`, Storage `Passed: 33`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 

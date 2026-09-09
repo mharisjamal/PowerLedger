@@ -16,7 +16,7 @@ public class SmallRepositoriesTests
         repo.OpenSession()!.Id.ShouldBe(id);
         repo.OpenSession()!.Reason.ShouldBe(SessionReason.Boot);
 
-        repo.Close(id, Fixtures.T0.AddHours(2), SessionReason.Suspend);
+        repo.Close(id, Fixtures.T0.AddHours(2), SessionReason.Suspend).ShouldBeTrue();
         repo.OpenSession().ShouldBeNull();
         var second = repo.Open(SessionReason.Resume, Fixtures.T0.AddHours(5));
 
@@ -51,6 +51,7 @@ public class SmallRepositoriesTests
         repo.Add(new Tariff(Fixtures.T0, 0.123456m, "USD"));
         var all = repo.All();
         all.Select(x => x.PricePerKwh).ShouldBe([0.123456m, 0.20m]);
+        all[0].Currency.ShouldBe("USD");
         repo.Schedule().At(Fixtures.T0.AddDays(1))!.PricePerKwh.ShouldBe(0.123456m);
     }
 
@@ -65,5 +66,30 @@ public class SmallRepositoriesTests
         repo.Get("tariff.currency").ShouldBe("EUR");
         repo.Set("idle.threshold", "300");
         repo.All().ShouldBe(new Dictionary<string, string> { ["tariff.currency"] = "EUR", ["idle.threshold"] = "300" });
+    }
+
+    [Fact]
+    public void Sessions_come_back_in_start_order_and_the_newest_open_one_wins()
+    {
+        using var t = new TestDatabase();
+        var repo = new SessionRepository(t.Db);
+        var late = repo.Open(SessionReason.Resume, Fixtures.T0.AddHours(5));
+        var early = repo.Open(SessionReason.Boot, Fixtures.T0);
+        repo.List(Fixtures.T0, Fixtures.T0.AddHours(6)).Select(s => s.Id).ShouldBe([early, late]);
+        repo.OpenSession()!.Id.ShouldBe(late);
+        repo.CloseAllOpen(Fixtures.T0.AddHours(6)).ShouldBe(2);
+        repo.Close(early, Fixtures.T0.AddHours(7), SessionReason.Shutdown).ShouldBeFalse();
+        repo.Close(9999, Fixtures.T0.AddHours(7), SessionReason.Shutdown).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Empty_tables_read_as_empty()
+    {
+        using var t = new TestDatabase();
+        new TariffRepository(t.Db).All().ShouldBeEmpty();
+        new TariffRepository(t.Db).Schedule().At(Fixtures.T0).ShouldBeNull();
+        new SettingsRepository(t.Db).All().ShouldBeEmpty();
+        new SessionRepository(t.Db).List(Fixtures.T0, Fixtures.T0.AddHours(1)).ShouldBeEmpty();
+        new SessionRepository(t.Db).CloseAllOpen(Fixtures.T0).ShouldBe(0);
     }
 }
