@@ -2004,21 +2004,45 @@ public class TariffScheduleTests
     {
         var empty = new TariffSchedule([]);
         empty.At(Jun).ShouldBeNull();
-        empty.Cost([(Jun, 1000)]).ShouldBe(0m);
+        empty.Cost([(Jun, 1000)]).ShouldBe(new CostResult(0m, null, false));
         empty.Currency.ShouldBeNull();
+        empty.HasMixedCurrencies.ShouldBeFalse();
     }
 
     [Fact]
     public void Cost_applies_the_rate_in_force_for_each_slice()
     {
         var cost = Schedule.Cost([(Jan.AddDays(3), 500), (Jun.AddDays(3), 500)]);
-        cost.ShouldBe(0.5m * 0.17m + 0.5m * 0.20m);
+        cost.Amount.ShouldBe(0.5m * 0.17m + 0.5m * 0.20m);
+        cost.Currency.ShouldBe("USD");
+        cost.Partial.ShouldBeFalse();
         Schedule.Currency.ShouldBe("USD");
     }
 
     [Fact]
     public void Cost_is_exact_decimal_arithmetic()
-        => Schedule.Cost([(Jan, 1234)]).ShouldBe(0.20978m);
+        => Schedule.Cost([(Jan, 1234)]).Amount.ShouldBe(0.20978m);
+
+    [Fact]
+    public void A_currency_change_starts_a_new_cost_history()
+    {
+        var moved = new TariffSchedule([new Tariff(Jan, 0.30m, "GBP"), new Tariff(Jun, 0.20m, "EUR")]);
+        var cost = moved.Cost([(Jan.AddDays(3), 500), (Jun.AddDays(3), 500)]);
+        cost.ShouldBe(new CostResult(0.5m * 0.20m, "EUR", Partial: true));
+        moved.HasMixedCurrencies.ShouldBeTrue();
+        moved.Cost([(Jun.AddDays(3), 500)]).Partial.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Same_instant_tariffs_keep_input_order_so_the_later_one_wins()
+    {
+        var schedule = new TariffSchedule([new Tariff(Jan, 0.10m, "USD"), new Tariff(Jan, 0.11m, "USD")]);
+        schedule.At(Jan)!.PricePerKwh.ShouldBe(0.11m);
+    }
+
+    [Fact]
+    public void Non_finite_energy_is_ignored()
+        => Schedule.Cost([(Jan, double.NaN), (Jan, double.PositiveInfinity), (Jan, 1000)]).Amount.ShouldBe(0.17m);
 
     [Fact]
     public void Co2_and_comparisons()
@@ -2043,6 +2067,7 @@ Expected: build error, `TariffSchedule` not found.
 ```csharp
 namespace PowerLedger.Core;
 
+/// <summary>One price per kWh from a point in time onward (spec §7). Money is decimal end to end.</summary>
 /// <param name="Currency">ISO 4217 code, e.g. "USD".</param>
 public sealed record Tariff(DateTimeOffset EffectiveFrom, decimal PricePerKwh, string Currency);
 ```
@@ -2051,15 +2076,28 @@ public sealed record Tariff(DateTimeOffset EffectiveFrom, decimal PricePerKwh, s
 ```csharp
 namespace PowerLedger.Core;
 
-/// <summary>Spec §7: cost is computed at query time from the tariff in force when the energy was used.</summary>
+/// <param name="Amount">Sum of the slices priced in <paramref name="Currency"/>.</param>
+/// <param name="Currency">Currency of the latest-effective tariff; null when the schedule is empty.</param>
+/// <param name="Partial">True when some slices were priced under a tariff in a different currency and left out.</param>
+public sealed record CostResult(decimal Amount, string? Currency, bool Partial);
+
+/// <summary>
+/// Spec §7: cost is computed at query time from the tariff in force when the energy was used.
+/// A currency change starts a new cost history: slices priced under another currency are excluded and flagged.
+/// </summary>
 public sealed class TariffSchedule
 {
     private readonly List<Tariff> _tariffs;
 
+    /// <summary>Tariffs in any order. Ties on EffectiveFrom keep input order, so the later-listed tariff wins (TariffRepository orders by effective_from, id).</summary>
     public TariffSchedule(IEnumerable<Tariff> tariffs)
         => _tariffs = tariffs.OrderBy(t => t.EffectiveFrom).ToList();
 
+    /// <summary>Currency of the latest-effective tariff (not the most recently entered one, once backdating is involved); null when empty.</summary>
     public string? Currency => _tariffs.Count == 0 ? null : _tariffs[^1].Currency;
+
+    /// <summary>True when the schedule holds tariffs in more than one currency.</summary>
+    public bool HasMixedCurrencies => _tariffs.Select(t => t.Currency).Distinct().Count() > 1;
 
     /// <summary>The latest tariff effective on or before <paramref name="at"/>; energy before the first tariff uses the first one.</summary>
     public Tariff? At(DateTimeOffset at)
@@ -2073,15 +2111,24 @@ public sealed class TariffSchedule
         return best ?? (_tariffs.Count > 0 ? _tariffs[0] : null);
     }
 
-    public decimal Cost(IEnumerable<(DateTimeOffset Start, double Wh)> energy)
+    /// <summary>Prices each slice by the tariff in force at its start (a slice straddling a change is wholly priced at the older rate).
+    /// Non-finite energy is ignored; slices priced in another currency are skipped and reported through Partial.</summary>
+    public CostResult Cost(IEnumerable<(DateTimeOffset Start, double Wh)> energy)
     {
         decimal total = 0;
+        var partial = false;
         foreach (var (start, wh) in energy)
         {
+            if (!double.IsFinite(wh)) continue;
             if (At(start) is not { } tariff) continue;
+            if (tariff.Currency != Currency)
+            {
+                partial = true;
+                continue;
+            }
             total += (decimal)wh / 1000m * tariff.PricePerKwh;
         }
-        return total;
+        return new CostResult(total, Currency, partial);
     }
 }
 ```
@@ -2090,11 +2137,13 @@ public sealed class TariffSchedule
 ```csharp
 namespace PowerLedger.Core;
 
+/// <summary>Grid carbon intensity math (spec §9).</summary>
 public static class Co2
 {
     /// <summary>World-average grid intensity, used when no country factor is chosen.</summary>
     public const double DefaultKgPerKwh = 0.40;
 
+    /// <summary>Kilograms of CO₂ for the energy at the given grid intensity.</summary>
     public static double Kg(double kwh, double kgPerKwh) => kwh * kgPerKwh;
 }
 ```
@@ -2103,11 +2152,16 @@ public static class Co2
 ```csharp
 namespace PowerLedger.Core;
 
-/// <summary>Everyday equivalents for a kWh figure (spec §9).</summary>
+/// <summary>Everyday equivalents for a kWh figure (spec §9). Constants are round, defensible assumptions, not measurements.</summary>
 public static class Comparisons
 {
+    /// <summary>A 60 W-equivalent LED bulb.</summary>
     public const double LedBulbW = 10;
+
+    /// <summary>A full charge of a ~4,000 mAh phone battery at 3.85 V, before charger losses.</summary>
     public const double PhoneChargeWh = 15;
+
+    /// <summary>A mid-size electric car: 18 kWh per 100 km.</summary>
     public const double EvKwhPerKm = 0.18;
 
     public static double LedBulbHours(double kwh) => kwh * 1000 / LedBulbW;
@@ -2119,12 +2173,12 @@ public static class Comparisons
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter TariffScheduleTests`
-Expected: `Passed! - Failed: 0, Passed: 6`.
+Expected: `Passed! - Failed: 0, Passed: 9`.
 
 - [x] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 103`.
+Expected: `Passed! - Failed: 0, Passed: 106`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -3408,6 +3462,7 @@ public class ReportQueriesTests
         totals.EnergyKwh.ShouldBe(0.12, 1e-9);            // 120 × 0.5 Wh + 60 × 1 Wh
         totals.Cost.ShouldBe(0.024m);
         totals.Currency.ShouldBe("USD");
+        totals.CostIsPartial.ShouldBeFalse();
         totals.AvgW.ShouldBe(40, 1e-9);                    // 120 Wh over 3 h on
         totals.PeakW.ShouldBe(60);
         totals.PeakAt.ShouldBe(Fixtures.T0.AddHours(2));
@@ -3489,10 +3544,11 @@ Expected: build error, `ReportQueries` not found.
 ```csharp
 namespace PowerLedger.Storage;
 
-/// <summary>Everything the Report screen shows for one range. Asleep = range length minus on-time.</summary>
+/// <summary>Everything the Report screen shows for one range. Asleep = range length minus on-time.
+/// CostIsPartial is true when some energy was priced under a different currency and left out of Cost.</summary>
 public sealed record RangeTotals(
     DateTimeOffset From, DateTimeOffset To,
-    double EnergyKwh, decimal Cost, string? Currency,
+    double EnergyKwh, decimal Cost, string? Currency, bool CostIsPartial,
     double AvgW, double PeakW, DateTimeOffset? PeakAt,
     double OnHours, double IdleOnHours, double IdleOffHours, double AsleepHours,
     double CpuKwh, double GpuKwh, double DisplayKwh, double RestKwh,
@@ -3532,11 +3588,13 @@ public sealed class ReportQueries(SqliteDatabase db)
 
         var qualityS = measuredS + calibratedS + estimatedS;
         var onHours = onS / 3600.0;
+        var cost = schedule.Cost(rows.Select(r => (r.Start, r.EnergyWh)));
         return new RangeTotals(
             from, to,
             EnergyKwh: energy / 1000,
-            Cost: schedule.Cost(rows.Select(r => (r.Start, r.EnergyWh))),
-            Currency: schedule.Currency,
+            Cost: cost.Amount,
+            Currency: cost.Currency,
+            CostIsPartial: cost.Partial,
             AvgW: onHours > 0 ? energy / onHours : 0,
             PeakW: peak, PeakAt: peakAt,
             OnHours: onHours,
@@ -3560,7 +3618,7 @@ public sealed class ReportQueries(SqliteDatabase db)
             .Select(g => new DayTotals(
                 g.Key,
                 EnergyKwh: g.Sum(r => r.EnergyWh) / 1000,
-                Cost: schedule.Cost(g.Select(r => (r.Start, r.EnergyWh))),
+                Cost: schedule.Cost(g.Select(r => (r.Start, r.EnergyWh))).Amount,
                 OnHours: g.Sum(r => r.OnSeconds) / 3600.0,
                 PeakW: g.Max(r => r.MaxW),
                 IdleOnKwh: g.Sum(r => r.IdleOnWh) / 1000,
@@ -3671,7 +3729,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 105`, Storage `Passed: 27`, no failures, no skipped tests.
+Expected: Core `Passed: 108`, Storage `Passed: 27`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 

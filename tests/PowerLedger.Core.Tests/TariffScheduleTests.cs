@@ -29,21 +29,45 @@ public class TariffScheduleTests
     {
         var empty = new TariffSchedule([]);
         empty.At(Jun).ShouldBeNull();
-        empty.Cost([(Jun, 1000)]).ShouldBe(0m);
+        empty.Cost([(Jun, 1000)]).ShouldBe(new CostResult(0m, null, false));
         empty.Currency.ShouldBeNull();
+        empty.HasMixedCurrencies.ShouldBeFalse();
     }
 
     [Fact]
     public void Cost_applies_the_rate_in_force_for_each_slice()
     {
         var cost = Schedule.Cost([(Jan.AddDays(3), 500), (Jun.AddDays(3), 500)]);
-        cost.ShouldBe(0.5m * 0.17m + 0.5m * 0.20m);
+        cost.Amount.ShouldBe(0.5m * 0.17m + 0.5m * 0.20m);
+        cost.Currency.ShouldBe("USD");
+        cost.Partial.ShouldBeFalse();
         Schedule.Currency.ShouldBe("USD");
     }
 
     [Fact]
     public void Cost_is_exact_decimal_arithmetic()
-        => Schedule.Cost([(Jan, 1234)]).ShouldBe(0.20978m);
+        => Schedule.Cost([(Jan, 1234)]).Amount.ShouldBe(0.20978m);
+
+    [Fact]
+    public void A_currency_change_starts_a_new_cost_history()
+    {
+        var moved = new TariffSchedule([new Tariff(Jan, 0.30m, "GBP"), new Tariff(Jun, 0.20m, "EUR")]);
+        var cost = moved.Cost([(Jan.AddDays(3), 500), (Jun.AddDays(3), 500)]);
+        cost.ShouldBe(new CostResult(0.5m * 0.20m, "EUR", Partial: true));
+        moved.HasMixedCurrencies.ShouldBeTrue();
+        moved.Cost([(Jun.AddDays(3), 500)]).Partial.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Same_instant_tariffs_keep_input_order_so_the_later_one_wins()
+    {
+        var schedule = new TariffSchedule([new Tariff(Jan, 0.10m, "USD"), new Tariff(Jan, 0.11m, "USD")]);
+        schedule.At(Jan)!.PricePerKwh.ShouldBe(0.11m);
+    }
+
+    [Fact]
+    public void Non_finite_energy_is_ignored()
+        => Schedule.Cost([(Jan, double.NaN), (Jan, double.PositiveInfinity), (Jan, 1000)]).Amount.ShouldBe(0.17m);
 
     [Fact]
     public void Co2_and_comparisons()

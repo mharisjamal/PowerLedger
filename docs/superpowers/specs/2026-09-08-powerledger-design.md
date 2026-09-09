@@ -197,7 +197,7 @@ Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence dec
 | `settings` | key / value | — | service-owned settings |
 | `schema_version` | | | migrations |
 
-Cost is computed at query time as `Σ energy × tariff effective at that time`, so rate changes never corrupt history and "what-if" comparisons are possible. A future time-of-use tariff adds an hours mask column without rewriting data.
+Cost is computed at query time as `Σ energy × tariff effective at that time`, so rate changes never corrupt history and "what-if" comparisons are possible. A currency change starts a new cost history: energy priced under an earlier currency still counts in kWh but is excluded from the cost figure, and the report flags the figure as partial. A future time-of-use tariff adds an hours mask column without rewriting data.
 
 ### Jobs
 
