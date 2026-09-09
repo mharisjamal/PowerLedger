@@ -53,6 +53,10 @@ public class AggregateRepositoryTests
         repo.UpsertMinute(Minute(3));
         repo.UpsertMinute(Minute(1));
         repo.LastMinuteStart().ShouldBe(Fixtures.T0.AddMinutes(3));
+
+        repo.LastHourStart().ShouldBeNull();
+        repo.UpsertHour(Minute(2));
+        repo.LastHourStart().ShouldBe(Fixtures.T0.AddMinutes(2));
     }
 
     [Fact]
@@ -61,8 +65,10 @@ public class AggregateRepositoryTests
         using var t = new TestDatabase();
         var repo = new AggregateRepository(t.Db);
         for (var i = 0; i < 5; i++) repo.UpsertMinute(Minute(i));
+        repo.UpsertHour(Minute(0));
         repo.PurgeMinutesBefore(Fixtures.T0.AddMinutes(3)).ShouldBe(3);
         repo.ReadMinutes(Fixtures.T0, Fixtures.T0.AddHours(1)).Count.ShouldBe(2);
+        repo.ReadHours(Fixtures.T0, Fixtures.T0.AddHours(1)).Count.ShouldBe(1);
     }
 
     [Fact]
@@ -76,5 +82,16 @@ public class AggregateRepositoryTests
         repo.UpsertHour(distinct);
         repo.ReadMinutes(Fixtures.T0.AddMinutes(9), Fixtures.T0.AddMinutes(10)).Single().ShouldBe(distinct);
         repo.ReadHours(Fixtures.T0.AddMinutes(9), Fixtures.T0.AddMinutes(10)).Single().ShouldBe(distinct);
+    }
+
+    [Fact]
+    public void An_empty_range_reads_nothing()
+    {
+        using var t = new TestDatabase();
+        var repo = new AggregateRepository(t.Db);
+        repo.UpsertMinute(Minute(0));
+        repo.ReadMinutes(Fixtures.T0.AddHours(1), Fixtures.T0.AddHours(2)).ShouldBeEmpty();
+        repo.ReadHours(Fixtures.T0, Fixtures.T0.AddHours(1)).ShouldBeEmpty();
+        repo.PurgeMinutesBefore(Fixtures.T0).ShouldBe(0);
     }
 }

@@ -11,18 +11,25 @@ public sealed class AggregateRepository(SqliteDatabase db)
         "start_ms, avg_w, max_w, energy_wh, cpu_wh, gpu_wh, display_wh, rest_wh, idle_on_wh, idle_off_wh, " +
         "idle_on_s, idle_off_s, on_s, battery_s, gap_s, sample_count, measured_s, calibrated_s, estimated_s";
 
+    /// <summary>Writes or replaces one minute row, keyed by its start.</summary>
     public void UpsertMinute(Aggregate a) => Upsert(MinuteTable, a);
 
+    /// <summary>Writes or replaces one hour row, keyed by its start.</summary>
     public void UpsertHour(Aggregate a) => Upsert(HourTable, a);
 
+    /// <summary>Minute rows with from ≤ start &lt; to, oldest first. Starts come back with a zero offset.</summary>
     public List<Aggregate> ReadMinutes(DateTimeOffset from, DateTimeOffset to) => Read(MinuteTable, from, to);
 
+    /// <summary>Hour rows with from ≤ start &lt; to, oldest first. Starts come back with a zero offset.</summary>
     public List<Aggregate> ReadHours(DateTimeOffset from, DateTimeOffset to) => Read(HourTable, from, to);
 
+    /// <summary>Start of the newest minute row, or null when there are none.</summary>
     public DateTimeOffset? LastMinuteStart() => LastStart(MinuteTable);
 
+    /// <summary>Start of the newest hour row, or null when there are none.</summary>
     public DateTimeOffset? LastHourStart() => LastStart(HourTable);
 
+    /// <summary>Deletes minute rows older than the cutoff and returns how many went. Hour rows are kept forever (spec §7).</summary>
     public int PurgeMinutesBefore(DateTimeOffset cutoff)
     {
         using var c = db.Open();
@@ -82,7 +89,7 @@ public sealed class AggregateRepository(SqliteDatabase db)
         return v is long ms ? Rows.Time(ms) : null;
     }
 
-    internal static Aggregate Map(SqliteDataReader r) => new(
+    private static Aggregate Map(SqliteDataReader r) => new(
         Rows.Time(r.GetInt64(0)), r.GetDouble(1), r.GetDouble(2),
         r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6), r.GetDouble(7),
         r.GetDouble(8), r.GetDouble(9),

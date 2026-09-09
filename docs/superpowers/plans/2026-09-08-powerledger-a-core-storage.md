@@ -2867,6 +2867,10 @@ public class AggregateRepositoryTests
         repo.UpsertMinute(Minute(3));
         repo.UpsertMinute(Minute(1));
         repo.LastMinuteStart().ShouldBe(Fixtures.T0.AddMinutes(3));
+
+        repo.LastHourStart().ShouldBeNull();
+        repo.UpsertHour(Minute(2));
+        repo.LastHourStart().ShouldBe(Fixtures.T0.AddMinutes(2));
     }
 
     [Fact]
@@ -2875,8 +2879,10 @@ public class AggregateRepositoryTests
         using var t = new TestDatabase();
         var repo = new AggregateRepository(t.Db);
         for (var i = 0; i < 5; i++) repo.UpsertMinute(Minute(i));
+        repo.UpsertHour(Minute(0));
         repo.PurgeMinutesBefore(Fixtures.T0.AddMinutes(3)).ShouldBe(3);
         repo.ReadMinutes(Fixtures.T0, Fixtures.T0.AddHours(1)).Count.ShouldBe(2);
+        repo.ReadHours(Fixtures.T0, Fixtures.T0.AddHours(1)).Count.ShouldBe(1);
     }
 
     [Fact]
@@ -2890,6 +2896,17 @@ public class AggregateRepositoryTests
         repo.UpsertHour(distinct);
         repo.ReadMinutes(Fixtures.T0.AddMinutes(9), Fixtures.T0.AddMinutes(10)).Single().ShouldBe(distinct);
         repo.ReadHours(Fixtures.T0.AddMinutes(9), Fixtures.T0.AddMinutes(10)).Single().ShouldBe(distinct);
+    }
+
+    [Fact]
+    public void An_empty_range_reads_nothing()
+    {
+        using var t = new TestDatabase();
+        var repo = new AggregateRepository(t.Db);
+        repo.UpsertMinute(Minute(0));
+        repo.ReadMinutes(Fixtures.T0.AddHours(1), Fixtures.T0.AddHours(2)).ShouldBeEmpty();
+        repo.ReadHours(Fixtures.T0, Fixtures.T0.AddHours(1)).ShouldBeEmpty();
+        repo.PurgeMinutesBefore(Fixtures.T0).ShouldBe(0);
     }
 }
 ```
@@ -2916,18 +2933,25 @@ public sealed class AggregateRepository(SqliteDatabase db)
         "start_ms, avg_w, max_w, energy_wh, cpu_wh, gpu_wh, display_wh, rest_wh, idle_on_wh, idle_off_wh, " +
         "idle_on_s, idle_off_s, on_s, battery_s, gap_s, sample_count, measured_s, calibrated_s, estimated_s";
 
+    /// <summary>Writes or replaces one minute row, keyed by its start.</summary>
     public void UpsertMinute(Aggregate a) => Upsert(MinuteTable, a);
 
+    /// <summary>Writes or replaces one hour row, keyed by its start.</summary>
     public void UpsertHour(Aggregate a) => Upsert(HourTable, a);
 
+    /// <summary>Minute rows with from ≤ start &lt; to, oldest first. Starts come back with a zero offset.</summary>
     public List<Aggregate> ReadMinutes(DateTimeOffset from, DateTimeOffset to) => Read(MinuteTable, from, to);
 
+    /// <summary>Hour rows with from ≤ start &lt; to, oldest first. Starts come back with a zero offset.</summary>
     public List<Aggregate> ReadHours(DateTimeOffset from, DateTimeOffset to) => Read(HourTable, from, to);
 
+    /// <summary>Start of the newest minute row, or null when there are none.</summary>
     public DateTimeOffset? LastMinuteStart() => LastStart(MinuteTable);
 
+    /// <summary>Start of the newest hour row, or null when there are none.</summary>
     public DateTimeOffset? LastHourStart() => LastStart(HourTable);
 
+    /// <summary>Deletes minute rows older than the cutoff and returns how many went. Hour rows are kept forever (spec §7).</summary>
     public int PurgeMinutesBefore(DateTimeOffset cutoff)
     {
         using var c = db.Open();
@@ -2987,7 +3011,7 @@ public sealed class AggregateRepository(SqliteDatabase db)
         return v is long ms ? Rows.Time(ms) : null;
     }
 
-    internal static Aggregate Map(SqliteDataReader r) => new(
+    private static Aggregate Map(SqliteDataReader r) => new(
         Rows.Time(r.GetInt64(0)), r.GetDouble(1), r.GetDouble(2),
         r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6), r.GetDouble(7),
         r.GetDouble(8), r.GetDouble(9),
@@ -3001,7 +3025,7 @@ public sealed class AggregateRepository(SqliteDatabase db)
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter AggregateRepositoryTests`
-Expected: `Passed! - Failed: 0, Passed: 6`.
+Expected: `Passed! - Failed: 0, Passed: 7`.
 
 - [x] **Step 5: Commit**
 
@@ -3810,7 +3834,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 108`, Storage `Passed: 30`, no failures, no skipped tests.
+Expected: Core `Passed: 108`, Storage `Passed: 31`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 
