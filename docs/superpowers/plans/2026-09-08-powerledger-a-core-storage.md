@@ -1970,7 +1970,7 @@ git commit -m "Add Aggregate and Downsampler with energy conservation"
 - Create: `src/PowerLedger.Core/Comparisons.cs`
 - Test: `tests/PowerLedger.Core.Tests/TariffScheduleTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Core;
@@ -2032,12 +2032,12 @@ public class TariffScheduleTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter TariffScheduleTests`
 Expected: build error, `TariffSchedule` not found.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/PowerLedger.Core/Tariff.cs`
 ```csharp
@@ -2116,12 +2116,12 @@ public static class Comparisons
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter TariffScheduleTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Run the whole Core suite and commit**
+- [x] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
 Expected: `Passed! - Failed: 0, Passed: 103`.
