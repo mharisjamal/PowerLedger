@@ -34,7 +34,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         tx.Commit();
     }
 
-    /// <summary>Readings with from ≤ timestamp &lt; to, oldest first.</summary>
+    /// <summary>Readings with from ≤ timestamp &lt; to, oldest first. Timestamps are stored to the millisecond and come back with a zero offset.</summary>
     public List<Reading> Read(DateTimeOffset from, DateTimeOffset to)
     {
         using var c = db.Open();
@@ -54,6 +54,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         return list;
     }
 
+    /// <summary>Deletes rows older than the cutoff and returns how many went.</summary>
     public int PurgeBefore(DateTimeOffset cutoff)
     {
         using var c = db.Open();
@@ -63,6 +64,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         return cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Total raw rows (full scan; for status and tests).</summary>
     public long Count()
     {
         using var c = db.Open();

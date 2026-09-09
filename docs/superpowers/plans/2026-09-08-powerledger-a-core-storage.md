@@ -2626,6 +2626,7 @@ internal static class Fixtures
 
 `tests/PowerLedger.Storage.Tests/RawSampleRepositoryTests.cs`
 ```csharp
+using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
 
@@ -2639,16 +2640,25 @@ public class RawSampleRepositoryTests
         using var t = new TestDatabase();
         var repo = new RawSampleRepository(t.Db);
         var batch = Fixtures.Minute(0);
-        // Flags deliberately differ from the batch (on battery, display off, idle, suspect, null loads) so a swapped column cannot round-trip.
-        var odd = Fixtures.Reading(60, idle: true, displayOn: false) with { Suspect = true, GpuLoad = null, Brightness = null };
-        repo.InsertBatch([.. batch, odd]);
+        // Every REAL column gets a distinct value and every pair of flag columns differs somewhere, so a swapped column cannot round-trip.
+        var odd = Fixtures.Reading(60, idle: true, displayOn: false) with
+        {
+            Components = new Components(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+            DeltaSeconds = 0.98,
+            Suspect = true,
+            GpuLoad = null,
+            Brightness = null,
+        };
+        var odd2 = Fixtures.Reading(61) with { SessionLocked = true, Suspect = true };
+        repo.InsertBatch([.. batch, odd, odd2]);
 
         var back = repo.Read(Fixtures.T0, Fixtures.T0.AddMinutes(2));
-        back.Count.ShouldBe(61);
+        back.Count.ShouldBe(62);
         back[0].ShouldBe(batch[0]);
         back[59].ShouldBe(batch[59]);
         back[60].ShouldBe(odd);
-        repo.Count().ShouldBe(61);
+        back[61].ShouldBe(odd2);
+        repo.Count().ShouldBe(62);
     }
 
     [Fact]
@@ -2738,7 +2748,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         tx.Commit();
     }
 
-    /// <summary>Readings with from ≤ timestamp &lt; to, oldest first.</summary>
+    /// <summary>Readings with from ≤ timestamp &lt; to, oldest first. Timestamps are stored to the millisecond and come back with a zero offset.</summary>
     public List<Reading> Read(DateTimeOffset from, DateTimeOffset to)
     {
         using var c = db.Open();
@@ -2758,6 +2768,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         return list;
     }
 
+    /// <summary>Deletes rows older than the cutoff and returns how many went.</summary>
     public int PurgeBefore(DateTimeOffset cutoff)
     {
         using var c = db.Open();
@@ -2767,6 +2778,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         return cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Total raw rows (full scan; for status and tests).</summary>
     public long Count()
     {
         using var c = db.Open();
