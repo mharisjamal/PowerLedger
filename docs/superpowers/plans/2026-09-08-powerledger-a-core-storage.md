@@ -3969,7 +3969,7 @@ git commit -m "Add ReportQueries with cost at query time and daily buckets"
 **Files:**
 - Test: `tests/PowerLedger.Core.Tests/EnergyProperties.cs`
 
-- [ ] **Step 1: Write the property tests**
+- [x] **Step 1: Write the property tests**
 
 ```csharp
 using FsCheck.Xunit;
@@ -4019,12 +4019,12 @@ public class EnergyProperties
 }
 ```
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter EnergyProperties`
 Expected: `Passed! - Failed: 0, Passed: 2`. If a property fails, FsCheck prints the shrunk counter-example; fix the production code, not the property.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/PowerLedger.Core.Tests/EnergyProperties.cs
