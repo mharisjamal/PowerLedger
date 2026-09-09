@@ -2600,7 +2600,7 @@ git commit -m "Add SQLite database, migrator and schema v1"
 - Create: `tests/PowerLedger.Storage.Tests/Fixtures.cs`
 - Test: `tests/PowerLedger.Storage.Tests/RawSampleRepositoryTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Storage.Tests/Fixtures.cs`
 ```csharp
@@ -2693,12 +2693,12 @@ public class RawSampleRepositoryTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter RawSampleRepositoryTests`
 Expected: build error, `RawSampleRepository` not found.
 
-- [ ] **Step 3: Write the repository**
+- [x] **Step 3: Write the repository**
 
 `src/PowerLedger.Storage/RawSampleRepository.cs`
 ```csharp
@@ -2777,12 +2777,12 @@ public sealed class RawSampleRepository(SqliteDatabase db)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter RawSampleRepositoryTests`
 Expected: `Passed! - Failed: 0, Passed: 5`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Storage/RawSampleRepository.cs tests/PowerLedger.Storage.Tests
