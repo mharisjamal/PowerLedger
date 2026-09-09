@@ -8,7 +8,7 @@ public class EnergyIntegratorTests
 {
     private static Reading Reading(double totalW = 34.2, double delta = 1.0, bool idle = false, bool displayOn = true, bool onBattery = false, double monitors = 0, double rest = 11.3)
         => new(TestData.T0, delta, totalW, Quality.Measured,
-               new Components(Cpu: 14.6, Gpu: 4.1, Display: 4.2, 0, 0, 0, 0, Monitors: monitors, 0, Rest: rest),
+               new Components(Cpu: 14.6, Gpu: 4.1, Display: 4.2, 0, 0, 0, 0, Monitors: monitors, 0, Unattributed: rest),
                onBattery, displayOn, idle, false, 0.3, 0.3, 0.6, false);
 
     [Fact]

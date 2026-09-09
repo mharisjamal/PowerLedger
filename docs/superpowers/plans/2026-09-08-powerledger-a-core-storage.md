@@ -398,7 +398,7 @@ public class ComponentsTests
     [Fact]
     public void Sum_adds_every_part()
     {
-        var c = new Components(Cpu: 1, Gpu: 2, Display: 3, Ram: 4, Storage: 5, Board: 6, Extras: 7, Monitors: 8, PsuLoss: 9, Rest: 10);
+        var c = new Components(Cpu: 1, Gpu: 2, Display: 3, Ram: 4, Storage: 5, Board: 6, Extras: 7, Monitors: 8, PsuLoss: 9, Unattributed: 10);
         c.Sum.ShouldBe(55);
     }
 
@@ -497,14 +497,15 @@ public sealed record Sample(
 namespace PowerLedger.Core;
 
 /// <summary>Watts attributed to each part of the machine for one tick.</summary>
-/// <param name="Rest">Watts not itemised elsewhere: the measured remainder (battery mode), the learned baseline (calibrated mode),
-/// or the default laptop baseline (estimated laptop). 0 for estimated desktops, whose parts are itemised.</param>
+/// <param name="Unattributed">Watts not itemised elsewhere: the measured remainder (battery mode), the learned baseline (calibrated mode),
+/// or the default laptop baseline (estimated laptop). 0 for estimated desktops, whose parts are itemised.
+/// Narrower than EnergySlice.RestWh, which is the whole non-CPU/GPU/display energy band.</param>
 public sealed record Components(
     double Cpu, double Gpu, double Display, double Ram, double Storage,
-    double Board, double Extras, double Monitors, double PsuLoss, double Rest)
+    double Board, double Extras, double Monitors, double PsuLoss, double Unattributed)
 {
-    /// <summary>Every part including PsuLoss and Rest. Equals TotalW once the model has filled PsuLoss; before that it is the pre-supply figure.</summary>
-    public double Sum => Cpu + Gpu + Display + Ram + Storage + Board + Extras + Monitors + PsuLoss + Rest;
+    /// <summary>Every part including PsuLoss and Unattributed. Equals TotalW once the model has filled PsuLoss; before that it is the pre-supply figure.</summary>
+    public double Sum => Cpu + Gpu + Display + Ram + Storage + Board + Extras + Monitors + PsuLoss + Unattributed;
 
     public static Components Zero { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
@@ -798,7 +799,7 @@ public class PowerModelTests
         r.Components.Cpu.ShouldBe(14.6);
         r.Components.Gpu.ShouldBe(4.1);
         r.Components.Display.ShouldBe(4.2, 0.001);
-        r.Components.Rest.ShouldBe(34.2 - 14.6 - 4.1 - 4.2, 0.001);
+        r.Components.Unattributed.ShouldBe(34.2 - 14.6 - 4.1 - 4.2, 0.001);
         r.Components.PsuLoss.ShouldBe(0);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
@@ -809,7 +810,7 @@ public class PowerModelTests
         var r = Laptop().Evaluate(TestData.Laptop(cpu: 10, gpu: 3, battery: 8.0, onBattery: true));
         r.Quality.ShouldBe(Quality.Measured);
         r.TotalW.ShouldBe(8.0, 0.001);
-        r.Components.Rest.ShouldBe(8.0 - 10 - 3 - 4.2, 0.001);
+        r.Components.Unattributed.ShouldBe(8.0 - 10 - 3 - 4.2, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
 
@@ -840,7 +841,7 @@ public class PowerModelTests
         var beforePsu = 14.6 + 4.1 + 4.2 + 5.0;
         r.Quality.ShouldBe(Quality.Estimated);
         r.TotalW.ShouldBe(beforePsu / 0.9, 0.001);
-        r.Components.Rest.ShouldBe(5.0);
+        r.Components.Unattributed.ShouldBe(5.0);
         r.Components.Board.ShouldBe(0);
         r.Components.PsuLoss.ShouldBe(beforePsu / 0.9 - beforePsu, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
@@ -851,7 +852,7 @@ public class PowerModelTests
     {
         var r = Laptop(baseline: 9.0).Evaluate(TestData.Laptop());
         r.Quality.ShouldBe(Quality.Calibrated);
-        r.Components.Rest.ShouldBe(9.0);
+        r.Components.Unattributed.ShouldBe(9.0);
         r.Components.Board.ShouldBe(0);
         r.TotalW.ShouldBe((14.6 + 4.1 + 4.2 + 9.0) / 0.9, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
@@ -903,7 +904,7 @@ public class PowerModelTests
     {
         var r = Desktop(baseline: 9.0).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, battery: 200, onBattery: true, brightness: null));
         r.Quality.ShouldBe(Quality.Estimated);
-        r.Components.Rest.ShouldBe(0);
+        r.Components.Unattributed.ShouldBe(0);
         r.Components.Board.ShouldBe(15.0);
         r.TotalW.ShouldBe((50 + 120 + 5 + 2 + 15) / 0.85, 0.001);
     }
@@ -1024,7 +1025,7 @@ public sealed class PowerModel
     }
 
     /// <summary>
-    /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; in measured mode <c>Rest</c> may go
+    /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; in measured mode <c>Unattributed</c> may go
     /// negative when the parts over-report, which is the honest sensor-disagreement signal.
     /// The Service feeds <c>Components.Cpu</c>, <c>Gpu</c> and <c>Display</c> back into the calibration learner.
     /// </summary>
@@ -1041,7 +1042,7 @@ public sealed class PowerModel
         {
             var measuredParts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
-                Monitors: monitors, PsuLoss: 0, Rest: measured - cpu - gpu - display);
+                Monitors: monitors, PsuLoss: 0, Unattributed: measured - cpu - gpu - display);
             return Build(s, measured + monitors, Quality.Measured, measuredParts, userIdle);
         }
 
@@ -1052,14 +1053,14 @@ public sealed class PowerModel
             // The learned baseline was observed on battery, so it already contains any extras drawing from the battery.
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
-                Monitors: monitors, PsuLoss: 0, Rest: learned);
+                Monitors: monitors, PsuLoss: 0, Unattributed: learned);
             quality = Quality.Calibrated;
         }
         else if (isLaptop)
         {
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: _profile.ExtrasWatts,
-                Monitors: monitors, PsuLoss: 0, Rest: LaptopBaselineW);
+                Monitors: monitors, PsuLoss: 0, Unattributed: LaptopBaselineW);
             quality = Quality.Estimated;
         }
         else
@@ -1067,7 +1068,7 @@ public sealed class PowerModel
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: RamWatts(), Storage: StorageWatts(),
                 Board: DesktopBoardW + _profile.FanCount * FanW, Extras: _profile.ExtrasWatts,
-                Monitors: monitors, PsuLoss: 0, Rest: 0);
+                Monitors: monitors, PsuLoss: 0, Unattributed: 0);
             quality = Quality.Estimated;
         }
 
@@ -1294,7 +1295,7 @@ public class CalibrationLearnerTests
         var model = new PowerModel(MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, new PowerModelOptions(), learner);
         var r = model.Evaluate(TestData.Laptop(cpu: 10, gpu: 2, brightness: 0.6));
         r.Quality.ShouldBe(Quality.Calibrated);
-        r.Components.Rest.ShouldBe(9.0, 0.0001);
+        r.Components.Unattributed.ShouldBe(9.0, 0.0001);
     }
 }
 ```
@@ -1484,7 +1485,7 @@ public class EnergyIntegratorTests
 {
     private static Reading Reading(double totalW = 34.2, double delta = 1.0, bool idle = false, bool displayOn = true, bool onBattery = false, double monitors = 0, double rest = 11.3)
         => new(TestData.T0, delta, totalW, Quality.Measured,
-               new Components(Cpu: 14.6, Gpu: 4.1, Display: 4.2, 0, 0, 0, 0, Monitors: monitors, 0, Rest: rest),
+               new Components(Cpu: 14.6, Gpu: 4.1, Display: 4.2, 0, 0, 0, 0, Monitors: monitors, 0, Unattributed: rest),
                onBattery, displayOn, idle, false, 0.3, 0.3, 0.6, false);
 
     [Fact]
@@ -1608,7 +1609,7 @@ Expected: build error, `EnergyIntegrator` not found.
 namespace PowerLedger.Core;
 
 /// <summary>Energy contributed by one tick. DisplayWh covers the internal panel plus opted-in external monitors;
-/// RestWh is everything else (broader than Components.Rest, which excludes the itemised parts such as RAM, board and PSU loss).
+/// RestWh is everything else (broader than Components.Unattributed, which excludes the itemised parts such as RAM, board and PSU loss).
 /// A gap tick (see <see cref="EnergyIntegrator"/>) carries only GapSeconds.</summary>
 public sealed record EnergySlice(
     double Wh, double CpuWh, double GpuWh, double DisplayWh, double RestWh,
@@ -1695,7 +1696,7 @@ public class DownsamplerTests
 {
     private static Reading At(int second, double totalW, double delta = 1.0, Quality q = Quality.Measured, bool idle = false, bool displayOn = true)
         => new(TestData.T0.AddSeconds(second), delta, totalW, q,
-               new Components(Cpu: totalW * 0.4, Gpu: totalW * 0.1, Display: 4, 0, 0, 0, 0, 0, 0, Rest: totalW * 0.5 - 4),
+               new Components(Cpu: totalW * 0.4, Gpu: totalW * 0.1, Display: 4, 0, 0, 0, 0, 0, 0, Unattributed: totalW * 0.5 - 4),
                OnBattery: q == Quality.Measured, DisplayOn: displayOn, UserIdle: idle, SessionLocked: false, 0.3, 0.3, 0.6, false);
 
     [Fact]
@@ -2360,7 +2361,7 @@ internal static class Schema
             extras_w     REAL    NOT NULL,
             monitors_w   REAL    NOT NULL,
             psu_loss_w   REAL    NOT NULL,
-            rest_w       REAL    NOT NULL,
+            unattributed_w REAL NOT NULL,
             on_battery   INTEGER NOT NULL,
             display_on   INTEGER NOT NULL,
             user_idle    INTEGER NOT NULL,
@@ -2626,7 +2627,7 @@ internal static class Fixtures
 
     public static Reading Reading(int second, double totalW = 30, Quality q = Quality.Measured, bool idle = false, bool displayOn = true, double delta = 1.0)
         => new(T0.AddSeconds(second), delta, totalW, q,
-               new Components(Cpu: totalW * 0.4, Gpu: totalW * 0.1, Display: 4, Ram: 0, Storage: 0, Board: 0, Extras: 0, Monitors: 0, PsuLoss: 0, Rest: totalW * 0.5 - 4),
+               new Components(Cpu: totalW * 0.4, Gpu: totalW * 0.1, Display: 4, Ram: 0, Storage: 0, Board: 0, Extras: 0, Monitors: 0, PsuLoss: 0, Unattributed: totalW * 0.5 - 4),
                OnBattery: q == Quality.Measured, DisplayOn: displayOn, UserIdle: idle, SessionLocked: false,
                CpuLoad: 0.3, GpuLoad: 0.2, Brightness: 0.6, Suspect: false);
 
@@ -2732,7 +2733,7 @@ namespace PowerLedger.Storage;
 public sealed class RawSampleRepository(SqliteDatabase db)
 {
     private const string Columns =
-        "ts_ms, delta_s, total_w, quality, cpu_w, gpu_w, display_w, ram_w, storage_w, board_w, extras_w, monitors_w, psu_loss_w, rest_w, " +
+        "ts_ms, delta_s, total_w, quality, cpu_w, gpu_w, display_w, ram_w, storage_w, board_w, extras_w, monitors_w, psu_loss_w, unattributed_w, " +
         "on_battery, display_on, user_idle, locked, cpu_load, gpu_load, brightness, suspect";
 
     /// <summary>Writes all readings in one transaction. Same timestamp replaces the earlier row.</summary>
@@ -2751,7 +2752,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         foreach (var r in readings)
         {
             var p = r.Components;
-            object?[] values = [Rows.Ms(r.Timestamp), r.DeltaSeconds, r.TotalW, (int)r.Quality, p.Cpu, p.Gpu, p.Display, p.Ram, p.Storage, p.Board, p.Extras, p.Monitors, p.PsuLoss, p.Rest,
+            object?[] values = [Rows.Ms(r.Timestamp), r.DeltaSeconds, r.TotalW, (int)r.Quality, p.Cpu, p.Gpu, p.Display, p.Ram, p.Storage, p.Board, p.Extras, p.Monitors, p.PsuLoss, p.Unattributed,
                 r.OnBattery ? 1 : 0, r.DisplayOn ? 1 : 0, r.UserIdle ? 1 : 0, r.SessionLocked ? 1 : 0, r.CpuLoad, r.GpuLoad, r.Brightness, r.Suspect ? 1 : 0];
             for (var i = 0; i < values.Length; i++) cmd.Parameters[i].Value = values[i] ?? DBNull.Value;
             cmd.ExecuteNonQuery();
@@ -3999,7 +4000,7 @@ public class EnergyProperties
     private static Reading Make(double totalW, double delta, bool idle, int second = 0)
     {
         var display = Math.Min(6, totalW * 0.1);
-        var parts = new Components(Cpu: totalW * 0.5, Gpu: totalW * 0.2, Display: display, 0, 0, 0, 0, 0, 0, Rest: totalW * 0.3 - display);
+        var parts = new Components(Cpu: totalW * 0.5, Gpu: totalW * 0.2, Display: display, 0, 0, 0, 0, 0, 0, Unattributed: totalW * 0.3 - display);
         return new Reading(TestData.T0.AddSeconds(second), delta, totalW, Quality.Estimated, parts,
             OnBattery: false, DisplayOn: true, UserIdle: idle, SessionLocked: false, 0.5, null, 0.5, false);
     }

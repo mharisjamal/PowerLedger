@@ -9,7 +9,7 @@ public class EnergyProperties
     private static Reading Make(double totalW, double delta, bool idle, int second = 0)
     {
         var display = Math.Min(6, totalW * 0.1);
-        var parts = new Components(Cpu: totalW * 0.5, Gpu: totalW * 0.2, Display: display, 0, 0, 0, 0, 0, 0, Rest: totalW * 0.3 - display);
+        var parts = new Components(Cpu: totalW * 0.5, Gpu: totalW * 0.2, Display: display, 0, 0, 0, 0, 0, 0, Unattributed: totalW * 0.3 - display);
         return new Reading(TestData.T0.AddSeconds(second), delta, totalW, Quality.Estimated, parts,
             OnBattery: false, DisplayOn: true, UserIdle: idle, SessionLocked: false, 0.5, null, 0.5, false);
     }

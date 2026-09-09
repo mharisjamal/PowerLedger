@@ -155,6 +155,6 @@ public class CalibrationLearnerTests
         var model = new PowerModel(MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, new PowerModelOptions(), learner);
         var r = model.Evaluate(TestData.Laptop(cpu: 10, gpu: 2, brightness: 0.6));
         r.Quality.ShouldBe(Quality.Calibrated);
-        r.Components.Rest.ShouldBe(9.0, 0.0001);
+        r.Components.Unattributed.ShouldBe(9.0, 0.0001);
     }
 }

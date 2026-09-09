@@ -8,7 +8,7 @@ public class DownsamplerTests
 {
     private static Reading At(int second, double totalW, double delta = 1.0, Quality q = Quality.Measured, bool idle = false, bool displayOn = true)
         => new(TestData.T0.AddSeconds(second), delta, totalW, q,
-               new Components(Cpu: totalW * 0.4, Gpu: totalW * 0.1, Display: 4, 0, 0, 0, 0, 0, 0, Rest: totalW * 0.5 - 4),
+               new Components(Cpu: totalW * 0.4, Gpu: totalW * 0.1, Display: 4, 0, 0, 0, 0, 0, 0, Unattributed: totalW * 0.5 - 4),
                OnBattery: q == Quality.Measured, DisplayOn: displayOn, UserIdle: idle, SessionLocked: false, 0.3, 0.3, 0.6, false);
 
     [Fact]

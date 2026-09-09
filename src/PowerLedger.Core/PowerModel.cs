@@ -36,7 +36,7 @@ public sealed class PowerModel
     }
 
     /// <summary>
-    /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; in measured mode <c>Rest</c> may go
+    /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; in measured mode <c>Unattributed</c> may go
     /// negative when the parts over-report, which is the honest sensor-disagreement signal.
     /// The Service feeds <c>Components.Cpu</c>, <c>Gpu</c> and <c>Display</c> back into the calibration learner.
     /// </summary>
@@ -53,7 +53,7 @@ public sealed class PowerModel
         {
             var measuredParts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
-                Monitors: monitors, PsuLoss: 0, Rest: measured - cpu - gpu - display);
+                Monitors: monitors, PsuLoss: 0, Unattributed: measured - cpu - gpu - display);
             return Build(s, measured + monitors, Quality.Measured, measuredParts, userIdle);
         }
 
@@ -64,14 +64,14 @@ public sealed class PowerModel
             // The learned baseline was observed on battery, so it already contains any extras drawing from the battery.
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
-                Monitors: monitors, PsuLoss: 0, Rest: learned);
+                Monitors: monitors, PsuLoss: 0, Unattributed: learned);
             quality = Quality.Calibrated;
         }
         else if (isLaptop)
         {
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: _profile.ExtrasWatts,
-                Monitors: monitors, PsuLoss: 0, Rest: LaptopBaselineW);
+                Monitors: monitors, PsuLoss: 0, Unattributed: LaptopBaselineW);
             quality = Quality.Estimated;
         }
         else
@@ -79,7 +79,7 @@ public sealed class PowerModel
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: RamWatts(), Storage: StorageWatts(),
                 Board: DesktopBoardW + _profile.FanCount * FanW, Extras: _profile.ExtrasWatts,
-                Monitors: monitors, PsuLoss: 0, Rest: 0);
+                Monitors: monitors, PsuLoss: 0, Unattributed: 0);
             quality = Quality.Estimated;
         }
 

@@ -18,7 +18,7 @@ internal static class Schema
             extras_w     REAL    NOT NULL,
             monitors_w   REAL    NOT NULL,
             psu_loss_w   REAL    NOT NULL,
-            rest_w       REAL    NOT NULL,
+            unattributed_w REAL NOT NULL,
             on_battery   INTEGER NOT NULL,
             display_on   INTEGER NOT NULL,
             user_idle    INTEGER NOT NULL,

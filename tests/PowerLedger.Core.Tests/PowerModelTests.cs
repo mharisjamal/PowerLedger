@@ -21,7 +21,7 @@ public class PowerModelTests
         r.Components.Cpu.ShouldBe(14.6);
         r.Components.Gpu.ShouldBe(4.1);
         r.Components.Display.ShouldBe(4.2, 0.001);
-        r.Components.Rest.ShouldBe(34.2 - 14.6 - 4.1 - 4.2, 0.001);
+        r.Components.Unattributed.ShouldBe(34.2 - 14.6 - 4.1 - 4.2, 0.001);
         r.Components.PsuLoss.ShouldBe(0);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
@@ -32,7 +32,7 @@ public class PowerModelTests
         var r = Laptop().Evaluate(TestData.Laptop(cpu: 10, gpu: 3, battery: 8.0, onBattery: true));
         r.Quality.ShouldBe(Quality.Measured);
         r.TotalW.ShouldBe(8.0, 0.001);
-        r.Components.Rest.ShouldBe(8.0 - 10 - 3 - 4.2, 0.001);
+        r.Components.Unattributed.ShouldBe(8.0 - 10 - 3 - 4.2, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
 
@@ -63,7 +63,7 @@ public class PowerModelTests
         var beforePsu = 14.6 + 4.1 + 4.2 + 5.0;
         r.Quality.ShouldBe(Quality.Estimated);
         r.TotalW.ShouldBe(beforePsu / 0.9, 0.001);
-        r.Components.Rest.ShouldBe(5.0);
+        r.Components.Unattributed.ShouldBe(5.0);
         r.Components.Board.ShouldBe(0);
         r.Components.PsuLoss.ShouldBe(beforePsu / 0.9 - beforePsu, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
@@ -74,7 +74,7 @@ public class PowerModelTests
     {
         var r = Laptop(baseline: 9.0).Evaluate(TestData.Laptop());
         r.Quality.ShouldBe(Quality.Calibrated);
-        r.Components.Rest.ShouldBe(9.0);
+        r.Components.Unattributed.ShouldBe(9.0);
         r.Components.Board.ShouldBe(0);
         r.TotalW.ShouldBe((14.6 + 4.1 + 4.2 + 9.0) / 0.9, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
@@ -126,7 +126,7 @@ public class PowerModelTests
     {
         var r = Desktop(baseline: 9.0).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, battery: 200, onBattery: true, brightness: null));
         r.Quality.ShouldBe(Quality.Estimated);
-        r.Components.Rest.ShouldBe(0);
+        r.Components.Unattributed.ShouldBe(0);
         r.Components.Board.ShouldBe(15.0);
         r.TotalW.ShouldBe((50 + 120 + 5 + 2 + 15) / 0.85, 0.001);
     }

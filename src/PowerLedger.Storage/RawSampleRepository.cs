@@ -7,7 +7,7 @@ namespace PowerLedger.Storage;
 public sealed class RawSampleRepository(SqliteDatabase db)
 {
     private const string Columns =
-        "ts_ms, delta_s, total_w, quality, cpu_w, gpu_w, display_w, ram_w, storage_w, board_w, extras_w, monitors_w, psu_loss_w, rest_w, " +
+        "ts_ms, delta_s, total_w, quality, cpu_w, gpu_w, display_w, ram_w, storage_w, board_w, extras_w, monitors_w, psu_loss_w, unattributed_w, " +
         "on_battery, display_on, user_idle, locked, cpu_load, gpu_load, brightness, suspect";
 
     /// <summary>Writes all readings in one transaction. Same timestamp replaces the earlier row.</summary>
@@ -26,7 +26,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         foreach (var r in readings)
         {
             var p = r.Components;
-            object?[] values = [Rows.Ms(r.Timestamp), r.DeltaSeconds, r.TotalW, (int)r.Quality, p.Cpu, p.Gpu, p.Display, p.Ram, p.Storage, p.Board, p.Extras, p.Monitors, p.PsuLoss, p.Rest,
+            object?[] values = [Rows.Ms(r.Timestamp), r.DeltaSeconds, r.TotalW, (int)r.Quality, p.Cpu, p.Gpu, p.Display, p.Ram, p.Storage, p.Board, p.Extras, p.Monitors, p.PsuLoss, p.Unattributed,
                 r.OnBattery ? 1 : 0, r.DisplayOn ? 1 : 0, r.UserIdle ? 1 : 0, r.SessionLocked ? 1 : 0, r.CpuLoad, r.GpuLoad, r.Brightness, r.Suspect ? 1 : 0];
             for (var i = 0; i < values.Length; i++) cmd.Parameters[i].Value = values[i] ?? DBNull.Value;
             cmd.ExecuteNonQuery();

@@ -8,7 +8,7 @@ public class ComponentsTests
     [Fact]
     public void Sum_adds_every_part()
     {
-        var c = new Components(Cpu: 1, Gpu: 2, Display: 3, Ram: 4, Storage: 5, Board: 6, Extras: 7, Monitors: 8, PsuLoss: 9, Rest: 10);
+        var c = new Components(Cpu: 1, Gpu: 2, Display: 3, Ram: 4, Storage: 5, Board: 6, Extras: 7, Monitors: 8, PsuLoss: 9, Unattributed: 10);
         c.Sum.ShouldBe(55);
     }
 
