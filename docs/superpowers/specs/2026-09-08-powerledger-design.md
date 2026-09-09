@@ -167,7 +167,8 @@ Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence dec
 ## 6. Energy accounting
 
 - Energy is integrated per tick: `Wh += totalW × Δt / 3600`, with Δt from a monotonic clock.
-- If Δt ≤ 5 s the tick is counted at the current reading. If Δt > 5 s (sleep, hibernate, service stop, Modern Standby throttling) the tick contributes zero energy and the interval is recorded as a gap.
+- If Δt is within the gap threshold the tick is counted at the current reading. Beyond it (sleep, hibernate, service stop, Modern Standby throttling) the tick contributes zero energy and the interval is recorded as a gap. The threshold is `max(5 s, 2 × sample interval)`, so a slower sampling setting never turns timer jitter into gaps. Non-finite readings contribute nothing.
+- Energy attribution bands: CPU, GPU, display (internal panel plus opted-in external monitors), and rest (everything else, including RAM, board, PSU loss and the learned or measured remainder). In measured mode the rest band can go negative when the parts over-report; storage keeps it raw and the UI clamps and annotates at display time.
 - Suspend and resume are handled through `SERVICE_CONTROL_POWEREVENT`: on suspend the write buffer is flushed and the session row closed; on resume a new session row opens, the Δt clock resets, sensor handles are re-opened, and the hardware inventory re-runs.
 - Idle waste = energy of samples where `userIdleSeconds ≥ idleThreshold` (default 5 min, configurable 1–30), split into display-on and display-off. The saving suggestion reads the current Windows sleep timeout (`powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE`) so it can say "Windows currently sleeps after 30 min" or "never".
 - Timestamps are stored in UTC; the UI converts to local time. Wall-clock jumps produce a session note, never negative energy.
@@ -227,7 +228,7 @@ WPF on .NET 10, WPF-UI for Fluent window chrome and controls, `CommunityToolkit.
 
 1. **Tray** — icon renders the live watts as text and updates only when the rounded value changes. Tooltip: now W and quality, today kWh and cost. Menu: Open, Start with Windows (on by default, set by the installer), Exit UI (service keeps logging).
 2. **Now** — large live watts with quality badge, 60 s sparkline, meter scale with average and peak marks, today ledger (kWh, cost, avg, peak, on, idle, asleep, CO₂), month-to-date with projected month cost, power-budget bar and per-component rows, today's stacked-area chart by component.
-3. **Breakdown** — stacked area CPU / GPU / display / rest over today / 7 d / 30 d / custom, W↔Wh toggle, per-component kWh and percentage table.
+3. **Breakdown** — stacked area CPU / GPU / display / rest over today / 7 d / 30 d / custom, W↔Wh toggle, per-component kWh and percentage table. Display means the internal panel plus opted-in external monitors. A negative rest band (measured mode, parts over-reporting) is clamped to zero on the chart and called out in a footnote.
 4. **Report** — range summary: kWh, cost, CO₂ kg, avg/peak, on / idle / asleep hours, idle waste with saving suggestion, comparisons (LED-bulb hours at 10 W, phone charges at 15 Wh, EV km at 0.18 kWh/km), quality mix, daily bars. Export PDF, CSV (raw / 1 m / 1 h), PNG.
 5. **Settings** — tariff and currency with history, CO₂ factor (country picker with bundled table, default 0.40 kg/kWh, editable), machine profile (chassis, PSU tier, extras, monitors, GPU/CPU TDP overrides), idle threshold, sample interval, retention, calibration status and reset, theme, start with Windows. About: service, driver, and per-source health.
 6. **First-run wizard** — tariff (region → suggested rate) → confirm detected hardware → "Measured vs Estimated" explainer.
