@@ -123,15 +123,18 @@ public class ReportQueriesTests
     }
 
     [Fact]
-    public void Crossing_the_resolution_limit_switches_source_tables()
+    public void Hour_rows_cover_the_bulk_and_minute_rows_fill_the_unfolded_tail()
     {
         using var t = new TestDatabase();
         var agg = new AggregateRepository(t.Db);
-        agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0, Fixtures.Minute(0, 30)));
-        agg.UpsertHour(Downsampler.ToHour(Fixtures.T0, [Downsampler.ToMinute(Fixtures.T0, Fixtures.Minute(0, 90))]));
-        var queries = new ReportQueries(t.Db);
-        queries.Totals(Fixtures.T0, Fixtures.T0 + ReportQueries.MinuteResolutionLimit).EnergyKwh.ShouldBe(30.0 / 60 / 1000, 1e-9);
-        queries.Totals(Fixtures.T0, Fixtures.T0 + ReportQueries.MinuteResolutionLimit + TimeSpan.FromMinutes(1)).EnergyKwh.ShouldBe(90.0 / 60 / 1000, 1e-9);
+        var firstHour = Enumerable.Range(0, 60).Select(i => Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), Fixtures.Minute(i * 60, 60))).ToList();
+        agg.UpsertHour(Downsampler.ToHour(Fixtures.T0, firstHour));
+        foreach (var m in firstHour) agg.UpsertMinute(m);                                              // same data, must not be counted twice
+        agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0.AddHours(1), Fixtures.Minute(3600, 120)));   // the hour the job has not folded yet
+
+        var totals = new ReportQueries(t.Db).Totals(Fixtures.T0, Fixtures.T0.AddHours(2));
+        totals.EnergyKwh.ShouldBe((60.0 + 2.0) / 1000, 1e-9);
+        totals.PeakW.ShouldBe(120);
     }
 
     [Fact]

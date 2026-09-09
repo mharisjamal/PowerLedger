@@ -25,24 +25,37 @@ public sealed class ReportQueries(SqliteDatabase db)
     public List<DayTotals> DailyBuckets(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo zone)
         => Days(Load(from, to).Rows, new TariffRepository(db).Schedule(), zone);
 
+    /// <summary>
+    /// Rows for the range, newest resolution first. Hour rows are kept forever and are the base of any range;
+    /// minute rows fill the hours the hourly job has not folded up yet, so an in-progress hour is never lost
+    /// and no hour is counted twice. The window returned is the requested range widened to whole rows.
+    /// </summary>
     private Window Load(DateTimeOffset from, DateTimeOffset to)
     {
         var repo = new AggregateRepository(db);
         var minute = TimeSpan.FromMinutes(1);
         var hour = TimeSpan.FromHours(1);
-        var wantMinutes = to - from <= MinuteResolutionLimit;
-        if (wantMinutes)
-        {
-            var rows = repo.ReadMinutes(Floor(from, minute), Ceiling(to, minute));
-            if (rows.Count > 0) return new Window(Floor(from, minute), Ceiling(to, minute), rows);
-        }
+        var hourFrom = Floor(from, hour);
+        var hourTo = Ceiling(to, hour);
 
-        // Minute rows are purged after a year or two; hour rows are kept forever, so an old short range still reports.
-        var hourRows = repo.ReadHours(Floor(from, hour), Ceiling(to, hour));
-        return hourRows.Count > 0 || !wantMinutes
-            ? new Window(Floor(from, hour), Ceiling(to, hour), hourRows)
-            : new Window(Floor(from, minute), Ceiling(to, minute), []);
+        var hours = repo.ReadHours(hourFrom, hourTo);
+        var folded = hours.Select(h => h.Start).ToHashSet();
+
+        // A short range reads minutes throughout; a long one only past the last folded hour, so the read stays bounded.
+        var minuteFrom = to - from <= MinuteResolutionLimit
+            ? Floor(from, minute)
+            : Max(Floor(from, minute), hours.Count > 0 ? hours[^1].Start + hour : hourTo - MinuteResolutionLimit);
+        var minutes = minuteFrom < Ceiling(to, minute)
+            ? repo.ReadMinutes(minuteFrom, Ceiling(to, minute)).Where(m => !folded.Contains(Floor(m.Start, hour))).ToList()
+            : [];
+
+        var rows = hours.Concat(minutes).OrderBy(r => r.Start).ToList();
+        return hours.Count > 0
+            ? new Window(hourFrom, hourTo, rows)
+            : new Window(Floor(from, minute), Ceiling(to, minute), rows);
     }
+
+    private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
 
     private static RangeTotals Summarise(Window w, TariffSchedule schedule)
     {

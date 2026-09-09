@@ -1115,7 +1115,7 @@ public sealed class PowerModel
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter PowerModelTests`
-Expected: `Passed! - Failed: 0, Passed: 20`.
+Expected: `Passed! - Failed: 0, Passed: 21`.
 
 - [x] **Step 5: Commit**
 
@@ -2189,7 +2189,7 @@ Expected: `Passed! - Failed: 0, Passed: 10`.
 - [x] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 107`.
+Expected: `Passed! - Failed: 0, Passed: 108`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -3768,15 +3768,18 @@ public class ReportQueriesTests
     }
 
     [Fact]
-    public void Crossing_the_resolution_limit_switches_source_tables()
+    public void Hour_rows_cover_the_bulk_and_minute_rows_fill_the_unfolded_tail()
     {
         using var t = new TestDatabase();
         var agg = new AggregateRepository(t.Db);
-        agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0, Fixtures.Minute(0, 30)));
-        agg.UpsertHour(Downsampler.ToHour(Fixtures.T0, [Downsampler.ToMinute(Fixtures.T0, Fixtures.Minute(0, 90))]));
-        var queries = new ReportQueries(t.Db);
-        queries.Totals(Fixtures.T0, Fixtures.T0 + ReportQueries.MinuteResolutionLimit).EnergyKwh.ShouldBe(30.0 / 60 / 1000, 1e-9);
-        queries.Totals(Fixtures.T0, Fixtures.T0 + ReportQueries.MinuteResolutionLimit + TimeSpan.FromMinutes(1)).EnergyKwh.ShouldBe(90.0 / 60 / 1000, 1e-9);
+        var firstHour = Enumerable.Range(0, 60).Select(i => Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), Fixtures.Minute(i * 60, 60))).ToList();
+        agg.UpsertHour(Downsampler.ToHour(Fixtures.T0, firstHour));
+        foreach (var m in firstHour) agg.UpsertMinute(m);                                              // same data, must not be counted twice
+        agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0.AddHours(1), Fixtures.Minute(3600, 120)));   // the hour the job has not folded yet
+
+        var totals = new ReportQueries(t.Db).Totals(Fixtures.T0, Fixtures.T0.AddHours(2));
+        totals.EnergyKwh.ShouldBe((60.0 + 2.0) / 1000, 1e-9);
+        totals.PeakW.ShouldBe(120);
     }
 
     [Fact]
@@ -3859,24 +3862,37 @@ public sealed class ReportQueries(SqliteDatabase db)
     public List<DayTotals> DailyBuckets(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo zone)
         => Days(Load(from, to).Rows, new TariffRepository(db).Schedule(), zone);
 
+    /// <summary>
+    /// Rows for the range, newest resolution first. Hour rows are kept forever and are the base of any range;
+    /// minute rows fill the hours the hourly job has not folded up yet, so an in-progress hour is never lost
+    /// and no hour is counted twice. The window returned is the requested range widened to whole rows.
+    /// </summary>
     private Window Load(DateTimeOffset from, DateTimeOffset to)
     {
         var repo = new AggregateRepository(db);
         var minute = TimeSpan.FromMinutes(1);
         var hour = TimeSpan.FromHours(1);
-        var wantMinutes = to - from <= MinuteResolutionLimit;
-        if (wantMinutes)
-        {
-            var rows = repo.ReadMinutes(Floor(from, minute), Ceiling(to, minute));
-            if (rows.Count > 0) return new Window(Floor(from, minute), Ceiling(to, minute), rows);
-        }
+        var hourFrom = Floor(from, hour);
+        var hourTo = Ceiling(to, hour);
 
-        // Minute rows are purged after a year or two; hour rows are kept forever, so an old short range still reports.
-        var hourRows = repo.ReadHours(Floor(from, hour), Ceiling(to, hour));
-        return hourRows.Count > 0 || !wantMinutes
-            ? new Window(Floor(from, hour), Ceiling(to, hour), hourRows)
-            : new Window(Floor(from, minute), Ceiling(to, minute), []);
+        var hours = repo.ReadHours(hourFrom, hourTo);
+        var folded = hours.Select(h => h.Start).ToHashSet();
+
+        // A short range reads minutes throughout; a long one only past the last folded hour, so the read stays bounded.
+        var minuteFrom = to - from <= MinuteResolutionLimit
+            ? Floor(from, minute)
+            : Max(Floor(from, minute), hours.Count > 0 ? hours[^1].Start + hour : hourTo - MinuteResolutionLimit);
+        var minutes = minuteFrom < Ceiling(to, minute)
+            ? repo.ReadMinutes(minuteFrom, Ceiling(to, minute)).Where(m => !folded.Contains(Floor(m.Start, hour))).ToList()
+            : [];
+
+        var rows = hours.Concat(minutes).OrderBy(r => r.Start).ToList();
+        return hours.Count > 0
+            ? new Window(hourFrom, hourTo, rows)
+            : new Window(Floor(from, minute), Ceiling(to, minute), rows);
     }
+
+    private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
 
     private static RangeTotals Summarise(Window w, TariffSchedule schedule)
     {
@@ -4043,7 +4059,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [x] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 109`, Storage `Passed: 40`, no failures, no skipped tests.
+Expected: Core `Passed: 110`, Storage `Passed: 40`, no failures, no skipped tests.
 
 - [x] **Step 3: Confirm the working tree is clean and every task is committed**
 
