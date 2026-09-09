@@ -8,6 +8,7 @@ public static class Migrator
 
     public static int LatestVersion => Migrations[^1].Version;
 
+    /// <summary>Stored schema version, 0 when never migrated. Creates the schema_version table if missing, so a never-migrated file needs a writable connection.</summary>
     public static int CurrentVersion(SqliteConnection c)
     {
         Exec(c, "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL, applied_ms INTEGER NOT NULL)");

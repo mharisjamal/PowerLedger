@@ -2194,6 +2194,7 @@ git commit -m "Add tariff schedule, cost, CO2 and comparison math"
 - Create: `src/PowerLedger.Storage/Migrator.cs`
 - Create: `src/PowerLedger.Storage/SqliteDatabase.cs`
 - Create: `src/PowerLedger.Storage/Rows.cs`
+- Modify: `src/PowerLedger.Storage/PowerLedger.Storage.csproj` — add `<ItemGroup><InternalsVisibleTo Include="PowerLedger.Storage.Tests" /></ItemGroup>` so tests can reach `Rows` and `SqliteDatabase.Backup`
 - Create: `tests/PowerLedger.Storage.Tests/TestDatabase.cs`
 - Test: `tests/PowerLedger.Storage.Tests/SqliteDatabaseTests.cs`
 
@@ -2235,12 +2236,13 @@ namespace PowerLedger.Storage.Tests;
 public class SqliteDatabaseTests
 {
     [Fact]
-    public void A_new_database_is_migrated_to_the_latest_version_in_wal_mode()
+    public void A_new_database_is_migrated_to_the_latest_version_in_wal_mode_with_incremental_vacuum()
     {
         using var t = new TestDatabase();
         using var c = t.Db.Open();
         Migrator.CurrentVersion(c).ShouldBe(Migrator.LatestVersion);
         Scalar<string>(c, "PRAGMA journal_mode").ShouldBe("wal");
+        Scalar<long>(c, "PRAGMA auto_vacuum").ShouldBe(2);
         Scalar<long>(c, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('samples_raw','samples_1m','samples_1h','sessions','tariffs','calibration','hardware_inventory','settings')").ShouldBe(8);
     }
 
@@ -2266,6 +2268,40 @@ public class SqliteDatabaseTests
         Scalar<long>(reader, "SELECT COUNT(*) FROM settings").ShouldBe(0);
         tx.Commit();
         Scalar<long>(reader, "SELECT COUNT(*) FROM settings").ShouldBe(1);
+    }
+
+    [Fact]
+    public void A_backup_taken_while_a_writer_is_open_includes_uncheckpointed_rows()
+    {
+        using var t = new TestDatabase();
+        using var writer = t.Db.Open();
+        for (var i = 0; i < 200; i++) Exec(writer, $"INSERT INTO settings(key, value) VALUES ('k{i}', '{i}')");
+
+        var bak = t.Path + ".bak";
+        SqliteDatabase.Backup(writer, bak);
+
+        using var bakDb = new SqliteDatabase(bak, readOnly: true);
+        using var reader = bakDb.Open();
+        Scalar<long>(reader, "SELECT COUNT(*) FROM settings").ShouldBe(200);
+        Scalar<string>(reader, "PRAGMA journal_mode").ShouldBe("delete");
+        File.Exists(bak + "-wal").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_read_only_handle_to_a_missing_file_throws_and_creates_nothing()
+    {
+        var missing = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"powerledger-missing-{Guid.NewGuid():N}.db");
+        using var db = new SqliteDatabase(missing, readOnly: true);
+        Should.Throw<SqliteException>(() => db.Open());
+        File.Exists(missing).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Prices_round_trip_through_micro_units_rounding_half_away_from_zero()
+    {
+        Rows.Micro(0.17m).ShouldBe(170_000);
+        Rows.Micro(0.1234565m).ShouldBe(123_457);
+        Rows.Price(123_457).ShouldBe(0.123457m);
     }
 
     private static T Scalar<T>(SqliteConnection c, string sql)
@@ -2397,6 +2433,7 @@ public static class Migrator
 
     public static int LatestVersion => Migrations[^1].Version;
 
+    /// <summary>Stored schema version, 0 when never migrated. Creates the schema_version table if missing, so a never-migrated file needs a writable connection.</summary>
     public static int CurrentVersion(SqliteConnection c)
     {
         Exec(c, "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL, applied_ms INTEGER NOT NULL)");
@@ -2454,36 +2491,67 @@ public sealed class SqliteDatabase : IDisposable
         }.ToString();
     }
 
-    /// <summary>Opens (creating if needed), backs up before a schema upgrade, sets pragmas and migrates.</summary>
+    /// <summary>Opens (creating if needed), takes a complete backup before a schema upgrade, and migrates.</summary>
     public static SqliteDatabase OpenAndMigrate(string path)
     {
         var existedBefore = File.Exists(path) && new FileInfo(path).Length > 0;
         var db = new SqliteDatabase(path);
         using var c = db.Open();
-        Migrator.Exec(c, "PRAGMA auto_vacuum = INCREMENTAL");   // only takes effect on a brand-new file; harmless otherwise
         if (existedBefore && Migrator.CurrentVersion(c) < Migrator.LatestVersion)
         {
-            File.Copy(path, path + ".bak", overwrite: true);   // spec §7: backup once per schema version bump
+            Backup(c, path + ".bak");   // spec §7: backup once per schema version bump
         }
         Migrator.Apply(c);
         return db;
     }
 
+    /// <summary>A connection with busy_timeout set; writers also get WAL, synchronous=NORMAL and foreign keys.</summary>
     public SqliteConnection Open()
     {
         var c = new SqliteConnection(_connectionString);
-        c.Open();
-        Migrator.Exec(c, "PRAGMA busy_timeout = 5000");
-        if (!_readOnly)
+        try
         {
-            Migrator.Exec(c, "PRAGMA journal_mode = WAL");
-            Migrator.Exec(c, "PRAGMA synchronous = NORMAL");
-            Migrator.Exec(c, "PRAGMA foreign_keys = ON");
+            c.Open();
+            Migrator.Exec(c, "PRAGMA busy_timeout = 5000");
+            if (!_readOnly)
+            {
+                // auto_vacuum is baked into page 1 by the first write, so it must precede journal_mode on a brand-new file.
+                if (IsEmptyFile()) Migrator.Exec(c, "PRAGMA auto_vacuum = INCREMENTAL");
+                Migrator.Exec(c, "PRAGMA journal_mode = WAL");
+                Migrator.Exec(c, "PRAGMA synchronous = NORMAL");
+                Migrator.Exec(c, "PRAGMA foreign_keys = ON");
+            }
+            return c;
         }
-        return c;
+        catch
+        {
+            c.Dispose();
+            throw;
+        }
     }
 
-    public void Dispose() => SqliteConnection.ClearPool(new SqliteConnection(_connectionString));
+    /// <summary>Complete copy through the online backup API (WAL content included), written as a single non-WAL file.</summary>
+    internal static void Backup(SqliteConnection source, string backupPath)
+    {
+        foreach (var f in new[] { backupPath, backupPath + "-wal", backupPath + "-shm" }) File.Delete(f);
+        using var destination = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = backupPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+        }.ToString());
+        destination.Open();
+        source.BackupDatabase(destination);
+        Migrator.Exec(destination, "PRAGMA journal_mode = DELETE");
+    }
+
+    public void Dispose()
+    {
+        using var probe = new SqliteConnection(_connectionString);
+        SqliteConnection.ClearPool(probe);
+    }
+
+    private bool IsEmptyFile() => !File.Exists(Path) || new FileInfo(Path).Length == 0;
 }
 ```
 
@@ -2493,14 +2561,15 @@ using Microsoft.Data.Sqlite;
 
 namespace PowerLedger.Storage;
 
-/// <summary>Small helpers shared by the repositories.</summary>
+/// <summary>Small helpers shared by the repositories. Microsoft.Data.Sqlite refuses to bind NaN, so callers never pass non-finite doubles (the integrator guards them upstream).</summary>
 internal static class Rows
 {
     public static long Ms(DateTimeOffset t) => t.ToUnixTimeMilliseconds();
 
     public static DateTimeOffset Time(long ms) => DateTimeOffset.FromUnixTimeMilliseconds(ms);
 
-    public static long Micro(decimal price) => (long)decimal.Round(price * 1_000_000m);
+    /// <summary>Price to integer micro-units: six decimals, halves rounded away from zero.</summary>
+    public static long Micro(decimal price) => (long)decimal.Round(price * 1_000_000m, MidpointRounding.AwayFromZero);
 
     public static decimal Price(long micro) => micro / 1_000_000m;
 
@@ -2513,7 +2582,7 @@ internal static class Rows
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter SqliteDatabaseTests`
-Expected: `Passed! - Failed: 0, Passed: 3`.
+Expected: `Passed! - Failed: 0, Passed: 6`.
 
 - [x] **Step 5: Commit**
 
@@ -3729,7 +3798,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 108`, Storage `Passed: 27`, no failures, no skipped tests.
+Expected: Core `Passed: 108`, Storage `Passed: 30`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 

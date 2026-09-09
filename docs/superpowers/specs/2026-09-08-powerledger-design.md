@@ -204,7 +204,7 @@ Cost is computed at query time as `Σ energy × tariff effective at that time`, 
 - Every minute: aggregate the previous full minute of raw rows into `samples_1m`.
 - Every hour: aggregate `samples_1m` into `samples_1h`.
 - Daily at 03:00 local: purge raw rows older than the raw retention (default 48 h, configurable 24–168 h) and 1-minute rows older than the history retention (default 2 years, configurable 1–5 years); run `PRAGMA incremental_vacuum` weekly. Never a full `VACUUM`. Hourly rows are never purged.
-- Migrations run at service start inside a transaction, with `power.db.bak` written once per schema version bump.
+- Migrations run at service start inside a transaction, with `power.db.bak` written once per schema version bump through SQLite's online backup API, so uncheckpointed WAL content is included and the backup is a single self-contained file.
 
 ### Query API (Storage → App)
 
