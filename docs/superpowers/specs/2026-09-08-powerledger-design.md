@@ -138,7 +138,7 @@ Desktops divide by PSU efficiency; laptops use 1.0 on battery and 0.90 (adapter 
 
 ### Baseline auto-calibration (laptops)
 
-Every second on battery provides ground truth: `baselineObserved = measured − cpu − dGpu − displayModel`. The learner keeps one running average per brightness bucket (10 % steps, plus a display-off bucket), keyed by the hardware inventory hash, with an exponential weighting whose half-life is 10 minutes of samples. Suspect samples and the 3 s after transitions are excluded.
+Every second on battery provides ground truth: `baselineObserved = measured − cpu − dGpu − displayModel`. The learner keeps one running average per brightness bucket (10 % steps, plus a display-off bucket), keyed by the hardware inventory hash, with an exponential weighting whose half-life is 10 minutes of samples. A young bucket uses a plain running mean until it holds roughly one half-life of samples, so the first tick after a brightness change does not dominate. Residuals are averaged as they are, negative ones included (a clamp would bias the baseline upward), and the reported baseline is clamped at zero. Suspect samples, samples with non-finite parts, and the 3 s after transitions are excluded. The learner is thread-safe because the Service samples on one thread and exports or resets from the pipe thread.
 
 A bucket counts as calibrated once it holds ≥ 5 minutes of samples and the machine has ≥ 30 minutes of battery samples in total. Calibrated baselines replace the defaults in AC mode. Calibration progress and a reset button appear in Settings.
 

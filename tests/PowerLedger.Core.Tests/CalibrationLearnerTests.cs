@@ -38,7 +38,7 @@ public class CalibrationLearnerTests
     public void The_average_moves_with_the_configured_half_life()
     {
         var learner = new CalibrationLearner(Fast);
-        Feed(learner, 1, batteryW: 26);                        // seeds bucket at 10 W
+        Feed(learner, 20, batteryW: 26);                       // 20 samples at 10 W: past the warm-up, mean is exactly 10 W
         Feed(learner, 30, batteryW: 36);                       // 20 W for three half-lives
         learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldNotBeNull().ShouldBe(20 - 10 * 0.125, 0.05);
     }
@@ -88,12 +88,53 @@ public class CalibrationLearnerTests
         learner.Import(new CalibrationState([
             new BucketState(6, 9.0, 10),
             new BucketState(7, double.NaN, 10),
-            new BucketState(8, -1.0, 10),
+            new BucketState(8, 1e9, 10),
             new BucketState(9, 5.0, 0),
+            new BucketState(99, 5.0, 10),
+            new BucketState(-5, 5.0, 10),
         ]));
         learner.TotalSamples.ShouldBe(10);
         learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldNotBeNull().ShouldBe(9.0, 0.0001);
         learner.GetBaseline(CalibrationBuckets.For(0.7, true)).ShouldBeNull();
+        learner.GetBaseline(99).ShouldBeNull();
+        learner.GetBaseline(CalibrationBuckets.MaxBucket).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Thresholds_are_inclusive_and_independent()
+    {
+        var learner = new CalibrationLearner(new CalibrationOptions(HalfLifeSamples: 10, MinBucketSamples: 5, MinTotalSamples: 8));
+        Feed(learner, 5, batteryW: 25, brightness: 0.6);
+        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldBeNull();          // bucket ready, machine not (5 < 8)
+        Feed(learner, 3, batteryW: 25, brightness: 0.2);
+        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldNotBeNull();       // total now 8
+        learner.GetBaseline(CalibrationBuckets.For(0.2, true)).ShouldBeNull();          // bucket has 3 < 5
+    }
+
+    [Fact]
+    public void Non_finite_parts_are_ignored()
+    {
+        var learner = new CalibrationLearner(Fast);
+        learner.Observe(TestData.Laptop(battery: 25, onBattery: true), double.NaN, 2, 4);
+        learner.Observe(TestData.Laptop(battery: 25, onBattery: true), 10, double.PositiveInfinity, 4);
+        learner.TotalSamples.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Negative_residuals_are_averaged_raw_but_reported_as_zero()
+    {
+        var learner = new CalibrationLearner(Fast);
+        Feed(learner, 10, batteryW: 10);                       // 10 - 10 - 2 - 4 = -6 W
+        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldNotBeNull().ShouldBe(0.0, 0.0001);
+        learner.Export().Buckets.Single().BaselineW.ShouldBe(-6.0, 0.0001);
+    }
+
+    [Fact]
+    public void Invalid_options_throw()
+    {
+        Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(HalfLifeSamples: 0)));
+        Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(MinBucketSamples: -1)));
+        Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(MinTotalSamples: 0)));
     }
 
     [Fact]
