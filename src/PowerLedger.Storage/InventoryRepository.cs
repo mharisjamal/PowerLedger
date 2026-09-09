@@ -1,9 +1,11 @@
 namespace PowerLedger.Storage;
 
 /// <param name="Hash">Stable hash of the detected hardware set (computed by the Sensors project in Plan B).</param>
+/// <param name="DetectedAt">When this hardware set was first seen.</param>
 /// <param name="Json">The detected inventory, serialised for display and diagnostics.</param>
 public sealed record InventoryRecord(string Hash, DateTimeOffset DetectedAt, string Json);
 
+/// <summary>Detected hardware sets. The hash keys calibration, so a hardware change never reuses stale baselines.</summary>
 public sealed class InventoryRepository(SqliteDatabase db)
 {
     /// <summary>Inserts a new hardware set; an existing hash keeps its first detection time.</summary>
@@ -18,8 +20,17 @@ public sealed class InventoryRepository(SqliteDatabase db)
         cmd.ExecuteNonQuery();
     }
 
-    public InventoryRecord? Latest() => All().OrderByDescending(r => r.DetectedAt).FirstOrDefault();
+    /// <summary>The most recently detected hardware set, or null when none was ever recorded.</summary>
+    public InventoryRecord? Latest()
+    {
+        using var c = db.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT hash, detected_ms, json FROM hardware_inventory ORDER BY detected_ms DESC, hash DESC LIMIT 1";
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? new InventoryRecord(r.GetString(0), Rows.Time(r.GetInt64(1)), r.GetString(2)) : null;
+    }
 
+    /// <summary>Every hardware set, oldest first.</summary>
     public List<InventoryRecord> All()
     {
         using var c = db.Open();

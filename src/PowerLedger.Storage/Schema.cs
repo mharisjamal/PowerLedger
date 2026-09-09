@@ -72,7 +72,7 @@ internal static class Schema
             bucket         INTEGER NOT NULL,
             baseline_w     REAL    NOT NULL,
             samples        INTEGER NOT NULL,
-            updated_ms     INTEGER NOT NULL,
+            updated_ms     INTEGER NOT NULL,   -- diagnostic only: when this bucket was last saved
             PRIMARY KEY (inventory_hash, bucket)
         );
 

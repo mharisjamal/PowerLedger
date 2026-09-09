@@ -3408,6 +3408,40 @@ public class CalibrationInventoryRetentionTests
         RetentionOptions.Clamped(rawHours: 500, historyYears: 0).ShouldBe(new RetentionOptions(168, 1));
         RetentionOptions.Clamped(72, 3).ShouldBe(new RetentionOptions(72, 3));
     }
+
+    [Fact]
+    public void Saving_an_empty_state_clears_the_hash()
+    {
+        using var t = new TestDatabase();
+        var repo = new CalibrationRepository(t.Db);
+        repo.Save("abc", new CalibrationState([new BucketState(6, 9.0, 400)]), Fixtures.T0);
+        repo.Save("abc", CalibrationState.Empty, Fixtures.T0.AddMinutes(1));
+        repo.Load("abc").Buckets.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Retention_deletes_nothing_when_everything_is_young()
+    {
+        using var t = new TestDatabase();
+        var raw = new RawSampleRepository(t.Db);
+        raw.InsertBatch([Fixtures.Reading(0)]);
+        new AggregateRepository(t.Db).UpsertMinute(Aggregate.Empty(Fixtures.T0));
+        new RetentionJob(t.Db).Run(Fixtures.T0.AddHours(1), new RetentionOptions()).ShouldBe(new RetentionResult(0, 0));
+        raw.Count().ShouldBe(1);
+    }
+
+    [Fact]
+    public void Out_of_range_options_cannot_widen_the_purge_and_vacuum_reclaims_pages()
+    {
+        using var t = new TestDatabase();
+        var raw = new RawSampleRepository(t.Db);
+        raw.InsertBatch([Fixtures.Reading(0) with { Timestamp = Fixtures.T0.AddHours(-25) }]);
+        // 0 hours would purge everything; the clamp holds it at 24 h, so this row survives.
+        new RetentionJob(t.Db).Run(Fixtures.T0, new RetentionOptions(RawHours: 0, HistoryYears: 0)).RawDeleted.ShouldBe(1);
+        raw.InsertBatch([Fixtures.Reading(0) with { Timestamp = Fixtures.T0.AddHours(-1) }]);
+        new RetentionJob(t.Db).Run(Fixtures.T0, new RetentionOptions(RawHours: 0, HistoryYears: 0)).RawDeleted.ShouldBe(0);
+        new RetentionJob(t.Db).IncrementalVacuum();
+    }
 }
 ```
 
@@ -3420,6 +3454,7 @@ Expected: build error, `CalibrationRepository` not found.
 
 `src/PowerLedger.Storage/CalibrationRepository.cs`
 ```csharp
+using Microsoft.Data.Sqlite;
 using PowerLedger.Core;
 
 namespace PowerLedger.Storage;
@@ -3427,6 +3462,7 @@ namespace PowerLedger.Storage;
 /// <summary>Learned baselines, keyed by hardware inventory hash so a hardware change never reuses stale numbers.</summary>
 public sealed class CalibrationRepository(SqliteDatabase db)
 {
+    /// <summary>Replaces everything stored for this hardware set. An empty state clears it.</summary>
     public void Save(string inventoryHash, CalibrationState state, DateTimeOffset now)
     {
         using var c = db.Open();
@@ -3440,24 +3476,25 @@ public sealed class CalibrationRepository(SqliteDatabase db)
         using (var ins = c.CreateCommand())
         {
             ins.CommandText = "INSERT INTO calibration(inventory_hash, bucket, baseline_w, samples, updated_ms) VALUES ($hash, $bucket, $baseline, $samples, $updated)";
-            var hash = ins.Parameters.Add("$hash", Microsoft.Data.Sqlite.SqliteType.Text);
-            var bucket = ins.Parameters.Add("$bucket", Microsoft.Data.Sqlite.SqliteType.Integer);
-            var baseline = ins.Parameters.Add("$baseline", Microsoft.Data.Sqlite.SqliteType.Real);
-            var samples = ins.Parameters.Add("$samples", Microsoft.Data.Sqlite.SqliteType.Integer);
-            var updated = ins.Parameters.Add("$updated", Microsoft.Data.Sqlite.SqliteType.Integer);
+            var hash = ins.Parameters.Add("$hash", SqliteType.Text);
+            var bucket = ins.Parameters.Add("$bucket", SqliteType.Integer);
+            var baseline = ins.Parameters.Add("$baseline", SqliteType.Real);
+            var samples = ins.Parameters.Add("$samples", SqliteType.Integer);
+            var updated = ins.Parameters.Add("$updated", SqliteType.Integer);
+            hash.Value = inventoryHash;
+            updated.Value = Rows.Ms(now);
             foreach (var b in state.Buckets)
             {
-                hash.Value = inventoryHash;
                 bucket.Value = b.Bucket;
                 baseline.Value = b.BaselineW;
                 samples.Value = b.Samples;
-                updated.Value = Rows.Ms(now);
                 ins.ExecuteNonQuery();
             }
         }
         tx.Commit();
     }
 
+    /// <summary>The stored buckets for this hardware set, ordered by bucket; empty when nothing was learned. Values are not validated here; CalibrationLearner.Import filters corrupt rows.</summary>
     public CalibrationState Load(string inventoryHash)
     {
         using var c = db.Open();
@@ -3470,6 +3507,7 @@ public sealed class CalibrationRepository(SqliteDatabase db)
         return new CalibrationState(buckets);
     }
 
+    /// <summary>Forgets everything learned for this hardware set.</summary>
     public void Clear(string inventoryHash)
     {
         using var c = db.Open();
@@ -3486,9 +3524,11 @@ public sealed class CalibrationRepository(SqliteDatabase db)
 namespace PowerLedger.Storage;
 
 /// <param name="Hash">Stable hash of the detected hardware set (computed by the Sensors project in Plan B).</param>
+/// <param name="DetectedAt">When this hardware set was first seen.</param>
 /// <param name="Json">The detected inventory, serialised for display and diagnostics.</param>
 public sealed record InventoryRecord(string Hash, DateTimeOffset DetectedAt, string Json);
 
+/// <summary>Detected hardware sets. The hash keys calibration, so a hardware change never reuses stale baselines.</summary>
 public sealed class InventoryRepository(SqliteDatabase db)
 {
     /// <summary>Inserts a new hardware set; an existing hash keeps its first detection time.</summary>
@@ -3503,8 +3543,17 @@ public sealed class InventoryRepository(SqliteDatabase db)
         cmd.ExecuteNonQuery();
     }
 
-    public InventoryRecord? Latest() => All().OrderByDescending(r => r.DetectedAt).FirstOrDefault();
+    /// <summary>The most recently detected hardware set, or null when none was ever recorded.</summary>
+    public InventoryRecord? Latest()
+    {
+        using var c = db.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT hash, detected_ms, json FROM hardware_inventory ORDER BY detected_ms DESC, hash DESC LIMIT 1";
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? new InventoryRecord(r.GetString(0), Rows.Time(r.GetInt64(1)), r.GetString(2)) : null;
+    }
 
+    /// <summary>Every hardware set, oldest first.</summary>
     public List<InventoryRecord> All()
     {
         using var c = db.Open();
@@ -3523,20 +3572,28 @@ public sealed class InventoryRepository(SqliteDatabase db)
 namespace PowerLedger.Storage;
 
 /// <summary>Spec §7: raw 24–168 h (default 48), minute history 1–5 years (default 2). Hour rows are kept forever.</summary>
+/// <param name="RawHours">How long raw one-second rows are kept.</param>
+/// <param name="HistoryYears">How long minute rows are kept.</param>
 public sealed record RetentionOptions(int RawHours = 48, int HistoryYears = 2)
 {
+    /// <summary>The same options with both values forced into the spec's bounds.</summary>
     public static RetentionOptions Clamped(int rawHours, int historyYears)
         => new(Math.Clamp(rawHours, 24, 168), Math.Clamp(historyYears, 1, 5));
 }
 
+/// <param name="RawDeleted">Raw rows removed.</param>
+/// <param name="MinutesDeleted">Minute rows removed.</param>
 public sealed record RetentionResult(int RawDeleted, int MinutesDeleted);
 
+/// <summary>Daily housekeeping: purges expired rows and, weekly, reclaims free pages.</summary>
 public sealed class RetentionJob(SqliteDatabase db)
 {
+    /// <summary>Purges raw and minute rows older than the retention window. Options are clamped, so no caller can widen the purge past the spec's bounds. Hour rows are never touched.</summary>
     public RetentionResult Run(DateTimeOffset now, RetentionOptions options)
     {
-        var raw = new RawSampleRepository(db).PurgeBefore(now.AddHours(-options.RawHours));
-        var minutes = new AggregateRepository(db).PurgeMinutesBefore(now.AddYears(-options.HistoryYears));
+        var safe = RetentionOptions.Clamped(options.RawHours, options.HistoryYears);
+        var raw = new RawSampleRepository(db).PurgeBefore(now.AddHours(-safe.RawHours));
+        var minutes = new AggregateRepository(db).PurgeMinutesBefore(now.AddYears(-safe.HistoryYears));
         return new RetentionResult(raw, minutes);
     }
 
@@ -3552,7 +3609,7 @@ public sealed class RetentionJob(SqliteDatabase db)
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter CalibrationInventoryRetentionTests`
-Expected: `Passed! - Failed: 0, Passed: 4`.
+Expected: `Passed! - Failed: 0, Passed: 7`.
 
 - [x] **Step 5: Commit**
 
@@ -3874,7 +3931,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 108`, Storage `Passed: 33`, no failures, no skipped tests.
+Expected: Core `Passed: 108`, Storage `Passed: 36`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 

@@ -67,4 +67,38 @@ public class CalibrationInventoryRetentionTests
         RetentionOptions.Clamped(rawHours: 500, historyYears: 0).ShouldBe(new RetentionOptions(168, 1));
         RetentionOptions.Clamped(72, 3).ShouldBe(new RetentionOptions(72, 3));
     }
+
+    [Fact]
+    public void Saving_an_empty_state_clears_the_hash()
+    {
+        using var t = new TestDatabase();
+        var repo = new CalibrationRepository(t.Db);
+        repo.Save("abc", new CalibrationState([new BucketState(6, 9.0, 400)]), Fixtures.T0);
+        repo.Save("abc", CalibrationState.Empty, Fixtures.T0.AddMinutes(1));
+        repo.Load("abc").Buckets.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Retention_deletes_nothing_when_everything_is_young()
+    {
+        using var t = new TestDatabase();
+        var raw = new RawSampleRepository(t.Db);
+        raw.InsertBatch([Fixtures.Reading(0)]);
+        new AggregateRepository(t.Db).UpsertMinute(Aggregate.Empty(Fixtures.T0));
+        new RetentionJob(t.Db).Run(Fixtures.T0.AddHours(1), new RetentionOptions()).ShouldBe(new RetentionResult(0, 0));
+        raw.Count().ShouldBe(1);
+    }
+
+    [Fact]
+    public void Out_of_range_options_cannot_widen_the_purge_and_vacuum_reclaims_pages()
+    {
+        using var t = new TestDatabase();
+        var raw = new RawSampleRepository(t.Db);
+        raw.InsertBatch([Fixtures.Reading(0) with { Timestamp = Fixtures.T0.AddHours(-25) }]);
+        // 0 hours would purge everything; the clamp holds it at 24 h, so this row survives.
+        new RetentionJob(t.Db).Run(Fixtures.T0, new RetentionOptions(RawHours: 0, HistoryYears: 0)).RawDeleted.ShouldBe(1);
+        raw.InsertBatch([Fixtures.Reading(0) with { Timestamp = Fixtures.T0.AddHours(-1) }]);
+        new RetentionJob(t.Db).Run(Fixtures.T0, new RetentionOptions(RawHours: 0, HistoryYears: 0)).RawDeleted.ShouldBe(0);
+        new RetentionJob(t.Db).IncrementalVacuum();
+    }
 }
