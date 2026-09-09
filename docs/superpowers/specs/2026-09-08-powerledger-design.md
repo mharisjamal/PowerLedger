@@ -129,12 +129,12 @@ Reading { ts, totalW, quality, components: { cpu, gpu, display, ram, storage, bo
 
 ### Modes
 
-1. **Laptop on battery** → `totalW = |batteryRateW|`. Quality **Measured** (±3 %). Components are still computed for the breakdown; `rest = measured − cpu − gpu − display`.
+1. **Laptop with a usable discharge rate** (on battery; rate finite and above zero, since zero or negative means charging or a transition blip) → `totalW = batteryRateW + monitors`. Quality **Measured** (±3 %). Components are still computed for the breakdown; `rest = measured − cpu − gpu − display`, which may go negative when the parts over-report (the honest sensor-disagreement signal). `Components.Sum` always equals `totalW`.
 2. **Any machine on AC** → `totalW = (cpu + gpu + display + baseline) / psuEfficiency + monitors`. External monitors are wall-powered, so they are added after the supply-efficiency division and never contribute to PSU loss.
    - Quality **Calibrated** (±10 %) when a learned baseline exists for the current brightness bucket (see below).
    - Quality **Estimated** (±20 %) otherwise.
 
-Desktops divide by PSU efficiency; laptops use 1.0 on battery and 0.90 (adapter efficiency) on AC.
+Desktops divide by PSU efficiency; laptops use 1.0 on battery and 0.90 (adapter efficiency) on AC. Desktops are always Estimated: battery rates (a UPS) and learned baselines apply to laptops only. A learned baseline was observed on battery and therefore already contains any extras drawing from the battery, so `Extras` is reported as 0 in calibrated mode.
 
 ### Baseline auto-calibration (laptops)
 

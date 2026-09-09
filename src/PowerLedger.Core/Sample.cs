@@ -23,4 +23,9 @@ public sealed record Sample(
     int MonitorCount,
     double UserIdleSeconds,
     bool SessionLocked,
-    bool Suspect);
+    bool Suspect)
+{
+    /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
+    /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>
+    public bool HasDischargeRate => OnBattery && BatteryRateW is { } rate && double.IsFinite(rate) && rate > 0;
+}

@@ -4,11 +4,13 @@ namespace PowerLedger.Core;
 
 /// <summary>
 /// Turns one <see cref="Sample"/> into a <see cref="Reading"/> (spec §5).
-/// Battery discharge is the truth when available; otherwise the parts are summed
-/// with a learned or default "rest of system" baseline and divided by supply efficiency.
+/// On a laptop the battery discharge rate is the truth when available; otherwise the parts are summed
+/// with a learned (laptop) or default "rest of system" baseline and divided by supply efficiency.
+/// Desktops are always estimated. Wall-powered external monitors are added after the efficiency division.
 /// </summary>
 public sealed class PowerModel
 {
+    /// <summary>Default laptop "rest of system" (board, RAM, SSD, radios) before calibration. Extras are separate.</summary>
     public const double LaptopBaselineW = 5;
     public const double DesktopBoardW = 12;
     public const double FanW = 1;
@@ -33,6 +35,11 @@ public sealed class PowerModel
         _baselines = baselines;
     }
 
+    /// <summary>
+    /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; in measured mode <c>Rest</c> may go
+    /// negative when the parts over-report, which is the honest sensor-disagreement signal.
+    /// The Service feeds <c>Components.Cpu</c>, <c>Gpu</c> and <c>Display</c> back into the calibration learner.
+    /// </summary>
     public Reading Evaluate(Sample s)
     {
         var cpu = CpuWatts(s);
@@ -40,31 +47,40 @@ public sealed class PowerModel
         var display = DisplayModel.PanelWatts(_profile, s.Brightness, s.DisplayOn);
         var monitors = DisplayModel.MonitorWatts(_profile, s.DisplayOn);
         var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds;
+        var isLaptop = _profile.Chassis == ChassisKind.Laptop;
 
-        if (s.OnBattery && s.BatteryRateW is { } measured && measured >= 0)
+        if (isLaptop && s.HasDischargeRate)
         {
-            var rest = Math.Max(0, measured - cpu - gpu - display);
-            var measuredParts = new Components(cpu, gpu, display, 0, 0, 0, 0, 0, 0, rest);
-            return Build(s, measured, Quality.Measured, measuredParts, userIdle);
+            var measured = s.BatteryRateW!.Value;
+            var measuredParts = new Components(
+                Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
+                Monitors: monitors, PsuLoss: 0, Rest: measured - cpu - gpu - display);
+            return Build(s, measured + monitors, Quality.Measured, measuredParts, userIdle);
         }
 
-        var isLaptop = _profile.Chassis == ChassisKind.Laptop;
         Components parts;
         Quality quality;
-        if (_baselines.GetBaseline(CalibrationBuckets.For(s.Brightness, s.DisplayOn)) is { } learned)
+        if (isLaptop && _baselines.GetBaseline(CalibrationBuckets.For(s.Brightness, s.DisplayOn)) is { } learned)
         {
-            parts = new Components(cpu, gpu, display, 0, 0, 0, 0, monitors, 0, learned);
+            // The learned baseline was observed on battery, so it already contains any extras drawing from the battery.
+            parts = new Components(
+                Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
+                Monitors: monitors, PsuLoss: 0, Rest: learned);
             quality = Quality.Calibrated;
         }
         else if (isLaptop)
         {
-            parts = new Components(cpu, gpu, display, 0, 0, 0, _profile.ExtrasWatts, monitors, 0, Rest: LaptopBaselineW);
+            parts = new Components(
+                Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: _profile.ExtrasWatts,
+                Monitors: monitors, PsuLoss: 0, Rest: LaptopBaselineW);
             quality = Quality.Estimated;
         }
         else
         {
-            var board = DesktopBoardW + _profile.FanCount * FanW;
-            parts = new Components(cpu, gpu, display, RamWatts(), StorageWatts(), board, _profile.ExtrasWatts, monitors, 0, 0);
+            parts = new Components(
+                Cpu: cpu, Gpu: gpu, Display: display, Ram: RamWatts(), Storage: StorageWatts(),
+                Board: DesktopBoardW + _profile.FanCount * FanW, Extras: _profile.ExtrasWatts,
+                Monitors: monitors, PsuLoss: 0, Rest: 0);
             quality = Quality.Estimated;
         }
 
@@ -84,21 +100,26 @@ public sealed class PowerModel
 
     private double CpuWatts(Sample s)
     {
-        if (s.CpuPackageW is { } w) return Math.Max(0, w);
+        if (Finite(s.CpuPackageW) is { } w) return Math.Max(0, w);
         var idle = _profile.Chassis == ChassisKind.Laptop ? CpuIdleLaptopW : CpuIdleDesktopW;
         var tdp = Math.Max(idle + 1, _profile.CpuTdpOverrideW ?? _facts.CpuTdpW);
-        return idle + (tdp - idle) * Math.Clamp(s.CpuLoad, 0, 1);
+        return idle + (tdp - idle) * Load(s.CpuLoad);
     }
 
     private double GpuWatts(Sample s)
     {
         if (!s.DGpuPresent) return 0;
-        if (s.DGpuW is { } w) return Math.Max(0, w);
+        if (Finite(s.DGpuW) is { } w) return Math.Max(0, w);
         var tdp = Math.Max(GpuIdleW + 1, _profile.GpuTdpOverrideW ?? _facts.GpuTdpW);
-        return GpuIdleW + (tdp - GpuIdleW) * Math.Clamp(s.DGpuLoad ?? 0, 0, 1);
+        return GpuIdleW + (tdp - GpuIdleW) * Load(s.DGpuLoad ?? 0);
     }
 
     private double RamWatts() => _profile.RamSticks * (_profile.RamIsDdr5 ? Ddr5StickW : Ddr4StickW);
 
     private double StorageWatts() => _profile.SsdCount * SsdW + _profile.HddCount * HddW;
+
+    /// <summary>NaN and infinity count as "no value", like null.</summary>
+    private static double? Finite(double? value) => value is { } v && double.IsFinite(v) ? v : null;
+
+    private static double Load(double load) => double.IsFinite(load) ? Math.Clamp(load, 0, 1) : 0;
 }

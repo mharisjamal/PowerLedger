@@ -484,7 +484,12 @@ public sealed record Sample(
     int MonitorCount,
     double UserIdleSeconds,
     bool SessionLocked,
-    bool Suspect);
+    bool Suspect)
+{
+    /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
+    /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>
+    public bool HasDischargeRate => OnBattery && BatteryRateW is { } rate && double.IsFinite(rate) && rate > 0;
+}
 ```
 
 `src/PowerLedger.Core/Components.cs`
@@ -778,11 +783,11 @@ namespace PowerLedger.Core.Tests;
 
 public class PowerModelTests
 {
-    private static PowerModel Laptop(double? baseline = null, PowerModelOptions? options = null)
-        => new(MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, options ?? new PowerModelOptions(), new FixedBaseline(baseline));
+    private static PowerModel Laptop(double? baseline = null, PowerModelOptions? options = null, MachineProfile? profile = null)
+        => new(profile ?? MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, options ?? new PowerModelOptions(), new FixedBaseline(baseline));
 
-    private static PowerModel Desktop()
-        => new(MachineProfile.DefaultDesktop, HardwareFacts.DesktopDefaults, new PowerModelOptions(), new FixedBaseline(null));
+    private static PowerModel Desktop(double? baseline = null, MachineProfile? profile = null)
+        => new(profile ?? MachineProfile.DefaultDesktop, HardwareFacts.DesktopDefaults, new PowerModelOptions(), new FixedBaseline(baseline));
 
     [Fact]
     public void On_battery_the_discharge_rate_is_the_total_and_the_remainder_becomes_rest()
@@ -795,6 +800,37 @@ public class PowerModelTests
         r.Components.Display.ShouldBe(4.2, 0.001);
         r.Components.Rest.ShouldBe(34.2 - 14.6 - 4.1 - 4.2, 0.001);
         r.Components.PsuLoss.ShouldBe(0);
+        r.Components.Sum.ShouldBe(r.TotalW, 0.001);
+    }
+
+    [Fact]
+    public void Parts_exceeding_the_measured_rate_give_a_negative_rest_and_keep_sum_equal_to_total()
+    {
+        var r = Laptop().Evaluate(TestData.Laptop(cpu: 10, gpu: 3, battery: 8.0, onBattery: true));
+        r.Quality.ShouldBe(Quality.Measured);
+        r.TotalW.ShouldBe(8.0, 0.001);
+        r.Components.Rest.ShouldBe(8.0 - 10 - 3 - 4.2, 0.001);
+        r.Components.Sum.ShouldBe(r.TotalW, 0.001);
+    }
+
+    [Fact]
+    public void Zero_or_negative_battery_rate_is_not_measured()
+    {
+        Laptop().Evaluate(TestData.Laptop(battery: 0, onBattery: true)).Quality.ShouldBe(Quality.Estimated);
+        Laptop().Evaluate(TestData.Laptop(battery: -20, onBattery: true)).Quality.ShouldBe(Quality.Estimated);
+        TestData.Laptop(battery: 12, onBattery: true).HasDischargeRate.ShouldBeTrue();
+        TestData.Laptop(battery: 12, onBattery: false).HasDischargeRate.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Measured_mode_still_adds_opted_in_monitors()
+    {
+        var profile = MachineProfile.DefaultLaptop with { ExternalMonitors = 1, IncludeMonitors = true, MonitorWatts = 25 };
+        var r = Laptop(profile: profile).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
+        r.Quality.ShouldBe(Quality.Measured);
+        r.Components.Monitors.ShouldBe(25);
+        r.TotalW.ShouldBe(34.2 + 25, 0.001);
+        r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
 
     [Fact]
@@ -830,6 +866,14 @@ public class PowerModelTests
     }
 
     [Fact]
+    public void Laptop_extras_count_in_estimated_mode_but_are_inside_the_learned_baseline()
+    {
+        var profile = MachineProfile.DefaultLaptop with { ExtrasWatts = 10 };
+        Laptop(profile: profile).Evaluate(TestData.Laptop()).Components.Extras.ShouldBe(10);
+        Laptop(baseline: 9.0, profile: profile).Evaluate(TestData.Laptop()).Components.Extras.ShouldBe(0);
+    }
+
+    [Fact]
     public void Desktop_estimate_adds_ram_storage_board_fans_and_divides_by_psu_efficiency()
     {
         var r = Desktop().Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
@@ -845,13 +889,30 @@ public class PowerModelTests
     public void External_monitors_are_added_after_the_supply_efficiency_division()
     {
         var profile = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 25 };
-        var model = new PowerModel(profile, HardwareFacts.DesktopDefaults, new PowerModelOptions(), new FixedBaseline(null));
-        var r = model.Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
+        var r = Desktop(profile: profile).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
         var pcParts = 50 + 120 + 2 * 2.5 + 2 + (12 + 3 * 1);
         r.Components.Monitors.ShouldBe(50);
         r.Components.PsuLoss.ShouldBe(pcParts / 0.85 - pcParts, 0.001);
         r.TotalW.ShouldBe(pcParts / 0.85 + 50, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
+    }
+
+    [Fact]
+    public void Desktops_are_always_estimated_even_with_a_battery_rate_or_a_baseline()
+    {
+        var r = Desktop(baseline: 9.0).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, battery: 200, onBattery: true, brightness: null));
+        r.Quality.ShouldBe(Quality.Estimated);
+        r.Components.Rest.ShouldBe(0);
+        r.Components.Board.ShouldBe(15.0);
+    }
+
+    [Fact]
+    public void Ddr5_sticks_and_hard_drives_use_their_own_constants()
+    {
+        var profile = MachineProfile.DefaultDesktop with { RamIsDdr5 = true, HddCount = 1 };
+        var r = Desktop(profile: profile).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
+        r.Components.Ram.ShouldBe(2 * 1.5, 0.001);
+        r.Components.Storage.ShouldBe(2 + 6, 0.001);
     }
 
     [Fact]
@@ -862,8 +923,14 @@ public class PowerModelTests
     public void Cpu_tdp_override_wins_over_inventory_facts()
     {
         var profile = MachineProfile.DefaultLaptop with { CpuTdpOverrideW = 28 };
-        var model = new PowerModel(profile, HardwareFacts.LaptopDefaults, new PowerModelOptions(), new FixedBaseline(null));
-        model.Evaluate(TestData.Laptop(cpu: null, cpuLoad: 1.0)).Components.Cpu.ShouldBe(28, 0.001);
+        Laptop(profile: profile).Evaluate(TestData.Laptop(cpu: null, cpuLoad: 1.0)).Components.Cpu.ShouldBe(28, 0.001);
+    }
+
+    [Fact]
+    public void Gpu_tdp_override_wins_over_inventory_facts()
+    {
+        var profile = MachineProfile.DefaultLaptop with { GpuTdpOverrideW = 45 };
+        Laptop(profile: profile).Evaluate(TestData.Laptop(gpu: null, gpuLoad: 1.0)).Components.Gpu.ShouldBe(45, 0.001);
     }
 
     [Fact]
@@ -871,6 +938,23 @@ public class PowerModelTests
     {
         Laptop().Evaluate(TestData.Laptop(gpu: null, gpuLoad: 0.4)).Components.Gpu.ShouldBe(3 + (25 - 3) * 0.4, 0.001);
         Laptop().Evaluate(TestData.Laptop(gpu: null, gpuPresent: false)).Components.Gpu.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Loads_outside_zero_to_one_are_clamped_and_a_missing_gpu_load_means_idle()
+    {
+        Laptop().Evaluate(TestData.Laptop(cpu: null, cpuLoad: 1.5)).Components.Cpu.ShouldBe(15, 0.001);
+        Laptop().Evaluate(TestData.Laptop(cpu: null, cpuLoad: -0.5)).Components.Cpu.ShouldBe(2, 0.001);
+        Laptop().Evaluate(TestData.Laptop(gpu: null, gpuLoad: null)).Components.Gpu.ShouldBe(3, 0.001);
+    }
+
+    [Fact]
+    public void Non_finite_sensor_values_fall_back_like_missing_ones()
+    {
+        Laptop().Evaluate(TestData.Laptop(cpu: double.NaN, cpuLoad: 0.5)).Components.Cpu.ShouldBe(2 + (15 - 2) * 0.5, 0.001);
+        Laptop().Evaluate(TestData.Laptop(gpu: double.PositiveInfinity, gpuLoad: 0.4)).Components.Gpu.ShouldBe(3 + (25 - 3) * 0.4, 0.001);
+        Laptop().Evaluate(TestData.Laptop(cpu: null, cpuLoad: double.NaN)).Components.Cpu.ShouldBe(2, 0.001);
+        Laptop().Evaluate(TestData.Laptop(battery: double.NaN, onBattery: true)).Quality.ShouldBe(Quality.Estimated);
     }
 
     [Fact]
@@ -906,11 +990,13 @@ namespace PowerLedger.Core;
 
 /// <summary>
 /// Turns one <see cref="Sample"/> into a <see cref="Reading"/> (spec §5).
-/// Battery discharge is the truth when available; otherwise the parts are summed
-/// with a learned or default "rest of system" baseline and divided by supply efficiency.
+/// On a laptop the battery discharge rate is the truth when available; otherwise the parts are summed
+/// with a learned (laptop) or default "rest of system" baseline and divided by supply efficiency.
+/// Desktops are always estimated. Wall-powered external monitors are added after the efficiency division.
 /// </summary>
 public sealed class PowerModel
 {
+    /// <summary>Default laptop "rest of system" (board, RAM, SSD, radios) before calibration. Extras are separate.</summary>
     public const double LaptopBaselineW = 5;
     public const double DesktopBoardW = 12;
     public const double FanW = 1;
@@ -935,6 +1021,11 @@ public sealed class PowerModel
         _baselines = baselines;
     }
 
+    /// <summary>
+    /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; in measured mode <c>Rest</c> may go
+    /// negative when the parts over-report, which is the honest sensor-disagreement signal.
+    /// The Service feeds <c>Components.Cpu</c>, <c>Gpu</c> and <c>Display</c> back into the calibration learner.
+    /// </summary>
     public Reading Evaluate(Sample s)
     {
         var cpu = CpuWatts(s);
@@ -942,31 +1033,40 @@ public sealed class PowerModel
         var display = DisplayModel.PanelWatts(_profile, s.Brightness, s.DisplayOn);
         var monitors = DisplayModel.MonitorWatts(_profile, s.DisplayOn);
         var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds;
+        var isLaptop = _profile.Chassis == ChassisKind.Laptop;
 
-        if (s.OnBattery && s.BatteryRateW is { } measured && measured >= 0)
+        if (isLaptop && s.HasDischargeRate)
         {
-            var rest = Math.Max(0, measured - cpu - gpu - display);
-            var measuredParts = new Components(cpu, gpu, display, 0, 0, 0, 0, 0, 0, rest);
-            return Build(s, measured, Quality.Measured, measuredParts, userIdle);
+            var measured = s.BatteryRateW!.Value;
+            var measuredParts = new Components(
+                Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
+                Monitors: monitors, PsuLoss: 0, Rest: measured - cpu - gpu - display);
+            return Build(s, measured + monitors, Quality.Measured, measuredParts, userIdle);
         }
 
-        var isLaptop = _profile.Chassis == ChassisKind.Laptop;
         Components parts;
         Quality quality;
-        if (_baselines.GetBaseline(CalibrationBuckets.For(s.Brightness, s.DisplayOn)) is { } learned)
+        if (isLaptop && _baselines.GetBaseline(CalibrationBuckets.For(s.Brightness, s.DisplayOn)) is { } learned)
         {
-            parts = new Components(cpu, gpu, display, 0, 0, 0, 0, monitors, 0, learned);
+            // The learned baseline was observed on battery, so it already contains any extras drawing from the battery.
+            parts = new Components(
+                Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
+                Monitors: monitors, PsuLoss: 0, Rest: learned);
             quality = Quality.Calibrated;
         }
         else if (isLaptop)
         {
-            parts = new Components(cpu, gpu, display, 0, 0, 0, _profile.ExtrasWatts, monitors, 0, Rest: LaptopBaselineW);
+            parts = new Components(
+                Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: _profile.ExtrasWatts,
+                Monitors: monitors, PsuLoss: 0, Rest: LaptopBaselineW);
             quality = Quality.Estimated;
         }
         else
         {
-            var board = DesktopBoardW + _profile.FanCount * FanW;
-            parts = new Components(cpu, gpu, display, RamWatts(), StorageWatts(), board, _profile.ExtrasWatts, monitors, 0, 0);
+            parts = new Components(
+                Cpu: cpu, Gpu: gpu, Display: display, Ram: RamWatts(), Storage: StorageWatts(),
+                Board: DesktopBoardW + _profile.FanCount * FanW, Extras: _profile.ExtrasWatts,
+                Monitors: monitors, PsuLoss: 0, Rest: 0);
             quality = Quality.Estimated;
         }
 
@@ -986,30 +1086,35 @@ public sealed class PowerModel
 
     private double CpuWatts(Sample s)
     {
-        if (s.CpuPackageW is { } w) return Math.Max(0, w);
+        if (Finite(s.CpuPackageW) is { } w) return Math.Max(0, w);
         var idle = _profile.Chassis == ChassisKind.Laptop ? CpuIdleLaptopW : CpuIdleDesktopW;
         var tdp = Math.Max(idle + 1, _profile.CpuTdpOverrideW ?? _facts.CpuTdpW);
-        return idle + (tdp - idle) * Math.Clamp(s.CpuLoad, 0, 1);
+        return idle + (tdp - idle) * Load(s.CpuLoad);
     }
 
     private double GpuWatts(Sample s)
     {
         if (!s.DGpuPresent) return 0;
-        if (s.DGpuW is { } w) return Math.Max(0, w);
+        if (Finite(s.DGpuW) is { } w) return Math.Max(0, w);
         var tdp = Math.Max(GpuIdleW + 1, _profile.GpuTdpOverrideW ?? _facts.GpuTdpW);
-        return GpuIdleW + (tdp - GpuIdleW) * Math.Clamp(s.DGpuLoad ?? 0, 0, 1);
+        return GpuIdleW + (tdp - GpuIdleW) * Load(s.DGpuLoad ?? 0);
     }
 
     private double RamWatts() => _profile.RamSticks * (_profile.RamIsDdr5 ? Ddr5StickW : Ddr4StickW);
 
     private double StorageWatts() => _profile.SsdCount * SsdW + _profile.HddCount * HddW;
+
+    /// <summary>NaN and infinity count as "no value", like null.</summary>
+    private static double? Finite(double? value) => value is { } v && double.IsFinite(v) ? v : null;
+
+    private static double Load(double load) => double.IsFinite(load) ? Math.Clamp(load, 0, 1) : 0;
 }
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter PowerModelTests`
-Expected: `Passed! - Failed: 0, Passed: 11`.
+Expected: `Passed! - Failed: 0, Passed: 20`.
 
 - [x] **Step 5: Commit**
 
@@ -1093,6 +1198,8 @@ public class CalibrationLearnerTests
         learner.Observe(TestData.Laptop(battery: 25, onBattery: false), 10, 2, 4);
         learner.Observe(TestData.Laptop(battery: 25, onBattery: true, suspect: true), 10, 2, 4);
         learner.Observe(TestData.Laptop(battery: null, onBattery: true), 10, 2, 4);
+        learner.Observe(TestData.Laptop(battery: -5, onBattery: true), 10, 2, 4);
+        learner.Observe(TestData.Laptop(battery: 0, onBattery: true), 10, 2, 4);
         learner.TotalSamples.ShouldBe(0);
     }
 
@@ -1191,11 +1298,11 @@ public sealed class CalibrationLearner : IBaselineProvider
 
     public int TotalSamples => _samples.Sum();
 
-    /// <summary>Feed one tick. Ignored unless the sample is on battery, has a rate, and is not suspect.
+    /// <summary>Feed one tick. Ignored unless the sample has a usable discharge rate (see <see cref="Sample.HasDischargeRate"/>) and is not suspect.
     /// The caller must also skip the 3 s after an AC transition.</summary>
     public void Observe(Sample s, double cpuW, double gpuW, double displayW)
     {
-        if (!s.OnBattery || s.Suspect || s.BatteryRateW is not { } measured) return;
+        if (s.Suspect || !s.HasDischargeRate || s.BatteryRateW is not { } measured) return;
         var observed = Math.Max(0, measured - cpuW - gpuW - displayW);
         var i = Index(CalibrationBuckets.For(s.Brightness, s.DisplayOn));
         _baseline[i] = _samples[i] == 0 ? observed : _baseline[i] + _alpha * (observed - _baseline[i]);
@@ -1795,7 +1902,7 @@ Expected: `Passed! - Failed: 0, Passed: 6`.
 - [ ] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 71`.
+Expected: `Passed! - Failed: 0, Passed: 80`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -3327,7 +3434,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 73`, Storage `Passed: 26`, no failures, no skipped tests.
+Expected: Core `Passed: 82`, Storage `Passed: 26`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 
@@ -3341,7 +3448,7 @@ Plan B (Sensors + Service) consumes exactly these types; do not rename them with
 |---|---|
 | `Sample`, `Reading`, `Components` | sampler output, model output |
 | `PowerModel`, `PowerModelOptions`, `HardwareFacts`, `IBaselineProvider` | one model instance per hardware inventory |
-| `CalibrationLearner`, `CalibrationState`, `CalibrationOptions`, `CalibrationBuckets` | learning on battery ticks, persisted through `CalibrationRepository` |
+| `CalibrationLearner`, `CalibrationState`, `CalibrationOptions`, `CalibrationBuckets` | learning on battery ticks, persisted through `CalibrationRepository`; the Service passes `Reading.Components.Cpu/Gpu/Display` from the same tick into `Observe` |
 | `EnergyIntegrator`, `Downsampler`, `Aggregate` | minute and hour jobs |
 | `TariffSchedule`, `Tariff` | settings and pipe `SetTariff` |
 | `SqliteDatabase.OpenAndMigrate`, all repositories, `RetentionJob`, `ReportQueries` | service startup, writer, jobs, and the App's read side |
