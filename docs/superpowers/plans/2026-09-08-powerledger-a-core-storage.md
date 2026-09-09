@@ -1170,7 +1170,7 @@ public class CalibrationLearnerTests
     {
         var learner = new CalibrationLearner(Fast);
         Feed(learner, 10, batteryW: 25);                       // 25 - 10 - 2 - 4 = 9 W of "rest"
-        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldBe(9.0, 0.0001);
+        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldNotBeNull().ShouldBe(9.0, 0.0001);
     }
 
     [Fact]
@@ -1179,7 +1179,7 @@ public class CalibrationLearnerTests
         var learner = new CalibrationLearner(Fast);
         Feed(learner, 1, batteryW: 26);                        // seeds bucket at 10 W
         Feed(learner, 30, batteryW: 36);                       // 20 W for three half-lives
-        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldBe(20 - 10 * 0.125, 0.05);
+        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldNotBeNull().ShouldBe(20 - 10 * 0.125, 0.05);
     }
 
     [Fact]
@@ -1216,8 +1216,8 @@ public class CalibrationLearnerTests
         var restored = new CalibrationLearner(Fast);
         restored.Import(state);
         restored.TotalSamples.ShouldBe(20);
-        restored.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldBe(9.0, 0.0001);
-        restored.GetBaseline(CalibrationBuckets.DisplayOff).ShouldBe(21 - 10 - 2 - 4, 0.0001);
+        restored.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldNotBeNull().ShouldBe(9.0, 0.0001);
+        restored.GetBaseline(CalibrationBuckets.DisplayOff).ShouldNotBeNull().ShouldBe(21 - 10 - 2 - 4, 0.0001);
     }
 
     [Fact]
@@ -1231,7 +1231,7 @@ public class CalibrationLearnerTests
             new BucketState(9, 5.0, 0),
         ]));
         learner.TotalSamples.ShouldBe(10);
-        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldBe(9.0, 0.0001);
+        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldNotBeNull().ShouldBe(9.0, 0.0001);
         learner.GetBaseline(CalibrationBuckets.For(0.7, true)).ShouldBeNull();
     }
 
