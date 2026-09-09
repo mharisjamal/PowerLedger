@@ -1134,7 +1134,7 @@ git commit -m "Add PowerModel: measured, calibrated and estimated readings"
 - Create: `src/PowerLedger.Core/CalibrationLearner.cs`
 - Test: `tests/PowerLedger.Core.Tests/CalibrationLearnerTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Contracts;
@@ -1221,6 +1221,21 @@ public class CalibrationLearnerTests
     }
 
     [Fact]
+    public void Import_skips_corrupt_buckets()
+    {
+        var learner = new CalibrationLearner(Fast);
+        learner.Import(new CalibrationState([
+            new BucketState(6, 9.0, 10),
+            new BucketState(7, double.NaN, 10),
+            new BucketState(8, -1.0, 10),
+            new BucketState(9, 5.0, 0),
+        ]));
+        learner.TotalSamples.ShouldBe(10);
+        learner.GetBaseline(CalibrationBuckets.For(0.6, true)).ShouldBe(9.0, 0.0001);
+        learner.GetBaseline(CalibrationBuckets.For(0.7, true)).ShouldBeNull();
+    }
+
+    [Fact]
     public void Reset_forgets_everything()
     {
         var learner = new CalibrationLearner(Fast);
@@ -1243,12 +1258,12 @@ public class CalibrationLearnerTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter CalibrationLearnerTests`
 Expected: build error, `CalibrationLearner` not found.
 
-- [ ] **Step 3: Write the learner**
+- [x] **Step 3: Write the learner**
 
 `src/PowerLedger.Core/CalibrationOptions.cs`
 ```csharp
@@ -1328,6 +1343,7 @@ public sealed class CalibrationLearner : IBaselineProvider
         Reset();
         foreach (var b in state.Buckets)
         {
+            if (!double.IsFinite(b.BaselineW) || b.BaselineW < 0 || b.Samples <= 0) continue;   // corrupt row: ignore rather than poison the model
             var i = Index(b.Bucket);
             _baseline[i] = b.BaselineW;
             _samples[i] = b.Samples;
@@ -1346,12 +1362,12 @@ public sealed class CalibrationLearner : IBaselineProvider
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter CalibrationLearnerTests`
-Expected: `Passed! - Failed: 0, Passed: 8`.
+Expected: `Passed! - Failed: 0, Passed: 9`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Core/Calibration*.cs tests/PowerLedger.Core.Tests/CalibrationLearnerTests.cs
@@ -1903,7 +1919,7 @@ Expected: `Passed! - Failed: 0, Passed: 6`.
 - [ ] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 80`.
+Expected: `Passed! - Failed: 0, Passed: 81`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -3435,7 +3451,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 82`, Storage `Passed: 26`, no failures, no skipped tests.
+Expected: Core `Passed: 83`, Storage `Passed: 26`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 
