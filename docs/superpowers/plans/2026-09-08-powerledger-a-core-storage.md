@@ -2197,7 +2197,7 @@ git commit -m "Add tariff schedule, cost, CO2 and comparison math"
 - Create: `tests/PowerLedger.Storage.Tests/TestDatabase.cs`
 - Test: `tests/PowerLedger.Storage.Tests/SqliteDatabaseTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Storage.Tests/TestDatabase.cs`
 ```csharp
@@ -2284,12 +2284,12 @@ public class SqliteDatabaseTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter SqliteDatabaseTests`
 Expected: build error, `SqliteDatabase` not found.
 
-- [ ] **Step 3: Write the schema, migrator and database**
+- [x] **Step 3: Write the schema, migrator and database**
 
 `src/PowerLedger.Storage/Schema.cs`
 ```csharp
@@ -2510,12 +2510,12 @@ internal static class Rows
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter SqliteDatabaseTests`
 Expected: `Passed! - Failed: 0, Passed: 3`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Storage tests/PowerLedger.Storage.Tests
