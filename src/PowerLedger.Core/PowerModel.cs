@@ -49,9 +49,8 @@ public sealed class PowerModel
         var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds;
         var isLaptop = _profile.Chassis == ChassisKind.Laptop;
 
-        if (isLaptop && s.HasDischargeRate)
+        if (isLaptop && s.HasDischargeRate && s.BatteryRateW is { } measured)
         {
-            var measured = s.BatteryRateW!.Value;
             var measuredParts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
                 Monitors: monitors, PsuLoss: 0, Rest: measured - cpu - gpu - display);
@@ -60,7 +59,7 @@ public sealed class PowerModel
 
         Components parts;
         Quality quality;
-        if (isLaptop && _baselines.GetBaseline(CalibrationBuckets.For(s.Brightness, s.DisplayOn)) is { } learned)
+        if (isLaptop && Finite(_baselines.GetBaseline(CalibrationBuckets.For(s.Brightness, s.DisplayOn))) is { } learned)
         {
             // The learned baseline was observed on battery, so it already contains any extras drawing from the battery.
             parts = new Components(

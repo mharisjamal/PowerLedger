@@ -77,6 +77,7 @@ public class PowerModelTests
         r.Components.Rest.ShouldBe(9.0);
         r.Components.Board.ShouldBe(0);
         r.TotalW.ShouldBe((14.6 + 4.1 + 4.2 + 9.0) / 0.9, 0.001);
+        r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
 
     [Fact]
@@ -127,6 +128,7 @@ public class PowerModelTests
         r.Quality.ShouldBe(Quality.Estimated);
         r.Components.Rest.ShouldBe(0);
         r.Components.Board.ShouldBe(15.0);
+        r.TotalW.ShouldBe((50 + 120 + 5 + 2 + 15) / 0.85, 0.001);
     }
 
     [Fact]
