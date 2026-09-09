@@ -1,6 +1,6 @@
 namespace PowerLedger.Core;
 
-/// <param name="Amount">Sum of the slices priced in <paramref name="Currency"/>.</param>
+/// <param name="Amount">Sum of the slices priced in <paramref name="Currency"/>, rounded to six decimals (the precision tariffs are stored at).</param>
 /// <param name="Currency">Currency of the latest-effective tariff; null when the schedule is empty.</param>
 /// <param name="Partial">True when some slices were priced under a tariff in a different currency and left out.</param>
 public sealed record CostResult(decimal Amount, string? Currency, bool Partial);
@@ -36,7 +36,8 @@ public sealed class TariffSchedule
     }
 
     /// <summary>Prices each slice by the tariff in force at its start (a slice straddling a change is wholly priced at the older rate).
-    /// Non-finite energy is ignored; slices priced in another currency are skipped and reported through Partial.</summary>
+    /// Non-finite energy is ignored; slices priced in another currency are skipped and reported through Partial.
+    /// The total is rounded to six decimals, which absorbs the floating-point residue of energy accumulated tick by tick.</summary>
     public CostResult Cost(IEnumerable<(DateTimeOffset Start, double Wh)> energy)
     {
         decimal total = 0;
@@ -52,6 +53,6 @@ public sealed class TariffSchedule
             }
             total += (decimal)wh / 1000m * tariff.PricePerKwh;
         }
-        return new CostResult(total, Currency, partial);
+        return new CostResult(decimal.Round(total, 6, MidpointRounding.AwayFromZero), Currency, partial);
     }
 }

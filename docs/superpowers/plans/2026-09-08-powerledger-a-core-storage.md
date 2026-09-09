@@ -2053,6 +2053,16 @@ public class TariffScheduleTests
         Comparisons.PhoneCharges(1.0).ShouldBe(1000.0 / 15, 1e-9);
         Comparisons.EvKm(1.0).ShouldBe(1 / 0.18, 1e-9);
     }
+
+    [Fact]
+    public void Energy_carrying_floating_point_residue_still_costs_an_exact_amount()
+    {
+        // 60 ticks of 30 W integrated one second at a time land just off 0.5 Wh; money must not inherit that.
+        var minuteWh = Enumerable.Range(0, 60).Aggregate(0.0, (wh, _) => wh + 30 * (1.0 / 3600));
+        var noisy = Enumerable.Range(0, 120).Select(_ => (Jan.AddDays(3), minuteWh)).ToList();
+        minuteWh.ShouldNotBe(0.5);
+        Schedule.Cost(noisy).Amount.ShouldBe(0.0102m);
+    }
 }
 ```
 
@@ -2076,7 +2086,7 @@ public sealed record Tariff(DateTimeOffset EffectiveFrom, decimal PricePerKwh, s
 ```csharp
 namespace PowerLedger.Core;
 
-/// <param name="Amount">Sum of the slices priced in <paramref name="Currency"/>.</param>
+/// <param name="Amount">Sum of the slices priced in <paramref name="Currency"/>, rounded to six decimals (the precision tariffs are stored at).</param>
 /// <param name="Currency">Currency of the latest-effective tariff; null when the schedule is empty.</param>
 /// <param name="Partial">True when some slices were priced under a tariff in a different currency and left out.</param>
 public sealed record CostResult(decimal Amount, string? Currency, bool Partial);
@@ -2112,7 +2122,8 @@ public sealed class TariffSchedule
     }
 
     /// <summary>Prices each slice by the tariff in force at its start (a slice straddling a change is wholly priced at the older rate).
-    /// Non-finite energy is ignored; slices priced in another currency are skipped and reported through Partial.</summary>
+    /// Non-finite energy is ignored; slices priced in another currency are skipped and reported through Partial.
+    /// The total is rounded to six decimals, which absorbs the floating-point residue of energy accumulated tick by tick.</summary>
     public CostResult Cost(IEnumerable<(DateTimeOffset Start, double Wh)> energy)
     {
         decimal total = 0;
@@ -2128,7 +2139,7 @@ public sealed class TariffSchedule
             }
             total += (decimal)wh / 1000m * tariff.PricePerKwh;
         }
-        return new CostResult(total, Currency, partial);
+        return new CostResult(decimal.Round(total, 6, MidpointRounding.AwayFromZero), Currency, partial);
     }
 }
 ```
@@ -2173,12 +2184,12 @@ public static class Comparisons
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter TariffScheduleTests`
-Expected: `Passed! - Failed: 0, Passed: 9`.
+Expected: `Passed! - Failed: 0, Passed: 10`.
 
 - [x] **Step 5: Run the whole Core suite and commit**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests`
-Expected: `Passed! - Failed: 0, Passed: 106`.
+Expected: `Passed! - Failed: 0, Passed: 107`.
 
 ```bash
 git add src/PowerLedger.Core tests/PowerLedger.Core.Tests
@@ -3931,7 +3942,7 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [ ] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 108`, Storage `Passed: 36`, no failures, no skipped tests.
+Expected: Core `Passed: 109`, Storage `Passed: 36`, no failures, no skipped tests.
 
 - [ ] **Step 3: Confirm the working tree is clean and every task is committed**
 

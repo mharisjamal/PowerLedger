@@ -78,4 +78,14 @@ public class TariffScheduleTests
         Comparisons.PhoneCharges(1.0).ShouldBe(1000.0 / 15, 1e-9);
         Comparisons.EvKm(1.0).ShouldBe(1 / 0.18, 1e-9);
     }
+
+    [Fact]
+    public void Energy_carrying_floating_point_residue_still_costs_an_exact_amount()
+    {
+        // 60 ticks of 30 W integrated one second at a time land just off 0.5 Wh; money must not inherit that.
+        var minuteWh = Enumerable.Range(0, 60).Aggregate(0.0, (wh, _) => wh + 30 * (1.0 / 3600));
+        var noisy = Enumerable.Range(0, 120).Select(_ => (Jan.AddDays(3), minuteWh)).ToList();
+        minuteWh.ShouldNotBe(0.5);
+        Schedule.Cost(noisy).Amount.ShouldBe(0.0102m);
+    }
 }
