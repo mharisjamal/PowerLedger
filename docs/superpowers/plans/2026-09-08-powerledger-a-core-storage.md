@@ -975,6 +975,19 @@ public class PowerModelTests
         r.Suspect.ShouldBeTrue();
         r.SessionLocked.ShouldBeTrue();
     }
+
+    [Fact]
+    public void A_bad_profile_or_option_yields_a_zeroed_suspect_reading_not_a_non_finite_one()
+    {
+        var extras = MachineProfile.DefaultLaptop with { ExtrasWatts = double.NaN };
+        var bad = Laptop(profile: extras).Evaluate(TestData.Laptop());
+        bad.TotalW.ShouldBe(0);
+        bad.Suspect.ShouldBeTrue();
+        bad.Components.ShouldBe(Components.Zero);
+
+        var noEfficiency = new PowerModel(MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, new PowerModelOptions(LaptopAdapterEfficiency: 0), new FixedBaseline(null));
+        noEfficiency.Evaluate(TestData.Laptop()).TotalW.ShouldBe(0);
+    }
 }
 ```
 
@@ -1082,9 +1095,13 @@ public sealed class PowerModel
         return Build(s, total, quality, parts with { PsuLoss = psuLoss }, userIdle);
     }
 
+    /// <summary>A reading is never non-finite: a bad profile or option value yields a zeroed, suspect reading rather than poisoning storage.</summary>
     private static Reading Build(Sample s, double total, Quality quality, Components parts, bool userIdle)
-        => new(s.Timestamp, s.DeltaSeconds, total, quality, parts, s.OnBattery, s.DisplayOn, userIdle,
-               s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, s.Suspect);
+        => double.IsFinite(total) && double.IsFinite(parts.Sum)
+            ? new Reading(s.Timestamp, s.DeltaSeconds, total, quality, parts, s.OnBattery, s.DisplayOn, userIdle,
+                          s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, s.Suspect)
+            : new Reading(s.Timestamp, s.DeltaSeconds, 0, quality, Components.Zero, s.OnBattery, s.DisplayOn, userIdle,
+                          s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, Suspect: true);
 
     private double CpuWatts(Sample s)
     {
@@ -4079,6 +4096,21 @@ Plan B (Sensors + Service) consumes exactly these types; do not rename them with
 | `TariffSchedule`, `Tariff` | settings and pipe `SetTariff` |
 | `SqliteDatabase.OpenAndMigrate`, all repositories, `RetentionJob`, `ReportQueries` | service startup, writer, jobs, and the App's read side |
 | `MachineProfile`, `Quality`, `SessionReason` (Contracts) | inventory, pipe DTOs |
+
+**Rules Plan B must follow.** These are contracts the types cannot enforce on their own:
+
+- Pass the gap threshold explicitly: `Downsampler.ToMinute(start, readings, EnergyIntegrator.GapThresholdFor(sampleIntervalSeconds))`. The default is the 5 s floor, so at a 5 s sample interval ordinary timer jitter would mark every tick a gap and leave the database empty.
+- Own exactly one `SqliteDatabase` for the service's lifetime and one for the app; `Dispose` clears a process-wide pool keyed by the connection string, so disposing one handle evicts another's pooled connections.
+- Feed the calibration learner the same tick's numbers: `learner.Observe(sample, reading.Components.Cpu, reading.Components.Gpu, reading.Components.Display)`, and skip the 3 s after an AC transition.
+- `CalibrationState` holds a list, so it compares by reference. Save on a timer or compare buckets element-wise; never `if (state != lastSaved)`.
+- Write a running partial hour row (`UpsertHour` is idempotent by start) or leave the hour to the report's minute-row top-up; both work, but pick one.
+- `Close` returns false when the session was already closed. Close only the id from a live `OpenSession()` so a normal suspend-then-shutdown does not look like a lost session.
+
+**Known follow-ups, deliberately not done in Plan A.** Neither blocks Plan B:
+
+- The pure report arithmetic (`Summarise`, `Days`, `RangeTotals`, `DayTotals`) lives in `Storage` rather than `Core`. Move it to `Core` before Plan C writes a second implementation for live in-memory rows.
+- Spec §7 lists `GetSeries(from, to, resolution)` and `GetCalibrationStatus()`; the App currently composes those from `ReadMinutes`/`ReadHours` and the learner's counters. Give each a named shape when the pipe is built.
+- `Aggregate.MaxW` surfaces as `RangeTotals.PeakW`; settle on one word when the ViewModels are written.
 
 No step in this plan ships a running process; that is Plan B's first task.
 

@@ -93,9 +93,13 @@ public sealed class PowerModel
         return Build(s, total, quality, parts with { PsuLoss = psuLoss }, userIdle);
     }
 
+    /// <summary>A reading is never non-finite: a bad profile or option value yields a zeroed, suspect reading rather than poisoning storage.</summary>
     private static Reading Build(Sample s, double total, Quality quality, Components parts, bool userIdle)
-        => new(s.Timestamp, s.DeltaSeconds, total, quality, parts, s.OnBattery, s.DisplayOn, userIdle,
-               s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, s.Suspect);
+        => double.IsFinite(total) && double.IsFinite(parts.Sum)
+            ? new Reading(s.Timestamp, s.DeltaSeconds, total, quality, parts, s.OnBattery, s.DisplayOn, userIdle,
+                          s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, s.Suspect)
+            : new Reading(s.Timestamp, s.DeltaSeconds, 0, quality, Components.Zero, s.OnBattery, s.DisplayOn, userIdle,
+                          s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, Suspect: true);
 
     private double CpuWatts(Sample s)
     {

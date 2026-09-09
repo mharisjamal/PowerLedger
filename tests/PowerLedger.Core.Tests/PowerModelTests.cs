@@ -197,4 +197,17 @@ public class PowerModelTests
         r.Suspect.ShouldBeTrue();
         r.SessionLocked.ShouldBeTrue();
     }
+
+    [Fact]
+    public void A_bad_profile_or_option_yields_a_zeroed_suspect_reading_not_a_non_finite_one()
+    {
+        var extras = MachineProfile.DefaultLaptop with { ExtrasWatts = double.NaN };
+        var bad = Laptop(profile: extras).Evaluate(TestData.Laptop());
+        bad.TotalW.ShouldBe(0);
+        bad.Suspect.ShouldBeTrue();
+        bad.Components.ShouldBe(Components.Zero);
+
+        var noEfficiency = new PowerModel(MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, new PowerModelOptions(LaptopAdapterEfficiency: 0), new FixedBaseline(null));
+        noEfficiency.Evaluate(TestData.Laptop()).TotalW.ShouldBe(0);
+    }
 }

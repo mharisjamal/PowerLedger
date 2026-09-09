@@ -175,12 +175,12 @@ Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence dec
 
 ### Sessions
 
-`sessions` records the power-state timeline. Each row stores why it started (`boot`, `service-start`, `resume`, `crash-recovered`) and why it ended (`suspend`, `shutdown`, `service-stop`, or `crash-recovered` when the end was never written because the service died). "Asleep" hours in reports come from gaps between sessions.
+`sessions` records the power-state timeline. Each row stores why it started (`boot`, `service-start`, `resume`, `crash-recovered`) and why it ended (`suspend`, `shutdown`, `service-stop`, or `crash-recovered` when the end was never written because the service died). "Asleep" hours in reports come from gaps between ticks; range time that produced no rows at all, such as before install, is reported separately as unmonitored (§9).
 
 ## 7. Storage
 
 - Engine: SQLite via `Microsoft.Data.Sqlite`, hand-written SQL (no EF Core), WAL mode, `synchronous=NORMAL`, `auto_vacuum=INCREMENTAL`.
-- File: `C:\ProgramData\PowerLedger\power.db`. ACL: SYSTEM full control, Users read.
+- File: `C:\ProgramData\PowerLedger\power.db`. ACL: SYSTEM full control on the files; Users need **modify on the folder**, because a read-only WAL connection still creates the `-shm` shared-memory file. Granting only read would stop the App from opening history at all.
 - Writes are batched: 60 samples per transaction (one per minute). The buffer flushes on suspend, `PRESHUTDOWN`, and service stop.
 
 ### Tables
@@ -192,7 +192,7 @@ Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence dec
 | `samples_1h` | 1 h: same aggregates | forever | tiny |
 | `sessions` | `start_ts`, `end_ts`, `reason` | forever | |
 | `tariffs` | `effective_from`, `price_per_kwh` (decimal as integer micro-units), `currency` (ISO 4217) | forever | |
-| `calibration` | `inventory_hash`, `bucket`, `baseline_w`, `weight`, `updated_ts` | — | |
+| `calibration` | `inventory_hash`, `bucket`, `baseline_w`, `samples`, `updated_ts` | — | |
 | `hardware_inventory` | `hash`, `detected_ts`, `json` | forever | one row per distinct hardware set |
 | `settings` | key / value | — | service-owned settings |
 | `schema_version` | | | migrations |
