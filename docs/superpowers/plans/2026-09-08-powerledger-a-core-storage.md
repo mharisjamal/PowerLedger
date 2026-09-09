@@ -767,7 +767,7 @@ git commit -m "Add display and PSU efficiency models"
 - Create: `src/PowerLedger.Core/PowerModel.cs`
 - Test: `tests/PowerLedger.Core.Tests/PowerModelTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Contracts;
@@ -891,12 +891,12 @@ public class PowerModelTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter PowerModelTests`
 Expected: build error, `PowerModel` not found.
 
-- [ ] **Step 3: Write the model**
+- [x] **Step 3: Write the model**
 
 `src/PowerLedger.Core/PowerModel.cs`
 ```csharp
@@ -1006,12 +1006,12 @@ public sealed class PowerModel
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Core.Tests --filter PowerModelTests`
 Expected: `Passed! - Failed: 0, Passed: 11`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Core/PowerModel.cs tests/PowerLedger.Core.Tests/PowerModelTests.cs
