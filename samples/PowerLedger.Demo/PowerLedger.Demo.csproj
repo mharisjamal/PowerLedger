@@ -4,6 +4,7 @@
     <ProjectReference Include="..\..\src\PowerLedger.Core\PowerLedger.Core.csproj" />
     <ProjectReference Include="..\..\src\PowerLedger.Contracts\PowerLedger.Contracts.csproj" />
     <ProjectReference Include="..\..\src\PowerLedger.Storage\PowerLedger.Storage.csproj" />
+    <ProjectReference Include="..\..\src\PowerLedger.Sensors\PowerLedger.Sensors.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

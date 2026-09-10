@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
+using PowerLedger.Sensors;
 using PowerLedger.Storage;
 
 namespace PowerLedger.Demo;
@@ -34,12 +35,21 @@ internal static class Program
 
     private static void Record(SqliteDatabase db, int seconds)
     {
-        var sensors = new WindowsSensors();
-        var profile = sensors.BatteryPresent ? MachineProfile.DefaultLaptop : MachineProfile.DefaultDesktop;
-        var facts = sensors.BatteryPresent ? HardwareFacts.LaptopDefaults : HardwareFacts.DesktopDefaults;
+        var facts = HardwareInventory.Detect();
+        using var sensors = MachineSensors.Create(displayOn: () => true, sessionLocked: () => false);
+
+        var profile = facts.ToProfile(facts.Chassis == ChassisKind.Laptop ? MachineProfile.DefaultLaptop : MachineProfile.DefaultDesktop);
+        var hardware = new HardwareFacts(
+            facts.CpuTdpW ?? (facts.Chassis == ChassisKind.Laptop ? HardwareFacts.LaptopDefaults.CpuTdpW : HardwareFacts.DesktopDefaults.CpuTdpW),
+            facts.GpuTdpW ?? (facts.Chassis == ChassisKind.Laptop ? HardwareFacts.LaptopDefaults.GpuTdpW : HardwareFacts.DesktopDefaults.GpuTdpW));
+
         // Learn fast so a short preview can reach Calibrated; the service uses 10-minute thresholds.
         var learner = new CalibrationLearner(new CalibrationOptions(HalfLifeSamples: 60, MinBucketSamples: 15, MinTotalSamples: 15));
-        var model = new PowerModel(profile, facts, new PowerModelOptions(), learner);
+        var calibration = new CalibrationRepository(db);
+        learner.Import(calibration.Load(facts.Hash));
+        var model = new PowerModel(profile, hardware, new PowerModelOptions(), learner);
+
+        new InventoryRepository(db).Upsert(new InventoryRecord(facts.Hash, DateTimeOffset.UtcNow, facts.ToJson()));
 
         var raw = new RawSampleRepository(db);
         var aggregates = new AggregateRepository(db);
@@ -47,6 +57,9 @@ internal static class Program
         sessions.CloseAllOpen(DateTimeOffset.UtcNow);
         var session = sessions.Open(SessionReason.ServiceStart, DateTimeOffset.UtcNow);
 
+        Console.WriteLine($"  {facts.CpuName}");
+        Console.WriteLine($"  {facts.GpuName ?? "no discrete GPU"}    {facts.Chassis}    inventory {facts.Hash}");
+        Console.WriteLine();
         Console.WriteLine($"  Recording for {seconds} s. Unplug the charger to see measured readings.");
         Console.WriteLine();
 
@@ -88,9 +101,16 @@ internal static class Program
 
         if (pending.Count > 0) raw.InsertBatch(pending);
         if (minute.Count > 0) aggregates.UpsertMinute(Downsampler.ToMinute(minuteStart, minute, EnergyIntegrator.GapThresholdFor(1)));
+        calibration.Save(facts.Hash, learner.Export(), DateTimeOffset.UtcNow);
         sessions.Close(session, DateTimeOffset.UtcNow, SessionReason.ServiceStop);
 
         Console.WriteLine();
+        Console.WriteLine();
+        foreach (var health in sensors.Sampler.Health.Where(h => !h.Supported))
+        {
+            Console.WriteLine($"  {health.Name} unavailable: {health.Unavailable}");
+        }
+        if (sensors.Validator.SuspectCount > 0) Console.WriteLine($"  {sensors.Validator.SuspectCount} ticks marked suspect");
         Console.WriteLine();
     }
 

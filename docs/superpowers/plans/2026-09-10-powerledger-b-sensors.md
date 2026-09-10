@@ -3100,20 +3100,20 @@ git commit -m "Assemble the machine's sensor set behind one factory"
 
 The preview currently carries its own throwaway P/Invoke. Replacing it with `PowerLedger.Sensors` deletes that duplication, proves the layer end to end on real hardware, and gives the owner measured CPU watts instead of an estimate.
 
-- [ ] **Step 1: Reference the Sensors project**
+- [x] **Step 1: Reference the Sensors project**
 
 Add to `samples/PowerLedger.Demo/PowerLedger.Demo.csproj`, inside the existing `ProjectReference` group:
 ```xml
     <ProjectReference Include="..\..\src\PowerLedger.Sensors\PowerLedger.Sensors.csproj" />
 ```
 
-- [ ] **Step 2: Delete the throwaway sensors**
+- [x] **Step 2: Delete the throwaway sensors**
 
 ```bash
 git rm samples/PowerLedger.Demo/WindowsSensors.cs
 ```
 
-- [ ] **Step 3: Rewrite the recording loop against the real layer**
+- [x] **Step 3: Rewrite the recording loop against the real layer**
 
 In `samples/PowerLedger.Demo/Program.cs`, add `using PowerLedger.Sensors;` and replace the whole `Record` method with:
 
@@ -3200,7 +3200,7 @@ In `samples/PowerLedger.Demo/Program.cs`, add `using PowerLedger.Sensors;` and r
     }
 ```
 
-- [ ] **Step 4: Run it and confirm the CPU reading is now measured**
+- [x] **Step 4: Run it and confirm the CPU reading is now measured**
 
 Run: `dotnet build -c Release`
 Expected: 0 warnings.
@@ -3208,7 +3208,7 @@ Expected: 0 warnings.
 Run: `dotnet run --project samples/PowerLedger.Demo -c Release -- 12`
 Expected: the header names the processor and the GPU, and the live line shows a `cpu` figure that tracks real activity rather than the flat load model. On a Windows 11 machine with energy-meter rails the CPU column moves with load and matches the package wattage the meter reports. Record the output in the task report.
 
-- [ ] **Step 5: Update the preview's README and commit**
+- [x] **Step 5: Update the preview's README and commit**
 
 Rewrite `samples/PowerLedger.Demo/README.md` to say that the preview now uses `PowerLedger.Sensors`, that CPU watts come from the Windows energy meter with no driver, that GPU power is unavailable on cards without measurement hardware, and that calibration is persisted between runs. Keep it under 30 lines.
 

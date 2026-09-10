@@ -1,12 +1,10 @@
 # PowerLedger.Demo
 
-A console preview of the finished Core and Storage libraries. It reads what Windows exposes
-without a kernel driver (battery discharge rate, AC state, CPU load, user idle time), runs it
-through the real `PowerModel`, `CalibrationLearner`, `EnergyIntegrator` and `Downsampler`, stores
-the result with the real repositories, and prints a live reading plus a 30-day report.
-
-This is a preview, not the shipping product. The real sensor adapters, the Windows service and
-the WPF app come later; this just proves Core and Storage work end to end on real hardware.
+A console preview of the finished Core, Storage and Sensors libraries — not the shipping product;
+the Windows service and the WPF app come later. It detects the machine and reads it through
+`PowerLedger.Sensors` — no kernel driver — runs every tick through the real `PowerModel`,
+`CalibrationLearner`, `EnergyIntegrator` and `Downsampler`, stores it with the real repositories,
+and prints a live reading plus a 30-day report.
 
 ## Commands
 
@@ -18,10 +16,13 @@ dotnet run --project samples/PowerLedger.Demo -c Release -- report    # report o
 
 ## Estimated vs. measured
 
-While plugged into AC there is no kernel driver for true CPU package power, so readings are
-`estimated` from the CPU load model. Unplug the charger and Windows reports a real battery
-discharge rate, which the model uses directly — readings switch to `measured`. Stay on battery
-long enough (about 15 ticks per brightness bucket) and it also starts reporting `calibrated`.
+CPU watts come from the Windows Energy Meter Interface with no kernel driver, so `cpu` is a real
+measured reading whenever the meter is present. Discrete GPU watts come from NVML when the card
+reports power telemetry; a card with no measurement hardware (most low-end laptop GPUs, including
+this machine's MX330) reports none and falls back to a load-based estimate. The `estimated` /
+`calibrated` / `measured` label describes the *total*, not the CPU figure: it is `measured` only
+on battery, where the discharge rate is ground truth. Calibration is saved keyed to this machine's
+hardware hash and reloaded next run, so it keeps improving across sessions instead of starting over.
 
 ## Database
 
