@@ -6,7 +6,7 @@
 
 **Architecture:** Each source owns a few fields of a mutable `SampleDraft` and nothing else; a `Sampler` runs them all behind individual try/catch with backoff and hands back an immutable `Sample`. No source needs a kernel driver or elevation: Windows 11 publishes the processor's power rails through the Energy Meter Interface, NVIDIA publishes GPU telemetry through its own driver, and battery, display and activity are plain Win32 and WMI. The validator sits between the sampler and the model, marking rather than throwing.
 
-**Tech Stack:** .NET 10, `net10.0-windows`, `System.Management` for WMI, and Win32 P/Invoke for everything else: the energy meter, battery, CPU times, idle, session state and NVML. No third-party sensor library. xUnit, Shouldly. Spec: `docs/superpowers/specs/2026-09-08-powerledger-design.md` §4, §5, §11.
+**Tech Stack:** .NET 10, `net10.0-windows`, `System.Management` for WMI, `System.Diagnostics.PerformanceCounter` for the energy meter, and Win32 P/Invoke for everything else: battery, CPU times, idle, device power state and NVML. No third-party sensor library. xUnit, Shouldly. Spec: `docs/superpowers/specs/2026-09-08-powerledger-design.md` §4, §5, §11.
 
 **Git rule (from the owner):** commit locally after every task. Never add a remote, push, or create a GitHub repo.
 
@@ -34,33 +34,44 @@ public sealed record Sample(
 
 ```
 src/PowerLedger.Sensors/
-  PowerLedger.Sensors.csproj      net10.0-windows; refs Core + Contracts; System.Management
+  PowerLedger.Sensors.csproj      net10.0-windows; refs Core + Contracts; System.Management, PerformanceCounter
   SampleDraft.cs                  mutable tick under construction; each source fills the fields it owns
   ISensorSource.cs                the source contract plus SourceHealth
   Sampler.cs                      runs the sources, isolates failures, backs off, emits a Sample
   ValidatorOptions.cs             plausible ranges, median window, outlier factor, transition window
-  SampleValidator.cs              range checks, outlier replacement, RAPL wrap, AC transition window
+  SampleValidator.cs              range checks, spike rejection, AC transition window
   RollingMedian.cs                fixed-window median over the last N values
-  Win32.cs                        P/Invoke: battery state, system times, last input, console session idle
-  EnergyMeter.cs                  the Energy Meter Interface: enumerate rails, read energy counters
-  BatterySource.cs                discharge watts and AC state
+  Win32.cs                        P/Invoke: battery state and the UPS flag, system times, last input
+  Wmi.cs                          every WMI query: a timeout, row disposal, one definition of failure
+  EnergyMeter.cs                  the Energy Meter Interface: processor rails as performance counters
+  EnergyMeterSource.cs            CPU package and iGPU watts from the energy meter
+  BatterySource.cs                discharge watts and AC state, from the machine's own battery only
   CpuLoadSource.cs                CPU load from system time deltas
   ActivitySource.cs               user idle seconds and session locked
-  DisplaySource.cs                brightness, monitor count, panel diagonal, display on/off
-  EnergyMeterSource.cs            CPU package, cores, iGPU and DRAM watts from the energy meter
-  NvidiaSource.cs                 discrete GPU watts, load and presence through nvml.dll
+  DisplaySource.cs                brightness, monitor count, display on/off
+  DevicePowerState.cs             whether Windows has switched a device off, without waking it
+  Nvml.cs                         the nvml.dll surface, loaded from System32 only
+  NvidiaSource.cs                 discrete GPU watts, load and presence
   TdpTable.cs                     CPU and GPU TDP lookup by model name
   tdp-table.json                  the bundled table, an embedded resource
   InventoryFacts.cs               what was detected, plus its stable hash
   HardwareInventory.cs            WMI detection into InventoryFacts
+  MachineSensors.cs               the assembled set the Service and the preview share
 tests/PowerLedger.Sensors.Tests/
   FakeSource.cs                   test double for ISensorSource
+  SampleDraftTests.cs
   SamplerTests.cs
   RollingMedianTests.cs
   SampleValidatorTests.cs
+  EnergyMeterTests.cs
+  EnergyMeterSourceTests.cs
+  SimpleSourcesTests.cs           battery, CPU load and activity
+  DisplaySourceTests.cs
+  NvidiaSourceTests.cs
   TdpTableTests.cs
   InventoryFactsTests.cs
-  EnergyMeterTests.cs
+  HardwareInventoryTests.cs       chassis, drive and panel decisions
+  MachineSensorsTests.cs
   RealHardwareTests.cs            Trait("Category","Hardware"); reads this machine, skipped in CI
 ```
 
@@ -101,7 +112,8 @@ dotnet add tests/PowerLedger.Sensors.Tests package Shouldly
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Management" Version="10.0.2" />
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.12" />
+    <PackageReference Include="System.Management" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
@@ -689,14 +701,14 @@ git commit -m "Add a fixed-window rolling median"
 
 ---
 
-### Task 5: SampleValidator — ranges, outliers, wraps and the transition window
+### Task 5: SampleValidator — ranges, spikes and the transition window
 
 **Files:**
 - Create: `src/PowerLedger.Sensors/ValidatorOptions.cs`
 - Create: `src/PowerLedger.Sensors/SampleValidator.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/SampleValidatorTests.cs`
 
-Spec §4: plausible ranges CPU 0–400 W, GPU 0–700 W, battery 0–300 W; a value more than 3× the rolling 30-sample median is replaced with the last good one and the tick marked suspect; a negative RAPL delta drops that tick's CPU value; the first 3 s after an AC↔battery transition is excluded from calibration while the quality label still switches immediately.
+Spec §4: plausible ranges CPU 0–400 W, GPU 0–700 W, battery 0–300 W. A GPU or battery value more than 3× the rolling 30-sample median is a spike: it is replaced with the last good one and the tick marked suspect. A second such value in a row is a real rise, so it is accepted and restarts the median; otherwise a sustained change would be rejected forever. CPU watts from the energy meter are exact over their tick and are range-checked only, and a rail whose counter goes backwards is dropped by the meter itself (Task 7). The first 3 s after an AC↔battery transition are excluded from calibration while the quality label still switches immediately, and the transition restarts the battery median.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -754,56 +766,72 @@ public class SampleValidatorTests
     }
 
     [Fact]
-    public void A_spike_more_than_three_times_the_median_is_replaced_by_the_last_good_value()
+    public void A_single_gpu_spike_is_replaced_by_the_last_good_value()
     {
         var validator = new SampleValidator();
-        for (var i = 0; i < 30; i++) validator.Validate(Raw(cpu: 10, second: i));
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(gpu: 10, second: i));
 
-        var spike = validator.Validate(Raw(cpu: 200, second: 30));
+        var spike = validator.Validate(Raw(gpu: 200, second: 30));
 
-        spike.CpuPackageW.ShouldBe(10);
+        spike.DGpuW.ShouldBe(10);
         spike.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_sustained_rise_is_accepted_on_its_second_reading_instead_of_being_rejected_forever()
+    {
+        var validator = new SampleValidator();
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(gpu: 10, second: i));
+
+        validator.Validate(Raw(gpu: 200, second: 30)).DGpuW.ShouldBe(10);
+
+        var second = validator.Validate(Raw(gpu: 200, second: 31));
+        second.DGpuW.ShouldBe(200);
+        second.Suspect.ShouldBeFalse();
+        validator.Validate(Raw(gpu: 210, second: 32)).DGpuW.ShouldBe(210);
+    }
+
+    [Fact]
+    public void Cpu_watts_from_the_energy_meter_are_never_spike_filtered()
+    {
+        // They are averages of real energy over the tick, so a jump from idle to turbo is a fact, not a glitch.
+        var validator = new SampleValidator();
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(cpu: 6, second: i));
+
+        var load = validator.Validate(Raw(cpu: 35, second: 30));
+        load.CpuPackageW.ShouldBe(35);
+        load.Suspect.ShouldBeFalse();
     }
 
     [Fact]
     public void A_dip_far_below_the_median_is_left_alone_because_idle_is_real()
     {
         var validator = new SampleValidator();
-        for (var i = 0; i < 30; i++) validator.Validate(Raw(cpu: 30, second: i));
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(gpu: 30, second: i));
 
-        var dip = validator.Validate(Raw(cpu: 1, second: 30));
+        var dip = validator.Validate(Raw(gpu: 1, second: 30));
 
-        dip.CpuPackageW.ShouldBe(1);
+        dip.DGpuW.ShouldBe(1);
         dip.Suspect.ShouldBeFalse();
-    }
-
-    [Fact]
-    public void The_median_is_not_poisoned_by_the_spike_it_rejected()
-    {
-        var validator = new SampleValidator();
-        for (var i = 0; i < 30; i++) validator.Validate(Raw(cpu: 10, second: i));
-        validator.Validate(Raw(cpu: 200, second: 30));
-
-        validator.Validate(Raw(cpu: 200, second: 31)).CpuPackageW.ShouldBe(10);
     }
 
     [Fact]
     public void A_reading_stays_trusted_until_the_window_has_something_to_say()
     {
         var validator = new SampleValidator();
-        validator.Validate(Raw(cpu: 5)).CpuPackageW.ShouldBe(5);
-        validator.Validate(Raw(cpu: 300, second: 1)).CpuPackageW.ShouldBe(300);
+        validator.Validate(Raw(gpu: 5)).DGpuW.ShouldBe(5);
+        validator.Validate(Raw(gpu: 300, second: 1)).DGpuW.ShouldBe(300);
         validator.SuspectCount.ShouldBe(0);
     }
 
     [Fact]
-    public void A_cpu_reading_below_the_previous_one_by_more_than_a_hair_is_a_counter_wrap_and_is_dropped()
+    public void A_negative_cpu_reading_is_dropped()
     {
         var validator = new SampleValidator();
         validator.Validate(Raw(cpu: 20));
-        var wrapped = validator.Validate(Raw(cpu: -0.5, second: 1));
-        wrapped.CpuPackageW.ShouldBeNull();
-        wrapped.Suspect.ShouldBeTrue();
+        var negative = validator.Validate(Raw(cpu: -0.5, second: 1));
+        negative.CpuPackageW.ShouldBeNull();
+        negative.Suspect.ShouldBeTrue();
     }
 
     [Fact]
@@ -831,6 +859,16 @@ public class SampleValidatorTests
     }
 
     [Fact]
+    public void Coming_off_mains_starts_the_battery_median_afresh()
+    {
+        var validator = new SampleValidator();
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(battery: 10, onBattery: true, second: i));
+        validator.Validate(Raw(battery: null, onBattery: false, second: 30));
+
+        validator.Validate(Raw(battery: 40, onBattery: true, second: 40)).BatteryRateW.ShouldBe(40);
+    }
+
+    [Fact]
     public void Brightness_and_load_are_clamped_rather_than_dropped()
     {
         var validator = new SampleValidator();
@@ -845,12 +883,21 @@ public class SampleValidatorTests
     }
 
     [Fact]
+    public void A_non_finite_integrated_graphics_reading_is_dropped()
+    {
+        var validator = new SampleValidator();
+        var checked_ = validator.Validate(Raw() with { IGpuW = double.NaN });
+        checked_.IGpuW.ShouldBeNull();
+        checked_.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
     public void Options_choose_the_ranges_and_the_windows()
     {
         var strict = new SampleValidator(new ValidatorOptions(CpuMaxW: 20, MedianWindow: 3, OutlierFactor: 2, TransitionSeconds: 1));
         strict.Validate(Raw(cpu: 25)).CpuPackageW.ShouldBeNull();
-        for (var i = 0; i < 3; i++) strict.Validate(Raw(cpu: 5, second: i));
-        strict.Validate(Raw(cpu: 15, second: 3)).CpuPackageW.ShouldBe(5);
+        for (var i = 0; i < 3; i++) strict.Validate(Raw(gpu: 5, second: i));
+        strict.Validate(Raw(gpu: 15, second: 3)).DGpuW.ShouldBe(5);
     }
 }
 ```
@@ -889,22 +936,29 @@ namespace PowerLedger.Sensors;
 
 /// <summary>
 /// Spec §4: sits between the sampler and the model and marks rather than throws. Out-of-range values are dropped,
-/// spikes are replaced with the last good reading, a counter wrap drops that tick's CPU value, and the seconds
-/// after an AC change are flagged so the calibration learner skips them while the quality label switches at once.
-/// Single-threaded: the sampling loop owns it.
+/// a single-tick spike is replaced with the last good reading, and a second high reading in a row is accepted as a
+/// real change of level rather than rejected forever. The seconds after an AC change are flagged so the calibration
+/// learner skips them while the quality label switches at once.
+/// CPU watts come from the energy meter as averages of real energy over the tick, so they are range-checked but never
+/// spike-filtered: a jump from idle to turbo is a fact, not a glitch. Single-threaded: the sampling loop owns it.
 /// </summary>
-public sealed class SampleValidator(ValidatorOptions? options = null)
+public sealed class SampleValidator
 {
-    private readonly ValidatorOptions _options = options ?? new ValidatorOptions();
-    private readonly RollingMedian _cpu = new((options ?? new ValidatorOptions()).MedianWindow);
-    private readonly RollingMedian _gpu = new((options ?? new ValidatorOptions()).MedianWindow);
-    private readonly RollingMedian _battery = new((options ?? new ValidatorOptions()).MedianWindow);
+    private readonly ValidatorOptions _options;
+    private readonly Channel _cpu;
+    private readonly Channel _gpu;
+    private readonly Channel _battery;
 
-    private double? _lastCpu;
-    private double? _lastGpu;
-    private double? _lastBattery;
     private bool? _lastOnBattery;
     private DateTimeOffset _transitionAt = DateTimeOffset.MinValue;
+
+    public SampleValidator(ValidatorOptions? options = null)
+    {
+        _options = options ?? new ValidatorOptions();
+        _cpu = new Channel(_options.MedianWindow);
+        _gpu = new Channel(_options.MedianWindow);
+        _battery = new Channel(_options.MedianWindow);
+    }
 
     /// <summary>How many ticks have been marked suspect since the service started (spec §4, shown in status).</summary>
     public int SuspectCount { get; private set; }
@@ -913,15 +967,18 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
     {
         var suspect = false;
 
-        if (_lastOnBattery is { } previous && previous != raw.OnBattery) _transitionAt = raw.Timestamp;
+        if (_lastOnBattery is { } previous && previous != raw.OnBattery)
+        {
+            _transitionAt = raw.Timestamp;
+            _battery.Reset();          // a discharge rate from before the last time on mains says nothing about now
+        }
         _lastOnBattery = raw.OnBattery;
         if ((raw.Timestamp - _transitionAt).TotalSeconds < _options.TransitionSeconds) suspect = true;
 
-        // A RAPL counter wrap shows up as a negative delta, which the driver surfaces as a negative reading.
-        var cpu = raw.CpuPackageW is { } candidate && candidate < 0 && _lastCpu is not null ? Drop(ref suspect) : raw.CpuPackageW;
-        cpu = Check(cpu, _options.CpuMaxW, _cpu, ref _lastCpu, ref suspect);
-        var gpu = Check(raw.DGpuW, _options.GpuMaxW, _gpu, ref _lastGpu, ref suspect);
-        var battery = Check(raw.BatteryRateW, _options.BatteryMaxW, _battery, ref _lastBattery, ref suspect);
+        var cpu = Check(raw.CpuPackageW, _options.CpuMaxW, _cpu, spikeFilter: false, ref suspect);
+        var gpu = Check(raw.DGpuW, _options.GpuMaxW, _gpu, spikeFilter: true, ref suspect);
+        var battery = Check(raw.BatteryRateW, _options.BatteryMaxW, _battery, spikeFilter: true, ref suspect);
+        var igpu = InRange(raw.IGpuW, _options.CpuMaxW, ref suspect);
 
         var brightness = Fraction(raw.Brightness, ref suspect);
         var load = Fraction(raw.CpuLoad, ref suspect) ?? 0;
@@ -931,6 +988,7 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
         return raw with
         {
             CpuPackageW = cpu,
+            IGpuW = igpu,
             DGpuW = gpu,
             BatteryRateW = battery,
             Brightness = brightness,
@@ -940,26 +998,38 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
         };
     }
 
-    private double? Check(double? value, double max, RollingMedian window, ref double? last, ref bool suspect)
+    private double? Check(double? value, double max, Channel channel, bool spikeFilter, ref bool suspect)
     {
-        if (value is not { } reading) return null;
-        if (!double.IsFinite(reading) || reading < 0 || reading > max) return Drop(ref suspect);
+        if (InRange(value, max, ref suspect) is not { } reading) return null;
 
-        // The spike test engages only once the window is full: a median of one or two readings says nothing,
-        // and rejecting against it would throw away a genuine jump from idle to load in the first seconds.
-        if (window.Count >= _options.MedianWindow && window.Median is { } median && median > 0 && reading >= median * _options.OutlierFactor)
+        // The spike test engages only once the window is full: a median of one or two readings says nothing.
+        var isSpike = spikeFilter
+            && channel.Window.Count >= _options.MedianWindow
+            && channel.Window.Median is { } median && median > 0
+            && reading >= median * _options.OutlierFactor;
+
+        if (isSpike && channel.ConsecutiveSpikes == 0)
         {
+            // One high reading is a spike: replace it, and keep it out of the window so the median stays honest.
+            channel.ConsecutiveSpikes = 1;
             suspect = true;
-            return last;                      // the spike never enters the window, so the median stays honest
+            return channel.Last;
         }
 
-        window.Add(reading);
-        last = reading;
+        // A second high reading in a row is a real change of level, so the old median no longer applies.
+        if (isSpike) channel.Window.Reset();
+
+        channel.ConsecutiveSpikes = 0;
+        channel.Window.Add(reading);
+        channel.Last = reading;
         return reading;
     }
 
-    private static double? Drop(ref bool suspect)
+    /// <summary>A watts reading: dropped when it is not a number, negative, or above the plausible ceiling.</summary>
+    private static double? InRange(double? value, double max, ref bool suspect)
     {
+        if (value is not { } reading) return null;
+        if (double.IsFinite(reading) && reading >= 0 && reading <= max) return reading;
         suspect = true;
         return null;
     }
@@ -980,13 +1050,27 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
         }
         return reading;
     }
+
+    private sealed class Channel(int window)
+    {
+        public RollingMedian Window { get; } = new(window);
+        public double? Last { get; set; }
+        public int ConsecutiveSpikes { get; set; }
+
+        public void Reset()
+        {
+            Window.Reset();
+            Last = null;
+            ConsecutiveSpikes = 0;
+        }
+    }
 }
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SampleValidatorTests`
-Expected: `Passed! - Failed: 0, Passed: 15`.
+Expected: `Passed! - Failed: 0, Passed: 18`.
 
 - [x] **Step 5: Commit**
 
@@ -1013,6 +1097,9 @@ using Shouldly;
 
 namespace PowerLedger.Sensors.Tests;
 
+[Trait("Category", "Hardware")]
+public class RealHardwareTests
+{
 [Trait("Category", "Hardware")]
 public class RealHardwareTests
 {
@@ -1052,15 +1139,22 @@ namespace PowerLedger.Sensors;
 /// </summary>
 internal static class Win32
 {
+    private const int SystemPowerCapabilities = 4;
     private const int SystemBatteryState = 5;
 
     /// <summary>Windows reports this when it cannot tell how fast the battery is moving.</summary>
     public const int UnknownRate = unchecked((int)0x80000000);
 
     /// <param name="AcOnLine">True when the machine is on mains power.</param>
-    /// <param name="Present">True when a battery is fitted.</param>
+    /// <param name="Present">True when Windows sees a battery.</param>
     /// <param name="RateMilliwatts">Negative while discharging, positive while charging, <see cref="UnknownRate"/> when unknown.</param>
-    public readonly record struct BatteryState(bool AcOnLine, bool Present, bool Charging, bool Discharging, int RateMilliwatts);
+    /// <param name="ShortTerm">True when Windows marks the batteries short-term, as it does for a UPS on USB.</param>
+    public readonly record struct BatteryState(bool AcOnLine, bool Present, bool Charging, bool Discharging, int RateMilliwatts, bool ShortTerm = false)
+    {
+        /// <summary>A battery that powers this machine alone. A UPS also powers whatever else is plugged into it, so
+        /// neither its presence nor its drain says anything about this machine.</summary>
+        public bool OwnBattery => Present && !ShortTerm;
+    }
 
     /// <summary>Cumulative 100 ns counters since boot. Kernel time already includes idle time.</summary>
     public readonly record struct SystemTimes(ulong Idle, ulong Kernel, ulong User);
@@ -1070,42 +1164,28 @@ internal static class Win32
         var state = default(SystemBatteryStateInfo);
         var status = CallNtPowerInformation(SystemBatteryState, IntPtr.Zero, 0, ref state, (uint)Marshal.SizeOf<SystemBatteryStateInfo>());
         if (status != 0) return null;
-        return new BatteryState(state.AcOnLine != 0, state.BatteryPresent != 0, state.Charging != 0, state.Discharging != 0, state.Rate);
+        return new BatteryState(state.AcOnLine != 0, state.BatteryPresent != 0, state.Charging != 0, state.Discharging != 0, state.Rate, BatteriesAreShortTerm());
+    }
+
+    /// <summary>False when Windows will not say, which keeps a real battery counted.</summary>
+    private static bool BatteriesAreShortTerm()
+    {
+        var capabilities = default(SystemPowerCapabilitiesInfo);
+        var status = CallNtPowerInformation(SystemPowerCapabilities, IntPtr.Zero, 0, ref capabilities, (uint)Marshal.SizeOf<SystemPowerCapabilitiesInfo>());
+        return status == 0 && capabilities.SystemBatteriesPresent != 0 && capabilities.BatteriesAreShortTerm != 0;
     }
 
     public static SystemTimes? ReadSystemTimes()
         => GetSystemTimes(out var idle, out var kernel, out var user) ? new SystemTimes(idle, kernel, user) : null;
 
-    /// <summary>Seconds since the last keyboard or mouse input, from the calling session.</summary>
+    /// <summary>Seconds since the last keyboard or mouse input in the calling session. From the service (session 0)
+    /// this reports the service's own session, so the service must get idle time from the user's session instead.</summary>
     public static double ReadIdleSeconds()
     {
         var info = new LastInputInfo { cbSize = (uint)Marshal.SizeOf<LastInputInfo>() };
         if (!GetLastInputInfo(ref info)) return 0;
         return unchecked((uint)Environment.TickCount - info.dwTime) / 1000.0;
     }
-
-    /// <summary>Seconds since the last input in the console session, which is what a service must ask (spec §4).</summary>
-    public static double? ReadConsoleSessionIdleSeconds()
-    {
-        var session = WTSGetActiveConsoleSessionId();
-        if (session == 0xFFFFFFFF) return null;
-        if (!WTSQuerySessionInformationW(IntPtr.Zero, session, WtsSessionInfo, out var buffer, out var size) || size == 0)
-        {
-            return null;
-        }
-        try
-        {
-            var info = Marshal.PtrToStructure<WtsInfo>(buffer);
-            var idleTicks = info.CurrentTime - info.LastInputTime;
-            return idleTicks <= 0 ? 0 : idleTicks / 10_000_000.0;
-        }
-        finally
-        {
-            WTSFreeMemory(buffer);
-        }
-    }
-
-    private const int WtsSessionInfo = 24;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SystemBatteryStateInfo
@@ -1126,6 +1206,15 @@ internal static class Win32
         public uint DefaultAlert2;
     }
 
+    /// <summary>SYSTEM_POWER_CAPABILITIES is 76 bytes; only its two battery flags are read. The offsets were checked
+    /// on real hardware against the sleep states powercfg reports.</summary>
+    [StructLayout(LayoutKind.Explicit, Size = 76)]
+    private struct SystemPowerCapabilitiesInfo
+    {
+        [FieldOffset(30)] public byte SystemBatteriesPresent;
+        [FieldOffset(31)] public byte BatteriesAreShortTerm;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct LastInputInfo
     {
@@ -1133,30 +1222,11 @@ internal static class Win32
         public uint dwTime;
     }
 
-    /// <summary>The head of WTSINFOW; only the two time fields are read, so the trailing strings are ignored.</summary>
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct WtsInfo
-    {
-        public int State;
-        public int SessionId;
-        public int IncomingBytes;
-        public int OutgoingBytes;
-        public int IncomingFrames;
-        public int OutgoingFrames;
-        public int IncomingCompressedBytes;
-        public int OutgoingCompressedBytes;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 33)] public string WinStationName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 21)] public string Domain;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 21)] public string UserName;
-        public long ConnectTime;
-        public long DisconnectTime;
-        public long LastInputTime;
-        public long LogonTime;
-        public long CurrentTime;
-    }
-
     [DllImport("powrprof.dll")]
     private static extern uint CallNtPowerInformation(int informationLevel, IntPtr inputBuffer, uint inputBufferSize, ref SystemBatteryStateInfo outputBuffer, uint outputBufferSize);
+
+    [DllImport("powrprof.dll")]
+    private static extern uint CallNtPowerInformation(int informationLevel, IntPtr inputBuffer, uint inputBufferSize, ref SystemPowerCapabilitiesInfo outputBuffer, uint outputBufferSize);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -1165,16 +1235,6 @@ internal static class Win32
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetLastInputInfo(ref LastInputInfo info);
-
-    [DllImport("kernel32.dll")]
-    private static extern uint WTSGetActiveConsoleSessionId();
-
-    [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WTSQuerySessionInformationW(IntPtr server, uint sessionId, int infoClass, out IntPtr buffer, out uint bytesReturned);
-
-    [DllImport("wtsapi32.dll")]
-    private static extern void WTSFreeMemory(IntPtr memory);
 }
 ```
 
@@ -1200,9 +1260,9 @@ git commit -m "Add the Win32 surface for battery, CPU times and idle"
 - Create: `src/PowerLedger.Sensors/EnergyMeter.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/EnergyMeterTests.cs`
 
-Windows 11 publishes the processor's RAPL rails as performance counters backed by the Energy Meter Interface. `Win32_PerfFormattedData_PowerMeterCounter_EnergyMeter` exposes one instance per rail with a `Power` reading and a monotonic `Energy` counter. Verified on the development laptop from a non-elevated process: `RAPL_Package0_PKG` 5590, `RAPL_Package0_PP0` 1827, `RAPL_Package0_PP1` 66, `RAPL_Package0_DRAM` 0, plus a `_Total` instance that must be ignored.
+Windows 11 publishes the processor's RAPL rails as performance counters backed by the Energy Meter Interface: the `Energy Meter` category, one instance per rail, each with a monotonic `Energy` counter in picowatt-hours. Verified on the development laptop from a non-elevated process: `RAPL_Package0_PKG`, `RAPL_Package0_PP0`, `RAPL_Package0_PP1` and `RAPL_Package0_DRAM`, plus a `_Total` instance that must be ignored.
 
-The `Power` field's unit is not documented. Every sign says milliwatts, and the hardware test below pins that by cross-checking against the energy counter and against a plausible band for this processor. If the assertion fails, the unit is wrong and the constant must be corrected rather than the test loosened.
+The counters are read as raw values through the performance-counter API, in well under a millisecond, and watts are the energy used since the previous read divided by the time between reads. The same numbers are available through WMI, but that query took about 270 ms, far over the tick budget. The unit was confirmed on real hardware against Windows' own milliwatt figure: 1 pWh is 3.6e-9 J. The hardware test pins it with a plausible band for this processor; a thousandfold error lands far outside it. If the assertion fails, the constant is wrong and must be corrected rather than the test loosened.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -1268,7 +1328,7 @@ Add to `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`, inside the existi
 
 ```csharp
     [Fact]
-    public void The_energy_meter_reports_a_believable_package_wattage()
+    public void The_energy_meter_reports_a_believable_package_wattage_well_inside_the_tick_budget()
     {
         using var meter = new EnergyMeter();
         if (!meter.Available)
@@ -1278,20 +1338,14 @@ Add to `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`, inside the existi
             return;
         }
 
-        var reading = meter.Read();
-        reading.PackageW.ShouldNotBeNull();
-        reading.PackageW!.Value.ShouldBeInRange(0.1, 200);
+        // A thousandfold unit error would put this at a few milliwatts or several kilowatts, so the band pins the unit.
+        Thread.Sleep(1000);
+        meter.Read().PackageW.ShouldNotBeNull().ShouldBeInRange(0.1, 200);
 
-        // Cross-check the undocumented Power unit against the monotonic energy counter.
-        var first = meter.ReadRails().Single(r => EnergyMeter.Classify(r.Name) == RailKind.Package);
-        Thread.Sleep(3000);
-        var second = meter.ReadRails().Single(r => r.Name == first.Name);
-        second.EnergyPicowattHours.ShouldBeGreaterThan(first.EnergyPicowattHours);
-
-        var joules = (second.EnergyPicowattHours - first.EnergyPicowattHours) * 3.6e-9;   // 1 pWh = 1e-12 Wh = 3.6e-9 J
-        var derivedWatts = joules / 3.0;
-        derivedWatts.ShouldBeInRange(0.1, 200);
-        derivedWatts.ShouldBe(reading.PackageW.Value, tolerance: reading.PackageW.Value * 0.9 + 2);
+        // Spec §4 budgets about 2 ms a tick for the fast sources; the old WMI query took about 270 ms.
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < 20; i++) meter.Read();
+        (timer.Elapsed.TotalMilliseconds / 20).ShouldBeLessThan(5);
     }
 ```
 
@@ -1304,7 +1358,8 @@ Expected: build error, `EnergyMeter` not found.
 
 `src/PowerLedger.Sensors/EnergyMeter.cs`
 ```csharp
-using System.Management;
+using System.ComponentModel;
+using System.Diagnostics;
 
 namespace PowerLedger.Sensors;
 
@@ -1324,8 +1379,8 @@ public enum RailKind
 }
 
 /// <param name="Name">Counter instance name, e.g. "RAPL_Package0_PKG".</param>
-/// <param name="PowerMilliwatts">The rail's current power. The unit is undocumented; a hardware test pins it.</param>
-/// <param name="EnergyPicowattHours">Monotonic energy counter, used only to cross-check the power unit.</param>
+/// <param name="PowerMilliwatts">The rail's average power over the last tick.</param>
+/// <param name="EnergyPicowattHours">The rail's monotonic energy counter at the end of that tick.</param>
 public readonly record struct Rail(string Name, ulong PowerMilliwatts, ulong EnergyPicowattHours);
 
 /// <param name="PackageW">Whole-processor watts, or null when no package rail exists.</param>
@@ -1335,26 +1390,57 @@ public readonly record struct Rail(string Name, ulong PowerMilliwatts, ulong Ene
 public readonly record struct EnergyMeterReading(double? PackageW, double? CoresW, double? IntegratedGpuW, double? MemoryW);
 
 /// <summary>
-/// The processor's power rails as Windows publishes them (spec §4). No kernel driver and no elevation:
-/// Windows 11's inbox power-management driver populates these counters from the processor's own energy meters.
+/// The processor's power rails as Windows publishes them (spec §4). No kernel driver and no elevation: Windows 11's
+/// inbox power-management driver fills the "Energy Meter" performance counters from the processor's own meters.
+/// Each rail's energy counter, in picowatt-hours, is read directly through the performance-counter API in well
+/// under a millisecond, and watts are the energy used since the previous read over the time between reads, so every
+/// figure is exact over its tick rather than over some window of Windows' choosing.
 /// A machine with no rails reports nothing, never zero, because a zero is indistinguishable from an idle chip.
+/// Single-threaded: the sampling loop owns it.
 /// </summary>
 public sealed class EnergyMeter : IDisposable
 {
-    private const string Query = "SELECT Name, Power, Energy FROM Win32_PerfFormattedData_PowerMeterCounter_EnergyMeter";
+    private const string Category = "Energy Meter";
+    private const string EnergyCounter = "Energy";
 
-    private readonly ManagementObjectSearcher? _searcher;
+    /// <summary>1 pWh = 1e-12 Wh = 3.6e-9 J. Confirmed on real hardware against Windows' own milliwatt figure.</summary>
+    public const double JoulesPerPicowattHour = 3.6e-9;
+
+    private readonly List<(string Name, PerformanceCounter Energy)> _rails = [];
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private Dictionary<string, long> _previousEnergy = [];
+    private TimeSpan _previousAt;
 
     public EnergyMeter()
     {
         try
         {
-            _searcher = new ManagementObjectSearcher(new ManagementScope(@"\\.\root\cimv2"), new ObjectQuery(Query));
-            Available = ReadRails().Any(r => Classify(r.Name) != RailKind.Ignored);
-            if (!Available) Unavailable = "this machine publishes no processor power rails";
+            if (!PerformanceCounterCategory.Exists(Category))
+            {
+                Unavailable = "this machine publishes no processor power rails";
+                return;
+            }
+
+            foreach (var instance in new PerformanceCounterCategory(Category).GetInstanceNames())
+            {
+                if (Classify(instance) == RailKind.Ignored) continue;
+                _rails.Add((instance, new PerformanceCounter(Category, EnergyCounter, instance, readOnly: true)));
+            }
+
+            if (_rails.Count == 0)
+            {
+                Unavailable = "this machine publishes no processor power rails";
+                return;
+            }
+
+            // Take the first reading now, so the first real tick already has an interval to measure.
+            _previousEnergy = Snapshot();
+            _previousAt = _clock.Elapsed;
+            Available = true;
         }
-        catch (ManagementException error)
+        catch (Exception error) when (error is InvalidOperationException or UnauthorizedAccessException or Win32Exception)
         {
+            Dispose();
             Available = false;
             Unavailable = error.Message;
         }
@@ -1366,24 +1452,28 @@ public sealed class EnergyMeter : IDisposable
     /// <summary>Why there is nothing to read, for the status screen; null when the meter works.</summary>
     public string? Unavailable { get; }
 
-    /// <summary>Every rail instance, unclassified and unsummed.</summary>
-    public IReadOnlyList<Rail> ReadRails()
+    /// <summary>Average watts per kind of rail since the previous call. A rail whose counter went backwards reports nothing.</summary>
+    public EnergyMeterReading Read()
     {
-        if (_searcher is null) return [];
-        var rails = new List<Rail>();
-        using var results = _searcher.Get();
-        foreach (var row in results)
-        {
-            using var instance = (ManagementObject)row;
-            var name = instance["Name"] as string;
-            if (string.IsNullOrEmpty(name)) continue;
-            rails.Add(new Rail(name, ToUInt64(instance["Power"]), ToUInt64(instance["Energy"])));
-        }
-        return rails;
-    }
+        if (!Available) return default;
 
-    /// <summary>One reading with the rails grouped by what they measure.</summary>
-    public EnergyMeterReading Read() => Summarise(ReadRails());
+        var now = _clock.Elapsed;
+        var seconds = (now - _previousAt).TotalSeconds;
+        var energy = Snapshot();
+        var previous = _previousEnergy;
+        _previousEnergy = energy;
+        _previousAt = now;
+        if (seconds <= 0) return default;
+
+        var rails = new List<Rail>(energy.Count);
+        foreach (var (name, value) in energy)
+        {
+            if (!previous.TryGetValue(name, out var before) || value < before) continue;
+            var watts = (value - before) * JoulesPerPicowattHour / seconds;
+            rails.Add(new Rail(name, (ulong)Math.Round(watts * 1000), (ulong)value));
+        }
+        return Summarise(rails);
+    }
 
     /// <summary>Groups rails by kind and sums each kind, so a two-socket machine reports one package figure.</summary>
     public static EnergyMeterReading Summarise(IReadOnlyList<Rail> rails)
@@ -1416,9 +1506,18 @@ public sealed class EnergyMeter : IDisposable
         return RailKind.Ignored;
     }
 
-    private static ulong ToUInt64(object? value) => value is null ? 0 : Convert.ToUInt64(value);
+    private Dictionary<string, long> Snapshot()
+    {
+        var snapshot = new Dictionary<string, long>(_rails.Count);
+        foreach (var (name, counter) in _rails) snapshot[name] = counter.RawValue;
+        return snapshot;
+    }
 
-    public void Dispose() => _searcher?.Dispose();
+    public void Dispose()
+    {
+        foreach (var (_, counter) in _rails) counter.Dispose();
+        _rails.Clear();
+    }
 }
 ```
 
@@ -1428,9 +1527,9 @@ Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter EnergyMeterTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter RealHardwareTests`
-Expected: `Passed! - Failed: 0, Passed: 2`. The wattage test takes about three seconds.
+Expected: `Passed! - Failed: 0, Passed: 2`. The wattage test takes about a second.
 
-If the cross-check fails because the derived watts and the reported watts differ by orders of magnitude, the `Power` unit is not milliwatts. Report the two numbers and stop; do not change the tolerance.
+If the package figure misses the band by orders of magnitude, the picowatt-hour constant is wrong. Report the number and stop; do not widen the band.
 
 - [x] **Step 5: Commit**
 
@@ -1581,6 +1680,8 @@ git commit -m "Add the energy meter sensor source"
 
 Each of these owns two or three fields and takes its Windows call as a delegate, so the logic is testable without hardware and the real call is one line.
 
+Two traps shape them. `GetLastInputInfo` describes the caller's own session, so the service, running in session 0, must be handed idle time from the user's session. And Windows shows a UPS on USB as a battery, flagged short-term; it powers the whole desk, so it is not the machine's battery.
+
 - [x] **Step 1: Write the failing tests**
 
 ```csharp
@@ -1637,6 +1738,23 @@ public class SimpleSourcesTests
         var draft = new SampleDraft();
         source.Contribute(draft);
         draft.OnBattery.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_ups_is_not_the_machines_battery()
+    {
+        // A desktop riding out a power cut on a UPS: the drain is the whole desk, not this machine.
+        var ups = new Win32.BatteryState(AcOnLine: false, Present: true, Charging: false, Discharging: true, RateMilliwatts: -180_000, ShortTerm: true);
+        ups.OwnBattery.ShouldBeFalse();
+
+        var source = new BatterySource(() => ups);
+        source.Supported.ShouldBeFalse();
+        source.Unavailable.ShouldNotBeNull().ShouldContain("UPS");
+
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+        draft.OnBattery.ShouldBeFalse();
+        draft.BatteryRateW.ShouldBeNull();
     }
 
     [Fact]
@@ -1717,6 +1835,8 @@ namespace PowerLedger.Sensors;
 /// <summary>
 /// Whether the machine is on mains and, while it is not, how fast the battery is draining. This is the only
 /// source that measures the whole machine rather than one of its parts, so it decides whether a reading is Measured.
+/// A UPS on USB also looks like a battery to Windows. It is ignored, because its drain includes everything else
+/// plugged into it and would teach the calibration a baseline the machine does not have.
 /// </summary>
 public sealed class BatterySource : ISensorSource
 {
@@ -1729,8 +1849,11 @@ public sealed class BatterySource : ISensorSource
     {
         _read = read;
         var state = read();
-        Supported = state?.Present ?? false;
-        Unavailable = Supported ? null : state is null ? "Windows did not answer" : "no battery fitted";
+        Supported = state?.OwnBattery ?? false;
+        Unavailable = Supported ? null
+            : state is null ? "Windows did not answer"
+            : state.Value.Present ? "the only battery is a UPS, which powers more than this machine"
+            : "no battery fitted";
     }
 
     public string Name => "battery";
@@ -1742,7 +1865,7 @@ public sealed class BatterySource : ISensorSource
     public void Contribute(SampleDraft draft)
     {
         if (_read() is not { } state) return;
-        draft.OnBattery = state.Present && !state.AcOnLine;
+        draft.OnBattery = state.OwnBattery && !state.AcOnLine;
 
         // Windows reports the rate as negative while discharging. A zero means "not moving", which is no reading.
         var discharging = draft.OnBattery && state.RateMilliwatts != 0 && state.RateMilliwatts != Win32.UnknownRate;
@@ -1806,8 +1929,10 @@ public sealed class CpuLoadSource : ISensorSource
 namespace PowerLedger.Sensors;
 
 /// <summary>
-/// How long the person at the keyboard has been away, and whether they locked the screen. The service runs in
-/// session 0, so it asks about the console session rather than its own.
+/// How long the person at the keyboard has been away, and whether they locked the screen.
+/// Idle time is only meaningful from the user's own session: the default reads it there with GetLastInputInfo,
+/// which is right for the App and the preview. The service runs in session 0, where that call describes the
+/// service itself, so it must pass in idle time reported from the user's session.
 /// </summary>
 public sealed class ActivitySource : ISensorSource
 {
@@ -1815,8 +1940,9 @@ public sealed class ActivitySource : ISensorSource
     private readonly Func<bool> _locked;
 
     /// <param name="sessionLocked">The service supplies this from its session-change notifications; the preview passes false.</param>
-    public ActivitySource(Func<bool> sessionLocked)
-        : this(() => Win32.ReadConsoleSessionIdleSeconds() ?? Win32.ReadIdleSeconds(), sessionLocked) { }
+    /// <param name="idleSeconds">Idle time from the user's session, or null for this process's own session.</param>
+    public ActivitySource(Func<bool> sessionLocked, Func<double?>? idleSeconds = null)
+        : this(idleSeconds ?? OwnSessionIdle, sessionLocked) { }
 
     /// <summary>Test seam: any source of idle time and lock state.</summary>
     internal ActivitySource(Func<double?> idleSeconds, Func<bool> locked)
@@ -1831,6 +1957,7 @@ public sealed class ActivitySource : ISensorSource
 
     public string? Unavailable => null;
 
+    /// <summary>Unknown idle time counts as active, which never overstates idle waste.</summary>
     public void Contribute(SampleDraft draft)
     {
         draft.UserIdleSeconds = _idleSeconds() ?? 0;
@@ -1838,13 +1965,15 @@ public sealed class ActivitySource : ISensorSource
     }
 
     public void Dispose() { }
+
+    private static double? OwnSessionIdle() => Win32.ReadIdleSeconds();
 }
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SimpleSourcesTests`
-Expected: `Passed! - Failed: 0, Passed: 9`.
+Expected: `Passed! - Failed: 0, Passed: 10`.
 
 - [x] **Step 5: Commit**
 
@@ -1858,14 +1987,20 @@ git commit -m "Add the battery, CPU load and activity sources"
 ### Task 10: DisplaySource
 
 **Files:**
+- Create: `src/PowerLedger.Sensors/Wmi.cs`
 - Create: `src/PowerLedger.Sensors/DisplaySource.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/DisplaySourceTests.cs`
+- Test: add to `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`
 
-Brightness and panel size come from WMI, which is slow, so they are cached and refreshed on a timer rather than read every tick (spec §4 performance rules). Whether the display is on comes from the service's power notifications, so it arrives as a delegate.
+Brightness and monitor count come from WMI, which is slow, so they are cached and refreshed on a timer rather than read every tick (spec §4 performance rules). Whether the display is on comes from the service's power notifications, so it arrives as a delegate. The panel's size belongs to the hardware inventory (Task 14).
+
+This is the first WMI user, so it also brings `Wmi`, the one way the assembly queries WMI. Every query gets a timeout, because a hung provider would otherwise stall the sampling loop, and every row is disposed, because each holds a COM object. WMI fails with `ManagementException`, with `COMException` while the service restarts, and with `UnauthorizedAccessException`; `Wmi.IsFailure` names all three. A desktop has no panel whose brightness Windows controls, and WMI answers that query with "not supported", which means no brightness rather than a failure.
 
 - [x] **Step 1: Write the failing tests**
 
 ```csharp
+using System.Management;
+using System.Runtime.InteropServices;
 using PowerLedger.Sensors;
 using Shouldly;
 
@@ -1877,7 +2012,7 @@ public class DisplaySourceTests
     public void Brightness_and_monitor_count_reach_the_draft()
     {
         var draft = new SampleDraft();
-        new DisplaySource(() => new DisplayState(Brightness: 0.6, MonitorCount: 2, DiagonalInches: 15.6), () => true).Contribute(draft);
+        new DisplaySource(() => new DisplayState(Brightness: 0.6, MonitorCount: 2), () => true).Contribute(draft);
 
         draft.Brightness.ShouldBe(0.6);
         draft.MonitorCount.ShouldBe(2);
@@ -1888,7 +2023,7 @@ public class DisplaySourceTests
     public void A_dark_screen_keeps_its_brightness_because_the_panel_is_still_set_that_way()
     {
         var draft = new SampleDraft();
-        new DisplaySource(() => new DisplayState(0.6, 1, 15.6), () => false).Contribute(draft);
+        new DisplaySource(() => new DisplayState(0.6, 1), () => false).Contribute(draft);
 
         draft.DisplayOn.ShouldBeFalse();
         draft.Brightness.ShouldBe(0.6);
@@ -1898,7 +2033,7 @@ public class DisplaySourceTests
     public void A_desktop_with_no_brightness_control_reports_no_brightness()
     {
         var draft = new SampleDraft();
-        new DisplaySource(() => new DisplayState(null, 1, 0), () => true).Contribute(draft);
+        new DisplaySource(() => new DisplayState(null, 1), () => true).Contribute(draft);
 
         draft.Brightness.ShouldBeNull();
         draft.MonitorCount.ShouldBe(1);
@@ -1908,7 +2043,7 @@ public class DisplaySourceTests
     public void The_slow_query_runs_once_and_is_reused_until_it_goes_stale()
     {
         var calls = 0;
-        var source = new DisplaySource(() => { calls++; return new DisplayState(0.5, 1, 14); }, () => true, refreshEvery: TimeSpan.FromMinutes(5));
+        var source = new DisplaySource(() => { calls++; return new DisplayState(0.5, 1); }, () => true, refreshEvery: TimeSpan.FromMinutes(5));
 
         for (var tick = 0; tick < 10; tick++) source.Contribute(new SampleDraft());
 
@@ -1918,12 +2053,15 @@ public class DisplaySourceTests
         calls.ShouldBe(2);
     }
 
-    [Fact]
-    public void The_last_good_state_survives_a_query_that_throws()
+    [Theory]
+    [InlineData("query refused")]
+    [InlineData("service restarting")]
+    public void The_last_good_state_survives_a_query_that_throws(string failure)
     {
         var fail = false;
+        Exception Failure() => failure == "query refused" ? new ManagementException("not found") : new COMException("RPC server unavailable");
         var source = new DisplaySource(
-            () => fail ? throw new InvalidOperationException("wmi down") : new DisplayState(0.7, 1, 15.6),
+            () => fail ? throw Failure() : new DisplayState(0.7, 1),
             () => true,
             refreshEvery: TimeSpan.Zero);
 
@@ -1936,13 +2074,34 @@ public class DisplaySourceTests
     }
 
     [Fact]
-    public void The_panel_diagonal_is_offered_to_the_inventory_rather_than_the_tick()
+    public void A_failing_query_is_retried_soon_but_not_every_tick()
     {
-        var source = new DisplaySource(() => new DisplayState(0.5, 1, 17.3), () => true);
-        source.Contribute(new SampleDraft());
-        source.DiagonalInches.ShouldBe(17.3);
+        var calls = 0;
+        var source = new DisplaySource(() => { calls++; throw new COMException("RPC server unavailable"); }, () => true, refreshEvery: TimeSpan.FromMinutes(5));
+
+        var draft = new SampleDraft();
+        for (var tick = 0; tick < 10; tick++) source.Contribute(draft);
+
+        calls.ShouldBe(1);
+        draft.MonitorCount.ShouldBe(1);                 // until WMI answers, one display is assumed
+        draft.Brightness.ShouldBeNull();
     }
 }
+```
+
+Add to `RealHardwareTests`:
+
+```csharp
+    [Fact]
+    public void The_display_query_answers_on_its_first_tick()
+    {
+        var draft = new SampleDraft();
+        new DisplaySource(() => true).Contribute(draft);
+
+        draft.MonitorCount.ShouldBeGreaterThan(0);
+        // Null on a desktop, where no panel has a brightness Windows controls.
+        if (draft.Brightness is { } brightness) brightness.ShouldBeInRange(0, 1);
+    }
 ```
 
 - [x] **Step 2: Run tests to verify they fail**
@@ -1952,6 +2111,60 @@ Expected: build error, `DisplaySource` not found.
 
 - [x] **Step 3: Write the source**
 
+`src/PowerLedger.Sensors/Wmi.cs`
+```csharp
+using System.Management;
+using System.Runtime.InteropServices;
+using EnumerationOptions = System.Management.EnumerationOptions;
+
+namespace PowerLedger.Sensors;
+
+/// <summary>
+/// The one way this assembly asks WMI anything. Queries are forward-only with a timeout, because a hung WMI provider
+/// would otherwise stall whichever thread asked, and every row is disposed, because each one holds a COM object.
+/// </summary>
+internal static class Wmi
+{
+    /// <summary>How long one row may take to arrive. Healthy queries answer in milliseconds.</summary>
+    private static readonly TimeSpan RowTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>What WMI throws when it cannot answer: a refused or timed-out query, the WMI service stopping or
+    /// restarting, or a namespace the caller may not read.</summary>
+    public static bool IsFailure(Exception error) => error is ManagementException or COMException or UnauthorizedAccessException;
+
+    /// <summary>Runs one query and folds its rows. Throws whatever WMI throws; see <see cref="IsFailure"/>.</summary>
+    public static T Read<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold)
+    {
+        var options = new EnumerationOptions { ReturnImmediately = true, Rewindable = false, Timeout = RowTimeout };
+        var rows = new List<ManagementBaseObject>();
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(scope, query, options);
+            using var results = searcher.Get();
+            foreach (var row in results) rows.Add(row);
+            return fold(rows);
+        }
+        finally
+        {
+            foreach (var row in rows) row.Dispose();
+        }
+    }
+
+    /// <summary>As <see cref="Read{T}"/>, but a query WMI cannot answer comes back as <paramref name="fallback"/>.</summary>
+    public static T ReadOr<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold, T fallback)
+    {
+        try
+        {
+            return Read(scope, query, fold);
+        }
+        catch (Exception error) when (IsFailure(error))
+        {
+            return fallback;
+        }
+    }
+}
+```
+
 `src/PowerLedger.Sensors/DisplaySource.cs`
 ```csharp
 using System.Management;
@@ -1959,22 +2172,25 @@ using System.Management;
 namespace PowerLedger.Sensors;
 
 /// <param name="Brightness">0..1 for the internal panel; null where the machine has no brightness control.</param>
-/// <param name="MonitorCount">How many displays Windows currently reports.</param>
-/// <param name="DiagonalInches">The internal panel's diagonal; 0 when there is none or it cannot be read.</param>
-public readonly record struct DisplayState(double? Brightness, int MonitorCount, double DiagonalInches);
+/// <param name="MonitorCount">How many displays Windows currently reports as active.</param>
+public readonly record struct DisplayState(double? Brightness, int MonitorCount);
 
 /// <summary>
-/// Panel brightness, monitor count and panel size. WMI is slow, so the query runs on a timer and every tick
-/// reuses the answer (spec §4). Whether the screen is lit comes from the service's power notifications.
+/// Panel brightness and monitor count. WMI is slow, so the query runs on a timer and every tick reuses the answer
+/// (spec §4). Whether the screen is lit comes from the service's power notifications. The panel's size is the
+/// hardware inventory's business, not this source's.
 /// </summary>
 public sealed class DisplaySource : ISensorSource
 {
+    /// <summary>After a failed query, when to try again: soon, so a WMI restart heals quickly, but not every tick.</summary>
+    private static readonly TimeSpan RetryAfterFailure = TimeSpan.FromSeconds(10);
+
     private readonly Func<DisplayState> _query;
     private readonly Func<bool> _displayOn;
     private readonly TimeSpan _refreshEvery;
-    private DisplayState _state;
-    private DateTimeOffset _readAt = DateTimeOffset.MinValue;
-    private bool _everRead;
+    private DisplayState _state = new(null, 1);
+    private DateTimeOffset _nextReadAt = DateTimeOffset.MinValue;
+    private volatile bool _refreshRequested;
 
     /// <param name="displayOn">The service supplies this from GUID_CONSOLE_DISPLAY_STATE; the preview passes true.</param>
     public DisplaySource(Func<bool> displayOn) : this(QueryWmi, displayOn) { }
@@ -1993,30 +2209,26 @@ public sealed class DisplaySource : ISensorSource
 
     public string? Unavailable => null;
 
-    /// <summary>The internal panel's diagonal, for the hardware inventory. 0 when unknown.</summary>
-    public double DiagonalInches => _state.DiagonalInches;
-
-    /// <summary>Forces the next tick to re-query, after a resume or a monitor change.</summary>
-    public void Refresh() => _readAt = DateTimeOffset.MinValue;
+    /// <summary>Makes the next tick re-query, after a resume or a monitor change. Safe to call from any thread.</summary>
+    public void Refresh() => _refreshRequested = true;
 
     public void Contribute(SampleDraft draft)
     {
         var now = DateTimeOffset.UtcNow;
-        if (!_everRead || now - _readAt >= _refreshEvery)
+        if (_refreshRequested || now >= _nextReadAt)
         {
+            // Cleared before the query, so a Refresh that arrives while it runs is not lost.
+            _refreshRequested = false;
             try
             {
                 _state = _query();
-                _everRead = true;
+                _nextReadAt = now + _refreshEvery;
             }
-            catch (ManagementException)
+            catch (Exception error) when (Wmi.IsFailure(error))
             {
                 // Keep the last good answer; a WMI hiccup must not blank the brightness.
+                _nextReadAt = now + (_refreshEvery < RetryAfterFailure ? _refreshEvery : RetryAfterFailure);
             }
-            catch (InvalidOperationException)
-            {
-            }
-            _readAt = now;
         }
 
         draft.Brightness = _state.Brightness;
@@ -2026,37 +2238,22 @@ public sealed class DisplaySource : ISensorSource
 
     private static DisplayState QueryWmi()
     {
-        double? brightness = null;
-        var monitors = 0;
-        double diagonal = 0;
+        var monitors = Wmi.Read(@"\\.\root\wmi", "SELECT Active FROM WmiMonitorBasicDisplayParams",
+            rows => rows.Count(row => row["Active"] is true));
 
-        using (var searcher = new ManagementObjectSearcher(@"\\.\root\wmi", "SELECT CurrentBrightness FROM WmiMonitorBrightness"))
-        using (var results = searcher.Get())
+        double? brightness;
+        try
         {
-            foreach (var row in results)
-            {
-                using var instance = (ManagementObject)row;
-                brightness = Convert.ToDouble(instance["CurrentBrightness"]) / 100.0;
-                break;
-            }
+            brightness = Wmi.Read(@"\\.\root\wmi", "SELECT CurrentBrightness FROM WmiMonitorBrightness",
+                rows => rows.Count > 0 ? Convert.ToDouble(rows[0]["CurrentBrightness"]) / 100.0 : (double?)null);
+        }
+        catch (ManagementException error) when (error.ErrorCode == ManagementStatus.NotSupported)
+        {
+            // A desktop: WMI refuses outright when no panel has a brightness Windows controls.
+            brightness = null;
         }
 
-        using (var searcher = new ManagementObjectSearcher(@"\\.\root\wmi", "SELECT MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams"))
-        using (var results = searcher.Get())
-        {
-            foreach (var row in results)
-            {
-                using var instance = (ManagementObject)row;
-                monitors++;
-                if (diagonal > 0) continue;
-                // WMI reports the panel in centimetres; the model wants the diagonal in inches.
-                var width = Convert.ToDouble(instance["MaxHorizontalImageSize"]);
-                var height = Convert.ToDouble(instance["MaxVerticalImageSize"]);
-                if (width > 0 && height > 0) diagonal = Math.Round(Math.Sqrt(width * width + height * height) / 2.54, 1);
-            }
-        }
-
-        return new DisplayState(brightness, Math.Max(monitors, 1), diagonal);
+        return new DisplayState(brightness, Math.Max(monitors, 1));
     }
 
     public void Dispose() { }
@@ -2066,12 +2263,16 @@ public sealed class DisplaySource : ISensorSource
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter DisplaySourceTests`
-Expected: `Passed! - Failed: 0, Passed: 6`.
+Expected: `Passed! - Failed: 0, Passed: 7`.
+
+Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter RealHardwareTests`
+Expected: `Passed! - Failed: 0, Passed: 3`. On the development laptop the display test should find one monitor and a brightness.
 
 - [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/DisplaySource.cs tests/PowerLedger.Sensors.Tests/DisplaySourceTests.cs
+git add src/PowerLedger.Sensors/Wmi.cs tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs
 git commit -m "Add the display source with a cached WMI query"
 ```
 
@@ -2082,9 +2283,13 @@ git commit -m "Add the display source with a cached WMI query"
 **Files:**
 - Create: `src/PowerLedger.Sensors/Nvml.cs`
 - Create: `src/PowerLedger.Sensors/NvidiaSource.cs`
+- Create: `src/PowerLedger.Sensors/DevicePowerState.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/NvidiaSourceTests.cs`
+- Test: add to `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`
 
 NVML ships with the NVIDIA display driver as `nvml.dll` in the system directory, so no package and no driver of ours is involved. Two facts decided by measurement on the development laptop: the GeForce MX330 answers temperature and utilisation but returns "not supported" for power, and that is a property of the card rather than of the driver. So power is often null and the model's load fallback is the normal path.
+
+A switchable-graphics laptop keeps its discrete GPU switched off, in D3, almost all the time, drawing next to nothing. Asking NVML about a card in that state either fails or wakes it. Windows' device power state answers in microseconds, needs no elevation and never wakes the device, so the source asks it first and reports 0 W without calling NVML. Because the service runs as LocalSystem, `nvml.dll` is loaded from System32 only, never from the search path. NVML codes that mean the driver or the card is gone make the read throw, so the sampler backs off instead of reporting a silent null forever.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -2136,6 +2341,23 @@ public class NvidiaSourceTests
     }
 
     [Fact]
+    public void A_switched_off_gpu_draws_nothing_and_nvml_is_never_asked()
+    {
+        // Measured on the development laptop: the MX330 sits in D3 on 39 ticks out of 40.
+        var asked = false;
+        var source = new NvidiaSource(() => { asked = true; return new GpuReading(true, null, 0.5); },
+            present: true, unavailable: null, poweredOff: () => true);
+
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+
+        draft.DGpuPresent.ShouldBeTrue();
+        draft.DGpuW.ShouldBe(0);
+        draft.DGpuLoad.ShouldBe(0);
+        asked.ShouldBeFalse();
+    }
+
+    [Fact]
     public void The_source_is_named_for_the_status_screen()
         => From(1, 1).Name.ShouldBe("nvidia-gpu");
 }
@@ -2161,6 +2383,11 @@ Add to `RealHardwareTests`:
 
         // Power is null on cards with no measurement hardware, which is most low-end laptop GPUs.
         if (reading.PowerWatts is { } watts) watts.ShouldBeInRange(0.1, 700);
+
+        // Windows can say whether the card is switched off without waking it.
+        var device = DevicePowerState.FindNvidiaGpu();
+        device.ShouldNotBeNull().ShouldStartWith(@"PCI\VEN_10DE");
+        Should.NotThrow(() => DevicePowerState.IsPoweredOff(device));
     }
 ```
 
@@ -2189,7 +2416,9 @@ public readonly record struct GpuReading(bool Present, double? PowerWatts, doubl
 public sealed class Nvml : IDisposable
 {
     private const int Success = 0;
-    private const int NotSupported = 3;
+    private const int Uninitialized = 1;
+    private const int DriverNotLoaded = 9;
+    private const int GpuIsLost = 15;
 
     private readonly IntPtr _device;
     private bool _initialised;
@@ -2237,9 +2466,25 @@ public sealed class Nvml : IDisposable
     {
         if (!Available) return new GpuReading(false, null, null);
 
-        double? watts = nvmlDeviceGetPowerUsage(_device, out var milliwatts) == Success ? milliwatts / 1000.0 : null;
-        double? load = nvmlDeviceGetUtilizationRates(_device, out var utilisation) == Success ? utilisation.Gpu / 100.0 : null;
+        var powerResult = nvmlDeviceGetPowerUsage(_device, out var milliwatts);
+        var loadResult = nvmlDeviceGetUtilizationRates(_device, out var utilisation);
+        ThrowIfBroken(powerResult);
+        ThrowIfBroken(loadResult);
+
+        // "Not supported" means a card with no power sensor, and other errors a card that declined this once: both are null.
+        double? watts = powerResult == Success ? milliwatts / 1000.0 : null;
+        double? load = loadResult == Success ? utilisation.Gpu / 100.0 : null;
         return new GpuReading(true, watts, load);
+    }
+
+    /// <summary>A lost GPU, an unloaded driver or a torn-down library is a broken source, not a missing reading:
+    /// throwing lets the sampler back off and show it in status instead of charging a phantom load forever.</summary>
+    private static void ThrowIfBroken(int result)
+    {
+        if (result is Uninitialized or DriverNotLoaded or GpuIsLost)
+        {
+            throw new InvalidOperationException($"NVML error {result}: the GPU or its driver is no longer available");
+        }
     }
 
     public void Dispose()
@@ -2262,12 +2507,12 @@ public sealed class Nvml : IDisposable
         public uint Memory;
     }
 
-    [DllImport("nvml.dll")] private static extern int nvmlInit_v2();
-    [DllImport("nvml.dll")] private static extern int nvmlShutdown();
-    [DllImport("nvml.dll")] private static extern int nvmlDeviceGetCount_v2(out uint count);
-    [DllImport("nvml.dll")] private static extern int nvmlDeviceGetHandleByIndex_v2(uint index, out IntPtr device);
-    [DllImport("nvml.dll")] private static extern int nvmlDeviceGetPowerUsage(IntPtr device, out uint milliwatts);
-    [DllImport("nvml.dll")] private static extern int nvmlDeviceGetUtilizationRates(IntPtr device, out Utilisation utilisation);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlInit_v2();
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlShutdown();
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetCount_v2(out uint count);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetHandleByIndex_v2(uint index, out IntPtr device);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetPowerUsage(IntPtr device, out uint milliwatts);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetUtilizationRates(IntPtr device, out Utilisation utilisation);
 }
 ```
 
@@ -2276,26 +2521,31 @@ public sealed class Nvml : IDisposable
 namespace PowerLedger.Sensors;
 
 /// <summary>
-/// Discrete GPU power, load and presence. Power is null on the many laptop GPUs with no measurement hardware,
-/// which the power model turns into the load fallback rather than a zero.
+/// Discrete GPU power, load and presence. When Windows has switched the GPU off, as a switchable-graphics laptop
+/// does almost all the time, it draws next to nothing and NVML is not asked at all. When it is on, power is null on
+/// the many laptop GPUs with no measurement hardware, which the power model turns into its load fallback.
 /// </summary>
 public sealed class NvidiaSource : ISensorSource
 {
     private readonly Func<GpuReading> _read;
+    private readonly Func<bool> _poweredOff;
     private readonly Nvml? _nvml;
 
     public NvidiaSource()
     {
+        var device = DevicePowerState.FindNvidiaGpu();
+        _poweredOff = device is null ? static () => false : () => DevicePowerState.IsPoweredOff(device);
         _nvml = new Nvml();
         _read = _nvml.Read;
         Supported = _nvml.Available;
         Unavailable = _nvml.Unavailable;
     }
 
-    /// <summary>Test seam: any source of GPU readings.</summary>
-    internal NvidiaSource(Func<GpuReading> read, bool present, string? unavailable)
+    /// <summary>Test seam: any source of GPU readings and power state.</summary>
+    internal NvidiaSource(Func<GpuReading> read, bool present, string? unavailable, Func<bool>? poweredOff = null)
     {
         _read = read;
+        _poweredOff = poweredOff ?? (static () => false);
         Supported = present;
         Unavailable = unavailable;
     }
@@ -2308,6 +2558,14 @@ public sealed class NvidiaSource : ISensorSource
 
     public void Contribute(SampleDraft draft)
     {
+        if (_poweredOff())
+        {
+            draft.DGpuPresent = true;
+            draft.DGpuW = 0;
+            draft.DGpuLoad = 0;
+            return;
+        }
+
         var reading = _read();
         draft.DGpuPresent = reading.Present;
         draft.DGpuW = reading.PowerWatts;
@@ -2318,18 +2576,75 @@ public sealed class NvidiaSource : ISensorSource
 }
 ```
 
+`src/PowerLedger.Sensors/DevicePowerState.cs`
+```csharp
+using System.Runtime.InteropServices;
+
+namespace PowerLedger.Sensors;
+
+/// <summary>
+/// Whether Windows has switched a device off. A switchable-graphics laptop keeps its discrete GPU in D3 almost all
+/// the time, where it draws next to nothing; asking the GPU's own library about it then either fails or wakes it.
+/// Windows' device power state answers in microseconds, needs no elevation and never wakes the device.
+/// </summary>
+internal static class DevicePowerState
+{
+    /// <summary>DEVICE_POWER_STATE: PowerDeviceD0 is 1, PowerDeviceD3 is 4.</summary>
+    private const int PowerDeviceD3 = 4;
+
+    private static readonly DevPropKey PowerData = new() { FormatId = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), PropertyId = 32 };
+
+    /// <summary>The Plug and Play instance id of the first NVIDIA display adapter, or null when there is none.</summary>
+    public static string? FindNvidiaGpu() => Wmi.ReadOr(@"\\.\root\cimv2", "SELECT PNPDeviceID FROM Win32_VideoController", rows =>
+    {
+        foreach (var row in rows)
+        {
+            if (row["PNPDeviceID"] is string id && id.StartsWith(@"PCI\VEN_10DE", StringComparison.OrdinalIgnoreCase)) return id;
+        }
+        return null;
+    }, null);
+
+    /// <summary>True when Windows reports the device in D3. Anything it cannot answer counts as on, which never hides real draw.</summary>
+    public static bool IsPoweredOff(string pnpDeviceId)
+    {
+        if (CM_Locate_DevNodeW(out var node, pnpDeviceId, 0) != 0) return false;
+        var key = PowerData;
+        var buffer = new byte[64];
+        var size = (uint)buffer.Length;
+        if (CM_Get_DevNode_PropertyW(node, ref key, out _, buffer, ref size, 0) != 0 || size < 8) return false;
+        // CM_POWER_DATA begins with PD_Size, then PD_MostRecentPowerState.
+        return BitConverter.ToInt32(buffer, 4) == PowerDeviceD3;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DevPropKey
+    {
+        public Guid FormatId;
+        public uint PropertyId;
+    }
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int CM_Locate_DevNodeW(out uint node, string deviceId, uint flags);
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int CM_Get_DevNode_PropertyW(uint node, ref DevPropKey key, out uint propertyType, byte[] buffer, ref uint bufferSize, uint flags);
+}
+```
+
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter NvidiaSourceTests`
-Expected: `Passed! - Failed: 0, Passed: 4`.
+Expected: `Passed! - Failed: 0, Passed: 5`.
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter RealHardwareTests`
-Expected: `Passed! - Failed: 0, Passed: 3`. On the development laptop the GPU test should find a card, report a load, and find no power.
+Expected: `Passed! - Failed: 0, Passed: 4`. On the development laptop the GPU test should find a card, report a load, find no power, and get an answer about whether the card is switched off.
 
 - [x] **Step 5: Commit**
 
 ```bash
-git add src/PowerLedger.Sensors/Nvml.cs src/PowerLedger.Sensors/NvidiaSource.cs tests/PowerLedger.Sensors.Tests
+git add src/PowerLedger.Sensors/Nvml.cs src/PowerLedger.Sensors/NvidiaSource.cs src/PowerLedger.Sensors/DevicePowerState.cs tests/PowerLedger.Sensors.Tests
 git commit -m "Add the NVIDIA GPU source through NVML"
 ```
 
@@ -2534,7 +2849,7 @@ git commit -m "Add the bundled TDP table"
 - Create: `src/PowerLedger.Sensors/InventoryFacts.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/InventoryFactsTests.cs`
 
-The hash keys the learned calibration in storage, so it must change when the machine changes and must not change when it does not. It must also survive a restart, which rules out `string.GetHashCode`.
+The hash keys the learned calibration in storage, so it must change when the machine changes and must not change when it does not. It must also survive a restart, which rules out `string.GetHashCode`. So it covers only what cannot change without opening the case: chassis, processor and memory. Drive counts, the panel size and the GPU name all move with docks, external drives and driver installs; the GPU reads "Microsoft Basic Display Adapter" until the vendor's driver arrives.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -2564,22 +2879,23 @@ public class InventoryFactsTests
     }
 
     [Fact]
-    public void Changing_any_part_changes_the_hash()
+    public void A_different_processor_memory_or_chassis_is_a_different_machine()
     {
         var baseline = Laptop().Hash;
+        (Laptop() with { CpuName = "AMD Ryzen 7 5800U with Radeon Graphics" }).Hash.ShouldNotBe(baseline);
         (Laptop() with { RamSticks = 2 }).Hash.ShouldNotBe(baseline);
-        (Laptop() with { CpuName = "Ryzen 7 5800U" }).Hash.ShouldNotBe(baseline);
-        (Laptop() with { GpuName = null }).Hash.ShouldNotBe(baseline);
-        (Laptop() with { SsdCount = 2 }).Hash.ShouldNotBe(baseline);
         (Laptop() with { RamIsDdr5 = true }).Hash.ShouldNotBe(baseline);
         (Laptop() with { Chassis = ChassisKind.Desktop }).Hash.ShouldNotBe(baseline);
     }
 
     [Fact]
-    public void Plugging_in_a_second_monitor_does_not_relearn_the_machine()
+    public void Docks_external_drives_and_driver_installs_do_not_relearn_the_machine()
     {
-        // Monitor count moves all day; it is inventory for the wizard, not identity for calibration.
-        (Laptop() with { MonitorCount = 3 }).Hash.ShouldBe(Laptop().Hash);
+        var baseline = Laptop().Hash;
+        (Laptop() with { MonitorCount = 3 }).Hash.ShouldBe(baseline);                          // docked
+        (Laptop() with { DisplayDiagonalInches = 0 }).Hash.ShouldBe(baseline);                 // lid shut on the dock
+        (Laptop() with { SsdCount = 2, HddCount = 1 }).Hash.ShouldBe(baseline);                // external drives
+        (Laptop() with { GpuName = "Microsoft Basic Display Adapter" }).Hash.ShouldBe(baseline); // before the driver
     }
 
     [Fact]
@@ -2609,8 +2925,12 @@ public class InventoryFactsTests
     }
 
     [Fact]
-    public void An_unknown_panel_size_leaves_the_profile_default_alone()
+    public void An_unknown_panel_size_leaves_the_profile_alone()
     {
+        // Detected while docked with the lid shut: no built-in panel shows, but it is still there.
+        var docked = Laptop() with { DisplayDiagonalInches = 0 };
+        docked.ToProfile(MachineProfile.DefaultLaptop with { DisplayDiagonalInches = 13.3 }).DisplayDiagonalInches.ShouldBe(13.3);
+
         var desktop = Laptop() with { Chassis = ChassisKind.Desktop, DisplayDiagonalInches = 0 };
         desktop.ToProfile(MachineProfile.DefaultDesktop).DisplayDiagonalInches.ShouldBe(0);
     }
@@ -2650,10 +2970,15 @@ using PowerLedger.Contracts;
 namespace PowerLedger.Sensors;
 
 /// <summary>
-/// What was detected about this machine (spec §5). The hash keys the learned calibration, so it covers the
-/// parts whose power draw is fixed and deliberately excludes the monitor count, which changes when someone
-/// plugs in a screen and must not throw away a learned baseline.
+/// What was detected about this machine (spec §5). The hash keys the learned calibration, so it covers only what
+/// cannot change without opening the case: the chassis, the processor and the memory. Drives, displays and graphics
+/// adapters come and go with docks, external drives and driver installs, and none of those may throw away a
+/// learned baseline.
 /// </summary>
+/// <param name="GpuName">Not part of the hash: it reads "Microsoft Basic Display Adapter" until the vendor's driver installs.</param>
+/// <param name="SsdCount">Not part of the hash, and neither is <paramref name="HddCount"/>: drives come and go.</param>
+/// <param name="DisplayDiagonalInches">The built-in panel's diagonal, or 0 when none was found. Not part of the hash:
+/// a laptop docked with its lid shut shows no panel at all.</param>
 /// <param name="MonitorCount">How many displays were attached when this was detected. Not part of the hash.</param>
 public sealed record InventoryFacts(
     ChassisKind Chassis,
@@ -2677,15 +3002,14 @@ public sealed record InventoryFacts(
     {
         get
         {
-            var identity = string.Join('|',
-                Chassis, CpuName ?? "", GpuName ?? "", RamSticks, RamIsDdr5, SsdCount, HddCount,
-                DisplayDiagonalInches.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            var identity = FormattableString.Invariant($"{Chassis}|{CpuName}|{RamSticks}|{RamIsDdr5}");
             var digest = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
             return Convert.ToHexStringLower(digest.AsSpan(0, 8));
         }
     }
 
-    /// <summary>The detected fields folded into the user's profile; everything the user chose is left alone.</summary>
+    /// <summary>The detected fields folded into the user's profile. Everything the user chose is left alone, and so is
+    /// the panel size when no built-in panel was found.</summary>
     public MachineProfile ToProfile(MachineProfile chosen) => chosen with
     {
         Chassis = Chassis,
@@ -2693,7 +3017,7 @@ public sealed record InventoryFacts(
         RamIsDdr5 = RamIsDdr5,
         SsdCount = SsdCount,
         HddCount = HddCount,
-        DisplayDiagonalInches = DisplayDiagonalInches,
+        DisplayDiagonalInches = DisplayDiagonalInches > 0 ? DisplayDiagonalInches : chosen.DisplayDiagonalInches,
     };
 
     /// <summary>The record as storage keeps it, for the status screen and for diagnosing a hash change.</summary>
@@ -2719,9 +3043,10 @@ git commit -m "Add hardware inventory facts with a stable hash"
 
 **Files:**
 - Create: `src/PowerLedger.Sensors/HardwareInventory.cs`
+- Test: `tests/PowerLedger.Sensors.Tests/HardwareInventoryTests.cs`
 - Test: add to `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`
 
-Detection is all WMI, so the logic worth unit-testing is the chassis decision; the rest is proven against the real machine.
+Detection is all WMI, so the logic worth unit-testing is the chassis, drive and panel decisions; the rest is proven against the real machine. Three traps shaped them. A UPS on USB looks like a battery, so only the machine's own battery says laptop. USB sticks, SD cards and mounted ISOs look like drives, so drives are filtered by bus. And Windows lists monitors in no fixed order, so the built-in panel is found by its connection type; a laptop shut on its dock shows none, and the profile then keeps the size it had.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -2744,7 +3069,7 @@ Add to `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`:
     }
 ```
 
-Create `tests/PowerLedger.Sensors.Tests/ChassisTests.cs`:
+Create `tests/PowerLedger.Sensors.Tests/HardwareInventoryTests.cs`:
 
 ```csharp
 using PowerLedger.Contracts;
@@ -2753,7 +3078,7 @@ using Shouldly;
 
 namespace PowerLedger.Sensors.Tests;
 
-public class ChassisTests
+public class HardwareInventoryTests
 {
     [Theory]
     [InlineData(9, true, ChassisKind.Laptop)]      // Laptop
@@ -2780,19 +3105,60 @@ public class ChassisTests
         HardwareInventory.ChassisFrom(null, batteryPresent: true).ShouldBe(ChassisKind.Laptop);
         HardwareInventory.ChassisFrom(null, batteryPresent: false).ShouldBe(ChassisKind.Desktop);
     }
+
+    [Fact]
+    public void Only_drives_fitted_inside_the_machine_are_counted()
+    {
+        var drives = new[]
+        {
+            (MediaType: 4, BusType: 17),   // NVMe SSD
+            (MediaType: 3, BusType: 11),   // SATA hard disk
+            (MediaType: 0, BusType: 13),   // eMMC on a budget laptop, media type unknown
+            (MediaType: 4, BusType: 7),    // USB stick
+            (MediaType: 3, BusType: 7),    // USB backup disk
+            (MediaType: 0, BusType: 12),   // SD card
+            (MediaType: 0, BusType: 15),   // mounted ISO
+        };
+
+        HardwareInventory.CountDrives(drives).ShouldBe((2, 1));
+    }
+
+    [Theory]
+    [InlineData(0x80000000u)]   // internal
+    [InlineData(11u)]           // embedded DisplayPort
+    [InlineData(6u)]            // LVDS, on older laptops
+    public void The_panel_size_comes_from_the_built_in_panel_wherever_windows_lists_it(uint builtIn)
+    {
+        var connections = new Dictionary<string, uint>
+        {
+            [@"DISPLAY\DEL41A8\1"] = 10,          // DisplayPort desk monitor, listed first
+            [@"DISPLAY\AUO4199\2"] = builtIn,     // the laptop's own panel
+        };
+        (string, double, double)[] sizes = [(@"DISPLAY\DEL41A8\1", 60, 34), (@"DISPLAY\AUO4199\2", 34, 19)];
+
+        HardwareInventory.BuiltInDiagonal(connections, sizes).ShouldBe(15.3);
+    }
+
+    [Fact]
+    public void A_laptop_shut_on_its_dock_reports_no_panel_size_rather_than_the_desk_monitor()
+    {
+        var connections = new Dictionary<string, uint> { [@"DISPLAY\DEL41A8\1"] = 10 };
+        (string, double, double)[] sizes = [(@"DISPLAY\DEL41A8\1", 60, 34)];
+
+        HardwareInventory.BuiltInDiagonal(connections, sizes).ShouldBe(0);
+    }
 }
 ```
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter ChassisTests`
+Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter HardwareInventoryTests`
 Expected: build error, `HardwareInventory` not found.
 
 - [x] **Step 3: Write the detector**
 
 `src/PowerLedger.Sensors/HardwareInventory.cs`
 ```csharp
-using System.Management;
 using PowerLedger.Contracts;
 
 namespace PowerLedger.Sensors;
@@ -2807,33 +3173,71 @@ public static class HardwareInventory
     /// <summary>Enclosure types Windows uses for portable machines.</summary>
     private static readonly HashSet<int> PortableEnclosures = [8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32];
 
-    /// <summary>A fitted battery settles it; otherwise the enclosure type decides, and an unknown enclosure means desktop.</summary>
+    /// <summary>STORAGE_BUS_TYPE values for drives that are not part of the machine. FireWire, Fibre Channel, USB,
+    /// iSCSI and SD cards are external or remote; virtual, file-backed and Storage Spaces disks are not drives at all.</summary>
+    private static readonly HashSet<int> NotFittedBuses = [4, 6, 7, 9, 12, 14, 15, 16];
+
+    /// <summary>D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY values for a panel built into the machine: LVDS, embedded
+    /// DisplayPort, embedded UDI and the generic "internal".</summary>
+    private static readonly HashSet<uint> BuiltInConnections = [6, 11, 13, 0x80000000];
+
+    /// <summary>The machine's own battery settles it; otherwise the enclosure type decides, and an unknown enclosure means desktop.</summary>
+    /// <param name="batteryPresent">True for a battery that powers this machine alone; a UPS does not count.</param>
     public static ChassisKind ChassisFrom(int? enclosureType, bool batteryPresent)
     {
         if (batteryPresent) return ChassisKind.Laptop;
         return enclosureType is { } type && PortableEnclosures.Contains(type) ? ChassisKind.Laptop : ChassisKind.Desktop;
     }
 
+    /// <summary>Solid-state and spinning drives fitted inside the machine. Media type 3 is a hard disk; anything else,
+    /// unknown included, counts as solid state, the lower-power guess.</summary>
+    public static (int Ssd, int Hdd) CountDrives(IEnumerable<(int MediaType, int BusType)> drives)
+    {
+        var solid = 0;
+        var spinning = 0;
+        foreach (var (media, bus) in drives)
+        {
+            if (NotFittedBuses.Contains(bus)) continue;
+            if (media == 3) spinning++;
+            else solid++;
+        }
+        return (solid, spinning);
+    }
+
+    /// <summary>The built-in panel's diagonal in inches, or 0 when no built-in panel shows. The panel is found by how
+    /// it is connected, never by where Windows lists it, so a docked laptop reports its own panel, not the desk monitor.</summary>
+    /// <param name="connections">Connection type by monitor instance name.</param>
+    /// <param name="sizes">Maximum image size in centimetres by monitor instance name.</param>
+    public static double BuiltInDiagonal(
+        IReadOnlyDictionary<string, uint> connections, IEnumerable<(string Instance, double WidthCm, double HeightCm)> sizes)
+    {
+        foreach (var (instance, width, height) in sizes)
+        {
+            if (width <= 0 || height <= 0) continue;
+            if (!connections.TryGetValue(instance, out var connection) || !BuiltInConnections.Contains(connection)) continue;
+            return Math.Round(Math.Sqrt(width * width + height * height) / 2.54, 1);
+        }
+        return 0;
+    }
+
     /// <summary>One detection pass. Never throws: an unanswered question leaves its field at a sensible default.</summary>
     public static InventoryFacts Detect()
     {
         var battery = Win32.ReadBatteryState();
-        var chassis = ChassisFrom(Query(@"\\.\root\cimv2", "SELECT ChassisTypes FROM Win32_SystemEnclosure", rows =>
+        var enclosure = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT ChassisTypes FROM Win32_SystemEnclosure", rows =>
         {
             foreach (var row in rows)
             {
-                if (row["ChassisTypes"] is ushort[] { Length: > 0 } types) return (int)types[0];
+                if (row["ChassisTypes"] is ushort[] { Length: > 0 } types) return (int?)types[0];
             }
-            return (int?)null;
-        }), battery?.Present ?? false);
-
-        var cpuName = Query(@"\\.\root\cimv2", "SELECT Name FROM Win32_Processor", rows =>
-        {
-            foreach (var row in rows) return (row["Name"] as string)?.Trim();
             return null;
-        });
+        }, null);
+        var chassis = ChassisFrom(enclosure, battery?.OwnBattery ?? false);
 
-        var gpuName = Query(@"\\.\root\cimv2", "SELECT Name, AdapterCompatibility FROM Win32_VideoController", rows =>
+        var cpuName = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT Name FROM Win32_Processor", rows =>
+            rows.Count > 0 ? (rows[0]["Name"] as string)?.Trim() : null, null);
+
+        var gpuName = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT Name, AdapterCompatibility FROM Win32_VideoController", rows =>
         {
             string? fallback = null;
             foreach (var row in rows)
@@ -2847,9 +3251,9 @@ public static class HardwareInventory
                 fallback ??= name;
             }
             return fallback;
-        });
+        }, null);
 
-        var (sticks, ddr5) = Query(@"\\.\root\cimv2", "SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory", rows =>
+        var (sticks, ddr5) = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory", rows =>
         {
             var count = 0;
             var isDdr5 = false;
@@ -2862,70 +3266,47 @@ public static class HardwareInventory
             return (Math.Max(count, 1), isDdr5);
         }, (1, false));
 
-        var (ssd, hdd) = Query(@"\\.\root\microsoft\windows\storage", "SELECT MediaType FROM MSFT_PhysicalDisk", rows =>
-        {
-            var solid = 0;
-            var spinning = 0;
-            foreach (var row in rows)
-            {
-                // MediaType 4 is SSD, 3 is HDD; anything else is counted as solid state.
-                var media = row["MediaType"] is null ? 0 : Convert.ToInt32(row["MediaType"]);
-                if (media == 3) spinning++;
-                else solid++;
-            }
-            return (solid, spinning);
-        }, (1, 0));
+        var (ssd, hdd) = Wmi.ReadOr(@"\\.\root\microsoft\windows\storage", "SELECT MediaType, BusType FROM MSFT_PhysicalDisk", rows =>
+            CountDrives(rows.Select(row => (
+                row["MediaType"] is null ? 0 : Convert.ToInt32(row["MediaType"]),
+                row["BusType"] is null ? 0 : Convert.ToInt32(row["BusType"])))), (1, 0));
 
-        var (monitors, diagonal) = Query(@"\\.\root\wmi", "SELECT MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
+        var connections = Wmi.ReadOr(@"\\.\root\wmi", "SELECT InstanceName, VideoOutputTechnology FROM WmiMonitorConnectionParams", rows =>
         {
-            var count = 0;
-            double inches = 0;
+            var byInstance = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in rows)
             {
-                count++;
-                if (inches > 0) continue;
-                var width = Convert.ToDouble(row["MaxHorizontalImageSize"]);
-                var height = Convert.ToDouble(row["MaxVerticalImageSize"]);
-                if (width > 0 && height > 0) inches = Math.Round(Math.Sqrt(width * width + height * height) / 2.54, 1);
+                if (row["InstanceName"] is string name && row["VideoOutputTechnology"] is uint connection) byInstance[name] = connection;
             }
-            return (Math.Max(count, 1), inches);
-        }, (1, 0d));
+            return byInstance;
+        }, []);
+
+        var (monitors, diagonal) = Wmi.ReadOr(@"\\.\root\wmi", "SELECT InstanceName, Active, MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
+        (
+            Math.Max(rows.Count(row => row["Active"] is true), 1),
+            BuiltInDiagonal(connections, rows.Select(row => (
+                row["InstanceName"] as string ?? "",
+                Convert.ToDouble(row["MaxHorizontalImageSize"]),
+                Convert.ToDouble(row["MaxVerticalImageSize"]))))
+        ), (1, 0d));
 
         return new InventoryFacts(
             chassis, cpuName, gpuName,
             sticks, ddr5,
             Math.Max(ssd, 0), Math.Max(hdd, 0),
-            chassis == ChassisKind.Laptop ? diagonal : 0,
+            diagonal,
             monitors);
-    }
-
-    private static T Query<T>(string scope, string query, Func<IEnumerable<ManagementObject>, T> read, T fallback = default!)
-    {
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(scope, query);
-            using var results = searcher.Get();
-            return read(results.Cast<ManagementObject>());
-        }
-        catch (ManagementException)
-        {
-            return fallback;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return fallback;
-        }
     }
 }
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter ChassisTests`
-Expected: `Passed! - Failed: 0, Passed: 9`.
+Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter HardwareInventoryTests`
+Expected: `Passed! - Failed: 0, Passed: 14`.
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter RealHardwareTests`
-Expected: `Passed! - Failed: 0, Passed: 4`. On the development laptop the detected chassis must be `Laptop` and the CPU name must contain `i7-1165G7`.
+Expected: `Passed! - Failed: 0, Passed: 5`. On the development laptop the detected chassis must be `Laptop` and the CPU name must contain `i7-1165G7`.
 
 - [x] **Step 5: Commit**
 
@@ -3052,8 +3433,12 @@ public sealed class MachineSensors : IDisposable
 
     /// <param name="displayOn">Whether the screen is lit; the Service supplies this from its power notifications.</param>
     /// <param name="sessionLocked">Whether the console session is locked; the Service supplies this from its session notifications.</param>
+    /// <param name="userIdleSeconds">Idle time from the user's session. Leave null in a process that runs in that session;
+    /// the Service, in session 0, must supply it.</param>
     /// <param name="validatorOptions">Overrides for the plausible ranges and windows.</param>
-    public static MachineSensors Create(Func<bool> displayOn, Func<bool> sessionLocked, ValidatorOptions? validatorOptions = null)
+    public static MachineSensors Create(
+        Func<bool> displayOn, Func<bool> sessionLocked,
+        Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null)
     {
         var display = new DisplaySource(displayOn);
         var sources = new List<ISensorSource>
@@ -3062,7 +3447,7 @@ public sealed class MachineSensors : IDisposable
             new NvidiaSource(),
             new BatterySource(),
             new CpuLoadSource(),
-            new ActivitySource(sessionLocked),
+            new ActivitySource(sessionLocked, userIdleSeconds),
             display,
         };
         return new MachineSensors(new Sampler(sources), new SampleValidator(validatorOptions), display);
@@ -3229,12 +3614,12 @@ Expected: `Build succeeded.` and `0 Warning(s)`.
 - [x] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 110`, Storage `Passed: 40`, Sensors `Passed: 87`, no failures, no skipped tests.
+Expected: Core `Passed: 110`, Storage `Passed: 40`, Sensors `Passed: 99`, no failures, no skipped tests.
 
 - [x] **Step 3: Confirm CI can skip the hardware tests**
 
 Run: `dotnet test -c Release --filter "Category!=Hardware"`
-Expected: Sensors `Passed: 83` (the four `RealHardwareTests` excluded), Core and Storage unchanged, no failures. This is the command CI uses, because a build agent has no battery and no GPU.
+Expected: Sensors `Passed: 94` (the five `RealHardwareTests` excluded), Core and Storage unchanged, no failures. This is the command CI uses, because a build agent has no battery and no GPU.
 
 - [x] **Step 4: Confirm the working tree is clean and every task is committed**
 
@@ -3246,27 +3631,33 @@ Plan C (the Windows service) consumes exactly these types:
 
 | Type | Used by Plan C for |
 |---|---|
-| `MachineSensors.Create(displayOn, sessionLocked)` | one instance for the service's lifetime; the two delegates come from its power and session notifications |
+| `MachineSensors.Create(displayOn, sessionLocked, userIdleSeconds)` | one set per power session: built at start, rebuilt on every resume; the delegates come from the service's power and session notifications and from the App over the pipe |
 | `MachineSensors.Read(timestamp, deltaSeconds)` | one validated `Sample` per tick, never throwing |
-| `MachineSensors.Display.Refresh()` | after a resume or a monitor change, so the cached WMI answer is re-read |
-| `Sampler.Health`, `SampleValidator.SuspectCount` | the pipe's `GetStatus` reply |
+| `MachineSensors.Display.Refresh()` | on resume and on a display-change notification, so the cached WMI answer is re-read; safe from any thread |
+| `Sampler.Health`, `SampleValidator.SuspectCount` | the pipe's `GetStatus` reply, through a snapshot the loop publishes |
 | `HardwareInventory.Detect()` → `InventoryFacts` | at start and on resume; `Hash` keys calibration, `ToProfile` folds detection into the user's settings, `ToJson` is what `InventoryRepository` stores |
 | `InventoryFacts.CpuTdpW` / `GpuTdpW` | the `HardwareFacts` the power model needs |
 | `TdpTable.Bundled` | only if the service wants a lookup outside the inventory |
 
 **Rules Plan C must follow.** These are contracts the types cannot enforce:
 
-- Build the sensor set once and keep it. Every source caches state across ticks, and `CpuLoadSource` needs a previous reading before it can report a load, so the first tick after construction always reports zero load.
+- Build the sensor set at start and rebuild it on every resume, disposing the old one. Across a sleep the energy counters can reset, NVML can lose the card, and the validator's windows hold values from before the sleep. Within a power session keep the one set: `CpuLoadSource` needs a previous reading, so the first tick of every set reports zero load.
+- Idle time must come from the user's session. `GetLastInputInfo` in session 0 describes the service itself, so the App reports its own idle seconds over the pipe and the service passes them in as `userIdleSeconds`. With no App connected, hand in a delegate that returns null; unknown idle time counts as active, which never overstates idle waste.
+- Only the sampling loop touches the sensor set, the sampler and the validator. None of them is thread-safe, and the validator's rolling windows must live as long as the set. The pipe thread reads a status snapshot (source health, suspect count, the last reading) that the loop publishes each tick with a single reference swap. `Display.Refresh()` is the one call that is safe from another thread.
+- Guard the loop with a watchdog. WMI now gives up after five seconds a row, but NVML and the performance-counter API have no timeout. If a tick runs past about ten seconds, record a gap, dispose the stuck set on a background thread and build a fresh one.
 - Pass a real monotonic delta, from a `Stopwatch` rather than the wall clock, and pass `EnergyIntegrator.GapThresholdFor(sampleIntervalSeconds)` to the downsampler.
-- Call `Display.Refresh()` on resume and on a display-change notification; otherwise a brightness change takes up to a minute to show.
-- Re-run `HardwareInventory.Detect()` on resume. If the hash changed, the machine changed: start a fresh learner rather than importing the old calibration.
-- The validator is single-threaded and stateful. Only the sampling loop may touch it, and the same instance must live as long as the loop, or the rolling windows reset every tick.
-- A source reporting `Supported == false` is a fact about the machine, not an error. Show it in status; never retry it.
+- Re-run `HardwareInventory.Detect()` on resume. The hash covers only chassis, processor and memory, so a changed hash means a different machine: start a fresh learner rather than importing the old calibration.
+- `ToProfile` overwrites every detected field. Apply it on first run and when the hash changes, not on every resume, or it will undo corrections the user made in the wizard. Remember which fields the user corrected and leave those alone.
+- A source reporting `Supported == false` is a fact about the machine, not an error. Show it in status and do not retry it within the set; the rebuild on resume checks again.
 
 **Known gaps, deliberately left to later plans:**
 
 - Whether the display is on and whether the session is locked arrive as delegates. Plan C supplies them from `RegisterPowerSettingNotification` and `WTSRegisterSessionNotification`; until then the preview passes constants.
-- AMD discrete GPUs report through ADL, which is not implemented. An AMD card is currently reported as absent, so its power falls to the model's load fallback.
+- `Reading` carries one quality for the whole tick. Status and the report need to say which parts were measured, such as CPU from the energy meter, and which were estimated. Plan C should add per-component provenance to `Reading` before the pipe contract freezes.
+- Only NVIDIA cards are read. Any other discrete GPU is reported absent, and the model charges an absent GPU nothing, not its load fallback. On a desktop with a Radeon card the estimate loses the whole GPU; on a laptop on battery the draw lands in the unattributed share instead. The driver-free fix is the `GPU Engine` performance counters, which give per-adapter utilisation for every vendor and can feed the model's existing TDP-times-load fallback. `HardwareInventory` also prefers any AMD adapter for the GPU name, which on a Ryzen laptop is the integrated one; revisit that alongside.
+- The model charges a built-in panel only on laptops, so an all-in-one desktop's panel draws nothing. The inventory already reports its size.
+- With the lid shut on a dock the built-in panel is dark, but the model still charges it. Plan C can register for `GUID_LIDSWITCH_STATE_CHANGE` once `Sample` has a field to carry it.
+- A UPS is recognised by Windows' short-term battery flag, which is that flag's documented meaning, but no real UPS has been tried.
 - Fan count is taken from the machine profile rather than measured; measuring it needs the kernel driver this design deliberately avoids.
 
 No step in this plan ships a running process; that is Plan C's first task.
@@ -3280,6 +3671,23 @@ git commit -m "Complete Plan B: sensors verified on real hardware"
 
 ---
 
+## After the final review
+
+The whole-branch review found problems the tasks above did not. Each fix is its own commit, and the code blocks above already show the fixed files.
+
+| Problem | Fix |
+|---|---|
+| The validator rejected a sustained rise forever: once the median fell behind, every new reading looked like a spike. | A rise is accepted on its second reading and restarts the window. Energy-meter CPU watts are never spike-filtered, and coming off mains restarts the battery median. |
+| The console-session idle call read past its buffer, and from session 0 it could not work anyway. | Removed. Idle time comes from `GetLastInputInfo` in the caller's session, or is handed in by the service. |
+| The energy meter's WMI query took about 270 ms a tick. | The rails are read as performance-counter raw values in well under a millisecond, and watts come from the energy used between reads. |
+| A switched-off discrete GPU was charged its idle floor, and asking NVML could wake it. | Windows' device power state says when the card is in D3; it then draws nothing and NVML is not asked. NVML loads from System32 only, and a lost card or unloaded driver fails the source so the sampler backs off. |
+| The inventory hash covered drives, the panel and the GPU name, so a USB stick, a dock or a driver install threw away the calibration. | The hash covers chassis, processor and memory only. |
+| A UPS on USB made a desktop look like a laptop, and its drain during a power cut would have trained the calibration. | A short-term battery is not the machine's own. USB, SD, network and virtual drives no longer count as fitted drives. |
+| WMI could throw `COMException` while restarting, never timed out and leaked its rows, and a desktop's brightness query failed every tick. | One helper runs every query with a timeout and disposes its rows. The display source keeps its last answer, retries in ten seconds, and reads "not supported" brightness as none. `Refresh` is safe from any thread. |
+| The panel size came from whichever monitor WMI listed first. | The built-in panel is found by its connection type. With none showing, the profile keeps its size. |
+
+---
+
 ## Self-review against the spec
 
 | Spec section | Covered by |
@@ -3290,7 +3698,7 @@ git commit -m "Complete Plan B: sensors verified on real hardware"
 | §4 no kernel driver, energy meter, the "no rails" fallback | Tasks 7–8; `Supported` is false and the model falls back |
 | §4 performance rule that slow sources are not read per tick | Task 10, cached WMI with a refresh timer |
 | §4 `Sample` record | Task 2 |
-| §4 validator: ranges, outliers, RAPL wrap, transition window, suspect counts | Tasks 4–5 |
+| §4 validator: ranges, outliers, transition window, suspect counts; counter wrap | Tasks 4–5; Task 7 drops a rail whose counter went backwards |
 | §5 default estimate table, TDP by model with a fallback | Task 12 |
 | §5 machine profile detection, inventory hash keyed to calibration | Tasks 13–14 |
 | §11 no elevation for sensors, everything stays local | Tasks 7–11; no driver, no network |

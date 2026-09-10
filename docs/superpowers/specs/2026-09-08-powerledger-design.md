@@ -84,11 +84,11 @@ Sampling runs at 1 Hz (configurable 1–5 s). Every source is read inside its ow
 
 | Source | Reads | Mechanism | Needs driver |
 |---|---|---|---|
-| CPU | package W, cores W, iGPU W, DRAM W, load | Windows Energy Meter Interface: `DeviceIoControl` on the `GUID_DEVICE_ENERGY_METER` interface, which Windows 11 populates with the processor's RAPL rails. `GetSystemTimes` for load | no |
-| Discrete GPU | power W, load, present | NVML through the installed NVIDIA driver (`nvml.dll`), ADL for AMD. Many laptop GPUs, the GeForce MX330 included, report no power at all; those fall back to the load model | no |
-| Battery | discharge/charge rate mW, AC line status | `CallNtPowerInformation(SystemBatteryState)` (Rate is negative when discharging), `GetSystemPowerStatus` | no |
-| Display | brightness %, display on/off, monitor count and size | WMI `WmiMonitorBrightness`, `RegisterPowerSettingNotification(GUID_CONSOLE_DISPLAY_STATE)` with service handle, `WmiMonitorID` + `WmiMonitorBasicDisplayParams` | no |
-| Activity | user idle seconds, session locked | `WTSQuerySessionInformation(WTSSessionInfo).LastInputTime` for the console session (works from session 0), `WTSRegisterSessionNotification` | no |
+| CPU | package W, cores W, iGPU W, DRAM W, load | Windows Energy Meter Interface, which Windows 11 fills with the processor's RAPL rails, read through the `Energy Meter` performance counters as raw picowatt-hour values in well under a millisecond. `GetSystemTimes` for load | no |
+| Discrete GPU | power W, load, present | NVML through the installed NVIDIA driver (`nvml.dll`, loaded from System32 only). A card Windows has switched off (D3, read from the device's power data without waking it) counts as 0 W and is not queried. Many laptop GPUs, the GeForce MX330 included, report no power at all; those fall back to the load model. AMD and Intel cards are not read yet; the `GPU Engine` performance counters are the driver-free route to their load | no |
+| Battery | discharge/charge rate mW, AC line status | `CallNtPowerInformation(SystemBatteryState)` (Rate is negative when discharging). A UPS on USB also appears as a battery, flagged short-term in `SystemPowerCapabilities`; it powers more than the machine and is ignored | no |
+| Display | brightness %, display on/off, monitor count and size | WMI `WmiMonitorBrightness` ("not supported" on a desktop means no brightness), `RegisterPowerSettingNotification(GUID_CONSOLE_DISPLAY_STATE)` with service handle, `WmiMonitorBasicDisplayParams` + `WmiMonitorConnectionParams`: the built-in panel is the monitor with an internal or embedded connection, never simply the first one listed | no |
+| Activity | user idle seconds, session locked | `GetLastInputInfo`, which only describes the caller's own session, so the App reports it over the pipe; `WTSRegisterSessionNotification` for the lock state | no |
 | Fans | count only | Taken from the machine profile, not measured; reading fan tachometers needs a kernel driver and buys about a watt | no |
 
 ### No kernel driver anywhere
@@ -129,9 +129,9 @@ Sample {
 Runs before the model. Rejects implausible values and marks the sample **suspect** rather than throwing.
 
 - Plausible ranges: CPU 0–400 W, GPU 0–700 W, battery 0–300 W.
-- Single-tick outlier: value more than 3× the rolling 30-sample median → reuse last good value, count as suspect.
-- Negative RAPL deltas (counter wrap) → drop that tick's CPU value.
-- First 3 s after an AC↔battery transition: battery value excluded from calibration; quality still switches immediately.
+- Single-tick spike: a GPU or battery value more than 3× the rolling 30-sample median → reuse the last good value, count as suspect. A second such value in a row is a real rise: accept it and restart the median, or a sustained change would be rejected forever. CPU watts from the energy meter are exact over their tick, so they are range-checked only.
+- A rail whose energy counter goes backwards (wrap or reset) reports nothing that tick.
+- First 3 s after an AC↔battery transition: battery value excluded from calibration; quality still switches immediately. The transition also restarts the battery median.
 - Suspect counts are exposed in status so users can see sensor health.
 
 ## 5. Power model and calibration
@@ -291,7 +291,7 @@ The app looks like a bench instrument; the reports read like a utility bill. Ref
 | Glitch values | Validator rules in §4. |
 | AC ↔ battery switch | Quality flips immediately; first 3 s excluded from calibration. |
 | Suspend / resume, Modern Standby | §6. Gaps over 5 s count as asleep. |
-| Hardware change (dock, eGPU, monitor, RAM) | Inventory hash changes → new inventory row; calibration buckets are keyed by hash so stale baselines are never reused. |
+| Hardware change (RAM, processor, a different machine) | Inventory hash changes → new inventory row; calibration buckets are keyed by hash so stale baselines are never reused. The hash covers chassis, processor and memory only: docks, monitors, external drives, eGPUs and driver installs leave it alone, because they do not change the machine the battery measures. |
 | Service crash | Windows service recovery restarts after 5 s, up to 3 times; at most 60 s of buffered samples lost; WAL keeps the DB consistent; `crash-recovered` session reason. |
 | Database corrupt | Rename to `power.corrupt-<date>.db`, start fresh, alert in UI. |
 | Disk full | Pause writes, keep a 1 h in-memory ring buffer, retry every minute, status badge. |
