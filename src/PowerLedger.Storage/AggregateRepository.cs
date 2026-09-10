@@ -11,7 +11,8 @@ public sealed class AggregateRepository(SqliteDatabase db)
         "start_ms, avg_w, max_w, energy_wh, cpu_wh, gpu_wh, display_wh, rest_wh, idle_on_wh, idle_off_wh, " +
         "idle_on_s, idle_off_s, on_s, battery_s, gap_s, sample_count, measured_s, calibrated_s, estimated_s";
 
-    /// <summary>Writes or replaces one minute row, keyed by its start.</summary>
+    /// <summary>Writes or replaces one minute row, keyed by its start. Because it replaces, build the row from every raw
+    /// row in that minute (spec §7), never from one run's own ticks, or a restart inside the minute erases the earlier part.</summary>
     public void UpsertMinute(Aggregate a) => Upsert(MinuteTable, a);
 
     /// <summary>Writes or replaces one hour row, keyed by its start.</summary>

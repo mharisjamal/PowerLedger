@@ -66,7 +66,6 @@ internal static class Program
         var clock = Stopwatch.StartNew();
         var previous = TimeSpan.Zero;
         var pending = new List<Reading>();
-        var minute = new List<Reading>();
         var minuteStart = FloorMinute(DateTimeOffset.UtcNow);
 
         for (var tick = 0; tick < seconds; tick++)
@@ -83,24 +82,19 @@ internal static class Program
 
             if (FloorMinute(now) != minuteStart)
             {
-                if (minute.Count > 0) aggregates.UpsertMinute(Downsampler.ToMinute(minuteStart, minute, EnergyIntegrator.GapThresholdFor(1)));
-                minute.Clear();
+                Flush(raw, pending);
+                FoldMinute(raw, aggregates, minuteStart);
                 minuteStart = FloorMinute(now);
             }
 
-            minute.Add(reading);
             pending.Add(reading);
-            if (pending.Count >= 10)
-            {
-                raw.InsertBatch(pending);
-                pending.Clear();
-            }
+            if (pending.Count >= 10) Flush(raw, pending);
 
             PrintLive(reading, learner);
         }
 
-        if (pending.Count > 0) raw.InsertBatch(pending);
-        if (minute.Count > 0) aggregates.UpsertMinute(Downsampler.ToMinute(minuteStart, minute, EnergyIntegrator.GapThresholdFor(1)));
+        Flush(raw, pending);
+        FoldMinute(raw, aggregates, minuteStart);
         calibration.Save(facts.Hash, learner.Export(), DateTimeOffset.UtcNow);
         sessions.Close(session, DateTimeOffset.UtcNow, SessionReason.ServiceStop);
 
@@ -112,6 +106,21 @@ internal static class Program
         }
         if (sensors.Validator.SuspectCount > 0) Console.WriteLine($"  {sensors.Validator.SuspectCount} ticks marked suspect");
         Console.WriteLine();
+    }
+
+    private static void Flush(RawSampleRepository raw, List<Reading> pending)
+    {
+        if (pending.Count == 0) return;
+        raw.InsertBatch(pending);
+        pending.Clear();
+    }
+
+    /// <summary>Builds the minute row from every stored tick in that minute, not only this run's (spec §7). The row is
+    /// replaced, so a second run inside the same minute must add to the first rather than erase it.</summary>
+    private static void FoldMinute(RawSampleRepository raw, AggregateRepository aggregates, DateTimeOffset minuteStart)
+    {
+        var ticks = raw.Read(minuteStart, minuteStart.AddMinutes(1));
+        if (ticks.Count > 0) aggregates.UpsertMinute(Downsampler.ToMinute(minuteStart, ticks, EnergyIntegrator.GapThresholdFor(1)));
     }
 
     private static void PrintLive(Reading r, CalibrationLearner learner)
