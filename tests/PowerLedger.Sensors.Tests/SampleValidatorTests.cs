@@ -51,56 +51,72 @@ public class SampleValidatorTests
     }
 
     [Fact]
-    public void A_spike_more_than_three_times_the_median_is_replaced_by_the_last_good_value()
+    public void A_single_gpu_spike_is_replaced_by_the_last_good_value()
     {
         var validator = new SampleValidator();
-        for (var i = 0; i < 30; i++) validator.Validate(Raw(cpu: 10, second: i));
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(gpu: 10, second: i));
 
-        var spike = validator.Validate(Raw(cpu: 200, second: 30));
+        var spike = validator.Validate(Raw(gpu: 200, second: 30));
 
-        spike.CpuPackageW.ShouldBe(10);
+        spike.DGpuW.ShouldBe(10);
         spike.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_sustained_rise_is_accepted_on_its_second_reading_instead_of_being_rejected_forever()
+    {
+        var validator = new SampleValidator();
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(gpu: 10, second: i));
+
+        validator.Validate(Raw(gpu: 200, second: 30)).DGpuW.ShouldBe(10);
+
+        var second = validator.Validate(Raw(gpu: 200, second: 31));
+        second.DGpuW.ShouldBe(200);
+        second.Suspect.ShouldBeFalse();
+        validator.Validate(Raw(gpu: 210, second: 32)).DGpuW.ShouldBe(210);
+    }
+
+    [Fact]
+    public void Cpu_watts_from_the_energy_meter_are_never_spike_filtered()
+    {
+        // They are averages of real energy over the tick, so a jump from idle to turbo is a fact, not a glitch.
+        var validator = new SampleValidator();
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(cpu: 6, second: i));
+
+        var load = validator.Validate(Raw(cpu: 35, second: 30));
+        load.CpuPackageW.ShouldBe(35);
+        load.Suspect.ShouldBeFalse();
     }
 
     [Fact]
     public void A_dip_far_below_the_median_is_left_alone_because_idle_is_real()
     {
         var validator = new SampleValidator();
-        for (var i = 0; i < 30; i++) validator.Validate(Raw(cpu: 30, second: i));
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(gpu: 30, second: i));
 
-        var dip = validator.Validate(Raw(cpu: 1, second: 30));
+        var dip = validator.Validate(Raw(gpu: 1, second: 30));
 
-        dip.CpuPackageW.ShouldBe(1);
+        dip.DGpuW.ShouldBe(1);
         dip.Suspect.ShouldBeFalse();
-    }
-
-    [Fact]
-    public void The_median_is_not_poisoned_by_the_spike_it_rejected()
-    {
-        var validator = new SampleValidator();
-        for (var i = 0; i < 30; i++) validator.Validate(Raw(cpu: 10, second: i));
-        validator.Validate(Raw(cpu: 200, second: 30));
-
-        validator.Validate(Raw(cpu: 200, second: 31)).CpuPackageW.ShouldBe(10);
     }
 
     [Fact]
     public void A_reading_stays_trusted_until_the_window_has_something_to_say()
     {
         var validator = new SampleValidator();
-        validator.Validate(Raw(cpu: 5)).CpuPackageW.ShouldBe(5);
-        validator.Validate(Raw(cpu: 300, second: 1)).CpuPackageW.ShouldBe(300);
+        validator.Validate(Raw(gpu: 5)).DGpuW.ShouldBe(5);
+        validator.Validate(Raw(gpu: 300, second: 1)).DGpuW.ShouldBe(300);
         validator.SuspectCount.ShouldBe(0);
     }
 
     [Fact]
-    public void A_cpu_reading_below_the_previous_one_by_more_than_a_hair_is_a_counter_wrap_and_is_dropped()
+    public void A_negative_cpu_reading_is_dropped()
     {
         var validator = new SampleValidator();
         validator.Validate(Raw(cpu: 20));
-        var wrapped = validator.Validate(Raw(cpu: -0.5, second: 1));
-        wrapped.CpuPackageW.ShouldBeNull();
-        wrapped.Suspect.ShouldBeTrue();
+        var negative = validator.Validate(Raw(cpu: -0.5, second: 1));
+        negative.CpuPackageW.ShouldBeNull();
+        negative.Suspect.ShouldBeTrue();
     }
 
     [Fact]
@@ -128,6 +144,16 @@ public class SampleValidatorTests
     }
 
     [Fact]
+    public void Coming_off_mains_starts_the_battery_median_afresh()
+    {
+        var validator = new SampleValidator();
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(battery: 10, onBattery: true, second: i));
+        validator.Validate(Raw(battery: null, onBattery: false, second: 30));
+
+        validator.Validate(Raw(battery: 40, onBattery: true, second: 40)).BatteryRateW.ShouldBe(40);
+    }
+
+    [Fact]
     public void Brightness_and_load_are_clamped_rather_than_dropped()
     {
         var validator = new SampleValidator();
@@ -142,11 +168,20 @@ public class SampleValidatorTests
     }
 
     [Fact]
+    public void A_non_finite_integrated_graphics_reading_is_dropped()
+    {
+        var validator = new SampleValidator();
+        var checked_ = validator.Validate(Raw() with { IGpuW = double.NaN });
+        checked_.IGpuW.ShouldBeNull();
+        checked_.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
     public void Options_choose_the_ranges_and_the_windows()
     {
         var strict = new SampleValidator(new ValidatorOptions(CpuMaxW: 20, MedianWindow: 3, OutlierFactor: 2, TransitionSeconds: 1));
         strict.Validate(Raw(cpu: 25)).CpuPackageW.ShouldBeNull();
-        for (var i = 0; i < 3; i++) strict.Validate(Raw(cpu: 5, second: i));
-        strict.Validate(Raw(cpu: 15, second: 3)).CpuPackageW.ShouldBe(5);
+        for (var i = 0; i < 3; i++) strict.Validate(Raw(gpu: 5, second: i));
+        strict.Validate(Raw(gpu: 15, second: 3)).DGpuW.ShouldBe(5);
     }
 }

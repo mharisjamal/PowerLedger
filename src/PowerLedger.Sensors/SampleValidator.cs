@@ -4,22 +4,29 @@ namespace PowerLedger.Sensors;
 
 /// <summary>
 /// Spec §4: sits between the sampler and the model and marks rather than throws. Out-of-range values are dropped,
-/// spikes are replaced with the last good reading, a counter wrap drops that tick's CPU value, and the seconds
-/// after an AC change are flagged so the calibration learner skips them while the quality label switches at once.
-/// Single-threaded: the sampling loop owns it.
+/// a single-tick spike is replaced with the last good reading, and a second high reading in a row is accepted as a
+/// real change of level rather than rejected forever. The seconds after an AC change are flagged so the calibration
+/// learner skips them while the quality label switches at once.
+/// CPU watts come from the energy meter as averages of real energy over the tick, so they are range-checked but never
+/// spike-filtered: a jump from idle to turbo is a fact, not a glitch. Single-threaded: the sampling loop owns it.
 /// </summary>
-public sealed class SampleValidator(ValidatorOptions? options = null)
+public sealed class SampleValidator
 {
-    private readonly ValidatorOptions _options = options ?? new ValidatorOptions();
-    private readonly RollingMedian _cpu = new((options ?? new ValidatorOptions()).MedianWindow);
-    private readonly RollingMedian _gpu = new((options ?? new ValidatorOptions()).MedianWindow);
-    private readonly RollingMedian _battery = new((options ?? new ValidatorOptions()).MedianWindow);
+    private readonly ValidatorOptions _options;
+    private readonly Channel _cpu;
+    private readonly Channel _gpu;
+    private readonly Channel _battery;
 
-    private double? _lastCpu;
-    private double? _lastGpu;
-    private double? _lastBattery;
     private bool? _lastOnBattery;
     private DateTimeOffset _transitionAt = DateTimeOffset.MinValue;
+
+    public SampleValidator(ValidatorOptions? options = null)
+    {
+        _options = options ?? new ValidatorOptions();
+        _cpu = new Channel(_options.MedianWindow);
+        _gpu = new Channel(_options.MedianWindow);
+        _battery = new Channel(_options.MedianWindow);
+    }
 
     /// <summary>How many ticks have been marked suspect since the service started (spec §4, shown in status).</summary>
     public int SuspectCount { get; private set; }
@@ -28,15 +35,18 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
     {
         var suspect = false;
 
-        if (_lastOnBattery is { } previous && previous != raw.OnBattery) _transitionAt = raw.Timestamp;
+        if (_lastOnBattery is { } previous && previous != raw.OnBattery)
+        {
+            _transitionAt = raw.Timestamp;
+            _battery.Reset();          // a discharge rate from before the last time on mains says nothing about now
+        }
         _lastOnBattery = raw.OnBattery;
         if ((raw.Timestamp - _transitionAt).TotalSeconds < _options.TransitionSeconds) suspect = true;
 
-        // A RAPL counter wrap shows up as a negative delta, which the driver surfaces as a negative reading.
-        var cpu = raw.CpuPackageW is { } candidate && candidate < 0 && _lastCpu is not null ? Drop(ref suspect) : raw.CpuPackageW;
-        cpu = Check(cpu, _options.CpuMaxW, _cpu, ref _lastCpu, ref suspect);
-        var gpu = Check(raw.DGpuW, _options.GpuMaxW, _gpu, ref _lastGpu, ref suspect);
-        var battery = Check(raw.BatteryRateW, _options.BatteryMaxW, _battery, ref _lastBattery, ref suspect);
+        var cpu = Check(raw.CpuPackageW, _options.CpuMaxW, _cpu, spikeFilter: false, ref suspect);
+        var gpu = Check(raw.DGpuW, _options.GpuMaxW, _gpu, spikeFilter: true, ref suspect);
+        var battery = Check(raw.BatteryRateW, _options.BatteryMaxW, _battery, spikeFilter: true, ref suspect);
+        var igpu = InRange(raw.IGpuW, _options.CpuMaxW, ref suspect);
 
         var brightness = Fraction(raw.Brightness, ref suspect);
         var load = Fraction(raw.CpuLoad, ref suspect) ?? 0;
@@ -46,6 +56,7 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
         return raw with
         {
             CpuPackageW = cpu,
+            IGpuW = igpu,
             DGpuW = gpu,
             BatteryRateW = battery,
             Brightness = brightness,
@@ -55,26 +66,38 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
         };
     }
 
-    private double? Check(double? value, double max, RollingMedian window, ref double? last, ref bool suspect)
+    private double? Check(double? value, double max, Channel channel, bool spikeFilter, ref bool suspect)
     {
-        if (value is not { } reading) return null;
-        if (!double.IsFinite(reading) || reading < 0 || reading > max) return Drop(ref suspect);
+        if (InRange(value, max, ref suspect) is not { } reading) return null;
 
-        // The spike test engages only once the window is full: a median of one or two readings says nothing,
-        // and rejecting against it would throw away a genuine jump from idle to load in the first seconds.
-        if (window.Count >= _options.MedianWindow && window.Median is { } median && median > 0 && reading >= median * _options.OutlierFactor)
+        // The spike test engages only once the window is full: a median of one or two readings says nothing.
+        var isSpike = spikeFilter
+            && channel.Window.Count >= _options.MedianWindow
+            && channel.Window.Median is { } median && median > 0
+            && reading >= median * _options.OutlierFactor;
+
+        if (isSpike && channel.ConsecutiveSpikes == 0)
         {
+            // One high reading is a spike: replace it, and keep it out of the window so the median stays honest.
+            channel.ConsecutiveSpikes = 1;
             suspect = true;
-            return last;                      // the spike never enters the window, so the median stays honest
+            return channel.Last;
         }
 
-        window.Add(reading);
-        last = reading;
+        // A second high reading in a row is a real change of level, so the old median no longer applies.
+        if (isSpike) channel.Window.Reset();
+
+        channel.ConsecutiveSpikes = 0;
+        channel.Window.Add(reading);
+        channel.Last = reading;
         return reading;
     }
 
-    private static double? Drop(ref bool suspect)
+    /// <summary>A watts reading: dropped when it is not a number, negative, or above the plausible ceiling.</summary>
+    private static double? InRange(double? value, double max, ref bool suspect)
     {
+        if (value is not { } reading) return null;
+        if (double.IsFinite(reading) && reading >= 0 && reading <= max) return reading;
         suspect = true;
         return null;
     }
@@ -94,5 +117,19 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
             return Math.Clamp(reading, 0, 1);
         }
         return reading;
+    }
+
+    private sealed class Channel(int window)
+    {
+        public RollingMedian Window { get; } = new(window);
+        public double? Last { get; set; }
+        public int ConsecutiveSpikes { get; set; }
+
+        public void Reset()
+        {
+            Window.Reset();
+            Last = null;
+            ConsecutiveSpikes = 0;
+        }
     }
 }
