@@ -2086,7 +2086,7 @@ git commit -m "Add the display source with a cached WMI query"
 
 NVML ships with the NVIDIA display driver as `nvml.dll` in the system directory, so no package and no driver of ours is involved. Two facts decided by measurement on the development laptop: the GeForce MX330 answers temperature and utilisation but returns "not supported" for power, and that is a property of the card rather than of the driver. So power is often null and the model's load fallback is the normal path.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Sensors;
@@ -2164,12 +2164,12 @@ Add to `RealHardwareTests`:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter NvidiaSourceTests`
 Expected: build error, `NvidiaSource` not found.
 
-- [ ] **Step 3: Write the interop and the source**
+- [x] **Step 3: Write the interop and the source**
 
 `src/PowerLedger.Sensors/Nvml.cs`
 ```csharp
@@ -2318,7 +2318,7 @@ public sealed class NvidiaSource : ISensorSource
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter NvidiaSourceTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
@@ -2326,7 +2326,7 @@ Expected: `Passed! - Failed: 0, Passed: 4`.
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter RealHardwareTests`
 Expected: `Passed! - Failed: 0, Passed: 3`. On the development laptop the GPU test should find a card, report a load, and find no power.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/Nvml.cs src/PowerLedger.Sensors/NvidiaSource.cs tests/PowerLedger.Sensors.Tests

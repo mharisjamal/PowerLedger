@@ -47,4 +47,23 @@ public class RealHardwareTests
         derivedWatts.ShouldBeInRange(0.1, 200);
         derivedWatts.ShouldBe(reading.PackageW.Value, tolerance: reading.PackageW.Value * 0.9 + 2);
     }
+
+    [Fact]
+    public void An_nvidia_card_answers_or_is_honestly_absent()
+    {
+        using var nvml = new Nvml();
+        if (!nvml.Available)
+        {
+            nvml.Unavailable.ShouldNotBeNull();
+            return;
+        }
+
+        var reading = nvml.Read();
+        reading.Present.ShouldBeTrue();
+        reading.LoadFraction.ShouldNotBeNull();
+        reading.LoadFraction!.Value.ShouldBeInRange(0, 1);
+
+        // Power is null on cards with no measurement hardware, which is most low-end laptop GPUs.
+        if (reading.PowerWatts is { } watts) watts.ShouldBeInRange(0.1, 700);
+    }
 }
