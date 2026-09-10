@@ -16,6 +16,10 @@ public static class HardwareInventory
     /// iSCSI and SD cards are external or remote; virtual, file-backed and Storage Spaces disks are not drives at all.</summary>
     private static readonly HashSet<int> NotFittedBuses = [4, 6, 7, 9, 12, 14, 15, 16];
 
+    /// <summary>D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY values for a panel built into the machine: LVDS, embedded
+    /// DisplayPort, embedded UDI and the generic "internal".</summary>
+    private static readonly HashSet<uint> BuiltInConnections = [6, 11, 13, 0x80000000];
+
     /// <summary>The machine's own battery settles it; otherwise the enclosure type decides, and an unknown enclosure means desktop.</summary>
     /// <param name="batteryPresent">True for a battery that powers this machine alone; a UPS does not count.</param>
     public static ChassisKind ChassisFrom(int? enclosureType, bool batteryPresent)
@@ -37,6 +41,22 @@ public static class HardwareInventory
             else solid++;
         }
         return (solid, spinning);
+    }
+
+    /// <summary>The built-in panel's diagonal in inches, or 0 when no built-in panel shows. The panel is found by how
+    /// it is connected, never by where Windows lists it, so a docked laptop reports its own panel, not the desk monitor.</summary>
+    /// <param name="connections">Connection type by monitor instance name.</param>
+    /// <param name="sizes">Maximum image size in centimetres by monitor instance name.</param>
+    public static double BuiltInDiagonal(
+        IReadOnlyDictionary<string, uint> connections, IEnumerable<(string Instance, double WidthCm, double HeightCm)> sizes)
+    {
+        foreach (var (instance, width, height) in sizes)
+        {
+            if (width <= 0 || height <= 0) continue;
+            if (!connections.TryGetValue(instance, out var connection) || !BuiltInConnections.Contains(connection)) continue;
+            return Math.Round(Math.Sqrt(width * width + height * height) / 2.54, 1);
+        }
+        return 0;
     }
 
     /// <summary>One detection pass. Never throws: an unanswered question leaves its field at a sensible default.</summary>
@@ -90,26 +110,30 @@ public static class HardwareInventory
                 row["MediaType"] is null ? 0 : Convert.ToInt32(row["MediaType"]),
                 row["BusType"] is null ? 0 : Convert.ToInt32(row["BusType"])))), (1, 0));
 
-        var (monitors, diagonal) = Wmi.ReadOr(@"\\.\root\wmi", "SELECT MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
+        var connections = Wmi.ReadOr(@"\\.\root\wmi", "SELECT InstanceName, VideoOutputTechnology FROM WmiMonitorConnectionParams", rows =>
         {
-            var count = 0;
-            double inches = 0;
+            var byInstance = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in rows)
             {
-                count++;
-                if (inches > 0) continue;
-                var width = Convert.ToDouble(row["MaxHorizontalImageSize"]);
-                var height = Convert.ToDouble(row["MaxVerticalImageSize"]);
-                if (width > 0 && height > 0) inches = Math.Round(Math.Sqrt(width * width + height * height) / 2.54, 1);
+                if (row["InstanceName"] is string name && row["VideoOutputTechnology"] is uint connection) byInstance[name] = connection;
             }
-            return (Math.Max(count, 1), inches);
-        }, (1, 0d));
+            return byInstance;
+        }, []);
+
+        var (monitors, diagonal) = Wmi.ReadOr(@"\\.\root\wmi", "SELECT InstanceName, Active, MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
+        (
+            Math.Max(rows.Count(row => row["Active"] is true), 1),
+            BuiltInDiagonal(connections, rows.Select(row => (
+                row["InstanceName"] as string ?? "",
+                Convert.ToDouble(row["MaxHorizontalImageSize"]),
+                Convert.ToDouble(row["MaxVerticalImageSize"]))))
+        ), (1, 0d));
 
         return new InventoryFacts(
             chassis, cpuName, gpuName,
             sticks, ddr5,
             Math.Max(ssd, 0), Math.Max(hdd, 0),
-            chassis == ChassisKind.Laptop ? diagonal : 0,
+            diagonal,
             monitors);
     }
 }

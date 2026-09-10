@@ -4,7 +4,7 @@ using Shouldly;
 
 namespace PowerLedger.Sensors.Tests;
 
-public class ChassisTests
+public class HardwareInventoryTests
 {
     [Theory]
     [InlineData(9, true, ChassisKind.Laptop)]      // Laptop
@@ -47,5 +47,30 @@ public class ChassisTests
         };
 
         HardwareInventory.CountDrives(drives).ShouldBe((2, 1));
+    }
+
+    [Theory]
+    [InlineData(0x80000000u)]   // internal
+    [InlineData(11u)]           // embedded DisplayPort
+    [InlineData(6u)]            // LVDS, on older laptops
+    public void The_panel_size_comes_from_the_built_in_panel_wherever_windows_lists_it(uint builtIn)
+    {
+        var connections = new Dictionary<string, uint>
+        {
+            [@"DISPLAY\DEL41A8\1"] = 10,          // DisplayPort desk monitor, listed first
+            [@"DISPLAY\AUO4199\2"] = builtIn,     // the laptop's own panel
+        };
+        (string, double, double)[] sizes = [(@"DISPLAY\DEL41A8\1", 60, 34), (@"DISPLAY\AUO4199\2", 34, 19)];
+
+        HardwareInventory.BuiltInDiagonal(connections, sizes).ShouldBe(15.3);
+    }
+
+    [Fact]
+    public void A_laptop_shut_on_its_dock_reports_no_panel_size_rather_than_the_desk_monitor()
+    {
+        var connections = new Dictionary<string, uint> { [@"DISPLAY\DEL41A8\1"] = 10 };
+        (string, double, double)[] sizes = [(@"DISPLAY\DEL41A8\1", 60, 34)];
+
+        HardwareInventory.BuiltInDiagonal(connections, sizes).ShouldBe(0);
     }
 }
