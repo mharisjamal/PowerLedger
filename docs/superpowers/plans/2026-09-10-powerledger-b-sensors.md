@@ -325,7 +325,7 @@ git commit -m "Add SampleDraft and the sensor source contract"
 - Create: `tests/PowerLedger.Sensors.Tests/FakeSource.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/SamplerTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Sensors.Tests/FakeSource.cs`
 ```csharp
@@ -461,12 +461,12 @@ public class SamplerTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SamplerTests`
 Expected: build error, `Sampler` not found.
 
-- [ ] **Step 3: Write the sampler**
+- [x] **Step 3: Write the sampler**
 
 `src/PowerLedger.Sensors/Sampler.cs`
 ```csharp
@@ -540,12 +540,12 @@ public sealed class Sampler : IDisposable
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SamplerTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/Sampler.cs tests/PowerLedger.Sensors.Tests
