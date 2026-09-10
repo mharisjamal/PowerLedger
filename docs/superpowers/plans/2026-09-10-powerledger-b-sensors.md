@@ -1204,7 +1204,7 @@ Windows 11 publishes the processor's RAPL rails as performance counters backed b
 
 The `Power` field's unit is not documented. Every sign says milliwatts, and the hardware test below pins that by cross-checking against the energy counter and against a plausible band for this processor. If the assertion fails, the unit is wrong and the constant must be corrected rather than the test loosened.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Sensors;
@@ -1239,8 +1239,8 @@ public class EnergyMeterTests
             new Rail("_Total", 99999, 4),
         ]);
 
-        reading.PackageW.ShouldBe(10.0, 1e-9);
-        reading.IntegratedGpuW.ShouldBe(0.066, 1e-9);
+        reading.PackageW.ShouldNotBeNull().ShouldBe(10.0, 1e-9);
+        reading.IntegratedGpuW.ShouldNotBeNull().ShouldBe(0.066, 1e-9);
         reading.CoresW.ShouldBeNull();
         reading.MemoryW.ShouldBeNull();
     }
@@ -1288,19 +1288,19 @@ Add to `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`, inside the existi
         var second = meter.ReadRails().Single(r => r.Name == first.Name);
         second.EnergyPicowattHours.ShouldBeGreaterThan(first.EnergyPicowattHours);
 
-        var joules = (second.EnergyPicowattHours - first.EnergyPicowattHours) * 3.6e-12;
+        var joules = (second.EnergyPicowattHours - first.EnergyPicowattHours) * 3.6e-9;   // 1 pWh = 1e-12 Wh = 3.6e-9 J
         var derivedWatts = joules / 3.0;
         derivedWatts.ShouldBeInRange(0.1, 200);
         derivedWatts.ShouldBe(reading.PackageW.Value, tolerance: reading.PackageW.Value * 0.9 + 2);
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter EnergyMeterTests`
 Expected: build error, `EnergyMeter` not found.
 
-- [ ] **Step 3: Write the meter**
+- [x] **Step 3: Write the meter**
 
 `src/PowerLedger.Sensors/EnergyMeter.cs`
 ```csharp
@@ -1422,7 +1422,7 @@ public sealed class EnergyMeter : IDisposable
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter EnergyMeterTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
@@ -1432,7 +1432,7 @@ Expected: `Passed! - Failed: 0, Passed: 2`. The wattage test takes about three s
 
 If the cross-check fails because the derived watts and the reported watts differ by orders of magnitude, the `Power` unit is not milliwatts. Report the two numbers and stop; do not change the tolerance.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/EnergyMeter.cs tests/PowerLedger.Sensors.Tests
@@ -1601,7 +1601,7 @@ public class SimpleSourcesTests
         new BatterySource(() => Battery(ac: false)).Contribute(draft);
 
         draft.OnBattery.ShouldBeTrue();
-        draft.BatteryRateW.ShouldBe(34.2, 1e-9);
+        draft.BatteryRateW.ShouldNotBeNull().ShouldBe(34.2, 1e-9);
     }
 
     [Fact]
