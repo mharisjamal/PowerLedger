@@ -37,7 +37,7 @@ The core loop is: **sample sensors once per second → convert to a whole-system
 | Measurement sources v1 | Sensors + estimate model only; zero extra hardware |
 | Report content v1 | Energy bill + component breakdown + extras (CO₂, comparisons, idle waste) |
 | Per-app attribution | v1.1 |
-| Stack | .NET 10 LTS, WPF + WPF-UI, LibreHardwareMonitorLib, SQLite |
+| Stack | .NET 10 LTS, WPF + WPF-UI, SQLite; sensors are plain Win32 and WMI |
 | Process model | Windows Service (sampler) + unelevated WPF tray app (UI) |
 | Visual direction | "Meter & Ledger": instrument-panel dark theme, bench-sheet light theme |
 | Repo | `D:\PowerLedger`, license MIT unless the owner decides otherwise |
@@ -47,7 +47,7 @@ The core loop is: **sample sensors once per second → convert to a whole-system
 ```
 ┌──────────────── PowerLedger.Service (Windows Service, LocalSystem) ────────────────┐
 │  Sensors ──► Sampler (1/s) ──► Validator ──► PowerModel ──► Writer ──► SQLite (WAL)  │
-│   LHM (CPU/GPU)                                  │             ▲                     │
+│   Energy meter, GPU, battery                     │             ▲                     │
 │   Battery, Display, Activity                     ▼        Downsampler + retention    │
 │                                    NamedPipe server: live readings, status, settings │
 └──────────────────────────────────────────┬────────────────────┬─────────────────────┘
@@ -68,7 +68,7 @@ The core loop is: **sample sensors once per second → convert to a whole-system
 | `PowerLedger.Storage` | SQLite schema, migrations, batched writer, retention jobs, read-side query API. | Core |
 | `PowerLedger.Service` | Worker host: sampler loop, writer, downsample scheduler, pipe server, power/session event handling. | all above |
 | `PowerLedger.App` | WPF UI, tray icon, charts, exports, monthly report, wizard. | Core, Contracts, Storage (read-only) |
-| `installer/` | Inno Setup script, PawnIO driver bundle, runtime bootstrap. | build output |
+| `installer/` | Inno Setup script and runtime bootstrap. No driver to bundle. | build output |
 | `tests/*` | One xUnit project per library plus a Service integration test project. | |
 
 ### Rules
@@ -166,7 +166,7 @@ A bucket counts as calibrated once it holds ≥ 5 minutes of samples and the mac
 | Desktop board | 12 W |
 | RAM per stick | DDR4 2.5 W, DDR5 1.5 W (`Win32_PhysicalMemory.SMBIOSMemoryType`) |
 | Drive | SSD 2 W, HDD 6 W (`MSFT_PhysicalDisk.MediaType`) |
-| Fan | 1 W each (LHM count at startup) |
+| Fan | 1 W each, counted from the machine profile rather than measured |
 | Extras (RGB, pumps, USB devices) | user slider 0–100 W, default 0 |
 | External monitors | opt-in, default 25 W each while display on, 0.5 W when off |
 | PSU efficiency | 80+ White 82 %, Bronze 85 % (default), Silver 87 %, Gold 90 %, Platinum 92 %, Titanium 94 % |
@@ -286,7 +286,7 @@ The app looks like a bench instrument; the reports read like a utility bill. Ref
 
 | Situation | Behaviour |
 |---|---|
-| Kernel driver won't load (PawnIO missing, HVCI, AV quarantine) | Service keeps running on driverless sources; CPU falls back to the load × TDP model; quality drops to Estimated; UI shows "CPU sensor unavailable" with an "Install driver" action (UAC). |
+| No energy-meter rails (Windows 10 without metering hardware, or a processor that publishes none) | Service keeps running; CPU falls back to the load × TDP model; quality drops to Estimated; the status screen says "CPU power unavailable on this machine" rather than offering a fix that does not exist. |
 | Sensor unsupported on this hardware (e.g. GeForce MX330 has no power readout) | Adapter reports `Supported=false` at startup; model uses the fallback; UI marks the value estimated. |
 | Glitch values | Validator rules in §4. |
 | AC ↔ battery switch | Quality flips immediately; first 3 s excluded from calibration. |
@@ -357,7 +357,7 @@ docs/
 .github/workflows/ci.yml
 ```
 
-Third-party licenses in use: LibreHardwareMonitorLib (MPL-2.0), WPF-UI (MIT), LiveCharts2 (MIT), CommunityToolkit.Mvvm (MIT), Microsoft.Data.Sqlite (MIT), Serilog (Apache-2.0), QuestPDF (Community license, free below USD 1M revenue), FsCheck (BSD-3), fonts Archivo, Archivo Narrow, Martian Mono (OFL). No GPL.
+Third-party licenses in use: WPF-UI (MIT), LiveCharts2 (MIT), CommunityToolkit.Mvvm (MIT), Microsoft.Data.Sqlite (MIT), Serilog (Apache-2.0), QuestPDF (Community license, free below USD 1M revenue), FsCheck (BSD-3), fonts Archivo, Archivo Narrow, Martian Mono (OFL). No GPL.
 
 ## 15. Success criteria for v1
 
