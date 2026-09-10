@@ -1581,7 +1581,7 @@ git commit -m "Add the energy meter sensor source"
 
 Each of these owns two or three fields and takes its Windows call as a delegate, so the logic is testable without hardware and the real call is one line.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Sensors;
@@ -1703,12 +1703,12 @@ public class SimpleSourcesTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SimpleSourcesTests`
 Expected: build error, `BatterySource` not found.
 
-- [ ] **Step 3: Write the three sources**
+- [x] **Step 3: Write the three sources**
 
 `src/PowerLedger.Sensors/BatterySource.cs`
 ```csharp
@@ -1841,12 +1841,12 @@ public sealed class ActivitySource : ISensorSource
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SimpleSourcesTests`
 Expected: `Passed! - Failed: 0, Passed: 9`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors tests/PowerLedger.Sensors.Tests/SimpleSourcesTests.cs
