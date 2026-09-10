@@ -945,7 +945,9 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
         if (value is not { } reading) return null;
         if (!double.IsFinite(reading) || reading < 0 || reading > max) return Drop(ref suspect);
 
-        if (window.Median is { } median && median > 0 && reading >= median * _options.OutlierFactor)
+        // The spike test engages only once the window is full: a median of one or two readings says nothing,
+        // and rejecting against it would throw away a genuine jump from idle to load in the first seconds.
+        if (window.Count >= _options.MedianWindow && window.Median is { } median && median > 0 && reading >= median * _options.OutlierFactor)
         {
             suspect = true;
             return last;                      // the spike never enters the window, so the median stays honest
