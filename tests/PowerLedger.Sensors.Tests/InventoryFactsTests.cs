@@ -23,22 +23,23 @@ public class InventoryFactsTests
     }
 
     [Fact]
-    public void Changing_any_part_changes_the_hash()
+    public void A_different_processor_memory_or_chassis_is_a_different_machine()
     {
         var baseline = Laptop().Hash;
+        (Laptop() with { CpuName = "AMD Ryzen 7 5800U with Radeon Graphics" }).Hash.ShouldNotBe(baseline);
         (Laptop() with { RamSticks = 2 }).Hash.ShouldNotBe(baseline);
-        (Laptop() with { CpuName = "Ryzen 7 5800U" }).Hash.ShouldNotBe(baseline);
-        (Laptop() with { GpuName = null }).Hash.ShouldNotBe(baseline);
-        (Laptop() with { SsdCount = 2 }).Hash.ShouldNotBe(baseline);
         (Laptop() with { RamIsDdr5 = true }).Hash.ShouldNotBe(baseline);
         (Laptop() with { Chassis = ChassisKind.Desktop }).Hash.ShouldNotBe(baseline);
     }
 
     [Fact]
-    public void Plugging_in_a_second_monitor_does_not_relearn_the_machine()
+    public void Docks_external_drives_and_driver_installs_do_not_relearn_the_machine()
     {
-        // Monitor count moves all day; it is inventory for the wizard, not identity for calibration.
-        (Laptop() with { MonitorCount = 3 }).Hash.ShouldBe(Laptop().Hash);
+        var baseline = Laptop().Hash;
+        (Laptop() with { MonitorCount = 3 }).Hash.ShouldBe(baseline);                          // docked
+        (Laptop() with { DisplayDiagonalInches = 0 }).Hash.ShouldBe(baseline);                 // lid shut on the dock
+        (Laptop() with { SsdCount = 2, HddCount = 1 }).Hash.ShouldBe(baseline);                // external drives
+        (Laptop() with { GpuName = "Microsoft Basic Display Adapter" }).Hash.ShouldBe(baseline); // before the driver
     }
 
     [Fact]
@@ -68,8 +69,12 @@ public class InventoryFactsTests
     }
 
     [Fact]
-    public void An_unknown_panel_size_leaves_the_profile_default_alone()
+    public void An_unknown_panel_size_leaves_the_profile_alone()
     {
+        // Detected while docked with the lid shut: no built-in panel shows, but it is still there.
+        var docked = Laptop() with { DisplayDiagonalInches = 0 };
+        docked.ToProfile(MachineProfile.DefaultLaptop with { DisplayDiagonalInches = 13.3 }).DisplayDiagonalInches.ShouldBe(13.3);
+
         var desktop = Laptop() with { Chassis = ChassisKind.Desktop, DisplayDiagonalInches = 0 };
         desktop.ToProfile(MachineProfile.DefaultDesktop).DisplayDiagonalInches.ShouldBe(0);
     }
