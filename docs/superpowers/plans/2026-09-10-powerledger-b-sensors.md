@@ -3221,26 +3221,26 @@ git commit -m "Point the console preview at the real sensor layer"
 
 ### Task 17: Final verification and handoff to Plan C
 
-- [ ] **Step 1: Clean build with warnings as errors**
+- [x] **Step 1: Clean build with warnings as errors**
 
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` and `0 Warning(s)`.
 
-- [ ] **Step 2: Full test run**
+- [x] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
 Expected: Core `Passed: 110`, Storage `Passed: 40`, Sensors `Passed: 87`, no failures, no skipped tests.
 
-- [ ] **Step 3: Confirm CI can skip the hardware tests**
+- [x] **Step 3: Confirm CI can skip the hardware tests**
 
 Run: `dotnet test -c Release --filter "Category!=Hardware"`
 Expected: Sensors `Passed: 83` (the four `RealHardwareTests` excluded), Core and Storage unchanged, no failures. This is the command CI uses, because a build agent has no battery and no GPU.
 
-- [ ] **Step 4: Confirm the working tree is clean and every task is committed**
+- [x] **Step 4: Confirm the working tree is clean and every task is committed**
 
 Run: `git status --short` → no output. Run: `git log --oneline | head -n 20` → one commit per task from this plan, newest first.
 
-- [ ] **Step 5: Record the public surface Plan C will build on**
+- [x] **Step 5: Record the public surface Plan C will build on**
 
 Plan C (the Windows service) consumes exactly these types:
 
@@ -3271,7 +3271,7 @@ Plan C (the Windows service) consumes exactly these types:
 
 No step in this plan ships a running process; that is Plan C's first task.
 
-- [ ] **Step 6: Commit the finished plan**
+- [x] **Step 6: Commit the finished plan**
 
 ```bash
 git add docs/superpowers/plans
