@@ -1,4 +1,3 @@
-using System.Management;
 using PowerLedger.Contracts;
 
 namespace PowerLedger.Sensors;
@@ -44,22 +43,20 @@ public static class HardwareInventory
     public static InventoryFacts Detect()
     {
         var battery = Win32.ReadBatteryState();
-        var chassis = ChassisFrom(Query(@"\\.\root\cimv2", "SELECT ChassisTypes FROM Win32_SystemEnclosure", rows =>
+        var enclosure = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT ChassisTypes FROM Win32_SystemEnclosure", rows =>
         {
             foreach (var row in rows)
             {
-                if (row["ChassisTypes"] is ushort[] { Length: > 0 } types) return (int)types[0];
+                if (row["ChassisTypes"] is ushort[] { Length: > 0 } types) return (int?)types[0];
             }
-            return (int?)null;
-        }), battery?.OwnBattery ?? false);
-
-        var cpuName = Query(@"\\.\root\cimv2", "SELECT Name FROM Win32_Processor", rows =>
-        {
-            foreach (var row in rows) return (row["Name"] as string)?.Trim();
             return null;
-        });
+        }, null);
+        var chassis = ChassisFrom(enclosure, battery?.OwnBattery ?? false);
 
-        var gpuName = Query(@"\\.\root\cimv2", "SELECT Name, AdapterCompatibility FROM Win32_VideoController", rows =>
+        var cpuName = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT Name FROM Win32_Processor", rows =>
+            rows.Count > 0 ? (rows[0]["Name"] as string)?.Trim() : null, null);
+
+        var gpuName = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT Name, AdapterCompatibility FROM Win32_VideoController", rows =>
         {
             string? fallback = null;
             foreach (var row in rows)
@@ -73,9 +70,9 @@ public static class HardwareInventory
                 fallback ??= name;
             }
             return fallback;
-        });
+        }, null);
 
-        var (sticks, ddr5) = Query(@"\\.\root\cimv2", "SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory", rows =>
+        var (sticks, ddr5) = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory", rows =>
         {
             var count = 0;
             var isDdr5 = false;
@@ -88,12 +85,12 @@ public static class HardwareInventory
             return (Math.Max(count, 1), isDdr5);
         }, (1, false));
 
-        var (ssd, hdd) = Query(@"\\.\root\microsoft\windows\storage", "SELECT MediaType, BusType FROM MSFT_PhysicalDisk", rows =>
+        var (ssd, hdd) = Wmi.ReadOr(@"\\.\root\microsoft\windows\storage", "SELECT MediaType, BusType FROM MSFT_PhysicalDisk", rows =>
             CountDrives(rows.Select(row => (
                 row["MediaType"] is null ? 0 : Convert.ToInt32(row["MediaType"]),
                 row["BusType"] is null ? 0 : Convert.ToInt32(row["BusType"])))), (1, 0));
 
-        var (monitors, diagonal) = Query(@"\\.\root\wmi", "SELECT MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
+        var (monitors, diagonal) = Wmi.ReadOr(@"\\.\root\wmi", "SELECT MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
         {
             var count = 0;
             double inches = 0;
@@ -114,23 +111,5 @@ public static class HardwareInventory
             Math.Max(ssd, 0), Math.Max(hdd, 0),
             chassis == ChassisKind.Laptop ? diagonal : 0,
             monitors);
-    }
-
-    private static T Query<T>(string scope, string query, Func<IEnumerable<ManagementObject>, T> read, T fallback = default!)
-    {
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(scope, query);
-            using var results = searcher.Get();
-            return read(results.Cast<ManagementObject>());
-        }
-        catch (ManagementException)
-        {
-            return fallback;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return fallback;
-        }
     }
 }

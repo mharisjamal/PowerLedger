@@ -80,4 +80,15 @@ public class RealHardwareTests
         // Detection must be repeatable: the same machine, the same hash.
         HardwareInventory.Detect().Hash.ShouldBe(facts.Hash);
     }
+
+    [Fact]
+    public void The_display_query_answers_on_its_first_tick()
+    {
+        var draft = new SampleDraft();
+        new DisplaySource(() => true).Contribute(draft);
+
+        draft.MonitorCount.ShouldBeGreaterThan(0);
+        // Null on a desktop, where no panel has a brightness Windows controls.
+        if (draft.Brightness is { } brightness) brightness.ShouldBeInRange(0, 1);
+    }
 }

@@ -1,4 +1,3 @@
-using System.Management;
 using System.Runtime.InteropServices;
 
 namespace PowerLedger.Sensors;
@@ -16,24 +15,14 @@ internal static class DevicePowerState
     private static readonly DevPropKey PowerData = new() { FormatId = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), PropertyId = 32 };
 
     /// <summary>The Plug and Play instance id of the first NVIDIA display adapter, or null when there is none.</summary>
-    public static string? FindNvidiaGpu()
+    public static string? FindNvidiaGpu() => Wmi.ReadOr(@"\\.\root\cimv2", "SELECT PNPDeviceID FROM Win32_VideoController", rows =>
     {
-        try
+        foreach (var row in rows)
         {
-            using var searcher = new ManagementObjectSearcher(@"\\.\root\cimv2", "SELECT PNPDeviceID FROM Win32_VideoController");
-            using var results = searcher.Get();
-            foreach (var row in results)
-            {
-                using var instance = (ManagementObject)row;
-                if (instance["PNPDeviceID"] is string id && id.StartsWith(@"PCI\VEN_10DE", StringComparison.OrdinalIgnoreCase)) return id;
-            }
-            return null;
+            if (row["PNPDeviceID"] is string id && id.StartsWith(@"PCI\VEN_10DE", StringComparison.OrdinalIgnoreCase)) return id;
         }
-        catch (Exception error) when (error is ManagementException or COMException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+        return null;
+    }, null);
 
     /// <summary>True when Windows reports the device in D3. Anything it cannot answer counts as on, which never hides real draw.</summary>
     public static bool IsPoweredOff(string pnpDeviceId)
