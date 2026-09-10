@@ -3500,7 +3500,7 @@ git rm samples/PowerLedger.Demo/WindowsSensors.cs
 
 - [x] **Step 3: Rewrite the recording loop against the real layer**
 
-In `samples/PowerLedger.Demo/Program.cs`, add `using PowerLedger.Sensors;` and replace the whole `Record` method with:
+In `samples/PowerLedger.Demo/Program.cs`, add `using PowerLedger.Sensors;`, replace the whole `Record` method, and add the two helpers after it. Each minute row is folded from every stored tick in that minute, because `UpsertMinute` replaces the row and a second run inside the same minute must not erase the first:
 
 ```csharp
     private static void Record(SqliteDatabase db, int seconds)
@@ -3536,7 +3536,6 @@ In `samples/PowerLedger.Demo/Program.cs`, add `using PowerLedger.Sensors;` and r
         var clock = Stopwatch.StartNew();
         var previous = TimeSpan.Zero;
         var pending = new List<Reading>();
-        var minute = new List<Reading>();
         var minuteStart = FloorMinute(DateTimeOffset.UtcNow);
 
         for (var tick = 0; tick < seconds; tick++)
@@ -3553,24 +3552,19 @@ In `samples/PowerLedger.Demo/Program.cs`, add `using PowerLedger.Sensors;` and r
 
             if (FloorMinute(now) != minuteStart)
             {
-                if (minute.Count > 0) aggregates.UpsertMinute(Downsampler.ToMinute(minuteStart, minute, EnergyIntegrator.GapThresholdFor(1)));
-                minute.Clear();
+                Flush(raw, pending);
+                FoldMinute(raw, aggregates, minuteStart);
                 minuteStart = FloorMinute(now);
             }
 
-            minute.Add(reading);
             pending.Add(reading);
-            if (pending.Count >= 10)
-            {
-                raw.InsertBatch(pending);
-                pending.Clear();
-            }
+            if (pending.Count >= 10) Flush(raw, pending);
 
             PrintLive(reading, learner);
         }
 
-        if (pending.Count > 0) raw.InsertBatch(pending);
-        if (minute.Count > 0) aggregates.UpsertMinute(Downsampler.ToMinute(minuteStart, minute, EnergyIntegrator.GapThresholdFor(1)));
+        Flush(raw, pending);
+        FoldMinute(raw, aggregates, minuteStart);
         calibration.Save(facts.Hash, learner.Export(), DateTimeOffset.UtcNow);
         sessions.Close(session, DateTimeOffset.UtcNow, SessionReason.ServiceStop);
 
@@ -3582,6 +3576,21 @@ In `samples/PowerLedger.Demo/Program.cs`, add `using PowerLedger.Sensors;` and r
         }
         if (sensors.Validator.SuspectCount > 0) Console.WriteLine($"  {sensors.Validator.SuspectCount} ticks marked suspect");
         Console.WriteLine();
+    }
+
+    private static void Flush(RawSampleRepository raw, List<Reading> pending)
+    {
+        if (pending.Count == 0) return;
+        raw.InsertBatch(pending);
+        pending.Clear();
+    }
+
+    /// <summary>Builds the minute row from every stored tick in that minute, not only this run's (spec §7). The row is
+    /// replaced, so a second run inside the same minute must add to the first rather than erase it.</summary>
+    private static void FoldMinute(RawSampleRepository raw, AggregateRepository aggregates, DateTimeOffset minuteStart)
+    {
+        var ticks = raw.Read(minuteStart, minuteStart.AddMinutes(1));
+        if (ticks.Count > 0) aggregates.UpsertMinute(Downsampler.ToMinute(minuteStart, ticks, EnergyIntegrator.GapThresholdFor(1)));
     }
 ```
 
@@ -3646,6 +3655,7 @@ Plan C (the Windows service) consumes exactly these types:
 - Only the sampling loop touches the sensor set, the sampler and the validator. None of them is thread-safe, and the validator's rolling windows must live as long as the set. The pipe thread reads a status snapshot (source health, suspect count, the last reading) that the loop publishes each tick with a single reference swap. `Display.Refresh()` is the one call that is safe from another thread.
 - Guard the loop with a watchdog. WMI now gives up after five seconds a row, but NVML and the performance-counter API have no timeout. If a tick runs past about ten seconds, record a gap, dispose the stuck set on a background thread and build a fresh one.
 - Pass a real monotonic delta, from a `Stopwatch` rather than the wall clock, and pass `EnergyIntegrator.GapThresholdFor(sampleIntervalSeconds)` to the downsampler.
+- Build each minute row from the raw rows in storage (spec §7), never from the loop's own buffer. `UpsertMinute` replaces the row, so a restart inside a minute, such as the crash recovery five seconds later, would otherwise erase the part before it. On start, fold every minute since `LastMinuteStart()` that has raw rows, so the minute a shutdown cut short is not left unfolded.
 - Re-run `HardwareInventory.Detect()` on resume. The hash covers only chassis, processor and memory, so a changed hash means a different machine: start a fresh learner rather than importing the old calibration.
 - `ToProfile` overwrites every detected field. Apply it on first run and when the hash changes, not on every resume, or it will undo corrections the user made in the wizard. Remember which fields the user corrected and leave those alone.
 - A source reporting `Supported == false` is a fact about the machine, not an error. Show it in status and do not retry it within the set; the rebuild on resume checks again.
@@ -3673,7 +3683,7 @@ git commit -m "Complete Plan B: sensors verified on real hardware"
 
 ## After the final review
 
-The whole-branch review found problems the tasks above did not. Each fix is its own commit, and the code blocks above already show the fixed files.
+The whole-branch review, and the end-to-end run after it, found problems the tasks above did not. Each fix is its own commit, and the code blocks above already show the fixed files.
 
 | Problem | Fix |
 |---|---|
@@ -3685,6 +3695,7 @@ The whole-branch review found problems the tasks above did not. Each fix is its 
 | A UPS on USB made a desktop look like a laptop, and its drain during a power cut would have trained the calibration. | A short-term battery is not the machine's own. USB, SD, network and virtual drives no longer count as fitted drives. |
 | WMI could throw `COMException` while restarting, never timed out and leaked its rows, and a desktop's brightness query failed every tick. | One helper runs every query with a timeout and disposes its rows. The display source keeps its last answer, retries in ten seconds, and reads "not supported" brightness as none. `Refresh` is safe from any thread. |
 | The panel size came from whichever monitor WMI listed first. | The built-in panel is found by its connection type. With none showing, the profile keeps its size. |
+| The preview folded each minute from its own ticks and replaced the stored row, so a second run inside the same minute erased the first. | Minute rows are folded from every stored tick in the minute, as spec §7 prescribes. |
 
 ---
 
