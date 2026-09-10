@@ -64,7 +64,7 @@ The core loop is: **sample sensors once per second → convert to a whole-system
 |---|---|---|
 | `PowerLedger.Core` | Pure domain: `PowerModel`, calibration learner, energy integrator, downsampler, tariff/cost/CO₂ math, report builder. No I/O. | nothing |
 | `PowerLedger.Contracts` | Pipe message DTOs, settings model, shared enums (`Quality`, `SessionReason`). | nothing |
-| `PowerLedger.Sensors` | `ISensorSource` and adapters: `LhmSource` (CPU, GPU, fans), `BatterySource`, `DisplaySource`, `ActivitySource`, `HardwareInventory`. Validator lives here. | Core, LibreHardwareMonitorLib |
+| `PowerLedger.Sensors` | `ISensorSource` and adapters: `EnergyMeterSource` (CPU rails), `NvidiaSource` (discrete GPU), `BatterySource`, `CpuLoadSource`, `DisplaySource`, `ActivitySource`, `HardwareInventory`. Validator lives here. | Core, Contracts |
 | `PowerLedger.Storage` | SQLite schema, migrations, batched writer, retention jobs, read-side query API. | Core |
 | `PowerLedger.Service` | Worker host: sampler loop, writer, downsample scheduler, pipe server, power/session event handling. | all above |
 | `PowerLedger.App` | WPF UI, tray icon, charts, exports, monthly report, wizard. | Core, Contracts, Storage (read-only) |
@@ -84,25 +84,27 @@ Sampling runs at 1 Hz (configurable 1–5 s). Every source is read inside its ow
 
 | Source | Reads | Mechanism | Needs driver |
 |---|---|---|---|
-| CPU | package W, iGPU W (Intel PP1 where exposed), load | LibreHardwareMonitorLib (RAPL / AMD SMU via kernel driver), `GetSystemTimes` for load | yes, for watts only |
-| Discrete GPU | power W, load, present | LibreHardwareMonitorLib (NVML / ADL) reads through the vendor driver. Many laptop GPUs, the GeForce MX330 included, expose no power sensor at all; those fall back to the load model | no |
+| CPU | package W, cores W, iGPU W, DRAM W, load | Windows Energy Meter Interface: `DeviceIoControl` on the `GUID_DEVICE_ENERGY_METER` interface, which Windows 11 populates with the processor's RAPL rails. `GetSystemTimes` for load | no |
+| Discrete GPU | power W, load, present | NVML through the installed NVIDIA driver (`nvml.dll`), ADL for AMD. Many laptop GPUs, the GeForce MX330 included, report no power at all; those fall back to the load model | no |
 | Battery | discharge/charge rate mW, AC line status | `CallNtPowerInformation(SystemBatteryState)` (Rate is negative when discharging), `GetSystemPowerStatus` | no |
 | Display | brightness %, display on/off, monitor count and size | WMI `WmiMonitorBrightness`, `RegisterPowerSettingNotification(GUID_CONSOLE_DISPLAY_STATE)` with service handle, `WmiMonitorID` + `WmiMonitorBasicDisplayParams` | no |
 | Activity | user idle seconds, session locked | `WTSQuerySessionInformation(WTSSessionInfo).LastInputTime` for the console session (works from session 0), `WTSRegisterSessionNotification` | no |
-| Fans | count only, at startup | LibreHardwareMonitorLib SuperIO read, once | yes |
+| Fans | count only | Taken from the machine profile, not measured; reading fan tachometers needs a kernel driver and buys about a watt | no |
 
-### Running without the kernel driver
+### No kernel driver anywhere
 
-Ring-0 access is a first-class option, not a requirement. Reading CPU package power means reading model-specific registers, which needs a kernel driver: LibreHardwareMonitorLib 0.9.5 and later use PawnIO (2.0.0 or newer; WinRing0 is gone, and Microsoft's vulnerable-driver blocklist rejects it). PawnIO is a separate installer, not a NuGet package, and both installing it and reading through it need administrator rights, which the service has as LocalSystem.
+PowerLedger installs no driver and needs no elevation to read a sensor. That is a deliberate constraint, and Windows 11 makes it affordable.
 
-Without it the app still works, and this is the mode it must be correct in first:
+Reading CPU package power used to mean reading model-specific registers, which means ring 0, which means shipping a kernel driver. Windows 11 removes that: the inbox processor power-management driver publishes the processor's RAPL rails through the **Energy Meter Interface**, an ordinary device interface any process can open for reading. Verified on the development laptop from a non-elevated process: package 5.59 W, cores 1.83 W, integrated graphics 0.07 W, memory 0 W, alongside a monotonic picowatt-hour energy counter.
 
-- **Battery** gives true whole-system watts while unplugged, unelevated, with no driver. This is the best signal on any laptop.
-- **NVIDIA and AMD GPUs** report through the vendor driver, so temperature and load survive; power depends on the card.
-- **Display, activity, inventory and fan count** are WMI and Win32, all driver-free.
-- **CPU** loses package watts and falls back to `idle + (TDP − idle) × load`, quality **Estimated**.
+Consequences that shape the rest of the design:
 
-One trap decides the design: with no driver loaded, LibreHardwareMonitorLib still creates the RAPL power sensors and they read exactly **0 W**, not null. A zero is indistinguishable from a genuinely idle chip. The CPU source must therefore gate on `PawnIo.IsInstalled` and report "no value" itself, never on the sensor's presence.
+- The sensor layer is plain Win32 and WMI. No third-party sensor library, no driver installer, no mixed licences, and nothing for Windows memory integrity or an anti-cheat to object to.
+- The installer stays small and the service could run unelevated if it ever needed to. It runs as LocalSystem for session and power events, not for sensors.
+- **Windows 10 is the caveat.** The interface exists there, but only machines with real metering hardware populate it. On a Windows 10 machine with no rails, CPU watts are unavailable and the model falls back to `idle + (TDP − idle) × load`, quality **Estimated**, exactly as on a desktop with no battery. The source must treat an empty rail list as "no value", never as zero.
+- Two rails are worth more than their names suggest: the integrated-graphics rail makes iGPU power measured rather than guessed, and the memory rail replaces the RAM estimate where it is populated. Neither is present on every processor; the development laptop reports the first and zeroes the second.
+
+Battery remains the best whole-system signal on a laptop, and is the only source that measures the machine rather than its parts.
 
 ### Performance rules
 
@@ -305,7 +307,7 @@ Logging: Serilog rolling files in `C:\ProgramData\PowerLedger\logs`, 7 days or 5
 
 - The service runs as LocalSystem but exposes only a local named pipe with remote access denied.
 - Settings over the pipe are a closed, range-checked set; nothing executable or path-like.
-- The kernel driver is the signed PawnIO driver, installed by its own elevated installer rather than bundled as a library. It is optional: declining it costs CPU watts and nothing else. Its licence is not the plain MPL the rest of the stack uses, so shipping it needs a decision recorded in §16.
+- No kernel driver is installed and no sensor read needs elevation. The service runs as LocalSystem for session and power notifications, not for hardware access.
 - All data stays on the machine. Exports happen only when the user asks. No telemetry in v1; a future opt-in crash reporter would be a separate decision.
 - The installer is code-signed (Azure Trusted Signing) before the first public release so SmartScreen does not flag it.
 
@@ -325,7 +327,7 @@ Framework: xUnit, Shouldly (BSD; FluentAssertions 8+ requires a paid commercial 
 
 - Requirements: Windows 10 1809 or later, Windows 11, x64 only.
 - Framework-dependent build; Inno Setup installs the .NET 10 Desktop Runtime if missing, so the installer stays around 15 MB.
-- The installer bundles the official signed PawnIO installer and runs it silently, registers the service with recovery options, adds the tray app to HKCU Run, and launches the first-run wizard. Uninstall stops the service and asks whether to keep the database.
+- The installer registers the service with recovery options, adds the tray app to HKCU Run, and launches the first-run wizard. There is no driver to install. Uninstall stops the service and asks whether to keep the database.
 - Releases on GitHub with a winget manifest after the first stable build. v1 has a "check for updates" link; an in-app updater is v1.1.
 - CI (GitHub Actions): build, non-hardware tests, installer artifact.
 
@@ -371,10 +373,11 @@ Third-party licenses in use: LibreHardwareMonitorLib (MPL-2.0), WPF-UI (MIT), Li
 - License: MIT by default; the owner may choose otherwise before the first public release.
 - Timing of code signing: optional for private testing, required before public release.
 - Source of the bundled CO₂ grid-intensity table (any published national averages; a world-average fallback of 0.40 kg/kWh applies regardless).
-- **Whether to ship the kernel driver at all.** PawnIO buys CPU package watts and iGPU watts, and nothing else. Against that: its own licence is GPL-2.0 with an IOCTL exception rather than MPL, LibreHardwareMonitorLib embeds LGPL-2.1 PawnIO modules, so the notices are mixed; it needs a second elevated installer; and whether it loads with Windows memory integrity switched on is untested. Answering this needs a trial install on a machine with memory integrity enabled, and a licence sign-off.
+- **What to show a Windows 10 machine with no energy-meter rails.** CPU watts fall back to the load model, so every reading is Estimated and a desktop has no better signal at all. Options: say so plainly in the wizard and carry on, or offer an opt-in kernel driver later. The driver was dropped from v1 once Windows 11 turned out to expose the rails without one.
 
 ## 17. Prerequisites to verify before implementation
 
 - The development machine has the .NET 10 Desktop Runtime (10.0.11) but no .NET SDK (`dotnet --list-sdks` is empty). Install the .NET 10 SDK first.
-- Confirmed 2026-09-10: `LibreHardwareMonitorLib` 0.9.6 (MPL-2.0, targets `net10.0`) uses PawnIO and no longer references WinRing0. Pin that version. The driver itself is a separate install; see §16.
+- Confirmed 2026-09-10 on the development laptop, unelevated: the Energy Meter Interface is present and enabled, and reports the package, cores, integrated-graphics and memory rails. No sensor library or kernel driver is needed, so `LibreHardwareMonitorLib` was dropped from the design along with the PawnIO driver it now requires.
+- Confirmed 2026-09-10: the GeForce MX330 reports no power at all through NVML or NVAPI. It is a whole class of low-end laptop GPUs with no measurement hardware, so the load-model fallback in §5 is the normal path, not the exception.
 - Inno Setup 6 installed for the installer step.
