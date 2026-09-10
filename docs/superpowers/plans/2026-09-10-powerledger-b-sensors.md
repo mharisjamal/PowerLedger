@@ -1447,7 +1447,7 @@ git commit -m "Read the processor power rails from the Windows energy meter"
 - Create: `src/PowerLedger.Sensors/EnergyMeterSource.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/EnergyMeterSourceTests.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Sensors;
@@ -1502,12 +1502,12 @@ public class EnergyMeterSourceTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter EnergyMeterSourceTests`
 Expected: build error, `EnergyMeterSource` not found.
 
-- [ ] **Step 3: Write the source**
+- [x] **Step 3: Write the source**
 
 `src/PowerLedger.Sensors/EnergyMeterSource.cs`
 ```csharp
@@ -1557,12 +1557,12 @@ public sealed class EnergyMeterSource : ISensorSource
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter EnergyMeterSourceTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/EnergyMeterSource.cs tests/PowerLedger.Sensors.Tests/EnergyMeterSourceTests.cs
