@@ -698,7 +698,7 @@ git commit -m "Add a fixed-window rolling median"
 
 Spec §4: plausible ranges CPU 0–400 W, GPU 0–700 W, battery 0–300 W; a value more than 3× the rolling 30-sample median is replaced with the last good one and the tick marked suspect; a negative RAPL delta drops that tick's CPU value; the first 3 s after an AC↔battery transition is excluded from calibration while the quality label still switches immediately.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Core;
@@ -855,12 +855,12 @@ public class SampleValidatorTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SampleValidatorTests`
 Expected: build error, `SampleValidator` not found.
 
-- [ ] **Step 3: Write the options and the validator**
+- [x] **Step 3: Write the options and the validator**
 
 `src/PowerLedger.Sensors/ValidatorOptions.cs`
 ```csharp
@@ -983,12 +983,12 @@ public sealed class SampleValidator(ValidatorOptions? options = null)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SampleValidatorTests`
 Expected: `Passed! - Failed: 0, Passed: 15`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/ValidatorOptions.cs src/PowerLedger.Sensors/SampleValidator.cs tests/PowerLedger.Sensors.Tests/SampleValidatorTests.cs
