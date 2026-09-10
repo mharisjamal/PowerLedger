@@ -75,7 +75,7 @@ tests/PowerLedger.Sensors.Tests/
 - Create: `tests/PowerLedger.Sensors.Tests/PowerLedger.Sensors.Tests.csproj`
 - Modify: `PowerLedger.sln`
 
-- [ ] **Step 1: Create the two projects and wire them up**
+- [x] **Step 1: Create the two projects and wire them up**
 
 Run from `D:\PowerLedger`:
 ```bash
@@ -89,7 +89,7 @@ dotnet add tests/PowerLedger.Sensors.Tests reference src/PowerLedger.Sensors src
 dotnet add tests/PowerLedger.Sensors.Tests package Shouldly
 ```
 
-- [ ] **Step 2: Set the target framework and trim the generated csproj**
+- [x] **Step 2: Set the target framework and trim the generated csproj**
 
 `src/PowerLedger.Sensors/PowerLedger.Sensors.csproj` must read exactly:
 ```xml
@@ -122,7 +122,7 @@ dotnet add tests/PowerLedger.Sensors.Tests package Shouldly
 
 `tests/PowerLedger.Sensors.Tests/PowerLedger.Sensors.Tests.csproj` keeps its generated shape but its `TargetFramework` becomes `net10.0-windows`, and it must not carry `ImplicitUsings`/`Nullable` lines of its own (they come from `Directory.Build.props`).
 
-- [ ] **Step 3: Create a placeholder so the embedded resource resolves**
+- [x] **Step 3: Create a placeholder so the embedded resource resolves**
 
 Write `src/PowerLedger.Sensors/tdp-table.json` with exactly:
 ```json
@@ -133,7 +133,7 @@ Write `src/PowerLedger.Sensors/tdp-table.json` with exactly:
 ```
 Task 9 fills it in.
 
-- [ ] **Step 4: Build and run the suites**
+- [x] **Step 4: Build and run the suites**
 
 Run: `dotnet build`
 Expected: `Build succeeded.` with 0 warnings.
@@ -141,7 +141,7 @@ Expected: `Build succeeded.` with 0 warnings.
 Run: `dotnet test`
 Expected: Core 110 passed, Storage 40 passed, Sensors reports "No test is available".
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
