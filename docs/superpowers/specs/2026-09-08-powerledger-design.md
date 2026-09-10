@@ -84,12 +84,25 @@ Sampling runs at 1 Hz (configurable 1–5 s). Every source is read inside its ow
 
 | Source | Reads | Mechanism | Needs driver |
 |---|---|---|---|
-| CPU | package W, iGPU W (Intel PP1 where exposed), load | LibreHardwareMonitorLib (RAPL / AMD SMU via kernel driver), `GetSystemTimes` for load | yes |
-| Discrete GPU | power W, load, present | LibreHardwareMonitorLib (NVML / ADL). Optimus-off dGPU → 0 W | no |
+| CPU | package W, iGPU W (Intel PP1 where exposed), load | LibreHardwareMonitorLib (RAPL / AMD SMU via kernel driver), `GetSystemTimes` for load | yes, for watts only |
+| Discrete GPU | power W, load, present | LibreHardwareMonitorLib (NVML / ADL) reads through the vendor driver. Many laptop GPUs, the GeForce MX330 included, expose no power sensor at all; those fall back to the load model | no |
 | Battery | discharge/charge rate mW, AC line status | `CallNtPowerInformation(SystemBatteryState)` (Rate is negative when discharging), `GetSystemPowerStatus` | no |
 | Display | brightness %, display on/off, monitor count and size | WMI `WmiMonitorBrightness`, `RegisterPowerSettingNotification(GUID_CONSOLE_DISPLAY_STATE)` with service handle, `WmiMonitorID` + `WmiMonitorBasicDisplayParams` | no |
 | Activity | user idle seconds, session locked | `WTSQuerySessionInformation(WTSSessionInfo).LastInputTime` for the console session (works from session 0), `WTSRegisterSessionNotification` | no |
 | Fans | count only, at startup | LibreHardwareMonitorLib SuperIO read, once | yes |
+
+### Running without the kernel driver
+
+Ring-0 access is a first-class option, not a requirement. Reading CPU package power means reading model-specific registers, which needs a kernel driver: LibreHardwareMonitorLib 0.9.5 and later use PawnIO (2.0.0 or newer; WinRing0 is gone, and Microsoft's vulnerable-driver blocklist rejects it). PawnIO is a separate installer, not a NuGet package, and both installing it and reading through it need administrator rights, which the service has as LocalSystem.
+
+Without it the app still works, and this is the mode it must be correct in first:
+
+- **Battery** gives true whole-system watts while unplugged, unelevated, with no driver. This is the best signal on any laptop.
+- **NVIDIA and AMD GPUs** report through the vendor driver, so temperature and load survive; power depends on the card.
+- **Display, activity, inventory and fan count** are WMI and Win32, all driver-free.
+- **CPU** loses package watts and falls back to `idle + (TDP − idle) × load`, quality **Estimated**.
+
+One trap decides the design: with no driver loaded, LibreHardwareMonitorLib still creates the RAPL power sensors and they read exactly **0 W**, not null. A zero is indistinguishable from a genuinely idle chip. The CPU source must therefore gate on `PawnIo.IsInstalled` and report "no value" itself, never on the sensor's presence.
 
 ### Performance rules
 
@@ -292,7 +305,7 @@ Logging: Serilog rolling files in `C:\ProgramData\PowerLedger\logs`, 7 days or 5
 
 - The service runs as LocalSystem but exposes only a local named pipe with remote access denied.
 - Settings over the pipe are a closed, range-checked set; nothing executable or path-like.
-- The kernel driver is the signed PawnIO driver; the installer verifies its hash before running it.
+- The kernel driver is the signed PawnIO driver, installed by its own elevated installer rather than bundled as a library. It is optional: declining it costs CPU watts and nothing else. Its licence is not the plain MPL the rest of the stack uses, so shipping it needs a decision recorded in §16.
 - All data stays on the machine. Exports happen only when the user asks. No telemetry in v1; a future opt-in crash reporter would be a separate decision.
 - The installer is code-signed (Azure Trusted Signing) before the first public release so SmartScreen does not flag it.
 
@@ -358,9 +371,10 @@ Third-party licenses in use: LibreHardwareMonitorLib (MPL-2.0), WPF-UI (MIT), Li
 - License: MIT by default; the owner may choose otherwise before the first public release.
 - Timing of code signing: optional for private testing, required before public release.
 - Source of the bundled CO₂ grid-intensity table (any published national averages; a world-average fallback of 0.40 kg/kWh applies regardless).
+- **Whether to ship the kernel driver at all.** PawnIO buys CPU package watts and iGPU watts, and nothing else. Against that: its own licence is GPL-2.0 with an IOCTL exception rather than MPL, LibreHardwareMonitorLib embeds LGPL-2.1 PawnIO modules, so the notices are mixed; it needs a second elevated installer; and whether it loads with Windows memory integrity switched on is untested. Answering this needs a trial install on a machine with memory integrity enabled, and a licence sign-off.
 
 ## 17. Prerequisites to verify before implementation
 
 - The development machine has the .NET 10 Desktop Runtime (10.0.11) but no .NET SDK (`dotnet --list-sdks` is empty). Install the .NET 10 SDK first.
-- Confirm the current `LibreHardwareMonitorLib` NuGet release supports the PawnIO driver. If it still requires WinRing0, ship WinRing0 for v1 with a documented HVCI caveat and track the PawnIO migration.
+- Confirmed 2026-09-10: `LibreHardwareMonitorLib` 0.9.6 (MPL-2.0, targets `net10.0`) uses PawnIO and no longer references WinRing0. Pin that version. The driver itself is a separate install; see §16.
 - Inno Setup 6 installed for the installer step.
