@@ -2723,7 +2723,7 @@ git commit -m "Add hardware inventory facts with a stable hash"
 
 Detection is all WMI, so the logic worth unit-testing is the chassis decision; the rest is proven against the real machine.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`:
 
@@ -2783,12 +2783,12 @@ public class ChassisTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter ChassisTests`
 Expected: build error, `HardwareInventory` not found.
 
-- [ ] **Step 3: Write the detector**
+- [x] **Step 3: Write the detector**
 
 `src/PowerLedger.Sensors/HardwareInventory.cs`
 ```csharp
@@ -2919,7 +2919,7 @@ public static class HardwareInventory
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter ChassisTests`
 Expected: `Passed! - Failed: 0, Passed: 9`.
@@ -2927,7 +2927,7 @@ Expected: `Passed! - Failed: 0, Passed: 9`.
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter RealHardwareTests`
 Expected: `Passed! - Failed: 0, Passed: 4`. On the development laptop the detected chassis must be `Laptop` and the CPU name must contain `i7-1165G7`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/HardwareInventory.cs tests/PowerLedger.Sensors.Tests

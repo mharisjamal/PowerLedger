@@ -66,4 +66,19 @@ public class RealHardwareTests
         // Power is null on cards with no measurement hardware, which is most low-end laptop GPUs.
         if (reading.PowerWatts is { } watts) watts.ShouldBeInRange(0.1, 700);
     }
+
+    [Fact]
+    public void The_machine_describes_itself()
+    {
+        var facts = HardwareInventory.Detect();
+
+        facts.CpuName.ShouldNotBeNullOrWhiteSpace();
+        facts.RamSticks.ShouldBeGreaterThan(0);
+        (facts.SsdCount + facts.HddCount).ShouldBeGreaterThan(0);
+        facts.MonitorCount.ShouldBeGreaterThan(0);
+        facts.Hash.Length.ShouldBe(16);
+
+        // Detection must be repeatable: the same machine, the same hash.
+        HardwareInventory.Detect().Hash.ShouldBe(facts.Hash);
+    }
 }
