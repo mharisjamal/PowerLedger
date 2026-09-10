@@ -516,7 +516,8 @@ public sealed class Sampler : IDisposable
                 entry.Failures++;
                 entry.LastError = error.Message;
                 entry.Backoff = entry.Backoff == 0 ? 1 : Math.Min(entry.Backoff * 2, _maxBackoffTicks);
-                entry.SkipUntil = _tick + entry.Backoff;
+                // SkipUntil is the tick it resumes at, so Backoff whole ticks are actually skipped.
+                entry.SkipUntil = _tick + entry.Backoff + 1;
             }
         }
         return draft.ToSample(timestamp, deltaSeconds);
