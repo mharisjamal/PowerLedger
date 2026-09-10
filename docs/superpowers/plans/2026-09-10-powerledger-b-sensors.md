@@ -157,7 +157,7 @@ git commit -m "Scaffold the Sensors project"
 - Create: `src/PowerLedger.Sensors/ISensorSource.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/SampleDraftTests.cs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```csharp
 using PowerLedger.Sensors;
@@ -223,12 +223,12 @@ public class SampleDraftTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SampleDraftTests`
 Expected: build error, `SampleDraft` not found.
 
-- [ ] **Step 3: Write the draft and the contract**
+- [x] **Step 3: Write the draft and the contract**
 
 `src/PowerLedger.Sensors/SampleDraft.cs`
 ```csharp
@@ -304,12 +304,12 @@ public sealed record SourceHealth(
     int Failures, long SkippedUntilTick, string? LastError);
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter SampleDraftTests`
 Expected: `Passed! - Failed: 0, Passed: 2`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors tests/PowerLedger.Sensors.Tests
