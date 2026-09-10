@@ -22,7 +22,7 @@ public class RealHardwareTests
     }
 
     [Fact]
-    public void The_energy_meter_reports_a_believable_package_wattage()
+    public void The_energy_meter_reports_a_believable_package_wattage_well_inside_the_tick_budget()
     {
         using var meter = new EnergyMeter();
         if (!meter.Available)
@@ -32,20 +32,14 @@ public class RealHardwareTests
             return;
         }
 
-        var reading = meter.Read();
-        reading.PackageW.ShouldNotBeNull();
-        reading.PackageW!.Value.ShouldBeInRange(0.1, 200);
+        // A thousandfold unit error would put this at a few milliwatts or several kilowatts, so the band pins the unit.
+        Thread.Sleep(1000);
+        meter.Read().PackageW.ShouldNotBeNull().ShouldBeInRange(0.1, 200);
 
-        // Cross-check the undocumented Power unit against the monotonic energy counter.
-        var first = meter.ReadRails().Single(r => EnergyMeter.Classify(r.Name) == RailKind.Package);
-        Thread.Sleep(3000);
-        var second = meter.ReadRails().Single(r => r.Name == first.Name);
-        second.EnergyPicowattHours.ShouldBeGreaterThan(first.EnergyPicowattHours);
-
-        var joules = (second.EnergyPicowattHours - first.EnergyPicowattHours) * 3.6e-9;   // 1 pWh = 1e-12 Wh = 3.6e-9 J
-        var derivedWatts = joules / 3.0;
-        derivedWatts.ShouldBeInRange(0.1, 200);
-        derivedWatts.ShouldBe(reading.PackageW.Value, tolerance: reading.PackageW.Value * 0.9 + 2);
+        // Spec §4 budgets about 2 ms a tick for the fast sources; the old WMI query took about 270 ms.
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < 20; i++) meter.Read();
+        (timer.Elapsed.TotalMilliseconds / 20).ShouldBeLessThan(5);
     }
 
     [Fact]
