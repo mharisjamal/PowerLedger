@@ -2944,7 +2944,7 @@ git commit -m "Detect the machine through WMI"
 
 One factory so the Service and the preview build the same set the same way, rather than each remembering the order and the wiring.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Sensors;
@@ -3015,12 +3015,12 @@ public class MachineSensorsTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter MachineSensorsTests`
 Expected: build error, `MachineSensors` not found.
 
-- [ ] **Step 3: Write the factory**
+- [x] **Step 3: Write the factory**
 
 `src/PowerLedger.Sensors/MachineSensors.cs`
 ```csharp
@@ -3076,12 +3076,12 @@ public sealed class MachineSensors : IDisposable
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter MachineSensorsTests`
 Expected: `Passed! - Failed: 0, Passed: 5`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/MachineSensors.cs tests/PowerLedger.Sensors.Tests/MachineSensorsTests.cs
