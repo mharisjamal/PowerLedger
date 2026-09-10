@@ -13,11 +13,31 @@ public static class HardwareInventory
     /// <summary>Enclosure types Windows uses for portable machines.</summary>
     private static readonly HashSet<int> PortableEnclosures = [8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32];
 
-    /// <summary>A fitted battery settles it; otherwise the enclosure type decides, and an unknown enclosure means desktop.</summary>
+    /// <summary>STORAGE_BUS_TYPE values for drives that are not part of the machine. FireWire, Fibre Channel, USB,
+    /// iSCSI and SD cards are external or remote; virtual, file-backed and Storage Spaces disks are not drives at all.</summary>
+    private static readonly HashSet<int> NotFittedBuses = [4, 6, 7, 9, 12, 14, 15, 16];
+
+    /// <summary>The machine's own battery settles it; otherwise the enclosure type decides, and an unknown enclosure means desktop.</summary>
+    /// <param name="batteryPresent">True for a battery that powers this machine alone; a UPS does not count.</param>
     public static ChassisKind ChassisFrom(int? enclosureType, bool batteryPresent)
     {
         if (batteryPresent) return ChassisKind.Laptop;
         return enclosureType is { } type && PortableEnclosures.Contains(type) ? ChassisKind.Laptop : ChassisKind.Desktop;
+    }
+
+    /// <summary>Solid-state and spinning drives fitted inside the machine. Media type 3 is a hard disk; anything else,
+    /// unknown included, counts as solid state, the lower-power guess.</summary>
+    public static (int Ssd, int Hdd) CountDrives(IEnumerable<(int MediaType, int BusType)> drives)
+    {
+        var solid = 0;
+        var spinning = 0;
+        foreach (var (media, bus) in drives)
+        {
+            if (NotFittedBuses.Contains(bus)) continue;
+            if (media == 3) spinning++;
+            else solid++;
+        }
+        return (solid, spinning);
     }
 
     /// <summary>One detection pass. Never throws: an unanswered question leaves its field at a sensible default.</summary>
@@ -31,7 +51,7 @@ public static class HardwareInventory
                 if (row["ChassisTypes"] is ushort[] { Length: > 0 } types) return (int)types[0];
             }
             return (int?)null;
-        }), battery?.Present ?? false);
+        }), battery?.OwnBattery ?? false);
 
         var cpuName = Query(@"\\.\root\cimv2", "SELECT Name FROM Win32_Processor", rows =>
         {
@@ -68,19 +88,10 @@ public static class HardwareInventory
             return (Math.Max(count, 1), isDdr5);
         }, (1, false));
 
-        var (ssd, hdd) = Query(@"\\.\root\microsoft\windows\storage", "SELECT MediaType FROM MSFT_PhysicalDisk", rows =>
-        {
-            var solid = 0;
-            var spinning = 0;
-            foreach (var row in rows)
-            {
-                // MediaType 4 is SSD, 3 is HDD; anything else is counted as solid state.
-                var media = row["MediaType"] is null ? 0 : Convert.ToInt32(row["MediaType"]);
-                if (media == 3) spinning++;
-                else solid++;
-            }
-            return (solid, spinning);
-        }, (1, 0));
+        var (ssd, hdd) = Query(@"\\.\root\microsoft\windows\storage", "SELECT MediaType, BusType FROM MSFT_PhysicalDisk", rows =>
+            CountDrives(rows.Select(row => (
+                row["MediaType"] is null ? 0 : Convert.ToInt32(row["MediaType"]),
+                row["BusType"] is null ? 0 : Convert.ToInt32(row["BusType"])))), (1, 0));
 
         var (monitors, diagonal) = Query(@"\\.\root\wmi", "SELECT MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
         {

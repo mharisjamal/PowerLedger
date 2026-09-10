@@ -54,6 +54,23 @@ public class SimpleSourcesTests
     }
 
     [Fact]
+    public void A_ups_is_not_the_machines_battery()
+    {
+        // A desktop riding out a power cut on a UPS: the drain is the whole desk, not this machine.
+        var ups = new Win32.BatteryState(AcOnLine: false, Present: true, Charging: false, Discharging: true, RateMilliwatts: -180_000, ShortTerm: true);
+        ups.OwnBattery.ShouldBeFalse();
+
+        var source = new BatterySource(() => ups);
+        source.Supported.ShouldBeFalse();
+        source.Unavailable.ShouldNotBeNull().ShouldContain("UPS");
+
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+        draft.OnBattery.ShouldBeFalse();
+        draft.BatteryRateW.ShouldBeNull();
+    }
+
+    [Fact]
     public void Windows_refusing_to_answer_leaves_the_draft_alone()
     {
         var draft = new SampleDraft { OnBattery = true };

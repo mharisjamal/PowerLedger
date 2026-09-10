@@ -31,4 +31,21 @@ public class ChassisTests
         HardwareInventory.ChassisFrom(null, batteryPresent: true).ShouldBe(ChassisKind.Laptop);
         HardwareInventory.ChassisFrom(null, batteryPresent: false).ShouldBe(ChassisKind.Desktop);
     }
+
+    [Fact]
+    public void Only_drives_fitted_inside_the_machine_are_counted()
+    {
+        var drives = new[]
+        {
+            (MediaType: 4, BusType: 17),   // NVMe SSD
+            (MediaType: 3, BusType: 11),   // SATA hard disk
+            (MediaType: 0, BusType: 13),   // eMMC on a budget laptop, media type unknown
+            (MediaType: 4, BusType: 7),    // USB stick
+            (MediaType: 3, BusType: 7),    // USB backup disk
+            (MediaType: 0, BusType: 12),   // SD card
+            (MediaType: 0, BusType: 15),   // mounted ISO
+        };
+
+        HardwareInventory.CountDrives(drives).ShouldBe((2, 1));
+    }
 }
