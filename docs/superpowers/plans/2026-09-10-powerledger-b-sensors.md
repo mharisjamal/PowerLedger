@@ -1003,7 +1003,7 @@ git commit -m "Add the sample validator with ranges, outliers and the transition
 - Create: `src/PowerLedger.Sensors/Win32.cs`
 - Test: `tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 This is the first hardware-touching test. It carries `Trait("Category", "Hardware")` so CI can exclude it with `--filter Category!=Hardware`; it must pass on the developer's machine.
 
@@ -1033,12 +1033,12 @@ public class RealHardwareTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter RealHardwareTests`
 Expected: build error, `Win32` not found.
 
-- [ ] **Step 3: Write the P/Invoke surface**
+- [x] **Step 3: Write the P/Invoke surface**
 
 `src/PowerLedger.Sensors/Win32.cs`
 ```csharp
@@ -1178,14 +1178,14 @@ internal static class Win32
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter RealHardwareTests`
 Expected: `Passed! - Failed: 0, Passed: 1`.
 
 If `ReadBatteryState` returns null on a machine with a battery, stop and report it rather than loosening the assertion: it means the struct layout is wrong.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/Win32.cs tests/PowerLedger.Sensors.Tests/RealHardwareTests.cs
