@@ -2344,7 +2344,7 @@ git commit -m "Add the NVIDIA GPU source through NVML"
 
 Spec §5: a CPU or GPU with no power sensor is modelled as `idle + (TDP − idle) × load`, with the TDP taken from a bundled table and a default when the model is unknown. Matching is by substring because Windows reports names like "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz".
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Sensors;
@@ -2399,12 +2399,12 @@ public class TdpTableTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter TdpTableTests`
 Expected: build error, `TdpTable` not found.
 
-- [ ] **Step 3: Fill the table and write the lookup**
+- [x] **Step 3: Fill the table and write the lookup**
 
 `src/PowerLedger.Sensors/tdp-table.json` — replace the placeholder with:
 ```json
@@ -2512,14 +2512,14 @@ public sealed class TdpTable(IReadOnlyDictionary<string, double> cpu, IReadOnlyD
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter TdpTableTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
 If the resource name is wrong the load throws with a clear message; check the actual name with `Assembly.GetExecutingAssembly().GetManifestResourceNames()` rather than guessing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/TdpTable.cs src/PowerLedger.Sensors/tdp-table.json tests/PowerLedger.Sensors.Tests/TdpTableTests.cs
