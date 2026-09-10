@@ -32,36 +32,14 @@ internal static class Win32
     public static SystemTimes? ReadSystemTimes()
         => GetSystemTimes(out var idle, out var kernel, out var user) ? new SystemTimes(idle, kernel, user) : null;
 
-    /// <summary>Seconds since the last keyboard or mouse input, from the calling session.</summary>
+    /// <summary>Seconds since the last keyboard or mouse input in the calling session. From the service (session 0)
+    /// this reports the service's own session, so the service must get idle time from the user's session instead.</summary>
     public static double ReadIdleSeconds()
     {
         var info = new LastInputInfo { cbSize = (uint)Marshal.SizeOf<LastInputInfo>() };
         if (!GetLastInputInfo(ref info)) return 0;
         return unchecked((uint)Environment.TickCount - info.dwTime) / 1000.0;
     }
-
-    /// <summary>Seconds since the last input in the console session, which is what a service must ask (spec §4).</summary>
-    public static double? ReadConsoleSessionIdleSeconds()
-    {
-        var session = WTSGetActiveConsoleSessionId();
-        if (session == 0xFFFFFFFF) return null;
-        if (!WTSQuerySessionInformationW(IntPtr.Zero, session, WtsSessionInfo, out var buffer, out var size) || size == 0)
-        {
-            return null;
-        }
-        try
-        {
-            var info = Marshal.PtrToStructure<WtsInfo>(buffer);
-            var idleTicks = info.CurrentTime - info.LastInputTime;
-            return idleTicks <= 0 ? 0 : idleTicks / 10_000_000.0;
-        }
-        finally
-        {
-            WTSFreeMemory(buffer);
-        }
-    }
-
-    private const int WtsSessionInfo = 24;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SystemBatteryStateInfo
@@ -89,28 +67,6 @@ internal static class Win32
         public uint dwTime;
     }
 
-    /// <summary>The head of WTSINFOW; only the two time fields are read, so the trailing strings are ignored.</summary>
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct WtsInfo
-    {
-        public int State;
-        public int SessionId;
-        public int IncomingBytes;
-        public int OutgoingBytes;
-        public int IncomingFrames;
-        public int OutgoingFrames;
-        public int IncomingCompressedBytes;
-        public int OutgoingCompressedBytes;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 33)] public string WinStationName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 21)] public string Domain;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 21)] public string UserName;
-        public long ConnectTime;
-        public long DisconnectTime;
-        public long LastInputTime;
-        public long LogonTime;
-        public long CurrentTime;
-    }
-
     [DllImport("powrprof.dll")]
     private static extern uint CallNtPowerInformation(int informationLevel, IntPtr inputBuffer, uint inputBufferSize, ref SystemBatteryStateInfo outputBuffer, uint outputBufferSize);
 
@@ -122,13 +78,4 @@ internal static class Win32
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetLastInputInfo(ref LastInputInfo info);
 
-    [DllImport("kernel32.dll")]
-    private static extern uint WTSGetActiveConsoleSessionId();
-
-    [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WTSQuerySessionInformationW(IntPtr server, uint sessionId, int infoClass, out IntPtr buffer, out uint bytesReturned);
-
-    [DllImport("wtsapi32.dll")]
-    private static extern void WTSFreeMemory(IntPtr memory);
 }

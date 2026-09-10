@@ -26,8 +26,12 @@ public sealed class MachineSensors : IDisposable
 
     /// <param name="displayOn">Whether the screen is lit; the Service supplies this from its power notifications.</param>
     /// <param name="sessionLocked">Whether the console session is locked; the Service supplies this from its session notifications.</param>
+    /// <param name="userIdleSeconds">Idle time from the user's session. Leave null in a process that runs in that session;
+    /// the Service, in session 0, must supply it.</param>
     /// <param name="validatorOptions">Overrides for the plausible ranges and windows.</param>
-    public static MachineSensors Create(Func<bool> displayOn, Func<bool> sessionLocked, ValidatorOptions? validatorOptions = null)
+    public static MachineSensors Create(
+        Func<bool> displayOn, Func<bool> sessionLocked,
+        Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null)
     {
         var display = new DisplaySource(displayOn);
         var sources = new List<ISensorSource>
@@ -36,7 +40,7 @@ public sealed class MachineSensors : IDisposable
             new NvidiaSource(),
             new BatterySource(),
             new CpuLoadSource(),
-            new ActivitySource(sessionLocked),
+            new ActivitySource(sessionLocked, userIdleSeconds),
             display,
         };
         return new MachineSensors(new Sampler(sources), new SampleValidator(validatorOptions), display);
