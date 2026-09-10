@@ -47,7 +47,7 @@ The core loop is: **sample sensors once per second → convert to a whole-system
 ```
 ┌──────────────── PowerLedger.Service (Windows Service, LocalSystem) ────────────────┐
 │  Sensors ──► Sampler (1/s) ──► Validator ──► PowerModel ──► Writer ──► SQLite (WAL)  │
-│   Energy meter, GPU, battery                     │             ▲                     │
+│   Energy meter, GPU                              │             ▲                     │
 │   Battery, Display, Activity                     ▼        Downsampler + retention    │
 │                                    NamedPipe server: live readings, status, settings │
 └──────────────────────────────────────────┬────────────────────┬─────────────────────┘
