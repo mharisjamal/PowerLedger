@@ -1863,7 +1863,7 @@ git commit -m "Add the battery, CPU load and activity sources"
 
 Brightness and panel size come from WMI, which is slow, so they are cached and refreshed on a timer rather than read every tick (spec §4 performance rules). Whether the display is on comes from the service's power notifications, so it arrives as a delegate.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 using PowerLedger.Sensors;
@@ -1945,12 +1945,12 @@ public class DisplaySourceTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter DisplaySourceTests`
 Expected: build error, `DisplaySource` not found.
 
-- [ ] **Step 3: Write the source**
+- [x] **Step 3: Write the source**
 
 `src/PowerLedger.Sensors/DisplaySource.cs`
 ```csharp
@@ -2063,12 +2063,12 @@ public sealed class DisplaySource : ISensorSource
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Sensors.Tests --filter DisplaySourceTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Sensors/DisplaySource.cs tests/PowerLedger.Sensors.Tests/DisplaySourceTests.cs
