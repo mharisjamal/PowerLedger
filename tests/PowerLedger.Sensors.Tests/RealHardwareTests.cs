@@ -59,6 +59,11 @@ public class RealHardwareTests
 
         // Power is null on cards with no measurement hardware, which is most low-end laptop GPUs.
         if (reading.PowerWatts is { } watts) watts.ShouldBeInRange(0.1, 700);
+
+        // Windows can say whether the card is switched off without waking it.
+        var device = DevicePowerState.FindNvidiaGpu();
+        device.ShouldNotBeNull().ShouldStartWith(@"PCI\VEN_10DE");
+        Should.NotThrow(() => DevicePowerState.IsPoweredOff(device));
     }
 
     [Fact]

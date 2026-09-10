@@ -14,7 +14,9 @@ public readonly record struct GpuReading(bool Present, double? PowerWatts, doubl
 public sealed class Nvml : IDisposable
 {
     private const int Success = 0;
-    private const int NotSupported = 3;
+    private const int Uninitialized = 1;
+    private const int DriverNotLoaded = 9;
+    private const int GpuIsLost = 15;
 
     private readonly IntPtr _device;
     private bool _initialised;
@@ -62,9 +64,25 @@ public sealed class Nvml : IDisposable
     {
         if (!Available) return new GpuReading(false, null, null);
 
-        double? watts = nvmlDeviceGetPowerUsage(_device, out var milliwatts) == Success ? milliwatts / 1000.0 : null;
-        double? load = nvmlDeviceGetUtilizationRates(_device, out var utilisation) == Success ? utilisation.Gpu / 100.0 : null;
+        var powerResult = nvmlDeviceGetPowerUsage(_device, out var milliwatts);
+        var loadResult = nvmlDeviceGetUtilizationRates(_device, out var utilisation);
+        ThrowIfBroken(powerResult);
+        ThrowIfBroken(loadResult);
+
+        // "Not supported" means a card with no power sensor, and other errors a card that declined this once: both are null.
+        double? watts = powerResult == Success ? milliwatts / 1000.0 : null;
+        double? load = loadResult == Success ? utilisation.Gpu / 100.0 : null;
         return new GpuReading(true, watts, load);
+    }
+
+    /// <summary>A lost GPU, an unloaded driver or a torn-down library is a broken source, not a missing reading:
+    /// throwing lets the sampler back off and show it in status instead of charging a phantom load forever.</summary>
+    private static void ThrowIfBroken(int result)
+    {
+        if (result is Uninitialized or DriverNotLoaded or GpuIsLost)
+        {
+            throw new InvalidOperationException($"NVML error {result}: the GPU or its driver is no longer available");
+        }
     }
 
     public void Dispose()
@@ -87,10 +105,10 @@ public sealed class Nvml : IDisposable
         public uint Memory;
     }
 
-    [DllImport("nvml.dll")] private static extern int nvmlInit_v2();
-    [DllImport("nvml.dll")] private static extern int nvmlShutdown();
-    [DllImport("nvml.dll")] private static extern int nvmlDeviceGetCount_v2(out uint count);
-    [DllImport("nvml.dll")] private static extern int nvmlDeviceGetHandleByIndex_v2(uint index, out IntPtr device);
-    [DllImport("nvml.dll")] private static extern int nvmlDeviceGetPowerUsage(IntPtr device, out uint milliwatts);
-    [DllImport("nvml.dll")] private static extern int nvmlDeviceGetUtilizationRates(IntPtr device, out Utilisation utilisation);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlInit_v2();
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlShutdown();
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetCount_v2(out uint count);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetHandleByIndex_v2(uint index, out IntPtr device);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetPowerUsage(IntPtr device, out uint milliwatts);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetUtilizationRates(IntPtr device, out Utilisation utilisation);
 }
