@@ -389,7 +389,7 @@ git commit -m "Add the service settings the App may change, with range checks"
 - Test: `tests/PowerLedger.Service.Tests/PipeProtocolTests.cs`
 - Test: `tests/PowerLedger.Service.Tests/MessageChannelTests.cs`
 
-Spec §8: newline-delimited JSON with `System.Text.Json` source generation. Each message carries `type`, and requests carry an `id`. The limit is 64 KB a message. Everything lives in Contracts, so the App's client (Plan D) uses the same framing. Enums travel as numbers, as `MachineProfile` and `Quality` already promise. The discriminator is written first; readers rely on that.
+Spec §8: newline-delimited JSON with `System.Text.Json` source generation. Each message carries `type`, and requests carry an `id`. The limit is 64 KB a message. Everything lives in Contracts, so the App's client (Plan D) uses the same framing. Enums travel as numbers, as `MachineProfile` and `Quality` already promise. The discriminator is written first; readers rely on that. Stored settings are the one exception to source generation: found while executing this task, the generated code assigns every init-only property, so JSON from an older version that lacks a setting would read back as zero rather than the default `MachineProfile` promises. Settings storage uses reflection, which sets only what the JSON holds.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -732,6 +732,7 @@ public sealed record CalibrationStatus(int BatterySamples, int SamplesNeeded, in
 ```csharp
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace PowerLedger.Contracts;
 
@@ -770,15 +771,26 @@ public static class PipeProtocol
         }
     }
 
+    /// <summary>
+    /// Stored settings are read and written by reflection, not by the generated code. The generated code assigns every
+    /// init-only property, so a setting missing from JSON an older version wrote would come back as zero instead of its
+    /// default, and so would a profile field. Reflection builds the object first and sets only what the JSON holds.
+    /// </summary>
+    private static readonly JsonSerializerOptions StoredSettings = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+    };
+
     /// <summary>Settings as the service stores them.</summary>
-    public static string SerializeSettings(ServiceSettings settings) => JsonSerializer.Serialize(settings, PipeJson.Default.ServiceSettings);
+    public static string SerializeSettings(ServiceSettings settings) => JsonSerializer.Serialize(settings, StoredSettings);
 
     /// <summary>Stored settings back, or null when the text is not settings at all.</summary>
     public static ServiceSettings? DeserializeSettings(string json)
     {
         try
         {
-            return JsonSerializer.Deserialize(json, PipeJson.Default.ServiceSettings);
+            return JsonSerializer.Deserialize<ServiceSettings>(json, StoredSettings);
         }
         catch (JsonException)
         {
@@ -792,7 +804,6 @@ public sealed class PipeProtocolException(string message, Exception? inner = nul
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(PipeMessage))]
-[JsonSerializable(typeof(ServiceSettings))]
 internal sealed partial class PipeJson : JsonSerializerContext;
 ```
 
