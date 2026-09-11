@@ -54,6 +54,15 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         return list;
     }
 
+    /// <summary>The newest tick's timestamp, or null when the table is empty.</summary>
+    public DateTimeOffset? Latest()
+    {
+        using var c = db.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT MAX(ts_ms) FROM samples_raw";
+        return cmd.ExecuteScalar() is long ms ? Rows.Time(ms) : null;
+    }
+
     /// <summary>Deletes rows older than the cutoff and returns how many went.</summary>
     public int PurgeBefore(DateTimeOffset cutoff)
     {

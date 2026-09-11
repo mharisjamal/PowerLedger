@@ -72,4 +72,14 @@ public class RawSampleRepositoryTests
         new RawSampleRepository(t.Db).InsertBatch([]);
         new RawSampleRepository(t.Db).Count().ShouldBe(0);
     }
+
+    [Fact]
+    public void Latest_is_the_newest_tick_or_null_on_an_empty_table()
+    {
+        using var t = new TestDatabase();
+        var repo = new RawSampleRepository(t.Db);
+        repo.Latest().ShouldBeNull();
+        repo.InsertBatch([.. Enumerable.Range(0, 10).Select(s => Fixtures.Reading(s))]);
+        repo.Latest().ShouldBe(Fixtures.T0.AddSeconds(9));
+    }
 }
