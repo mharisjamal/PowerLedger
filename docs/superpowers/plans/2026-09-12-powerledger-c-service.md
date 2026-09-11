@@ -1499,7 +1499,7 @@ public class SettingsTests
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `dotnet test tests/PowerLedger.Service.Tests --filter SettingsTests`
+Run: `dotnet test tests/PowerLedger.Service.Tests --filter "FullyQualifiedName~Tests.SettingsTests"`
 Expected: build error, `ProfilePolicy` not found.
 
 - [ ] **Step 3: Write the store, the rule and the factory**
@@ -1567,7 +1567,7 @@ internal static class ModelFactory
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `dotnet test tests/PowerLedger.Service.Tests --filter SettingsTests`
+Run: `dotnet test tests/PowerLedger.Service.Tests --filter "FullyQualifiedName~Tests.SettingsTests"`
 Expected: `Passed! - Failed: 0, Passed: 8`.
 
 - [ ] **Step 5: Commit**
