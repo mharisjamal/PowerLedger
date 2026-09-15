@@ -11,6 +11,7 @@
     <local:VisibleWhen x:Key="VisibleWhen" />
     <local:VisibleWhen x:Key="HiddenWhen" Invert="True" />
     <local:VisibleWhenText x:Key="VisibleWhenText" />
+    <local:VisibleWhenStep x:Key="VisibleWhenStep" />
     <local:ValueIs x:Key="Is" />
     <local:UpperCase x:Key="Upper" />
 

@@ -28,6 +28,7 @@ public class RenderingTests
         (Page.Breakdown, "custom", shell => shell.Breakdown.Range.Choice = RangeChoice.Custom, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Report, "report", _ => { }, shell => new ReportView { DataContext = shell.Report }),
         (Page.Settings, "settings", _ => { }, shell => new SettingsView { DataContext = shell.Settings }),
+        (Page.Now, "wizard", shell => shell.BeginSetup(), shell => new WizardView { DataContext = shell.Wizard }),
     ];
 
     [Fact]
@@ -69,7 +70,7 @@ public class RenderingTests
             Source = new Uri("pack://application:,,,/PowerLedger;component/Theme/Styles.xaml", UriKind.Absolute),
         });
         using var saver = new FakeSaver();
-        var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), SettingsScreen(), "0.1.0");
+        var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.1.0");
         ResourceDictionary? palette = null;
         foreach (var theme in new[] { Theme.Dark, Theme.Light })
         {
@@ -95,6 +96,7 @@ public class RenderingTests
                     File.Copy(saver.Chosen, Path.Combine(Folder, "report-picture.png"), overwrite: true);
                 }
                 window.Close();
+                if (shell.IsSetup) shell.EndSetup();
 
                 // Windows keeps a window within the screen, so each screen's whole length is drawn from its view alone.
                 var child = view(shell);
@@ -164,6 +166,14 @@ public class RenderingTests
         var link = new FakeLink();
         link.Connect(true);
         return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
+            TimeZoneInfo.Utc, English, "USD");
+    }
+
+    private static WizardViewModel WizardScreen()
+    {
+        var link = new FakeLink();
+        link.Connect(true);
+        return new WizardViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");
     }
 

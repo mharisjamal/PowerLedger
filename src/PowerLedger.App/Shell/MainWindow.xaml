@@ -21,6 +21,9 @@
         <DataTemplate DataType="{x:Type local:SettingsViewModel}">
             <local:SettingsView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type local:WizardViewModel}">
+            <local:WizardView />
+        </DataTemplate>
     </Window.Resources>
 
     <Border BorderBrush="{DynamicResource Brush.LineStrong}">
@@ -66,7 +69,8 @@
                     <ColumnDefinition Width="168" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border Grid.Column="0" Background="{DynamicResource Brush.Ground}" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,0,1,0">
+                <Border Grid.Column="0" Background="{DynamicResource Brush.Ground}" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,0,1,0"
+                        Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
                     <DockPanel Margin="0,14,0,0">
                         <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="18,12">
                             <StackPanel Orientation="Horizontal">
@@ -97,7 +101,19 @@
                         </StackPanel>
                     </DockPanel>
                 </Border>
-                <ContentControl Grid.Column="1" Content="{Binding Current}" Focusable="False" />
+                <ContentControl Content="{Binding Current}" Focusable="False">
+                    <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                            <Setter Property="Grid.Column" Value="1" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSetup}" Value="True">
+                                    <Setter Property="Grid.Column" Value="0" />
+                                    <Setter Property="Grid.ColumnSpan" Value="2" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ContentControl.Style>
+                </ContentControl>
             </Grid>
 
             <Border Grid.Row="2" Background="{DynamicResource Brush.Ground}" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="16,7">

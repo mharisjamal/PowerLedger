@@ -11,21 +11,36 @@ internal enum Page
     Settings,
 }
 
-/// <summary>The window: which page shows, the screens, and the version in the title bar.</summary>
-internal sealed class ShellViewModel(
-    NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, SettingsViewModel settings, string version) : ObservableObject
+/// <summary>The window: which page shows, the screens, the first-run wizard while it runs, and the version in the title bar.</summary>
+internal sealed class ShellViewModel : ObservableObject
 {
     private Page _page = Page.Now;
+    private bool _isSetup;
 
-    public NowViewModel Now { get; } = now;
+    public ShellViewModel(
+        NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, SettingsViewModel settings, WizardViewModel wizard, string version)
+    {
+        Now = now;
+        Breakdown = breakdown;
+        Report = report;
+        Settings = settings;
+        Wizard = wizard;
+        Version = version;
+        Wizard.Finished += EndSetup;
+        Settings.SetupRequested += BeginSetup;
+    }
 
-    public BreakdownViewModel Breakdown { get; } = breakdown;
+    public NowViewModel Now { get; }
 
-    public ReportViewModel Report { get; } = report;
+    public BreakdownViewModel Breakdown { get; }
 
-    public SettingsViewModel Settings { get; } = settings;
+    public ReportViewModel Report { get; }
 
-    public string Version { get; } = version;
+    public SettingsViewModel Settings { get; }
+
+    public WizardViewModel Wizard { get; }
+
+    public string Version { get; }
 
     /// <summary>The page shown. A screen that reads history or the service reads while it shows and stops when it does not.</summary>
     public Page Page
@@ -34,21 +49,55 @@ internal sealed class ShellViewModel(
         set
         {
             if (!SetProperty(ref _page, value)) return;
-            if (value == Page.Breakdown) Breakdown.Show();
-            else Breakdown.Hide();
-            if (value == Page.Report) Report.Show();
-            else Report.Hide();
-            if (value == Page.Settings) Settings.Show();
-            else Settings.Hide();
+            ShowPage();
             OnPropertyChanged(nameof(Current));
         }
     }
 
-    public object Current => Page switch
+    /// <summary>The wizard has the window: the rail and the screens wait until it is finished.</summary>
+    public bool IsSetup
+    {
+        get => _isSetup;
+        private set
+        {
+            if (!SetProperty(ref _isSetup, value)) return;
+            ShowPage();
+            OnPropertyChanged(nameof(Current));
+        }
+    }
+
+    public object Current => IsSetup ? Wizard : Page switch
     {
         Page.Now => Now,
         Page.Breakdown => Breakdown,
         Page.Report => Report,
         _ => Settings,
     };
+
+    /// <summary>Shows the first-run wizard from its first step.</summary>
+    public void BeginSetup()
+    {
+        Wizard.Start();
+        IsSetup = true;
+    }
+
+    /// <summary>The wizard is done: back to the Now screen.</summary>
+    public void EndSetup()
+    {
+        _page = Page.Now;
+        OnPropertyChanged(nameof(Page));
+        IsSetup = false;
+    }
+
+    /// <summary>Lets only the screen on show read, and none while the wizard runs.</summary>
+    private void ShowPage()
+    {
+        var shown = IsSetup ? (Page?)null : Page;
+        if (shown == Page.Breakdown) Breakdown.Show();
+        else Breakdown.Hide();
+        if (shown == Page.Report) Report.Show();
+        else Report.Hide();
+        if (shown == Page.Settings) Settings.Show();
+        else Settings.Hide();
+    }
 }

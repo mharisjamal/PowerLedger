@@ -11,12 +11,15 @@ public class ShellViewModelTests
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly FakeRangeHistory _history = new();
     private readonly FakeLink _link = new();
+    private readonly FakeUiSettings _ui = new();
+    private readonly FakeMachineHistory _machine = new();
 
     private ShellViewModel Shell() => new(
         new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { }),
         new BreakdownViewModel(_history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
         new ReportViewModel(_history, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4),
-        new SettingsViewModel(_link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
+        new SettingsViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
+        new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         "0.1.0");
 
     [Fact]
@@ -44,5 +47,31 @@ public class ShellViewModelTests
         shell.Page = Page.Settings;
         shell.Current.ShouldBe(shell.Settings);
         shell.Settings.Service.IsLoaded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Setup_takes_the_window_until_it_is_finished()
+    {
+        var shell = Shell();
+        shell.Page = Page.Report;
+        shell.BeginSetup();
+        shell.IsSetup.ShouldBeTrue();
+        shell.Current.ShouldBe(shell.Wizard);
+
+        shell.Wizard.Finish.Execute(null);
+        shell.IsSetup.ShouldBeFalse();
+        shell.Page.ShouldBe(Page.Now);
+        shell.Current.ShouldBe(shell.Now);
+        _ui.Current.FirstRunDone.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Settings_can_run_setup_again()
+    {
+        var shell = Shell();
+        shell.Page = Page.Settings;
+        shell.Settings.RunSetup.Execute(null);
+        shell.IsSetup.ShouldBeTrue();
+        shell.Wizard.Step.ShouldBe(SetupStep.Tariff);
     }
 }

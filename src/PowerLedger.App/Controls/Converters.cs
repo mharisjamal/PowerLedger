@@ -24,6 +24,15 @@ internal sealed class VisibleWhenText : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
 }
 
+/// <summary>Shows an element while a value equals the converter parameter: a wizard step's panel while that step is current.</summary>
+internal sealed class VisibleWhenStep : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => Equals(value, parameter) ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
+}
+
 /// <summary>Checks a radio button when its value is the one chosen, and chooses it when it is checked.</summary>
 internal sealed class ValueIs : IValueConverter
 {

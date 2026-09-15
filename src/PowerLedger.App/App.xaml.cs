@@ -19,6 +19,7 @@ public partial class App : Application
     private ReportViewModel? _report;
     private AppPreferences? _preferences;
     private SettingsViewModel? _settings;
+    private WizardViewModel? _wizard;
     private MonthlyReports? _monthly;
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
@@ -57,7 +58,8 @@ public partial class App : Application
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _settings = new SettingsViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
-        _shell = new ShellViewModel(_now, _breakdown, _report, _settings, version);
+        _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
+        _shell = new ShellViewModel(_now, _breakdown, _report, _settings, _wizard, version);
         _tray = new TrayIcon(ShowWindow, ExitUi, autostart);
         _monthly = new MonthlyReports(
             history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,
@@ -83,6 +85,7 @@ public partial class App : Application
     private void ShowWindow()
     {
         if (_exiting || _shell is null) return;
+        if (_preferences is { Current.FirstRunDone: false } && !_shell.IsSetup) _shell.BeginSetup();   // spec §9: the first window is the wizard
         if (_window is null)
         {
             _window = new MainWindow { DataContext = _shell };
