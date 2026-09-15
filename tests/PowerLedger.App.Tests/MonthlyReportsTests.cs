@@ -92,4 +92,12 @@ public sealed class MonthlyReportsTests : IDisposable
         _clock.Advance(MonthlyReports.CheckEvery);
         _toasts.Count.ShouldBe(2);
     }
+
+    [Fact]
+    public void The_co2_factor_can_change_between_checks()
+    {
+        using var job = Job();
+        job.Co2KgPerKwh = 0.9;
+        job.Check().First().Data.Co2Note.ShouldBe("at 0.90 kg / kWh");
+    }
 }

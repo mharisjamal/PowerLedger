@@ -25,7 +25,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     private readonly TimeProvider _clock;
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
-    private readonly double _co2KgPerKwh;
+    private double _co2KgPerKwh;
     private readonly LiveWindow _window = new(TimeSpan.FromSeconds(60));
     private ITimer? _historyTimer;
     private ITimer? _statusTimer;
@@ -72,6 +72,17 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     public ChartModel Chart { get => _chart; private set => SetProperty(ref _chart, value); }
 
     public ChartLegend Legend { get => _legend; private set => SetProperty(ref _legend, value); }
+
+    /// <summary>Kilograms of CO₂ per kWh for today's ledger; a new factor redraws it (Settings, spec §9).</summary>
+    public double Co2KgPerKwh
+    {
+        get => _co2KgPerKwh;
+        set
+        {
+            _co2KgPerKwh = value;
+            if (_snapshot is not null) Today = TodayOf(_snapshot, TimeZoneInfo.ConvertTime(_clock.GetUtcNow(), _zone));
+        }
+    }
 
     public StatusLine Status { get => _status; private set => SetProperty(ref _status, value); }
 

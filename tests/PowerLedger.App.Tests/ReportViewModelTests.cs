@@ -120,4 +120,15 @@ public sealed class ReportViewModelTests : IDisposable
     [Fact]
     public void A_day_is_named_by_its_date()
         => ReportViewModel.FileName(Ranges.Today(Now, TimeZoneInfo.Utc, English), TimeZoneInfo.Utc).ShouldBe("PowerLedger-2026-09-08");
+
+    [Fact]
+    public void A_new_co2_factor_reads_the_report_again()
+    {
+        var model = Model();
+        model.Show();
+        model.Data.Co2.ShouldBe("1.04 kg");
+
+        model.Co2KgPerKwh = 0.2;
+        model.Data.Co2.ShouldBe("0.55 kg");
+    }
 }

@@ -46,4 +46,13 @@ public sealed class UiPreferencesTests : IDisposable
         System.IO.File.WriteAllText(File, """{ "Theme": "Dark", "Co2KgPerKwh": 55 }""");
         new UiPreferencesStore(File).Load().ShouldBe(new UiPreferences { Theme = ThemeChoice.Dark });
     }
+
+    [Fact]
+    public void The_first_run_is_remembered()
+    {
+        var store = new UiPreferencesStore(File);
+        store.Load().FirstRunDone.ShouldBeFalse();
+        store.Save(UiPreferences.Default with { FirstRunDone = true });
+        store.Load().FirstRunDone.ShouldBeTrue();
+    }
 }

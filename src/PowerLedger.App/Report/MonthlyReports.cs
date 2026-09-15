@@ -24,7 +24,6 @@ internal sealed class MonthlyReports : IDisposable
     private readonly TimeProvider _clock;
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
-    private readonly double _co2KgPerKwh;
     private readonly Action<IReadOnlyList<MonthlyReport>> _written;
     private readonly Lock _gate = new();
     private ITimer? _timer;
@@ -40,13 +39,16 @@ internal sealed class MonthlyReports : IDisposable
         _clock = clock;
         _zone = zone;
         _culture = culture;
-        _co2KgPerKwh = co2KgPerKwh;
+        Co2KgPerKwh = co2KgPerKwh;
         _written = written;
     }
 
     public static string DefaultFolder { get; } = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "PowerLedger");
 
     public static string FileName(DateOnly month) => $"PowerLedger-{month.ToString("yyyy-MM", CultureInfo.InvariantCulture)}.pdf";
+
+    /// <summary>Kilograms of CO₂ per kWh, read at each check, so a change in Settings reaches the next report.</summary>
+    public double Co2KgPerKwh { get; set; }
 
     /// <summary>Checks soon after startup and then every hour, on the timer's thread.</summary>
     public void Start() => _timer ??= _clock.CreateTimer(_ => CheckQuietly(), null, FirstCheck, CheckEvery);
@@ -89,7 +91,7 @@ internal sealed class MonthlyReports : IDisposable
             {
                 var range = Ranges.Month(month.Year, month.Month, now, _zone, _culture);
                 if (_history.Read(range, _zone) is not { } report) break;                   // history can't be read: next hour
-                var data = ReportData.From(report, _sleep.Read(), _co2KgPerKwh, _zone, _culture);
+                var data = ReportData.From(report, _sleep.Read(), Co2KgPerKwh, _zone, _culture);
                 if (!data.HasData) continue;                                                // nothing was recorded that month
                 var path = PathOf(month);
                 try

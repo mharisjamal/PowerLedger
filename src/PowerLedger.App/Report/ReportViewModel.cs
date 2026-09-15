@@ -25,7 +25,7 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
     private readonly TimeProvider _clock;
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
-    private readonly double _co2KgPerKwh;
+    private double _co2KgPerKwh;
     private ITimer? _timer;
     private int _reads;
     private DateRange? _range;
@@ -75,6 +75,17 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
 
     /// <summary>Takes the grain's name: Raw, Minute or Hour.</summary>
     public ICommand ExportCsv { get; }
+
+    /// <summary>Kilograms of CO₂ per kWh; a new factor reads the report again.</summary>
+    public double Co2KgPerKwh
+    {
+        get => _co2KgPerKwh;
+        set
+        {
+            _co2KgPerKwh = value;
+            if (_range is not null) Refresh();
+        }
+    }
 
     /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
     public void Show()

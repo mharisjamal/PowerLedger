@@ -24,6 +24,9 @@ internal sealed record UiPreferences
     /// <summary>Kilograms of CO₂ per kWh used for every CO₂ figure; spec §9's default is the world average.</summary>
     public double Co2KgPerKwh { get; init; } = Co2.DefaultKgPerKwh;
 
+    /// <summary>The first-run wizard was finished once; it shows until then (spec §9).</summary>
+    public bool FirstRunDone { get; init; }
+
     public static UiPreferences Default { get; } = new();
 
     /// <summary>The same preferences with anything out of range put back to its default.</summary>

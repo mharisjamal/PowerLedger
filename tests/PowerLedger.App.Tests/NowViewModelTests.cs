@@ -183,4 +183,17 @@ public class NowViewModelTests
         model.Chart.NowAt.ShouldNotBeNull().ShouldBe(174.42, 0.01);           // 14:32:07 in five-minute buckets
         model.Legend.ShouldBe(new ChartLegend("120 Wh", "30 Wh", "28 Wh", "106 Wh"));
     }
+
+    [Fact]
+    public void A_new_co2_factor_redraws_todays_ledger()
+    {
+        var model = Model();
+        _history.Snapshot = Snapshots.Typical(Now);
+        model.RefreshHistory();
+        model.Today.Co2.ShouldBe("0.11");                                     // 0.284 kWh at 0.38
+
+        model.Co2KgPerKwh = 0.8;
+        model.Today.Co2.ShouldBe("0.23");
+        model.Today.Co2Factor.ShouldBe("0.80 kg / kWh grid");
+    }
 }
