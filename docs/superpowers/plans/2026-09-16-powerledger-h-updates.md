@@ -2593,4 +2593,42 @@ Expected: 0 warnings; every project passes (Hardware and UI included on this lap
 
 ## Results
 
-(Filled in after Task 12 and Task 13.)
+2026-09-16. Tasks 1–8 and 9–11 were built at the same time in two worktrees, then integrated, reviewed and verified on
+`plan-h/updates` (11 task commits and 2 fix commits) and fast-forwarded into `main`.
+
+**Verified**
+
+- `dotnet build -c Release`: 0 warnings, 0 errors. Every test outside `Installed`: 915 pass (Core 117, Storage 49,
+  Sensors 260, Service 131, App 358, of which 93 are the updater's).
+- The card draws in both themes: `%TEMP%\powerledger-renders\update-{ready,updated}-{Dark,Light}.png`.
+- Installers: `PowerLedger-0.2.0-setup.exe`, 95.7 MB, sha256 `A41DEDB4A6237CE875BD474184A1FB9FEAE6D47F4DF15BF3E1D61943C9F45FD6`.
+- **Windows Sandbox, end to end, 18 of 18** (`sandbox\update-e2e.ps1` and `update-feed.ps1` in the session's scratchpad):
+  0.2.0 installed; a stand-in feed on `127.0.0.1` offered a real 0.2.1 build; the App asked for it as `PowerLedger/0.2.0`,
+  downloaded it quietly, kept it only once its size and SHA-256 matched, remembered announcing it (`AnnouncedVersion` in
+  ui.json) and showed the card; "Restart to update" closed the App in 250 ms through its exit event, setup installed
+  silently, reopened the App as the original user, then registered and started the service; the App came back as 0.2.1
+  with "Updated to 0.2.1", and its next check cleared the used installer and kept setup's log.
+  - A first run with the plan's `-TestVariants` upgrade passed 14 of 18: that build carries the *same* programs under a
+    higher installer version, so the service and the App still read 0.2.0 and no "Updated" card appears. The real 0.2.1
+    build for the second run came from a scratch worktree with `<Version>0.2.1</Version>`.
+  - Seen in both runs: the App reopens a moment before setup starts the service, so the status line says "Service not
+    running" for a few seconds until the pipe reconnects.
+
+**Review** (whole branch, security first): no way was found to make the App run an installer GitHub doesn't list — tag,
+asset name, URL prefix (normalised, so `..` can't escape), size, and GitHub's SHA-256 all have to agree, and the file is
+hashed again while held open just before setup starts. Fixed before shipping: `--update-feed` now takes only this
+machine's addresses; a setup that fails after closing the App starts the service and reopens the App
+(`DeinitializeSetup`), instead of leaving both off until Windows restarts; `release.ps1` reads native exit codes itself
+and waits for GitHub to work out the digest; the App reads its own version leniently. Left as they are: a process running
+as the same user could still swap the installer once setup has begun reading it (signing closes that); the tray shares one
+click action between the monthly-report and update notifications; and `UiPreferences.CheckForUpdates` needs a setter
+because the JSON source generator gives an init-only property missing from the file its type's default rather than its
+initializer — which also means a ui.json without `Co2KgPerKwh` loads 0 (pre-existing, tracked separately).
+
+**Deviations from the plan's code**: `CheckForUpdates` is `{ get; set; }` for the reason above; tests say
+`nameof(updater.X)`, since a helper method shadows the `Updater` type; the updater clears old downloads at every check as
+well as at start, because the App that setup reopens cannot delete the installer setup is still running from;
+`--update-feed` is loopback-only.
+
+**Not covered**: a failure in the middle of installing (the recovery is written and reasoned about, but forcing one was
+out of scope), and the permission prompt as an unelevated user sees it, since the Sandbox's account is an administrator.
