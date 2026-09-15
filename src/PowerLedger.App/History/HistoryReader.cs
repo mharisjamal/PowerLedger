@@ -46,12 +46,7 @@ internal sealed class HistoryReader(SqliteDatabase database) : IHistory
     }
 
     /// <summary>Midnight local time on <paramref name="date"/>, or the first valid time after it where a clock change skips midnight.</summary>
-    internal static DateTimeOffset LocalMidnight(DateTime date, TimeZoneInfo zone)
-    {
-        var wall = date.Date;
-        while (zone.IsInvalidTime(wall)) wall = wall.AddMinutes(15);
-        return new DateTimeOffset(wall, zone.GetUtcOffset(wall));
-    }
+    internal static DateTimeOffset LocalMidnight(DateTime date, TimeZoneInfo zone) => Ranges.At(date.Date, zone);
 
     /// <summary>The names the budget rows show, from the newest inventory the service stored.</summary>
     internal static MachineNames? Names(InventoryRecord? record)
