@@ -237,7 +237,7 @@ Cost is computed at query time as `Σ energy × tariff effective at that time`, 
 
 ### Stack
 
-WPF on .NET 10, WPF-UI for Fluent window chrome and controls, `CommunityToolkit.Mvvm`, LiveCharts2 (SkiaSharp) for charts, QuestPDF for PDF, `Microsoft.Toolkit.Uwp.Notifications` for toasts. One ViewModel per screen; no logic in code-behind. Custom lightweight controls: `MeterScale` (tick scale with needle and marks) and `BudgetBar` (segmented bar with watt ruler), drawn with `DrawingContext`.
+WPF on .NET 10 with its own `WindowChrome`, `CommunityToolkit.Mvvm`, QuestPDF for PDF. The meter, the budget bar, the sparkline and the charts are lightweight controls drawn with `DrawingContext`, whose geometry is tested as pure functions; WPF-UI's Fluent styles and LiveCharts2's SkiaSharp were dropped in Plan D1 because the design overrides the first almost everywhere and the second is far larger than four simple drawings need. The tray icon is WinForms' `NotifyIcon`, which also shows the monthly report's notification. One ViewModel per screen; no logic in code-behind.
 
 ### Screens
 
@@ -275,7 +275,7 @@ The app looks like a bench instrument; the reports read like a utility bill. Ref
 | Measured / Calibrated / Estimated | `#8FCB8B` / `#8FB6D4` / `#B9AE93` | `#3E7E43` / `#35678A` / `#7C7355` |
 | CPU / GPU / Display / Rest | `#E39B3B` / `#6F97C4` / `#B5C46A` / `#6E736D` | `#C4761C` / `#4A76A6` / `#7C8A2E` / `#8E928A` |
 
-- Type: **Archivo** for UI and body, **Archivo Narrow** for uppercase tracked labels, **Martian Mono** (Light 300, Regular 400) for every number with tabular figures. All three are OFL and bundled as static TTFs, because WPF does not support variable-font axes.
+- Type: **Archivo** for UI and body, **Archivo Narrow** for uppercase tracked labels, **Martian Mono** (Light 300, Regular 400) for every number with tabular figures. All three are OFL and bundled as static TTFs, because WPF does not support variable-font axes. Until the TTFs are added to `src/PowerLedger.App/Fonts`, every font reference falls back to Windows' own: Bahnschrift for text, Cascadia Mono then Consolas for numbers.
 - Amber is spent only on the live reading and the current position (needle, "now" line). Semantic quality colors are separate from the accent.
 - Quality is encoded by color and by form: solid dot, half dot, dashed border.
 - Hairlines instead of shadows; corner radii 2–6 px; dotted leaders between ledger labels and values; tick rulers on the scale and budget bar; LED-style dots for navigation state.
@@ -319,7 +319,7 @@ Framework: xUnit, Shouldly (BSD; FluentAssertions 8+ requires a paid commercial 
 - **Sensors**: validator driven by fake sources with glitch sequences (wrap, blip, spike, transition). Real-hardware adapter tests carry `Trait("Category","Hardware")` and are skipped in CI.
 - **Storage**: temp-file SQLite; migration from every prior schema version; retention purge; a reader querying while the writer commits under WAL.
 - **Service**: host the worker with fake sources and a temp DB, advance the fake clock through 10 simulated minutes including a suspend/resume, assert rows, aggregates, and sessions. Pipe round-trip and reconnect tests.
-- **App**: ViewModel unit tests. A manual QA checklist per screen for v1.
+- **App**: ViewModel and geometry unit tests; the pipe client against a real pipe; history against a temp database; a rendering test that draws the window in both themes to PNG (Category UI, skipped in CI). A manual QA checklist per screen for v1.
 - **Accuracy (manual, once)**: battery mode within ±5 % of `powercfg /batteryreport`; calibrated AC estimate within ±15 % of an inexpensive wall meter, on the developer's Dell Inspiron 3501.
 - **Performance gate**: service < 0.5 % CPU and < 50 MB private working set, the figure Task Manager shows (the full working set adds shared system and driver DLL images, about 50 MB more on the development laptop, where the service measured 0.04 % CPU and 36.8 MB); App < 120 MB with a window open; measured with `dotnet-counters` and the process counters; 7-day soak on the developer machine with zero crashes.
 
@@ -329,7 +329,7 @@ Framework: xUnit, Shouldly (BSD; FluentAssertions 8+ requires a paid commercial 
 - Framework-dependent build; Inno Setup installs the .NET 10 Desktop Runtime if missing, so the installer stays around 15 MB.
 - The installer registers the service with recovery options, adds the tray app to HKCU Run, and launches the first-run wizard. There is no driver to install. Uninstall stops the service and asks whether to keep the database.
 - Releases on GitHub with a winget manifest after the first stable build. v1 has a "check for updates" link; an in-app updater is v1.1.
-- CI (GitHub Actions): build, non-hardware tests, installer artifact.
+- CI (GitHub Actions): build, tests outside the Hardware and UI categories, installer artifact.
 
 ## 14. Repository layout and conventions
 
@@ -357,7 +357,7 @@ docs/
 .github/workflows/ci.yml
 ```
 
-Third-party licenses in use: WPF-UI (MIT), LiveCharts2 (MIT), CommunityToolkit.Mvvm (MIT), Microsoft.Data.Sqlite (MIT), Serilog (Apache-2.0), QuestPDF (Community license, free below USD 1M revenue), FsCheck (BSD-3), fonts Archivo, Archivo Narrow, Martian Mono (OFL). No GPL.
+Third-party licenses in use: CommunityToolkit.Mvvm (MIT), Microsoft.Data.Sqlite (MIT), Serilog (Apache-2.0), QuestPDF (Community license, free below USD 1M revenue), FsCheck (BSD-3), fonts Archivo, Archivo Narrow, Martian Mono (OFL). No GPL.
 
 ## 15. Success criteria for v1
 

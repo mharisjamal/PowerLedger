@@ -4922,22 +4922,22 @@ git commit -m "Draw the window in both themes to pictures, and run the App for r
 
 ### Task 15: Final verification, the spec, and the handoff to D2
 
-- [ ] **Step 1: Clean build with warnings as errors**
+- [x] **Step 1: Clean build with warnings as errors**
 
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` and `0 Warning(s)`.
 
-- [ ] **Step 2: Full test run**
+- [x] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
 Expected: Core `Passed: 110`, Storage `Passed: 41`, Sensors `Passed: 99`, Service `Passed: 127`, App `Passed: 73`, no failures.
 
-- [ ] **Step 3: Confirm CI can skip the hardware and UI tests**
+- [x] **Step 3: Confirm CI can skip the hardware and UI tests**
 
 Run: `dotnet test -c Release --filter "Category!=Hardware&Category!=UI"`
 Expected: App `Passed: 72` (the rendering test excluded), Service `Passed: 125`, Sensors `Passed: 94`, Core and Storage unchanged.
 
-- [ ] **Step 4: Bring the spec in line**
+- [x] **Step 4: Bring the spec in line**
 
 In `docs/superpowers/specs/2026-09-08-powerledger-design.md`:
 
@@ -4955,7 +4955,7 @@ WPF on .NET 10 with its own `WindowChrome`, `CommunityToolkit.Mvvm`, QuestPDF fo
 
 §14, in the third-party licence line, remove `WPF-UI (MIT), LiveCharts2 (MIT), `.
 
-- [ ] **Step 5: Record what D2 builds on**
+- [x] **Step 5: Record what D2 builds on**
 
 D2 (Breakdown, Report, Settings, the wizard, exports and the monthly PDF) uses:
 
@@ -4985,7 +4985,7 @@ D2 (Breakdown, Report, Settings, the wizard, exports and the monthly PDF) uses:
 - The custom maximise button does not open Windows 11's snap-layout flyout; snapping by dragging works.
 - At 16 px the tray icon's three digits are small; the tooltip carries the exact value.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-09-08-powerledger-design.md docs/superpowers/plans
