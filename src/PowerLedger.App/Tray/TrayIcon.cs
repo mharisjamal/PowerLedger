@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Text;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -32,6 +34,7 @@ internal sealed class TrayIcon : IDisposable
     private int? _shown;
     private bool _drawn;
     private bool _disposed;
+    private string? _open;
 
     public TrayIcon(Action open, Action exit, StartWithWindows autostart)
     {
@@ -44,6 +47,7 @@ internal sealed class TrayIcon : IDisposable
         menu.Items.Add("Exit UI", null, (_, _) => exit());
         _icon = new NotifyIcon { ContextMenuStrip = menu, Text = "PowerLedger", Visible = true };
         _icon.DoubleClick += (_, _) => open();
+        _icon.BalloonTipClicked += (_, _) => Launch(_open);
         Show(null, "PowerLedger · waiting for the service");
     }
 
@@ -60,6 +64,27 @@ internal sealed class TrayIcon : IDisposable
         _icon.Icon = next;
         _current?.Dispose();
         _current = next;
+    }
+
+    /// <summary>A notification from the tray, the monthly report's (spec §9). Clicking it opens <paramref name="open"/>.</summary>
+    public void Notify(string title, string text, string? open)
+    {
+        if (_disposed) return;
+        _open = open;
+        _icon.ShowBalloonTip(10_000, title, text, ToolTipIcon.None);
+    }
+
+    private static void Launch(string? path)
+    {
+        if (path is null || !File.Exists(path)) return;
+        try
+        {
+            using var viewer = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // No app opens PDFs here; the file is still in Documents.
+        }
     }
 
     public void Dispose()

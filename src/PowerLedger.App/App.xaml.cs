@@ -16,6 +16,7 @@ public partial class App : Application
     private NowViewModel? _now;
     private BreakdownViewModel? _breakdown;
     private ReportViewModel? _report;
+    private MonthlyReports? _monthly;
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
     private MainWindow? _window;
@@ -34,27 +35,35 @@ public partial class App : Application
 
         var options = AppOptions.Parse(e.Args);
         var preferences = new UiPreferencesStore(UiPreferencesStore.DefaultPath).Load();
+        var zone = TimeZoneInfo.Local;
+        var culture = CultureInfo.CurrentCulture;
+        var version = Version();
         _theme = new ThemeManager(this, preferences.Theme);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
         _link = new PipeServiceLink(options.PipeName, new LastInputIdleSource(), TimeProvider.System);
         var threads = new UiThreads(action => Dispatcher.InvokeAsync(action), action => Task.Run(action));
         var history = new HistoryReader(_database);
-        _now = new NowViewModel(
-            _link, history, threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture,
-            preferences.Co2KgPerKwh, ServiceStarter.Start);
-        _breakdown = new BreakdownViewModel(history, threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture);
-        var version = Version();
-        byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, CultureInfo.CurrentCulture);
-        _report = new ReportViewModel(
-            history, new SleepSettings(), new FileSaver(), Pdf, threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture,
-            preferences.Co2KgPerKwh);
+        var sleep = new SleepSettings();
+        byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, culture);
+
+        _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
+        _breakdown = new BreakdownViewModel(history, threads, TimeProvider.System, zone, culture);
+        _report = new ReportViewModel(history, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
         _shell = new ShellViewModel(_now, _breakdown, _report, version);
         _tray = new TrayIcon(ShowWindow, ExitUi, new StartWithWindows(Environment.ProcessPath!));
+        _monthly = new MonthlyReports(
+            history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,
+            written => Dispatcher.InvokeAsync(() =>
+            {
+                var (title, text) = MonthlyReports.Toast(written);
+                _tray?.Notify(title, text, written[0].Path);
+            }));
         _now.PropertyChanged += OnNowChanged;
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
 
         _link.Start();
         _now.Start();
+        _monthly.Start();
         if (!options.StartInTray) ShowWindow();
     }
 
@@ -101,6 +110,7 @@ public partial class App : Application
         _exiting = true;
         try
         {
+            _monthly?.Dispose();
             _window?.Close();
             _tray?.Dispose();
             if (_now is not null)
