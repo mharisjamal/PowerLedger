@@ -36,7 +36,10 @@ public sealed class SqliteDatabase : IDisposable
         return db;
     }
 
-    /// <summary>A connection with busy_timeout set; writers also get WAL, synchronous=NORMAL and foreign keys.</summary>
+    /// <summary>
+    /// A connection with busy_timeout set; writers also get WAL, with its files kept after the last writer closes,
+    /// synchronous=NORMAL and foreign keys.
+    /// </summary>
     public SqliteConnection Open()
     {
         var c = new SqliteConnection(_connectionString);
@@ -49,6 +52,7 @@ public sealed class SqliteDatabase : IDisposable
                 // auto_vacuum is baked into page 1 by the first write, so it must precede journal_mode on a brand-new file.
                 if (IsEmptyFile()) Migrator.Exec(c, "PRAGMA auto_vacuum = INCREMENTAL");
                 Migrator.Exec(c, "PRAGMA journal_mode = WAL");
+                PersistentWal.TryEnable(c);
                 Migrator.Exec(c, "PRAGMA synchronous = NORMAL");
                 Migrator.Exec(c, "PRAGMA foreign_keys = ON");
             }
