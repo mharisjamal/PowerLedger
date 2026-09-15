@@ -50,7 +50,7 @@ Filename: "{app}\PowerLedger.exe"; Description: "Open PowerLedger"; Flags: posti
 var
   RuntimePage: TDownloadWizardPage;
 
-function Run(const FileName, Params: string): Integer;
+function RunHidden(const FileName, Params: string): Integer;
 var
   Code: Integer;
 begin
@@ -61,7 +61,7 @@ end;
 
 function Sc(const Params: string): Integer;
 begin
-  Result := Run(ExpandConstant('{sys}\sc.exe'), Params);
+  Result := RunHidden(ExpandConstant('{sys}\sc.exe'), Params);
 end;
 
 function ServiceExists: Boolean;
@@ -73,7 +73,7 @@ end;
 procedure StopService;
 begin
   if ServiceExists then
-    Run(ExpandConstant('{sys}\net.exe'), 'stop {#ServiceName}');
+    RunHidden(ExpandConstant('{sys}\net.exe'), 'stop {#ServiceName}');
 end;
 
 function ServiceExecutable: string;
@@ -94,7 +94,7 @@ begin
   Sc('description {#ServiceName} "Records how much power this PC uses."');
   Sc('failure {#ServiceName} reset= 86400 actions= restart/5000/restart/5000/restart/5000');
   Sc('failureflag {#ServiceName} 1');
-  Run(ExpandConstant('{sys}\net.exe'), 'start {#ServiceName}');
+  RunHidden(ExpandConstant('{sys}\net.exe'), 'start {#ServiceName}');
 end;
 
 { The Desktop Runtime is present when dotnet's shared folder holds a 10.x version of it. }
