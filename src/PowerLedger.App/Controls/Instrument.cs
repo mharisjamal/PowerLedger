@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Media;
 
 namespace PowerLedger.App;
@@ -46,6 +47,12 @@ internal abstract class Instrument : FrameworkElement
 
     public FontFamily NumberFont { get => (FontFamily)GetValue(NumberFontProperty); set => SetValue(NumberFontProperty, value); }
 
+    /// <summary>What the control shows, in a sentence, for a screen reader.</summary>
+    internal virtual string Describe() => string.Empty;
+
+    /// <summary>To UI Automation a drawn control is a picture, named by the view or else by <see cref="Describe"/>.</summary>
+    protected override AutomationPeer OnCreateAutomationPeer() => new InstrumentPeer(this);
+
     /// <summary>A dependency property that repaints the control when it changes.</summary>
     protected static DependencyProperty Register<T>(string name, T defaultValue, Type owner)
         => DependencyProperty.Register(name, typeof(T), owner, new FrameworkPropertyMetadata(defaultValue, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -72,6 +79,19 @@ internal abstract class Instrument : FrameworkElement
 
     protected Size Fixed(Size available, double height)
         => new(double.IsInfinity(available.Width) ? 600 : available.Width, height);
+
+    private sealed class InstrumentPeer(Instrument owner) : FrameworkElementAutomationPeer(owner)
+    {
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Image;
+
+        protected override string GetClassNameCore() => Owner.GetType().Name;
+
+        protected override string GetNameCore()
+        {
+            var name = base.GetNameCore();
+            return string.IsNullOrEmpty(name) ? ((Instrument)Owner).Describe() : name;
+        }
+    }
 
     private static DependencyProperty BrushProperty(string name) => DependencyProperty.Register(
         name, typeof(Brush), typeof(Instrument), new FrameworkPropertyMetadata(Brushes.Gray, FrameworkPropertyMetadataOptions.AffectsRender));

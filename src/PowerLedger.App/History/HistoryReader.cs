@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using PowerLedger.Core;
@@ -12,8 +13,8 @@ internal sealed record MachineNames(string? Cpu, string? Gpu, double DisplayDiag
 
 /// <summary>Everything the Now screen reads from history in one pass, so its parts always agree.</summary>
 internal sealed record HistorySnapshot(
-    RangeTotals Today, RangeTotals Month, IReadOnlyList<DayTotals> MonthDays, IReadOnlyList<DaySlot> TodaySlots,
-    DateTimeOffset DayStart, Tariff? Tariff, MachineNames? Machine);
+    RangeTotals Today, RangeTotals Month, IReadOnlyList<DayTotals> MonthDays, DateRange TodayRange, IReadOnlyList<Aggregate> TodaySeries,
+    Tariff? Tariff, MachineNames? Machine);
 
 internal interface IHistory
 {
@@ -28,16 +29,16 @@ internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeH
     {
         try
         {
+            var day = Ranges.Today(now, zone, CultureInfo.InvariantCulture);
             var local = TimeZoneInfo.ConvertTime(now, zone);
-            var dayStart = LocalMidnight(local.Date, zone);
             var monthStart = LocalMidnight(new DateTime(local.Year, local.Month, 1), zone);
             var queries = new ReportQueries(database);
-            var today = queries.Totals(dayStart, now);
+            var today = queries.Totals(day.From, now);
             var (month, days) = queries.Report(monthStart, now, zone);
-            var slots = DaySlots.Build(new AggregateRepository(database).ReadMinutes(dayStart, now), dayStart, now);
+            var series = queries.Series(day.From, now, day.Bucket);
             var tariff = new TariffRepository(database).Schedule().At(now);
             var machine = Names(new InventoryRepository(database).Latest());
-            return new HistorySnapshot(today, month, days, slots, dayStart, tariff, machine);
+            return new HistorySnapshot(today, month, days, day, series, tariff, machine);
         }
         catch (SqliteException)
         {

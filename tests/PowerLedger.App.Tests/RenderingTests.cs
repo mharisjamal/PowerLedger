@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Extensions.Time.Testing;
+using PowerLedger.Core;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -101,7 +102,7 @@ public class RenderingTests
         var model = new NowViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc,
             CultureInfo.GetCultureInfo("en-US"), co2KgPerKwh: 0.38, startService: () => { });
         link.Connect(true);
-        history.Snapshot = Snapshots.Typical(Now, Slots());
+        history.Snapshot = Snapshots.Typical(Now, Series());
         model.RefreshHistory();
         var seed = 11;
         var watts = 33.0;
@@ -114,10 +115,10 @@ public class RenderingTests
         return model;
     }
 
-    private static IReadOnlyList<DaySlot> Slots()
+    private static IReadOnlyList<Aggregate> Series()
     {
         var dayStart = new DateTimeOffset(Now.Date, TimeSpan.Zero);
-        var slots = new List<DaySlot>();
+        var series = new List<Aggregate>();
         var seed = 7;
         double Noise()
         {
@@ -135,12 +136,16 @@ public class RenderingTests
                 168 => 68,
                 _ => 44 + Noise() * 6,
             };
-            var start = dayStart + i * DaySlots.Length;
-            slots.Add(total <= 0
-                ? new DaySlot(start, 0, 0, 0, 0, 0, 300)
-                : new DaySlot(start, total * 0.45, total * 0.11, 4, total * 0.44 - 4, 300, 0));
+            var start = dayStart.AddMinutes(5 * i);
+            series.Add(total <= 0
+                ? Aggregate.Empty(start) with { GapSeconds = 300 }
+                : Aggregate.Empty(start) with
+                {
+                    CpuWh = total * 0.45 / 12, GpuWh = total * 0.11 / 12, DisplayWh = 4 / 12.0, RestWh = (total * 0.44 - 4) / 12,
+                    EnergyWh = total / 12, OnSeconds = 300,
+                });
         }
-        return slots;
+        return series;
     }
 
     private static void Pump(TimeSpan duration)

@@ -53,9 +53,9 @@ public sealed class HistoryReaderTests : IDisposable
         snapshot.Today.EnergyKwh.ShouldBe(0.001, 1e-12);
         snapshot.Month.EnergyKwh.ShouldBe(0.0015, 1e-12);
         snapshot.MonthDays.Count.ShouldBe(2);
-        snapshot.DayStart.ShouldBe(new DateTimeOffset(2026, 9, 15, 0, 0, 0, TimeSpan.Zero));
-        snapshot.TodaySlots.Count.ShouldBe(174);                              // 14.5 hours of five-minute slots
-        snapshot.TodaySlots[168].CpuW.ShouldBe(12, 1e-9);                     // 14:00: 0.4 Wh of CPU over 120 s
+        snapshot.TodayRange.From.ShouldBe(new DateTimeOffset(2026, 9, 15, 0, 0, 0, TimeSpan.Zero));
+        snapshot.TodaySeries.Count.ShouldBe(174);                             // 14.5 hours of five-minute buckets
+        snapshot.TodaySeries[168].CpuWh.ShouldBe(0.4, 1e-9);                  // 14:00: two minutes of 0.2 Wh of CPU
         snapshot.Tariff.ShouldNotBeNull().PricePerKwh.ShouldBe(0.17m);
         snapshot.Machine.ShouldBe(new MachineNames("11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz", "NVIDIA GeForce MX330", 15.3));
     }

@@ -48,15 +48,22 @@ public class GeometryTests
     [Fact]
     public void Stacked_layers_rise_from_rest_to_cpu_and_negative_rest_stays_at_zero()
     {
-        DaySlot[] slots =
+        ChartBucket[] buckets =
         [
-            new(DateTimeOffset.UnixEpoch, CpuW: 10, GpuW: 2, DisplayW: 4, RestW: 6, OnSeconds: 300, AsleepSeconds: 0),
-            new(DateTimeOffset.UnixEpoch, CpuW: 20, GpuW: 0, DisplayW: 4, RestW: -3, OnSeconds: 300, AsleepSeconds: 0),
+            new(Cpu: 10, Gpu: 2, Display: 4, Rest: 6, OnSeconds: 300, AsleepSeconds: 0),
+            new(Cpu: 20, Gpu: 0, Display: 4, Rest: -3, OnSeconds: 300, AsleepSeconds: 0),
         ];
-        var tops = Geometry.StackTops(slots);
+        var tops = Geometry.StackTops(buckets);
         tops.RestTop.ShouldBe(new double[] { 6, 0 });
         tops.DisplayTop.ShouldBe(new double[] { 10, 4 });
         tops.GpuTop.ShouldBe(new double[] { 12, 4 });
         tops.CpuTop.ShouldBe(new double[] { 22, 24 });
+    }
+
+    [Fact]
+    public void A_chart_scale_never_drops_under_its_floor()
+    {
+        Geometry.ChartScale(3, floor: 1).ShouldBe((3.0, 1.0));
+        Geometry.ChartScale(0.3, floor: 0.1).Max.ShouldBe(0.3, 1e-9);
     }
 }

@@ -55,7 +55,7 @@
     <Style TargetType="local:MeterScale" BasedOn="{StaticResource Instrument}" />
     <Style TargetType="local:BudgetBar" BasedOn="{StaticResource Instrument}" />
     <Style TargetType="local:Sparkline" BasedOn="{StaticResource Instrument}" />
-    <Style TargetType="local:DayChart" BasedOn="{StaticResource Instrument}" />
+    <Style TargetType="local:StackedChart" BasedOn="{StaticResource Instrument}" />
     <Style TargetType="local:LiveReadout" BasedOn="{StaticResource Instrument}">
         <Setter Property="LabelBrush" Value="{DynamicResource Brush.Ink2}" />
     </Style>

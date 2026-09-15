@@ -171,4 +171,16 @@ public class NowViewModelTests
     [InlineData("Intel(R) Core(TM) Ultra 7 155H", "Core Ultra 7 155H")]
     public void Names_lose_the_trademarks_the_maker_and_the_clock_speed(string full, string expected)
         => NowViewModel.ShortName(full).ShouldBe(expected);
+
+    [Fact]
+    public void Todays_chart_spans_the_day_and_its_legend_gives_each_bands_energy()
+    {
+        var model = Model();
+        _history.Snapshot = Snapshots.Typical(Now);
+        model.RefreshHistory();
+
+        model.Chart.Capacity.ShouldBe(288);
+        model.Chart.NowAt.ShouldNotBeNull().ShouldBe(174.42, 0.01);           // 14:32:07 in five-minute buckets
+        model.Legend.ShouldBe(new ChartLegend("120 Wh", "30 Wh", "28 Wh", "106 Wh"));
+    }
 }

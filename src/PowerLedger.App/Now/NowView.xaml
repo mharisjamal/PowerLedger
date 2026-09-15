@@ -131,7 +131,7 @@
                     <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Eyebrow}" Text="WATTS" />
                     <TextBlock Style="{StaticResource Text.Eyebrow}" Text="TODAY · 5-MIN · STACKED BY COMPONENT" />
                 </DockPanel>
-                <local:DayChart Slots="{Binding Chart.Slots}" Now="{Binding Chart.Now}" />
+                <local:StackedChart Model="{Binding Chart}" />
                 <WrapPanel Margin="0,8,0,0">
                     <WrapPanel.Resources>
                         <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Secondary}">
@@ -145,13 +145,13 @@
                         </Style>
                     </WrapPanel.Resources>
                     <Rectangle Fill="{DynamicResource Brush.PartCpu}" />
-                    <TextBlock Text="CPU " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Chart.CpuWh}" Margin="0,0,22,0" />
+                    <TextBlock Text="CPU " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Legend.Cpu}" Margin="0,0,22,0" />
                     <Rectangle Fill="{DynamicResource Brush.PartGpu}" />
-                    <TextBlock Text="GPU " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Chart.GpuWh}" Margin="0,0,22,0" />
+                    <TextBlock Text="GPU " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Legend.Gpu}" Margin="0,0,22,0" />
                     <Rectangle Fill="{DynamicResource Brush.PartDisplay}" />
-                    <TextBlock Text="Display " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Chart.DisplayWh}" Margin="0,0,22,0" />
+                    <TextBlock Text="Display " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Legend.Display}" Margin="0,0,22,0" />
                     <Rectangle Fill="{DynamicResource Brush.PartRest}" />
-                    <TextBlock Text="Rest " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Chart.RestWh}" />
+                    <TextBlock Text="Rest " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Legend.Rest}" />
                 </WrapPanel>
             </StackPanel>
         </StackPanel>

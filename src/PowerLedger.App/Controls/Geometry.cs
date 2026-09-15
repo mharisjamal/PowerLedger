@@ -20,12 +20,12 @@ internal static class Geometry
         return nice * power;
     }
 
-    /// <summary>The day chart's top and gridline step: round steps that clear the tallest slot, never under 20 W.</summary>
-    public static (double Max, double Step) ChartScale(double tallest)
+    /// <summary>A chart's top and gridline step: round steps that clear the tallest bucket, never under <paramref name="floor"/>.</summary>
+    public static (double Max, double Step) ChartScale(double tallest, double floor = 20)
     {
-        var need = double.IsFinite(tallest) ? Math.Max(tallest, 20) : 20;
+        var need = double.IsFinite(tallest) ? Math.Max(tallest, floor) : floor;
         var step = NiceStep(need, 4);
-        return (step * Math.Ceiling(need / step), step);
+        return (step * Math.Ceiling(need / step - 1e-9), step);
     }
 
     /// <summary>The sparkline's range: the values with room above and below, and the round gridlines inside it.</summary>
@@ -61,19 +61,19 @@ internal static class Geometry
         return points;
     }
 
-    /// <summary>The top of each band in each slot, stacked from rest at the bottom to CPU at the top (spec §9). A negative rest stays at zero.</summary>
-    public static (double[] RestTop, double[] DisplayTop, double[] GpuTop, double[] CpuTop) StackTops(IReadOnlyList<DaySlot> slots)
+    /// <summary>The top of each band in each bucket, stacked from rest at the bottom to CPU at the top (spec §9). A negative rest stays at zero.</summary>
+    public static (double[] RestTop, double[] DisplayTop, double[] GpuTop, double[] CpuTop) StackTops(IReadOnlyList<ChartBucket> buckets)
     {
-        var rest = new double[slots.Count];
-        var display = new double[slots.Count];
-        var gpu = new double[slots.Count];
-        var cpu = new double[slots.Count];
-        for (var i = 0; i < slots.Count; i++)
+        var rest = new double[buckets.Count];
+        var display = new double[buckets.Count];
+        var gpu = new double[buckets.Count];
+        var cpu = new double[buckets.Count];
+        for (var i = 0; i < buckets.Count; i++)
         {
-            rest[i] = Math.Max(0, slots[i].RestW);
-            display[i] = rest[i] + Math.Max(0, slots[i].DisplayW);
-            gpu[i] = display[i] + Math.Max(0, slots[i].GpuW);
-            cpu[i] = gpu[i] + Math.Max(0, slots[i].CpuW);
+            rest[i] = Math.Max(0, buckets[i].Rest);
+            display[i] = rest[i] + Math.Max(0, buckets[i].Display);
+            gpu[i] = display[i] + Math.Max(0, buckets[i].Gpu);
+            cpu[i] = gpu[i] + Math.Max(0, buckets[i].Cpu);
         }
         return (rest, display, gpu, cpu);
     }

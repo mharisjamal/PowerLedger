@@ -39,7 +39,8 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     private LivePanel _live = LivePanel.Waiting;
     private TodayLedger _today = TodayLedger.Empty;
     private MonthLedger _month = MonthLedger.Empty;
-    private DayChartModel _chart = DayChartModel.Empty;
+    private ChartModel _chart = ChartModel.Empty;
+    private ChartLegend _legend = ChartLegend.Empty;
     private StatusLine _status = StatusLine.Down;
     private Connection _connection = Connection.Connecting;
     private bool _isSensorless;
@@ -67,7 +68,10 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
 
     public MonthLedger Month { get => _month; private set => SetProperty(ref _month, value); }
 
-    public DayChartModel Chart { get => _chart; private set => SetProperty(ref _chart, value); }
+    /// <summary>Today's stacked chart (spec §9).</summary>
+    public ChartModel Chart { get => _chart; private set => SetProperty(ref _chart, value); }
+
+    public ChartLegend Legend { get => _legend; private set => SetProperty(ref _legend, value); }
 
     public StatusLine Status { get => _status; private set => SetProperty(ref _status, value); }
 
@@ -216,17 +220,16 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         {
             Today = TodayLedger.Empty;
             Month = MonthLedger.Empty;
-            Chart = DayChartModel.Empty;
+            Chart = ChartModel.Empty;
+            Legend = ChartLegend.Empty;
         }
         else
         {
-            var now = _clock.GetUtcNow();
-            var local = TimeZoneInfo.ConvertTime(now, _zone);
+            var local = TimeZoneInfo.ConvertTime(_clock.GetUtcNow(), _zone);
             Today = TodayOf(snapshot, local);
             Month = MonthOf(snapshot, local);
-            Chart = new DayChartModel(
-                snapshot.TodaySlots, snapshot.DayStart, now,
-                Wh(snapshot.Today.CpuKwh), Wh(snapshot.Today.GpuKwh), Wh(snapshot.Today.DisplayKwh), Wh(snapshot.Today.RestKwh));
+            Chart = Charts.Build(snapshot.TodayRange, snapshot.TodaySeries, ChartUnit.Watts, _zone, _culture);
+            Legend = new ChartLegend(Wh(snapshot.Today.CpuKwh), Wh(snapshot.Today.GpuKwh), Wh(snapshot.Today.DisplayKwh), Wh(snapshot.Today.RestKwh));
         }
         RebuildLive();
     }

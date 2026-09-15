@@ -41,4 +41,8 @@ internal static class Format
     /// <summary>A share of a whole, as a whole percent: "43%".</summary>
     public static string Percent(double share, CultureInfo culture)
         => double.IsFinite(share) ? Math.Round(Math.Clamp(share, 0, 1) * 100).ToString("0", culture) + "%" : Missing;
+
+    /// <summary>A scale label, or a value read against the scale, with the decimals its step needs: "40", "2.5", "0.25".</summary>
+    public static string Scale(double value, double step, CultureInfo culture)
+        => double.IsFinite(value) ? Math.Max(0, value).ToString(step >= 1 ? "0" : step >= 0.1 ? "0.0" : "0.00", culture) : Missing;
 }

@@ -46,12 +46,10 @@ internal sealed record MonthLedger(
     public static MonthLedger Empty { get; } = new("", "", "–", "–", "–", "", "–", "–", "", "–", "", "–", "", "");
 }
 
-/// <summary>Today's chart and its legend.</summary>
-internal sealed record DayChartModel(
-    IReadOnlyList<DaySlot> Slots, DateTimeOffset DayStart, DateTimeOffset Now,
-    string CpuWh, string GpuWh, string DisplayWh, string RestWh)
+/// <summary>Today's chart legend: each band's energy so far.</summary>
+internal sealed record ChartLegend(string Cpu, string Gpu, string Display, string Rest)
 {
-    public static DayChartModel Empty { get; } = new([], default, default, "–", "–", "–", "–");
+    public static ChartLegend Empty { get; } = new("–", "–", "–", "–");
 }
 
 /// <summary>The status bar and the rail's footer.</summary>
