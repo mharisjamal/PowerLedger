@@ -1,4 +1,5 @@
 #Requires -Version 7
+
 <#
 .SYNOPSIS
 Installs PowerLedger on this machine with its installer, checks what it installed, then upgrades, removes and reinstalls it.
@@ -10,10 +11,11 @@ and printed as PASS, FAIL or SKIP, and the exit code is the number of failures. 
 <Results>\<step>-setup.log and <step>-uninstall.log; the interactive steps write the text of every window they see to
 <Results>\dialogs.log.
 
-The default steps are silent, so CI can run them: Preflight, NoRuntime, Install, Service, Data, Recovery, ServiceStop,
-Upgrade, UninstallKeep, Reinstall, Cleanup. Four more need a desktop. BadUrl, UninstallDelete and RuntimeWizard start
-setup or the uninstaller and answer it themselves (RuntimeWizard downloads the 60 MB .NET Desktop Runtime from Microsoft);
-DriveWizard waits for a setup somebody else started, unelevated say, and drives it to the end.
+The default steps are silent, so CI can run them: Preflight, Install, Service, Data, Recovery, ServiceStop, Upgrade,
+UninstallKeep, Reinstall, Cleanup. Three more need a desktop. InstallWizard and UninstallDelete start setup or the
+uninstaller and answer it themselves (InstallWizard installs with the wizard, as somebody new to PowerLedger would, for a
+clean Windows such as Windows Sandbox); DriveWizard waits for a setup somebody else started, unelevated say, and drives
+it to the end.
 
 Preflight stops the run when C:\ProgramData\PowerLedger exists, since that may be somebody's history. Cleanup deletes the
 folder only when this run's Preflight found none there.
@@ -22,17 +24,15 @@ folder only when this run's Preflight found none there.
 ./installer/test-installer.ps1
 
 .EXAMPLE
-./installer/test-installer.ps1 -Step Preflight, Install, Service, Data, BadUrl, UninstallDelete, Cleanup
+./installer/test-installer.ps1 -Step Preflight, InstallWizard, Service, Data, UninstallDelete, Cleanup
 #>
 param(
-    [ValidateSet('Preflight', 'NoRuntime', 'Install', 'Service', 'Data', 'Recovery', 'ServiceStop', 'Upgrade', 'UninstallKeep',
-        'Reinstall', 'BadUrl', 'UninstallDelete', 'RuntimeWizard', 'DriveWizard', 'Cleanup')]
-    [string[]]$Step = @('Preflight', 'NoRuntime', 'Install', 'Service', 'Data', 'Recovery', 'ServiceStop', 'Upgrade', 'UninstallKeep',
+    [ValidateSet('Preflight', 'Install', 'Service', 'Data', 'Recovery', 'ServiceStop', 'Upgrade', 'UninstallKeep', 'Reinstall',
+        'UninstallDelete', 'InstallWizard', 'DriveWizard', 'Cleanup')]
+    [string[]]$Step = @('Preflight', 'Install', 'Service', 'Data', 'Recovery', 'ServiceStop', 'Upgrade', 'UninstallKeep',
         'Reinstall', 'Cleanup'),
     [string]$Setup,
     [string]$Upgrade,
-    [string]$NoRuntime,
-    [string]$BadUrl,
     [string]$Results,
     [int]$WizardTimeout = 600
 )
@@ -48,8 +48,6 @@ $patched = '{0}.{1}.{2}' -f $parsed.Major, $parsed.Minor, ($parsed.Build + 1)   
 $output = Join-Path $PSScriptRoot 'output'
 if (-not $Setup) { $Setup = Join-Path $output "PowerLedger-$version-setup.exe" }
 if (-not $Upgrade) { $Upgrade = Join-Path $output "test\PowerLedger-$patched-setup.exe" }
-if (-not $NoRuntime) { $NoRuntime = Join-Path $output "test\PowerLedger-$version-noruntime-setup.exe" }
-if (-not $BadUrl) { $BadUrl = Join-Path $output "test\PowerLedger-$version-badurl-setup.exe" }
 if (-not $Results) { $Results = Join-Path $output 'test-results' }
 $Results = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Results)
 $null = New-Item -ItemType Directory -Force $Results
@@ -74,6 +72,7 @@ $ExpectedRules = @(                             # what the service puts on the d
     'S-1-5-32-545 Allow ReadAndExecute, Synchronize (ContainerInherit, ObjectInherit; None)'
 )
 $MessageBoxIds = @{ Yes = '6'; No = '7'; OK = '1', '2'; Cancel = '2' }   # control ids of a message box's buttons
+$PeMachines = @{ X64 = 0x8664; Arm64 = 0xAA64 }  # a PE header's machine field, for each Windows PowerLedger has a build for
 
 $ResultsFile = Join-Path $Results 'results.jsonl'
 $PreflightMarker = Join-Path $Results 'preflight-found-no-data.txt'
@@ -216,6 +215,18 @@ function Get-RunValue { (Get-ItemProperty $RunKey -ErrorAction SilentlyContinue)
 function Get-ServiceLog { Get-ChildItem (Join-Path $DataDir 'logs') -Filter 'service-*.log' -File -ErrorAction SilentlyContinue }
 
 function Get-SetAside { Get-ChildItem $DataDir -File -ErrorAction SilentlyContinue | Where-Object Name -match '^power\.(untrusted|corrupt)-' }
+
+# The machine a program is built for, from its PE header: 0x8664 for x64, 0xAA64 for Arm64.
+function Get-PeMachine([string]$Path) {
+    $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($Path))
+    try {
+        $reader.BaseStream.Position = 0x3C
+        $reader.BaseStream.Position = $reader.ReadInt32()   # where the PE header starts
+        if ($reader.ReadUInt32() -ne 0x4550) { throw "$Path has no PE header." }   # 'PE' and two zero bytes
+        $reader.ReadUInt16()
+    }
+    finally { $reader.Dispose() }
+}
 
 # The service's status from its pipe, asking again while it is starting or not yet listening.
 function Get-PipeStatus([int]$Seconds = 60) {
@@ -483,19 +494,23 @@ function Step-Preflight {
     Set-Content -LiteralPath $PreflightMarker "Preflight found no $DataDir at $(Get-Date -Format o); this run made whatever is there later."
 }
 
-function Step-NoRuntime {
-    Check NoRuntime 'silent setup refuses without the runtime' { $code = Invoke-Setup $NoRuntime $Silent; Assert ($code -ne 0) "exit code $code" }
-    Check NoRuntime 'its log says the runtime is missing' {
-        $log = Get-StepLog 'setup'
-        Assert (Select-String -LiteralPath $log -Pattern 'Desktop Runtime is missing' -SimpleMatch -Quiet) $log
-    }
-    Check NoRuntime 'nothing installed' { Assert (-not (Test-Path $UninstallKey)) (Get-Presence $UninstallKey) }
-}
-
 function Step-Install {
     Check Install 'silent setup exits 0' { $code = Invoke-Setup $Setup $Silent; Assert ($code -eq 0) "exit code $code" }
     Check Install 'App and service installed' {
         $missing = @($AppExe, $ServiceExe | Where-Object { -not (Test-Path $_) })
+        Assert ($missing.Count -eq 0) "missing: $(if ($missing) { $missing -join ', ' } else { 'nothing' })"
+    }
+    Check Install 'App and service are the build for this Windows architecture' {
+        $os = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+        $expected = $PeMachines["$os"]
+        if (-not $expected) { throw "PowerLedger has no build for $os Windows." }
+        $found = foreach ($exe in $AppExe, $ServiceExe) { [pscustomobject]@{ Name = Split-Path $exe -Leaf; Machine = Get-PeMachine $exe } }
+        $wrong = @($found | Where-Object Machine -ne $expected)
+        Assert ($wrong.Count -eq 0) ('{0} Windows wants 0x{1:X4}: {2}' -f $os, $expected, (($found | ForEach-Object { '{0} 0x{1:X4}' -f $_.Name, $_.Machine }) -join ', '))
+    }
+    Check Install 'App and service each carry the .NET runtime' {
+        $runtime = foreach ($folder in $AppDir, (Split-Path $ServiceExe)) { Join-Path $folder 'hostfxr.dll'; Join-Path $folder 'coreclr.dll' }
+        $missing = @($runtime | Where-Object { -not (Test-Path $_) })
         Assert ($missing.Count -eq 0) "missing: $(if ($missing) { $missing -join ', ' } else { 'nothing' })"
     }
     Check Install 'Start menu shortcut opens the App' {
@@ -639,28 +654,6 @@ function Step-Reinstall {
     Confirm-HistoryKept Reinstall $before
 }
 
-function Step-BadUrl {
-    $installed = (Get-ItemProperty $UninstallKey -ErrorAction SilentlyContinue).DisplayVersion
-    Check BadUrl 'PowerLedger installed first, so the Ready page comes first' { Assert $installed "installed version: $($installed ?? 'none')" }
-    if (-not $installed) { return }
-    Initialize-Automation
-    $setup = Start-Setup $BadUrl
-    $wizard = Wait-Wizard 60
-    Check BadUrl 'wizard opens' { Assert $wizard $(if ($wizard) { $wizard.Current.Name } else { 'no Setup - PowerLedger window within 60 s' }) }
-    if ($wizard) {
-        Check BadUrl 'Install pressed' { Invoke-Install $wizard }
-        Check BadUrl 'a failed download is reported' { Submit-Dialog $SetupProcess 'could not be downloaded' 'OK' -Seconds 180 }
-        Check BadUrl 'setup stays on the Ready page' { Wait-WizardButton $wizard 'Install' -Seconds 30 }
-        Check BadUrl 'Cancel, and Yes to leaving' { Press $wizard 'Cancel'; Submit-Dialog $SetupProcess 'Exit Setup' 'Yes' -Seconds 30 }
-    }
-    Check BadUrl 'setup exits with 2, cancelled' { $code = Wait-Exit $setup 60; Assert ($code -eq 2) "exit code $code" }
-    Check BadUrl 'installed version unchanged' {
-        $now = (Get-ItemProperty $UninstallKey -ErrorAction SilentlyContinue).DisplayVersion
-        Assert ($now -eq $installed) "$installed -> $($now ?? 'none')"
-    }
-    Check BadUrl 'service still running' { Assert ((Get-ServiceState) -eq 'Running') (Get-ServiceState) }
-}
-
 function Step-UninstallDelete {
     Initialize-Automation
     $uninstaller = Start-Uninstall
@@ -675,30 +668,29 @@ function Step-UninstallDelete {
     Check UninstallDelete 'service removed' { Assert (Wait-Until { (Get-ScQueryCode) -eq 1060 } -Seconds 30) "sc.exe query: exit code $(Get-ScQueryCode)" }
 }
 
-# The download page end to end, in a setup this run starts: the runtime is fetched from Microsoft and its installer run.
+# The installer's wizard end to end, in a setup this run starts, as somebody new to PowerLedger would install it.
 # This run is elevated, so the App the wizard opens is too; DriveWizard is the step for the unelevated start.
-function Step-RuntimeWizard {
+function Step-InstallWizard {
     Initialize-Automation
-    $setup = Start-Setup $NoRuntime
+    $setup = Start-Setup $Setup
     $wizard = Wait-Wizard 60
-    Check RuntimeWizard 'wizard opens' { Assert $wizard $(if ($wizard) { $wizard.Current.Name } else { 'no Setup - PowerLedger window within 60 s' }) }
+    Check InstallWizard 'wizard opens' { Assert $wizard $(if ($wizard) { $wizard.Current.Name } else { 'no Setup - PowerLedger window within 60 s' }) }
     if ($wizard) {
-        Check RuntimeWizard 'Install pressed' { Invoke-Install $wizard }
-        Check RuntimeWizard 'runtime fetched and installed; Finish pressed' {
-            $null = Wait-WizardButton $wizard 'Finish' -Seconds 600
+        Check InstallWizard 'Install pressed' { Invoke-Install $wizard }
+        Check InstallWizard 'finished within 300 s, Finish pressed with Open PowerLedger ticked' {
+            $null = Wait-WizardButton $wizard 'Finish' -Seconds 300
             Press $wizard 'Finish'
         }
     }
-    Check RuntimeWizard 'setup exits 0' { $code = Wait-Exit $setup 120; Assert ($code -eq 0) "exit code $code" }
-    Check RuntimeWizard 'its log shows the runtime fetched and its installer run' {
+    Check InstallWizard 'setup exits 0' { $code = Wait-Exit $setup 120; Assert ($code -eq 0) "exit code $code" }
+    Check InstallWizard 'setup log has no exception and no "could not"' {
         $log = Get-StepLog 'setup'
-        $lines = @(Select-String -LiteralPath $log -Pattern 'windowsdesktop-runtime', 'Runtime installer' -SimpleMatch)
-        Assert ($lines.Count -gt 0 -and -not (Select-String -LiteralPath $log -Pattern 'could not be' -SimpleMatch -Quiet)) `
-            "$($lines.Count) lines: $(($lines | Select-Object -Last 3).Line -join ' / ')"
+        $bad = @(Select-String -LiteralPath $log -Pattern 'Exception', 'could not' -SimpleMatch)
+        Assert ($bad.Count -eq 0) "$(Split-Path $log -Leaf): $(if ($bad) { $bad.Line -join ' / ' } else { 'clean' })"
     }
-    Check RuntimeWizard 'service running' { Assert (Wait-ServiceRunning 60) (Get-ServiceState) }
-    Check RuntimeWizard 'the App the wizard opened is closed again' {
-        $null = Wait-Until { Get-AppProcess } -Seconds 30
+    Check InstallWizard 'service running' { Assert (Wait-ServiceRunning 60) (Get-ServiceState) }
+    Check InstallWizard 'the App opens within 30 s' { Assert (Wait-Until { Get-AppProcess } -Seconds 30) "App processes: $(@(Get-AppProcess).Count)" }
+    Check InstallWizard 'the App the wizard opened is closed again' {
         $how = Stop-App
         Assert (Wait-Until { -not (Get-AppProcess) } -Seconds 15) $how
     }
@@ -721,10 +713,6 @@ function Step-DriveWizard {
         if (-not (Wait-Until { Get-AppProcess } -Seconds 30)) { throw "$AppExe is not running." }
         $token = Get-Elevation (Get-AppProcess | Select-Object -First 1).Id
         Assert (-not $token.Elevated) "token elevation type $($token.Type), elevated $($token.Elevated)"
-    }
-    Check DriveWizard 'setup log mentions windowsdesktop-runtime' {
-        $log = Get-NewestSetupLog $since
-        Assert (Select-String -LiteralPath $log.FullName -Pattern 'windowsdesktop-runtime' -SimpleMatch -Quiet) $log.FullName
     }
     Check DriveWizard 'setup log has no exception and no "could not"' {
         $log = Get-NewestSetupLog $since
