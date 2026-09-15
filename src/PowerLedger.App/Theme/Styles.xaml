@@ -8,6 +8,32 @@
     <FontFamily x:Key="Font.Numbers">/Fonts/#Martian Mono, Cascadia Mono, Consolas</FontFamily>
     <FontFamily x:Key="Font.Glyphs">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
+    <!-- The logo, as assets\brand\make-brand.ps1 draws it: a graphite P on an amber tile, its bowl a meter's dial with the
+         needle in it, its stem a ledger's margin with two rows beside it. Fixed colours: it is the brand in either theme. -->
+    <DrawingImage x:Key="Brand.Mark">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Brush="#F2B233">
+                    <GeometryDrawing.Geometry>
+                        <RectangleGeometry Rect="0,0,48,48" RadiusX="10.5" RadiusY="10.5" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+                <GeometryDrawing Brush="#1B1D1A" Geometry="F0 M 12,9 H 27 A 12,12 0 0 1 27,33 H 18 V 45 H 12 Z M 18,15 H 27 A 6,6 0 0 1 27,27 H 18 Z" />
+                <GeometryDrawing Brush="#1B1D1A" Geometry="M 21,36 H 39 V 39 H 21 Z M 21,42 H 33 V 45 H 21 Z" />
+                <GeometryDrawing Geometry="M 22.5,25.5 L 30,18">
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#FFF6DC" Thickness="3" StartLineCap="Round" EndLineCap="Round" />
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+                <GeometryDrawing Brush="#FFF6DC">
+                    <GeometryDrawing.Geometry>
+                        <EllipseGeometry Center="22.5,25.5" RadiusX="2.25" RadiusY="2.25" />
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+
     <local:VisibleWhen x:Key="VisibleWhen" />
     <local:VisibleWhen x:Key="HiddenWhen" Invert="True" />
     <local:VisibleWhenText x:Key="VisibleWhenText" />

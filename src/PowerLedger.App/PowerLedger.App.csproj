@@ -7,6 +7,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>PowerLedger</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The logo, made by assets\brand\make-brand.ps1: the icon Explorer, the Start menu and a pinned taskbar button show. -->
+    <ApplicationIcon>..\..\assets\brand\PowerLedger.ico</ApplicationIcon>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- WFO0003 wants DPI awareness set through WinForms' startup API, which a WPF app never calls; WPF reads it from the manifest. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
@@ -25,6 +27,8 @@
 
   <ItemGroup>
     <Resource Include="Fonts\*.ttf" />
+    <!-- The window's icon: its taskbar button and Alt+Tab. -->
+    <Resource Include="..\..\assets\brand\PowerLedger.ico" Link="Brand\PowerLedger.ico" />
   </ItemGroup>
 
   <ItemGroup>

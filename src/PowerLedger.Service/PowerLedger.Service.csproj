@@ -7,6 +7,8 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- The logo, so the service shows as PowerLedger in Task Manager and Services. -->
+    <ApplicationIcon>..\..\assets\brand\PowerLedger.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
