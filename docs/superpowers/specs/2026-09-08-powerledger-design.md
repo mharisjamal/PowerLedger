@@ -223,7 +223,7 @@ Cost is computed at query time as `Σ energy × tariff effective at that time`, 
 
 ### Query API (Storage → App)
 
-`GetLive(seconds)`, `GetSeries(from, to, resolution)`, `GetTotals(range)` → kWh, cost, avg/peak W, hours on / idle / asleep, per-component kWh, quality mix; `GetIdleWaste(range)`; `GetDailyBuckets(range)`; `GetSessions(range)`; `GetTariffs()`; `GetCalibrationStatus()`.
+`GetLive(seconds)`, `GetSeries(from, to, resolution)`, `GetTotals(range)` → kWh, cost, avg/peak W, hours on / idle / asleep, per-component kWh, quality mix; `GetIdleWaste(range)`; `GetDailyBuckets(range)`; `GetSessions(range)`; `GetTariffs()`; `GetCalibrationStatus()`. `GetSeries` is `ReportQueries.Series`: it buckets the rows the totals read, so a chart and its totals agree. A range of up to three days reads minute rows throughout, so it is exact to the minute and a bucket under an hour has real data; an hour row stands in only where retention has purged the minutes. Each bucket's gap seconds are the sleep inside it, laid back from the moment the machine woke over the buckets the sleep covered.
 
 ## 8. IPC
 
@@ -243,8 +243,8 @@ WPF on .NET 10 with its own `WindowChrome`, `CommunityToolkit.Mvvm`, QuestPDF fo
 
 1. **Tray** — icon renders the live watts as text and updates only when the rounded value changes. Tooltip: now W and quality, today kWh and cost. Menu: Open, Start with Windows (on by default, set by the installer), Exit UI (service keeps logging).
 2. **Now** — large live watts with quality badge, 60 s sparkline, meter scale with average and peak marks, today ledger (kWh, cost, avg, peak, on, idle, asleep, CO₂), month-to-date with projected month cost, power-budget bar and per-component rows, today's stacked-area chart by component.
-3. **Breakdown** — stacked area CPU / GPU / display / rest over today / 7 d / 30 d / custom, W↔Wh toggle, per-component kWh and percentage table. Display means the internal panel plus opted-in external monitors. A negative rest band (measured mode, parts over-reporting) is clamped to zero on the chart and called out in a footnote.
-4. **Report** — range summary: kWh, cost, CO₂ kg, avg/peak, on / idle / asleep / unmonitored hours (asleep is time the machine slept while the service was running; unmonitored is range time that produced no rows at all, such as before install), idle waste with saving suggestion, comparisons (LED-bulb hours at 10 W, phone charges at 15 Wh, EV km at 0.18 kWh/km), quality mix, daily bars. Export PDF, CSV (raw / 1 m / 1 h), PNG.
+3. **Breakdown** — stacked area CPU / GPU / display / rest over today / 7 d / 30 d / custom, W↔Wh toggle, per-component kWh and percentage table. Display means the internal panel plus opted-in external monitors. A negative rest band (measured mode, parts over-reporting) is clamped to zero on the chart and called out in a footnote. Ranges offered: today, 7 days, 30 days, this month, last month and custom days from two date pickers (the drop-down calendar keeps Windows' look). Buckets are 5 minutes for a day, 15 up to three days, an hour for a week, 6 hours for a month and a day beyond. The chart spans the whole range with the future left empty, a dashed line at now, and hatching where the machine slept through most of a bucket.
+4. **Report** — range summary: kWh, cost, CO₂ kg, avg/peak, on / idle / asleep / unmonitored hours (asleep is time the machine slept while the service was running; unmonitored is range time that produced no rows at all, such as before install), idle waste with saving suggestion, comparisons (LED-bulb hours at 10 W, phone charges at 15 Wh, EV km at 0.18 kWh/km), quality mix, daily bars. Export PDF, CSV (raw / 1 m / 1 h), PNG. The screen opens on this month. Exports are named from the range (`PowerLedger-2026-08` for a finished month, first to last day otherwise) and written beside the target, then moved into place. PNG is the report's sheet at screen resolution; the PDF is one A4 page in the light palette, drawn with QuestPDF in Windows' fonts (Segoe UI with the script fonts behind it). The saving suggestion quotes the plugged-in sleep and display timeouts, read with `powrprof`, the API behind `powercfg`.
 5. **Settings** — tariff and currency with history, CO₂ factor (country picker with bundled table, default 0.40 kg/kWh, editable), machine profile (chassis, PSU tier, extras, monitors, GPU/CPU TDP overrides), idle threshold, sample interval, retention, calibration status and reset, theme, start with Windows. About: service, driver, and per-source health.
 6. **First-run wizard** — tariff (region → suggested rate) → confirm detected hardware → "Measured vs Estimated" explainer.
 
@@ -252,7 +252,7 @@ UI-only preferences (theme, start with Windows, units) live in `%LOCALAPPDATA%\P
 
 ### Monthly report
 
-The App checks at startup and once per hour while running. When a month has ended and `Documents\PowerLedger\PowerLedger-YYYY-MM.pdf` does not yet exist for it, the App generates that PDF and shows a toast with the headline numbers. The App owns this because the service runs as SYSTEM and has no user Documents folder.
+The App checks at startup and once per hour while running. When a month has ended and `Documents\PowerLedger\PowerLedger-YYYY-MM.pdf` does not yet exist for it, the App generates that PDF and shows a toast with the headline numbers. The App owns this because the service runs as SYSTEM and has no user Documents folder. The first check comes 30 seconds after startup. It looks back at most twelve finished months, no earlier than the month history began in, skips a month with no readings at all, and waits for the next hour when history can't be read or Documents can't be written. The notification names the newest month's energy and cost, and clicking it opens that PDF.
 
 ### States
 
@@ -319,14 +319,14 @@ Framework: xUnit, Shouldly (BSD; FluentAssertions 8+ requires a paid commercial 
 - **Sensors**: validator driven by fake sources with glitch sequences (wrap, blip, spike, transition). Real-hardware adapter tests carry `Trait("Category","Hardware")` and are skipped in CI.
 - **Storage**: temp-file SQLite; migration from every prior schema version; retention purge; a reader querying while the writer commits under WAL.
 - **Service**: host the worker with fake sources and a temp DB, advance the fake clock through 10 simulated minutes including a suspend/resume, assert rows, aggregates, and sessions. Pipe round-trip and reconnect tests.
-- **App**: ViewModel and geometry unit tests; the pipe client against a real pipe; history against a temp database; a rendering test that draws the window in both themes to PNG (Category UI, skipped in CI). A manual QA checklist per screen for v1.
+- **App**: ViewModel, geometry and chart unit tests; the pipe client against a real pipe; history against a temp database; the PDF generated from a report; the drawn controls' screen-reader names; a rendering test that draws every screen in both themes to PNG, presses PNG export and writes the PDF (Category UI, skipped in CI); the sleep-timeout reader (Category Hardware). A manual QA checklist per screen for v1.
 - **Accuracy (manual, once)**: battery mode within ±5 % of `powercfg /batteryreport`; calibrated AC estimate within ±15 % of an inexpensive wall meter, on the developer's Dell Inspiron 3501.
 - **Performance gate**: service < 0.5 % CPU and < 50 MB private working set, the figure Task Manager shows (the full working set adds shared system and driver DLL images, about 50 MB more on the development laptop, where the service measured 0.04 % CPU and 36.8 MB); App < 120 MB with a window open; measured with `dotnet-counters` and the process counters; 7-day soak on the developer machine with zero crashes.
 
 ## 13. Distribution
 
 - Requirements: Windows 10 1809 or later, Windows 11, x64 only.
-- Framework-dependent build; Inno Setup installs the .NET 10 Desktop Runtime if missing, so the installer stays around 15 MB.
+- Framework-dependent build; Inno Setup installs the .NET 10 Desktop Runtime if missing, so the installer stays around 15 MB. Publish for win-x64, so only that platform's native libraries ship: QuestPDF and SQLite bring natives for eight platforms, 116 MB in a platform-neutral build.
 - The installer registers the service with recovery options, adds the tray app to HKCU Run, and launches the first-run wizard. There is no driver to install. Uninstall stops the service and asks whether to keep the database.
 - Releases on GitHub with a winget manifest after the first stable build. v1 has a "check for updates" link; an in-app updater is v1.1.
 - CI (GitHub Actions): build, tests outside the Hardware and UI categories, installer artifact.

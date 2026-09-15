@@ -2,6 +2,8 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -48,6 +50,7 @@ public class RenderingTests
         thread.Join();
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
 
+        new FileInfo(Path.Combine(Folder, "report-picture.png")).Length.ShouldBeGreaterThan(30_000);
         foreach (var (_, name, _, _) in Pages)
         {
             foreach (var theme in new[] { Theme.Dark, Theme.Light })
@@ -64,7 +67,8 @@ public class RenderingTests
         {
             Source = new Uri("pack://application:,,,/PowerLedger;component/Theme/Styles.xaml", UriKind.Absolute),
         });
-        var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(), "0.1.0");
+        using var saver = new FakeSaver();
+        var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), "0.1.0");
         ResourceDictionary? palette = null;
         foreach (var theme in new[] { Theme.Dark, Theme.Light })
         {
@@ -84,12 +88,17 @@ public class RenderingTests
                 window.Show();
                 Pump(TimeSpan.FromMilliseconds(1200));   // the live readout settles over 900 ms
                 Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"{name}-{theme}.png");
+                if (page == Page.Report && FindButton(window, "PNG") is { } picture)
+                {
+                    picture.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));   // the view draws the report into the file the saver names
+                    File.Copy(saver.Chosen, Path.Combine(Folder, "report-picture.png"), overwrite: true);
+                }
                 window.Close();
 
                 // Windows keeps a window within the screen, so each screen's whole length is drawn from its view alone.
                 var child = view(shell);
                 child.Width = 1010;
-                var host = new System.Windows.Controls.Border { Background = (Brush)application.FindResource("Brush.Panel"), Child = child };
+                var host = new Border { Background = (Brush)application.FindResource("Brush.Panel"), Child = child };
                 host.Measure(new Size(1010, double.PositiveInfinity));
                 host.Arrange(new Rect(host.DesiredSize));
                 Pump(TimeSpan.FromMilliseconds(1200));
@@ -141,10 +150,10 @@ public class RenderingTests
     }
 
     /// <summary>September so far on the same machine, with a tariff and a plan that sleeps after three hours.</summary>
-    private static ReportViewModel ReportScreen()
+    private static ReportViewModel ReportScreen(FakeSaver saver)
     {
         var history = new FakeRangeHistory { Answer = Month };
-        return new ReportViewModel(history, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
+        return new ReportViewModel(history, new FakeSleep(), saver, _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, 0.38);
     }
 
@@ -218,6 +227,17 @@ public class RenderingTests
                 });
         }
         return series;
+    }
+
+    private static Button? FindButton(DependencyObject root, string content)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is Button button && Equals(button.Content, content)) return button;
+            if (FindButton(child, content) is { } found) return found;
+        }
+        return null;
     }
 
     private static void Pump(TimeSpan duration)

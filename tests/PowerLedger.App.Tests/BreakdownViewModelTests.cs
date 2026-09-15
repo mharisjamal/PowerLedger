@@ -128,5 +128,4 @@ public class BreakdownViewModelTests
         _clock.Advance(BreakdownViewModel.RefreshEvery * 3);
         _history.Reads.Count.ShouldBe(2);
     }
-
 }
