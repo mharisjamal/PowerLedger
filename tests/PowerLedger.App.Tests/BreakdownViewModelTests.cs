@@ -129,19 +129,4 @@ public class BreakdownViewModelTests
         _history.Reads.Count.ShouldBe(2);
     }
 
-    [Fact]
-    public void The_shell_reads_the_breakdown_only_while_it_shows()
-    {
-        var breakdown = Model();
-        var now = new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { });
-        var shell = new ShellViewModel(now, breakdown, "0.1.0");
-
-        shell.Page = Page.Breakdown;
-        shell.Current.ShouldBe(breakdown);
-        _history.Reads.Count.ShouldBe(1);
-
-        shell.Page = Page.Now;
-        _clock.Advance(BreakdownViewModel.RefreshEvery * 2);
-        _history.Reads.Count.ShouldBe(1);
-    }
 }

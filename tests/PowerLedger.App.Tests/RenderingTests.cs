@@ -19,10 +19,12 @@ public class RenderingTests
     private static readonly DateTimeOffset Now = new(2026, 9, 8, 14, 32, 7, TimeSpan.Zero);
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
 
-    private static readonly (Page Page, string Name, Func<ShellViewModel, FrameworkElement> View)[] Pages =
+    private static readonly (Page Page, string Name, Action<ShellViewModel> Prepare, Func<ShellViewModel, FrameworkElement> View)[] Pages =
     [
-        (Page.Now, "now", shell => new NowView { DataContext = shell.Now }),
-        (Page.Breakdown, "breakdown", shell => new BreakdownView { DataContext = shell.Breakdown }),
+        (Page.Now, "now", _ => { }, shell => new NowView { DataContext = shell.Now }),
+        (Page.Breakdown, "breakdown", shell => shell.Breakdown.Range.Choice = RangeChoice.SevenDays, shell => new BreakdownView { DataContext = shell.Breakdown }),
+        (Page.Breakdown, "custom", shell => shell.Breakdown.Range.Choice = RangeChoice.Custom, shell => new BreakdownView { DataContext = shell.Breakdown }),
+        (Page.Report, "report", _ => { }, shell => new ReportView { DataContext = shell.Report }),
     ];
 
     [Fact]
@@ -46,7 +48,7 @@ public class RenderingTests
         thread.Join();
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
 
-        foreach (var (_, name, _) in Pages)
+        foreach (var (_, name, _, _) in Pages)
         {
             foreach (var theme in new[] { Theme.Dark, Theme.Light })
             {
@@ -62,7 +64,7 @@ public class RenderingTests
         {
             Source = new Uri("pack://application:,,,/PowerLedger;component/Theme/Styles.xaml", UriKind.Absolute),
         });
-        var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), "0.1.0");
+        var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(), "0.1.0");
         ResourceDictionary? palette = null;
         foreach (var theme in new[] { Theme.Dark, Theme.Light })
         {
@@ -70,8 +72,9 @@ public class RenderingTests
             palette = ThemeManager.Palette(theme);
             application.Resources.MergedDictionaries.Insert(0, palette);
 
-            foreach (var (page, name, view) in Pages)
+            foreach (var (page, name, prepare, view) in Pages)
             {
+                prepare(shell);
                 shell.Page = page;
                 var window = new MainWindow
                 {
@@ -95,6 +98,7 @@ public class RenderingTests
             }
         }
         shell.Page = Page.Now;
+        File.WriteAllBytes(Path.Combine(Folder, "report.pdf"), ReportDocument.Generate(shell.Report.Data, "0.1.0", Now, English));
     }
 
     private static void Save(Visual visual, int width, int height, string name)
@@ -133,8 +137,23 @@ public class RenderingTests
     {
         var history = new FakeRangeHistory { Answer = range => Reports.Typical(range) with { Series = Week(range) } };
         var model = new BreakdownViewModel(history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English);
-        model.Range.Choice = RangeChoice.SevenDays;
         return model;
+    }
+
+    /// <summary>September so far on the same machine, with a tariff and a plan that sleeps after three hours.</summary>
+    private static ReportViewModel ReportScreen()
+    {
+        var history = new FakeRangeHistory { Answer = Month };
+        return new ReportViewModel(history, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
+            TimeZoneInfo.Utc, English, 0.38);
+    }
+
+    private static RangeReport Month(DateRange range)
+    {
+        var report = Reports.Typical(range);
+        var weights = report.Days.Select((_, i) => 0.7 + 0.15 * (i * 3 % 5)).ToList();
+        var days = report.Days.Select((d, i) => d with { EnergyKwh = report.Totals.EnergyKwh * weights[i] / weights.Sum() }).ToList();
+        return report with { Days = days };
     }
 
     private static IReadOnlyList<Aggregate> Week(DateRange range)

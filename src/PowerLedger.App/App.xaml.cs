@@ -15,6 +15,7 @@ public partial class App : Application
     private PipeServiceLink? _link;
     private NowViewModel? _now;
     private BreakdownViewModel? _breakdown;
+    private ReportViewModel? _report;
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
     private MainWindow? _window;
@@ -42,7 +43,12 @@ public partial class App : Application
             _link, history, threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture,
             preferences.Co2KgPerKwh, ServiceStarter.Start);
         _breakdown = new BreakdownViewModel(history, threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture);
-        _shell = new ShellViewModel(_now, _breakdown, Version());
+        var version = Version();
+        byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, CultureInfo.CurrentCulture);
+        _report = new ReportViewModel(
+            history, new SleepSettings(), new FileSaver(), Pdf, threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture,
+            preferences.Co2KgPerKwh);
+        _shell = new ShellViewModel(_now, _breakdown, _report, version);
         _tray = new TrayIcon(ShowWindow, ExitUi, new StartWithWindows(Environment.ProcessPath!));
         _now.PropertyChanged += OnNowChanged;
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
@@ -103,6 +109,7 @@ public partial class App : Application
                 _now.Dispose();
             }
             _breakdown?.Dispose();
+            _report?.Dispose();
             if (_link is not null) await _link.DisposeAsync();
             _theme?.Dispose();
             _database?.Dispose();

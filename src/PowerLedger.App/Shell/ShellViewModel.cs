@@ -15,19 +15,17 @@ internal enum Page
 internal sealed record PlaceholderViewModel(string Title, string Text);
 
 /// <summary>The window: which page shows, the screens, and the version in the title bar.</summary>
-internal sealed class ShellViewModel(NowViewModel now, BreakdownViewModel breakdown, string version) : ObservableObject
+internal sealed class ShellViewModel(NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, string version) : ObservableObject
 {
-    private static readonly Dictionary<Page, PlaceholderViewModel> Placeholders = new()
-    {
-        [Page.Report] = new("Report", "The energy bill, comparisons and exports arrive in the next build."),
-        [Page.Settings] = new("Settings", "Tariff, machine profile and preferences arrive in the next build."),
-    };
+    private static readonly PlaceholderViewModel Settings = new("Settings", "Tariff, machine profile and preferences arrive in the next build.");
 
     private Page _page = Page.Now;
 
     public NowViewModel Now { get; } = now;
 
     public BreakdownViewModel Breakdown { get; } = breakdown;
+
+    public ReportViewModel Report { get; } = report;
 
     public string Version { get; } = version;
 
@@ -40,6 +38,8 @@ internal sealed class ShellViewModel(NowViewModel now, BreakdownViewModel breakd
             if (!SetProperty(ref _page, value)) return;
             if (value == Page.Breakdown) Breakdown.Show();
             else Breakdown.Hide();
+            if (value == Page.Report) Report.Show();
+            else Report.Hide();
             OnPropertyChanged(nameof(Current));
         }
     }
@@ -48,6 +48,7 @@ internal sealed class ShellViewModel(NowViewModel now, BreakdownViewModel breakd
     {
         Page.Now => Now,
         Page.Breakdown => Breakdown,
-        _ => Placeholders[Page],
+        Page.Report => Report,
+        _ => Settings,
     };
 }

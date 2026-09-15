@@ -15,6 +15,9 @@
         <DataTemplate DataType="{x:Type local:BreakdownViewModel}">
             <local:BreakdownView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type local:ReportViewModel}">
+            <local:ReportView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type local:PlaceholderViewModel}">
             <StackPanel Margin="26,22" MaxWidth="520" HorizontalAlignment="Left">
                 <TextBlock Style="{StaticResource Text.Eyebrow}" Text="{Binding Title, Converter={StaticResource Upper}}" />
