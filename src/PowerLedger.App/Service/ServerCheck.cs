@@ -72,10 +72,19 @@ internal sealed class InstalledServiceCheck(Func<string?> installedImage) : ISer
         return exe > 0 ? line[..(exe + 4)] : line;
     }
 
+    /// <summary>The installed service's executable, or null when it is not installed or the registry won't say. The link
+    /// asks on every connection, so nothing may escape from here.</summary>
     private static string? RegisteredImage()
     {
-        using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{ServiceName}");
-        return ExecutableOf(key?.GetValue("ImagePath") as string);
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{ServiceName}");
+            return ExecutableOf(key?.GetValue("ImagePath") as string);
+        }
+        catch (Exception error) when (error is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            return null;
+        }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]

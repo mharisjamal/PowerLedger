@@ -57,7 +57,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         Tariff = new TariffForm(link, threads, clock, zone, culture, regionCurrency);
         Service = new ServiceForm(link, threads, culture);
         Tariff.Saved += ReadTariffs;
-        Service.Saved += Show;
+        Service.Saved += ReadSaved;
         SaveCo2 = new RelayCommand(ApplyCo2);
         ResetCalibration = new RelayCommand(() => ConfirmingReset = true);
         CancelReset = new RelayCommand(() => ConfirmingReset = false);
@@ -156,7 +156,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         Tariff.Saved -= ReadTariffs;
-        Service.Saved -= Show;
+        Service.Saved -= ReadSaved;
         _link.ConnectionChanged -= OnConnectionChanged;
         Hide();
     }
@@ -208,6 +208,12 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     {
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         _threads.Post(() => ShowStatus(status));
+    }
+
+    /// <summary>The service took the settings: fill the form with what it now holds, while the screen shows.</summary>
+    private void ReadSaved()
+    {
+        if (_timer is not null) _threads.Background(() => _ = ReadAllAsync(refill: true));
     }
 
     private void ReadTariffs()

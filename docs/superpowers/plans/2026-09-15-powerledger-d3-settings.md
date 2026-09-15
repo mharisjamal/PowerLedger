@@ -213,10 +213,19 @@ internal sealed class InstalledServiceCheck(Func<string?> installedImage) : ISer
         return exe > 0 ? line[..(exe + 4)] : line;
     }
 
+    /// <summary>The installed service's executable, or null when it is not installed or the registry won't say. The link
+    /// asks on every connection, so nothing may escape from here.</summary>
     private static string? RegisteredImage()
     {
-        using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{ServiceName}");
-        return ExecutableOf(key?.GetValue("ImagePath") as string);
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{ServiceName}");
+            return ExecutableOf(key?.GetValue("ImagePath") as string);
+        }
+        catch (Exception error) when (error is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            return null;
+        }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -1787,6 +1796,20 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task A_save_finishing_after_the_screen_hid_starts_no_reading()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+        model.Hide();
+        var before = _link.StatusReads;
+
+        (await model.Service.SaveAsync()).ShouldBeTrue();
+        _clock.Advance(SettingsViewModel.StatusEvery * 3);
+        _link.StatusReads.ShouldBe(before);
+    }
+
+    [Fact]
     public void Run_setup_again_asks_the_shell()
     {
         var model = Model();
@@ -1883,7 +1906,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         Tariff = new TariffForm(link, threads, clock, zone, culture, regionCurrency);
         Service = new ServiceForm(link, threads, culture);
         Tariff.Saved += ReadTariffs;
-        Service.Saved += Show;
+        Service.Saved += ReadSaved;
         SaveCo2 = new RelayCommand(ApplyCo2);
         ResetCalibration = new RelayCommand(() => ConfirmingReset = true);
         CancelReset = new RelayCommand(() => ConfirmingReset = false);
@@ -1982,7 +2005,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         Tariff.Saved -= ReadTariffs;
-        Service.Saved -= Show;
+        Service.Saved -= ReadSaved;
         _link.ConnectionChanged -= OnConnectionChanged;
         Hide();
     }
@@ -2034,6 +2057,12 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     {
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         _threads.Post(() => ShowStatus(status));
+    }
+
+    /// <summary>The service took the settings: fill the form with what it now holds, while the screen shows.</summary>
+    private void ReadSaved()
+    {
+        if (_timer is not null) _threads.Background(() => _ = ReadAllAsync(refill: true));
     }
 
     private void ReadTariffs()
@@ -3490,6 +3519,17 @@ git commit -m "Complete Plan D3: Settings, the first-run wizard, and changes ove
 - The drop-down calendar of the date pickers keeps Windows' light look in the dark theme.
 - Settings fills the service's form each time it shows, so values typed and not saved are lost when leaving the page.
 - The bundled fonts are not in the repository yet; downloading them needs the owner's go-ahead.
+
+---
+
+## After the final review
+
+One whole-branch review ran once every task was committed, and it reported nothing. A pass of my own over the paths that run on other threads found two things, fixed in one commit. The code blocks above already show both fixes:
+
+| Problem | Fix |
+|---|---|
+| The link asks the server check on every connection, from its connect loop. A registry read that threw would have ended that loop for good, so the App would never have reconnected. | `RegisteredImage` treats a registry it cannot read as "not installed". |
+| A save that finished after Settings was hidden started the ten-second status reading again, and it kept running until Settings next showed and hid. | After a save, Settings reads the service again only while it shows. `FakeLink` counts status reads for the test that checks this. |
 
 ---
 

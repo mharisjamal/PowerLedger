@@ -27,7 +27,14 @@ internal sealed class FakeLink : IServiceLink
         ConnectionChanged?.Invoke(connected);
     }
 
-    public Task<ServiceStatus?> GetStatusAsync(CancellationToken cancel = default) => Task.FromResult(IsConnected ? Status : null);
+    /// <summary>How many times the App asked for the status.</summary>
+    public int StatusReads { get; private set; }
+
+    public Task<ServiceStatus?> GetStatusAsync(CancellationToken cancel = default)
+    {
+        StatusReads++;
+        return Task.FromResult(IsConnected ? Status : null);
+    }
 
     public Task<ServiceSettings?> GetSettingsAsync(CancellationToken cancel = default) => Task.FromResult(IsConnected ? Settings : null);
 

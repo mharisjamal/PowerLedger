@@ -124,6 +124,20 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task A_save_finishing_after_the_screen_hid_starts_no_reading()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+        model.Hide();
+        var before = _link.StatusReads;
+
+        (await model.Service.SaveAsync()).ShouldBeTrue();
+        _clock.Advance(SettingsViewModel.StatusEvery * 3);
+        _link.StatusReads.ShouldBe(before);
+    }
+
+    [Fact]
     public void Run_setup_again_asks_the_shell()
     {
         var model = Model();
