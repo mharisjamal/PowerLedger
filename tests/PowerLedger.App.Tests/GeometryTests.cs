@@ -66,4 +66,10 @@ public class GeometryTests
         Geometry.ChartScale(3, floor: 1).ShouldBe((3.0, 1.0));
         Geometry.ChartScale(0.3, floor: 0.1).Max.ShouldBe(0.3, 1e-9);
     }
+
+    [Theory]
+    [InlineData(30, 30.0, 1)]
+    [InlineData(90, 10.0, 3)]
+    [InlineData(0, 10.0, 1)]
+    public void Labels_skip_slots_until_they_fit(int count, double slot, int every) => Geometry.LabelEvery(count, slot, 22).ShouldBe(every);
 }

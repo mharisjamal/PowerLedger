@@ -77,4 +77,8 @@ internal static class Geometry
         }
         return (rest, display, gpu, cpu);
     }
+
+    /// <summary>How many slots apart labels <paramref name="labelWidth"/> wide must be to fit: every slot when they fit in one.</summary>
+    public static int LabelEvery(int count, double slotWidth, double labelWidth)
+        => count <= 0 || slotWidth <= 0 ? 1 : Math.Max(1, (int)Math.Ceiling(labelWidth / slotWidth));
 }

@@ -18,6 +18,14 @@ internal sealed class Sparkline : Instrument
 
     public IReadOnlyList<SparkSample> Values { get => (IReadOnlyList<SparkSample>)GetValue(ValuesProperty); set => SetValue(ValuesProperty, value); }
 
+    internal override string Describe()
+    {
+        var values = Values;
+        if (values.Count == 0) return "Last 60 seconds: no readings.";
+        var culture = CultureInfo.CurrentCulture;
+        return $"Last 60 seconds: between {Format.WholeWatts(values.Min(v => v.Watts), culture)} and {Format.WholeWatts(values.Max(v => v.Watts), culture)} W.";
+    }
+
     protected override Size MeasureOverride(Size availableSize) => Fixed(availableSize, ControlHeight);
 
     protected override void OnRender(DrawingContext dc)

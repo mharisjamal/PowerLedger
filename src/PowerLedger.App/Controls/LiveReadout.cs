@@ -26,6 +26,9 @@ internal sealed class LiveReadout : Instrument
 
     public double NumberSize { get => (double)GetValue(NumberSizeProperty); set => SetValue(NumberSizeProperty, value); }
 
+    internal override string Describe()
+        => double.IsFinite(Value) ? Format.Watts(Value, CultureInfo.CurrentCulture) + " watts" : "Waiting for a reading";
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var number = Number();

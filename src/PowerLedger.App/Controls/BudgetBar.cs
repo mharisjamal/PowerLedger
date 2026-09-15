@@ -18,6 +18,9 @@ internal sealed class BudgetBar : Instrument
 
     public double Total { get => (double)GetValue(TotalProperty); set => SetValue(TotalProperty, value); }
 
+    internal override string Describe()
+        => Rows.Count == 0 ? "Power budget: no reading." : "Power budget: " + string.Join(", ", Rows.Select(r => $"{r.Name} {r.Watts} ({r.Percent})")) + ".";
+
     protected override Size MeasureOverride(Size availableSize) => Fixed(availableSize, RulerTop + 22);
 
     protected override void OnRender(DrawingContext dc)

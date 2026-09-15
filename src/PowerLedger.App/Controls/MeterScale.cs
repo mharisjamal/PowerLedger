@@ -23,6 +23,14 @@ internal sealed class MeterScale : Instrument
 
     public double Peak { get => (double)GetValue(PeakProperty); set => SetValue(PeakProperty, value); }
 
+    internal override string Describe()
+    {
+        var culture = CultureInfo.CurrentCulture;
+        return double.IsFinite(Value)
+            ? $"Meter: {Format.Watts(Value, culture)} W now, average {Format.WholeWatts(Average, culture)} W, peak {Format.WholeWatts(Peak, culture)} W today."
+            : "Meter: waiting for a reading.";
+    }
+
     protected override Size MeasureOverride(Size availableSize) => Fixed(availableSize, 52);
 
     protected override void OnRender(DrawingContext dc)
