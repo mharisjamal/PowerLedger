@@ -1,4 +1,5 @@
-# Build, test outside the Hardware, UI and Installed categories, then make the installer and test it (spec §13).
+# Build, test outside the Hardware, UI and Installed categories, then make the installer and test it on x64 and on
+# Arm64 (spec §13).
 name: CI
 
 on:
@@ -30,12 +31,16 @@ jobs:
         shell: pwsh
         run: ./installer/build.ps1 -TestVariants
 
+      # The installer and its upgrade build, kept under installer/output so test/ stays a subfolder; the Arm64 job
+      # installs them.
       - uses: actions/upload-artifact@v4
         with:
           name: installer
-          path: installer/output/*.exe
+          path: |
+            installer/output/*.exe
+            installer/output/test/*.exe
 
-      # Hosted Windows runners are administrators, so the installer test's silent steps run here.
+      # Hosted Windows runners are administrators, so the installer test's silent steps run here, on x64.
       - name: Installer test
         shell: pwsh
         run: ./installer/test-installer.ps1
@@ -44,4 +49,27 @@ jobs:
         if: always()
         with:
           name: installer-test-results
+          path: installer/output/test-results/
+
+  # The same installer on Arm64 Windows, which is where its Arm64 build is exercised. GitHub-hosted Windows runners
+  # are administrators, so the silent steps run here too.
+  installer-arm64:
+    needs: build
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: installer/output
+
+      - name: Installer test
+        shell: pwsh
+        run: ./installer/test-installer.ps1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-test-results-arm64
           path: installer/output/test-results/
