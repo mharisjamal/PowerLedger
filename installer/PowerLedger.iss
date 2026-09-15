@@ -7,6 +7,9 @@
 #ifndef Compression
   #define Compression "lzma2/ultra64"
 #endif
+#ifndef PayloadBytes
+  #define PayloadBytes "0"
+#endif
 #define Publish "..\artifacts\publish"
 #define ServiceName "PowerLedger"
 
@@ -25,6 +28,9 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64os or arm64
 ArchitecturesInstallIn64BitMode=x64os or arm64
 MinVersion=10.0.17763
+; Inno Setup doesn't count files picked per architecture (the Checks in [Files]) toward the disk space it asks for, so
+; build.ps1 passes the bigger build's size; without it the destination page claimed a few MB.
+ExtraDiskSpaceRequired={#PayloadBytes}
 AppMutex=PowerLedger.App
 CloseApplications=yes
 RestartApplications=no

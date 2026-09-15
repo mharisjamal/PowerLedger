@@ -63,7 +63,16 @@ function Invoke-Iscc([string[]]$Options) {
 }
 
 $fastCompression = '/DCompression=lzma2/fast'
-$options = @("/DAppVersion=$version")
+
+# Inno Setup doesn't count files it picks per architecture toward the disk space setup asks for, so it is told what the
+# bigger build takes.
+$payload = (Get-ChildItem (Join-Path $root 'artifacts\publish') -Directory | ForEach-Object {
+        (Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum).Sum
+    } | Measure-Object -Maximum).Maximum
+if (-not $payload) { throw 'artifacts\publish is empty; run this without -SkipPublish.' }
+$payloadOption = "/DPayloadBytes=$([long]$payload)"
+
+$options = @("/DAppVersion=$version", $payloadOption)
 if ($Fast) { $options += $fastCompression }
 Invoke-Iscc $options
 $made = @(Join-Path $PSScriptRoot "output\PowerLedger-$version-setup.exe")
@@ -73,7 +82,7 @@ if ($TestVariants) {
     $current = [version]$version
     $next = '{0}.{1}.{2}' -f $current.Major, $current.Minor, ([Math]::Max($current.Build, 0) + 1)
     $upgrade = "PowerLedger-$next-setup"
-    Invoke-Iscc @("/DAppVersion=$next", $fastCompression, "/O$test", "/F$upgrade")
+    Invoke-Iscc @("/DAppVersion=$next", $payloadOption, $fastCompression, "/O$test", "/F$upgrade")
     $made += Join-Path $test "$upgrade.exe"
 }
 
