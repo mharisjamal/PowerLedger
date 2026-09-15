@@ -1,0 +1,241 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:PowerLedger.App">
+
+    <!-- Spec §9 type: the bundled faces first, then Windows' own. -->
+    <FontFamily x:Key="Font.Ui">/Fonts/#Archivo, Bahnschrift, Segoe UI</FontFamily>
+    <FontFamily x:Key="Font.Narrow">/Fonts/#Archivo Narrow, Bahnschrift</FontFamily>
+    <FontFamily x:Key="Font.Numbers">/Fonts/#Martian Mono, Cascadia Mono, Consolas</FontFamily>
+    <FontFamily x:Key="Font.Glyphs">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+    <local:VisibleWhen x:Key="VisibleWhen" />
+    <local:VisibleWhen x:Key="HiddenWhen" Invert="True" />
+    <local:PageIs x:Key="PageIs" />
+    <local:UpperCase x:Key="Upper" />
+
+    <Style x:Key="Text.Body" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+    </Style>
+    <Style x:Key="Text.Secondary" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink2}" />
+    </Style>
+    <Style x:Key="Text.Muted" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink3}" />
+    </Style>
+    <Style x:Key="Text.Eyebrow" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Narrow}" />
+        <Setter Property="FontStretch" Value="SemiCondensed" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink2}" />
+    </Style>
+    <Style x:Key="Text.Number" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Numbers}" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+    </Style>
+
+    <!-- The drawn controls take the palette here, so views never repeat it. -->
+    <Style x:Key="Instrument" TargetType="local:Instrument">
+        <Setter Property="LineBrush" Value="{DynamicResource Brush.Line}" />
+        <Setter Property="StrongLineBrush" Value="{DynamicResource Brush.LineStrong}" />
+        <Setter Property="LabelBrush" Value="{DynamicResource Brush.Ink3}" />
+        <Setter Property="InkBrush" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="AccentBrush" Value="{DynamicResource Brush.Amber}" />
+        <Setter Property="AccentSoftBrush" Value="{DynamicResource Brush.AmberSoft}" />
+        <Setter Property="CpuBrush" Value="{DynamicResource Brush.PartCpu}" />
+        <Setter Property="GpuBrush" Value="{DynamicResource Brush.PartGpu}" />
+        <Setter Property="DisplayBrush" Value="{DynamicResource Brush.PartDisplay}" />
+        <Setter Property="RestBrush" Value="{DynamicResource Brush.PartRest}" />
+        <Setter Property="NumberFont" Value="{StaticResource Font.Numbers}" />
+    </Style>
+    <Style TargetType="local:MeterScale" BasedOn="{StaticResource Instrument}" />
+    <Style TargetType="local:BudgetBar" BasedOn="{StaticResource Instrument}" />
+    <Style TargetType="local:Sparkline" BasedOn="{StaticResource Instrument}" />
+    <Style TargetType="local:DayChart" BasedOn="{StaticResource Instrument}" />
+    <Style TargetType="local:LiveReadout" BasedOn="{StaticResource Instrument}">
+        <Setter Property="LabelBrush" Value="{DynamicResource Brush.Ink2}" />
+    </Style>
+
+    <!-- Quality by colour and by form: solid, half, dashed. -->
+    <Style TargetType="local:QualityBadge">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Measured}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="local:QualityBadge">
+                    <Grid x:Name="Root" Height="22">
+                        <Rectangle x:Name="Frame" RadiusX="2" RadiusY="2" StrokeThickness="1" Stroke="{TemplateBinding Foreground}" />
+                        <StackPanel Orientation="Horizontal" Margin="7,0,8,0" VerticalAlignment="Center">
+                            <Grid Width="8" Height="8" VerticalAlignment="Center">
+                                <Ellipse x:Name="Dot" Stroke="{TemplateBinding Foreground}" StrokeThickness="1" Fill="{TemplateBinding Foreground}" />
+                                <Path x:Name="Half" Data="M4,0 A4,4 0 0 0 4,8 Z" Fill="{TemplateBinding Foreground}" Visibility="Collapsed" />
+                            </Grid>
+                            <TextBlock x:Name="Label" Margin="6,0,0,0" Text="MEASURED" VerticalAlignment="Center"
+                                       Style="{StaticResource Text.Eyebrow}" Foreground="{TemplateBinding Foreground}" />
+                        </StackPanel>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Quality" Value="{x:Null}">
+                            <Setter TargetName="Root" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="Quality" Value="Calibrated">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Calibrated}" />
+                            <Setter TargetName="Dot" Property="Fill" Value="Transparent" />
+                            <Setter TargetName="Half" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="Label" Property="Text" Value="CALIBRATED ±10%" />
+                        </Trigger>
+                        <Trigger Property="Quality" Value="Estimated">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Estimated}" />
+                            <Setter TargetName="Dot" Property="Fill" Value="Transparent" />
+                            <Setter TargetName="Frame" Property="StrokeDashArray" Value="3 2" />
+                            <Setter TargetName="Label" Property="Text" Value="ESTIMATED ±20%" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A ledger line: label, dotted leader, value and a small note. -->
+    <Style TargetType="local:LedgerRow">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="local:LedgerRow">
+                    <Grid x:Name="Row" Margin="0,7">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" MinWidth="16" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Style="{StaticResource Text.Secondary}" Text="{TemplateBinding Key}" VerticalAlignment="Bottom" />
+                        <Line Grid.Column="1" X1="0" X2="1" Stretch="Fill" VerticalAlignment="Bottom" Margin="10,0,10,4"
+                              Stroke="{DynamicResource Brush.LineStrong}" StrokeThickness="1" StrokeDashArray="1 3" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
+                            <TextBlock x:Name="Value" Style="{StaticResource Text.Number}" Text="{TemplateBinding Value}" VerticalAlignment="Bottom" />
+                            <TextBlock x:Name="Note" Style="{StaticResource Text.Muted}" Margin="6,0,0,1" Text="{TemplateBinding Note}" VerticalAlignment="Bottom" />
+                        </StackPanel>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHero" Value="True">
+                            <Setter TargetName="Row" Property="Margin" Value="0,12,0,8" />
+                            <Setter TargetName="Value" Property="FontSize" Value="26" />
+                            <Setter TargetName="Value" Property="FontWeight" Value="Light" />
+                            <Setter TargetName="Note" Property="FontSize" Value="13" />
+                        </Trigger>
+                        <Trigger Property="Note" Value="">
+                            <Setter TargetName="Note" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The rail: text with an LED that lights amber for the page shown. -->
+    <Style x:Key="Rail" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink2}" />
+        <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border Background="Transparent" Padding="18,9">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="Led" Width="7" Height="7" StrokeThickness="1" Stroke="{DynamicResource Brush.Ink3}" Fill="Transparent" VerticalAlignment="Center" />
+                            <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                            <Setter TargetName="Led" Property="Fill" Value="{DynamicResource Brush.Amber}" />
+                            <Setter TargetName="Led" Property="Stroke" Value="{DynamicResource Brush.Amber}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Title-bar buttons, flat until hovered. -->
+    <Style x:Key="Caption" TargetType="Button">
+        <Setter Property="Width" Value="46" />
+        <Setter Property="Height" Value="37" />
+        <Setter Property="FontFamily" Value="{StaticResource Font.Glyphs}" />
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink2}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="{TemplateBinding Background}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource Brush.Raised}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="Caption.Close" TargetType="Button" BasedOn="{StaticResource Caption}">
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="#C42B1C" />
+                <Setter Property="Foreground" Value="White" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- A plain bordered button for banners. -->
+    <Style x:Key="Quiet" TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="Transparent" BorderBrush="{DynamicResource Brush.LineStrong}" BorderThickness="1" CornerRadius="3" Padding="11,5">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource Brush.Raised}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Face" Property="BorderBrush" Value="{DynamicResource Brush.Amber}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="Banner" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Brush.Raised}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.LineStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="Padding" Value="14,10" />
+        <Setter Property="Margin" Value="0,0,0,18" />
+    </Style>
+
+    <!-- A ledger's heading: two labels over a strong hairline. -->
+    <Style x:Key="LedgerHead" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.LineStrong}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="0,0,0,8" />
+    </Style>
+</ResourceDictionary>

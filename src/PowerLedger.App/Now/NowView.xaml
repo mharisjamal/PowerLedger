@@ -1,0 +1,159 @@
+<UserControl x:Class="PowerLedger.App.NowView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:PowerLedger.App">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="26,22,26,18">
+
+            <Border Style="{StaticResource Banner}" Visibility="{Binding IsServiceDown, Converter={StaticResource VisibleWhen}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Quiet}" Content="Start service" Command="{Binding StartService}" Margin="16,0,0,0" />
+                    <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" VerticalAlignment="Center"
+                               Text="Service not running. History stays readable; live readings return when the service starts." />
+                </DockPanel>
+            </Border>
+            <Border Style="{StaticResource Banner}" Visibility="{Binding IsSensorless, Converter={StaticResource VisibleWhen}}">
+                <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap"
+                           Text="Power sensors aren't available here. Readings are estimated from load and the machine profile; uptime and idle time are still logged." />
+            </Border>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.15*" />
+                    <ColumnDefinition Width="34" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Style="{StaticResource Text.Eyebrow}" Text="{Binding Live.Eyebrow, Converter={StaticResource Upper}}" />
+                    <local:LiveReadout Value="{Binding Live.Watts}" Margin="0,6,0,10" HorizontalAlignment="Left" />
+                    <StackPanel Orientation="Horizontal">
+                        <local:QualityBadge Quality="{Binding Live.Quality}" VerticalAlignment="Center" />
+                        <TextBlock Style="{StaticResource Text.Muted}" Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding Live.QualityNote}" />
+                    </StackPanel>
+                    <local:MeterScale Margin="0,16,0,14" Range="{Binding Live.Meter}" Value="{Binding Live.Watts}"
+                                      Average="{Binding Live.AverageW}" Peak="{Binding Live.PeakW}" />
+                    <TextBlock Style="{StaticResource Text.Eyebrow}" Text="LAST 60 S" />
+                    <local:Sparkline Margin="0,6,0,0" Values="{Binding Live.Spark}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2">
+                    <TextBlock Style="{StaticResource Text.Eyebrow}" Text="POWER BUDGET · NOW" />
+                    <local:BudgetBar Margin="0,12,0,10" Rows="{Binding Live.Budget}" Total="{Binding Live.BudgetTotalW}" />
+                    <ItemsControl ItemsSource="{Binding Live.Budget}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:BudgetRow}">
+                                <Border BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="10" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="48" />
+                                        </Grid.ColumnDefinitions>
+                                        <Rectangle Grid.Column="0" Width="10" Height="10" RadiusX="1" RadiusY="1" VerticalAlignment="Top" Margin="0,4,0,0">
+                                            <Rectangle.Style>
+                                                <Style TargetType="Rectangle">
+                                                    <Setter Property="Fill" Value="{DynamicResource Brush.PartRest}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Part}" Value="Cpu"><Setter Property="Fill" Value="{DynamicResource Brush.PartCpu}" /></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Part}" Value="Gpu"><Setter Property="Fill" Value="{DynamicResource Brush.PartGpu}" /></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Part}" Value="Display"><Setter Property="Fill" Value="{DynamicResource Brush.PartDisplay}" /></DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Rectangle.Style>
+                                        </Rectangle>
+                                        <StackPanel Grid.Column="1" Margin="12,0,12,0">
+                                            <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Name}" />
+                                            <TextBlock Style="{StaticResource Text.Muted}" FontSize="11" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="2" Style="{StaticResource Text.Number}" Text="{Binding Watts}" />
+                                        <TextBlock Grid.Column="3" Style="{StaticResource Text.Number}" FontSize="12" Foreground="{DynamicResource Brush.Ink3}"
+                                                   Text="{Binding Percent}" HorizontalAlignment="Right" Margin="0,1,0,0" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Grid>
+
+            <Grid Margin="0,26,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="34" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <Border Style="{StaticResource LedgerHead}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Eyebrow}" Text="{Binding Today.Date, Converter={StaticResource Upper}}" />
+                            <TextBlock Style="{StaticResource Text.Eyebrow}" Text="TODAY" />
+                        </DockPanel>
+                    </Border>
+                    <TextBlock Style="{StaticResource Text.Muted}" Margin="0,10,0,0" Text="Collecting… first numbers in about a minute."
+                               Visibility="{Binding IsCollecting, Converter={StaticResource VisibleWhen}}" />
+                    <StackPanel Visibility="{Binding IsCollecting, Converter={StaticResource HiddenWhen}}">
+                        <local:LedgerRow IsHero="True" Key="Energy" Value="{Binding Today.Energy}" Note="kWh" />
+                        <local:LedgerRow Key="Cost" Value="{Binding Today.Cost}" Note="{Binding Today.Tariff}" />
+                        <local:LedgerRow Key="Average" Value="{Binding Today.Average}" Note="W" />
+                        <local:LedgerRow Key="Peak" Value="{Binding Today.Peak}" Note="{Binding Today.PeakAt}" />
+                        <local:LedgerRow Key="On" Value="{Binding Today.On}" />
+                        <local:LedgerRow Key="Idle, display on" Value="{Binding Today.Idle}" Note="{Binding Today.IdleWasted}" />
+                        <local:LedgerRow Key="Asleep" Value="{Binding Today.Asleep}" />
+                        <local:LedgerRow Key="CO₂" Value="{Binding Today.Co2}" Note="{Binding Today.Co2Factor}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2">
+                    <Border Style="{StaticResource LedgerHead}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Eyebrow}" Text="{Binding Month.Summary, Converter={StaticResource Upper}}" />
+                            <TextBlock Style="{StaticResource Text.Eyebrow}" Text="{Binding Month.Name, Converter={StaticResource Upper}}" />
+                        </DockPanel>
+                    </Border>
+                    <StackPanel Visibility="{Binding IsCollecting, Converter={StaticResource HiddenWhen}}">
+                        <local:LedgerRow IsHero="True" Key="Energy" Value="{Binding Month.Energy}" Note="kWh" />
+                        <local:LedgerRow Key="Cost" Value="{Binding Month.Cost}" />
+                        <local:LedgerRow Key="Projected month" Value="{Binding Month.Projected}" Note="{Binding Month.ProjectedEnergy}" />
+                        <local:LedgerRow Key="Daily average" Value="{Binding Month.DailyAverage}" />
+                        <local:LedgerRow Key="Idle waste" Value="{Binding Month.IdleWaste}" Note="{Binding Month.IdleWasteCost}" />
+                        <local:LedgerRow Key="Lowest day" Value="{Binding Month.Lowest}" Note="{Binding Month.LowestDate}" />
+                        <local:LedgerRow Key="Highest day" Value="{Binding Month.Highest}" Note="{Binding Month.HighestDate}" />
+                        <local:LedgerRow Key="Next report" Value="{Binding Month.NextReport}" Note="PDF to Documents" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+
+            <StackPanel Margin="0,26,0,0">
+                <DockPanel Margin="0,0,0,8">
+                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Eyebrow}" Text="WATTS" />
+                    <TextBlock Style="{StaticResource Text.Eyebrow}" Text="TODAY · 5-MIN · STACKED BY COMPONENT" />
+                </DockPanel>
+                <local:DayChart Slots="{Binding Chart.Slots}" Now="{Binding Chart.Now}" />
+                <WrapPanel Margin="0,8,0,0">
+                    <WrapPanel.Resources>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Secondary}">
+                            <Setter Property="FontSize" Value="12" />
+                            <Setter Property="VerticalAlignment" Value="Center" />
+                        </Style>
+                        <Style TargetType="Rectangle">
+                            <Setter Property="Width" Value="10" />
+                            <Setter Property="Height" Value="10" />
+                            <Setter Property="Margin" Value="0,0,7,0" />
+                        </Style>
+                    </WrapPanel.Resources>
+                    <Rectangle Fill="{DynamicResource Brush.PartCpu}" />
+                    <TextBlock Text="CPU " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Chart.CpuWh}" Margin="0,0,22,0" />
+                    <Rectangle Fill="{DynamicResource Brush.PartGpu}" />
+                    <TextBlock Text="GPU " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Chart.GpuWh}" Margin="0,0,22,0" />
+                    <Rectangle Fill="{DynamicResource Brush.PartDisplay}" />
+                    <TextBlock Text="Display " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Chart.DisplayWh}" Margin="0,0,22,0" />
+                    <Rectangle Fill="{DynamicResource Brush.PartRest}" />
+                    <TextBlock Text="Rest " /><TextBlock Style="{StaticResource Text.Number}" FontSize="12" Text="{Binding Chart.RestWh}" />
+                </WrapPanel>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
