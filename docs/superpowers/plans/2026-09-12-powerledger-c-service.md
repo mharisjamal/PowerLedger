@@ -3339,7 +3339,7 @@ public class SamplingLoopTests
         minutes.Select(m => m.Start.Minute).ShouldBe(new[] { 55, 56, 57, 58, 59, 0, 2, 3, 4, 5 });
         minutes.Sum(m => m.SampleCount).ShouldBe(480);
         minutes.Single(m => m.Start == Start.AddMinutes(7)).GapSeconds.ShouldBe(121, 1e-6);   // 01:00:00 to 01:02:01
-        minutes.Sum(m => m.EnergyWh).ShouldBe(raw.Read(Start, Start.AddMinutes(11)).Sum(r => EnergyIntegrator.Integrate(r).EnergyWh), 1e-9);
+        minutes.Sum(m => m.EnergyWh).ShouldBe(raw.Read(Start, Start.AddMinutes(11)).Sum(r => EnergyIntegrator.Integrate(r).Wh), 1e-9);
 
         var hour = aggregates.ReadHours(Start.AddHours(-1), Start.AddHours(2)).Single();       // 01:00 is not over yet
         hour.Start.ShouldBe(Start.AddMinutes(-55));
@@ -3495,7 +3495,12 @@ public class SamplingLoopTests
             }
         }
 
-        public Task StartAsync() => _loop.StartAsync(CancellationToken.None);
+        /// <summary>Starts the loop and waits until its timer runs, so the first advance of the clock is a tick.</summary>
+        public async Task StartAsync()
+        {
+            await _loop.StartAsync(CancellationToken.None);
+            await _loop.Ready.WaitAsync(TimeSpan.FromSeconds(5));
+        }
 
         public Task StopAsync() => _loop.StopAsync(CancellationToken.None);
 
@@ -3651,6 +3656,7 @@ internal sealed class SamplingLoop : BackgroundService
     private readonly WriteBuffer _buffer;
     private readonly SensorWorker _worker;
     private readonly TickClock _tickClock;
+    private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private ServiceSettings _settings = ServiceSettings.Default;
     private InventoryFacts? _facts;
@@ -3694,10 +3700,26 @@ internal sealed class SamplingLoop : BackgroundService
 
     private double GapThreshold => EnergyIntegrator.GapThresholdFor(_settings.SampleIntervalSeconds);
 
+    /// <summary>
+    /// Completes once the loop has started and its timer runs, so every tick the clock gives from then on is seen; fails
+    /// if start-up failed. .NET runs ExecuteAsync on the thread pool, so StartAsync returns before this.
+    /// </summary>
+    internal Task Ready => _ready.Task;
+
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
-        Start();
+        try
+        {
+            Start();
+        }
+        catch (Exception error)
+        {
+            _log.LogCritical(error, "PowerLedger could not start");
+            _ready.TrySetException(error);
+            throw;
+        }
         var timer = new PeriodicTimer(Interval, _clock);
+        _ready.TrySetResult();
         Task<bool>? tick = null;
         Task<bool>? inbox = null;
         try
