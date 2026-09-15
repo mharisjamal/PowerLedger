@@ -72,8 +72,17 @@ Name: "{autoprograms}\PowerLedger"; Filename: "{app}\PowerLedger.exe"; Comment: 
 [Run]
 ; The first window of a new install is the wizard; the App also turns on starting with Windows for this user.
 Filename: "{app}\PowerLedger.exe"; Description: "Open PowerLedger"; Flags: postinstall nowait skipifsilent runasoriginaluser
+; An update the App started (spec §13) passes /UPDATE=1: the App opens again, as the user who started setup rather than
+; as the administrator setup runs as.
+Filename: "{app}\PowerLedger.exe"; Flags: nowait runasoriginaluser; Check: IsUpdate
 
 [Code]
+{ The App starts setup with /UPDATE=1 when the user chooses "Restart to update" (spec §13). }
+function IsUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
 function RunHidden(const FileName, Params: string): Integer;
 var
   Code: Integer;

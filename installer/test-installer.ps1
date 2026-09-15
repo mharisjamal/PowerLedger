@@ -12,10 +12,11 @@ and printed as PASS, FAIL or SKIP, and the exit code is the number of failures. 
 <Results>\dialogs.log.
 
 The default steps are silent, so CI can run them: Preflight, Install, Service, Data, Recovery, ServiceStop, Upgrade,
-UninstallKeep, Reinstall, Cleanup. Three more need a desktop. InstallWizard and UninstallDelete start setup or the
-uninstaller and answer it themselves (InstallWizard installs with the wizard, as somebody new to PowerLedger would, for a
-clean Windows such as Windows Sandbox); DriveWizard waits for a setup somebody else started, unelevated say, and drives
-it to the end.
+UninstallKeep, Reinstall, Cleanup. Upgrade runs setup as the App's Restart to update does, with /UPDATE=1, and checks
+that the App opens again; UninstallKeep then closes it. Three more need a desktop. InstallWizard and UninstallDelete
+start setup or the uninstaller and answer it themselves (InstallWizard installs with the wizard, as somebody new to
+PowerLedger would, for a clean Windows such as Windows Sandbox); DriveWizard waits for a setup somebody else started,
+unelevated say, and drives it to the end.
 
 Preflight stops the run when C:\ProgramData\PowerLedger exists, since that may be somebody's history. Cleanup deletes the
 folder only when this run's Preflight found none there.
@@ -620,12 +621,18 @@ function Step-ServiceStop {
 }
 
 function Step-Upgrade {
-    $appRan = [bool](Get-AppProcess)
+    $old = @(Get-AppProcess | ForEach-Object Id)
     $before = Get-History
-    Write-Host "  before: the App $(if ($appRan) { 'running' } else { 'not running' }); $(Format-History $before)"
-    Check Upgrade 'silent upgrade exits 0' { $code = Invoke-Setup $Upgrade $Silent; Assert ($code -eq 0) "exit code $code" }
-    if ($appRan) {
-        Check Upgrade 'the running App was closed' { Assert (Wait-Until { -not (Get-AppProcess) } -Seconds 10) "App processes: $(@(Get-AppProcess).Count)" }
+    Write-Host "  before: the App $(if ($old) { 'running' } else { 'not running' }); $(Format-History $before)"
+    # Run as the App's "Restart to update" runs it (spec §13), without the progress window: /UPDATE=1 opens the App again.
+    Check Upgrade 'silent upgrade exits 0' { $code = Invoke-Setup $Upgrade ($Silent + '/UPDATE=1'); Assert ($code -eq 0) "exit code $code" }
+    if ($old) {
+        Check Upgrade 'the running App was closed' {
+            Assert (Wait-Until { -not (Get-Process -Id $old -ErrorAction SilentlyContinue) } -Seconds 10) "still running: $(@(Get-Process -Id $old -ErrorAction SilentlyContinue).Id -join ', ')"
+        }
+    }
+    Check Upgrade 'the update opened the App again' {
+        Assert (Wait-Until { @(Get-AppProcess | Where-Object Id -notin $old).Count } -Seconds 30) "App processes: $(@(Get-AppProcess).Id -join ', ')"
     }
     Check Upgrade 'uninstall entry shows the new version' {
         $shown = (Get-ItemProperty $UninstallKey).DisplayVersion
