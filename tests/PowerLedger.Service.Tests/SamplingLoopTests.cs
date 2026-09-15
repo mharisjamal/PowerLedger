@@ -147,13 +147,67 @@ public class SamplingLoopTests
         last.DeltaSeconds.ShouldBe(11.5, 1e-6);                      // from the last good tick, so it counts as a gap
     }
 
+    [Fact]
+    public async Task A_resume_is_done_only_once_its_new_timer_runs()
+    {
+        using var t = new TestDatabase();
+        var resume = new ResumeCommand();
+        await using var loop = new Harness(t, loopClock: clock => new LateTimerClock(clock, () => resume.Done.IsCompleted));
+        await loop.StartAsync();
+        await loop.Send(new SuspendCommand());
+        await loop.Send(resume);
+        await loop.Ticks(1);                                        // the clock moves the moment the resume is done
+    }
+
+    [Fact]
+    public async Task A_new_interval_is_done_only_once_its_new_timer_runs()
+    {
+        using var t = new TestDatabase();
+        ApplySettingsCommand? apply = null;
+        await using var loop = new Harness(t, loopClock: clock => new LateTimerClock(clock, () => apply?.Done.IsCompleted == true));
+        await loop.StartAsync();
+        apply = new ApplySettingsCommand(loop.Board.Settings.ShouldNotBeNull() with { SampleIntervalSeconds = 2 });
+        await loop.Send(apply);
+        loop.Clock.Advance(TimeSpan.FromSeconds(2));                // the clock moves the moment the settings are done
+        await WaitFor.True(() => loop.TickCount == 1);
+    }
+
+    /// <summary>
+    /// The fake clock as the loop sees it, except that a periodic timer the loop asks for while <paramref name="late"/>
+    /// holds is made only after the test has moved the clock: what a busy machine does when it parks the loop's thread
+    /// just before the call. A timer made then is due a whole interval after the tick the test gave, which is never seen.
+    /// </summary>
+    private sealed class LateTimerClock(FakeTimeProvider clock, Func<bool> late) : TimeProvider
+    {
+        public override TimeZoneInfo LocalTimeZone => clock.LocalTimeZone;
+
+        public override long TimestampFrequency => clock.TimestampFrequency;
+
+        public override DateTimeOffset GetUtcNow() => clock.GetUtcNow();
+
+        public override long GetTimestamp() => clock.GetTimestamp();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (period != Timeout.InfiniteTimeSpan && late())
+            {
+                var asked = clock.GetUtcNow();
+                SpinWait.SpinUntil(() => clock.GetUtcNow() > asked, TimeSpan.FromSeconds(5));
+            }
+            return clock.CreateTimer(callback, state, dueTime, period);
+        }
+    }
+
     /// <summary>The loop wired to a fake clock, fake sensors that report 20 W from the battery, and a temp database.</summary>
     private sealed class Harness : IAsyncDisposable
     {
         private readonly SamplingLoop _loop;
         private readonly List<FakeSensorSet> _sets = [];
 
-        public Harness(TestDatabase database, LoopOptions? options = null, Func<int, FakeSensorSet>? makeSet = null)
+        /// <param name="loopClock">What the loop sees of <see cref="Clock"/>, when that is not the fake clock itself.</param>
+        public Harness(
+            TestDatabase database, LoopOptions? options = null, Func<int, FakeSensorSet>? makeSet = null,
+            Func<FakeTimeProvider, TimeProvider>? loopClock = null)
         {
             Clock.SetLocalTimeZone(Plus2);
             makeSet ??= _ => new FakeSensorSet((ts, delta) => Samples.At(ts, delta, batteryW: 20));
@@ -171,7 +225,8 @@ public class SamplingLoopTests
                 SystemUptime: () => TimeSpan.FromHours(3),
                 SystemShuttingDown: () => false,
                 DatabaseNotice: null);
-            _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Clock, NullLogger<SamplingLoop>.Instance, options);
+            var clock = loopClock?.Invoke(Clock) ?? Clock;
+            _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, clock, NullLogger<SamplingLoop>.Instance, options);
         }
 
         public FakeTimeProvider Clock { get; } = new(Start);

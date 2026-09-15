@@ -138,10 +138,13 @@ internal sealed class SamplingLoop : BackgroundService
                     if (!open) break;
                     while (_commands.Reader.TryRead(out var command))
                     {
-                        if (!Handle(command)) continue;
-                        timer.Dispose();                           // a new interval, or a machine that just woke
-                        timer = new PeriodicTimer(Interval, _clock);
-                        tick = null;
+                        if (Handle(command))
+                        {
+                            timer.Dispose();                       // a new interval, or a machine that just woke
+                            timer = new PeriodicTimer(Interval, _clock);
+                            tick = null;
+                        }
+                        command.Complete();                        // only now (see Handle); one that failed stays failed
                     }
                 }
 
@@ -265,6 +268,11 @@ internal sealed class SamplingLoop : BackgroundService
         Version, _startedAt, ticks, [.. result.Health.Select(Frames.From)], result.SuspectCount, _worker.Abandoned,
         _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame));
 
+    /// <summary>
+    /// Carries out a command, or fails it. The loop completes one that succeeds only after starting the tick timer over
+    /// when asked to, so that, as with <see cref="Ready"/>, every tick the clock gives once the command is done is seen:
+    /// a tick given before the new timer existed would be lost, and a test moves its fake clock the moment it is told.
+    /// </summary>
     /// <returns>True when the tick timer must start over: the sample interval changed, or the machine woke, and a tick
     /// the timer queued while it slept must not fire before the rebuilt sensors have had a full interval.</returns>
     private bool Handle(LoopCommand command)
@@ -290,7 +298,6 @@ internal sealed class SamplingLoop : BackgroundService
                     _log.LogInformation("Calibration reset for hardware {Hash}", _calibration.Hash);
                     break;
             }
-            command.Complete();
             return restartTimer;
         }
         catch (Exception error)
