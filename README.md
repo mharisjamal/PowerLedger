@@ -25,11 +25,14 @@ Windows 10 1809 or later, or Windows 11, on x64. The installer fetches the .NET 
 
 ```
 dotnet build -c Release
-dotnet test -c Release --filter "Category!=Hardware&Category!=UI"
+dotnet test -c Release --filter "Category!=Hardware&Category!=UI&Category!=Installed"
 ```
 
 Tests tagged `Hardware` read this machine's sensors; tests tagged `UI` draw the window to pictures in
-`%TEMP%\powerledger-renders`. Run them with `dotnet test -c Release` on a real machine.
+`%TEMP%\powerledger-renders`. Run them with `dotnet test -c Release --filter "Category!=Installed"` on a real machine.
+Tests tagged `Installed` check the App against the installed service: that it trusts the service, that a settings
+change goes through, and that it can read the database under the data folder's ACL. Run them unelevated, after
+installing; see Test the installer below.
 
 ## Run it from source
 
@@ -53,12 +56,45 @@ started, so finish the wizard and untick it in Settings, or delete
 
 ## Make the installer
 
+The first time, get Inno Setup; then build:
+
 ```
+pwsh installer\get-inno-setup.ps1
 pwsh installer\build.ps1
 ```
 
-It publishes both programs for win-x64 into `artifacts\publish` and compiles `installer\PowerLedger.iss` with
-Inno Setup 6.3 or later into `installer\output`.
+`get-inno-setup.ps1` installs the pinned Inno Setup 7.1 for this user, so it needs no administrator. It downloads the
+release from github.com/jrsoftware/issrc and refuses it unless its SHA-256 matches and it is validly signed by
+Pyrsys B.V., Inno Setup's publisher. `build.ps1` publishes both programs for win-x64 into `artifacts\publish` and
+compiles `installer\PowerLedger.iss` into `installer\output`. The installer is built with Inno Setup 7.1; 6.3 or
+later also compiles it. `build.ps1` finds Inno Setup on PATH or in its usual folders, or takes the compiler's path as
+`-Iscc`.
+
+## Test the installer
+
+From an elevated PowerShell:
+
+```
+pwsh installer\build.ps1 -TestVariants
+pwsh installer\test-installer.ps1
+```
+
+`-TestVariants` also compiles the builds the test needs into `installer\output\test`: an upgrade, one that acts as if
+the .NET runtime were missing, and one whose runtime download fails. `test-installer.ps1` installs the real
+PowerLedger, service and all, and checks the files, shortcut and uninstall entry; the service's registration, and its
+recovery when its process is killed; the data folder's owner and ACL; that the pipe answers; that an upgrade, an
+uninstall and a reinstall keep the history; and that a silent install refuses without the runtime. It stops at once if
+`C:\ProgramData\PowerLedger` already exists, so it never touches a real history, and it removes what it created. Its
+interactive steps drive setup's windows with UI Automation: a failed runtime download, an uninstall that deletes the
+history, and the wizard of a setup started by a normal user. `-Step` picks the steps to run. Results go to
+`installer\output\test-results`.
+
+Then install PowerLedger from `installer\output` and, from an unelevated terminal, run the tests that need it
+installed:
+
+```
+dotnet test -c Release --filter Category=Installed
+```
 
 ## Documents
 
