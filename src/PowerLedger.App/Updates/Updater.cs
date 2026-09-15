@@ -92,6 +92,11 @@ internal sealed class Updater : ObservableObject, IDisposable
     /// <summary>The version running now.</summary>
     public Version Running { get; }
 
+    /// <summary>The running version as updates compare it, from the App's version text: the numbers before any pre-release
+    /// suffix, or 0.0.0 when there are none, which every release is newer than.</summary>
+    internal static Version RunningVersion(string version)
+        => Version.TryParse(version.Split('-')[0], out var parsed) ? parsed : new Version(0, 0, 0);
+
     public UpdateStage Stage => _stage;
 
     /// <summary>The card shows unless there is nothing to say, or the user put it away until the App next starts.</summary>

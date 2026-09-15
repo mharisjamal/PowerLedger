@@ -48,7 +48,9 @@ running. Rejected: NetSparkle (its own dialogs and XML feed, which we would rest
    again as the user who started setup, not as administrator.
 6. **After.** The App remembers the version that last ran; the first start of a newer one shows "Updated to X.Y.Z" with
    "What's new" (that version's release page). If the permission prompt is declined or setup ends without installing,
-   the App is still running and its card says so, with "Try again".
+   the App is still running and its card says so, with "Try again". If setup fails after it has closed the App (an error
+   or Cancel during the copy), setup itself starts the service again and reopens the App, whose next check offers the
+   update again.
 
 ## The card
 

@@ -63,7 +63,7 @@ public partial class App : Application
         var http = UpdateHttp.Create(version);
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
-            _preferences, threads, TimeProvider.System, zone, culture, System.Version.Parse(version),
+            _preferences, threads, TimeProvider.System, zone, culture, Updater.RunningVersion(version),
             release => _tray?.Announce($"PowerLedger {release.Name} is ready", "Open PowerLedger and choose Restart to update.", ShowWindow),
             OpenPage);
         _updates.PropertyChanged += OnUpdatesChanged;

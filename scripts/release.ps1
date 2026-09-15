@@ -24,6 +24,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false   # git's and gh's exit codes are read, not thrown
 $root = Split-Path -Parent $PSScriptRoot
 
 # Runs a native command, and throws when it fails.
@@ -58,10 +59,15 @@ $create = @('release', 'create', $tag, $installer, '--repo', $Repo, '--target', 
 if ($Draft) { $create += '--draft' }
 Invoke-Native 'gh release create' { gh @create } | Out-Host
 
-# Installed copies check their download against this digest, so it has to be the file built here.
-$listed = (Invoke-Native 'gh release view' { gh release view $tag --repo $Repo --json assets } | ConvertFrom-Json).assets |
-    Where-Object name -eq (Split-Path $installer -Leaf)
-if ($listed.digest -ne "sha256:$sha") { throw "GitHub lists $($listed.digest) for the installer, not sha256:$sha." }
+# Installed copies check their download against this digest, so it has to be the file built here. GitHub works it out
+# after the upload, so it can take a few seconds to appear.
+foreach ($attempt in 1..20) {
+    $listed = (Invoke-Native 'gh release view' { gh release view $tag --repo $Repo --json assets } | ConvertFrom-Json).assets |
+        Where-Object name -eq (Split-Path $installer -Leaf)
+    if ($listed.digest) { break }
+    Start-Sleep -Seconds 3
+}
+if ($listed.digest -ne "sha256:$sha") { throw "GitHub lists $($listed.digest ?? 'no SHA-256') for the installer, not sha256:$sha." }
 if (-not $Draft) { Invoke-Native 'git fetch' { git -C $root fetch --quiet --tags origin } | Out-Null }
 "Released ${tag}: https://github.com/$Repo/releases/tag/$tag"
 "Installer SHA-256: $sha"

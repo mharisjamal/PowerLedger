@@ -182,9 +182,14 @@ begin
   CloseApp;
 end;
 
+var
+  { PrepareToInstall stopped the service, and ssPostInstall hasn't yet registered and started it again. }
+  ServiceDown: Boolean;
+
 function PrepareToInstall(var NeedsRestart: Boolean): string;
 begin
   StopService;
+  ServiceDown := True;
   Result := '';
 end;
 
@@ -203,7 +208,28 @@ begin
   begin
     Log('Installed the ' + BuildName + ' build.');
     RegisterService;
+    ServiceDown := False;
   end;
+end;
+
+{ A setup that stopped the service but never got to start it again (an error, or Cancel, during the copy) starts it, and
+  reopens the App if the App started this update (spec §13), rather than leave both off until Windows restarts. Whatever
+  the copy left in place is what starts; if that can't run, the App's next start offers the update again. }
+procedure DeinitializeSetup;
+var
+  Code: Integer;
+begin
+  if not ServiceDown then
+    Exit;
+  Log('Setup ended before it finished; starting the service, and the App for an update, again.');
+  if ServiceExists then
+    Net('start {#ServiceName}');
+  if IsUpdate and FileExists(ExpandConstant('{app}\PowerLedger.exe')) then
+    try
+      ExecAsOriginalUser(ExpandConstant('{app}\PowerLedger.exe'), '', '', SW_SHOWNORMAL, ewNoWait, Code);
+    except
+      Log('Could not open the App again: ' + GetExceptionMessage);
+    end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

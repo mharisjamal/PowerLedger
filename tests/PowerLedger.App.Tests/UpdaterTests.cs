@@ -177,6 +177,13 @@ public class UpdaterTests
         updater.ActionLabel.ShouldBe("Try again");
     }
 
+    [Theory]
+    [InlineData("0.2.0", "0.2.0")]
+    [InlineData("0.3.0-beta", "0.3.0")]
+    [InlineData("not a version", "0.0.0")]
+    public void The_running_version_is_read_from_the_numbers_before_any_suffix(string informational, string expected)
+        => PowerLedger.App.Updater.RunningVersion(informational).ShouldBe(Version.Parse(expected));
+
     /// <summary>Inno Setup elevates itself, so a declined permission prompt comes back as setup stopping before it started.</summary>
     [Theory]
     [InlineData(1)]
