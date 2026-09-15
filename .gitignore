@@ -8,3 +8,4 @@ TestResults/
 *.db-wal
 *.db-shm
 installer/output/
+artifacts/
