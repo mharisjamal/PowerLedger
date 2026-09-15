@@ -21,6 +21,13 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
 
     private readonly List<Task> _clients = [];
     private readonly Lock _gate = new();
+    private readonly TaskCompletionSource _listening = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Completes once the first instance of the pipe exists, so a client can connect; fails if another process already
+    /// serves the name. .NET runs ExecuteAsync on the thread pool, so StartAsync returns before this.
+    /// </summary>
+    internal Task Listening => _listening.Task;
 
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
@@ -39,6 +46,7 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
                     if (first)
                     {
                         log.LogCritical(error, "Another process already serves the pipe {Pipe}, so the App cannot reach this service", pipeName);
+                        _listening.TrySetException(error);
                         throw;
                     }
                     log.LogWarning(error, "No free pipe instance; trying again in a second");
@@ -47,6 +55,7 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
                 }
 
                 first = false;
+                _listening.TrySetResult();
                 try
                 {
                     await server.WaitForConnectionAsync(stop).ConfigureAwait(false);
@@ -70,6 +79,7 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
         }
         finally
         {
+            _listening.TrySetCanceled();
             Task[] running;
             lock (_gate) running = [.. _clients];
             await Task.WhenAll(running).ConfigureAwait(false);

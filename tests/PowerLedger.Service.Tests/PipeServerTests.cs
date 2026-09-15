@@ -22,6 +22,7 @@ public sealed class PipeServerTests : IAsyncLifetime
         var handler = new PipeHandler(new LoopCommands(), _board, _signals, new TariffRepository(_database.Db), TimeProvider.System);
         _server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, _name);
         await _server.StartAsync(CancellationToken.None);
+        await _server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     public async Task DisposeAsync()

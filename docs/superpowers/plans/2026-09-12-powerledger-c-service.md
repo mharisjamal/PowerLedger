@@ -4250,6 +4250,7 @@ public sealed class PipeServerTests : IAsyncLifetime
         var handler = new PipeHandler(new LoopCommands(), _board, _signals, new TariffRepository(_database.Db), TimeProvider.System);
         _server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, _name);
         await _server.StartAsync(CancellationToken.None);
+        await _server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     public async Task DisposeAsync()
@@ -4376,6 +4377,13 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
 
     private readonly List<Task> _clients = [];
     private readonly Lock _gate = new();
+    private readonly TaskCompletionSource _listening = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Completes once the first instance of the pipe exists, so a client can connect; fails if another process already
+    /// serves the name. .NET runs ExecuteAsync on the thread pool, so StartAsync returns before this.
+    /// </summary>
+    internal Task Listening => _listening.Task;
 
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
@@ -4394,6 +4402,7 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
                     if (first)
                     {
                         log.LogCritical(error, "Another process already serves the pipe {Pipe}, so the App cannot reach this service", pipeName);
+                        _listening.TrySetException(error);
                         throw;
                     }
                     log.LogWarning(error, "No free pipe instance; trying again in a second");
@@ -4402,6 +4411,7 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
                 }
 
                 first = false;
+                _listening.TrySetResult();
                 try
                 {
                     await server.WaitForConnectionAsync(stop).ConfigureAwait(false);
@@ -4425,6 +4435,7 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
         }
         finally
         {
+            _listening.TrySetCanceled();
             Task[] running;
             lock (_gate) running = [.. _clients];
             await Task.WhenAll(running).ConfigureAwait(false);
@@ -5395,11 +5406,12 @@ git commit -m "Complete Plan C: the service runs, records and serves"
 
 One whole-branch review ran once every task was committed. It confirmed the data paths, the loop's single-threaded
 ownership, the pipe's limits and the data folder's checks, and raised four points. One was real and is fixed in its own
-commit, and the code blocks above already show it:
+commit, as is a test race the full suite showed after the merge, and the code blocks above already show it:
 
 | Problem | Fix |
 |---|---|
 | The write buffer caught only SQLite's exceptions, so any other write failure escaped the tick without the status screen saying why. | Every failure keeps the readings for the next flush and reports its message. |
+| Found when the full suite ran on `main`: a pipe test could run before the server had created its first instance, because .NET starts `ExecuteAsync` on the thread pool, so about half the runs failed. | The server exposes `Listening`, completed once the first instance exists, and the tests wait for it. |
 
 Three were checked and needed nothing. The database size is written and read only on the loop thread, and the service
 is x64 only. Disposing the tick timer completes its pending wait with false rather than throwing. Once the inbox is
