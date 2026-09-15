@@ -48,6 +48,16 @@ public class WriteBufferTests
     }
 
     [Fact]
+    public void A_write_that_fails_for_any_other_reason_is_held_and_reported_the_same_way()
+    {
+        var buffer = new WriteBuffer(_ => throw new IOException("The network location cannot be reached."));
+        for (var s = 0; s < 10; s++) buffer.Add(Readings.At(s));
+        buffer.Flush().ShouldBeFalse();
+        buffer.Count.ShouldBe(10);
+        buffer.Problem.ShouldNotBeNull().ShouldContain("cannot be reached");
+    }
+
+    [Fact]
     public void Past_its_capacity_the_oldest_readings_are_dropped_and_counted()
     {
         var buffer = new WriteBuffer(_ => throw new SqliteException("SQLite Error 10: 'disk I/O error'.", 10), capacity: 100);

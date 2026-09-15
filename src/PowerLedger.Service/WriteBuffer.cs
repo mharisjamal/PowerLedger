@@ -1,17 +1,16 @@
-using Microsoft.Data.Sqlite;
 using PowerLedger.Core;
 
 namespace PowerLedger.Service;
 
 /// <summary>
 /// Readings waiting to be written as one batch (spec §7): flushed once a minute, on suspend and on stop. When a write
-/// fails, as it does on a full disk, the readings stay here and the next flush retries them, up to
+/// fails for any reason, as it does on a full disk, the readings stay here and the next flush retries them, up to
 /// <paramref name="capacity"/> readings (an hour at one a second); past that the oldest are dropped (spec §10).
 /// </summary>
 internal sealed class WriteBuffer(Action<IReadOnlyList<Reading>> write, int capacity = 3600)
 {
     private readonly List<Reading> _pending = [];
-    private SqliteException? _lastError;
+    private Exception? _lastError;
 
     public int Count => _pending.Count;
 
@@ -43,8 +42,9 @@ internal sealed class WriteBuffer(Action<IReadOnlyList<Reading>> write, int capa
             _lastError = null;
             return true;
         }
-        catch (SqliteException error)
+        catch (Exception error)
         {
+            // Whatever the cause, the readings are safer held than lost, and the status screen says why.
             _lastError = error;
             return false;
         }
