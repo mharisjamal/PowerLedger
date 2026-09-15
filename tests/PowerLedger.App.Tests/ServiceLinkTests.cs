@@ -1,0 +1,85 @@
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Time.Testing;
+using PowerLedger.Contracts;
+using Shouldly;
+
+namespace PowerLedger.App.Tests;
+
+public sealed class ServiceLinkTests : IAsyncLifetime
+{
+    private readonly string _name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
+    private readonly FakeTimeProvider _clock = new(DateTimeOffset.UnixEpoch);
+    private readonly ConcurrentQueue<ReadingFrame> _frames = new();
+    private readonly ConcurrentQueue<bool> _changes = new();
+    private readonly FakeService _service;
+    private readonly PipeServiceLink _link;
+
+    public ServiceLinkTests()
+    {
+        _service = new FakeService(_name);
+        _link = new PipeServiceLink(_name, new FixedIdle(42), _clock);
+        _link.FrameReceived += _frames.Enqueue;
+        _link.ConnectionChanged += _changes.Enqueue;
+    }
+
+    public async Task InitializeAsync()
+    {
+        _service.Start();
+        _link.Start();
+        await WaitFor.True(() => _link.IsConnected);
+    }
+
+    public async Task DisposeAsync()
+    {
+        await _link.DisposeAsync();
+        await _service.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Once_connected_the_link_has_subscribed_and_passes_frames_on()
+    {
+        _service.Requests.OfType<SubscribeRequest>().Count().ShouldBe(1);
+        await _service.PushAsync(Frames.At(DateTimeOffset.UnixEpoch, totalW: 12));
+        await WaitFor.True(() => !_frames.IsEmpty);
+        _frames.Single().TotalW.ShouldBe(12);
+        _changes.ToArray().ShouldBe(new[] { true });
+    }
+
+    [Fact]
+    public async Task Status_and_settings_come_back_for_the_request_that_asked()
+    {
+        (await _link.GetStatusAsync()).ShouldNotBeNull().Version.ShouldBe("0.1.0+b688a18");
+        (await _link.GetSettingsAsync()).ShouldBe(ServiceSettings.Default);
+    }
+
+    [Fact]
+    public async Task Idle_time_is_reported_on_connecting_and_every_five_seconds()
+    {
+        await WaitFor.True(() => _service.Requests.OfType<ReportActivityRequest>().Any());
+        _service.Requests.OfType<ReportActivityRequest>().Single().IdleSeconds.ShouldBe(42);
+        _clock.Advance(PipeServiceLink.ActivityEvery);
+        await WaitFor.True(() => _service.Requests.OfType<ReportActivityRequest>().Count() == 2);
+    }
+
+    [Fact]
+    public async Task When_the_service_goes_away_the_link_says_so_and_comes_back_by_itself()
+    {
+        await _service.StopAsync();
+        await WaitFor.True(() => !_link.IsConnected);
+        (await _link.GetStatusAsync()).ShouldBeNull();
+
+        _service.Start();
+        await WaitFor.True(() =>
+        {
+            _clock.Advance(TimeSpan.FromSeconds(1));   // lets the backoff run out, however far it has got
+            return _link.IsConnected;
+        });
+        _changes.ToArray().ShouldBe(new[] { true, false, true });
+        _service.Requests.OfType<SubscribeRequest>().Count().ShouldBe(2);
+    }
+
+    private sealed class FixedIdle(double seconds) : IIdleSource
+    {
+        public double IdleSeconds() => seconds;
+    }
+}
