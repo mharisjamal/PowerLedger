@@ -1,0 +1,95 @@
+<UserControl x:Class="PowerLedger.App.BreakdownView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:PowerLedger.App">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="26,22,26,18">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
+                    <RadioButton Style="{StaticResource Segment}" Content="W" ToolTip="Average watts while the machine was on"
+                                 IsChecked="{Binding Unit, Converter={StaticResource Is}, ConverterParameter={x:Static local:ChartUnit.Watts}}" />
+                    <RadioButton Style="{StaticResource Segment}" Content="Wh" ToolTip="Energy in each bucket" Margin="0,0,0,6"
+                                 IsChecked="{Binding Unit, Converter={StaticResource Is}, ConverterParameter={x:Static local:ChartUnit.WattHours}}" />
+                </StackPanel>
+                <local:RangeBar DataContext="{Binding Range}" />
+            </DockPanel>
+
+            <DockPanel Margin="0,20,0,8">
+                <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Eyebrow}" Text="{Binding UnitLabel, Converter={StaticResource Upper}}" />
+                <TextBlock Style="{StaticResource Text.Eyebrow}" Text="{Binding Heading, Converter={StaticResource Upper}}" />
+            </DockPanel>
+            <TextBlock Style="{StaticResource Text.Muted}" Margin="0,0,0,8" Text="{Binding Message}"
+                       Visibility="{Binding HasMessage, Converter={StaticResource VisibleWhen}}" />
+            <local:StackedChart Height="300" Model="{Binding Chart}" />
+            <WrapPanel Margin="0,8,0,0">
+                <WrapPanel.Resources>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Secondary}">
+                        <Setter Property="FontSize" Value="12" />
+                        <Setter Property="Margin" Value="0,0,22,0" />
+                        <Setter Property="VerticalAlignment" Value="Center" />
+                    </Style>
+                    <Style TargetType="Rectangle">
+                        <Setter Property="Width" Value="10" />
+                        <Setter Property="Height" Value="10" />
+                        <Setter Property="Margin" Value="0,0,7,0" />
+                    </Style>
+                </WrapPanel.Resources>
+                <Rectangle Fill="{DynamicResource Brush.PartCpu}" /><TextBlock Text="CPU" />
+                <Rectangle Fill="{DynamicResource Brush.PartGpu}" /><TextBlock Text="GPU" />
+                <Rectangle Fill="{DynamicResource Brush.PartDisplay}" /><TextBlock Text="Display" />
+                <Rectangle Fill="{DynamicResource Brush.PartRest}" /><TextBlock Text="Rest" />
+            </WrapPanel>
+
+            <Border Style="{StaticResource LedgerHead}" Margin="0,28,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="80" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource Text.Eyebrow}" Text="BY COMPONENT" />
+                    <TextBlock Grid.Column="1" Style="{StaticResource Text.Eyebrow}" Text="KWH" HorizontalAlignment="Right" />
+                    <TextBlock Grid.Column="2" Style="{StaticResource Text.Eyebrow}" Text="SHARE" HorizontalAlignment="Right" />
+                </Grid>
+            </Border>
+            <ItemsControl ItemsSource="{Binding Parts}" Focusable="False">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type local:PartRow}">
+                        <Border x:Name="Line" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,0,0,1" Padding="0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="22" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="80" />
+                                </Grid.ColumnDefinitions>
+                                <Rectangle x:Name="Swatch" Width="10" Height="10" RadiusX="1" RadiusY="1" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                           Fill="{DynamicResource Brush.PartRest}" />
+                                <TextBlock x:Name="Label" Grid.Column="1" Style="{StaticResource Text.Body}" Text="{Binding Name}" />
+                                <TextBlock x:Name="Energy" Grid.Column="2" Style="{StaticResource Text.Number}" Text="{Binding Energy}" HorizontalAlignment="Right" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource Text.Number}" Foreground="{DynamicResource Brush.Ink3}" Text="{Binding Share}"
+                                           HorizontalAlignment="Right" />
+                            </Grid>
+                        </Border>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding Part}" Value="Cpu"><Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource Brush.PartCpu}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding Part}" Value="Gpu"><Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource Brush.PartGpu}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding Part}" Value="Display"><Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource Brush.PartDisplay}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding Part}" Value="{x:Null}">
+                                <Setter TargetName="Swatch" Property="Visibility" Value="Hidden" />
+                                <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
+                                <Setter TargetName="Energy" Property="FontWeight" Value="SemiBold" />
+                                <Setter TargetName="Line" Property="BorderThickness" Value="0" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Style="{StaticResource Text.Muted}" Margin="0,12,0,0" TextWrapping="Wrap"
+                       Visibility="{Binding HasNegativeRest, Converter={StaticResource VisibleWhen}}"
+                       Text="The rest of the system fell below zero for part of this range: in measured mode the parts sometimes report more than the battery drains. The chart and the table count it as zero." />
+            <TextBlock Style="{StaticResource Text.Muted}" Margin="0,12,0,0" TextWrapping="Wrap"
+                       Text="Display is the built-in panel plus the monitors in the machine profile. W is the average while the machine was on; Wh is the energy in each bucket." />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

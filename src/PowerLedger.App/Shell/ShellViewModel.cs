@@ -11,15 +11,14 @@ internal enum Page
     Settings,
 }
 
-/// <summary>A screen Plan D2 builds; until then it says so.</summary>
+/// <summary>A screen a later build brings; until then it says so.</summary>
 internal sealed record PlaceholderViewModel(string Title, string Text);
 
-/// <summary>The window: which page shows, the Now screen, and the version in the title bar.</summary>
-internal sealed class ShellViewModel(NowViewModel now, string version) : ObservableObject
+/// <summary>The window: which page shows, the screens, and the version in the title bar.</summary>
+internal sealed class ShellViewModel(NowViewModel now, BreakdownViewModel breakdown, string version) : ObservableObject
 {
     private static readonly Dictionary<Page, PlaceholderViewModel> Placeholders = new()
     {
-        [Page.Breakdown] = new("Breakdown", "Power by component over any range arrives in the next build."),
         [Page.Report] = new("Report", "The energy bill, comparisons and exports arrive in the next build."),
         [Page.Settings] = new("Settings", "Tariff, machine profile and preferences arrive in the next build."),
     };
@@ -28,16 +27,27 @@ internal sealed class ShellViewModel(NowViewModel now, string version) : Observa
 
     public NowViewModel Now { get; } = now;
 
+    public BreakdownViewModel Breakdown { get; } = breakdown;
+
     public string Version { get; } = version;
 
+    /// <summary>The page shown. A history screen reads while it shows and stops when it does not.</summary>
     public Page Page
     {
         get => _page;
         set
         {
-            if (SetProperty(ref _page, value)) OnPropertyChanged(nameof(Current));
+            if (!SetProperty(ref _page, value)) return;
+            if (value == Page.Breakdown) Breakdown.Show();
+            else Breakdown.Hide();
+            OnPropertyChanged(nameof(Current));
         }
     }
 
-    public object Current => Page == Page.Now ? Now : Placeholders[Page];
+    public object Current => Page switch
+    {
+        Page.Now => Now,
+        Page.Breakdown => Breakdown,
+        _ => Placeholders[Page],
+    };
 }

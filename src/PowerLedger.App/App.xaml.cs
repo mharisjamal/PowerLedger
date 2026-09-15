@@ -14,6 +14,7 @@ public partial class App : Application
     private SqliteDatabase? _database;
     private PipeServiceLink? _link;
     private NowViewModel? _now;
+    private BreakdownViewModel? _breakdown;
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
     private MainWindow? _window;
@@ -36,10 +37,12 @@ public partial class App : Application
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
         _link = new PipeServiceLink(options.PipeName, new LastInputIdleSource(), TimeProvider.System);
         var threads = new UiThreads(action => Dispatcher.InvokeAsync(action), action => Task.Run(action));
+        var history = new HistoryReader(_database);
         _now = new NowViewModel(
-            _link, new HistoryReader(_database), threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture,
+            _link, history, threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture,
             preferences.Co2KgPerKwh, ServiceStarter.Start);
-        _shell = new ShellViewModel(_now, Version());
+        _breakdown = new BreakdownViewModel(history, threads, TimeProvider.System, TimeZoneInfo.Local, CultureInfo.CurrentCulture);
+        _shell = new ShellViewModel(_now, _breakdown, Version());
         _tray = new TrayIcon(ShowWindow, ExitUi, new StartWithWindows(Environment.ProcessPath!));
         _now.PropertyChanged += OnNowChanged;
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
@@ -99,6 +102,7 @@ public partial class App : Application
                 _now.PropertyChanged -= OnNowChanged;
                 _now.Dispose();
             }
+            _breakdown?.Dispose();
             if (_link is not null) await _link.DisposeAsync();
             _theme?.Dispose();
             _database?.Dispose();

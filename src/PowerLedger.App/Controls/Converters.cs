@@ -15,8 +15,8 @@ internal sealed class VisibleWhen : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
 }
 
-/// <summary>Checks a rail button when the shell shows its page, and shows its page when it is checked.</summary>
-internal sealed class PageIs : IValueConverter
+/// <summary>Checks a radio button when its value is the one chosen, and chooses it when it is checked.</summary>
+internal sealed class ValueIs : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture) => Equals(value, parameter);
 

@@ -10,7 +10,7 @@
 
     <local:VisibleWhen x:Key="VisibleWhen" />
     <local:VisibleWhen x:Key="HiddenWhen" Invert="True" />
-    <local:PageIs x:Key="PageIs" />
+    <local:ValueIs x:Key="Is" />
     <local:UpperCase x:Key="Upper" />
 
     <Style x:Key="Text.Body" TargetType="TextBlock">
@@ -305,5 +305,71 @@
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.LineStrong}" />
         <Setter Property="BorderThickness" Value="0,0,0,1" />
         <Setter Property="Padding" Value="0,0,0,8" />
+    </Style>
+
+    <!-- Segmented choices: flat buttons in a row; the chosen one is raised with an amber edge. -->
+    <Style x:Key="Segment" TargetType="RadioButton">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink2}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Margin" Value="0,0,6,6" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Face" Background="Transparent" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="1" CornerRadius="3" Padding="11,5">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Face" Property="BorderBrush" Value="{DynamicResource Brush.LineStrong}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource Brush.Raised}" />
+                            <Setter TargetName="Face" Property="BorderBrush" Value="{DynamicResource Brush.Amber}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Dates for a custom range: WPF's picker with a text box and button in the palette. Its calendar keeps Windows' look. -->
+    <Style TargetType="DatePickerTextBox">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="FontFamily" Value="{StaticResource Font.Numbers}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DatePickerTextBox">
+                    <ScrollViewer x:Name="PART_ContentHost" Margin="8,4,4,4" VerticalAlignment="Center" Focusable="False" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="DatePicker">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DatePicker">
+                    <Border BorderBrush="{DynamicResource Brush.LineStrong}" BorderThickness="1" CornerRadius="3" Background="{DynamicResource Brush.Panel}">
+                        <Grid x:Name="PART_Root">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <DatePickerTextBox x:Name="PART_TextBox" Grid.Column="0" />
+                            <Button x:Name="PART_Button" Grid.Column="1" Style="{StaticResource Caption}" Width="28" Height="26" Content="&#xE787;" ToolTip="Pick a date" />
+                            <Popup x:Name="PART_Popup" AllowsTransparency="True" Placement="Bottom" PlacementTarget="{Binding ElementName=PART_TextBox}" StaysOpen="False" />
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 </ResourceDictionary>

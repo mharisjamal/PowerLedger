@@ -12,6 +12,9 @@
         <DataTemplate DataType="{x:Type local:NowViewModel}">
             <local:NowView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type local:BreakdownViewModel}">
+            <local:BreakdownView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type local:PlaceholderViewModel}">
             <StackPanel Margin="26,22" MaxWidth="520" HorizontalAlignment="Left">
                 <TextBlock Style="{StaticResource Text.Eyebrow}" Text="{Binding Title, Converter={StaticResource Upper}}" />
@@ -84,13 +87,13 @@
                         </Border>
                         <StackPanel>
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Now"
-                                         IsChecked="{Binding Page, Converter={StaticResource PageIs}, ConverterParameter={x:Static local:Page.Now}}" />
+                                         IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Now}}" />
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Breakdown"
-                                         IsChecked="{Binding Page, Converter={StaticResource PageIs}, ConverterParameter={x:Static local:Page.Breakdown}}" />
+                                         IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Breakdown}}" />
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Report"
-                                         IsChecked="{Binding Page, Converter={StaticResource PageIs}, ConverterParameter={x:Static local:Page.Report}}" />
+                                         IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Report}}" />
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Settings"
-                                         IsChecked="{Binding Page, Converter={StaticResource PageIs}, ConverterParameter={x:Static local:Page.Settings}}" />
+                                         IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Settings}}" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
