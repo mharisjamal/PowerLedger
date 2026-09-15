@@ -10,11 +10,13 @@ public class ShellViewModelTests
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly FakeRangeHistory _history = new();
+    private readonly FakeLink _link = new();
 
     private ShellViewModel Shell() => new(
         new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { }),
         new BreakdownViewModel(_history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
         new ReportViewModel(_history, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4),
+        new SettingsViewModel(_link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         "0.1.0");
 
     [Fact]
@@ -35,10 +37,12 @@ public class ShellViewModelTests
     }
 
     [Fact]
-    public void Settings_is_still_to_come()
+    public void Settings_reads_the_service_while_it_shows()
     {
+        _link.Connect(true);
         var shell = Shell();
         shell.Page = Page.Settings;
-        shell.Current.ShouldBeOfType<PlaceholderViewModel>();
+        shell.Current.ShouldBe(shell.Settings);
+        shell.Settings.Service.IsLoaded.ShouldBeTrue();
     }
 }

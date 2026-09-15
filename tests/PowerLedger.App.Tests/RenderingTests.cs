@@ -27,6 +27,7 @@ public class RenderingTests
         (Page.Breakdown, "breakdown", shell => shell.Breakdown.Range.Choice = RangeChoice.SevenDays, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Breakdown, "custom", shell => shell.Breakdown.Range.Choice = RangeChoice.Custom, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Report, "report", _ => { }, shell => new ReportView { DataContext = shell.Report }),
+        (Page.Settings, "settings", _ => { }, shell => new SettingsView { DataContext = shell.Settings }),
     ];
 
     [Fact]
@@ -68,7 +69,7 @@ public class RenderingTests
             Source = new Uri("pack://application:,,,/PowerLedger;component/Theme/Styles.xaml", UriKind.Absolute),
         });
         using var saver = new FakeSaver();
-        var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), "0.1.0");
+        var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), SettingsScreen(), "0.1.0");
         ResourceDictionary? palette = null;
         foreach (var theme in new[] { Theme.Dark, Theme.Light })
         {
@@ -155,6 +156,15 @@ public class RenderingTests
         var history = new FakeRangeHistory { Answer = Month };
         return new ReportViewModel(history, new FakeSleep(), saver, _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, 0.38);
+    }
+
+    /// <summary>Settings against a running service, with a tariff and this laptop's detection.</summary>
+    private static SettingsViewModel SettingsScreen()
+    {
+        var link = new FakeLink();
+        link.Connect(true);
+        return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
+            TimeZoneInfo.Utc, English, "USD");
     }
 
     private static RangeReport Month(DateRange range)

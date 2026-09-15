@@ -45,6 +45,10 @@ internal sealed class TrayIcon : IDisposable
         menu.Items.Add(startWithWindows);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit UI", null, (_, _) => exit());
+        menu.Opening += (_, _) =>
+        {
+            if (startWithWindows.Checked != autostart.IsEnabled) startWithWindows.Checked = autostart.IsEnabled;   // Settings may have changed it
+        };
         _icon = new NotifyIcon { ContextMenuStrip = menu, Text = "PowerLedger", Visible = true };
         _icon.DoubleClick += (_, _) => open();
         _icon.BalloonTipClicked += (_, _) => Launch(_open);

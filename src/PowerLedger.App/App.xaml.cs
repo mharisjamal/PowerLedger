@@ -17,6 +17,8 @@ public partial class App : Application
     private NowViewModel? _now;
     private BreakdownViewModel? _breakdown;
     private ReportViewModel? _report;
+    private AppPreferences? _preferences;
+    private SettingsViewModel? _settings;
     private MonthlyReports? _monthly;
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
@@ -35,7 +37,8 @@ public partial class App : Application
         }
 
         var options = AppOptions.Parse(e.Args);
-        var preferences = new UiPreferencesStore(UiPreferencesStore.DefaultPath).Load();
+        var store = new UiPreferencesStore(UiPreferencesStore.DefaultPath);
+        var preferences = store.Load();
         var zone = TimeZoneInfo.Local;
         var culture = CultureInfo.CurrentCulture;
         var version = Version();
@@ -51,8 +54,11 @@ public partial class App : Application
         _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
         _breakdown = new BreakdownViewModel(history, threads, TimeProvider.System, zone, culture);
         _report = new ReportViewModel(history, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
-        _shell = new ShellViewModel(_now, _breakdown, _report, version);
-        _tray = new TrayIcon(ShowWindow, ExitUi, new StartWithWindows(Environment.ProcessPath!));
+        var autostart = new StartWithWindows(Environment.ProcessPath!);
+        _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
+        _settings = new SettingsViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
+        _shell = new ShellViewModel(_now, _breakdown, _report, _settings, version);
+        _tray = new TrayIcon(ShowWindow, ExitUi, autostart);
         _monthly = new MonthlyReports(
             history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,
             written => Dispatcher.InvokeAsync(() =>
@@ -122,6 +128,7 @@ public partial class App : Application
             }
             _breakdown?.Dispose();
             _report?.Dispose();
+            _settings?.Dispose();
             if (_link is not null) await _link.DisposeAsync();
             _theme?.Dispose();
             _database?.Dispose();
@@ -134,6 +141,27 @@ public partial class App : Application
         finally
         {
             Shutdown();
+        }
+    }
+
+    /// <summary>A new CO₂ factor from Settings reaches every screen that shows CO₂, and the monthly reports.</summary>
+    private void UseCo2(double factor)
+    {
+        if (_now is not null) _now.Co2KgPerKwh = factor;
+        if (_report is not null) _report.Co2KgPerKwh = factor;
+        if (_monthly is not null) _monthly.Co2KgPerKwh = factor;
+    }
+
+    /// <summary>The currency a new tariff starts in: the region's.</summary>
+    private static string RegionCurrency()
+    {
+        try
+        {
+            return RegionInfo.CurrentRegion.ISOCurrencySymbol;
+        }
+        catch (ArgumentException)
+        {
+            return "USD";
         }
     }
 

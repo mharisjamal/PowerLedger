@@ -11,14 +11,10 @@ internal enum Page
     Settings,
 }
 
-/// <summary>A screen a later build brings; until then it says so.</summary>
-internal sealed record PlaceholderViewModel(string Title, string Text);
-
 /// <summary>The window: which page shows, the screens, and the version in the title bar.</summary>
-internal sealed class ShellViewModel(NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, string version) : ObservableObject
+internal sealed class ShellViewModel(
+    NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, SettingsViewModel settings, string version) : ObservableObject
 {
-    private static readonly PlaceholderViewModel Settings = new("Settings", "Tariff, machine profile and preferences arrive in the next build.");
-
     private Page _page = Page.Now;
 
     public NowViewModel Now { get; } = now;
@@ -27,9 +23,11 @@ internal sealed class ShellViewModel(NowViewModel now, BreakdownViewModel breakd
 
     public ReportViewModel Report { get; } = report;
 
+    public SettingsViewModel Settings { get; } = settings;
+
     public string Version { get; } = version;
 
-    /// <summary>The page shown. A history screen reads while it shows and stops when it does not.</summary>
+    /// <summary>The page shown. A screen that reads history or the service reads while it shows and stops when it does not.</summary>
     public Page Page
     {
         get => _page;
@@ -40,6 +38,8 @@ internal sealed class ShellViewModel(NowViewModel now, BreakdownViewModel breakd
             else Breakdown.Hide();
             if (value == Page.Report) Report.Show();
             else Report.Hide();
+            if (value == Page.Settings) Settings.Show();
+            else Settings.Hide();
             OnPropertyChanged(nameof(Current));
         }
     }

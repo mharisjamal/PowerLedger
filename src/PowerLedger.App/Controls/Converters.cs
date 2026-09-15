@@ -15,6 +15,15 @@ internal sealed class VisibleWhen : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
 }
 
+/// <summary>Shows an element while its text has something in it, so an empty message takes no room.</summary>
+internal sealed class VisibleWhenText : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is string { Length: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
+}
+
 /// <summary>Checks a radio button when its value is the one chosen, and chooses it when it is checked.</summary>
 internal sealed class ValueIs : IValueConverter
 {
