@@ -169,6 +169,15 @@
                 <CheckBox Style="{StaticResource Tick}" Content="In the tray, when you sign in" IsChecked="{Binding StartWithWindows}" />
             </StackPanel>
             <TextBlock Style="{StaticResource Said}" Text="{Binding AppMessage}" Visibility="{Binding AppMessage, Converter={StaticResource VisibleWhenText}}" />
+            <StackPanel Style="{StaticResource Row}">
+                <TextBlock Style="{StaticResource Label}" Text="Updates" />
+                <CheckBox Style="{StaticResource Tick}" Content="Download new versions quietly, then ask" IsChecked="{Binding Updates.CheckAutomatically}" />
+                <Button Style="{StaticResource Quiet}" Content="Check now" Command="{Binding Updates.CheckNow}" Margin="12,0,0,0" />
+            </StackPanel>
+            <TextBlock Style="{StaticResource Note}" Margin="230,0,0,0" Text="{Binding Updates.Status}"
+                       Visibility="{Binding Updates.Status, Converter={StaticResource VisibleWhenText}, FallbackValue=Collapsed}" />
+            <TextBlock Style="{StaticResource Said}" Text="{Binding Updates.Message}"
+                       Visibility="{Binding Updates.Message, Converter={StaticResource VisibleWhenText}, FallbackValue=Collapsed}" />
 
             <Border Style="{StaticResource Section}"><TextBlock Style="{StaticResource Text.Eyebrow}" Text="ABOUT" /></Border>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">

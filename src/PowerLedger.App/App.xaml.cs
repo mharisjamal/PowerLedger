@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Windows;
@@ -21,6 +22,7 @@ public partial class App : Application
     private SettingsViewModel? _settings;
     private WizardViewModel? _wizard;
     private MonthlyReports? _monthly;
+    private Updater? _updates;
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
     private MainWindow? _window;
@@ -58,9 +60,16 @@ public partial class App : Application
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _preferences.ApplyFirstRunDefaults();
-        _settings = new SettingsViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
+        var http = UpdateHttp.Create(version);
+        _updates = new Updater(
+            GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
+            _preferences, threads, TimeProvider.System, zone, culture, System.Version.Parse(version),
+            release => _tray?.Announce($"PowerLedger {release.Name} is ready", "Open PowerLedger and choose Restart to update.", ShowWindow),
+            OpenPage);
+        _updates.PropertyChanged += OnUpdatesChanged;
+        _settings = new SettingsViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates);
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
-        _shell = new ShellViewModel(_now, _breakdown, _report, _settings, _wizard, version);
+        _shell = new ShellViewModel(_now, _breakdown, _report, _settings, _wizard, version, _updates);
         _tray = new TrayIcon(ShowWindow, ExitUi, autostart);
         _monthly = new MonthlyReports(
             history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,
@@ -77,12 +86,32 @@ public partial class App : Application
         _link.Start();
         _now.Start();
         _monthly.Start();
+        _updates.Start();
         if (!options.StartInTray) ShowWindow();
     }
 
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(NowViewModel.TrayTooltip)) _tray?.Show(_now?.Last?.TotalW, _now?.TrayTooltip ?? "PowerLedger");
+    }
+
+    /// <summary>The tray menu offers the update the card offers.</summary>
+    private void OnUpdatesChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(Updater.ReadyVersion)) _tray?.OfferUpdate(_updates?.ReadyVersion, () => _updates?.Install());
+    }
+
+    /// <summary>A release's page in the browser; with no browser set up, nothing happens.</summary>
+    private static void OpenPage(Uri page)
+    {
+        try
+        {
+            using var browser = Process.Start(new ProcessStartInfo(page.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException)
+        {
+            // Nothing opens web pages here; the page is still on GitHub.
+        }
     }
 
     private void ShowWindow()
@@ -125,6 +154,11 @@ public partial class App : Application
         _exiting = true;
         try
         {
+            if (_updates is not null)
+            {
+                _updates.PropertyChanged -= OnUpdatesChanged;
+                _updates.Dispose();
+            }
             _monthly?.Dispose();
             _window?.Close();
             _tray?.Dispose();

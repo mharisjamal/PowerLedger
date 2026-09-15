@@ -86,6 +86,25 @@
                                 <TextBlock Margin="7,0,0,0" Style="{StaticResource Text.Muted}" FontSize="11" Text="{Binding Now.Status.State}" />
                             </StackPanel>
                         </Border>
+                        <!-- The update card (spec §13): above the service's status, and only when there is something to say. -->
+                        <Border DockPanel.Dock="Bottom" Style="{StaticResource UpdateCard}" DataContext="{Binding Updates}"
+                                Visibility="{Binding ShowCard, Converter={StaticResource VisibleWhen}, FallbackValue=Collapsed}"
+                                AutomationProperties.Name="Update">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource CardClose}" Command="{Binding Dismiss}" ToolTip="Later"
+                                            AutomationProperties.Name="Later" Visibility="{Binding CanDismiss, Converter={StaticResource VisibleWhen}}" />
+                                    <TextBlock Style="{StaticResource Text.Eyebrow}" Text="UPDATE" VerticalAlignment="Center" />
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource Text.Body}" FontSize="12.5" Margin="0,5,0,0" TextWrapping="Wrap" Text="{Binding Title}" />
+                                <TextBlock Style="{StaticResource Text.Muted}" FontSize="11.5" Margin="0,3,0,0" TextWrapping="Wrap" Text="{Binding Detail}"
+                                           Visibility="{Binding Detail, Converter={StaticResource VisibleWhenText}}" />
+                                <Button Style="{StaticResource Quiet}" Margin="0,9,0,0" HorizontalAlignment="Left" Content="{Binding ActionLabel}"
+                                        Command="{Binding Act}" Visibility="{Binding ActionLabel, Converter={StaticResource VisibleWhenText}}" />
+                                <Button Style="{StaticResource Link}" Margin="0,8,0,0" HorizontalAlignment="Left" Content="What's new"
+                                        Command="{Binding OpenNotes}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
+                            </StackPanel>
+                        </Border>
                         <StackPanel>
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Now"
                                          IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Now}}" />

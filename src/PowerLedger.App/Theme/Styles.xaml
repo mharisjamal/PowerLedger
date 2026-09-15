@@ -266,6 +266,69 @@
         <Setter Property="Margin" Value="0,0,0,18" />
     </Style>
 
+    <!-- The update card in the rail (spec §13): a raised panel with a strong hairline, the rail's width. -->
+    <Style x:Key="UpdateCard" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Brush.Raised}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.LineStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="Padding" Value="11,9,8,11" />
+        <Setter Property="Margin" Value="10,0,10,10" />
+    </Style>
+
+    <!-- The small ✕ that puts a card away. -->
+    <Style x:Key="CardClose" TargetType="Button">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="FontFamily" Value="{StaticResource Font.Glyphs}" />
+        <Setter Property="FontSize" Value="8" />
+        <Setter Property="Content" Value="&#xE8BB;" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink3}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="Transparent" CornerRadius="2">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource Brush.Line}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Amber}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Words that act: underlined when hovered, amber when they have the keyboard. -->
+    <Style x:Key="Link" TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink2}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <TextBlock x:Name="Words" Background="Transparent" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" />
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Words" Property="TextDecorations" Value="Underline" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Amber}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Slim scroll bars in the palette: a hairline-coloured thumb, no arrows. -->
     <Style x:Key="ScrollThumb" TargetType="Thumb">
         <Setter Property="Template">

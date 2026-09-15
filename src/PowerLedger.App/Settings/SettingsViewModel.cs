@@ -45,7 +45,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
 
     public SettingsViewModel(
         IServiceLink link, IMachineHistory history, IUiSettings ui, UiThreads threads, TimeProvider clock, TimeZoneInfo zone,
-        CultureInfo culture, string regionCurrency)
+        CultureInfo culture, string regionCurrency, Updater? updates = null)
     {
         _link = link;
         _history = history;
@@ -65,6 +65,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         ConfirmReset = new RelayCommand(() => _ = ConfirmResetAsync());
         RunSetup = new RelayCommand(() => SetupRequested?.Invoke());
         _link.ConnectionChanged += OnConnectionChanged;
+        Updates = updates;
     }
 
     /// <summary>"Run setup again": the shell shows the wizard.</summary>
@@ -113,6 +114,9 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
 
     /// <summary>Why a preference didn't stick, or null.</summary>
     public string? AppMessage { get => _appMessage; private set => SetProperty(ref _appMessage, value); }
+
+    /// <summary>The Updates row (spec §13).</summary>
+    public Updater? Updates { get; }
 
     /// <summary>How far calibration has got (spec §5).</summary>
     public string Calibration { get => _calibration; private set => SetProperty(ref _calibration, value); }

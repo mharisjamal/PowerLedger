@@ -18,7 +18,8 @@ internal sealed class ShellViewModel : ObservableObject
     private bool _isSetup;
 
     public ShellViewModel(
-        NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, SettingsViewModel settings, WizardViewModel wizard, string version)
+        NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, SettingsViewModel settings, WizardViewModel wizard, string version,
+        Updater? updates = null)
     {
         Now = now;
         Breakdown = breakdown;
@@ -26,6 +27,7 @@ internal sealed class ShellViewModel : ObservableObject
         Settings = settings;
         Wizard = wizard;
         Version = version;
+        Updates = updates;
         Wizard.Finished += EndSetup;
         Settings.SetupRequested += BeginSetup;
     }
@@ -41,6 +43,9 @@ internal sealed class ShellViewModel : ObservableObject
     public WizardViewModel Wizard { get; }
 
     public string Version { get; }
+
+    /// <summary>The update card in the rail (spec §13); without one the card stays hidden.</summary>
+    public Updater? Updates { get; }
 
     /// <summary>The page shown. A screen that reads history or the service reads while it shows and stops when it does not.</summary>
     public Page Page

@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
@@ -146,6 +147,62 @@ public class RenderingTests
                 }
             }
         });
+    }
+
+    [Fact]
+    public void The_update_card_draws_in_the_rail_in_both_themes()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                foreach (var (name, updates) in new[] { ("ready", ReadyUpdate()), ("updated", UpdatedApp()) })
+                {
+                    var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.2.0", updates);
+                    var window = new MainWindow
+                    {
+                        DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
+                        Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    };
+                    window.Show();
+                    try
+                    {
+                        Pump(TimeSpan.FromMilliseconds(1200));
+                        var card = Find<Border>(window, border => AutomationProperties.GetName(border) == "Update").ShouldNotBeNull(name);
+                        card.IsVisible.ShouldBeTrue(name);
+                        Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"update-{name}-{theme}.png");
+                    }
+                    finally
+                    {
+                        window.Close();
+                    }
+                }
+            }
+        });
+        new FileInfo(Path.Combine(Folder, "update-ready-Dark.png")).Length.ShouldBeGreaterThan(30_000);
+    }
+
+    /// <summary>0.3.0 downloaded and waiting, on 0.2.0.</summary>
+    private static Updater ReadyUpdate()
+    {
+        var feed = new FakeFeed { Latest = UpdaterTests.Release("0.3.0") };
+        var updater = new Updater(feed, new FakeDownloader(), new FakeSetup(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
+            TimeZoneInfo.Utc, English, new Version(0, 2, 0), _ => { }, _ => { });
+        updater.CheckAsync().GetAwaiter().GetResult();
+        return updater;
+    }
+
+    /// <summary>The first start of 0.2.0 after 0.1.0.</summary>
+    private static Updater UpdatedApp()
+    {
+        var ui = new FakeUiSettings { Current = UiPreferences.Default with { LastVersion = "0.1.0" } };
+        var updater = new Updater(new FakeFeed(), new FakeDownloader(), new FakeSetup(), ui, UiThreads.Inline, new FakeTimeProvider(Now),
+            TimeZoneInfo.Utc, English, new Version(0, 2, 0), _ => { }, _ => { });
+        updater.Start();
+        return updater;
     }
 
     /// <summary>The wizard at its longest step: the machine, for a desktop, which adds the power supply's rating.</summary>
