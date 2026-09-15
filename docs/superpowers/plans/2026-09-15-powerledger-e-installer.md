@@ -65,7 +65,7 @@ docs/superpowers/specs/2026-09-08-powerledger-design.md   Modify: §13
 
 Spec §9 has starting with Windows on by default. Until the first run is done, the App turns the Run entry on each time it starts. After that the entry is left as the user set it, so unticking it in Settings or the tray sticks.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/PowerLedger.App.Tests/AppPreferencesTests.cs`, inside the class:
 
@@ -90,12 +90,12 @@ Append to `tests/PowerLedger.App.Tests/AppPreferencesTests.cs`, inside the class
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter AppPreferencesTests`
 Expected: build error, `ApplyFirstRunDefaults` not found.
 
-- [ ] **Step 3: Turn it on until the first run is done**
+- [x] **Step 3: Turn it on until the first run is done**
 
 In `src/PowerLedger.App/Preferences/AppPreferences.cs`, add after `FinishFirstRun`:
 
@@ -116,12 +116,12 @@ In `src/PowerLedger.App/App.xaml.cs`, after `_preferences` is made, add:
         _preferences.ApplyFirstRunDefaults();
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter AppPreferencesTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App tests/PowerLedger.App.Tests/AppPreferencesTests.cs
@@ -138,7 +138,7 @@ git commit -m "Turn on starting with Windows until the first run is done"
 
 `publish.ps1` builds the App into `artifacts\publish\App` and the service into `artifacts\publish\Service`. Both are published for win-x64 and framework-dependent, so only Windows x64's native libraries ship (spec §13). It prints each folder's size.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 `scripts/publish.ps1`
 ```powershell
@@ -179,12 +179,12 @@ In `.gitignore`, add:
 artifacts/
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pwsh scripts/publish.ps1`
 Expected: both publishes succeed. The App's folder holds `PowerLedger.exe` and `runtimes\win-x64` only, with no other platforms. The sizes print, both well under the 116 MB a platform-neutral build carries.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/publish.ps1 .gitignore
@@ -211,7 +211,7 @@ Uninstalling runs in this order:
 - It removes this account's Run entry.
 - It asks whether to keep `C:\ProgramData\PowerLedger`.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 `installer/PowerLedger.iss`
 ```iss
@@ -403,7 +403,7 @@ begin
 end;
 ```
 
-- [ ] **Step 2: Read it against Inno Setup 6's documentation**
+- [x] **Step 2: Read it against Inno Setup 6's documentation**
 
 Check each item against the Inno Setup 6 help:
 - `CreateDownloadPage`, `TDownloadWizardPage.Add`, `Download` and `AbortedByUser` exist from 6.1.
@@ -416,7 +416,7 @@ Check each item against the Inno Setup 6 help:
 
 Expected: nothing to change; if something is, fix it here and note it in "After the final review".
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add installer/PowerLedger.iss
@@ -433,7 +433,7 @@ git commit -m "Add the installer: runtime, service, shortcut, first window, and 
 
 `build.ps1` publishes, reads the version from `Directory.Build.props` and compiles the installer with Inno Setup 6. It says where to get Inno Setup when it is missing. The workflow builds, runs the tests outside the Hardware and UI categories (spec §13), and uploads the installer. It then waits in the repository for the owner's remote.
 
-- [ ] **Step 1: Write them**
+- [x] **Step 1: Write them**
 
 `installer/build.ps1`
 ```powershell
@@ -503,12 +503,12 @@ jobs:
           path: installer/output/*.exe
 ```
 
-- [ ] **Step 2: Run what can run here**
+- [x] **Step 2: Run what can run here**
 
 Run: `pwsh installer/build.ps1`
 Expected: the publish succeeds and prints both sizes. The script then stops with "Inno Setup 6 is not installed…", which is correct on this machine.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add installer/build.ps1 .github/workflows/ci.yml
@@ -523,7 +523,7 @@ git commit -m "Build the installer locally and in CI"
 - Create: `README.md`
 - Modify: `docs/superpowers/specs/2026-09-08-powerledger-design.md`, this plan
 
-- [ ] **Step 1: Write the README**
+- [x] **Step 1: Write the README**
 
 `README.md`
 ````markdown
@@ -575,6 +575,9 @@ src\PowerLedger.App\bin\Release\net10.0-windows\PowerLedger.exe --pipe PowerLedg
 ```
 
 A run started with `--pipe` sends settings to that pipe's server without checking it is the installed service.
+Until its first-run wizard is finished, the App turns on starting with Windows for whichever `PowerLedger.exe` was
+started, so finish the wizard and untick it in Settings, or delete
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\PowerLedger`.
 `scripts\dev-service.ps1` installs the service for real, from an elevated PowerShell.
 
 ## Make the installer
@@ -592,7 +595,7 @@ Inno Setup 6.3 or later into `installer\output`.
 - `docs/superpowers/plans/`: how it was built, plan by plan.
 ````
 
-- [ ] **Step 2: Update the spec**
+- [x] **Step 2: Update the spec**
 
 In §13, after the framework-dependent line, add the install layout:
 - The App is in `Program Files\PowerLedger` and the service in its `Service` folder.
@@ -602,7 +605,7 @@ In §13, after the framework-dependent line, add the install layout:
 - An uninstall asks about the history and keeps it when silent.
 - A silent install needs the runtime already present.
 
-- [ ] **Step 3: Verify, and commit**
+- [x] **Step 3: Verify, and commit**
 
 Run: `dotnet build -c Release` and the tests with the CI filter.
 Expected: 0 warnings, and App 225 tests under the CI filter.

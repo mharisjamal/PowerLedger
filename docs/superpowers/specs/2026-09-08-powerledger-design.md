@@ -328,6 +328,7 @@ Framework: xUnit, Shouldly (BSD; FluentAssertions 8+ requires a paid commercial 
 
 - Requirements: Windows 10 1809 or later, Windows 11, x64 only.
 - Framework-dependent build; Inno Setup installs the .NET 10 Desktop Runtime if missing, so the installer stays around 15 MB. Publish for win-x64, so only that platform's native libraries ship: QuestPDF and SQLite bring natives for eight platforms, 116 MB in a platform-neutral build.
+- Layout (Plan E): the App in `Program Files\PowerLedger`, the service in its `Service` folder, a Start menu shortcut. An upgrade stops the service before copying and starts it after; the App turns on its Run entry on its first run, as the user who runs it, since the elevated installer can't write that user's `HKCU`. Uninstall asks whether to keep the history and keeps it when silent. A silent install needs the runtime already present. `installer\build.ps1` makes the installer with Inno Setup 6.3 or later; CI does the same.
 - The installer registers the service with recovery options, adds the tray app to HKCU Run, and launches the first-run wizard. There is no driver to install. Uninstall stops the service and asks whether to keep the database.
 - Releases on GitHub with a winget manifest after the first stable build. v1 has a "check for updates" link; an in-app updater is v1.1.
 - CI (GitHub Actions): build, tests outside the Hardware and UI categories, installer artifact.
