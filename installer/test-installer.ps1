@@ -10,9 +10,10 @@ and printed as PASS, FAIL or SKIP, and the exit code is the number of failures. 
 <Results>\<step>-setup.log and <step>-uninstall.log; the interactive steps write the text of every window they see to
 <Results>\dialogs.log.
 
-The default steps are silent, so CI can run them: Preflight, NoRuntime, Install, Service, Data, Recovery, Upgrade,
-UninstallKeep, Reinstall, Cleanup. Three more need a desktop. BadUrl and UninstallDelete start setup or the uninstaller
-and answer it themselves; DriveWizard waits for a setup somebody else started, unelevated say, and drives it to the end.
+The default steps are silent, so CI can run them: Preflight, NoRuntime, Install, Service, Data, Recovery, ServiceStop,
+Upgrade, UninstallKeep, Reinstall, Cleanup. Four more need a desktop. BadUrl, UninstallDelete and RuntimeWizard start
+setup or the uninstaller and answer it themselves (RuntimeWizard downloads the 60 MB .NET Desktop Runtime from Microsoft);
+DriveWizard waits for a setup somebody else started, unelevated say, and drives it to the end.
 
 Preflight stops the run when C:\ProgramData\PowerLedger exists, since that may be somebody's history. Cleanup deletes the
 folder only when this run's Preflight found none there.
@@ -24,9 +25,10 @@ folder only when this run's Preflight found none there.
 ./installer/test-installer.ps1 -Step Preflight, Install, Service, Data, BadUrl, UninstallDelete, Cleanup
 #>
 param(
-    [ValidateSet('Preflight', 'NoRuntime', 'Install', 'Service', 'Data', 'Recovery', 'Upgrade', 'UninstallKeep', 'Reinstall',
-        'BadUrl', 'UninstallDelete', 'DriveWizard', 'Cleanup')]
-    [string[]]$Step = @('Preflight', 'NoRuntime', 'Install', 'Service', 'Data', 'Recovery', 'Upgrade', 'UninstallKeep', 'Reinstall', 'Cleanup'),
+    [ValidateSet('Preflight', 'NoRuntime', 'Install', 'Service', 'Data', 'Recovery', 'ServiceStop', 'Upgrade', 'UninstallKeep',
+        'Reinstall', 'BadUrl', 'UninstallDelete', 'RuntimeWizard', 'DriveWizard', 'Cleanup')]
+    [string[]]$Step = @('Preflight', 'NoRuntime', 'Install', 'Service', 'Data', 'Recovery', 'ServiceStop', 'Upgrade', 'UninstallKeep',
+        'Reinstall', 'Cleanup'),
     [string]$Setup,
     [string]$Upgrade,
     [string]$NoRuntime,
@@ -579,6 +581,24 @@ function Step-Recovery {
     Check Recovery 'crash event 7031' { $crashes = @(Get-ServiceEvent 7031 $killed.AddSeconds(-1)); Assert $crashes.Count "$($crashes.Count) since the kill" }
 }
 
+# A clean stop keeps the write-ahead log and shared memory: the App reads with the Users group's read-only access to the
+# folder, so it could not open the history again if SQLite deleted them (spec §7).
+function Step-ServiceStop {
+    if (Get-AppProcess) {
+        Skip ServiceStop 'write-ahead log and shared memory kept after a clean stop' 'the App holds the database open, which keeps them anyway'
+        return
+    }
+    Check ServiceStop 'stops cleanly' {
+        Stop-Service $ServiceName
+        Assert (Wait-Until { (Get-ServiceState) -eq 'Stopped' } -Seconds 60) (Get-ServiceState)
+    }
+    Check ServiceStop 'write-ahead log and shared memory kept' {
+        $missing = @("$Database-wal", "$Database-shm" | Where-Object { -not (Test-Path $_) })
+        Assert ($missing.Count -eq 0) "missing: $(if ($missing) { $missing -join ', ' } else { 'nothing' })"
+    }
+    Check ServiceStop 'starts again' { Start-Service $ServiceName; Assert (Wait-ServiceRunning 30) (Get-ServiceState) }
+}
+
 function Step-Upgrade {
     $appRan = [bool](Get-AppProcess)
     $before = Get-History
@@ -653,6 +673,35 @@ function Step-UninstallDelete {
     Check UninstallDelete 'uninstaller finished' { $code = Wait-Exit $uninstaller 60; Wait-Uninstaller; Assert ($code -eq 0) "exit code $code" }
     Check UninstallDelete 'history deleted' { Assert (-not (Test-Path $DataDir)) (Get-Presence $DataDir) }
     Check UninstallDelete 'service removed' { Assert (Wait-Until { (Get-ScQueryCode) -eq 1060 } -Seconds 30) "sc.exe query: exit code $(Get-ScQueryCode)" }
+}
+
+# The download page end to end, in a setup this run starts: the runtime is fetched from Microsoft and its installer run.
+# This run is elevated, so the App the wizard opens is too; DriveWizard is the step for the unelevated start.
+function Step-RuntimeWizard {
+    Initialize-Automation
+    $setup = Start-Setup $NoRuntime
+    $wizard = Wait-Wizard 60
+    Check RuntimeWizard 'wizard opens' { Assert $wizard $(if ($wizard) { $wizard.Current.Name } else { 'no Setup - PowerLedger window within 60 s' }) }
+    if ($wizard) {
+        Check RuntimeWizard 'Install pressed' { Invoke-Install $wizard }
+        Check RuntimeWizard 'runtime fetched and installed; Finish pressed' {
+            $null = Wait-WizardButton $wizard 'Finish' -Seconds 600
+            Press $wizard 'Finish'
+        }
+    }
+    Check RuntimeWizard 'setup exits 0' { $code = Wait-Exit $setup 120; Assert ($code -eq 0) "exit code $code" }
+    Check RuntimeWizard 'its log shows the runtime fetched and its installer run' {
+        $log = Get-StepLog 'setup'
+        $lines = @(Select-String -LiteralPath $log -Pattern 'windowsdesktop-runtime', 'Runtime installer' -SimpleMatch)
+        Assert ($lines.Count -gt 0 -and -not (Select-String -LiteralPath $log -Pattern 'could not be' -SimpleMatch -Quiet)) `
+            "$($lines.Count) lines: $(($lines | Select-Object -Last 3).Line -join ' / ')"
+    }
+    Check RuntimeWizard 'service running' { Assert (Wait-ServiceRunning 60) (Get-ServiceState) }
+    Check RuntimeWizard 'the App the wizard opened is closed again' {
+        $null = Wait-Until { Get-AppProcess } -Seconds 30
+        $how = Stop-App
+        Assert (Wait-Until { -not (Get-AppProcess) } -Seconds 15) $how
+    }
 }
 
 # For a setup somebody else started, so it can be run unelevated and ask for elevation itself.
