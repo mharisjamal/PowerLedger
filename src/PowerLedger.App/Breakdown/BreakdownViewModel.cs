@@ -4,9 +4,6 @@ using PowerLedger.Storage;
 
 namespace PowerLedger.App;
 
-/// <summary>One line of the breakdown table: a band, or the total, with its energy in kWh and its share of the four bands.</summary>
-internal sealed record PartRow(Part? Part, string Name, string Energy, string Share);
-
 /// <summary>
 /// The Breakdown screen (spec §9): power by component over a range, as a stacked chart in watts or watt-hours and as each
 /// band's energy and share. It reads when shown, when the range changes and every minute while shown, off the UI thread;
@@ -136,19 +133,5 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
         Message = report.Totals.OnHours > 0 || report.Totals.AsleepHours > 0 ? null : "No readings in this range.";
     }
 
-    private IReadOnlyList<PartRow> Rows(RangeTotals t)
-    {
-        (Part Part, string Name, double Kwh)[] bands =
-        [
-            (Part.Cpu, "CPU package", t.CpuKwh), (Part.Gpu, "GPU", t.GpuKwh),
-            (Part.Display, "Display", t.DisplayKwh), (Part.Rest, "Rest of system", t.RestKwh),
-        ];
-        var clean = bands.Select(b => (b.Part, b.Name, Kwh: double.IsFinite(b.Kwh) ? Math.Max(0, b.Kwh) : 0)).ToList();
-        var total = clean.Sum(b => b.Kwh);
-        var rows = clean
-            .Select(b => new PartRow(b.Part, b.Name, Format.Kwh(b.Kwh, _culture), Format.Percent(total > 0 ? b.Kwh / total : 0, _culture)))
-            .ToList();
-        rows.Add(new PartRow(null, "Total", Format.Kwh(t.EnergyKwh, _culture), total > 0 ? Format.Percent(1, _culture) : Format.Missing));
-        return rows;
-    }
+    private IReadOnlyList<PartRow> Rows(RangeTotals t) => Bands.Rows(t, _culture, withTotal: true);
 }

@@ -67,6 +67,13 @@ internal static class Ranges
             : $"{first.ToString("d MMM yyyy", culture)} – {last.ToString("d MMM yyyy", culture)}";
     }
 
+    /// <summary>The first and last local days a range holds data for: a range under way stops at today, and an empty one keeps its days.</summary>
+    public static (DateOnly First, DateOnly Last) Covered(DateRange range, TimeZoneInfo zone)
+    {
+        var end = range.To > range.From ? range.To : range.Through;
+        return (LocalDay(range.From, zone), LocalDay(end.AddTicks(-1), zone));
+    }
+
     /// <summary>
     /// Five minutes for a day, fifteen for up to three days, an hour for a week, six hours for a month and a day beyond.
     /// A bucket under an hour needs minute rows, which only a range within <see cref="ReportQueries.MinuteResolutionLimit"/> reads.
