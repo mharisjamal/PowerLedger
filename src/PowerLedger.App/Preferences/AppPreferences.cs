@@ -60,6 +60,15 @@ internal sealed class AppPreferences(
 
     public string? FinishFirstRun() => Save(Current with { FirstRunDone = true });
 
+    /// <summary>Spec §9: starting with Windows is on by default. Until the first run is done the App turns it on as it
+    /// starts, as the user who runs it (the installer can't: it runs as the elevating account); after that it is left
+    /// as the user set it.</summary>
+    public void ApplyFirstRunDefaults()
+    {
+        if (Current.FirstRunDone || autostart.IsEnabled) return;
+        StartWithWindows(true);
+    }
+
     private string? Save(UiPreferences next)
     {
         Current = next;

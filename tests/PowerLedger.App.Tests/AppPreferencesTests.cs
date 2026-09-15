@@ -71,4 +71,23 @@ public sealed class AppPreferencesTests : IDisposable
         preferences.Choose(ThemeChoice.Dark).ShouldStartWith("Couldn't save your preferences:");
         _themes.ShouldBe(new[] { ThemeChoice.Dark });
     }
+
+    [Fact]
+    public void Until_the_first_run_is_done_starting_with_windows_is_turned_on()
+    {
+        var preferences = Preferences();
+        preferences.StartsWithWindows.ShouldBeFalse();
+        preferences.ApplyFirstRunDefaults();
+        preferences.StartsWithWindows.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void After_the_first_run_starting_with_windows_is_left_as_the_user_set_it()
+    {
+        var preferences = new AppPreferences(
+            Store, UiPreferences.Default with { FirstRunDone = true }, _themes.Add, _factors.Add,
+            new StartWithWindows(@"C:\Program Files\PowerLedger\PowerLedger.exe", _runKey));
+        preferences.ApplyFirstRunDefaults();
+        preferences.StartsWithWindows.ShouldBeFalse();
+    }
 }
