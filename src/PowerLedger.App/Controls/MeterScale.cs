@@ -41,6 +41,7 @@ internal sealed class MeterScale : Instrument
         Mark(dc, Average, "avg", range, left, right);
         Mark(dc, Peak, "peak", range, left, right);
 
+        if (!double.IsFinite(Value)) return;   // no reading, no needle
         var needle = Geometry.ScaleX(Value, range.Max, left, right);
         var shape = new StreamGeometry();
         using (var g = shape.Open())

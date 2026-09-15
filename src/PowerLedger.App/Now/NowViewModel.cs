@@ -187,13 +187,13 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var today = _snapshot?.Today;
         var peak = Math.Max(today?.PeakW ?? 0, _livePeak);
         var average = today is { OnHours: > 0 } ? today.AvgW : frame.TotalW;
-        var spark = _window.Values;
+        var spark = _window.Samples;
         var shares = Budget.Of(frame);
         Live = new LivePanel(
             frame.TotalW,
             $"Live · {Source(frame.Quality)} · {local.ToString("HH:mm:ss", _culture)}",
             frame.Quality, Note(frame.Quality), spark,
-            MeterRange.For(Math.Max(peak, spark.Count > 0 ? spark.Max() : 0)),
+            MeterRange.For(Math.Max(peak, spark.Count > 0 ? spark.Max(s => s.Watts) : 0)),
             average, peak,
             [.. shares.Select(share => Row(share, frame))],
             shares.Sum(share => share.Watts));

@@ -4,33 +4,35 @@ using System.Windows.Media;
 
 namespace PowerLedger.App;
 
-/// <summary>The last minute (spec §9): an amber line over a faint amber fill, with round gridlines labelled in watts and a dot at the newest reading.</summary>
+/// <summary>The last minute (spec §9): an amber line over a faint amber fill and a dot at the newest reading, with round
+/// gridlines labelled in a gutter on the right, clear of the line.</summary>
 internal sealed class Sparkline : Instrument
 {
-    public static readonly DependencyProperty ValuesProperty = Register<IReadOnlyList<double>>(nameof(Values), [], typeof(Sparkline));
+    public static readonly DependencyProperty ValuesProperty = Register<IReadOnlyList<SparkSample>>(nameof(Values), [], typeof(Sparkline));
 
     private const double ControlHeight = 84;
     private const double Top = 10;
     private const double Bottom = 74;
     private const double Inset = 8;
+    private const double Gutter = 30;
 
-    public IReadOnlyList<double> Values { get => (IReadOnlyList<double>)GetValue(ValuesProperty); set => SetValue(ValuesProperty, value); }
+    public IReadOnlyList<SparkSample> Values { get => (IReadOnlyList<SparkSample>)GetValue(ValuesProperty); set => SetValue(ValuesProperty, value); }
 
     protected override Size MeasureOverride(Size availableSize) => Fixed(availableSize, ControlHeight);
 
     protected override void OnRender(DrawingContext dc)
     {
         var values = Values;
-        double left = Inset, right = ActualWidth - Inset;
-        var (low, high, grid) = Geometry.SparkRange(values);
+        if (values.Count == 0) return;
+        double left = Inset, right = ActualWidth - Gutter;
+        var (low, high, grid) = Geometry.SparkRange([.. values.Select(v => v.Watts)]);
         var gridPen = Line(LineBrush);
         foreach (var watts in grid)
         {
             var y = Bottom - (Bottom - Top) * (watts - low) / (high - low);
             dc.DrawLine(gridPen, new Point(left, y), new Point(right, y));
-            DrawText(dc, Format.WholeWatts(watts, CultureInfo.CurrentCulture), left, y - 13, LabelBrush);   // left, clear of the newest-reading dot
+            DrawText(dc, Format.WholeWatts(watts, CultureInfo.CurrentCulture), ActualWidth, y - 7, LabelBrush, TextAlignment.Right);
         }
-        if (values.Count == 0) return;
 
         var points = Geometry.SparkPoints(values, left, right, Top, Bottom, low, high);
         var line = new StreamGeometry();

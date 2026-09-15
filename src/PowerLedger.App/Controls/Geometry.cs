@@ -46,16 +46,17 @@ internal static class Geometry
         return (low, high, grid);
     }
 
-    /// <summary>The sparkline's points, spread across the width with the newest at the right edge.</summary>
-    public static IReadOnlyList<Point> SparkPoints(IReadOnlyList<double> values, double left, double right, double top, double bottom, double low, double high)
+    /// <summary>The sparkline's points: the newest at the right edge, each older one placed by its age across
+    /// <paramref name="spanSeconds"/>, so a minute with gaps in it is not stretched to fill the width.</summary>
+    public static IReadOnlyList<Point> SparkPoints(
+        IReadOnlyList<SparkSample> samples, double left, double right, double top, double bottom, double low, double high, double spanSeconds = 60)
     {
-        var points = new Point[values.Count];
-        var step = values.Count > 1 ? (right - left) / (values.Count - 1) : 0;
-        var span = high > low ? high - low : 1;
-        for (var i = 0; i < values.Count; i++)
+        var points = new Point[samples.Count];
+        var height = high > low ? high - low : 1;
+        for (var i = 0; i < samples.Count; i++)
         {
-            var x = values.Count > 1 ? left + i * step : right;
-            points[i] = new Point(x, bottom - (bottom - top) * Math.Clamp((values[i] - low) / span, 0, 1));
+            var x = right - (right - left) * Math.Clamp(samples[i].AgeSeconds / spanSeconds, 0, 1);
+            points[i] = new Point(x, bottom - (bottom - top) * Math.Clamp((samples[i].Watts - low) / height, 0, 1));
         }
         return points;
     }

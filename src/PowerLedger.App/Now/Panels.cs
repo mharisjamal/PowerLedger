@@ -21,12 +21,13 @@ internal sealed record UiThreads(Action<Action> Post, Action<Action> Background)
 /// <summary>One row of the power budget: a band, what it is, and its share now.</summary>
 internal sealed record BudgetRow(Part Part, string Name, string Detail, string Watts, string Percent, double Share);
 
-/// <summary>The live half of the Now screen, replaced whole on every reading.</summary>
+/// <summary>The live half of the Now screen, replaced whole on every reading. Watts is NaN while there is no reading,
+/// which the readout shows as a dash and the meter as no needle.</summary>
 internal sealed record LivePanel(
-    double Watts, string Eyebrow, Quality? Quality, string QualityNote, IReadOnlyList<double> Spark,
+    double Watts, string Eyebrow, Quality? Quality, string QualityNote, IReadOnlyList<SparkSample> Spark,
     MeterRange Meter, double AverageW, double PeakW, IReadOnlyList<BudgetRow> Budget, double BudgetTotalW)
 {
-    public static LivePanel Waiting { get; } = new(0, "Live · waiting for the service", null, "", [], MeterRange.For(0), 0, 0, [], 0);
+    public static LivePanel Waiting { get; } = new(double.NaN, "Live · waiting for the service", null, "", [], MeterRange.For(0), 0, 0, [], 0);
 }
 
 /// <summary>Today's ledger, as the user reads it.</summary>

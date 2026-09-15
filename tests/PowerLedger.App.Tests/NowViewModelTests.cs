@@ -27,7 +27,7 @@ public class NowViewModelTests
         model.Live.Eyebrow.ShouldBe("Live · battery discharge · 14:32:07");
         model.Live.Quality.ShouldBe(Quality.Measured);
         model.Live.QualityNote.ShouldBe("Windows battery report · 1 s samples");
-        model.Live.Spark.ShouldBe(new[] { 34.2 });
+        model.Live.Spark.ShouldBe(new[] { new SparkSample(0, 34.2) });
         model.Live.Budget.Select(r => r.Name).ShouldBe(new[] { "CPU package", "GPU", "Display", "Rest of system" });
         model.Live.Budget[0].Watts.ShouldBe("14.6 W");
         model.Live.Budget[0].Percent.ShouldBe("43%");

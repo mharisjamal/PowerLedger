@@ -16,6 +16,8 @@ public class NowMathTests
         window.Values.Count.ShouldBe(61);
         window.Values[0].ShouldBe(30);
         window.Values[^1].ShouldBe(90);
+        window.Samples[0].ShouldBe(new SparkSample(60, 30));
+        window.Samples[^1].ShouldBe(new SparkSample(0, 90));
     }
 
     [Fact]

@@ -93,7 +93,7 @@ tests/PowerLedger.App.Tests/
 - Create: `tests/PowerLedger.App.Tests/PowerLedger.App.Tests.csproj`
 - Modify: `PowerLedger.sln`
 
-- [ ] **Step 1: Write the project files**
+- [x] **Step 1: Write the project files**
 
 `src/PowerLedger.App/PowerLedger.App.csproj`
 ```xml
@@ -226,19 +226,19 @@ public partial class App : Application
 </Project>
 ```
 
-- [ ] **Step 2: Add both projects to the solution**
+- [x] **Step 2: Add both projects to the solution**
 
 ```bash
 dotnet sln PowerLedger.sln add src/PowerLedger.App/PowerLedger.App.csproj --solution-folder src
 dotnet sln PowerLedger.sln add tests/PowerLedger.App.Tests/PowerLedger.App.Tests.csproj --solution-folder tests
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` with 0 warnings. `src/PowerLedger.App/obj/Release/net10.0-windows/PowerLedger.GlobalUsings.g.cs` names neither `System.Drawing` nor `System.Windows.Forms`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/PowerLedger.App tests/PowerLedger.App.Tests PowerLedger.sln
@@ -256,7 +256,7 @@ git commit -m "Add the App project and its tests"
 
 Spec §9: every number in a tabular numeral font, so columns line up like a bill; spec §10: money is `decimal` end to end, in the tariff's ISO 4217 currency, formatted with `CultureInfo`. Money keeps the user's way of writing numbers and borrows only the currency's symbol, so a US reader sees "€0.05" for a euro tariff, not a German "0,05 €".
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.App.Tests/FormatTests.cs`
 ```csharp
@@ -329,12 +329,12 @@ public class FormatTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter FormatTests`
 Expected: build error, `Format` not found.
 
-- [ ] **Step 3: Write the formatters**
+- [x] **Step 3: Write the formatters**
 
 `src/PowerLedger.App/Formatting/Format.cs`
 ```csharp
@@ -446,12 +446,12 @@ internal static class Money
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter FormatTests`
 Expected: `Passed! - Failed: 0, Passed: 7`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Formatting tests/PowerLedger.App.Tests/FormatTests.cs
@@ -468,7 +468,7 @@ git commit -m "Write numbers and money the user's way, in the tariff's currency"
 
 Spec §9: UI-only preferences live in `%LOCALAPPDATA%\PowerLedger\ui.json`; everything else is service-owned. D1 needs two: the theme choice and the CO₂ factor, which the App alone uses because the report is the App's. A damaged file is not an error: the App starts from the defaults. Saving writes a temporary file and moves it into place, so a crash never leaves half a file.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.App.Tests/UiPreferencesTests.cs`
 ```csharp
@@ -523,12 +523,12 @@ public sealed class UiPreferencesTests : IDisposable
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter UiPreferencesTests`
 Expected: build error, `UiPreferencesStore` not found.
 
-- [ ] **Step 3: Write the preferences**
+- [x] **Step 3: Write the preferences**
 
 `src/PowerLedger.App/Preferences/UiPreferences.cs`
 ```csharp
@@ -601,12 +601,12 @@ internal sealed class UiPreferencesStore(string path)
 internal sealed partial class UiJson : JsonSerializerContext;
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter UiPreferencesTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Preferences tests/PowerLedger.App.Tests/UiPreferencesTests.cs
@@ -625,7 +625,7 @@ git commit -m "Keep the App's own preferences in ui.json"
 
 Spec §9's tokens, one brush each, with the same keys in both palettes so every view names a token and never a colour. Both themes follow Windows' app mode by default and can be forced. The palette is swapped in the application's merged dictionaries, and every view refers to it with `DynamicResource`, so a switch repaints at once. `Brush.AmberSoft` is the amber at 14 % for the sparkline's fill.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/PowerLedger.App.Tests/ThemeRulesTests.cs`
 ```csharp
@@ -645,12 +645,12 @@ public class ThemeRulesTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter ThemeRulesTests`
 Expected: build error, `ThemeRules` not found.
 
-- [ ] **Step 3: Write the palettes and the manager**
+- [x] **Step 3: Write the palettes and the manager**
 
 `src/PowerLedger.App/Theme/Palette.Dark.xaml`
 ```xml
@@ -788,12 +788,12 @@ internal sealed class ThemeManager : IDisposable
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter ThemeRulesTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Theme tests/PowerLedger.App.Tests/ThemeRulesTests.cs
@@ -814,7 +814,7 @@ git commit -m "Add the instrument and bench-sheet palettes, following Windows by
 
 Spec §8 and Plan C's rules. The link connects, subscribes, and from then on one read loop takes every message: frames go to `FrameReceived`, replies complete the request that carries their id. Idle time from `GetLastInputInfo` goes every five seconds, because the service in session 0 cannot see input. When the connection ends the link says so, fails whatever was waiting, and tries again after 1, 2, 4, 8, 16 and then every 30 seconds. The test service is a real named pipe on a unique name, so the framing, ids and reconnects are the real ones; only the clock is fake.
 
-- [ ] **Step 1: Write the test helpers and the failing tests**
+- [x] **Step 1: Write the test helpers and the failing tests**
 
 `tests/PowerLedger.App.Tests/Frames.cs`
 ```csharp
@@ -1064,12 +1064,12 @@ public sealed class ServiceLinkTests : IAsyncLifetime
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter ServiceLinkTests`
 Expected: build error, `PipeServiceLink` not found.
 
-- [ ] **Step 3: Write the link**
+- [x] **Step 3: Write the link**
 
 `src/PowerLedger.App/Service/ServiceLink.cs`
 ```csharp
@@ -1326,12 +1326,12 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter ServiceLinkTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Service tests/PowerLedger.App.Tests/Frames.cs tests/PowerLedger.App.Tests/Statuses.cs tests/PowerLedger.App.Tests/WaitFor.cs tests/PowerLedger.App.Tests/FakeService.cs tests/PowerLedger.App.Tests/ServiceLinkTests.cs
@@ -1348,7 +1348,7 @@ git commit -m "Link the App to the service: subscribe, requests by id, idle repo
 
 The Now screen's chart is today in five-minute slots stacked by band (spec §9). A slot's watts are its energy over the time the machine was on in it, so a half-asleep slot is not drawn at half height. A minute row's gap is the sleep that ended in that minute (Plan A), so it is laid backwards over the slots the sleep covered, stopping at midnight; that is where the chart hatches "asleep".
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.App.Tests/DaySlotsTests.cs`
 ```csharp
@@ -1414,12 +1414,12 @@ public class DaySlotsTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter DaySlotsTests`
 Expected: build error, `DaySlots` not found.
 
-- [ ] **Step 3: Write the slots**
+- [x] **Step 3: Write the slots**
 
 `src/PowerLedger.App/History/DaySlots.cs`
 ```csharp
@@ -1497,12 +1497,12 @@ internal static class DaySlots
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter DaySlotsTests`
 Expected: `Passed! - Failed: 0, Passed: 5`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/History/DaySlots.cs tests/PowerLedger.App.Tests/DaySlotsTests.cs
@@ -1519,7 +1519,7 @@ git commit -m "Cut today into five-minute slots, laying each sleep back over the
 
 Spec §3: the App never writes the database. It opens it read-only, which works while the service runs even though the App cannot write the `-wal` and `-shm` files (Plan C, verified with SQLite 3.51). One read gathers everything the Now screen needs: today and the month through Plan A's `ReportQueries`, today's slots from the minute rows, the tariff in force and the machine's names from the newest inventory. When the database cannot be opened the read returns null and the screen says the service is not running. Local midnight is the start of today; where a clock change skips midnight, the day starts at the first valid time after it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.App.Tests/HistoryReaderTests.cs`
 ```csharp
@@ -1613,12 +1613,12 @@ public sealed class HistoryReaderTests : IDisposable
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter HistoryReaderTests`
 Expected: build error, `HistoryReader` not found.
 
-- [ ] **Step 3: Write the reader**
+- [x] **Step 3: Write the reader**
 
 `src/PowerLedger.App/History/HistoryReader.cs`
 ```csharp
@@ -1699,12 +1699,12 @@ internal sealed class HistoryReader(SqliteDatabase database) : IHistory
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter HistoryReaderTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/History/HistoryReader.cs tests/PowerLedger.App.Tests/HistoryReaderTests.cs
@@ -1724,7 +1724,7 @@ git commit -m "Read today, the month, the tariff and the machine from the databa
 
 Four small pure pieces. The live window keeps the last 60 s of readings for the sparkline, however often they arrive. The meter's full scale is the smallest round size at least 10 % above what it must show, so the needle never pins, with ticks that read cleanly at that size (spec §9's example is 0–150 W, majors every 25, minors every 5). The budget is spec §6's four bands with a negative rest shown as zero. The month outlook projects from the daily average over the days recorded, prices the projection and the idle waste at the month's own average price, and picks the lowest and highest complete days; today is not complete, so it never counts as either.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.App.Tests/NowMathTests.cs`
 ```csharp
@@ -1746,6 +1746,8 @@ public class NowMathTests
         window.Values.Count.ShouldBe(61);
         window.Values[0].ShouldBe(30);
         window.Values[^1].ShouldBe(90);
+        window.Samples[0].ShouldBe(new SparkSample(60, 30));
+        window.Samples[^1].ShouldBe(new SparkSample(0, 90));
     }
 
     [Fact]
@@ -1825,16 +1827,19 @@ public class NowMathTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter NowMathTests`
 Expected: build error, `LiveWindow` not found.
 
-- [ ] **Step 3: Write the four pieces**
+- [x] **Step 3: Write the four pieces**
 
 `src/PowerLedger.App/Now/LiveWindow.cs`
 ```csharp
 namespace PowerLedger.App;
+
+/// <param name="AgeSeconds">How long before the newest reading this one was taken.</param>
+internal readonly record struct SparkSample(double AgeSeconds, double Watts);
 
 /// <summary>The readings of the last <paramref name="span"/>, oldest first, for the sparkline (spec §9: "Last 60 s").</summary>
 internal sealed class LiveWindow(TimeSpan span)
@@ -1842,6 +1847,17 @@ internal sealed class LiveWindow(TimeSpan span)
     private readonly Queue<(DateTimeOffset At, double Watts)> _points = new();
 
     public IReadOnlyList<double> Values => [.. _points.Select(p => p.Watts)];
+
+    /// <summary>Each reading with its age, so a line with gaps in it is drawn where the readings fell.</summary>
+    public IReadOnlyList<SparkSample> Samples
+    {
+        get
+        {
+            if (_points.Count == 0) return [];
+            var newest = _points.Last().At;
+            return [.. _points.Select(p => new SparkSample((newest - p.At).TotalSeconds, p.Watts))];
+        }
+    }
 
     public void Add(DateTimeOffset at, double watts)
     {
@@ -1979,12 +1995,12 @@ internal sealed record MonthOutlook(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter NowMathTests`
 Expected: `Passed! - Failed: 0, Passed: 11`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Now/LiveWindow.cs src/PowerLedger.App/Now/MeterRange.cs src/PowerLedger.App/Now/Budget.cs src/PowerLedger.App/Now/MonthOutlook.cs tests/PowerLedger.App.Tests/NowMathTests.cs
@@ -2005,7 +2021,7 @@ git commit -m "Add the Now screen's arithmetic: the last minute, the meter scale
 
 Spec §9's Now screen, as immutable panels. A reading replaces `Live`; a history read replaces `Today`, `Month` and `Chart`; a status poll replaces `Status`. Every string is made here with the user's culture, so the tests read exactly what the user sees. Readings arrive on the link's thread and are posted to the UI thread; history and status are read off it. `UiThreads` carries both hops, and the tests pass one that runs everything inline, so nothing in them races. Spec §9's states: "Collecting…" until today has a folded minute, "Service not running" once the link has not connected within `ConnectGrace`, and an honest banner when the machine has neither an energy meter nor a battery.
 
-- [ ] **Step 1: Write the fakes and the failing tests**
+- [x] **Step 1: Write the fakes and the failing tests**
 
 `tests/PowerLedger.App.Tests/FakeLink.cs`
 ```csharp
@@ -2122,7 +2138,7 @@ public class NowViewModelTests
         model.Live.Eyebrow.ShouldBe("Live · battery discharge · 14:32:07");
         model.Live.Quality.ShouldBe(Quality.Measured);
         model.Live.QualityNote.ShouldBe("Windows battery report · 1 s samples");
-        model.Live.Spark.ShouldBe(new[] { 34.2 });
+        model.Live.Spark.ShouldBe(new[] { new SparkSample(0, 34.2) });
         model.Live.Budget.Select(r => r.Name).ShouldBe(new[] { "CPU package", "GPU", "Display", "Rest of system" });
         model.Live.Budget[0].Watts.ShouldBe("14.6 W");
         model.Live.Budget[0].Percent.ShouldBe("43%");
@@ -2269,12 +2285,12 @@ public class NowViewModelTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter NowViewModelTests`
 Expected: build error, `NowViewModel` not found.
 
-- [ ] **Step 3: Write the panels and the view model**
+- [x] **Step 3: Write the panels and the view model**
 
 `src/PowerLedger.App/Now/Panels.cs`
 ```csharp
@@ -2301,12 +2317,13 @@ internal sealed record UiThreads(Action<Action> Post, Action<Action> Background)
 /// <summary>One row of the power budget: a band, what it is, and its share now.</summary>
 internal sealed record BudgetRow(Part Part, string Name, string Detail, string Watts, string Percent, double Share);
 
-/// <summary>The live half of the Now screen, replaced whole on every reading.</summary>
+/// <summary>The live half of the Now screen, replaced whole on every reading. Watts is NaN while there is no reading,
+/// which the readout shows as a dash and the meter as no needle.</summary>
 internal sealed record LivePanel(
-    double Watts, string Eyebrow, Quality? Quality, string QualityNote, IReadOnlyList<double> Spark,
+    double Watts, string Eyebrow, Quality? Quality, string QualityNote, IReadOnlyList<SparkSample> Spark,
     MeterRange Meter, double AverageW, double PeakW, IReadOnlyList<BudgetRow> Budget, double BudgetTotalW)
 {
-    public static LivePanel Waiting { get; } = new(0, "Live · waiting for the service", null, "", [], MeterRange.For(0), 0, 0, [], 0);
+    public static LivePanel Waiting { get; } = new(double.NaN, "Live · waiting for the service", null, "", [], MeterRange.For(0), 0, 0, [], 0);
 }
 
 /// <summary>Today's ledger, as the user reads it.</summary>
@@ -2533,13 +2550,13 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var today = _snapshot?.Today;
         var peak = Math.Max(today?.PeakW ?? 0, _livePeak);
         var average = today is { OnHours: > 0 } ? today.AvgW : frame.TotalW;
-        var spark = _window.Values;
+        var spark = _window.Samples;
         var shares = Budget.Of(frame);
         Live = new LivePanel(
             frame.TotalW,
             $"Live · {Source(frame.Quality)} · {local.ToString("HH:mm:ss", _culture)}",
             frame.Quality, Note(frame.Quality), spark,
-            MeterRange.For(Math.Max(peak, spark.Count > 0 ? spark.Max() : 0)),
+            MeterRange.For(Math.Max(peak, spark.Count > 0 ? spark.Max(s => s.Watts) : 0)),
             average, peak,
             [.. shares.Select(share => Row(share, frame))],
             shares.Sum(share => share.Watts));
@@ -2707,12 +2724,12 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter NowViewModelTests`
 Expected: `Passed! - Failed: 0, Passed: 14`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Now/Panels.cs src/PowerLedger.App/Now/NowViewModel.cs tests/PowerLedger.App.Tests/FakeLink.cs tests/PowerLedger.App.Tests/FakeHistory.cs tests/PowerLedger.App.Tests/Snapshots.cs tests/PowerLedger.App.Tests/NowViewModelTests.cs
@@ -2735,7 +2752,7 @@ git commit -m "Add the Now screen's view model: live panel, ledgers, chart, stat
 
 Spec §9 asks for `MeterScale` and `BudgetBar` drawn with `DrawingContext`; the sparkline and the day chart are drawn the same way, following the mockup. Each control is thin: it calls `Geometry` for every number and draws the result, so what can be wrong is tested without a window. Brushes and the numeral font come from styles (Task 11), set with `DynamicResource`, so a theme switch repaints. The live readout settles from zero over 900 ms when it first shows a value, unless Windows' client-area animation is off (spec §9 motion), and then follows each reading without animating.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.App.Tests/GeometryTests.cs`
 ```csharp
@@ -2778,12 +2795,12 @@ public class GeometryTests
     }
 
     [Fact]
-    public void Spark_points_spread_across_the_width_with_the_newest_at_the_right()
+    public void Spark_points_sit_by_their_age_with_the_newest_at_the_right()
     {
-        var points = Geometry.SparkPoints([10, 20, 30], left: 0, right: 100, top: 0, bottom: 50, low: 10, high: 30);
+        var points = Geometry.SparkPoints([new(60, 10), new(30, 20), new(0, 30)], left: 0, right: 100, top: 0, bottom: 50, low: 10, high: 30);
         points.Select(p => p.X).ShouldBe(new double[] { 0, 50, 100 });
         points.Select(p => p.Y).ShouldBe(new double[] { 50, 25, 0 });
-        Geometry.SparkPoints([20], 0, 100, 0, 50, 10, 30).Single().X.ShouldBe(100);
+        Geometry.SparkPoints([new(3, 20), new(0, 20)], 0, 100, 0, 50, 10, 30).Select(p => p.X).ShouldBe(new double[] { 95, 100 });
     }
 
     [Fact]
@@ -2803,12 +2820,12 @@ public class GeometryTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter GeometryTests`
 Expected: build error, `Geometry` not found.
 
-- [ ] **Step 3: Write the geometry and the controls**
+- [x] **Step 3: Write the geometry and the controls**
 
 `src/PowerLedger.App/Controls/Geometry.cs`
 ```csharp
@@ -2860,16 +2877,17 @@ internal static class Geometry
         return (low, high, grid);
     }
 
-    /// <summary>The sparkline's points, spread across the width with the newest at the right edge.</summary>
-    public static IReadOnlyList<Point> SparkPoints(IReadOnlyList<double> values, double left, double right, double top, double bottom, double low, double high)
+    /// <summary>The sparkline's points: the newest at the right edge, each older one placed by its age across
+    /// <paramref name="spanSeconds"/>, so a minute with gaps in it is not stretched to fill the width.</summary>
+    public static IReadOnlyList<Point> SparkPoints(
+        IReadOnlyList<SparkSample> samples, double left, double right, double top, double bottom, double low, double high, double spanSeconds = 60)
     {
-        var points = new Point[values.Count];
-        var step = values.Count > 1 ? (right - left) / (values.Count - 1) : 0;
-        var span = high > low ? high - low : 1;
-        for (var i = 0; i < values.Count; i++)
+        var points = new Point[samples.Count];
+        var height = high > low ? high - low : 1;
+        for (var i = 0; i < samples.Count; i++)
         {
-            var x = values.Count > 1 ? left + i * step : right;
-            points[i] = new Point(x, bottom - (bottom - top) * Math.Clamp((values[i] - low) / span, 0, 1));
+            var x = right - (right - left) * Math.Clamp(samples[i].AgeSeconds / spanSeconds, 0, 1);
+            points[i] = new Point(x, bottom - (bottom - top) * Math.Clamp((samples[i].Watts - low) / height, 0, 1));
         }
         return points;
     }
@@ -3020,6 +3038,7 @@ internal sealed class MeterScale : Instrument
         Mark(dc, Average, "avg", range, left, right);
         Mark(dc, Peak, "peak", range, left, right);
 
+        if (!double.IsFinite(Value)) return;   // no reading, no needle
         var needle = Geometry.ScaleX(Value, range.Max, left, right);
         var shape = new StreamGeometry();
         using (var g = shape.Open())
@@ -3116,33 +3135,35 @@ using System.Windows.Media;
 
 namespace PowerLedger.App;
 
-/// <summary>The last minute (spec §9): an amber line over a faint amber fill, with round gridlines labelled in watts and a dot at the newest reading.</summary>
+/// <summary>The last minute (spec §9): an amber line over a faint amber fill and a dot at the newest reading, with round
+/// gridlines labelled in a gutter on the right, clear of the line.</summary>
 internal sealed class Sparkline : Instrument
 {
-    public static readonly DependencyProperty ValuesProperty = Register<IReadOnlyList<double>>(nameof(Values), [], typeof(Sparkline));
+    public static readonly DependencyProperty ValuesProperty = Register<IReadOnlyList<SparkSample>>(nameof(Values), [], typeof(Sparkline));
 
     private const double ControlHeight = 84;
     private const double Top = 10;
     private const double Bottom = 74;
     private const double Inset = 8;
+    private const double Gutter = 30;
 
-    public IReadOnlyList<double> Values { get => (IReadOnlyList<double>)GetValue(ValuesProperty); set => SetValue(ValuesProperty, value); }
+    public IReadOnlyList<SparkSample> Values { get => (IReadOnlyList<SparkSample>)GetValue(ValuesProperty); set => SetValue(ValuesProperty, value); }
 
     protected override Size MeasureOverride(Size availableSize) => Fixed(availableSize, ControlHeight);
 
     protected override void OnRender(DrawingContext dc)
     {
         var values = Values;
-        double left = Inset, right = ActualWidth - Inset;
-        var (low, high, grid) = Geometry.SparkRange(values);
+        if (values.Count == 0) return;
+        double left = Inset, right = ActualWidth - Gutter;
+        var (low, high, grid) = Geometry.SparkRange([.. values.Select(v => v.Watts)]);
         var gridPen = Line(LineBrush);
         foreach (var watts in grid)
         {
             var y = Bottom - (Bottom - Top) * (watts - low) / (high - low);
             dc.DrawLine(gridPen, new Point(left, y), new Point(right, y));
-            DrawText(dc, Format.WholeWatts(watts, CultureInfo.CurrentCulture), left, y - 13, LabelBrush);   // left, clear of the newest-reading dot
+            DrawText(dc, Format.WholeWatts(watts, CultureInfo.CurrentCulture), ActualWidth, y - 7, LabelBrush, TextAlignment.Right);
         }
-        if (values.Count == 0) return;
 
         var points = Geometry.SparkPoints(values, left, right, Top, Bottom, low, high);
         var line = new StreamGeometry();
@@ -3349,12 +3370,12 @@ internal sealed class LiveReadout : Instrument
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter GeometryTests`
 Expected: `Passed! - Failed: 0, Passed: 9`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Controls tests/PowerLedger.App.Tests/GeometryTests.cs
@@ -3379,7 +3400,7 @@ git commit -m "Draw the meter, budget bar, sparkline, day chart and live readout
 
 The mockup `docs/design/mockup-1-now-screen.html` in WPF. The window draws its own title bar with `WindowChrome`, keeping Windows' resizing and snapping; a maximised window is inset by the resize border, which Windows otherwise pushes off screen. The rail's LEDs light amber for the page shown. Quality is told by colour and by form (spec §9): a solid dot and solid frame for Measured, a half dot for Calibrated, a hollow dot and dashed frame for Estimated. Ledger rows run a dotted leader from label to value. Views use `DynamicResource` for every palette brush and `StaticResource` only for styles and fonts, which never change. The layout is proven by Task 14's rendering test; this task's check is the build.
 
-- [ ] **Step 1: Write the styles and the small controls**
+- [x] **Step 1: Write the styles and the small controls**
 
 `src/PowerLedger.App/Theme/Styles.xaml`
 ```xml
@@ -3780,7 +3801,7 @@ internal sealed class LedgerRow : Control
 }
 ```
 
-- [ ] **Step 2: Write the shell**
+- [x] **Step 2: Write the shell**
 
 `src/PowerLedger.App/Shell/ShellViewModel.cs`
 ```csharp
@@ -3970,7 +3991,7 @@ public partial class MainWindow : Window
 }
 ```
 
-- [ ] **Step 3: Write the Now screen's layout**
+- [x] **Step 3: Write the Now screen's layout**
 
 `src/PowerLedger.App/Now/NowView.xaml`
 ```xml
@@ -4165,12 +4186,12 @@ public partial class NowView : UserControl
 </Application>
 ```
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` with 0 warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Theme/Styles.xaml src/PowerLedger.App/Controls/Converters.cs src/PowerLedger.App/Controls/QualityBadge.cs src/PowerLedger.App/Controls/LedgerRow.cs src/PowerLedger.App/Shell src/PowerLedger.App/Now/NowView.xaml src/PowerLedger.App/Now/NowView.xaml.cs src/PowerLedger.App/App.xaml
@@ -4190,7 +4211,7 @@ git commit -m "Lay out the window and the Now screen in the Meter and Ledger des
 
 Spec §9's tray: the icon shows the live watts as text and redraws only when the rounded value changes; the tooltip gives now and today; the menu opens the window, toggles start with Windows (the HKCU Run entry the installer sets), and exits the UI while the service keeps logging. A second start of the App asks the first to show its window and exits. "Start service" runs `sc start` elevated, so Windows asks through UAC; declining is not an error. The icon's text rule, the Run entry and the single-instance handshake are tested; the drawing is seen in Task 14.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.App.Tests/TrayTests.cs`
 ```csharp
@@ -4248,12 +4269,12 @@ public sealed class TrayTests : IDisposable
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter TrayTests`
 Expected: build error, `TrayGlyph` not found.
 
-- [ ] **Step 3: Write the tray pieces**
+- [x] **Step 3: Write the tray pieces**
 
 `src/PowerLedger.App/Tray/TrayIcon.cs`
 ```csharp
@@ -4458,12 +4479,12 @@ internal static class ServiceStarter
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter TrayTests`
 Expected: `Passed! - Failed: 0, Passed: 7`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/Tray tests/PowerLedger.App.Tests/TrayTests.cs
@@ -4481,7 +4502,7 @@ git commit -m "Add the tray icon with live watts, start with Windows, and one Ap
 
 The App's start: claim the session (a second start shows the first and exits), read `ui.json`, apply the theme, open the database read-only (Plan A's rule: one `SqliteDatabase` for the App's lifetime), start the link and the Now screen, add the tray icon, and show the window unless started with `--tray`, as the Run entry does. `--pipe` and `--data` reach a development service, matching the service's own switches. Closing the window hides it; "Exit UI" leaves the service logging.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/PowerLedger.App.Tests/AppOptionsTests.cs`
 ```csharp
@@ -4516,12 +4537,12 @@ public class AppOptionsTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter AppOptionsTests`
 Expected: build error, `AppOptions` not found.
 
-- [ ] **Step 3: Write the options and the composition**
+- [x] **Step 3: Write the options and the composition**
 
 `src/PowerLedger.App/AppOptions.cs`
 ```csharp
@@ -4669,7 +4690,7 @@ public partial class App : Application
 }
 ```
 
-- [ ] **Step 4: Run the tests and the App**
+- [x] **Step 4: Run the tests and the App**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter AppOptionsTests`
 Expected: `Passed! - Failed: 0, Passed: 3`.
@@ -4677,7 +4698,7 @@ Expected: `Passed! - Failed: 0, Passed: 3`.
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` with 0 warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.App/AppOptions.cs src/PowerLedger.App/App.xaml.cs tests/PowerLedger.App.Tests/AppOptionsTests.cs
@@ -4693,7 +4714,7 @@ git commit -m "Compose the App: one per session, theme, history, link, Now scree
 
 The unit tests prove the numbers and the words; this task proves the look. A test draws the whole window, rail, Now screen and status bar, from fake data shaped like the mockup's Tuesday afternoon, in both themes, to PNGs in the temp folder. It runs on its own STA thread with the only `Application` in the test process, and it pumps the dispatcher long enough for the live readout to settle before drawing. It needs a desktop session, so it carries `Category=UI` and CI skips it with the hardware tests. Then the App runs for real against a development service.
 
-- [ ] **Step 1: Write the rendering test**
+- [x] **Step 1: Write the rendering test**
 
 `tests/PowerLedger.App.Tests/RenderingTests.cs`
 ```csharp
@@ -4857,14 +4878,14 @@ public class RenderingTests
 }
 ```
 
-- [ ] **Step 2: Run it and look at both pictures**
+- [x] **Step 2: Run it and look at both pictures**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter RenderingTests`
 Expected: `Passed! - Failed: 0, Passed: 1`, and `%TEMP%\powerledger-renders\now-Dark.png` and `now-Light.png` exist.
 
 Open both PNGs and compare them with `docs/design/mockup-1-now-screen.html` in a browser. Check: the amber is spent only on the live number's needle, the sparkline and the now line; hairlines, not shadows; the quality badge is a solid green frame with a solid dot; the ledgers' dotted leaders line up; nothing overlaps or clips at 1180 × 900. Fix what does not match in `Styles.xaml`, `NowView.xaml` or a control, and run again.
 
-- [ ] **Step 3: Run the App against a development service**
+- [x] **Step 3: Run the App against a development service**
 
 Build, then start a development service in one terminal and the App in another:
 
@@ -4876,7 +4897,7 @@ src/PowerLedger.App/bin/Release/net10.0-windows/PowerLedger.exe --data "$TEMP/pl
 
 Expected: the tray icon shows whole watts; the window's number ticks once a second with a Measured badge on battery or Estimated on mains; the budget rows name the processor and the graphics card; the status bar says "Service running" once the first status poll lands. After a minute the ledgers leave "Collecting…". Stop the service: within three seconds the banner says the service is not running, and the tooltip says so. Start it again: within 30 seconds the readings return by themselves.
 
-- [ ] **Step 4: Measure the App's memory**
+- [x] **Step 4: Measure the App's memory**
 
 With the window open for a minute, from PowerShell:
 
@@ -4888,7 +4909,9 @@ $private = (Get-Counter "\Process(PowerLedger)\Working Set - Private").CounterSa
 
 Expected: under 120 MB (spec §12's App gate, read as private working set like the service's). Record both numbers. Close the App with the tray menu's "Exit UI".
 
-- [ ] **Step 5: Commit**
+Measured on the development laptop, 2026-09-15, with the window open: 71 MB private working set after a minute, 84 MB after the service was stopped and started again; the working set was 180 to 194 MB, most of it shared framework images. The run also showed two things the pictures could not: after a reconnect the sparkline stretched its few points across the whole minute, so points are now placed by their age; and a panel waiting for the service showed "0.0 W" and an empty grid, so it now shows a dash, no needle and no grid.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/PowerLedger.App.Tests/RenderingTests.cs

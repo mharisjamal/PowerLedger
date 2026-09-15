@@ -37,12 +37,12 @@ public class GeometryTests
     }
 
     [Fact]
-    public void Spark_points_spread_across_the_width_with_the_newest_at_the_right()
+    public void Spark_points_sit_by_their_age_with_the_newest_at_the_right()
     {
-        var points = Geometry.SparkPoints([10, 20, 30], left: 0, right: 100, top: 0, bottom: 50, low: 10, high: 30);
+        var points = Geometry.SparkPoints([new(60, 10), new(30, 20), new(0, 30)], left: 0, right: 100, top: 0, bottom: 50, low: 10, high: 30);
         points.Select(p => p.X).ShouldBe(new double[] { 0, 50, 100 });
         points.Select(p => p.Y).ShouldBe(new double[] { 50, 25, 0 });
-        Geometry.SparkPoints([20], 0, 100, 0, 50, 10, 30).Single().X.ShouldBe(100);
+        Geometry.SparkPoints([new(3, 20), new(0, 20)], 0, 100, 0, 50, 10, 30).Select(p => p.X).ShouldBe(new double[] { 95, 100 });
     }
 
     [Fact]
