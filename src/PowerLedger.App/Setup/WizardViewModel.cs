@@ -17,10 +17,11 @@ internal enum SetupStep
 /// <summary>
 /// The first-run wizard (spec §9): the tariff, the detected hardware to confirm, and what measured, calibrated and
 /// estimated mean on this machine. A step saves before the wizard moves on and stays put when the save fails; an empty
-/// tariff means later. Without the service the machine can't be saved, so that step says so and moves on. Finishing is
-/// remembered in ui.json.
+/// tariff means later. Without the service the machine can't be saved, so that step says so and moves on. The service
+/// may come up after the wizard does, as at the first start after installing, so the wizard reads again when it
+/// connects. Finishing is remembered in ui.json.
 /// </summary>
-internal sealed class WizardViewModel : ObservableObject
+internal sealed class WizardViewModel : ObservableObject, IDisposable
 {
     private readonly IServiceLink _link;
     private readonly IMachineHistory _history;
@@ -47,6 +48,7 @@ internal sealed class WizardViewModel : ObservableObject
         Next = new RelayCommand(() => _ = NextAsync());
         Back = new RelayCommand(() => Step = Step == SetupStep.Readings ? SetupStep.Machine : SetupStep.Tariff);
         Finish = new RelayCommand(FinishSetup);
+        _link.ConnectionChanged += OnConnectionChanged;
     }
 
     /// <summary>Raised when the user finishes; the shell shows the Now screen.</summary>
@@ -91,8 +93,10 @@ internal sealed class WizardViewModel : ObservableObject
     {
         Step = SetupStep.Tariff;
         Message = null;
-        _threads.Background(() => _ = ReadAsync());
+        _threads.Background(() => _ = ReadAsync(refill: true));
     }
+
+    public void Dispose() => _link.ConnectionChanged -= OnConnectionChanged;
 
     /// <summary>Saves this step, and moves on when that worked. Call on the UI thread.</summary>
     internal async Task NextAsync()
@@ -131,17 +135,24 @@ internal sealed class WizardViewModel : ObservableObject
         return "This machine has no power sensors PowerLedger can read, so its readings are estimated from load and the machine profile.";
     }
 
-    private async Task ReadAsync()
+    /// <param name="refill">Fill the machine form even when it holds values; a reconnect only fills an empty one.</param>
+    private async Task ReadAsync(bool refill)
     {
         var settings = await _link.GetSettingsAsync().ConfigureAwait(false);
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         var detected = _history.Detected();
         _threads.Post(() =>
         {
-            if (settings is not null) Machine.Load(settings);
+            if (settings is not null && (refill || !Machine.IsLoaded)) Machine.Load(settings);
             Detected = detected?.Summary(_culture) ?? "The service hasn't detected this machine yet; it does when it starts.";
             Readings = ReadingsFor(status);
         });
+    }
+
+    /// <summary>The service came up after the wizard did: read what it knows. Raised on the link's thread.</summary>
+    private void OnConnectionChanged(bool connected)
+    {
+        if (connected) _threads.Background(() => _ = ReadAsync(refill: false));
     }
 
     private void FinishSetup()

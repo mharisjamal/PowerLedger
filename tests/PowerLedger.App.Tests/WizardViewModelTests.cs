@@ -116,6 +116,18 @@ public class WizardViewModelTests
     }
 
     [Fact]
+    public void A_service_that_comes_up_after_the_wizard_fills_the_machine()
+    {
+        var model = Model();
+        model.Machine.IsLoaded.ShouldBeFalse();
+        model.Machine.Chassis.ShouldBe(ChassisKind.Laptop);
+
+        _link.Connect(true);
+        model.Machine.IsLoaded.ShouldBeTrue();
+        model.Readings.ShouldStartWith("This machine has a battery");
+    }
+
+    [Fact]
     public void A_machine_without_sensors_is_told_its_readings_are_estimated()
         => WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: false, battery: false))
             .ShouldBe("This machine has no power sensors PowerLedger can read, so its readings are estimated from load and the machine profile.");

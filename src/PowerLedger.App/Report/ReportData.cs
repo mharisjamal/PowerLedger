@@ -46,7 +46,7 @@ internal sealed record ReportData(
             t.OnHours > 0 || t.AsleepHours > 0,
             Format.Kwh(t.EnergyKwh, culture),
             t.Currency is { } currency ? Money.Format(t.Cost, currency, culture) : Format.Missing,
-            CostNoteOf(t, price, culture),
+            CostNoteOf(t, report.Tariff, report.Range, zone, culture),
             Format.Kg(Core.Co2.Kg(t.EnergyKwh, co2KgPerKwh), culture) + " kg",   // Co2 alone would be the property
             $"at {co2KgPerKwh.ToString("0.00", culture)} kg / kWh",
             Format.WholeWatts(t.AvgW, culture),
@@ -70,12 +70,16 @@ internal sealed record ReportData(
             Bars(first, Ranges.LocalDay(report.Range.Through.AddTicks(-1), zone), report.Days));
     }
 
-    /// <summary>The average price over the range, which follows any tariff change; or why there is none.</summary>
-    private static string CostNoteOf(RangeTotals t, decimal? price, CultureInfo culture)
+    /// <summary>The tariff in force at the range's end, and the day it started when that was inside the range, since
+    /// energy before then was priced otherwise or not at all; or why there is no single price.</summary>
+    private static string CostNoteOf(RangeTotals t, Tariff? tariff, DateRange range, TimeZoneInfo zone, CultureInfo culture)
     {
-        if (t.Currency is not { } currency) return "no tariff set";
+        if (t.Currency is null || tariff is null) return "no tariff set";
         if (t.CostIsPartial) return "partial: energy priced in an earlier currency is left out";
-        return price is { } p ? Money.Rate(decimal.Round(p, 4), currency, culture) + " / kWh on average" : "";
+        var rate = Money.Rate(tariff.PricePerKwh, tariff.Currency, culture) + " / kWh";
+        return tariff.EffectiveFrom > range.From
+            ? $"{rate} from {TimeZoneInfo.ConvertTime(tariff.EffectiveFrom, zone).ToString("d MMM", culture)}"
+            : rate;
     }
 
     /// <summary>Spec §9's everyday equivalents, from Core's round assumptions.</summary>

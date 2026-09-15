@@ -9,7 +9,7 @@
             <Setter Property="Margin" Value="0,0,18,0" />
         </Style>
         <Style x:Key="Label" TargetType="TextBlock" BasedOn="{StaticResource Text.Secondary}">
-            <Setter Property="Width" Value="200" />
+            <Setter Property="Width" Value="250" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
         <Style x:Key="Row" TargetType="StackPanel">

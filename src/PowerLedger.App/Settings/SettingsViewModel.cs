@@ -13,8 +13,8 @@ internal sealed record SourceLine(string Name, string State, string Detail);
 /// <summary>
 /// The Settings screen (spec §9): the tariff and its history, the machine profile with what was detected, sampling and
 /// retention, calibration with a reset that asks first, the App's own preferences, and About. It reads when shown, and the
-/// status again every ten seconds while shown, off the UI thread. The service form is filled only when the screen shows
-/// and after a save, so a status refresh never overwrites what is being typed.
+/// status again every ten seconds while shown, off the UI thread. The service form is filled when the screen shows and
+/// after a save; when the service comes up while the screen shows, only an empty form is filled, so nothing typed is lost.
 /// </summary>
 internal sealed class SettingsViewModel : ObservableObject, IDisposable
 {
@@ -63,6 +63,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         CancelReset = new RelayCommand(() => ConfirmingReset = false);
         ConfirmReset = new RelayCommand(() => _ = ConfirmResetAsync());
         RunSetup = new RelayCommand(() => SetupRequested?.Invoke());
+        _link.ConnectionChanged += OnConnectionChanged;
     }
 
     /// <summary>"Run setup again": the shell shows the wizard.</summary>
@@ -142,7 +143,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     /// <summary>The page is shown: read everything now, and the status every ten seconds until hidden. Call on the UI thread.</summary>
     public void Show()
     {
-        _threads.Background(() => _ = ReadAllAsync());
+        _threads.Background(() => _ = ReadAllAsync(refill: true));
         _timer ??= _clock.CreateTimer(_ => _ = ReadStatusAsync(), null, StatusEvery, StatusEvery);
     }
 
@@ -156,6 +157,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     {
         Tariff.Saved -= ReadTariffs;
         Service.Saved -= Show;
+        _link.ConnectionChanged -= OnConnectionChanged;
         Hide();
     }
 
@@ -173,7 +175,8 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         await ReadStatusAsync().ConfigureAwait(false);
     }
 
-    private async Task ReadAllAsync()
+    /// <param name="refill">Fill the service form even when it holds values; a reconnect only fills an empty one.</param>
+    private async Task ReadAllAsync(bool refill)
     {
         var settings = await _link.GetSettingsAsync().ConfigureAwait(false);
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
@@ -184,7 +187,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             if (settings is not null)
             {
                 _sampleSeconds = settings.SampleIntervalSeconds;
-                Service.Load(settings);
+                if (refill || !Service.IsLoaded) Service.Load(settings);
             }
             Notice = settings is null
                 ? "The service isn't running. Its settings appear when it starts; the App's own preferences below work now."
@@ -193,6 +196,12 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             Detected = detected?.Summary(_culture) ?? "Nothing detected yet: the service detects the hardware when it starts.";
             ShowStatus(status);
         });
+    }
+
+    /// <summary>The service came up while the screen shows: read it. Raised on the link's thread.</summary>
+    private void OnConnectionChanged(bool connected)
+    {
+        if (connected && _timer is not null) _threads.Background(() => _ = ReadAllAsync(refill: false));
     }
 
     private async Task ReadStatusAsync()

@@ -52,7 +52,8 @@ internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeH
         {
             var queries = new ReportQueries(database);
             var (totals, days) = queries.Report(range.From, range.To, zone);
-            return new RangeReport(range, totals, days, queries.Series(range.From, range.To, range.Bucket));
+            var tariff = new TariffRepository(database).Schedule().At(range.To > range.From ? range.To.AddTicks(-1) : range.From);
+            return new RangeReport(range, totals, days, queries.Series(range.From, range.To, range.Bucket), tariff);
         }
         catch (SqliteException)
         {

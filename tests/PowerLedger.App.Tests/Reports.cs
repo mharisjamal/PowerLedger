@@ -30,7 +30,7 @@ internal static class Reports
         var days = Enumerable.Range(0, dayCount)
             .Select(d => new DayTotals(first.AddDays(d), kwh / dayCount, 0.05m, "USD", false, 8, 60, 0.01, 0))
             .ToList();
-        return new RangeReport(range, Totals(range, kwh), days, series);
+        return new RangeReport(range, Totals(range, kwh), days, series, new Tariff(range.From.AddDays(-30), 0.17m, "USD"));
     }
 
     public static RangeReport Empty(DateRange range) => new(

@@ -3,8 +3,9 @@ using PowerLedger.Storage;
 
 namespace PowerLedger.App;
 
-/// <summary>A range's totals, days and chart buckets, from one set of reads so they agree.</summary>
-internal sealed record RangeReport(DateRange Range, RangeTotals Totals, IReadOnlyList<DayTotals> Days, IReadOnlyList<Aggregate> Series);
+/// <summary>A range's totals, days and chart buckets, from one set of reads so they agree, and the tariff in force at its end.</summary>
+internal sealed record RangeReport(
+    DateRange Range, RangeTotals Totals, IReadOnlyList<DayTotals> Days, IReadOnlyList<Aggregate> Series, Tariff? Tariff = null);
 
 /// <summary>Spec §9's CSV grains.</summary>
 internal enum ExportGrain

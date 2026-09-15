@@ -1,4 +1,5 @@
 using System.Globalization;
+using PowerLedger.Core;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -25,7 +26,7 @@ public class ReportDataTests
         data.HasData.ShouldBeTrue();
         data.Energy.ShouldBe("2.74");
         data.Cost.ShouldBe("$0.47");
-        data.CostNote.ShouldBe("$0.17 / kWh on average");
+        data.CostNote.ShouldBe("$0.17 / kWh");
         data.Co2.ShouldBe("1.04 kg");                                   // 2.74 kWh at 0.38 kg / kWh
         data.Co2Note.ShouldBe("at 0.38 kg / kWh");
         data.Average.ShouldBe("41");
@@ -58,6 +59,14 @@ public class ReportDataTests
         data.Equivalents.Select(e => e.Value).ShouldBe(new[] { "274 hours", "183", "15 km" });
         data.QualityText.ShouldBe("62% measured · 20% calibrated · 18% estimated");
         data.Quality.ShouldBe(new QualityMix(0.62, 0.2, 0.18));
+    }
+
+    [Fact]
+    public void A_tariff_that_began_inside_the_range_says_from_when()
+    {
+        var range = Ranges.ThisMonth(Now, Utc, English);
+        var data = Month(r => r with { Tariff = new Tariff(new DateTimeOffset(2026, 9, 5, 0, 0, 0, TimeSpan.Zero), 0.25m, "USD") });
+        data.CostNote.ShouldBe("$0.25 / kWh from 5 Sep");
     }
 
     [Fact]

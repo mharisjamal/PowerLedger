@@ -19,8 +19,8 @@ internal sealed class ServiceForm : ObservableObject
     private readonly CultureInfo _culture;
     private readonly RelayCommand _save;
     private bool _isLoaded;
-    private ChassisKind _chassis;
-    private PsuTier _psuTier;
+    private ChassisKind _chassis = MachineProfile.DefaultLaptop.Chassis;
+    private PsuTier _psuTier = MachineProfile.DefaultLaptop.PsuTier;
     private string _ramSticks = "";
     private bool _ramIsDdr5;
     private string _ssdCount = "";

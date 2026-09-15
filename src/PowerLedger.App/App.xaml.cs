@@ -132,6 +132,7 @@ public partial class App : Application
             _breakdown?.Dispose();
             _report?.Dispose();
             _settings?.Dispose();
+            _wizard?.Dispose();
             if (_link is not null) await _link.DisposeAsync();
             _theme?.Dispose();
             _database?.Dispose();

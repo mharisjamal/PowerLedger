@@ -48,6 +48,18 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void A_service_that_comes_up_while_settings_shows_fills_it()
+    {
+        var model = Model();
+        model.Show();
+        model.Notice.ShouldNotBeNull();
+
+        _link.Connect(true);
+        model.Service.IsLoaded.ShouldBeTrue();
+        model.Notice.ShouldBeNull();
+    }
+
+    [Fact]
     public void A_co2_factor_is_read_in_the_users_culture_and_applied()
     {
         var model = Model();
