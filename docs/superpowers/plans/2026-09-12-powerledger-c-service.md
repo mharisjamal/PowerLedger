@@ -2286,6 +2286,16 @@ public class WriteBufferTests
     }
 
     [Fact]
+    public void A_write_that_fails_for_any_other_reason_is_held_and_reported_the_same_way()
+    {
+        var buffer = new WriteBuffer(_ => throw new IOException("The network location cannot be reached."));
+        for (var s = 0; s < 10; s++) buffer.Add(Readings.At(s));
+        buffer.Flush().ShouldBeFalse();
+        buffer.Count.ShouldBe(10);
+        buffer.Problem.ShouldNotBeNull().ShouldContain("cannot be reached");
+    }
+
+    [Fact]
     public void Past_its_capacity_the_oldest_readings_are_dropped_and_counted()
     {
         var buffer = new WriteBuffer(_ => throw new SqliteException("SQLite Error 10: 'disk I/O error'.", 10), capacity: 100);
@@ -2307,20 +2317,19 @@ Expected: build error, `WriteBuffer` not found.
 
 `src/PowerLedger.Service/WriteBuffer.cs`
 ```csharp
-using Microsoft.Data.Sqlite;
 using PowerLedger.Core;
 
 namespace PowerLedger.Service;
 
 /// <summary>
 /// Readings waiting to be written as one batch (spec §7): flushed once a minute, on suspend and on stop. When a write
-/// fails, as it does on a full disk, the readings stay here and the next flush retries them, up to
+/// fails for any reason, as it does on a full disk, the readings stay here and the next flush retries them, up to
 /// <paramref name="capacity"/> readings (an hour at one a second); past that the oldest are dropped (spec §10).
 /// </summary>
 internal sealed class WriteBuffer(Action<IReadOnlyList<Reading>> write, int capacity = 3600)
 {
     private readonly List<Reading> _pending = [];
-    private SqliteException? _lastError;
+    private Exception? _lastError;
 
     public int Count => _pending.Count;
 
@@ -2352,8 +2361,9 @@ internal sealed class WriteBuffer(Action<IReadOnlyList<Reading>> write, int capa
             _lastError = null;
             return true;
         }
-        catch (SqliteException error)
+        catch (Exception error)
         {
+            // Whatever the cause, the readings are safer held than lost, and the status screen says why.
             _lastError = error;
             return false;
         }
@@ -2364,7 +2374,7 @@ internal sealed class WriteBuffer(Action<IReadOnlyList<Reading>> write, int capa
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter WriteBufferTests`
-Expected: `Passed! - Failed: 0, Passed: 4`.
+Expected: `Passed! - Failed: 0, Passed: 5`.
 
 - [x] **Step 5: Commit**
 
@@ -5294,22 +5304,22 @@ git commit -m "Add development scripts to install and query the service"
 
 ### Task 23: Final verification, the spec, and the handoff to Plan D
 
-- [ ] **Step 1: Clean build with warnings as errors**
+- [x] **Step 1: Clean build with warnings as errors**
 
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` and `0 Warning(s)`.
 
-- [ ] **Step 2: Full test run**
+- [x] **Step 2: Full test run**
 
 Run: `dotnet test -c Release`
-Expected: Core `Passed: 110`, Storage `Passed: 41`, Sensors `Passed: 99`, Service `Passed: 126`, no failures and no skips.
+Expected: Core `Passed: 110`, Storage `Passed: 41`, Sensors `Passed: 99`, Service `Passed: 127`, no failures and no skips.
 
-- [ ] **Step 3: Confirm CI can skip the hardware tests**
+- [x] **Step 3: Confirm CI can skip the hardware tests**
 
 Run: `dotnet test -c Release --filter "Category!=Hardware"`
-Expected: Service `Passed: 124` (the display registration and the console host excluded), Sensors `Passed: 94`, Core and Storage unchanged, no failures.
+Expected: Service `Passed: 125` (the display registration and the console host excluded), Sensors `Passed: 94`, Core and Storage unchanged, no failures.
 
-- [ ] **Step 4: Bring the spec in line**
+- [x] **Step 4: Bring the spec in line**
 
 In `docs/superpowers/specs/2026-09-08-powerledger-design.md`:
 
@@ -5341,7 +5351,7 @@ In `docs/superpowers/specs/2026-09-08-powerledger-design.md`:
 - Messages: `subscribe` (the server pushes a `reading` frame each tick, saying which parts were measured), `getStatus` (service version, per-source health and suspect counts, sensor restarts, calibration progress, DB size, write problems), `getSettings`, `setSettings`, `setTariff` (inserts a `tariffs` row; `effectiveFrom` defaults to now and may be backdated by the user), `resetCalibration`, and `reportActivity` (the App's idle seconds every few seconds, because the service in session 0 cannot see input).
 ```
 
-- [ ] **Step 5: Record the public surface Plan D will build on**
+- [x] **Step 5: Record the public surface Plan D will build on**
 
 Plan D (the App) consumes exactly these:
 
@@ -5372,12 +5382,28 @@ Plan D (the App) consumes exactly these:
 - The service installs no event source of its own. The first warning written under the service control manager creates one, which LocalSystem may do.
 - Modern Standby may deliver no suspend at all. The loop then sees a long Δt, which the integrator records as a gap, so energy stays right but the sessions table shows no suspend.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-09-08-powerledger-design.md docs/superpowers/plans
 git commit -m "Complete Plan C: the service runs, records and serves"
 ```
+
+---
+
+## After the final review
+
+One whole-branch review ran once every task was committed. It confirmed the data paths, the loop's single-threaded
+ownership, the pipe's limits and the data folder's checks, and raised four points. One was real and is fixed in its own
+commit, and the code blocks above already show it:
+
+| Problem | Fix |
+|---|---|
+| The write buffer caught only SQLite's exceptions, so any other write failure escaped the tick without the status screen saying why. | Every failure keeps the readings for the next flush and reports its message. |
+
+Three were checked and needed nothing. The database size is written and read only on the loop thread, and the service
+is x64 only. Disposing the tick timer completes its pending wait with false rather than throwing. Once the inbox is
+closed, a late send fails at once, and anything queued before it is drained and failed.
 
 ---
 

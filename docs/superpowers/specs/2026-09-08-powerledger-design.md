@@ -87,8 +87,8 @@ Sampling runs at 1 Hz (configurable 1–5 s). Every source is read inside its ow
 | CPU | package W, cores W, iGPU W, DRAM W, load | Windows Energy Meter Interface, which Windows 11 fills with the processor's RAPL rails, read through the `Energy Meter` performance counters as raw picowatt-hour values in well under a millisecond. `GetSystemTimes` for load | no |
 | Discrete GPU | power W, load, present | NVML through the installed NVIDIA driver (`nvml.dll`, loaded from System32 only). A card Windows has switched off (D3, read from the device's power data without waking it) counts as 0 W and is not queried. Many laptop GPUs, the GeForce MX330 included, report no power at all; those fall back to the load model. AMD and Intel cards are not read yet; the `GPU Engine` performance counters are the driver-free route to their load | no |
 | Battery | discharge/charge rate mW, AC line status | `CallNtPowerInformation(SystemBatteryState)` (Rate is negative when discharging). A UPS on USB also appears as a battery, flagged short-term in `SystemPowerCapabilities`; it powers more than the machine and is ignored | no |
-| Display | brightness %, display on/off, monitor count and size | WMI `WmiMonitorBrightness` ("not supported" on a desktop means no brightness), `RegisterPowerSettingNotification(GUID_CONSOLE_DISPLAY_STATE)` with service handle, `WmiMonitorBasicDisplayParams` + `WmiMonitorConnectionParams`: the built-in panel is the monitor with an internal or embedded connection, never simply the first one listed | no |
-| Activity | user idle seconds, session locked | `GetLastInputInfo`, which only describes the caller's own session, so the App reports it over the pipe; `WTSRegisterSessionNotification` for the lock state | no |
+| Display | brightness %, display on/off, monitor count and size | WMI `WmiMonitorBrightness` ("not supported" on a desktop means no brightness), `PowerSettingRegisterNotification(GUID_CONSOLE_DISPLAY_STATE)` with a callback, `WmiMonitorBasicDisplayParams` + `WmiMonitorConnectionParams`: the built-in panel is the monitor with an internal or embedded connection, never simply the first one listed | no |
+| Activity | user idle seconds, session locked | `GetLastInputInfo`, which only describes the caller's own session, so the App reports it over the pipe; session-change events from the service control manager for the lock state | no |
 | Fans | count only | Taken from the machine profile, not measured; reading fan tachometers needs a kernel driver and buys about a watt | no |
 
 ### No kernel driver anywhere
@@ -184,7 +184,7 @@ Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence dec
 - Energy is integrated per tick: `Wh += totalW × Δt / 3600`, with Δt from a monotonic clock.
 - If Δt is within the gap threshold the tick is counted at the current reading. Beyond it (sleep, hibernate, service stop, Modern Standby throttling) the tick contributes zero energy and the interval is recorded as a gap. The threshold is `max(5 s, 2 × sample interval)`, so a slower sampling setting never turns timer jitter into gaps. Non-finite readings contribute nothing.
 - Energy attribution bands: CPU, GPU, display (internal panel plus opted-in external monitors), and rest (everything else, including RAM, board, PSU loss and the learned or measured remainder). In measured mode the rest band can go negative when the parts over-report; storage keeps it raw and the UI clamps and annotates at display time.
-- Suspend and resume are handled through `SERVICE_CONTROL_POWEREVENT`: on suspend the write buffer is flushed and the session row closed; on resume a new session row opens, the Δt clock resets, sensor handles are re-opened, and the hardware inventory re-runs.
+- Suspend and resume arrive through the power manager's callback registration (`PowerRegisterSuspendResumeNotification`), which works the same in a console run: on suspend the write buffer is flushed, the current minute folded and the session row closed, with the machine held up to 1.5 s; on resume a new session row opens, the sensor set is rebuilt, the hardware inventory re-runs, and the first Δt is measured by the wall clock so the sleep is recorded as a gap.
 - Idle waste = energy of samples where `userIdleSeconds ≥ idleThreshold` (default 5 min, configurable 1–30), split into display-on and display-off. The saving suggestion reads the current Windows sleep timeout (`powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE`) so it can say "Windows currently sleeps after 30 min" or "never".
 - Timestamps are stored in UTC; the UI converts to local time. Wall-clock jumps produce a session note, never negative energy.
 
@@ -195,8 +195,8 @@ Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence dec
 ## 7. Storage
 
 - Engine: SQLite via `Microsoft.Data.Sqlite`, hand-written SQL (no EF Core), WAL mode, `synchronous=NORMAL`, `auto_vacuum=INCREMENTAL`.
-- File: `C:\ProgramData\PowerLedger\power.db`. ACL: SYSTEM full control on the files; Users need **modify on the folder**, because a read-only WAL connection still creates the `-shm` shared-memory file. Granting only read would stop the App from opening history at all.
-- Writes are batched: 60 samples per transaction (one per minute). The buffer flushes on suspend, `PRESHUTDOWN`, and service stop.
+- File: `C:\ProgramData\PowerLedger\power.db`. ACL: SYSTEM and Administrators full control, Users read and execute, inherited by everything in the folder and nothing inherited from above. A database users could edit would feed crafted input to a SYSTEM process. A read-only SQLite connection reads a WAL database whose `-wal` and `-shm` it cannot write (verified with SQLite 3.51), so the App can read history while the service runs; with the service stopped the App shows it as not running. The service refuses a data folder another account owns, because anyone may create folders in ProgramData, and sets aside database files another account owns.
+- Writes are batched: 60 samples per transaction (one per minute). The buffer flushes on suspend, shutdown and service stop. `ServiceBase` offers no preshutdown hook; a minute of readings writes in milliseconds, well inside the shutdown allowance.
 
 ### Tables
 
@@ -229,7 +229,7 @@ Cost is computed at query time as `Σ energy × tariff effective at that time`, 
 
 - Named pipe `\\.\pipe\PowerLedger.v1`, ACL allowing local Authenticated Users, remote access denied.
 - Newline-delimited JSON with `System.Text.Json` source generation. Messages carry `type` and, for requests, `id`. Max message 64 KB.
-- Messages: `Subscribe` (server pushes a `Reading` frame each tick), `GetStatus` (service version, per-source health and suspect counts, driver state, calibration progress, DB size), `GetSettings`, `SetSettings`, `SetTariff` (inserts a `tariffs` row; `effective_from` defaults to now and may be backdated by the user), `ResetCalibration`.
+- Messages: `subscribe` (the server pushes a `reading` frame each tick, saying which parts were measured), `getStatus` (service version, per-source health and suspect counts, sensor restarts, calibration progress, DB size, write problems), `getSettings`, `setSettings`, `setTariff` (inserts a `tariffs` row; `effectiveFrom` defaults to now and may be backdated by the user), `resetCalibration`, and `reportActivity` (the App's idle seconds every few seconds, because the service in session 0 cannot see input).
 - Multiple clients supported. The App reconnects with backoff from 1 s to 30 s.
 - `SetSettings` accepts only tariff, machine profile, idle threshold, sample interval, and retention, each range-checked. No paths or commands travel over the pipe.
 
@@ -321,7 +321,7 @@ Framework: xUnit, Shouldly (BSD; FluentAssertions 8+ requires a paid commercial 
 - **Service**: host the worker with fake sources and a temp DB, advance the fake clock through 10 simulated minutes including a suspend/resume, assert rows, aggregates, and sessions. Pipe round-trip and reconnect tests.
 - **App**: ViewModel unit tests. A manual QA checklist per screen for v1.
 - **Accuracy (manual, once)**: battery mode within ±5 % of `powercfg /batteryreport`; calibrated AC estimate within ±15 % of an inexpensive wall meter, on the developer's Dell Inspiron 3501.
-- **Performance gate**: service < 0.5 % CPU and < 50 MB; App < 120 MB with a window open; measured with `dotnet-counters`; 7-day soak on the developer machine with zero crashes.
+- **Performance gate**: service < 0.5 % CPU and < 50 MB private working set, the figure Task Manager shows (the full working set adds shared system and driver DLL images, about 50 MB more on the development laptop, where the service measured 0.04 % CPU and 36.8 MB); App < 120 MB with a window open; measured with `dotnet-counters` and the process counters; 7-day soak on the developer machine with zero crashes.
 
 ## 13. Distribution
 
