@@ -107,6 +107,8 @@ tests/PowerLedger.App.Tests/
     <AssemblyName>PowerLedger</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- WFO0003 wants DPI awareness set through WinForms' startup API, which a WPF app never calls; WPF reads it from the manifest. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

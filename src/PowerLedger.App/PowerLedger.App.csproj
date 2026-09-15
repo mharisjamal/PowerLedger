@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>PowerLedger</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- WFO0003 wants DPI awareness set through WinForms' startup API, which a WPF app never calls; WPF reads it from the manifest. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PowerLedger.Contracts\PowerLedger.Contracts.csproj" />
+    <ProjectReference Include="..\PowerLedger.Core\PowerLedger.Core.csproj" />
+    <ProjectReference Include="..\PowerLedger.Storage\PowerLedger.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Fonts\*.ttf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PowerLedger.App.Tests" />
+  </ItemGroup>
+
+  <!-- WinForms is here only for the tray icon; its global usings would collide with WPF's Application, Color and more. -->
+  <Target Name="DropWinFormsGlobalUsings" BeforeTargets="GenerateGlobalUsings">
+    <ItemGroup>
+      <Using Remove="System.Drawing" />
+      <Using Remove="System.Windows.Forms" />
+    </ItemGroup>
+  </Target>
+
+</Project>
