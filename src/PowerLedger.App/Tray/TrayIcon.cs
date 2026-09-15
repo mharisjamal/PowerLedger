@@ -1,34 +1,33 @@
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Text;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace PowerLedger.App;
 
-/// <summary>What the tray icon says: whole watts, thousands as "k", a dash without a reading.</summary>
+/// <summary>
+/// What the tray icon says: whole watts and thousands as "k"; without a reading it says nothing and shows the logo.
+/// "1.2k" was tried and left out: at 16 pixels its digits are too small to read.
+/// </summary>
 internal static class TrayGlyph
 {
     public static int? Round(double? watts) => watts is { } w && double.IsFinite(w) ? (int)Math.Round(Math.Max(0, w)) : null;
 
-    public static string Text(int? watts) => watts switch
+    public static string? Text(int? watts) => watts switch
     {
-        null => "–",
+        null => null,
         < 1000 => watts.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
         _ => Math.Round(watts.Value / 1000.0).ToString(System.Globalization.CultureInfo.InvariantCulture) + "k",
     };
 }
 
 /// <summary>
-/// The tray icon (spec §9). It draws the live watts as text and redraws only when the rounded value changes; the tooltip
-/// gives now and today; the menu opens the window, toggles start with Windows, and exits the UI while the service keeps
-/// logging. Call it on the UI thread.
+/// The tray icon (spec §9). It draws the live watts on the brand's amber tile, or the logo until there is a reading, and
+/// redraws only when the rounded value changes; the tooltip gives now and today; the menu opens the window, toggles
+/// start with Windows, and exits the UI while the service keeps logging. Call it on the UI thread.
 /// </summary>
 internal sealed class TrayIcon : IDisposable
 {
-    private static readonly Color Amber = Color.FromArgb(0xF2, 0xB2, 0x33);
-
     private readonly NotifyIcon _icon;
     private Icon? _current;
     private int? _shown;
@@ -100,33 +99,9 @@ internal sealed class TrayIcon : IDisposable
         _current?.Dispose();
     }
 
-    /// <summary>The text in amber, as large as the small-icon size allows.</summary>
-    private static Icon Render(string text)
-    {
-        var size = SystemInformation.SmallIconSize;
-        using var bitmap = new Bitmap(size.Width, size.Height);
-        using (var graphics = Graphics.FromImage(bitmap))
-        {
-            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            graphics.Clear(Color.Transparent);
-            var em = size.Height * (text.Length <= 2 ? 0.78f : 0.62f);
-            using var font = new Font("Bahnschrift", em, FontStyle.Bold, GraphicsUnit.Pixel);
-            using var brush = new SolidBrush(Amber);
-            using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            graphics.DrawString(text, font, brush, new RectangleF(-2, 0, size.Width + 4, size.Height), format);
-        }
-        var handle = bitmap.GetHicon();
-        try
-        {
-            return (Icon)Icon.FromHandle(handle).Clone();
-        }
-        finally
-        {
-            DestroyIcon(handle);
-        }
-    }
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DestroyIcon(IntPtr handle);
+    /// <summary>
+    /// The text on the amber tile, or the logo without it, at the small-icon size of the system's scale. The icon owns its
+    /// handle, which <see cref="Show"/> and <see cref="Dispose"/> free with the icon.
+    /// </summary>
+    private static Icon Render(string? text) => TrayArt.DrawIcon(text, SystemInformation.SmallIconSize.Width);
 }

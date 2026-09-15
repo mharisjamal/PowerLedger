@@ -10,13 +10,25 @@ public sealed class TrayTests : IDisposable
     public void Dispose() => Registry.CurrentUser.DeleteSubKeyTree(_key, throwOnMissingSubKey: false);
 
     [Theory]
-    [InlineData(null, "–")]
+    [InlineData(0.0, "0")]
+    [InlineData(-3.0, "0")]
+    [InlineData(7.4, "7")]
     [InlineData(34.4, "34")]
+    [InlineData(349.6, "350")]
     [InlineData(999.4, "999")]
+    [InlineData(999.5, "1k")]
+    [InlineData(1200.0, "1k")]
     [InlineData(1499.0, "1k")]
     [InlineData(2600.0, "3k")]
-    public void The_icon_shows_whole_watts_and_thousands_as_k(double? watts, string expected)
+    public void The_icon_shows_whole_watts_and_thousands_as_k(double watts, string expected)
         => TrayGlyph.Text(TrayGlyph.Round(watts)).ShouldBe(expected);
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void Without_a_reading_the_icon_says_nothing_and_shows_the_logo(double? watts)
+        => TrayGlyph.Text(TrayGlyph.Round(watts)).ShouldBeNull();
 
     [Fact]
     public void Start_with_windows_writes_and_removes_the_run_entry()
