@@ -177,6 +177,24 @@ public class UpdaterTests
         updater.ActionLabel.ShouldBe("Try again");
     }
 
+    /// <summary>Inno Setup elevates itself, so a declined permission prompt comes back as setup stopping before it started.</summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Setup_that_stops_before_installing_asks_for_a_yes_next_time(int code)
+    {
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        await updater.CheckAsync();
+        _setup.Exit = Task.FromResult(code);
+
+        updater.Act.Execute(null);
+
+        await WaitFor.True(() => updater.Stage == UpdateStage.Failed);
+        updater.Detail.ShouldBe($"Setup stopped before installing (code {code}). Try again, and choose Yes when Windows asks for permission.");
+        updater.ReadyVersion.ShouldBe("0.3.0");
+    }
+
     [Fact]
     public async Task A_declined_permission_prompt_leaves_the_update_ready_to_try_again()
     {

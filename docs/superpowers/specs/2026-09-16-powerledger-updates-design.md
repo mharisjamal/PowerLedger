@@ -87,7 +87,8 @@ All in `src/PowerLedger.App/Updates/`, each testable alone:
 - `UpdateHttp` — one `HttpClient` for the App's life, with the user agent and the system proxy.
 
 Around them: `UiPreferences` gains `CheckForUpdates`, `AnnouncedVersion` and `LastVersion`; `AppOptions` gains
-`--update-feed <url>` so a test can stand in for GitHub (HTTPS, or HTTP on the machine itself); the tray gains the menu item
+`--update-feed <url>` so a test can stand in for GitHub with a feed served on the same machine (nothing else is accepted,
+since whatever can change the App's command line could otherwise offer an installer GitHub doesn't list); the tray gains the menu item
 and a notification that opens the window; `PowerLedger.iss` gains the `/UPDATE=1` relaunch.
 
 ## Releasing

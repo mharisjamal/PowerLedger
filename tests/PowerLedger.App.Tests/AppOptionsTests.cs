@@ -31,15 +31,17 @@ public class AppOptionsTests
     [Theory]
     [InlineData("http://127.0.0.1:8765", "http://127.0.0.1:8765/")]
     [InlineData("http://localhost:8765/feed/", "http://localhost:8765/feed/")]
-    [InlineData("https://example.org/pl", "https://example.org/pl/")]
-    public void A_test_feed_is_https_or_on_this_machine(string given, string expected)
+    [InlineData("https://localhost:8443/pl", "https://localhost:8443/pl/")]
+    public void A_test_feed_is_on_this_machine(string given, string expected)
         => AppOptions.Parse(["--update-feed", given]).UpdateFeed.ShouldBe(new Uri(expected));
 
+    /// <summary>Anything that can change the App's command line could otherwise offer an installer GitHub doesn't list.</summary>
     [Theory]
+    [InlineData("https://example.org/pl")]
     [InlineData("http://example.org/")]
     [InlineData("ftp://127.0.0.1/")]
     [InlineData("not a url")]
     [InlineData(@"C:\feed")]
-    public void Any_other_feed_is_ignored(string given)
+    public void A_feed_anywhere_else_is_ignored(string given)
         => AppOptions.Parse(["--update-feed", given]).UpdateFeed.ShouldBeNull();
 }

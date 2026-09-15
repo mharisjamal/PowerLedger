@@ -264,9 +264,15 @@ internal sealed class Updater : ObservableObject, IDisposable
         try
         {
             var code = await _setup.RunAsync(installer, release.Size, release.Sha256, log, _stop.Token).ConfigureAwait(false);
-            _threads.Post(() => Fail(code == 0
-                ? "Setup finished but didn't restart PowerLedger. Choose Exit UI in the tray menu, then open PowerLedger again."
-                : $"Setup ended without installing (code {code.ToString(CultureInfo.InvariantCulture)})."));
+            var shown = code.ToString(CultureInfo.InvariantCulture);
+            // Inno Setup elevates itself, so a declined permission prompt comes back as setup stopping before it began
+            // (codes 1 and 2); errors after that show setup's own message first.
+            _threads.Post(() => Fail(code switch
+            {
+                0 => "Setup finished but didn't restart PowerLedger. Choose Exit UI in the tray menu, then open PowerLedger again.",
+                1 or 2 => $"Setup stopped before installing (code {shown}). Try again, and choose Yes when Windows asks for permission.",
+                _ => $"Setup ended without installing (code {shown}).",
+            }));
         }
         catch (Win32Exception error) when (error.NativeErrorCode == SetupRunner.Declined)
         {
