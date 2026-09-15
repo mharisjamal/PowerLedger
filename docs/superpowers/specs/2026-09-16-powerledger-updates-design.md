@@ -26,7 +26,7 @@ running. Rejected: NetSparkle (its own dialogs and XML feed, which we would rest
 
 ## How it works
 
-1. **Check.** One minute after the App starts and every six hours after, while "Download new versions quietly" is ticked
+1. **Check.** One minute after the App starts and every hour after, while "Download new versions quietly" is ticked
    (the default), the App asks `https://api.github.com/repos/mharisjamal/PowerLedger/releases/latest`. GitHub leaves out
    drafts and pre-releases, so a pre-release can be tried without anyone being offered it. Settings also has "Check now",
    which works with the box unticked.
@@ -97,7 +97,7 @@ and a notification that opens the window; `PowerLedger.iss` gains the `/UPDATE=1
 
 `scripts/release.ps1` publishes the version in `Directory.Build.props`: it checks that `main` is clean and pushed, builds
 the installer, creates the GitHub release with its notes and the installer, and checks that GitHub's digest is the local
-file's. Every installed copy then finds it within six hours.
+file's. Every installed copy then finds it within the hour.
 
 ## Testing
 

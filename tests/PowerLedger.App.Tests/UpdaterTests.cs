@@ -116,7 +116,7 @@ public class UpdaterTests
     }
 
     [Fact]
-    public void It_checks_a_minute_after_starting_and_every_six_hours_while_allowed()
+    public void It_checks_a_minute_after_starting_and_every_hour_while_allowed()
     {
         var updater = Updater();
         updater.Start();
@@ -124,7 +124,7 @@ public class UpdaterTests
         _feed.Asked.ShouldBe(0);
         _clock.Advance(TimeSpan.FromSeconds(1));
         _feed.Asked.ShouldBe(1);
-        _clock.Advance(TimeSpan.FromHours(6));
+        _clock.Advance(TimeSpan.FromHours(1));
         _feed.Asked.ShouldBe(2);
 
         updater.CheckAutomatically = false;

@@ -27,7 +27,7 @@ internal enum UpdateStage
 }
 
 /// <summary>
-/// Updates (spec §13). A minute after the App starts and every six hours after, while the user allows it, asks the feed for
+/// Updates (spec §13). A minute after the App starts and every hour after, while the user allows it, asks the feed for
 /// the newest release and downloads a newer one quietly; once it is checked, the card offers it, the tray announces it once
 /// per version and its menu offers it too. Installing starts setup, which closes the App and opens the new version. Old
 /// downloads are cleared when the App starts and at each check. The card and Settings' Updates row bind here, and
@@ -36,7 +36,7 @@ internal enum UpdateStage
 internal sealed class Updater : ObservableObject, IDisposable
 {
     public static readonly TimeSpan FirstCheck = TimeSpan.FromMinutes(1);
-    public static readonly TimeSpan CheckEvery = TimeSpan.FromHours(6);
+    public static readonly TimeSpan CheckEvery = TimeSpan.FromHours(1);
 
     private static readonly string[] Card =
         [nameof(Stage), nameof(ShowCard), nameof(Title), nameof(Detail), nameof(ActionLabel), nameof(CanDismiss), nameof(HasNotes), nameof(ReadyVersion)];
@@ -167,7 +167,7 @@ internal sealed class Updater : ObservableObject, IDisposable
     private Uri NotesPage => _stage == UpdateStage.Updated || _release is null ? GitHubReleaseFeed.PageOf(Running) : _release.Page;
 
     /// <summary>Clears old downloads, says so when this is the first start of a newer version, and checks a minute from now
-    /// and every six hours after while checking automatically is on. Call on the UI thread.</summary>
+    /// and every hour after while checking automatically is on. Call on the UI thread.</summary>
     public void Start()
     {
         _downloader.Clean(Running);

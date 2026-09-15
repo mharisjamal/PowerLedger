@@ -34,7 +34,7 @@ security fixes arrive with PowerLedger's updates.
 
 ## Updates
 
-PowerLedger updates itself from this repository's releases. A minute after the App starts, and every six hours after, it
+PowerLedger updates itself from this repository's releases. A minute after the App starts, and every hour after, it
 asks GitHub for the latest release; when there is a newer one, it downloads the installer quietly into
 `%LOCALAPPDATA%\PowerLedger\Updates` and keeps it only when its size and SHA-256 are the ones GitHub lists. Then a card at
 the bottom of the window's rail, one notification from the tray and an item in the tray menu offer **Restart to update**:
