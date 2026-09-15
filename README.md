@@ -27,10 +27,21 @@ alone (within about 20%).
 ## Requirements
 
 Windows 10 1809 or later, or Windows 11, on x64 or Arm64. 32-bit (x86) Windows and Windows in S mode are not
-supported. The installer carries everything, the .NET 10 runtime included, and downloads nothing. It is about 92 MB;
+supported. The installer carries everything, the .NET 10 runtime included, and downloads nothing. It is about 96 MB;
 installed, PowerLedger takes about 260 MB of disk on x64 and 280 MB on Arm64. On Windows 10, .NET 10 is officially
 supported only on the Enterprise LTSC editions, but it runs on the others. Since the runtime is inside the app, .NET's
 security fixes arrive with PowerLedger's updates.
+
+## Updates
+
+PowerLedger updates itself from this repository's releases. A minute after the App starts, and every six hours after, it
+asks GitHub for the latest release; when there is a newer one, it downloads the installer quietly into
+`%LOCALAPPDATA%\PowerLedger\Updates` and keeps it only when its size and SHA-256 are the ones GitHub lists. Then a card at
+the bottom of the window's rail, one notification from the tray and an item in the tray menu offer **Restart to update**:
+Windows asks for permission, setup closes the App, updates the service and opens the new version. The check sends nothing
+about you or your PC; GitHub sees the request, with your IP address and `PowerLedger/<version>` as its user agent.
+Settings turns the checks off (**Download new versions quietly, then ask**) and has **Check now**. Drafts and
+pre-releases are never offered. Version 0.1.0 has no updater: install a newer version over it by hand once.
 
 ## Build and test
 
@@ -96,13 +107,13 @@ pwsh installer\test-installer.ps1
 fast compression since its size doesn't matter. `test-installer.ps1` installs the real PowerLedger, service and all,
 and checks the files, shortcut and uninstall entry; that the build installed is the one for this PC's architecture and
 carries its own .NET runtime; the service's registration, and its recovery when its process is killed; the data
-folder's owner and ACL; that the pipe answers; and that an upgrade, an uninstall and a reinstall keep the history. It
-stops at once if `C:\ProgramData\PowerLedger` already exists, so it never touches a real history, and it removes what
-it created. Its steps are Preflight, Install, Service, Data, Recovery, ServiceStop, Upgrade, UninstallKeep, Reinstall
-and Cleanup, all silent. Three more drive setup's windows with UI Automation: InstallWizard installs with the wizard,
-as somebody new to PowerLedger would; UninstallDelete uninstalls and deletes the history; and DriveWizard drives the
-wizard of a setup started by a normal user. `-Step` picks the steps to run. Results go to
-`installer\output\test-results`.
+folder's owner and ACL; that the pipe answers; that an upgrade, run as the App's Restart to update runs it, opens the
+App again; and that an upgrade, an uninstall and a reinstall keep the history. It stops at once if
+`C:\ProgramData\PowerLedger` already exists, so it never touches a real history, and it removes what it created. Its
+steps are Preflight, Install, Service, Data, Recovery, ServiceStop, Upgrade, UninstallKeep, Reinstall and Cleanup, all
+silent. Three more drive setup's windows with UI Automation: InstallWizard installs with the wizard, as somebody new to
+PowerLedger would; UninstallDelete uninstalls and deletes the history; and DriveWizard drives the wizard of a setup
+started by a normal user. `-Step` picks the steps to run. Results go to `installer\output\test-results`.
 
 Then install PowerLedger from `installer\output` and, from an unelevated terminal, run the tests that need it
 installed:
@@ -110,6 +121,20 @@ installed:
 ```
 dotnet test -c Release --filter Category=Installed
 ```
+
+## Publish a release
+
+Raise `<Version>` in `Directory.Build.props`, commit and push `main`, write the release notes, then:
+
+```
+pwsh scripts\release.ps1 -Notes notes.md
+```
+
+It checks that `main` is clean and pushed and that the version isn't released yet, builds the installer, creates the
+GitHub release `v<version>` at that commit with the notes and the installer, and checks that the SHA-256 GitHub lists is
+the local file's: every installed copy checks its download against it. `-Draft` makes a draft, which nobody is offered
+until it is published on GitHub; `-SkipBuild` uses the installer already in `installer\output`. `gh` has to be signed in
+to an account that can publish to the repository, or `GH_TOKEN` has to hold a token for one.
 
 ## Documents
 
