@@ -71,6 +71,8 @@ public partial class App : Application
             }));
         _now.PropertyChanged += OnNowChanged;
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
+        // The installer asks this before it replaces or removes the App (installer\PowerLedger.iss).
+        _instance.OnExitRequested(() => Dispatcher.InvokeAsync(ExitUi));
 
         _link.Start();
         _now.Start();
@@ -116,7 +118,8 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    /// <summary>"Exit UI" in the tray menu. It is an event handler, so nothing may escape it: the App ends either way.</summary>
+    /// <summary>"Exit UI" in the tray menu, and the installer's request to exit. <see cref="_exiting"/> is set first, so the
+    /// window closes for good, shown or hidden. It is an event handler, so nothing may escape it: the App ends either way.</summary>
     private async void ExitUi()
     {
         _exiting = true;

@@ -49,4 +49,50 @@ public sealed class TrayTests : IDisposable
         second.SignalFirst();
         await WaitFor.True(() => Volatile.Read(ref shown) == 1);
     }
+
+    [Fact]
+    public async Task The_installer_can_ask_a_running_app_to_exit()
+    {
+        var name = $"PowerLedger.test.{Guid.NewGuid():N}";
+        using var app = new SingleInstance(name);
+        var exits = 0;
+        app.OnExitRequested(() => Interlocked.Increment(ref exits));
+
+        AskToExit(name);
+        await WaitFor.True(() => Volatile.Read(ref exits) == 1, timeoutMs: 2000);
+    }
+
+    [Fact]
+    public async Task An_exit_asked_for_before_the_app_listens_is_not_lost()
+    {
+        var name = $"PowerLedger.test.{Guid.NewGuid():N}";
+        using var app = new SingleInstance(name);
+        AskToExit(name);
+
+        var exits = 0;
+        app.OnExitRequested(() => Interlocked.Increment(ref exits));
+        await WaitFor.True(() => Volatile.Read(ref exits) == 1, timeoutMs: 2000);
+    }
+
+    [Fact]
+    public async Task The_exit_runs_once_even_when_asked_again()
+    {
+        var name = $"PowerLedger.test.{Guid.NewGuid():N}";
+        using var app = new SingleInstance(name);
+        var exits = 0;
+        app.OnExitRequested(() => Interlocked.Increment(ref exits));
+
+        AskToExit(name);
+        await WaitFor.True(() => Volatile.Read(ref exits) == 1, timeoutMs: 2000);
+        AskToExit(name);   // an installer retrying finds the App already on its way out
+        await Task.Delay(250);
+        Volatile.Read(ref exits).ShouldBe(1);
+    }
+
+    /// <summary>What the installer does: opens the App's exit event by name, sets it, and lets go of it.</summary>
+    private static void AskToExit(string name)
+    {
+        using var exit = EventWaitHandle.OpenExisting($@"Local\{name}.Exit");
+        exit.Set();
+    }
 }
