@@ -40,7 +40,8 @@ public sealed record MachineProfile
     public bool IncludeMonitors { get; init; }
     /// <summary>Watts per external monitor while the display is on.</summary>
     public double MonitorWatts { get; init; } = 25;
-    /// <summary>Internal panel diagonal. 0 means unknown or no internal panel (desktops).</summary>
+    /// <summary>Built-in panel diagonal. 0 means unknown on a laptop and no built-in panel on a desktop; a desktop with
+    /// one, an all-in-one, gives its size so the panel counts.</summary>
     public double DisplayDiagonalInches { get; init; } = 15.6;
     public double? CpuTdpOverrideW { get; init; }
     public double? GpuTdpOverrideW { get; init; }

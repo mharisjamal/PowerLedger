@@ -110,6 +110,18 @@ public class PowerModelTests
     }
 
     [Fact]
+    public void An_all_in_one_s_built_in_panel_is_part_of_the_draw_through_its_supply()
+    {
+        var allInOne = MachineProfile.DefaultDesktop with { DisplayDiagonalInches = 23.8 };
+        var r = Desktop(profile: allInOne).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
+        var beforePsu = 50 + 120 + 11.25 + 2 * 2.5 + 2 + (12 + 3 * 1);
+        r.Quality.ShouldBe(Quality.Estimated);
+        r.Components.Display.ShouldBe(11.25, 0.001);
+        r.TotalW.ShouldBe(beforePsu / 0.85, 0.001);
+        r.Components.Sum.ShouldBe(r.TotalW, 0.001);
+    }
+
+    [Fact]
     public void External_monitors_are_added_after_the_supply_efficiency_division()
     {
         var profile = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 25 };

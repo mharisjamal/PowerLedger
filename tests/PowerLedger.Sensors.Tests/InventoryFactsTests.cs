@@ -77,6 +77,24 @@ public class InventoryFactsTests
 
         var desktop = Laptop() with { Chassis = ChassisKind.Desktop, DisplayDiagonalInches = 0 };
         desktop.ToProfile(MachineProfile.DefaultDesktop).DisplayDiagonalInches.ShouldBe(0);
+        desktop.ToProfile(MachineProfile.DefaultDesktop with { DisplayDiagonalInches = 23.8 }).DisplayDiagonalInches.ShouldBe(23.8);
+    }
+
+    [Fact]
+    public void An_all_in_one_s_built_in_panel_reaches_its_desktop_profile()
+    {
+        var allInOne = Laptop() with { Chassis = ChassisKind.Desktop, DisplayDiagonalInches = 23.8 };
+        var profile = allInOne.ToProfile(MachineProfile.DefaultDesktop);
+        profile.Chassis.ShouldBe(ChassisKind.Desktop);
+        profile.DisplayDiagonalInches.ShouldBe(23.8);
+    }
+
+    [Fact]
+    public void A_laptop_s_panel_size_does_not_follow_the_machine_into_a_desktop_profile()
+    {
+        // A tower whose UPS once passed for its own battery kept the laptop's panel size; a desktop would count it.
+        var tower = Laptop() with { Chassis = ChassisKind.Desktop, DisplayDiagonalInches = 0 };
+        tower.ToProfile(MachineProfile.DefaultLaptop).DisplayDiagonalInches.ShouldBe(0);
     }
 
     [Fact]

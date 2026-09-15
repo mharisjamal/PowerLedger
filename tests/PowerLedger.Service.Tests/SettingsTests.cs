@@ -28,6 +28,26 @@ public class SettingsTests
     }
 
     [Fact]
+    public void An_all_in_one_s_detected_panel_reaches_its_profile()
+    {
+        var (settings, _) = ProfilePolicy.Apply(null, null, Facts.Desktop() with { DisplayDiagonalInches = 23.8 });
+        settings.Profile.Chassis.ShouldBe(ChassisKind.Desktop);
+        settings.Profile.DisplayDiagonalInches.ShouldBe(23.8);
+    }
+
+    [Fact]
+    public void A_tower_first_taken_for_a_laptop_leaves_the_laptop_s_panel_behind()
+    {
+        // Its UPS passed for its own battery; detected again, the desktop enclosure changes the hash.
+        var stored = ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { ExtrasWatts = 6 } };
+        var (settings, changed) = ProfilePolicy.Apply(stored, "laptop-hash", Facts.Desktop());
+        changed.ShouldBeTrue();
+        settings.Profile.Chassis.ShouldBe(ChassisKind.Desktop);
+        settings.Profile.DisplayDiagonalInches.ShouldBe(0);
+        settings.Profile.ExtrasWatts.ShouldBe(6);
+    }
+
+    [Fact]
     public void The_same_machine_keeps_the_users_corrections()
     {
         var facts = Facts.Laptop(ramSticks: 2);

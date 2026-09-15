@@ -45,7 +45,9 @@ public sealed record InventoryFacts(
     }
 
     /// <summary>The detected fields folded into the user's profile. Everything the user chose is left alone, and so is
-    /// the panel size when no built-in panel was found.</summary>
+    /// the panel size when no built-in panel was found, as on a laptop docked with its lid shut; a built-in panel that
+    /// was found, an all-in-one's included, sets it. A laptop's panel size never passes to a machine now detected as a
+    /// desktop, because a desktop counts any panel size as a built-in screen.</summary>
     public MachineProfile ToProfile(MachineProfile chosen) => chosen with
     {
         Chassis = Chassis,
@@ -53,7 +55,9 @@ public sealed record InventoryFacts(
         RamIsDdr5 = RamIsDdr5,
         SsdCount = SsdCount,
         HddCount = HddCount,
-        DisplayDiagonalInches = DisplayDiagonalInches > 0 ? DisplayDiagonalInches : chosen.DisplayDiagonalInches,
+        DisplayDiagonalInches = DisplayDiagonalInches > 0 ? DisplayDiagonalInches
+            : Chassis == ChassisKind.Desktop && chosen.Chassis == ChassisKind.Laptop ? 0
+            : chosen.DisplayDiagonalInches,
     };
 
     /// <summary>The record as storage keeps it, for the status screen and for diagnosing a hash change.</summary>

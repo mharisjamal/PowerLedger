@@ -27,15 +27,32 @@ public class DisplayModelTests
     [InlineData(14.1, 1.0)]
     [InlineData(16.9, 1.0)]
     [InlineData(17.0, 1.3)]
+    [InlineData(19.9, 1.3)]
+    [InlineData(20.0, 3.0)]
+    [InlineData(23.8, 3.0)]
+    [InlineData(27.0, 3.0)]
     public void Size_factor_boundaries(double diagonal, double expected)
         => DisplayModel.SizeFactor(diagonal).ShouldBe(expected);
 
     [Fact]
-    public void Panel_is_zero_when_display_is_off_or_machine_is_a_desktop()
+    public void Panel_is_zero_when_the_display_is_off_or_a_desktop_has_no_built_in_panel()
     {
         DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, 0.6, displayOn: false).ShouldBe(0);
         DisplayModel.PanelWatts(MachineProfile.DefaultDesktop, 0.6, displayOn: true).ShouldBe(0);
     }
+
+    [Fact]
+    public void An_all_in_one_s_built_in_panel_counts_as_the_big_screen_it_is()
+    {
+        var allInOne = MachineProfile.DefaultDesktop with { DisplayDiagonalInches = 23.8 };
+        DisplayModel.PanelWatts(allInOne, 0.5, displayOn: true).ShouldBe(11.25, 0.001);
+        DisplayModel.PanelWatts(allInOne, 1.0, displayOn: true).ShouldBe(18.0, 0.001);
+        DisplayModel.PanelWatts(allInOne, 1.0, displayOn: false).ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_laptop_panel_counts_even_when_its_size_is_unknown()
+        => DisplayModel.PanelWatts(MachineProfile.DefaultLaptop with { DisplayDiagonalInches = 0 }, 0.5, displayOn: true).ShouldBe(3.75, 0.001);
 
     [Fact]
     public void Unknown_brightness_assumes_fifty_percent()
