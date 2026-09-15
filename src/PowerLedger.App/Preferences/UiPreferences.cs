@@ -27,6 +27,17 @@ internal sealed record UiPreferences
     /// <summary>The first-run wizard was finished once; it shows until then (spec §9).</summary>
     public bool FirstRunDone { get; init; }
 
+    /// <summary>Look for new versions every few hours and download them quietly (spec §13). On until the user unticks it;
+    /// a ui.json from before it existed keeps it on. It has a setter rather than init for that: the JSON source generator
+    /// gives an init-only property missing from the file its type's default, false, where a setter is left alone.</summary>
+    public bool CheckForUpdates { get; set; } = true;
+
+    /// <summary>The newest version the tray has announced, so each version is announced once.</summary>
+    public string? AnnouncedVersion { get; init; }
+
+    /// <summary>The version that last ran, so the first start of a newer one can say it was updated.</summary>
+    public string? LastVersion { get; init; }
+
     public static UiPreferences Default { get; } = new();
 
     /// <summary>The same preferences with anything out of range put back to its default.</summary>

@@ -90,4 +90,18 @@ public sealed class AppPreferencesTests : IDisposable
         preferences.ApplyFirstRunDefaults();
         preferences.StartsWithWindows.ShouldBeFalse();
     }
+
+    [Fact]
+    public void The_update_preferences_are_saved()
+    {
+        var preferences = Preferences();
+        preferences.CheckForUpdates(false).ShouldBeNull();
+        preferences.Announced("0.3.0").ShouldBeNull();
+        preferences.Ran("0.2.0").ShouldBeNull();
+
+        var saved = Store.Load();
+        saved.CheckForUpdates.ShouldBeFalse();
+        saved.AnnouncedVersion.ShouldBe("0.3.0");
+        saved.LastVersion.ShouldBe("0.2.0");
+    }
 }

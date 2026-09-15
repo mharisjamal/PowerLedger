@@ -16,6 +16,14 @@ internal interface IUiSettings
 
     string? StartWithWindows(bool enabled);
 
+    string? CheckForUpdates(bool enabled);
+
+    /// <summary>Remembers that the tray announced <paramref name="version"/>.</summary>
+    string? Announced(string version);
+
+    /// <summary>Remembers that <paramref name="version"/> ran.</summary>
+    string? Ran(string version);
+
     string? FinishFirstRun();
 }
 
@@ -57,6 +65,12 @@ internal sealed class AppPreferences(
             return "Couldn't change starting with Windows: " + error.Message;
         }
     }
+
+    public string? CheckForUpdates(bool enabled) => Save(Current with { CheckForUpdates = enabled });
+
+    public string? Announced(string version) => Save(Current with { AnnouncedVersion = version });
+
+    public string? Ran(string version) => Save(Current with { LastVersion = version });
 
     public string? FinishFirstRun() => Save(Current with { FirstRunDone = true });
 

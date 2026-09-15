@@ -55,4 +55,26 @@ public sealed class UiPreferencesTests : IDisposable
         store.Save(UiPreferences.Default with { FirstRunDone = true });
         store.Load().FirstRunDone.ShouldBeTrue();
     }
+
+    [Fact]
+    public void Updates_are_on_by_default_even_in_a_file_from_before_they_existed()
+    {
+        new UiPreferencesStore(File).Load().CheckForUpdates.ShouldBeTrue();
+
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, """{ "Theme": "Dark", "FirstRunDone": true }""");
+        var old = new UiPreferencesStore(File).Load();
+        old.CheckForUpdates.ShouldBeTrue();
+        old.AnnouncedVersion.ShouldBeNull();
+        old.LastVersion.ShouldBeNull();
+    }
+
+    [Fact]
+    public void The_update_bookkeeping_survives_a_save_and_a_load()
+    {
+        var store = new UiPreferencesStore(File);
+        var saved = UiPreferences.Default with { CheckForUpdates = false, AnnouncedVersion = "0.3.0", LastVersion = "0.2.0" };
+        store.Save(saved);
+        store.Load().ShouldBe(saved);
+    }
 }

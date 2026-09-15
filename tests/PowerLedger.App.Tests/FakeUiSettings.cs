@@ -3,7 +3,7 @@ namespace PowerLedger.App.Tests;
 /// <summary>The App's preferences held in memory, recording each change.</summary>
 internal sealed class FakeUiSettings : IUiSettings
 {
-    public UiPreferences Current { get; private set; } = UiPreferences.Default;
+    public UiPreferences Current { get; set; } = UiPreferences.Default;
 
     public bool StartsWithWindows { get; private set; } = true;
 
@@ -28,6 +28,27 @@ internal sealed class FakeUiSettings : IUiSettings
     {
         StartsWithWindows = enabled;
         Changes.Add($"autostart {enabled}");
+        return null;
+    }
+
+    public string? CheckForUpdates(bool enabled)
+    {
+        Current = Current with { CheckForUpdates = enabled };
+        Changes.Add($"updates {enabled}");
+        return null;
+    }
+
+    public string? Announced(string version)
+    {
+        Current = Current with { AnnouncedVersion = version };
+        Changes.Add($"announced {version}");
+        return null;
+    }
+
+    public string? Ran(string version)
+    {
+        Current = Current with { LastVersion = version };
+        Changes.Add($"ran {version}");
         return null;
     }
 
