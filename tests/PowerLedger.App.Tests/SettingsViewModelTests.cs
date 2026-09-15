@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.Time.Testing;
+using PowerLedger.Contracts;
 using PowerLedger.Core;
 using Shouldly;
 
@@ -32,6 +33,19 @@ public class SettingsViewModelTests
         model.Sources[0].State.ShouldBe("working");
         model.ServiceState.ShouldBe("Service 0.1.0 · 10 readings since 1 Jan 1970 00:00");
         model.Database.ShouldBe("31 MB");
+    }
+
+    [Fact]
+    public void A_desktop_is_told_calibration_is_not_used_rather_than_learning_on_battery()
+    {
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.Calibration.ShouldBe("Not used on a desktop: its readings are always estimated.");
+        _clock.Advance(SettingsViewModel.StatusEvery);
+        model.Calibration.ShouldBe("Not used on a desktop: its readings are always estimated.");
     }
 
     [Fact]

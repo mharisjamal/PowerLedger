@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -29,6 +30,7 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
     private readonly UiThreads _threads;
     private readonly CultureInfo _culture;
     private SetupStep _step;
+    private ServiceStatus? _status;
     private string _detected = "";
     private string _readings = "";
     private string? _message;
@@ -49,6 +51,7 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
         Back = new RelayCommand(() => Step = Step == SetupStep.Readings ? SetupStep.Machine : SetupStep.Tariff);
         Finish = new RelayCommand(FinishSetup);
         _link.ConnectionChanged += OnConnectionChanged;
+        Machine.PropertyChanged += OnMachineChanged;
     }
 
     /// <summary>Raised when the user finishes; the shell shows the Now screen.</summary>
@@ -96,7 +99,11 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
         _threads.Background(() => _ = ReadAsync(refill: true));
     }
 
-    public void Dispose() => _link.ConnectionChanged -= OnConnectionChanged;
+    public void Dispose()
+    {
+        _link.ConnectionChanged -= OnConnectionChanged;
+        Machine.PropertyChanged -= OnMachineChanged;
+    }
 
     /// <summary>Saves this step, and moves on when that worked. Call on the UI thread.</summary>
     internal async Task NextAsync()
@@ -122,17 +129,25 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
         });
     }
 
-    /// <summary>What this machine's readings will be, from the service's sources.</summary>
-    internal static string ReadingsFor(ServiceStatus? status)
+    /// <summary>What this machine's readings will be, from the service's sources and the chassis in the machine profile.
+    /// Only a laptop's readings come from its battery: the battery on a desktop is a UPS, which powers more than the
+    /// machine, so a desktop is never told its readings are measured.</summary>
+    internal static string ReadingsFor(ServiceStatus? status, ChassisKind chassis)
     {
         if (status is null) return "The service isn't running yet. Once it is, each reading on the Now screen shows its quality.";
         bool Has(string name) => status.Sources.Any(s => s.Name == name && s.Supported);
         const string battery = "On battery its readings are measured; plugged in, they are calibrated once the model has learned from battery time, and estimated until then.";
-        if (Has("battery") && Has("energy-meter")) return "This machine has a battery and a processor energy meter. " + battery;
-        if (Has("battery")) return "This machine has a battery. " + battery;
-        if (Has("energy-meter"))
-            return "This machine reports its processor's energy, so the processor is measured; the rest is estimated from the machine profile, since only a battery shows the whole machine's draw.";
-        return "This machine has no power sensors PowerLedger can read, so its readings are estimated from load and the machine profile.";
+        const string processor = "This machine reports its processor's energy, so the processor is measured; the rest is estimated from the machine profile";
+        const string ups = "The battery Windows shows is taken for a UPS, which powers more than this machine, so it isn't used.";
+        return (chassis, Has("battery"), Has("energy-meter")) switch
+        {
+            (ChassisKind.Laptop, true, true) => "This machine has a battery and a processor energy meter. " + battery,
+            (ChassisKind.Laptop, true, false) => "This machine has a battery. " + battery,
+            (_, true, true) => processor + ". " + ups,
+            (_, true, false) => "This machine's readings are estimated from load and the machine profile. " + ups,
+            (_, false, true) => processor + ", since only a battery shows the whole machine's draw.",
+            _ => "This machine has no power sensors PowerLedger can read, so its readings are estimated from load and the machine profile.",
+        };
     }
 
     /// <param name="refill">Fill the machine form even when it holds values; a reconnect only fills an empty one.</param>
@@ -145,7 +160,8 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
         {
             if (settings is not null && (refill || !Machine.IsLoaded)) Machine.Load(settings);
             Detected = detected?.Summary(_culture) ?? "The service hasn't detected this machine yet; it does when it starts.";
-            Readings = ReadingsFor(status);
+            _status = status;
+            Readings = ReadingsFor(_status, Machine.Chassis);
         });
     }
 
@@ -153,6 +169,12 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
     private void OnConnectionChanged(bool connected)
     {
         if (connected) _threads.Background(() => _ = ReadAsync(refill: false));
+    }
+
+    /// <summary>The readings step speaks of the chassis the machine step chose. Raised on the UI thread.</summary>
+    private void OnMachineChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ServiceForm.Chassis)) Readings = ReadingsFor(_status, Machine.Chassis);
     }
 
     private void FinishSetup()

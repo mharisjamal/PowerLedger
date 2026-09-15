@@ -21,7 +21,8 @@ internal static class Win32
     public readonly record struct BatteryState(bool AcOnLine, bool Present, bool Charging, bool Discharging, int RateMilliwatts, bool ShortTerm = false)
     {
         /// <summary>A battery that powers this machine alone. A UPS also powers whatever else is plugged into it, so
-        /// neither its presence nor its drain says anything about this machine.</summary>
+        /// neither its presence nor its drain says anything about this machine. Windows marks some UPS units short-term,
+        /// but not all, so one it doesn't mark still passes as the machine's own.</summary>
         public bool OwnBattery => Present && !ShortTerm;
     }
 

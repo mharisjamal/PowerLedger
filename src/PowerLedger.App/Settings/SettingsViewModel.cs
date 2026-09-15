@@ -29,6 +29,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     private readonly CultureInfo _culture;
     private ITimer? _timer;
     private int _sampleSeconds = 1;
+    private ChassisKind? _chassis;
     private IReadOnlyList<string> _tariffHistory = [];
     private string _detected = "";
     private string _co2;
@@ -187,6 +188,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             if (settings is not null)
             {
                 _sampleSeconds = settings.SampleIntervalSeconds;
+                _chassis = settings.Profile.Chassis;
                 if (refill || !Service.IsLoaded) Service.Load(settings);
             }
             Notice = settings is null
@@ -251,9 +253,12 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
         var c = status.Calibration;
         var learned = Format.Duration(c.BatterySamples * _sampleSeconds / 3600.0);
-        Calibration = c.TrustedBuckets > 0
-            ? $"Learned from {learned} on battery; {c.TrustedBuckets.ToString(_culture)} of {c.Buckets.ToString(_culture)} brightness levels trusted."
-            : $"Learning on battery: {learned} of {Format.Duration(c.SamplesNeeded * _sampleSeconds / 3600.0)} needed.";
+        // The battery on a desktop is a UPS, which powers more than the machine, so a desktop's readings never use it.
+        Calibration = _chassis == ChassisKind.Desktop
+            ? "Not used on a desktop: its readings are always estimated."
+            : c.TrustedBuckets > 0
+                ? $"Learned from {learned} on battery; {c.TrustedBuckets.ToString(_culture)} of {c.Buckets.ToString(_culture)} brightness levels trusted."
+                : $"Learning on battery: {learned} of {Format.Duration(c.SamplesNeeded * _sampleSeconds / 3600.0)} needed.";
         ServiceState = $"Service {status.Version.Split('+')[0]} · {status.Ticks.ToString("N0", _culture)} readings since "
                        + TimeZoneInfo.ConvertTime(status.StartedAt, _zone).ToString("d MMM yyyy HH:mm", _culture);
         Sources = [.. status.Sources.Select(Line)];

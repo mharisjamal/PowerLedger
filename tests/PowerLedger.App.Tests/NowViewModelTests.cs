@@ -153,6 +153,41 @@ public class NowViewModelTests
         model.IsSensorless.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData(ChassisKind.Laptop, false)]
+    [InlineData(ChassisKind.Desktop, true)]
+    public void A_battery_is_a_power_sensor_only_on_a_laptop(ChassisKind chassis, bool sensorless)
+    {
+        // On a desktop the battery Windows shows is a UPS, which powers more than the machine and measures nothing.
+        _link.Status = Statuses.Running(energyMeter: false, battery: true);
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Chassis = chassis } };
+        var model = Model();
+        _link.Connect(true);
+        model.IsSensorless.ShouldBe(sensorless);
+    }
+
+    [Fact]
+    public void A_desktop_s_status_never_speaks_of_calibrating_on_battery()
+    {
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
+        var model = Model();
+        _link.Connect(true);
+        model.Status.Calibration.ShouldBe("Desktop · always estimated");
+    }
+
+    [Fact]
+    public void A_chassis_corrected_after_connecting_reaches_the_screen_with_the_next_status()
+    {
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        model.Status.Calibration.ShouldBe("Calibrating · 15m of 30m on battery");
+
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
+        _clock.Advance(NowViewModel.StatusEvery);
+        model.Status.Calibration.ShouldBe("Desktop · always estimated");
+    }
+
     [Fact]
     public void Losing_the_service_clears_the_live_panel()
     {

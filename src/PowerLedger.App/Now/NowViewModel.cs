@@ -11,7 +11,7 @@ namespace PowerLedger.App;
 /// <summary>
 /// The Now screen (spec §9): the live reading and its quality, the last minute, the meter, the power budget, today's and
 /// the month's ledgers, and today's chart. Readings arrive on the link's thread and are posted to the UI thread; history
-/// is read every minute and the status every ten seconds, both off the UI thread.
+/// is read every minute and the status and settings every ten seconds, both off the UI thread.
 /// </summary>
 internal sealed partial class NowViewModel : ObservableObject, IDisposable
 {
@@ -128,15 +128,15 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         _threads.Post(() => ApplyHistory(snapshot));
     }
 
-    /// <summary>Asks the service for its status, and for its settings when they are not known yet. Nothing waits on it,
-    /// so it never throws: a poll that fails is simply retried by the next.</summary>
+    /// <summary>Asks the service for its status and its settings, which the wizard or Settings may have changed since the
+    /// last poll. Nothing waits on it, so it never throws: a poll that fails is simply retried by the next.</summary>
     internal async Task PollAsync()
     {
         try
         {
             if (!_link.IsConnected) return;
             var status = await _link.GetStatusAsync().ConfigureAwait(false);
-            var settings = _settings ?? await _link.GetSettingsAsync().ConfigureAwait(false);
+            var settings = await _link.GetSettingsAsync().ConfigureAwait(false);
             _threads.Post(() => ApplyStatus(status, settings));
         }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -245,19 +245,25 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         RebuildLive();
     }
 
+    /// <summary>A desktop's readings never come from a battery: the one Windows shows there is a UPS, which powers more
+    /// than the machine. So on a desktop the battery is no power sensor, and there is no calibration to speak of.</summary>
     private void ApplyStatus(ServiceStatus? status, ServiceSettings? settings)
     {
         if (settings is not null) _settings = settings;
         if (status is null) return;
-        IsSensorless = !Supported(status, "energy-meter") && !Supported(status, "battery");
+        var desktop = _settings?.Profile.Chassis == ChassisKind.Desktop;
+        IsSensorless = !Supported(status, "energy-meter") && (desktop || !Supported(status, "battery"));
         var interval = _settings?.SampleIntervalSeconds ?? 1;
         var learned = Format.Duration(status.Calibration.BatterySamples * interval / 3600.0);
         var needed = Format.Duration(status.Calibration.SamplesNeeded * interval / 3600.0);
+        var calibration = desktop ? "Desktop · always estimated"
+            : status.Calibration.TrustedBuckets > 0 ? $"Calibration {learned} on battery"
+            : $"Calibrating · {learned} of {needed} on battery";
         Status = new StatusLine(
             true,
             $"Service {status.Version.Split('+')[0]}",
             $"Sampling {interval.ToString(_culture)} s",
-            status.Calibration.TrustedBuckets > 0 ? $"Calibration {learned} on battery" : $"Calibrating · {learned} of {needed} on battery",
+            calibration,
             $"Database {Megabytes(status.DatabaseBytes)}",
             status.WriteProblem ?? status.DatabaseNotice);
         if (_last is not null) RebuildLive();

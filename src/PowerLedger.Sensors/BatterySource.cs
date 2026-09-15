@@ -3,8 +3,10 @@ namespace PowerLedger.Sensors;
 /// <summary>
 /// Whether the machine is on mains and, while it is not, how fast the battery is draining. This is the only
 /// source that measures the whole machine rather than one of its parts, so it decides whether a reading is Measured.
-/// A UPS on USB also looks like a battery to Windows. It is ignored, because its drain includes everything else
-/// plugged into it and would teach the calibration a baseline the machine does not have.
+/// A UPS on USB also looks like a battery to Windows. One Windows marks short-term is ignored here, because its drain
+/// includes everything else plugged into it and would teach the calibration a baseline the machine does not have.
+/// Windows doesn't mark every UPS that way, so a desktop enclosure outranks the battery when the chassis is detected,
+/// and a desktop's readings never come from a battery.
 /// </summary>
 public sealed class BatterySource : ISensorSource
 {

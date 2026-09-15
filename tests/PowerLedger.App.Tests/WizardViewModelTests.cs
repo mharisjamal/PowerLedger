@@ -127,8 +127,53 @@ public class WizardViewModelTests
         model.Readings.ShouldStartWith("This machine has a battery");
     }
 
-    [Fact]
-    public void A_machine_without_sensors_is_told_its_readings_are_estimated()
-        => WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: false, battery: false))
+    [Theory]
+    [InlineData(ChassisKind.Laptop)]
+    [InlineData(ChassisKind.Desktop)]
+    public void A_machine_without_sensors_is_told_its_readings_are_estimated(ChassisKind chassis)
+        => WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: false, battery: false), chassis)
             .ShouldBe("This machine has no power sensors PowerLedger can read, so its readings are estimated from load and the machine profile.");
+
+    [Fact]
+    public void A_desktop_is_never_told_its_readings_are_measured_from_a_battery()
+    {
+        // The battery Windows shows on a desktop is a UPS it doesn't mark short-term: it powers more than this machine.
+        WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: true, battery: true), ChassisKind.Desktop)
+            .ShouldBe("This machine reports its processor's energy, so the processor is measured; the rest is estimated from the machine profile. "
+                      + "The battery Windows shows is taken for a UPS, which powers more than this machine, so it isn't used.");
+        WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: false, battery: true), ChassisKind.Desktop)
+            .ShouldBe("This machine's readings are estimated from load and the machine profile. "
+                      + "The battery Windows shows is taken for a UPS, which powers more than this machine, so it isn't used.");
+    }
+
+    [Fact]
+    public void A_desktop_without_a_battery_reads_like_any_machine_without_one()
+        => WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: true, battery: false), ChassisKind.Desktop)
+            .ShouldBe(WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: true, battery: false), ChassisKind.Laptop));
+
+    [Fact]
+    public async Task The_readings_follow_the_chassis_chosen_on_the_machine_step()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.Readings.ShouldStartWith("This machine has a battery and a processor energy meter.");
+        await model.NextAsync();
+        model.Machine.Chassis = ChassisKind.Desktop;
+        await model.NextAsync();
+
+        model.Step.ShouldBe(SetupStep.Readings);
+        model.Readings.ShouldStartWith("This machine reports its processor's energy, so the processor is measured;");
+        model.Readings.ShouldNotContain("On battery its readings are measured");
+    }
+
+    [Fact]
+    public void A_desktop_profile_from_the_service_is_read_as_a_desktop()
+    {
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
+        _link.Connect(true);
+        var model = Model();
+
+        model.Machine.Chassis.ShouldBe(ChassisKind.Desktop);
+        model.Readings.ShouldNotContain("On battery its readings are measured");
+    }
 }

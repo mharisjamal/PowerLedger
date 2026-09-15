@@ -12,6 +12,11 @@ public static class HardwareInventory
     /// <summary>Enclosure types Windows uses for portable machines.</summary>
     private static readonly HashSet<int> PortableEnclosures = [8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32];
 
+    /// <summary>The enclosure types SMBIOS defines that say what the machine is: 1 is "Other", 2 is "Unknown", and
+    /// nothing past 36, "Stick PC", is defined.</summary>
+    private const int FirstTellingEnclosure = 3;
+    private const int LastTellingEnclosure = 36;
+
     /// <summary>STORAGE_BUS_TYPE values for drives that are not part of the machine. FireWire, Fibre Channel, USB,
     /// iSCSI and SD cards are external or remote; virtual, file-backed and Storage Spaces disks are not drives at all.</summary>
     private static readonly HashSet<int> NotFittedBuses = [4, 6, 7, 9, 12, 14, 15, 16];
@@ -20,12 +25,18 @@ public static class HardwareInventory
     /// DisplayPort, embedded UDI and the generic "internal".</summary>
     private static readonly HashSet<uint> BuiltInConnections = [6, 11, 13, 0x80000000];
 
-    /// <summary>The machine's own battery settles it; otherwise the enclosure type decides, and an unknown enclosure means desktop.</summary>
-    /// <param name="batteryPresent">True for a battery that powers this machine alone; a UPS does not count.</param>
+    /// <summary>A known enclosure type settles it: a portable one is a laptop, and any other is a desktop even when a
+    /// battery shows, because the battery on a desktop is a UPS whose drain covers everything plugged into it. Only an
+    /// unknown enclosure (none, "Other", "Unknown", or a type SMBIOS doesn't define) falls back to the battery.</summary>
+    /// <param name="batteryPresent">True when Windows shows a battery it doesn't mark short-term. It marks some UPS units
+    /// so, but not all.</param>
     public static ChassisKind ChassisFrom(int? enclosureType, bool batteryPresent)
     {
-        if (batteryPresent) return ChassisKind.Laptop;
-        return enclosureType is { } type && PortableEnclosures.Contains(type) ? ChassisKind.Laptop : ChassisKind.Desktop;
+        if (enclosureType is { } type && type is >= FirstTellingEnclosure and <= LastTellingEnclosure)
+        {
+            return PortableEnclosures.Contains(type) ? ChassisKind.Laptop : ChassisKind.Desktop;
+        }
+        return batteryPresent ? ChassisKind.Laptop : ChassisKind.Desktop;
     }
 
     /// <summary>Solid-state and spinning drives fitted inside the machine. Media type 3 is a hard disk; anything else,

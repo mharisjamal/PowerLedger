@@ -7,29 +7,65 @@ namespace PowerLedger.Sensors.Tests;
 public class HardwareInventoryTests
 {
     [Theory]
-    [InlineData(9, true, ChassisKind.Laptop)]      // Laptop
-    [InlineData(10, true, ChassisKind.Laptop)]     // Notebook
-    [InlineData(14, true, ChassisKind.Laptop)]     // Sub-notebook
-    [InlineData(31, true, ChassisKind.Laptop)]     // Convertible
-    [InlineData(3, false, ChassisKind.Desktop)]    // Desktop
-    [InlineData(7, false, ChassisKind.Desktop)]    // Tower
-    [InlineData(23, false, ChassisKind.Desktop)]   // Rack mount
-    public void The_enclosure_type_decides_the_chassis(int enclosure, bool battery, ChassisKind expected)
-        => HardwareInventory.ChassisFrom(enclosure, batteryPresent: battery).ShouldBe(expected);
-
-    [Fact]
-    public void A_battery_outvotes_an_enclosure_that_claims_to_be_a_desktop()
+    [InlineData(8)]     // Portable
+    [InlineData(9)]     // Laptop
+    [InlineData(10)]    // Notebook
+    [InlineData(11)]    // Hand held
+    [InlineData(12)]    // Docking station
+    [InlineData(14)]    // Sub-notebook
+    [InlineData(18)]    // Expansion chassis
+    [InlineData(21)]    // Peripheral chassis
+    [InlineData(30)]    // Tablet
+    [InlineData(31)]    // Convertible
+    [InlineData(32)]    // Detachable
+    public void A_portable_enclosure_is_a_laptop_with_or_without_a_battery(int enclosure)
     {
-        // Some laptops report "Other" or "Unknown"; a fitted battery settles it.
-        HardwareInventory.ChassisFrom(enclosureType: 2, batteryPresent: true).ShouldBe(ChassisKind.Laptop);
-        HardwareInventory.ChassisFrom(enclosureType: 3, batteryPresent: true).ShouldBe(ChassisKind.Laptop);
+        HardwareInventory.ChassisFrom(enclosure, batteryPresent: true).ShouldBe(ChassisKind.Laptop);
+        HardwareInventory.ChassisFrom(enclosure, batteryPresent: false).ShouldBe(ChassisKind.Laptop);
     }
 
-    [Fact]
-    public void No_enclosure_information_falls_back_to_the_battery()
+    [Theory]
+    [InlineData(3)]     // Desktop
+    [InlineData(4)]     // Low-profile desktop
+    [InlineData(5)]     // Pizza box
+    [InlineData(6)]     // Mini tower
+    [InlineData(7)]     // Tower
+    [InlineData(13)]    // All in one
+    [InlineData(15)]    // Space-saving
+    [InlineData(16)]    // Lunch box
+    [InlineData(17)]    // Main server chassis
+    [InlineData(19)]    // Sub-chassis
+    [InlineData(20)]    // Bus expansion chassis
+    [InlineData(22)]    // RAID chassis
+    [InlineData(23)]    // Rack mount
+    [InlineData(24)]    // Sealed-case PC
+    [InlineData(25)]    // Multi-system chassis
+    [InlineData(26)]    // Compact PCI
+    [InlineData(27)]    // Advanced TCA
+    [InlineData(28)]    // Blade
+    [InlineData(29)]    // Blade enclosure
+    [InlineData(33)]    // IoT gateway
+    [InlineData(34)]    // Embedded PC
+    [InlineData(35)]    // Mini PC
+    [InlineData(36)]    // Stick PC
+    public void A_known_desktop_enclosure_stays_a_desktop_when_a_battery_shows(int enclosure)
     {
-        HardwareInventory.ChassisFrom(null, batteryPresent: true).ShouldBe(ChassisKind.Laptop);
-        HardwareInventory.ChassisFrom(null, batteryPresent: false).ShouldBe(ChassisKind.Desktop);
+        // A UPS on USB that Windows doesn't mark short-term looks just like the machine's own battery.
+        HardwareInventory.ChassisFrom(enclosure, batteryPresent: true).ShouldBe(ChassisKind.Desktop);
+        HardwareInventory.ChassisFrom(enclosure, batteryPresent: false).ShouldBe(ChassisKind.Desktop);
+    }
+
+    [Theory]
+    [InlineData(null)]  // Windows didn't answer
+    [InlineData(1)]     // Other
+    [InlineData(2)]     // Unknown
+    [InlineData(0)]     // not a type SMBIOS defines
+    [InlineData(37)]
+    public void Only_an_unknown_enclosure_falls_back_to_the_battery(int? enclosure)
+    {
+        // Some laptops report "Other" or "Unknown"; there the battery is all there is to go on.
+        HardwareInventory.ChassisFrom(enclosure, batteryPresent: true).ShouldBe(ChassisKind.Laptop);
+        HardwareInventory.ChassisFrom(enclosure, batteryPresent: false).ShouldBe(ChassisKind.Desktop);
     }
 
     [Fact]
