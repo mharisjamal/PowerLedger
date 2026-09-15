@@ -163,7 +163,9 @@ function Invoke-Setup([string]$Exe, [string[]]$Arguments = @()) { Wait-Exit (Sta
 function Start-Uninstall([string[]]$Arguments = @()) {
     $command = (Get-ItemProperty $UninstallKey -ErrorAction SilentlyContinue).UninstallString
     if (-not $command) { throw 'PowerLedger is not installed: it has no uninstall entry.' }
-    Start-Program $command.Trim('"') (@($Arguments) + "/LOG=`"$(New-StepLog 'uninstall')`"")
+    # The entry is the quoted uninstaller, then /LOG since the script sets UninstallLogging.
+    if ($command -notmatch '^\s*"([^"]+)"') { throw "Can't find the uninstaller in its entry: $command" }
+    Start-Program $Matches[1] (@($Arguments) + "/LOG=`"$(New-StepLog 'uninstall')`"")
 }
 
 # unins000.exe exits with 0 as soon as its copy in %TEMP% (_unins*.tmp) takes over, before anything is removed.
