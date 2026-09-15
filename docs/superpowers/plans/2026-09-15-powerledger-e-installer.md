@@ -624,6 +624,15 @@ git commit -m "Complete Plan E: the installer, its build, and a README"
 
 ---
 
+## After the final review
+
+One whole-branch review ran once every task was committed. It raised two points, and neither needed a change:
+
+- **It read `binPath= "\"<path>\""` as unbalanced.** Under the command-line rules `sc.exe` parses by, the outer quotes group the argument and each `\"` is a literal quote. So the service's image path is stored quoted, `"C:\Program Files\PowerLedger\Service\PowerLedger.Service.exe"`, as the App's check and Windows' own advice on paths with spaces both want. The suggested `"<path>"` would store the path unquoted. That reopens the old hole where `C:\Program.exe` runs in the service's place.
+- **It asked for `ApplyFirstRunDefaults` to report a failed registry write.** `StartWithWindows` already turns the registry's failures (access, security, I/O) into a sentence. At startup there is no one to show it to, and Settings shows the entry's real state and can set it.
+
+---
+
 ## Self-review against the spec
 
 | Spec §13 | Where |
