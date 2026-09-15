@@ -3084,7 +3084,7 @@ internal sealed class BudgetBar : Instrument
         if (!(Total > 0)) return;
         var totalLabel = Text($"{Format.Watts(Total, CultureInfo.CurrentCulture)} W", 10, LabelBrush);
         dc.DrawText(totalLabel, new Point(width - totalLabel.Width, RulerTop + 8));
-        var step = Geometry.NiceStep(Total, 7);
+        var step = Geometry.NiceStep(Total, 8);
         var index = 0;
         for (var value = 0.0; value <= Total + 1e-9; value += step, index++)
         {
@@ -3140,7 +3140,7 @@ internal sealed class Sparkline : Instrument
         {
             var y = Bottom - (Bottom - Top) * (watts - low) / (high - low);
             dc.DrawLine(gridPen, new Point(left, y), new Point(right, y));
-            DrawText(dc, Format.WholeWatts(watts, CultureInfo.CurrentCulture), right, y - 13, LabelBrush, TextAlignment.Right);
+            DrawText(dc, Format.WholeWatts(watts, CultureInfo.CurrentCulture), left, y - 13, LabelBrush);   // left, clear of the newest-reading dot
         }
         if (values.Count == 0) return;
 
@@ -3218,12 +3218,12 @@ internal sealed class DayChart : Instrument
         if (slots.Count == 0) return;
 
         DrawAsleep(dc, slots, X);
+        // Each band is filled down to zero, tallest first, so no two bands share an anti-aliased edge.
         var tops = Geometry.StackTops(slots);
-        var zero = new double[slots.Count];
-        Band(dc, zero, tops.RestTop, RestBrush, X, Y);
-        Band(dc, tops.RestTop, tops.DisplayTop, DisplayBrush, X, Y);
-        Band(dc, tops.DisplayTop, tops.GpuTop, GpuBrush, X, Y);
-        Band(dc, tops.GpuTop, tops.CpuTop, CpuBrush, X, Y);
+        Area(dc, tops.CpuTop, CpuBrush, X, Y);
+        Area(dc, tops.GpuTop, GpuBrush, X, Y);
+        Area(dc, tops.DisplayTop, DisplayBrush, X, Y);
+        Area(dc, tops.RestTop, RestBrush, X, Y);
 
         var elapsed = Now == default ? slots.Count : (Now - slots[0].Start) / DaySlots.Length;
         var nowX = X(Math.Clamp(elapsed, 0, SlotsPerDay));
@@ -3264,22 +3264,15 @@ internal sealed class DayChart : Instrument
         }
     }
 
-    private static void Band(DrawingContext dc, double[] lower, double[] upper, Brush brush, Func<double, double> x, Func<double, double> y)
+    /// <summary>A band's top as a line through the slot centres, filled down to zero.</summary>
+    private static void Area(DrawingContext dc, double[] top, Brush brush, Func<double, double> x, Func<double, double> y)
     {
         var shape = new StreamGeometry();
         using (var g = shape.Open())
         {
-            g.BeginFigure(new Point(x(0), y(upper[0])), isFilled: true, isClosed: true);
-            for (var i = 0; i < upper.Length; i++)
-            {
-                g.LineTo(new Point(x(i), y(upper[i])), isStroked: false, isSmoothJoin: false);
-                g.LineTo(new Point(x(i + 1), y(upper[i])), isStroked: false, isSmoothJoin: false);
-            }
-            for (var i = lower.Length - 1; i >= 0; i--)
-            {
-                g.LineTo(new Point(x(i + 1), y(lower[i])), isStroked: false, isSmoothJoin: false);
-                g.LineTo(new Point(x(i), y(lower[i])), isStroked: false, isSmoothJoin: false);
-            }
+            g.BeginFigure(new Point(x(0.5), y(0)), isFilled: true, isClosed: true);
+            for (var i = 0; i < top.Length; i++) g.LineTo(new Point(x(i + 0.5), y(top[i])), isStroked: false, isSmoothJoin: false);
+            g.LineTo(new Point(x(top.Length - 0.5), y(0)), isStroked: false, isSmoothJoin: false);
         }
         shape.Freeze();
         dc.DrawGeometry(brush, null, shape);
@@ -3622,6 +3615,74 @@ The mockup `docs/design/mockup-1-now-screen.html` in WPF. The window draws its o
         <Setter Property="CornerRadius" Value="3" />
         <Setter Property="Padding" Value="14,10" />
         <Setter Property="Margin" Value="0,0,0,18" />
+    </Style>
+
+    <!-- Slim scroll bars in the palette: a hairline-coloured thumb, no arrows. -->
+    <Style x:Key="ScrollThumb" TargetType="Thumb">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border CornerRadius="3" Background="{DynamicResource Brush.LineStrong}" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="ScrollPage" TargetType="RepeatButton">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="Transparent" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="ScrollBar">
+        <Setter Property="Width" Value="10" />
+        <Setter Property="MinWidth" Value="10" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Track x:Name="PART_Track" IsDirectionReversed="True" Margin="2,4">
+                        <Track.DecreaseRepeatButton>
+                            <RepeatButton Style="{StaticResource ScrollPage}" Command="ScrollBar.PageUpCommand" />
+                        </Track.DecreaseRepeatButton>
+                        <Track.IncreaseRepeatButton>
+                            <RepeatButton Style="{StaticResource ScrollPage}" Command="ScrollBar.PageDownCommand" />
+                        </Track.IncreaseRepeatButton>
+                        <Track.Thumb>
+                            <Thumb Style="{StaticResource ScrollThumb}" />
+                        </Track.Thumb>
+                    </Track>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Height" Value="10" />
+                <Setter Property="MinHeight" Value="10" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ScrollBar">
+                            <Track x:Name="PART_Track" Margin="4,2">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource ScrollPage}" Command="ScrollBar.PageLeftCommand" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource ScrollPage}" Command="ScrollBar.PageRightCommand" />
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource ScrollThumb}" />
+                                </Track.Thumb>
+                            </Track>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <!-- A ledger's heading: two labels over a strong hairline. -->
@@ -4704,13 +4765,31 @@ public class RenderingTests
             };
             window.Show();
             Pump(TimeSpan.FromMilliseconds(1200));   // the live readout settles over 900 ms
-            var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(window);
-            var png = new PngBitmapEncoder();
-            png.Frames.Add(BitmapFrame.Create(bitmap));
-            using (var file = File.Create(Path.Combine(Folder, $"now-{theme}.png"))) png.Save(file);
+            Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"now-{theme}.png");
             window.Close();
+
+            // Windows keeps a window within the screen, so the whole screen's length is drawn from the view alone.
+            var host = new System.Windows.Controls.Border
+            {
+                Background = (Brush)application.FindResource("Brush.Panel"),
+                Child = new NowView { DataContext = shell.Now, Width = 1010 },
+            };
+            host.Measure(new Size(1010, double.PositiveInfinity));
+            host.Arrange(new Rect(host.DesiredSize));
+            Pump(TimeSpan.FromMilliseconds(1200));
+            host.UpdateLayout();
+            Save(host, (int)host.ActualWidth, (int)host.ActualHeight, $"now-{theme}-full.png");
         }
+    }
+
+    private static void Save(Visual visual, int width, int height, string name)
+    {
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var png = new PngBitmapEncoder();
+        png.Frames.Add(BitmapFrame.Create(bitmap));
+        using var file = File.Create(Path.Combine(Folder, name));
+        png.Save(file);
     }
 
     /// <summary>A Tuesday afternoon eight days into September: asleep until 07:30, a working morning, an idle patch, a peak at 14:00.</summary>

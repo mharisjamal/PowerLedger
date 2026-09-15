@@ -47,12 +47,12 @@ internal sealed class DayChart : Instrument
         if (slots.Count == 0) return;
 
         DrawAsleep(dc, slots, X);
+        // Each band is filled down to zero, tallest first, so no two bands share an anti-aliased edge.
         var tops = Geometry.StackTops(slots);
-        var zero = new double[slots.Count];
-        Band(dc, zero, tops.RestTop, RestBrush, X, Y);
-        Band(dc, tops.RestTop, tops.DisplayTop, DisplayBrush, X, Y);
-        Band(dc, tops.DisplayTop, tops.GpuTop, GpuBrush, X, Y);
-        Band(dc, tops.GpuTop, tops.CpuTop, CpuBrush, X, Y);
+        Area(dc, tops.CpuTop, CpuBrush, X, Y);
+        Area(dc, tops.GpuTop, GpuBrush, X, Y);
+        Area(dc, tops.DisplayTop, DisplayBrush, X, Y);
+        Area(dc, tops.RestTop, RestBrush, X, Y);
 
         var elapsed = Now == default ? slots.Count : (Now - slots[0].Start) / DaySlots.Length;
         var nowX = X(Math.Clamp(elapsed, 0, SlotsPerDay));
@@ -93,24 +93,18 @@ internal sealed class DayChart : Instrument
         }
     }
 
-    private static void Band(DrawingContext dc, double[] lower, double[] upper, Brush brush, Func<double, double> x, Func<double, double> y)
+    /// <summary>A band's top as a line through the slot centres, filled down to zero.</summary>
+    private static void Area(DrawingContext dc, double[] top, Brush brush, Func<double, double> x, Func<double, double> y)
     {
         var shape = new StreamGeometry();
         using (var g = shape.Open())
         {
-            g.BeginFigure(new Point(x(0), y(upper[0])), isFilled: true, isClosed: true);
-            for (var i = 0; i < upper.Length; i++)
-            {
-                g.LineTo(new Point(x(i), y(upper[i])), isStroked: false, isSmoothJoin: false);
-                g.LineTo(new Point(x(i + 1), y(upper[i])), isStroked: false, isSmoothJoin: false);
-            }
-            for (var i = lower.Length - 1; i >= 0; i--)
-            {
-                g.LineTo(new Point(x(i + 1), y(lower[i])), isStroked: false, isSmoothJoin: false);
-                g.LineTo(new Point(x(i), y(lower[i])), isStroked: false, isSmoothJoin: false);
-            }
+            g.BeginFigure(new Point(x(0.5), y(0)), isFilled: true, isClosed: true);
+            for (var i = 0; i < top.Length; i++) g.LineTo(new Point(x(i + 0.5), y(top[i])), isStroked: false, isSmoothJoin: false);
+            g.LineTo(new Point(x(top.Length - 0.5), y(0)), isStroked: false, isSmoothJoin: false);
         }
         shape.Freeze();
         dc.DrawGeometry(brush, null, shape);
     }
 }
+

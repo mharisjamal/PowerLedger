@@ -38,7 +38,7 @@ internal sealed class BudgetBar : Instrument
         if (!(Total > 0)) return;
         var totalLabel = Text($"{Format.Watts(Total, CultureInfo.CurrentCulture)} W", 10, LabelBrush);
         dc.DrawText(totalLabel, new Point(width - totalLabel.Width, RulerTop + 8));
-        var step = Geometry.NiceStep(Total, 7);
+        var step = Geometry.NiceStep(Total, 8);
         var index = 0;
         for (var value = 0.0; value <= Total + 1e-9; value += step, index++)
         {

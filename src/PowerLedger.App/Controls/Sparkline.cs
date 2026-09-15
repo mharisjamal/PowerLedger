@@ -28,7 +28,7 @@ internal sealed class Sparkline : Instrument
         {
             var y = Bottom - (Bottom - Top) * (watts - low) / (high - low);
             dc.DrawLine(gridPen, new Point(left, y), new Point(right, y));
-            DrawText(dc, Format.WholeWatts(watts, CultureInfo.CurrentCulture), right, y - 13, LabelBrush, TextAlignment.Right);
+            DrawText(dc, Format.WholeWatts(watts, CultureInfo.CurrentCulture), left, y - 13, LabelBrush);   // left, clear of the newest-reading dot
         }
         if (values.Count == 0) return;
 
