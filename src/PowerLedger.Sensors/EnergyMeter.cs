@@ -35,13 +35,16 @@ public readonly record struct EnergyMeterReading(double? PackageW, double? Cores
 /// Each rail's energy counter, in picowatt-hours, is read directly through the performance-counter API in well
 /// under a millisecond, and watts are the energy used since the previous read over the time between reads, so every
 /// figure is exact over its tick rather than over some window of Windows' choosing.
-/// A machine with no rails reports nothing, never zero, because a zero is indistinguishable from an idle chip.
+/// A machine with no rails reports nothing, never zero, because a zero is indistinguishable from an idle chip, and so
+/// does one whose meter has no package rail: its other rails can't stand in for the processor's figure.
 /// Single-threaded: the sampling loop owns it.
 /// </summary>
 public sealed class EnergyMeter : IDisposable
 {
     private const string Category = "Energy Meter";
     private const string EnergyCounter = "Energy";
+    private const string NoRails = "this machine publishes no processor power rails";
+    private const string NoPackageRail = "this machine's energy meter has no processor package rail";
 
     /// <summary>1 pWh = 1e-12 Wh = 3.6e-9 J. Confirmed on real hardware against Windows' own milliwatt figure.</summary>
     public const double JoulesPerPicowattHour = 3.6e-9;
@@ -57,20 +60,18 @@ public sealed class EnergyMeter : IDisposable
         {
             if (!PerformanceCounterCategory.Exists(Category))
             {
-                Unavailable = "this machine publishes no processor power rails";
+                Unavailable = NoRails;
                 return;
             }
 
-            foreach (var instance in new PerformanceCounterCategory(Category).GetInstanceNames())
+            var instances = new PerformanceCounterCategory(Category).GetInstanceNames();
+            Unavailable = WhyUnavailable(instances);
+            if (Unavailable is not null) return;
+
+            foreach (var instance in instances)
             {
                 if (Classify(instance) == RailKind.Ignored) continue;
                 _rails.Add((instance, new PerformanceCounter(Category, EnergyCounter, instance, readOnly: true)));
-            }
-
-            if (_rails.Count == 0)
-            {
-                Unavailable = "this machine publishes no processor power rails";
-                return;
             }
 
             // Take the first reading now, so the first real tick already has an interval to measure.
@@ -86,7 +87,8 @@ public sealed class EnergyMeter : IDisposable
         }
     }
 
-    /// <summary>True when at least one usable rail exists.</summary>
+    /// <summary>True when a package rail exists, so the processor's own watts can be read; the core, graphics and memory
+    /// rails beside it are read too.</summary>
     public bool Available { get; }
 
     /// <summary>Why there is nothing to read, for the status screen; null when the meter works.</summary>
@@ -131,6 +133,16 @@ public sealed class EnergyMeter : IDisposable
             }
         }
         return new EnergyMeterReading(package, cores, igpu, memory);
+    }
+
+    /// <summary>Why a meter with these counter instances can't give the processor's own watts, or null when it can.
+    /// That figure comes from a package rail alone: core, graphics and memory rails without one would leave the
+    /// processor modelled while the meter's presence claimed it measured.</summary>
+    public static string? WhyUnavailable(IEnumerable<string> instances)
+    {
+        var kinds = instances.Select(Classify).Where(kind => kind != RailKind.Ignored).ToList();
+        if (kinds.Count == 0) return NoRails;
+        return kinds.Contains(RailKind.Package) ? null : NoPackageRail;
     }
 
     /// <summary>Maps a counter instance name to what it measures. Intel names are RAPL_*; AMD publishes prose names.</summary>

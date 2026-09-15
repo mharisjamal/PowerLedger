@@ -147,6 +147,19 @@ public class WizardViewModelTests
     }
 
     [Fact]
+    public void An_energy_meter_that_cannot_read_the_processor_package_is_not_called_a_processor_meter()
+    {
+        // Core, graphics and memory rails alone leave the processor modelled, so the service reports the meter unsupported.
+        var packageless = new SourceStatus("energy-meter", false, "this machine's energy meter has no processor package rail", 0, null);
+        SourceStatus Battery(bool fitted) => new("battery", fitted, fitted ? null : "no battery fitted", 0, null);
+
+        WizardViewModel.ReadingsFor(Statuses.Running() with { Sources = [packageless, Battery(true)] }, ChassisKind.Laptop)
+            .ShouldStartWith("This machine has a battery. On battery");
+        WizardViewModel.ReadingsFor(Statuses.Running() with { Sources = [packageless, Battery(false)] }, ChassisKind.Laptop)
+            .ShouldBe("This machine has no power sensors PowerLedger can read, so its readings are estimated from load and the machine profile.");
+    }
+
+    [Fact]
     public void A_desktop_without_a_battery_reads_like_any_machine_without_one()
         => WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: true, battery: false), ChassisKind.Desktop)
             .ShouldBe(WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: true, battery: false), ChassisKind.Laptop));

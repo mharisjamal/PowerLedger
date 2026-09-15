@@ -38,6 +38,21 @@ public class EnergyMeterSourceTests
     }
 
     [Fact]
+    public void A_meter_without_a_package_rail_is_never_read_so_nothing_claims_the_processor_measured()
+    {
+        var reason = EnergyMeter.WhyUnavailable(["RAPL_Package0_PP0", "RAPL_Package0_PP1", "RAPL_Package0_DRAM"]);
+        var source = new EnergyMeterSource(() => throw new InvalidOperationException("should not be called"), available: reason is null, unavailable: reason);
+        using var sampler = new Sampler([source]);
+        var sample = sampler.Read(DateTimeOffset.UnixEpoch, 1);
+
+        source.Supported.ShouldBeFalse();
+        source.Unavailable.ShouldBe("this machine's energy meter has no processor package rail");
+        sample.CpuPackageW.ShouldBeNull();
+        sample.IGpuW.ShouldBeNull();
+        sampler.Health.Single().Failures.ShouldBe(0);
+    }
+
+    [Fact]
     public void The_source_never_touches_fields_that_belong_to_others()
     {
         var draft = new SampleDraft { BatteryRateW = 34.2, CpuLoad = 0.5, Brightness = 0.6 };

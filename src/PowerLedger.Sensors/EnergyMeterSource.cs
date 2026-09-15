@@ -4,6 +4,8 @@ namespace PowerLedger.Sensors;
 /// Fills the CPU package and integrated-graphics watts from the Windows energy meter. Owns those two fields
 /// and nothing else: CPU load comes from <see cref="CpuLoadSource"/>, because load is available even where
 /// watts are not. The memory rail is read but not published, since the model has no field for it yet.
+/// Supported only where the meter has a package rail, so a supported meter means the processor is measured; one with
+/// only core, graphics or memory rails is unsupported and says why.
 /// </summary>
 public sealed class EnergyMeterSource : ISensorSource
 {
