@@ -636,12 +636,12 @@ namespace PowerLedger.App.Tests;
 public class ThemeRulesTests
 {
     [Theory]
-    [InlineData(ThemeChoice.System, false, Theme.Dark)]
-    [InlineData(ThemeChoice.System, true, Theme.Light)]
-    [InlineData(ThemeChoice.Dark, true, Theme.Dark)]
-    [InlineData(ThemeChoice.Light, false, Theme.Light)]
-    public void The_choice_wins_and_system_follows_windows(ThemeChoice choice, bool windowsUsesLight, Theme expected)
-        => ThemeRules.Resolve(choice, windowsUsesLight).ShouldBe(expected);
+    [InlineData("System", false, "Dark")]
+    [InlineData("System", true, "Light")]
+    [InlineData("Dark", true, "Dark")]
+    [InlineData("Light", false, "Light")]
+    public void The_choice_wins_and_system_follows_windows(string choice, bool windowsUsesLight, string expected)
+        => ThemeRules.Resolve(Enum.Parse<ThemeChoice>(choice), windowsUsesLight).ToString().ShouldBe(expected);
 }
 ```
 

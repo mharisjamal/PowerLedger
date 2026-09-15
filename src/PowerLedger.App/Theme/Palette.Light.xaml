@@ -1,0 +1,22 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- "Bench sheet": spec §9 light tokens. -->
+    <SolidColorBrush x:Key="Brush.Ground" Color="#E4E6E0" />
+    <SolidColorBrush x:Key="Brush.Panel" Color="#EFF0EC" />
+    <SolidColorBrush x:Key="Brush.Raised" Color="#F8F8F5" />
+    <SolidColorBrush x:Key="Brush.Line" Color="#CDD0C8" />
+    <SolidColorBrush x:Key="Brush.LineStrong" Color="#AEB2A9" />
+    <SolidColorBrush x:Key="Brush.Ink" Color="#1D1F1B" />
+    <SolidColorBrush x:Key="Brush.Ink2" Color="#575B53" />
+    <SolidColorBrush x:Key="Brush.Ink3" Color="#858980" />
+    <SolidColorBrush x:Key="Brush.Amber" Color="#A2680C" />
+    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#24A2680C" />
+    <SolidColorBrush x:Key="Brush.OnAmber" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="Brush.Measured" Color="#3E7E43" />
+    <SolidColorBrush x:Key="Brush.Calibrated" Color="#35678A" />
+    <SolidColorBrush x:Key="Brush.Estimated" Color="#7C7355" />
+    <SolidColorBrush x:Key="Brush.PartCpu" Color="#C4761C" />
+    <SolidColorBrush x:Key="Brush.PartGpu" Color="#4A76A6" />
+    <SolidColorBrush x:Key="Brush.PartDisplay" Color="#7C8A2E" />
+    <SolidColorBrush x:Key="Brush.PartRest" Color="#8E928A" />
+</ResourceDictionary>
