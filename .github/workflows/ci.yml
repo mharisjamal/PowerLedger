@@ -1,0 +1,35 @@
+# Build, test outside the Hardware and UI categories, and make the installer (spec §13).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build -c Release
+
+      - name: Test
+        run: dotnet test -c Release --no-build --filter "Category!=Hardware&Category!=UI"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Installer
+        shell: pwsh
+        run: ./installer/build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: installer/output/*.exe
