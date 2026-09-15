@@ -2795,10 +2795,10 @@ public class GeometryTests
             new(DateTimeOffset.UnixEpoch, CpuW: 20, GpuW: 0, DisplayW: 4, RestW: -3, OnSeconds: 300, AsleepSeconds: 0),
         ];
         var tops = Geometry.StackTops(slots);
-        tops.Rest.ShouldBe(new double[] { 6, 0 });
-        tops.Display.ShouldBe(new double[] { 10, 4 });
-        tops.Gpu.ShouldBe(new double[] { 12, 4 });
-        tops.Cpu.ShouldBe(new double[] { 22, 24 });
+        tops.RestTop.ShouldBe(new double[] { 6, 0 });
+        tops.DisplayTop.ShouldBe(new double[] { 10, 4 });
+        tops.GpuTop.ShouldBe(new double[] { 12, 4 });
+        tops.CpuTop.ShouldBe(new double[] { 22, 24 });
     }
 }
 ```
@@ -2875,7 +2875,7 @@ internal static class Geometry
     }
 
     /// <summary>The top of each band in each slot, stacked from rest at the bottom to CPU at the top (spec §9). A negative rest stays at zero.</summary>
-    public static (double[] Rest, double[] Display, double[] Gpu, double[] Cpu) StackTops(IReadOnlyList<DaySlot> slots)
+    public static (double[] RestTop, double[] DisplayTop, double[] GpuTop, double[] CpuTop) StackTops(IReadOnlyList<DaySlot> slots)
     {
         var rest = new double[slots.Count];
         var display = new double[slots.Count];
@@ -3220,10 +3220,10 @@ internal sealed class DayChart : Instrument
         DrawAsleep(dc, slots, X);
         var tops = Geometry.StackTops(slots);
         var zero = new double[slots.Count];
-        Band(dc, zero, tops.Rest, RestBrush, X, Y);
-        Band(dc, tops.Rest, tops.Display, DisplayBrush, X, Y);
-        Band(dc, tops.Display, tops.Gpu, GpuBrush, X, Y);
-        Band(dc, tops.Gpu, tops.Cpu, CpuBrush, X, Y);
+        Band(dc, zero, tops.RestTop, RestBrush, X, Y);
+        Band(dc, tops.RestTop, tops.DisplayTop, DisplayBrush, X, Y);
+        Band(dc, tops.DisplayTop, tops.GpuTop, GpuBrush, X, Y);
+        Band(dc, tops.GpuTop, tops.CpuTop, CpuBrush, X, Y);
 
         var elapsed = Now == default ? slots.Count : (Now - slots[0].Start) / DaySlots.Length;
         var nowX = X(Math.Clamp(elapsed, 0, SlotsPerDay));
