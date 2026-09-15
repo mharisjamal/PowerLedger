@@ -106,6 +106,9 @@ the AMD/Intel graphics power and the accuracy fixes each worked in a git worktre
 
 - **An Arm64 PC.** The Arm64 build was published and its files checked as Arm64, but it has not run on Arm hardware.
   The `windows-11-arm` CI job will run it once the repository exists.
+  - *2026-09-16, after the push:* CI run 35019145550 installed the universal installer on `windows-11-arm`. Setup chose
+    the Arm64 build (App and service are PE 0xAA64), the service sampled, and all 57 installer checks passed, as on x64.
+    The window still hasn't been opened on an Arm PC.
 - **Real AMD and Intel cards.** The new graphics source was tested against fakes and against this laptop, which it
   correctly leaves to NVIDIA.
 - **Windows 10 Home and Pro.** PowerLedger installs and runs there, but Microsoft supports .NET 10 on Windows 10 only
