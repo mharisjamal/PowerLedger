@@ -18,11 +18,14 @@ internal static class ReportDocument
     private const string Amber = "#A2680C";
     private static readonly string[] PartColours = ["#C4761C", "#4A76A6", "#7C8A2E", "#8E928A"];
     private static readonly string[] QualityColours = ["#3E7E43", "#35678A", "#7C7355"];
-    private static readonly string[] Fonts = ["Segoe UI", "Nirmala UI", "Segoe UI Symbol", "Microsoft YaHei UI", "Yu Gothic UI", "Malgun Gothic"];
+    /// <summary>Segoe UI, then the fonts Windows ships for the scripts it lacks: Indic, Thai and Lao, Chinese, Japanese, Korean, Ethiopic, symbols.</summary>
+    private static readonly string[] Fonts =
+        ["Segoe UI", "Nirmala UI", "Leelawadee UI", "Microsoft YaHei UI", "Microsoft JhengHei UI", "Yu Gothic UI", "Malgun Gothic", "Ebrima", "Segoe UI Symbol"];
 
     static ReportDocument()
     {
         QuestPDF.Settings.License = LicenseType.Community;          // spec §14: QuestPDF's Community licence
+        QuestPDF.Settings.UseSystemFonts = true;                    // off by default since 2026.9.0; Windows' own fonts cover the scripts
         QuestPDF.Settings.ThrowOnMissingTextGlyphs = false;         // a glyph no font has is an empty box, not a failed export
         QuestPDF.Settings.ThrowOnMissingFontFamilies = false;       // a script font missing from this Windows is skipped
     }
