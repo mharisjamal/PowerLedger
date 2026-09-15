@@ -2601,7 +2601,13 @@ Expected: 0 warnings; every project passes (Hardware and UI included on this lap
 - `dotnet build -c Release`: 0 warnings, 0 errors. Every test outside `Installed`: 915 pass (Core 117, Storage 49,
   Sensors 260, Service 131, App 358, of which 93 are the updater's).
 - The card draws in both themes: `%TEMP%\powerledger-renders\update-{ready,updated}-{Dark,Light}.png`.
-- Installers: `PowerLedger-0.2.0-setup.exe`, 95.7 MB, sha256 `A41DEDB4A6237CE875BD474184A1FB9FEAE6D47F4DF15BF3E1D61943C9F45FD6`.
+- Installers: `PowerLedger-0.2.0-setup.exe`, 95.7 MB. The Sandbox run used the build of `20efa32`
+  (sha256 `A41DEDB4…`); the release was built again from the tagged commit, so its programs name it.
+- CI (run 35035640460, both jobs green): x64 built, tested and ran the installer test, whose upgrade step now runs setup
+  as "Restart to update" does (`/UPDATE=1`) and sees the App open again; then the Arm64 runner did the same.
+- Released as **v0.2.0**: <https://github.com/mharisjamal/PowerLedger/releases/tag/v0.2.0>, installer sha256
+  `28026c715de9289f20453b78ba3fadca549482826e61c246502638f2fc35bc9a`, which GitHub's API lists as the asset's digest —
+  what every installed copy checks its download against.
 - **Windows Sandbox, end to end, 18 of 18** (`sandbox\update-e2e.ps1` and `update-feed.ps1` in the session's scratchpad):
   0.2.0 installed; a stand-in feed on `127.0.0.1` offered a real 0.2.1 build; the App asked for it as `PowerLedger/0.2.0`,
   downloaded it quietly, kept it only once its size and SHA-256 matched, remembered announcing it (`AnnouncedVersion` in
