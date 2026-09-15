@@ -139,6 +139,7 @@ end;
 const
   EVENT_MODIFY_STATE = $0002;
 
+{ Setup is a 32-bit program (the script sets no SetupArchitecture), so a handle fits in a Cardinal; Inno Setup 6 has no THandle. }
 function PLOpenEvent(Access: Cardinal; Inherit: Longint; Name: string): Cardinal; external 'OpenEventW@kernel32.dll stdcall';
 function PLSetEvent(Handle: Cardinal): Longint; external 'SetEvent@kernel32.dll stdcall';
 function PLCloseHandle(Handle: Cardinal): Longint; external 'CloseHandle@kernel32.dll stdcall';
