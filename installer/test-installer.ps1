@@ -386,12 +386,17 @@ function Write-Seen([string]$Text) {
     Add-Content -LiteralPath (Join-Path $Results 'dialogs.log') -Value "$(Get-Date -Format o) $CurrentStep $Text" -Encoding utf8
 }
 
-# An enabled button on show, by its caption without the '&', or else by a message box's control id.
+# A caption as a label: without the '&' and the arrows, since Inno Setup 7's wizard says "Next" where 6's said "Next >".
+function Get-Label([string]$Caption) { $Caption.Replace('&', '').Trim(' ', '<', '>') }
+
+# An enabled button on show, by its caption, or else, in a message box, by its control id.
 function Find-Button($Window, [string]$Label) {
     $isButton = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button)
     $buttons = @($Window.FindAll([Windows.Automation.TreeScope]::Descendants, $isButton) | Where-Object { $_.Current.IsEnabled -and -not $_.Current.IsOffscreen })
-    $named = @($buttons | Where-Object { $_.Current.Name.Replace('&', '') -eq $Label })
-    if (-not $named) { $named = @($buttons | Where-Object { $_.Current.AutomationId -in $MessageBoxIds[$Label] }) }
+    $named = @($buttons | Where-Object { (Get-Label $_.Current.Name) -eq (Get-Label $Label) })
+    if (-not $named -and $Window.Current.ClassName -eq '#32770' -and $MessageBoxIds.ContainsKey($Label)) {
+        $named = @($buttons | Where-Object { $_.Current.AutomationId -and $_.Current.AutomationId -in $MessageBoxIds[$Label] })
+    }
     $named | Select-Object -First 1
 }
 
@@ -441,7 +446,7 @@ function Wait-WizardButton($Wizard, [string[]]$Labels, [int]$Seconds) {
 # Presses Next until the Ready page's Install shows, then Install.
 function Invoke-Install($Wizard) {
     foreach ($page in 1..8) {
-        $label = Wait-WizardButton $Wizard 'Install', 'Next >' -Seconds 60
+        $label = Wait-WizardButton $Wizard 'Install', 'Next' -Seconds 60
         $null = Press $Wizard $label
         if ($label -eq 'Install') { return "pressed Install after $($page - 1) x Next" }
         Start-Sleep -Seconds 1   # lets the next page come up
