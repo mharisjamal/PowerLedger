@@ -18,6 +18,9 @@ internal static class ReportDocument
     private const string Amber = "#A2680C";
     private static readonly string[] PartColours = ["#C4761C", "#4A76A6", "#7C8A2E", "#8E928A"];
     private static readonly string[] QualityColours = ["#3E7E43", "#35678A", "#7C7355"];
+
+    /// <summary>A4's width, 595 pt, less the two 40 pt margins.</summary>
+    private const float ContentWidth = 515;
     /// <summary>Segoe UI, then the fonts Windows ships for the scripts it lacks: Indic, Thai and Lao, Chinese, Japanese, Korean, Ethiopic, symbols.</summary>
     private static readonly string[] Fonts =
         ["Segoe UI", "Nirmala UI", "Leelawadee UI", "Microsoft YaHei UI", "Microsoft JhengHei UI", "Yu Gothic UI", "Malgun Gothic", "Ebrima", "Segoe UI Symbol"];
@@ -135,22 +138,25 @@ internal static class ReportDocument
         {
             Heading(daily, "Daily energy · kWh");
             var max = data.Days.Count > 0 ? data.Days.Max(d => d.Kwh) : 0;
+            var gap = data.Days.Count > 120 ? 0 : data.Days.Count > 40 ? 0.5f : 2;
             daily.Item().PaddingTop(8).Height(90).Row(bars =>
             {
                 foreach (var day in data.Days)
                 {
                     var height = max > 0 ? (float)(86 * day.Kwh / max) : 0;
-                    var slot = bars.RelativeItem().AlignBottom().PaddingHorizontal(data.Days.Count > 40 ? 0.5f : 2);
+                    var slot = bars.RelativeItem().AlignBottom().PaddingHorizontal(gap);
                     if (height >= 0.5f) slot.Height(height).Background(Amber);
                 }
             });
+            // A label spans the days up to the next one, so it has room however narrow a day is; it starts near its day's middle.
             var every = Math.Max(1, (int)Math.Ceiling(data.Days.Count / 16.0));
+            var inset = Math.Max(0, ContentWidth / data.Days.Count / 2 - 3);
             daily.Item().PaddingTop(2).Row(labels =>
             {
-                for (var i = 0; i < data.Days.Count; i++)
+                for (var i = 0; i < data.Days.Count; i += every)
                 {
-                    var cell = labels.RelativeItem().AlignCenter();
-                    if (i % every == 0) cell.Text(data.Days[i].Day.Day.ToString(CultureInfo.InvariantCulture)).FontSize(7).FontColor(Ink3);
+                    labels.RelativeItem(Math.Min(every, data.Days.Count - i)).PaddingLeft(inset)
+                        .Text(data.Days[i].Day.Day.ToString(CultureInfo.InvariantCulture)).FontSize(7).FontColor(Ink3);
                 }
             });
             if (max > 0) daily.Item().AlignRight().Text($"highest day {Format.Kwh(max, culture)} kWh").FontSize(7.5f).FontColor(Ink3);

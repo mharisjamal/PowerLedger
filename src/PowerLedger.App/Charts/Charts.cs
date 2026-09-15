@@ -10,7 +10,7 @@ internal static class Charts
     public static ChartModel Build(DateRange range, IReadOnlyList<Aggregate> series, ChartUnit unit, TimeZoneInfo zone, CultureInfo culture)
     {
         var buckets = Buckets(series, unit);
-        double? nowAt = range.To < range.Through ? (range.To - range.From) / range.Bucket : null;
+        double? nowAt = range.To > range.From && range.To < range.Through ? (range.To - range.From) / range.Bucket : null;
         var peak = buckets.Count > 0 ? buckets.Max(b => b.Total) : 0;
         var what = unit == ChartUnit.Watts ? "watts" : "watt-hours per " + Ranges.BucketLength(range.Bucket);
         var description = $"{range.Title}: power by component in {what}, stacked from the rest of the system up to the CPU. "

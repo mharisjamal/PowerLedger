@@ -87,6 +87,8 @@ public class ChartTests
     {
         var chart = Charts.Build(Ranges.LastMonth(Now, Utc, English), [], ChartUnit.WattHours, Utc, English);
         chart.NowAt.ShouldBeNull();
+        Charts.Build(Ranges.Days(new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 5), Now, Utc, English), [], ChartUnit.Watts, Utc, English)
+            .NowAt.ShouldBeNull();                                           // a range still to come has no now in it either
         chart.Description.ShouldBe("August 2026: power by component in watt-hours per 6 hours, stacked from the rest of the system up to the CPU. No readings in this range.");
     }
 

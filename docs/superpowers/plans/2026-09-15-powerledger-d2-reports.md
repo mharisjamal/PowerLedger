@@ -1055,6 +1055,8 @@ public class ChartTests
     {
         var chart = Charts.Build(Ranges.LastMonth(Now, Utc, English), [], ChartUnit.WattHours, Utc, English);
         chart.NowAt.ShouldBeNull();
+        Charts.Build(Ranges.Days(new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 5), Now, Utc, English), [], ChartUnit.Watts, Utc, English)
+            .NowAt.ShouldBeNull();                                           // a range still to come has no now in it either
         chart.Description.ShouldBe("August 2026: power by component in watt-hours per 6 hours, stacked from the rest of the system up to the CPU. No readings in this range.");
     }
 
@@ -1244,7 +1246,7 @@ internal static class Charts
     public static ChartModel Build(DateRange range, IReadOnlyList<Aggregate> series, ChartUnit unit, TimeZoneInfo zone, CultureInfo culture)
     {
         var buckets = Buckets(series, unit);
-        double? nowAt = range.To < range.Through ? (range.To - range.From) / range.Bucket : null;
+        double? nowAt = range.To > range.From && range.To < range.Through ? (range.To - range.From) / range.Bucket : null;
         var peak = buckets.Count > 0 ? buckets.Max(b => b.Total) : 0;
         var what = unit == ChartUnit.Watts ? "watts" : "watt-hours per " + Ranges.BucketLength(range.Bucket);
         var description = $"{range.Title}: power by component in {what}, stacked from the rest of the system up to the CPU. "
@@ -3406,6 +3408,13 @@ public class ReportDocumentTests
     }
 
     [Fact]
+    public void A_year_of_bars_fits()
+    {
+        var range = Ranges.Days(new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), Now, TimeZoneInfo.Utc, English);
+        ReportDocument.Generate(Data(range, English), "0.1.0", Now, English).Length.ShouldBeGreaterThan(5_000);
+    }
+
+    [Fact]
     public void Ninety_days_of_bars_fit()
     {
         var range = Ranges.Days(new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 29), Now, TimeZoneInfo.Utc, English);
@@ -3449,6 +3458,9 @@ internal static class ReportDocument
     private const string Amber = "#A2680C";
     private static readonly string[] PartColours = ["#C4761C", "#4A76A6", "#7C8A2E", "#8E928A"];
     private static readonly string[] QualityColours = ["#3E7E43", "#35678A", "#7C7355"];
+
+    /// <summary>A4's width, 595 pt, less the two 40 pt margins.</summary>
+    private const float ContentWidth = 515;
     /// <summary>Segoe UI, then the fonts Windows ships for the scripts it lacks: Indic, Thai and Lao, Chinese, Japanese, Korean, Ethiopic, symbols.</summary>
     private static readonly string[] Fonts =
         ["Segoe UI", "Nirmala UI", "Leelawadee UI", "Microsoft YaHei UI", "Microsoft JhengHei UI", "Yu Gothic UI", "Malgun Gothic", "Ebrima", "Segoe UI Symbol"];
@@ -3566,22 +3578,25 @@ internal static class ReportDocument
         {
             Heading(daily, "Daily energy · kWh");
             var max = data.Days.Count > 0 ? data.Days.Max(d => d.Kwh) : 0;
+            var gap = data.Days.Count > 120 ? 0 : data.Days.Count > 40 ? 0.5f : 2;
             daily.Item().PaddingTop(8).Height(90).Row(bars =>
             {
                 foreach (var day in data.Days)
                 {
                     var height = max > 0 ? (float)(86 * day.Kwh / max) : 0;
-                    var slot = bars.RelativeItem().AlignBottom().PaddingHorizontal(data.Days.Count > 40 ? 0.5f : 2);
+                    var slot = bars.RelativeItem().AlignBottom().PaddingHorizontal(gap);
                     if (height >= 0.5f) slot.Height(height).Background(Amber);
                 }
             });
+            // A label spans the days up to the next one, so it has room however narrow a day is; it starts near its day's middle.
             var every = Math.Max(1, (int)Math.Ceiling(data.Days.Count / 16.0));
+            var inset = Math.Max(0, ContentWidth / data.Days.Count / 2 - 3);
             daily.Item().PaddingTop(2).Row(labels =>
             {
-                for (var i = 0; i < data.Days.Count; i++)
+                for (var i = 0; i < data.Days.Count; i += every)
                 {
-                    var cell = labels.RelativeItem().AlignCenter();
-                    if (i % every == 0) cell.Text(data.Days[i].Day.Day.ToString(CultureInfo.InvariantCulture)).FontSize(7).FontColor(Ink3);
+                    labels.RelativeItem(Math.Min(every, data.Days.Count - i)).PaddingLeft(inset)
+                        .Text(data.Days[i].Day.Day.ToString(CultureInfo.InvariantCulture)).FontSize(7).FontColor(Ink3);
                 }
             });
             if (max > 0) daily.Item().AlignRight().Text($"highest day {Format.Kwh(max, culture)} kWh").FontSize(7.5f).FontColor(Ink3);
@@ -3634,7 +3649,7 @@ internal static class ReportDocument
 - [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.App.Tests --filter ReportDocumentTests`
-Expected: `Passed! - Failed: 0, Passed: 3`.
+Expected: `Passed! - Failed: 0, Passed: 4`.
 
 - [x] **Step 5: Commit**
 
@@ -5355,7 +5370,7 @@ Expected: 0 warnings, and:
 | Storage | 47 | 47 |
 | Sensors | 99 | 94 |
 | Service | 127 | 125 |
-| App | 155 | 153 |
+| App | 156 | 154 |
 
 - [x] **Step 5: Update the spec**
 
@@ -5390,6 +5405,19 @@ git commit -m "Complete Plan D2: Breakdown, Report, exports and the monthly PDF"
 - Raw CSV holds only what raw retention keeps: 48 hours by default.
 - A platform-neutral build carries 116 MB of native libraries for eight platforms. Plan E publishes for win-x64.
 - The saving suggestion quotes the plugged-in timeouts only.
+
+---
+
+## After the final review
+
+One whole-branch review ran once every task was committed. It reported two problems, and neither was real. It read `DateOnly.DayNumber` as the day of the year, and so expected the day counts in `ReportData.Bars` and `Charts.Ticks` to go negative across New Year. In fact `DayNumber` counts days since 1 January 0001, and `Charts`' test over a range from November 2025 to September 2026 already shows month ticks across the turn of the year.
+
+A pass of my own over the riskier paths, the exports on long ranges among them, found two real problems. Both are fixed in one commit, and the code blocks above already show the fixes:
+
+| Problem | Fix |
+|---|---|
+| A custom range of a year made the PDF export fail. Each day's label sat in a cell 1.4 pt wide, and QuestPDF refuses content that cannot fit. | A label spans the days up to the next label, starting near its day's middle, and bars lose their gaps beyond 120 days. `A_year_of_bars_fits` covers it. |
+| A custom range wholly in the future drew the "now" line at its left edge. | Now is marked only inside the range. |
 
 ---
 

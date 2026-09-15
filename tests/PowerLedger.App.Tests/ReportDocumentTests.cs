@@ -33,6 +33,13 @@ public class ReportDocumentTests
     }
 
     [Fact]
+    public void A_year_of_bars_fits()
+    {
+        var range = Ranges.Days(new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), Now, TimeZoneInfo.Utc, English);
+        ReportDocument.Generate(Data(range, English), "0.1.0", Now, English).Length.ShouldBeGreaterThan(5_000);
+    }
+
+    [Fact]
     public void Ninety_days_of_bars_fit()
     {
         var range = Ranges.Days(new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 29), Now, TimeZoneInfo.Utc, English);
