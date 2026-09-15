@@ -1,7 +1,4 @@
-using System.IO;
 using System.Runtime.InteropServices;
-using System.Text;
-using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
 namespace PowerLedger.App;
@@ -20,85 +17,87 @@ internal sealed class TrustAnyServer : IServerCheck
 }
 
 /// <summary>
-/// The process serving the pipe must be the installed service: the executable Windows starts for the PowerLedger
-/// service. Anyone may create a pipe with PowerLedger's name before the service does, so the name proves nothing.
+/// The process serving the pipe must be the one Windows runs for the PowerLedger service. Anyone may create a pipe with
+/// PowerLedger's name before the service does, so the name proves nothing. The Service Control Manager tells any
+/// signed-in user which process runs a service, where the service's own process, running as LocalSystem, won't tell an
+/// unelevated App even its path.
 /// </summary>
-/// <param name="installedImage">The installed service's executable, or null when it is not installed.</param>
-internal sealed class InstalledServiceCheck(Func<string?> installedImage) : IServerCheck
+/// <param name="serviceProcess">The installed service's process id: 0 while it isn't running, null when it isn't installed.</param>
+internal sealed class InstalledServiceCheck(Func<uint?> serviceProcess) : IServerCheck
 {
     public const string ServiceName = "PowerLedger";
-    private const uint QueryLimitedInformation = 0x1000;
+    private const uint ScManagerConnect = 0x0001;
+    private const uint ServiceQueryStatus = 0x0004;
+    private const int ScStatusProcessInfo = 0;
 
-    public static InstalledServiceCheck FromRegistry() => new(RegisteredImage);
+    public static InstalledServiceCheck FromServiceManager() => new(() => ServiceProcess(ServiceName));
 
     public string? Refusal(SafePipeHandle pipe)
     {
-        if (installedImage() is not { } expected) return "The PowerLedger service isn't installed, so nothing can be changed.";
-        if (ServerImage(pipe) is not { } actual) return "The program serving PowerLedger's pipe couldn't be identified, so nothing was sent.";
-        return string.Equals(Path.GetFullPath(actual), Path.GetFullPath(expected), StringComparison.OrdinalIgnoreCase)
+        if (serviceProcess() is not { } running) return "The PowerLedger service isn't installed, so nothing can be changed.";
+        if (ServerProcess(pipe) is not { } server) return "The program serving PowerLedger's pipe couldn't be identified, so nothing was sent.";
+        return running != 0 && server == running
             ? null
             : "The program serving PowerLedger's pipe isn't the installed service, so nothing was sent.";
     }
 
-    /// <summary>The executable of the process serving a pipe, or null when Windows won't say.</summary>
-    internal static string? ServerImage(SafePipeHandle pipe)
+    /// <summary>The process serving a pipe, or null when Windows won't say.</summary>
+    internal static uint? ServerProcess(SafePipeHandle pipe) => GetNamedPipeServerProcessId(pipe, out var id) ? id : null;
+
+    /// <summary>The process Windows runs for a service: 0 while it has none, null when it isn't installed or the Service
+    /// Control Manager won't say. The link asks on every connection, so nothing may escape from here: each failure is
+    /// an answer from Windows, never an exception.</summary>
+    internal static uint? ServiceProcess(string name)
     {
-        if (!GetNamedPipeServerProcessId(pipe, out var id)) return null;
-        var process = OpenProcess(QueryLimitedInformation, false, id);
-        if (process == IntPtr.Zero) return null;
+        var manager = IntPtr.Zero;
+        var service = IntPtr.Zero;
         try
         {
-            var name = new StringBuilder(1024);
-            var length = name.Capacity;
-            return QueryFullProcessImageName(process, 0, name, ref length) ? name.ToString(0, length) : null;
+            manager = OpenSCManagerW(null, null, ScManagerConnect);
+            if (manager == IntPtr.Zero) return null;
+            service = OpenServiceW(manager, name, ServiceQueryStatus);
+            if (service == IntPtr.Zero) return null;
+            return QueryServiceStatusEx(service, ScStatusProcessInfo, out var status, (uint)Marshal.SizeOf<ServiceStatusProcess>(), out _)
+                ? status.ProcessId
+                : null;
         }
         finally
         {
-            CloseHandle(process);
+            if (service != IntPtr.Zero) CloseServiceHandle(service);
+            if (manager != IntPtr.Zero) CloseServiceHandle(manager);
         }
     }
 
-    /// <summary>The executable a registered command line starts: the quoted part, or everything up to ".exe".</summary>
-    internal static string? ExecutableOf(string? commandLine)
+    /// <summary>SERVICE_STATUS_PROCESS: nine DWORDs, of which only the process id is read.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ServiceStatusProcess
     {
-        if (string.IsNullOrWhiteSpace(commandLine)) return null;
-        var line = commandLine.Trim();
-        if (line.StartsWith('"'))
-        {
-            var close = line.IndexOf('"', 1);
-            return close > 1 ? line[1..close] : null;
-        }
-        var exe = line.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
-        return exe > 0 ? line[..(exe + 4)] : line;
-    }
-
-    /// <summary>The installed service's executable, or null when it is not installed or the registry won't say. The link
-    /// asks on every connection, so nothing may escape from here.</summary>
-    private static string? RegisteredImage()
-    {
-        try
-        {
-            using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{ServiceName}");
-            return ExecutableOf(key?.GetValue("ImagePath") as string);
-        }
-        catch (Exception error) when (error is System.Security.SecurityException or UnauthorizedAccessException or IOException)
-        {
-            return null;
-        }
+        public uint ServiceType;
+        public uint CurrentState;
+        public uint ControlsAccepted;
+        public uint Win32ExitCode;
+        public uint ServiceSpecificExitCode;
+        public uint CheckPoint;
+        public uint WaitHint;
+        public uint ProcessId;
+        public uint ServiceFlags;
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint serverProcessId);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint processId);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern IntPtr OpenSCManagerW(string? machineName, string? databaseName, uint desiredAccess);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder name, ref int size);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern IntPtr OpenServiceW(IntPtr manager, string serviceName, uint desiredAccess);
 
-    [DllImport("kernel32.dll")]
+    [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr handle);
+    private static extern bool QueryServiceStatusEx(IntPtr service, int infoLevel, out ServiceStatusProcess status, uint bufferSize, out uint bytesNeeded);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseServiceHandle(IntPtr handle);
 }

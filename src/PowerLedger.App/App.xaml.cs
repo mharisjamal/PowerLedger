@@ -45,7 +45,7 @@ public partial class App : Application
         var version = Version();
         _theme = new ThemeManager(this, preferences.Theme);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
-        IServerCheck check = options.PipeName == PipeProtocol.PipeName ? InstalledServiceCheck.FromRegistry() : new TrustAnyServer();
+        IServerCheck check = options.PipeName == PipeProtocol.PipeName ? InstalledServiceCheck.FromServiceManager() : new TrustAnyServer();
         _link = new PipeServiceLink(options.PipeName, new LastInputIdleSource(), TimeProvider.System, check);
         var threads = new UiThreads(action => Dispatcher.InvokeAsync(action), action => Task.Run(action));
         var history = new HistoryReader(_database);
