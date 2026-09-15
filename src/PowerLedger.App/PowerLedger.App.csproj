@@ -31,7 +31,7 @@
     <InternalsVisibleTo Include="PowerLedger.App.Tests" />
   </ItemGroup>
 
-  <!-- WinForms is here only for the tray icon; its global usings would collide with WPF's Application, Color and more. -->
+  <!-- WinForms is here only for the tray icon and a screen's work area; its global usings would collide with WPF's Application, Color and more. -->
   <Target Name="DropWinFormsGlobalUsings" BeforeTargets="GenerateGlobalUsings">
     <ItemGroup>
       <Using Remove="System.Drawing" />

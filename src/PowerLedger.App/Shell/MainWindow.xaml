@@ -116,7 +116,7 @@
                 </ContentControl>
             </Grid>
 
-            <Border Grid.Row="2" Background="{DynamicResource Brush.Ground}" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="16,7">
+            <Border x:Name="StatusBar" Grid.Row="2" Background="{DynamicResource Brush.Ground}" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="16,7">
                 <WrapPanel>
                     <WrapPanel.Resources>
                         <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Secondary}">
