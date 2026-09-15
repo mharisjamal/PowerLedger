@@ -74,3 +74,11 @@ internal sealed class Stalling : Stream
 
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }
+
+/// <summary>Records what a progress report hears, as it hears it.</summary>
+internal sealed class Fractions : IProgress<double>
+{
+    public List<double> Seen { get; } = [];
+
+    public void Report(double value) => Seen.Add(value);
+}
