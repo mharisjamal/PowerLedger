@@ -47,11 +47,12 @@ UninstallLogging=yes
 ; SignTool=signtool sign /fd sha256 /tr http://timestamp.acs.microsoft.com /td sha256 $f
 
 [Files]
-; Each build carries its own runtime; the Check installs the one for this PC. solidbreak starts the Arm64 build in a
-; compression chunk of its own, so each PC unpacks only its own build instead of reading through the other one.
+; Each build carries its own runtime; the Check installs the one for this PC. x64 comes first, so x64 PCs, most of
+; them, unpack only their own build; Arm64 PCs read through the x64 build first, a few seconds. One stream, rather than
+; a chunk per build, keeps the installer 12 MB smaller, because the builds share many identical files.
 Source: "{#Publish}\win-x64\App\*"; DestDir: "{app}"; Check: not IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#Publish}\win-x64\Service\*"; DestDir: "{app}\Service"; Check: not IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#Publish}\win-arm64\App\*"; DestDir: "{app}"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs solidbreak
+Source: "{#Publish}\win-arm64\App\*"; DestDir: "{app}"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#Publish}\win-arm64\Service\*"; DestDir: "{app}\Service"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
