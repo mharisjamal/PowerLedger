@@ -19,7 +19,11 @@ alone (within about 20%).
 
 ## Requirements
 
-Windows 10 1809 or later, or Windows 11, on x64. The installer fetches the .NET 10 Desktop Runtime when it is missing.
+Windows 10 1809 or later, or Windows 11, on x64 or Arm64. 32-bit (x86) Windows and Windows in S mode are not
+supported. The installer carries everything, the .NET 10 runtime included, and downloads nothing. It is about 92 MB;
+installed, PowerLedger takes about 260 MB of disk on x64 and 280 MB on Arm64. On Windows 10, .NET 10 is officially
+supported only on the Enterprise LTSC editions, but it runs on the others. Since the runtime is inside the app, .NET's
+security fixes arrive with PowerLedger's updates.
 
 ## Build and test
 
@@ -65,10 +69,12 @@ pwsh installer\build.ps1
 
 `get-inno-setup.ps1` installs the pinned Inno Setup 7.1 for this user, so it needs no administrator. It downloads the
 release from github.com/jrsoftware/issrc and refuses it unless its SHA-256 matches and it is validly signed by
-Pyrsys B.V., Inno Setup's publisher. `build.ps1` publishes both programs for win-x64 into `artifacts\publish` and
-compiles `installer\PowerLedger.iss` into `installer\output`. The installer is built with Inno Setup 7.1; 6.3 or
-later also compiles it. `build.ps1` finds Inno Setup on PATH or in its usual folders, or takes the compiler's path as
-`-Iscc`.
+Pyrsys B.V., Inno Setup's publisher. `build.ps1` publishes both programs self-contained, for win-x64 and win-arm64,
+into `artifacts\publish`, and compiles `installer\PowerLedger.iss` into `installer\output`. The one installer holds
+both builds and installs the one that matches the PC; it downloads nothing. Its compression takes a few minutes;
+`-Fast` is quicker, for local builds, and makes a bigger installer. The installer is built with Inno Setup 7.1 or later; Inno
+Setup 6's 32-bit compiler can't use its 256 MB compression dictionary. `build.ps1` finds Inno Setup 7 on PATH or in its
+usual folders, or takes the compiler's path as `-Iscc`.
 
 ## Test the installer
 
@@ -79,14 +85,16 @@ pwsh installer\build.ps1 -TestVariants
 pwsh installer\test-installer.ps1
 ```
 
-`-TestVariants` also compiles the builds the test needs into `installer\output\test`: an upgrade, one that acts as if
-the .NET runtime were missing, and one whose runtime download fails. `test-installer.ps1` installs the real
-PowerLedger, service and all, and checks the files, shortcut and uninstall entry; the service's registration, and its
-recovery when its process is killed; the data folder's owner and ACL; that the pipe answers; that an upgrade, an
-uninstall and a reinstall keep the history; and that a silent install refuses without the runtime. It stops at once if
-`C:\ProgramData\PowerLedger` already exists, so it never touches a real history, and it removes what it created. Its
-interactive steps drive setup's windows with UI Automation: a failed runtime download, an uninstall that deletes the
-history, and the wizard of a setup started by a normal user. `-Step` picks the steps to run. Results go to
+`-TestVariants` also compiles the upgrade the test needs, the next patch version, into `installer\output\test`, with
+fast compression since its size doesn't matter. `test-installer.ps1` installs the real PowerLedger, service and all,
+and checks the files, shortcut and uninstall entry; that the build installed is the one for this PC's architecture and
+carries its own .NET runtime; the service's registration, and its recovery when its process is killed; the data
+folder's owner and ACL; that the pipe answers; and that an upgrade, an uninstall and a reinstall keep the history. It
+stops at once if `C:\ProgramData\PowerLedger` already exists, so it never touches a real history, and it removes what
+it created. Its steps are Preflight, Install, Service, Data, Recovery, ServiceStop, Upgrade, UninstallKeep, Reinstall
+and Cleanup, all silent. Three more drive setup's windows with UI Automation: InstallWizard installs with the wizard,
+as somebody new to PowerLedger would; UninstallDelete uninstalls and deletes the history; and DriveWizard drives the
+wizard of a setup started by a normal user. `-Step` picks the steps to run. Results go to
 `installer\output\test-results`.
 
 Then install PowerLedger from `installer\output` and, from an unelevated terminal, run the tests that need it

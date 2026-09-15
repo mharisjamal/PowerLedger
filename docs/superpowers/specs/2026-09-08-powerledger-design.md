@@ -26,7 +26,7 @@ The core loop is: **sample sensors once per second → convert to a whole-system
 - Per-application energy attribution (planned v1.1).
 - Smart-plug or PSU telemetry integration (planned v1.1).
 - Time-of-use tariffs (schema leaves room; UI later).
-- macOS, Linux, ARM64.
+- macOS and Linux.
 - Cloud sync, accounts, telemetry.
 
 ## 2. Users and scope decisions
@@ -68,7 +68,7 @@ The core loop is: **sample sensors once per second → convert to a whole-system
 | `PowerLedger.Storage` | SQLite schema, migrations, batched writer, retention jobs, read-side query API. | Core |
 | `PowerLedger.Service` | Worker host: sampler loop, writer, downsample scheduler, pipe server, power/session event handling. | all above |
 | `PowerLedger.App` | WPF UI, tray icon, charts, exports, monthly report, wizard. | Core, Contracts, Storage (read-only) |
-| `installer/` | Inno Setup script and runtime bootstrap. No driver to bundle. | build output |
+| `installer/` | Inno Setup script: one installer holding the x64 and Arm64 builds, runtime included. No driver to bundle. | build output |
 | `tests/*` | One xUnit project per library plus a Service integration test project. | |
 
 ### Rules
@@ -326,13 +326,14 @@ Framework: xUnit, Shouldly (BSD; FluentAssertions 8+ requires a paid commercial 
 
 ## 13. Distribution
 
-- Requirements: Windows 10 1809 or later, Windows 11, x64 only.
-- Framework-dependent build; Inno Setup installs the .NET 10 Desktop Runtime if missing, so the installer stays around 15 MB. Publish for win-x64, so only that platform's native libraries ship: QuestPDF and SQLite bring natives for eight platforms, 116 MB in a platform-neutral build.
-- Layout (Plan E): the App in `Program Files\PowerLedger`, the service in its `Service` folder, a Start menu shortcut. An upgrade stops the service before copying and starts it after; the App turns on its Run entry on its first run, as the user who runs it, since the elevated installer can't write that user's `HKCU`. Setup, once its checks pass, and uninstall, once the user confirms, close a running App before replacing or removing files: they signal the named event `Local\PowerLedger.App.Exit`, on which the App exits as its tray's Exit does, and wait up to 10 s; Inno's `AppMutex` check remains the fallback. A silent upgrade therefore works while the App runs, and the App starts again at the next sign-in through its Run entry, or when an interactive setup ends with "Open PowerLedger" ticked. Uninstall asks whether to keep the history and keeps it when silent. A silent install needs the runtime already present. `installer\build.ps1` makes the installer with Inno Setup 7.1, which `installer\get-inno-setup.ps1` installs for the current user from its GitHub release, refusing it unless its SHA-256 matches and it is validly signed by Pyrsys B.V.; Inno Setup 6.3 or later also compiles it (checked with 6.7.3, which `get-inno-setup.ps1 -Version 6.7.3` installs). CI does the same.
+- Requirements: Windows 10 1809 or later, or Windows 11, on x64 or Arm64. Not 32-bit Windows, and not S mode. On Windows 10, .NET 10 is officially supported only on the Enterprise LTSC editions, but it runs on the others.
+- Self-contained builds for win-x64 and win-arm64: each program carries the .NET 10 runtime, so the installer downloads nothing, the PC needs no .NET of its own, and Arm64 PCs run native code rather than emulated x64. .NET's security fixes reach users with PowerLedger's updates. A publish per platform ships only that platform's native libraries: QuestPDF and SQLite bring natives for eight platforms, 116 MB in a platform-neutral build.
+- One installer holds both builds and installs the one that matches the PC (`ArchitecturesAllowed=x64os or arm64`, so 32-bit Windows gets Inno Setup's own refusal). It is about 92 MB: LZMA2 at ultra64, one solid stream, and a 256 MB dictionary, so the service's copy of the runtime compresses against the App's (the x64 build alone would be 56 MB). Setup needs about 256 MB of memory to unpack it. Installed, PowerLedger takes about 260 MB on x64 and 280 MB on Arm64.
+- Layout (Plan E): the App in `Program Files\PowerLedger`, the service in its `Service` folder, a Start menu shortcut. An upgrade stops the service before copying and starts it after; the App turns on its Run entry on its first run, as the user who runs it, since the elevated installer can't write that user's `HKCU`. Setup, once its checks pass, and uninstall, once the user confirms, close a running App before replacing or removing files: they signal the named event `Local\PowerLedger.App.Exit`, on which the App exits as its tray's Exit does, and wait up to 10 s; Inno's `AppMutex` check remains the fallback. A silent upgrade therefore works while the App runs, and the App starts again at the next sign-in through its Run entry, or when an interactive setup ends with "Open PowerLedger" ticked. Uninstall asks whether to keep the history and keeps it when silent. `installer\build.ps1` makes the installer with Inno Setup 7.1, which `installer\get-inno-setup.ps1` installs for the current user from its GitHub release, refusing it unless its SHA-256 matches and it is validly signed by Pyrsys B.V.; Inno Setup 6 won't do, since its 32-bit compiler can't use the 256 MB compression dictionary. CI does the same.
 - The installer registers the service with recovery options and opens the App, whose first window is the first-run wizard; the App adds its own Run entry. It logs the exit code of every `sc.exe` and `net.exe` it runs, and tells the user when registering the service fails. There is no driver to install. Uninstall stops and deletes the service, removes its event-log source, and asks whether to keep the database.
 - Releases on GitHub with a winget manifest after the first stable build. v1 has a "check for updates" link; an in-app updater is v1.1.
-- Installer tests: `installer\build.ps1 -TestVariants` also compiles test builds into `installer\output\test\`: an upgrade (the patch version plus one), one that behaves as if the .NET runtime were missing (`noruntime`), and one whose runtime download fails (`badurl`). `installer\test-installer.ps1`, run from an elevated PowerShell, installs the real PowerLedger and checks a silent install; the files, shortcut and uninstall entry; the service's registration (quoted image path, automatic start, LocalSystem, restart on failure); the data folder's owner and ACL; the pipe answering; recovery after the service process is killed; an upgrade keeping the history, an uninstall keeping it and a reinstall over it; and a silent install refusing when the runtime is missing. Its interactive steps drive setup's windows with UI Automation: the failed runtime download, an uninstall that deletes the history, and the wizard of a setup started by a normal user. It stops at once if `C:\ProgramData\PowerLedger` already exists, removes what it created, and writes its results to `installer\output\test-results`.
-- CI (GitHub Actions): build, tests outside the Hardware, UI and Installed categories, the installer and its test builds, the installer test's silent steps (hosted Windows runners are administrators), and artifacts: the installer, and the test results even when a step fails.
+- Installer tests: `installer\build.ps1 -TestVariants` also compiles the upgrade (the patch version plus one) into `installer\output\test\`, with fast compression since its size doesn't matter. `installer\test-installer.ps1`, run from an elevated PowerShell, installs the real PowerLedger and checks a silent install; the files, shortcut and uninstall entry; that the App and the service are the build for the PC's architecture (their PE header's machine field) and each carry the runtime; the service's registration (quoted image path, automatic start, LocalSystem, restart on failure); the data folder's owner and ACL; the pipe answering; recovery after the service process is killed; and an upgrade keeping the history, an uninstall keeping it and a reinstall over it. Its interactive steps drive setup's windows with UI Automation: an install through the wizard, as somebody new to PowerLedger would do it (on a clean Windows such as Windows Sandbox), an uninstall that deletes the history, and the wizard of a setup started by a normal user. It stops at once if `C:\ProgramData\PowerLedger` already exists, removes what it created, and writes its results to `installer\output\test-results`.
+- CI (GitHub Actions): build, tests outside the Hardware, UI and Installed categories, the installer and its upgrade build, and the installer test's silent steps on x64; then the same installer's silent steps on an Arm64 runner (`windows-11-arm`), which installs the Arm64 build. Hosted Windows runners are administrators. Artifacts: the installer, and each runner's test results even when a step fails.
 
 ## 14. Repository layout and conventions
 
@@ -364,7 +365,7 @@ Third-party licenses in use: CommunityToolkit.Mvvm (MIT), Microsoft.Data.Sqlite 
 
 ## 15. Success criteria for v1
 
-- Installs on a clean Windows 10/11 x64 machine in under a minute with no manual driver steps.
+- Installs on a clean Windows 10/11 x64 or Arm64 machine in under a minute with no manual driver steps.
 - Logs from boot without the UI, survives sleep and resume, and keeps the database under 100 MB after two years of use.
 - Meets the performance gate and the accuracy targets in §12.
 - Runs a 7-day soak on the developer laptop with zero crashes.
@@ -383,4 +384,4 @@ Third-party licenses in use: CommunityToolkit.Mvvm (MIT), Microsoft.Data.Sqlite 
 - The development machine has the .NET 10 Desktop Runtime (10.0.11) but no .NET SDK (`dotnet --list-sdks` is empty). Install the .NET 10 SDK first.
 - Confirmed 2026-09-10 on the development laptop, unelevated: the Energy Meter Interface is present and enabled, and reports the package, cores, integrated-graphics and memory rails. No sensor library or kernel driver is needed, so `LibreHardwareMonitorLib` was dropped from the design along with the PawnIO driver it now requires.
 - Confirmed 2026-09-10: the GeForce MX330 reports no power at all through NVML or NVAPI. It is a whole class of low-end laptop GPUs with no measurement hardware, so the load-model fallback in §5 is the normal path, not the exception.
-- Inno Setup 7.1 installed for the installer step (`installer\get-inno-setup.ps1`); 6.3 or later also compiles the script.
+- Inno Setup 7.1 installed for the installer step (`installer\get-inno-setup.ps1`).
