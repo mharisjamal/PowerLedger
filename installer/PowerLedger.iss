@@ -45,6 +45,11 @@ SolidCompression=yes
 LZMADictionarySize=262144
 #endif
 WizardStyle=modern
+; The logo (assets\brand\make-brand.ps1): setup's own icon, the small image at the wizard's top right, and the large one on
+; the Finished page, each in one file per display scale so Setup picks the sharpest.
+SetupIconFile=..\assets\brand\PowerLedger.ico
+WizardSmallImageFile=..\assets\brand\wizard-small-58.png,..\assets\brand\wizard-small-72.png,..\assets\brand\wizard-small-87.png,..\assets\brand\wizard-small-116.png,..\assets\brand\wizard-small-159.png
+WizardImageFile=..\assets\brand\wizard-large-202.png,..\assets\brand\wizard-large-252.png,..\assets\brand\wizard-large-303.png,..\assets\brand\wizard-large-404.png,..\assets\brand\wizard-large-505.png
 UninstallDisplayIcon={app}\PowerLedger.exe
 UninstallDisplayName=PowerLedger
 SetupLogging=yes

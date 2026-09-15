@@ -1,5 +1,12 @@
 # PowerLedger
 
+<p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo-dark.svg">
+    <img src="assets/brand/logo.svg" alt="PowerLedger" width="320">
+  </picture>
+</p>
+
 PowerLedger records how much power a Windows PC uses, hour by hour, and turns it into a ledger: kWh, cost at your
 tariff, which parts used it (processor, graphics, display, the rest), CO₂, and the energy spent while nobody was
 using the machine. Hardware monitors show watts now; PowerLedger remembers them.
@@ -108,3 +115,5 @@ dotnet test -c Release --filter Category=Installed
 
 - `docs/superpowers/specs/2026-09-08-powerledger-design.md`: the design.
 - `docs/superpowers/plans/`: how it was built, plan by plan.
+- `assets/brand/`: the logo, a P on an amber tile whose bowl is a meter's dial and whose stem is a ledger's margin.
+  `make-brand.ps1` draws it and writes the Windows icon, the SVGs and PNGs, and the installer's images.
