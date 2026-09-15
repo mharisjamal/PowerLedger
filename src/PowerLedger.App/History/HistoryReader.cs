@@ -23,7 +23,7 @@ internal interface IHistory
 }
 
 /// <summary>The App's read-only view of the service's database (spec §3: the App never writes it).</summary>
-internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeHistory
+internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeHistory, IMachineHistory
 {
     public HistorySnapshot? Read(DateTimeOffset now, TimeZoneInfo zone)
     {
@@ -83,6 +83,30 @@ internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeH
         try
         {
             return new AggregateRepository(database).FirstMinuteStart() is { } first ? Ranges.LocalDay(first, zone) : null;
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
+    public IReadOnlyList<Tariff>? Tariffs()
+    {
+        try
+        {
+            return new TariffRepository(database).All();
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
+    public DetectedHardware? Detected()
+    {
+        try
+        {
+            return new InventoryRepository(database).Latest() is { } record ? DetectedHardware.Parse(record.Json) : null;
         }
         catch (SqliteException)
         {
