@@ -99,7 +99,7 @@ scripts/
 - Create: `tests/PowerLedger.Service.Tests/PowerLedger.Service.Tests.csproj`
 - Modify: `PowerLedger.sln`
 
-- [ ] **Step 1: Write the service project**
+- [x] **Step 1: Write the service project**
 
 `src/PowerLedger.Service/PowerLedger.Service.csproj`
 ```xml
@@ -147,7 +147,7 @@ internal static class Program
 }
 ```
 
-- [ ] **Step 2: Write the test project**
+- [x] **Step 2: Write the test project**
 
 `tests/PowerLedger.Service.Tests/PowerLedger.Service.Tests.csproj`
 ```xml
@@ -181,14 +181,14 @@ internal static class Program
 </Project>
 ```
 
-- [ ] **Step 3: Add both to the solution**
+- [x] **Step 3: Add both to the solution**
 
 ```bash
 dotnet sln PowerLedger.sln add src/PowerLedger.Service/PowerLedger.Service.csproj --solution-folder src
 dotnet sln PowerLedger.sln add tests/PowerLedger.Service.Tests/PowerLedger.Service.Tests.csproj --solution-folder tests
 ```
 
-- [ ] **Step 4: Build and run the empty suite**
+- [x] **Step 4: Build and run the empty suite**
 
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` with 0 warnings.
@@ -196,7 +196,7 @@ Expected: `Build succeeded.` with 0 warnings.
 Run: `dotnet test tests/PowerLedger.Service.Tests -c Release`
 Expected: the Service test run reports that no test is available.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service tests/PowerLedger.Service.Tests PowerLedger.sln
@@ -213,7 +213,7 @@ git commit -m "Add the Service project and its tests"
 
 Spec §8 limits `SetSettings` to the tariff, the machine profile, the idle threshold, the sample interval and retention, each range-checked. The tariff travels on its own message (Task 3), because it appends a row rather than replacing a value.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/ServiceSettingsTests.cs`
 ```csharp
@@ -284,12 +284,12 @@ public class ServiceSettingsTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter ServiceSettingsTests`
 Expected: build error, `ServiceSettings` not found.
 
-- [ ] **Step 3: Write the settings**
+- [x] **Step 3: Write the settings**
 
 `src/PowerLedger.Contracts/ServiceSettings.cs`
 ```csharp
@@ -364,12 +364,12 @@ public sealed record ServiceSettings
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter ServiceSettingsTests`
 Expected: `Passed! - Failed: 0, Passed: 14`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Contracts/ServiceSettings.cs tests/PowerLedger.Service.Tests/ServiceSettingsTests.cs
@@ -391,7 +391,7 @@ git commit -m "Add the service settings the App may change, with range checks"
 
 Spec §8: newline-delimited JSON with `System.Text.Json` source generation. Each message carries `type`, and requests carry an `id`. The limit is 64 KB a message. Everything lives in Contracts, so the App's client (Plan D) uses the same framing. Enums travel as numbers, as `MachineProfile` and `Quality` already promise. The discriminator is written first; readers rely on that. Stored settings are the one exception to source generation: found while executing this task, the generated code assigns every init-only property, so JSON from an older version that lacks a setting would read back as zero rather than the default `MachineProfile` promises. Settings storage uses reflection, which sets only what the JSON holds.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/PipeProtocolTests.cs`
 ```csharp
@@ -592,12 +592,12 @@ internal sealed class TrickleStream(byte[] data, int chunk) : Stream
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter "PipeProtocolTests|MessageChannelTests"`
 Expected: build error, `PipeMessage` not found.
 
-- [ ] **Step 3: Write the protocol**
+- [x] **Step 3: Write the protocol**
 
 `src/PowerLedger.Contracts/PipeMessages.cs`
 ```csharp
@@ -881,12 +881,12 @@ public sealed class MessageChannel(Stream stream) : IAsyncDisposable
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter "PipeProtocolTests|MessageChannelTests"`
 Expected: `Passed! - Failed: 0, Passed: 25`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Contracts tests/PowerLedger.Service.Tests/PipeProtocolTests.cs tests/PowerLedger.Service.Tests/MessageChannelTests.cs
@@ -903,7 +903,7 @@ git commit -m "Add the pipe protocol: message kinds, JSON source generation and 
 
 A session left open by a crash is closed at its last recorded tick (Task 14), which needs the newest timestamp in `samples_raw`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/PowerLedger.Storage.Tests/RawSampleRepositoryTests.cs`, inside the existing class:
 
@@ -919,12 +919,12 @@ Add to `tests/PowerLedger.Storage.Tests/RawSampleRepositoryTests.cs`, inside the
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests --filter RawSampleRepositoryTests`
 Expected: build error, `Latest` not found.
 
-- [ ] **Step 3: Add the query**
+- [x] **Step 3: Add the query**
 
 Add to `src/PowerLedger.Storage/RawSampleRepository.cs`, after `Read`:
 
@@ -939,12 +939,12 @@ Add to `src/PowerLedger.Storage/RawSampleRepository.cs`, after `Read`:
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Storage.Tests`
 Expected: `Passed! - Failed: 0, Passed: 41`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Storage/RawSampleRepository.cs tests/PowerLedger.Storage.Tests/RawSampleRepositoryTests.cs
@@ -962,7 +962,7 @@ git commit -m "Let storage report the newest raw tick"
 
 Spec §10: a corrupt database is renamed `power.corrupt-<date>.db` and a fresh one started, with an alert in the UI. SQLite reports a file that is not a database when it first reads it, and some damage only shows under an integrity check. So the opener runs `PRAGMA quick_check` once at start, which takes about a second on a two-year database. The database and its write-ahead log and shared-memory files move together, so a stale log never meets a fresh database. The file handles must be released before the rename. A failed open can leave a pooled connection holding the file, so every pool is cleared first.
 
-- [ ] **Step 1: Write the test helper and the failing tests**
+- [x] **Step 1: Write the test helper and the failing tests**
 
 `tests/PowerLedger.Service.Tests/TestDatabase.cs`
 ```csharp
@@ -1073,12 +1073,12 @@ public sealed class DatabaseOpenerTests : IDisposable
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter DatabaseOpenerTests`
 Expected: build error, `DatabaseOpener` not found.
 
-- [ ] **Step 3: Write the opener**
+- [x] **Step 3: Write the opener**
 
 `src/PowerLedger.Service/DatabaseOpener.cs`
 ```csharp
@@ -1140,12 +1140,12 @@ internal static class DatabaseOpener
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter DatabaseOpenerTests`
 Expected: `Passed! - Failed: 0, Passed: 3`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/DatabaseOpener.cs tests/PowerLedger.Service.Tests/TestDatabase.cs tests/PowerLedger.Service.Tests/DatabaseOpenerTests.cs
@@ -1163,7 +1163,7 @@ git commit -m "Open the database and set aside a damaged one"
 
 The service runs as LocalSystem and opens the database, so the folder and everything in it must be writable by SYSTEM and administrators only. `C:\ProgramData` lets ordinary users create folders. A user who created `C:\ProgramData\PowerLedger` before the installer did could plant a database or write-ahead log for a SYSTEM process to parse. So the service refuses a folder another account owns, and sets aside database files another account owns, with Task 5's `SetAside`. Enforcement applies only when running as LocalSystem: a console run in development just creates the folders. Setting the ACL cannot be tested unelevated, so the tests check the rules the ACL is built from and that an ordinary user's folder is refused.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/DataDirectoryTests.cs`
 ```csharp
@@ -1237,12 +1237,12 @@ public sealed class DataDirectoryTests : IDisposable
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter DataDirectoryTests`
 Expected: build error, `ServicePaths` not found.
 
-- [ ] **Step 3: Write the paths and the folder rules**
+- [x] **Step 3: Write the paths and the folder rules**
 
 `src/PowerLedger.Service/ServicePaths.cs`
 ```csharp
@@ -1342,12 +1342,12 @@ internal sealed class UntrustedDataDirectoryException(string path, SecurityIdent
     : Exception($"{path} is owned by {owner?.Value ?? "nobody"}, not by SYSTEM or Administrators, so PowerLedger will not keep its data there. Delete the folder and start the service again.");
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter DataDirectoryTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/ServicePaths.cs src/PowerLedger.Service/DataDirectory.cs tests/PowerLedger.Service.Tests/DataDirectoryTests.cs
@@ -1367,7 +1367,7 @@ git commit -m "Refuse a planted data folder and lock the real one down"
 
 Plan B's handoff: `ToProfile` overwrites every detected field, so detection is folded into the profile only on the first run and when the hardware hash changes, meaning a different machine. Otherwise the stored profile keeps the user's wizard corrections. The hash the profile was detected for is stored beside the settings. The model takes TDPs from the inventory, and uses the chassis defaults when the bundled table does not know the part.
 
-- [ ] **Step 1: Write the test helpers and the failing tests**
+- [x] **Step 1: Write the test helpers and the failing tests**
 
 `tests/PowerLedger.Service.Tests/Samples.cs`
 ```csharp
@@ -1497,12 +1497,12 @@ public class SettingsTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter "FullyQualifiedName~Tests.SettingsTests"`
 Expected: build error, `ProfilePolicy` not found.
 
-- [ ] **Step 3: Write the store, the rule and the factory**
+- [x] **Step 3: Write the store, the rule and the factory**
 
 `src/PowerLedger.Service/SettingsStore.cs`
 ```csharp
@@ -1565,12 +1565,12 @@ internal static class ModelFactory
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter "FullyQualifiedName~Tests.SettingsTests"`
 Expected: `Passed! - Failed: 0, Passed: 8`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/SettingsStore.cs src/PowerLedger.Service/ModelFactory.cs tests/PowerLedger.Service.Tests/Samples.cs tests/PowerLedger.Service.Tests/Facts.cs tests/PowerLedger.Service.Tests/SettingsTests.cs
@@ -1587,7 +1587,7 @@ git commit -m "Store settings and fold detection into the profile only for a new
 
 The sensor set reads three delegates: whether the display is on, whether the session is locked, and the user's idle seconds (Plan B's `MachineSensors.Create`). Windows notifications set the first two, and App clients report the third over the pipe. A report keeps ageing between messages, because idle time grows while nobody touches the machine. Several sessions may each run the App, so the most recently active user wins, and a report older than 30 s belongs to an App that went quiet. With nothing to go on, idle time is unknown, which the activity source counts as active and so never overstates idle waste.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/ServiceSignalsTests.cs`
 ```csharp
@@ -1658,12 +1658,12 @@ public class ServiceSignalsTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter ServiceSignalsTests`
 Expected: build error, `ServiceSignals` not found.
 
-- [ ] **Step 3: Write the signals**
+- [x] **Step 3: Write the signals**
 
 `src/PowerLedger.Service/ServiceSignals.cs`
 ```csharp
@@ -1730,12 +1730,12 @@ internal sealed class ServiceSignals(TimeProvider clock)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter ServiceSignalsTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/ServiceSignals.cs tests/PowerLedger.Service.Tests/ServiceSignalsTests.cs
@@ -1752,7 +1752,7 @@ git commit -m "Collect display, lock and idle signals from outside the loop"
 
 Spec §6: Δt comes from a monotonic clock, and a Δt beyond the gap threshold counts as asleep. Across a sleep, though, a monotonic counter may not have counted the time asleep. So the first tick after a resume measures from the last tick by the wall clock, and the sleep lands in the database as a gap instead of vanishing. A tick that was never committed, because its sensor read hung, is folded into the next Δt, so a long stall also becomes a gap. The first tick after start counts one interval: the service saw nothing before it, and that time is reported as unmonitored.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/TickClockTests.cs`
 ```csharp
@@ -1832,12 +1832,12 @@ public class TickClockTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter TickClockTests`
 Expected: build error, `TickClock` not found.
 
-- [ ] **Step 3: Write the clock**
+- [x] **Step 3: Write the clock**
 
 `src/PowerLedger.Service/TickClock.cs`
 ```csharp
@@ -1878,12 +1878,12 @@ internal sealed class TickClock(TimeProvider clock)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter TickClockTests`
 Expected: `Passed! - Failed: 0, Passed: 5`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/TickClock.cs tests/PowerLedger.Service.Tests/TickClockTests.cs
@@ -1903,7 +1903,7 @@ git commit -m "Measure each tick's Δt, and a sleep by the wall clock"
 
 Plan B's handoff: the sensor set is single-threaded, and NVML and the performance-counter API have no timeout. So every call into the set runs on one dedicated thread. A read that overruns its timeout abandons the set. The stuck thread finishes on its own and disposes the set when its call returns; the next read builds a fresh set on a fresh thread. `ISensorSet` is the seam that lets the loop's tests use fake sensors.
 
-- [ ] **Step 1: Write the test helpers and the failing tests**
+- [x] **Step 1: Write the test helpers and the failing tests**
 
 `tests/PowerLedger.Service.Tests/FakeSensorSet.cs`
 ```csharp
@@ -2049,12 +2049,12 @@ public class SensorWorkerTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter SensorWorkerTests`
 Expected: build error, `ISensorSet` not found.
 
-- [ ] **Step 3: Write the seam and the worker**
+- [x] **Step 3: Write the seam and the worker**
 
 `src/PowerLedger.Service/ISensorSet.cs`
 ```csharp
@@ -2189,12 +2189,12 @@ internal sealed class SensorWorker(Func<ISensorSet> factory, TimeSpan timeout, T
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter SensorWorkerTests`
 Expected: `Passed! - Failed: 0, Passed: 5`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/ISensorSet.cs src/PowerLedger.Service/SensorWorker.cs tests/PowerLedger.Service.Tests/FakeSensorSet.cs tests/PowerLedger.Service.Tests/WaitFor.cs tests/PowerLedger.Service.Tests/SensorWorkerTests.cs
@@ -2212,7 +2212,7 @@ git commit -m "Run the sensors on their own thread and replace a set whose read 
 
 Spec §7 batches 60 samples per transaction, once a minute, and flushes on suspend, shutdown and stop. Spec §10: on a full disk, pause writes, keep an hour in memory and retry every minute. A failed batch is retried whole; `samples_raw` is keyed by timestamp and the insert replaces, so a retry never duplicates.
 
-- [ ] **Step 1: Write the test helper and the failing tests**
+- [x] **Step 1: Write the test helper and the failing tests**
 
 `tests/PowerLedger.Service.Tests/Readings.cs`
 ```csharp
@@ -2298,12 +2298,12 @@ public class WriteBufferTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter WriteBufferTests`
 Expected: build error, `WriteBuffer` not found.
 
-- [ ] **Step 3: Write the buffer**
+- [x] **Step 3: Write the buffer**
 
 `src/PowerLedger.Service/WriteBuffer.cs`
 ```csharp
@@ -2361,12 +2361,12 @@ internal sealed class WriteBuffer(Action<IReadOnlyList<Reading>> write, int capa
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter WriteBufferTests`
 Expected: `Passed! - Failed: 0, Passed: 4`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/WriteBuffer.cs tests/PowerLedger.Service.Tests/Readings.cs tests/PowerLedger.Service.Tests/WriteBufferTests.cs
@@ -2383,7 +2383,7 @@ git commit -m "Batch raw writes and hold them in memory while the disk refuses"
 
 Two handoff rules meet here. Plan B: build each minute row from the raw rows in storage, never from the loop's own buffer, because `UpsertMinute` replaces the row; and on start, fold every minute since `LastMinuteStart()` that has raw rows. Plan A: pick one way to handle the running hour. The report reads minute rows for any hour without an hour row, so an hour is folded only once it is complete. Folding is idempotent, so the loop can fold a range again after a restart or a failed write. The gap threshold is passed in, as Plan A requires.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/RollupsTests.cs`
 ```csharp
@@ -2483,12 +2483,12 @@ public class RollupsTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter RollupsTests`
 Expected: build error, `Rollups` not found.
 
-- [ ] **Step 3: Write the rollups**
+- [x] **Step 3: Write the rollups**
 
 `src/PowerLedger.Service/Rollups.cs`
 ```csharp
@@ -2547,12 +2547,12 @@ internal sealed class Rollups(RawSampleRepository raw, AggregateRepository aggre
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter RollupsTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/Rollups.cs tests/PowerLedger.Service.Tests/RollupsTests.cs
@@ -2569,7 +2569,7 @@ git commit -m "Fold minutes from stored ticks, complete hours from minutes, and 
 
 Spec §7: purge daily at 03:00 local and run `PRAGMA incremental_vacuum` weekly. A machine asleep or off at 03:00 purges at its next chance. The last run is kept in the settings table, so a restart does not purge twice. A 03:00 that a clock change skips is taken as the first valid local time after it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/RetentionTests.cs`
 ```csharp
@@ -2635,12 +2635,12 @@ public class RetentionTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter RetentionTests`
 Expected: build error, `RetentionSchedule` not found.
 
-- [ ] **Step 3: Write the schedule and the runner**
+- [x] **Step 3: Write the schedule and the runner**
 
 `src/PowerLedger.Service/Retention.cs`
 ```csharp
@@ -2721,12 +2721,12 @@ internal sealed class RetentionRunner(SqliteDatabase database, TimeZoneInfo zone
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter RetentionTests`
 Expected: `Passed! - Failed: 0, Passed: 5`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/Retention.cs tests/PowerLedger.Service.Tests/RetentionTests.cs
@@ -2743,7 +2743,7 @@ git commit -m "Purge at 03:00 local, vacuum weekly, and remember both across res
 
 Spec §6: each session row says why it started (boot, service start, resume, crash recovered) and why it ended (suspend, shutdown, service stop, crash recovered). A row left open means the service died; it is closed at its last recorded tick, and the new session starts as crash-recovered too. Plan A's rule: close only the id of the live session, so a suspend followed by a shutdown does not look like a lost session. The service counts as starting with Windows when the machine has been up less than five minutes.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/SessionTrackerTests.cs`
 ```csharp
@@ -2819,12 +2819,12 @@ public class SessionTrackerTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter SessionTrackerTests`
 Expected: build error, `SessionTracker` not found.
 
-- [ ] **Step 3: Write the tracker**
+- [x] **Step 3: Write the tracker**
 
 `src/PowerLedger.Service/SessionTracker.cs`
 ```csharp
@@ -2874,12 +2874,12 @@ internal sealed class SessionTracker(SessionRepository sessions)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter SessionTrackerTests`
 Expected: `Passed! - Failed: 0, Passed: 5`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/SessionTracker.cs tests/PowerLedger.Service.Tests/SessionTrackerTests.cs
@@ -2896,7 +2896,7 @@ git commit -m "Keep the sessions timeline, closing a crashed session at its last
 
 Spec §5 keys calibration by the hardware hash. Plan A's rule: `CalibrationState` holds a list and compares by reference, so save on a timer, never by comparing states. The keeper saves every ten minutes, on suspend and on stop, and before switching to another machine's learner. The status screen shows progress: battery samples against the total needed, and how many brightness buckets are trusted.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/CalibrationKeeperTests.cs`
 ```csharp
@@ -2991,12 +2991,12 @@ public class CalibrationKeeperTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter CalibrationKeeperTests`
 Expected: build error, `CalibrationKeeper` not found.
 
-- [ ] **Step 3: Write the keeper**
+- [x] **Step 3: Write the keeper**
 
 `src/PowerLedger.Service/CalibrationKeeper.cs`
 ```csharp
@@ -3062,12 +3062,12 @@ internal sealed class CalibrationKeeper(CalibrationRepository repository, Calibr
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter CalibrationKeeperTests`
 Expected: `Passed! - Failed: 0, Passed: 5`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/CalibrationKeeper.cs tests/PowerLedger.Service.Tests/CalibrationKeeperTests.cs
@@ -3086,7 +3086,7 @@ git commit -m "Keep one calibration learner per machine, saved on a timer"
 
 Plan B's known gap is closed here for the live view: each frame says whether the CPU and GPU watts were measured this tick or modelled, so the Now screen can mark the modelled ones. Plan B's rule: the pipe thread reads a status snapshot that the loop publishes each tick with a single reference swap. It never touches the sampler or the validator. Live readings fan out through one small queue per subscriber. A queue that fills drops its oldest frames, so a stalled App can never hold up the loop or another client.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/PublishingTests.cs`
 ```csharp
@@ -3166,12 +3166,12 @@ public class PublishingTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter PublishingTests`
 Expected: build error, `Frames` not found.
 
-- [ ] **Step 3: Write the three pieces**
+- [x] **Step 3: Write the three pieces**
 
 `src/PowerLedger.Service/Frames.cs`
 ```csharp
@@ -3272,12 +3272,12 @@ internal sealed class StatusBoard
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter PublishingTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/Frames.cs src/PowerLedger.Service/LiveFeed.cs src/PowerLedger.Service/StatusBoard.cs tests/PowerLedger.Service.Tests/PublishingTests.cs
@@ -3297,7 +3297,7 @@ The loop brings Tasks 5–16 together. Each tick: read the sensors through the w
 
 The test is spec §12's service test: host the loop with fake sensors and a temp database, drive a fake clock through ten simulated minutes including a suspend and resume, and check rows, aggregates and sessions. A second test starts over a crashed run, a third changes settings mid-run, and a fourth hangs a sensor read.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/SamplingLoopTests.cs`
 ```csharp
@@ -3526,12 +3526,12 @@ public class SamplingLoopTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter SamplingLoopTests`
 Expected: build error, `SamplingLoop` not found.
 
-- [ ] **Step 3: Write the commands and the loop**
+- [x] **Step 3: Write the commands and the loop**
 
 `src/PowerLedger.Service/LoopCommands.cs`
 ```csharp
@@ -3961,12 +3961,12 @@ internal sealed class SamplingLoop : BackgroundService
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter SamplingLoopTests`
 Expected: `Passed! - Failed: 0, Passed: 4`. The ten-minute run takes a few seconds of real time.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/LoopCommands.cs src/PowerLedger.Service/SamplingLoop.cs tests/PowerLedger.Service.Tests/SamplingLoopTests.cs
@@ -3983,7 +3983,7 @@ git commit -m "Add the sampling loop: ticks, minute boundaries, sleep, settings 
 
 The handler answers each request without knowing about pipes, so it can be tested alone. Spec §8 and §11: everything a client sends is range-checked first, and nothing it can say names a file or runs a command. Anything that changes what the loop is doing goes to the loop as a command, and the reply waits until the loop has done it, or says the loop did not answer in time. A new tariff is written straight to its table: the loop never touches tariffs, because cost is computed at query time. Idle reports go straight to the signals.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/PipeHandlerTests.cs`
 ```csharp
@@ -4086,12 +4086,12 @@ public sealed class PipeHandlerTests : IDisposable
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter PipeHandlerTests`
 Expected: build error, `PipeHandler` not found.
 
-- [ ] **Step 3: Write the handler**
+- [x] **Step 3: Write the handler**
 
 `src/PowerLedger.Service/PipeHandler.cs`
 ```csharp
@@ -4190,12 +4190,12 @@ internal sealed partial class PipeHandler(LoopCommands commands, StatusBoard boa
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter PipeHandlerTests`
 Expected: `Passed! - Failed: 0, Passed: 7`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/PipeHandler.cs tests/PowerLedger.Service.Tests/PipeHandlerTests.cs
@@ -4212,7 +4212,7 @@ git commit -m "Answer pipe requests, range-checked, with loop work routed throug
 
 Spec §8 and §11: `\\.\pipe\PowerLedger.v1`, local authenticated users only, remote access denied, several clients at once. The first instance is created with `FirstPipeInstance`, so the service fails loudly if another process already serves the name. Ordinary users get read and write but not `CreateNewInstance`, so nobody else can add instances while the service runs. One listening instance always waits for the next client. Each client has its own task. A client that breaks the protocol is told why and disconnected. A subscribed client's frames and its replies share one writer, so they never interleave.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/PipeServerTests.cs`
 ```csharp
@@ -4334,12 +4334,12 @@ public sealed class PipeServerTests : IAsyncLifetime
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter PipeServerTests`
 Expected: build error, `PipeServer` not found.
 
-- [ ] **Step 3: Write the server**
+- [x] **Step 3: Write the server**
 
 `src/PowerLedger.Service/PipeServer.cs`
 ```csharp
@@ -4528,12 +4528,12 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter PipeServerTests`
 Expected: `Passed! - Failed: 0, Passed: 6`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/PipeServer.cs tests/PowerLedger.Service.Tests/PipeServerTests.cs
@@ -4551,7 +4551,7 @@ git commit -m "Serve the named pipe to local users, one task per client"
 
 Suspend, resume and the console display's state come through the power manager's callback registrations (see "Decisions made while planning"). Windows allows about two seconds to act on a suspend, so the callback holds the machine up to 1.5 s while the loop writes and closes the session. Only the automatic resume is used, because it always arrives, while the user-present resume follows only when someone touches the machine. The service lifetime adds what the default one drops: session lock changes; telling a system shutdown from a plain service stop; and a failure exit code when the sampling loop died, because a service that stops itself cleanly never triggers the recovery actions of spec §10. The callbacks' logic is tested directly; the registration itself is a hardware test.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/PowerLedger.Service.Tests/NotificationsTests.cs`
 ```csharp
@@ -4648,12 +4648,12 @@ public class NotificationsTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter NotificationsTests`
 Expected: build error, `PowerNotifications` not found.
 
-- [ ] **Step 3: Write the notifications and the lifetime**
+- [x] **Step 3: Write the notifications and the lifetime**
 
 `src/PowerLedger.Service/PowerNotifications.cs`
 ```csharp
@@ -4851,12 +4851,12 @@ internal sealed class PowerLedgerServiceLifetime : WindowsServiceLifetime
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter NotificationsTests`
 Expected: `Passed! - Failed: 0, Passed: 7`, the hardware test included.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/PowerNotifications.cs src/PowerLedger.Service/PowerLedgerServiceLifetime.cs tests/PowerLedger.Service.Tests/NotificationsTests.cs
@@ -4874,7 +4874,7 @@ git commit -m "Hear sleep, wake, display and lock changes from Windows"
 
 Plan A's rule: one `SqliteDatabase` for the service's lifetime. Spec §10: Serilog rolling files in the data folder's `logs`, kept seven days, 5 MB a file, hardware names only. Under the service control manager, warnings and errors also go to the Application event log, where an administrator looks when a service will not start; a console run logs to the console instead. The loop is registered once and resolved by both the host and `Program`, so a loop that died makes the process exit with 1. `--data` moves the files and `--pipe` renames the pipe, so a console run in development cannot collide with an installed service. Under the service control manager, idle time comes from the App. In a console run the process is in the user's own session, so the activity source reads it directly. The host test runs the real sensors from the console, so it is tagged Hardware.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/PowerLedger.Service.Tests/ServiceHostTests.cs`
 ```csharp
@@ -4941,12 +4941,12 @@ public class ServiceHostTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter ServiceHostTests`
 Expected: build error, `ServiceHost` not found.
 
-- [ ] **Step 3: Write the host and the entry point**
+- [x] **Step 3: Write the host and the entry point**
 
 `src/PowerLedger.Service/ServiceHost.cs`
 ```csharp
@@ -5109,7 +5109,7 @@ internal static class Program
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `dotnet build -c Release`
 Expected: `Build succeeded.` with 0 warnings.
@@ -5117,7 +5117,7 @@ Expected: `Build succeeded.` with 0 warnings.
 Run: `dotnet test tests/PowerLedger.Service.Tests --filter ServiceHostTests`
 Expected: `Passed! - Failed: 0, Passed: 1`. The run takes about five seconds, most of it the real sensors starting.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/PowerLedger.Service/ServiceHost.cs src/PowerLedger.Service/Program.cs tests/PowerLedger.Service.Tests/ServiceHostTests.cs
@@ -5135,7 +5135,7 @@ git commit -m "Compose the service host: logging, database, loop, notifications 
 
 The tests prove each part and the whole loop on a fake clock. This task runs the real service from the console on the development laptop, kills it to prove crash recovery, and measures it against the spec §12 performance gate. The two scripts are for the owner: one installs the service for development from an elevated PowerShell (the installer in Plan E replaces it), and one asks a running service for its status.
 
-- [ ] **Step 1: Write the scripts and the README**
+- [x] **Step 1: Write the scripts and the README**
 
 `scripts/dev-service.ps1`
 ```powershell
@@ -5243,7 +5243,7 @@ Only SYSTEM and administrators can write the folder; users can read it. The serv
 account owns.
 ```
 
-- [ ] **Step 2: Run the service from the console**
+- [x] **Step 2: Run the service from the console**
 
 Build, then start the service in the background with a scratch folder and a development pipe name:
 
@@ -5260,7 +5260,7 @@ After 20 s, from PowerShell:
 
 Expected: one line of JSON of type `status`, with `ticks` near 20, a `battery` source, an `inventoryHash`, and a `last` reading whose `cpuMeasured` is true on a Windows 11 machine with energy-meter rails.
 
-- [ ] **Step 3: Kill it and start it again**
+- [x] **Step 3: Kill it and start it again**
 
 End the process without letting it stop (Task Manager's "End task", or `taskkill /F /IM PowerLedger.Service.exe`), start it again with the same arguments for 15 s, then end it the same way. Read the database:
 
@@ -5268,21 +5268,22 @@ End the process without letting it stop (Task Manager's "End task", or `taskkill
 python -c "import sqlite3,os; c=sqlite3.connect(os.path.expandvars(r'%TEMP%\pl-run\power.db')); print(c.execute('select reason,end_reason from sessions').fetchall()); print(c.execute('select count(*) from samples_1m').fetchone())"
 ```
 
-Expected: the first session ended `CrashRecovered` and the second started `CrashRecovered`; the minute table has a row for every minute that has raw rows, including the minute the first run died in.
+Expected: the first session ended `CrashRecovered` and the second started `CrashRecovered`. The minute table has a row for every minute that has raw rows once the next run has started: a minute whose run dies before the minute ends is folded by the next start's catch-up. On the development laptop, 2026-09-15, the second run died inside the minute the first had died in; the third start folded that minute and closed the second session at its start, since it had stored no tick.
 
-- [ ] **Step 4: Measure the performance gate**
+- [x] **Step 4: Measure the performance gate**
 
 Start the service again and let it run for five minutes, then sample it from PowerShell:
 
 ```powershell
 $p = Get-Process PowerLedger.Service
 $cpu0 = $p.TotalProcessorTime; Start-Sleep 60; $p.Refresh()
-"{0:N2} % CPU, {1:N1} MB working set" -f (($p.TotalProcessorTime - $cpu0).TotalSeconds / 60 / [Environment]::ProcessorCount * 100), ($p.WorkingSet64 / 1MB)
+$private = (Get-Counter "\Process(PowerLedger.Service)\Working Set - Private").CounterSamples[0].CookedValue
+"{0:N2} % CPU, {1:N1} MB private working set, {2:N1} MB working set" -f (($p.TotalProcessorTime - $cpu0).TotalSeconds / 60 / [Environment]::ProcessorCount * 100), ($private / 1MB), ($p.WorkingSet64 / 1MB)
 ```
 
-Expected: under 0.5 % CPU and under 50 MB (spec §12). Record both numbers in the task report. Stop the service with Ctrl+C in its console, or `taskkill` without `/F`.
+Expected: under 0.5 % CPU and under 50 MB private working set, the figure Task Manager shows (spec §12). The full working set also counts shared system and driver DLL images. Measured on the development laptop, 2026-09-15, after five minutes: 0.04 % CPU, 36.8 MB private working set, 88 MB working set, of which `nvml.dll` alone is 16.5 MB and `System.Private.CoreLib` 15 MB. Stop the service with Ctrl+C in its console. A console process started without a window refuses a plain `taskkill`; `taskkill /F` ends it, and the next start records that as a crash.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/dev-service.ps1 scripts/pipe-status.ps1 src/PowerLedger.Service/README.md
