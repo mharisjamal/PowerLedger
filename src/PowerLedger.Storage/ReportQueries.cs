@@ -2,11 +2,14 @@ using PowerLedger.Core;
 
 namespace PowerLedger.Storage;
 
-/// <summary>Read side of the report: range totals and daily bars, with cost priced at query time.</summary>
+/// <summary>Read side of the report: range totals, daily bars and chart series, with cost priced at query time.</summary>
 public sealed class ReportQueries(SqliteDatabase db)
 {
     /// <summary>Ranges up to this length read minute rows; longer ranges read hour rows.</summary>
     public static readonly TimeSpan MinuteResolutionLimit = TimeSpan.FromDays(3);
+
+    private static readonly TimeSpan Minute = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
 
     /// <summary>Totals and daily bars from one read of the rows and one read of the tariffs, so the two always agree.</summary>
     public (RangeTotals Totals, List<DayTotals> Days) Report(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo zone)
@@ -26,33 +29,78 @@ public sealed class ReportQueries(SqliteDatabase db)
         => Days(Load(from, to).Rows, new TariffRepository(db).Schedule(), zone);
 
     /// <summary>
-    /// Rows for the range, newest resolution first. Hour rows are kept forever and are the base of any range;
-    /// minute rows fill the hours the hourly job has not folded up yet, so an in-progress hour is never lost
-    /// and no hour is counted twice. The window returned is the requested range widened to whole rows.
+    /// The range cut into buckets of <paramref name="bucket"/> from <paramref name="from"/> (spec §7 GetSeries), made from
+    /// the rows the totals read, so a chart and its totals agree. A row counts wholly in the bucket where it starts, so a
+    /// bucket shorter than an hour wants a range short enough to read minute rows. AvgW is each bucket's energy over its
+    /// on-time. GapSeconds is laid back: each sleep is spread backwards from the moment the machine woke over the buckets
+    /// it covered, so a chart shows it where it happened, and no bucket holds more sleep than its own length.
+    /// </summary>
+    public List<Aggregate> Series(DateTimeOffset from, DateTimeOffset to, TimeSpan bucket)
+    {
+        var count = Math.Max(1, (int)Math.Ceiling((to - from) / bucket));
+        var buckets = new Aggregate[count];
+        var asleep = new double[count];
+        for (var i = 0; i < count; i++) buckets[i] = Aggregate.Empty(from + i * bucket);
+
+        var window = Load(from, to);
+        var rows = window.Hours.Select(h => (Row: h, Length: Hour)).Concat(window.Minutes.Select(m => (Row: m, Length: Minute)));
+        foreach (var (row, length) in rows)
+        {
+            var index = Math.Clamp((int)Math.Floor((row.Start - from) / bucket), 0, count - 1);
+            buckets[index] = buckets[index].Plus(row with { GapSeconds = 0 });
+            // A sleep is stored in the row where the machine woke, and the time on in that row came after the wake.
+            var woke = row.Start + length - TimeSpan.FromSeconds(Math.Min(row.OnSeconds, length.TotalSeconds));
+            LayBack(asleep, woke, row.GapSeconds, from, bucket);
+        }
+        return [.. buckets.Select((b, i) => b with
+        {
+            AvgW = b.OnSeconds > 0 ? b.EnergyWh * 3600 / b.OnSeconds : 0,
+            GapSeconds = Math.Min(asleep[i], bucket.TotalSeconds),
+        })];
+    }
+
+    /// <summary>
+    /// The rows for a range, and the window they cover: the range widened to whole rows. A short range reads minute rows
+    /// throughout, so it is exact to the minute; an hour row stands in only for an hour whose minutes retention has purged.
+    /// A long range reads hour rows, which are kept forever, and minute rows only past the last hour the hourly job has
+    /// folded, so the read stays bounded and an hour in progress is never lost. No hour is ever counted twice.
     /// </summary>
     private Window Load(DateTimeOffset from, DateTimeOffset to)
     {
         var repo = new AggregateRepository(db);
-        var minute = TimeSpan.FromMinutes(1);
-        var hour = TimeSpan.FromHours(1);
-        var hourFrom = Floor(from, hour);
-        var hourTo = Ceiling(to, hour);
+        var hourFrom = Floor(from, Hour);
+        var hourTo = Ceiling(to, Hour);
+        var minuteFrom = Floor(from, Minute);
+        var minuteTo = Ceiling(to, Minute);
+
+        if (to - from <= MinuteResolutionLimit)
+        {
+            var minutes = repo.ReadMinutes(minuteFrom, minuteTo);
+            var covered = minutes.Select(m => Floor(m.Start, Hour)).ToHashSet();
+            var purged = repo.ReadHours(hourFrom, hourTo).Where(h => !covered.Contains(h.Start)).ToList();
+            return purged.Count > 0 ? new Window(hourFrom, hourTo, purged, minutes) : new Window(minuteFrom, minuteTo, [], minutes);
+        }
 
         var hours = repo.ReadHours(hourFrom, hourTo);
-        var folded = hours.Select(h => h.Start).ToHashSet();
+        var tailFrom = Max(minuteFrom, hours.Count > 0 ? hours[^1].Start + Hour : hourTo - MinuteResolutionLimit);
+        var tail = tailFrom < minuteTo ? repo.ReadMinutes(tailFrom, minuteTo) : [];
+        return hours.Count > 0 ? new Window(hourFrom, hourTo, hours, tail) : new Window(minuteFrom, minuteTo, [], tail);
+    }
 
-        // A short range reads minutes throughout; a long one only past the last folded hour, so the read stays bounded.
-        var minuteFrom = to - from <= MinuteResolutionLimit
-            ? Floor(from, minute)
-            : Max(Floor(from, minute), hours.Count > 0 ? hours[^1].Start + hour : hourTo - MinuteResolutionLimit);
-        var minutes = minuteFrom < Ceiling(to, minute)
-            ? repo.ReadMinutes(minuteFrom, Ceiling(to, minute)).Where(m => !folded.Contains(Floor(m.Start, hour))).ToList()
-            : [];
-
-        var rows = hours.Concat(minutes).OrderBy(r => r.Start).ToList();
-        return hours.Count > 0
-            ? new Window(hourFrom, hourTo, rows)
-            : new Window(Floor(from, minute), Ceiling(to, minute), rows);
+    /// <summary>Spreads a sleep of <paramref name="seconds"/> that ended at <paramref name="end"/> backwards over the buckets
+    /// it covered. Sleep before the range is dropped.</summary>
+    private static void LayBack(double[] asleep, DateTimeOffset end, double seconds, DateTimeOffset from, TimeSpan bucket)
+    {
+        var cursor = end;
+        while (seconds > 0 && cursor > from)
+        {
+            var index = (int)Math.Floor((cursor - from - TimeSpan.FromTicks(1)) / bucket);
+            var start = from + index * bucket;
+            var taken = Math.Min(seconds, (cursor - start).TotalSeconds);
+            if (index < asleep.Length) asleep[index] += taken;
+            seconds -= taken;
+            cursor = start;
+        }
     }
 
     private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
@@ -125,5 +173,9 @@ public sealed class ReportQueries(SqliteDatabase db)
 
     private static double Share(double part, double whole) => whole > 0 ? part / whole : 0;
 
-    private sealed record Window(DateTimeOffset From, DateTimeOffset To, List<Aggregate> Rows);
+    /// <summary>The rows a range reads, hour rows and minute rows apart so a series knows each row's length.</summary>
+    private sealed record Window(DateTimeOffset From, DateTimeOffset To, List<Aggregate> Hours, List<Aggregate> Minutes)
+    {
+        public List<Aggregate> Rows { get; } = [.. Hours.Concat(Minutes).OrderBy(r => r.Start)];
+    }
 }

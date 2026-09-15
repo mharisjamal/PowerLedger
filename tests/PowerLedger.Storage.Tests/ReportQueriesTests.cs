@@ -154,4 +154,83 @@ public class ReportQueriesTests
         days.Sum(d => d.EnergyKwh).ShouldBe(totals.EnergyKwh, 1e-9);
         new ReportQueries(t.Db).DailyBuckets(Fixtures.T0.AddDays(-5), Fixtures.T0.AddDays(-4), TimeZoneInfo.Utc).ShouldBeEmpty();
     }
+
+    [Fact]
+    public void A_short_range_reads_minutes_even_inside_a_folded_hour()
+    {
+        using var t = new TestDatabase();
+        var agg = new AggregateRepository(t.Db);
+        var hour = Enumerable.Range(0, 60).Select(i => Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), Fixtures.Minute(i * 60, 60))).ToList();
+        agg.UpsertHour(Downsampler.ToHour(Fixtures.T0, hour));
+        foreach (var m in hour) agg.UpsertMinute(m);
+
+        // Half the hour is in the range. Its minutes say so, where the hour row would have counted all of it.
+        new ReportQueries(t.Db).Totals(Fixtures.T0.AddMinutes(30), Fixtures.T0.AddHours(1)).EnergyKwh.ShouldBe(30.0 / 1000, 1e-9);
+    }
+
+    [Fact]
+    public void A_series_cuts_the_range_into_buckets_that_add_up_to_its_totals()
+    {
+        using var t = new TestDatabase();
+        SeedThreeHours(t);
+        var queries = new ReportQueries(t.Db);
+
+        var series = queries.Series(Fixtures.T0, Fixtures.T0.AddHours(4), TimeSpan.FromHours(1));
+
+        series.Select(b => b.Start).ShouldBe(Enumerable.Range(0, 4).Select(h => Fixtures.T0.AddHours(h)));
+        series[0].EnergyWh.ShouldBe(30, 1e-9);                     // sixty minutes at 30 W
+        series[0].AvgW.ShouldBe(30, 1e-9);
+        series[2].EnergyWh.ShouldBe(60, 1e-9);                     // sixty minutes at 60 W
+        series[3].EnergyWh.ShouldBe(0);
+        series.Sum(b => b.EnergyWh).ShouldBe(queries.Totals(Fixtures.T0, Fixtures.T0.AddHours(4)).EnergyKwh * 1000, 1e-9);
+    }
+
+    [Fact]
+    public void A_long_series_puts_each_hour_row_in_the_bucket_where_it_starts()
+    {
+        using var t = new TestDatabase();
+        var agg = new AggregateRepository(t.Db);
+        for (var d = 0; d < 5; d++)
+            agg.UpsertHour(Downsampler.ToHour(Fixtures.T0.AddDays(d), [Downsampler.ToMinute(Fixtures.T0.AddDays(d), Fixtures.Minute(0, 100))]));
+
+        var series = new ReportQueries(t.Db).Series(Fixtures.T0, Fixtures.T0.AddDays(5), TimeSpan.FromDays(1));
+        series.Count.ShouldBe(5);
+        series.ShouldAllBe(b => Math.Abs(b.EnergyWh - 100.0 / 60) < 1e-9);
+    }
+
+    [Fact]
+    public void A_sleep_is_laid_back_over_the_buckets_it_covered()
+    {
+        // Two hours asleep, stored in the minute starting at 14:00 with thirty seconds on after the wake:
+        // asleep from 12:00:30 to 14:00:30.
+        using var t = new TestDatabase();
+        new AggregateRepository(t.Db).UpsertMinute(Aggregate.Empty(Fixtures.T0.AddHours(2)) with { OnSeconds = 30, GapSeconds = 7200, SampleCount = 30 });
+
+        var series = new ReportQueries(t.Db).Series(Fixtures.T0, Fixtures.T0.AddMinutes(125), TimeSpan.FromMinutes(5));
+        series.Count.ShouldBe(25);
+        series[0].GapSeconds.ShouldBe(270, 1e-9);
+        series.Skip(1).Take(23).ShouldAllBe(b => Math.Abs(b.GapSeconds - 300) < 1e-9);
+        series[24].GapSeconds.ShouldBe(30, 1e-9);
+        series[24].OnSeconds.ShouldBe(30);
+    }
+
+    [Fact]
+    public void A_sleep_that_began_before_the_range_is_cut_at_its_start()
+    {
+        using var t = new TestDatabase();
+        new AggregateRepository(t.Db).UpsertMinute(Aggregate.Empty(Fixtures.T0.AddMinutes(10)) with { OnSeconds = 60, GapSeconds = 3600, SampleCount = 60 });
+
+        var series = new ReportQueries(t.Db).Series(Fixtures.T0, Fixtures.T0.AddMinutes(15), TimeSpan.FromMinutes(5));
+        series.Sum(b => b.GapSeconds).ShouldBe(600, 1e-9);        // 12:00 to 12:10
+    }
+
+    [Fact]
+    public void The_first_minute_row_says_where_history_begins()
+    {
+        using var t = new TestDatabase();
+        var repository = new AggregateRepository(t.Db);
+        repository.FirstMinuteStart().ShouldBeNull();
+        SeedThreeHours(t);
+        repository.FirstMinuteStart().ShouldBe(Fixtures.T0);
+    }
 }

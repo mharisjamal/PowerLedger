@@ -30,6 +30,15 @@ public sealed class AggregateRepository(SqliteDatabase db)
     /// <summary>Start of the newest hour row, or null when there are none.</summary>
     public DateTimeOffset? LastHourStart() => LastStart(HourTable);
 
+    /// <summary>Start of the oldest minute row, or null when there are none: where history begins.</summary>
+    public DateTimeOffset? FirstMinuteStart()
+    {
+        using var c = db.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = $"SELECT MIN(start_ms) FROM {MinuteTable}";
+        return cmd.ExecuteScalar() is long ms ? Rows.Time(ms) : null;
+    }
+
     /// <summary>Deletes minute rows older than the cutoff and returns how many went. Hour rows are kept forever (spec §7).</summary>
     public int PurgeMinutesBefore(DateTimeOffset cutoff)
     {
