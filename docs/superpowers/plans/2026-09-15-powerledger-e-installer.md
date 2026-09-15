@@ -18,6 +18,8 @@ The App turns on starting with Windows itself on its first run. The Run entry th
 
 **What this plan can't do here:** Inno Setup is not installed on the development machine, and fetching it is a download that needs the owner's go-ahead. So the installer script is written, and read line by line against Inno Setup 6's documentation, but not compiled here. CI compiles it, and so does `installer\build.ps1` wherever Inno Setup 6 is installed. The first compiled installer should be tried on a clean Windows 10 or 11 machine before release (Task 5 lists what to check).
 
+**Since then:** Plan F (docs/superpowers/plans/2026-09-15-powerledger-f-installer-verification.md) got Inno Setup, compiled this script with 7.1.0 and 6.7.3, and tested the installed product end to end. It found and fixed three bugs this plan couldn't see without an install: the App's server check could never trust the LocalSystem service, the installer couldn't close the running App, and history was unreadable while the service was stopped. Task 5's checklist is answered there, apart from what needs a clean machine or a second account.
+
 ---
 
 ## What already exists
