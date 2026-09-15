@@ -21,8 +21,11 @@ internal sealed record UiPreferences
 
     public ThemeChoice Theme { get; init; } = ThemeChoice.System;
 
-    /// <summary>Kilograms of CO₂ per kWh used for every CO₂ figure; spec §9's default is the world average.</summary>
-    public double Co2KgPerKwh { get; init; } = Co2.DefaultKgPerKwh;
+    /// <summary>Kilograms of CO₂ per kWh used for every CO₂ figure; spec §9's default is the world average, which a
+    /// ui.json without the field keeps. It has a setter rather than init for that: the JSON source generator gives an
+    /// init-only property missing from the file its type's default, 0, where a setter is left alone, and
+    /// <see cref="Sanitised"/> cannot tell that 0 from a real factor.</summary>
+    public double Co2KgPerKwh { get; set; } = Co2.DefaultKgPerKwh;
 
     /// <summary>The first-run wizard was finished once; it shows until then (spec §9).</summary>
     public bool FirstRunDone { get; init; }

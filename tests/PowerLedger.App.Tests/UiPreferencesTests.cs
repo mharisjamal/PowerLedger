@@ -48,6 +48,14 @@ public sealed class UiPreferencesTests : IDisposable
     }
 
     [Fact]
+    public void A_file_without_a_CO2_factor_gets_the_default()
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, """{ "Theme": "Dark" }""");
+        new UiPreferencesStore(File).Load().Co2KgPerKwh.ShouldBe(0.40);
+    }
+
+    [Fact]
     public void The_first_run_is_remembered()
     {
         var store = new UiPreferencesStore(File);
