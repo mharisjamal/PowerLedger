@@ -201,10 +201,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         {
             return await RequestAsync(channel, request, cancel).ConfigureAwait(false);
         }
-        catch (Exception error) when (error is IOException or ObjectDisposedException or TimeoutException
-                                      || (error is OperationCanceledException && !cancel.IsCancellationRequested))
+        catch (Exception error) when (error is not OperationCanceledException || !cancel.IsCancellationRequested)
         {
-            return null;
+            return null;   // whatever broke, the caller gets "no answer"; only its own cancellation goes back to it
         }
     }
 

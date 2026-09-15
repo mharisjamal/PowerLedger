@@ -72,6 +72,21 @@ public partial class App : Application
         _window.Activate();
     }
 
+    /// <summary>Windows is signing out or shutting down: let the window close instead of hiding it.</summary>
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        _exiting = true;
+        base.OnSessionEnding(e);
+    }
+
+    /// <summary>However the App ends, the tray icon goes with it rather than lingering until the mouse passes over it.</summary>
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _tray?.Dispose();
+        base.OnExit(e);
+    }
+
+    /// <summary>"Exit UI" in the tray menu. It is an event handler, so nothing may escape it: the App ends either way.</summary>
     private async void ExitUi()
     {
         _exiting = true;
@@ -88,6 +103,10 @@ public partial class App : Application
             _theme?.Dispose();
             _database?.Dispose();
             _instance?.Dispose();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Ending anyway; nothing left to tell.
         }
         finally
         {

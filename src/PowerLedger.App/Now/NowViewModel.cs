@@ -113,13 +113,21 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         _threads.Post(() => ApplyHistory(snapshot));
     }
 
-    /// <summary>Asks the service for its status, and for its settings when they are not known yet.</summary>
+    /// <summary>Asks the service for its status, and for its settings when they are not known yet. Nothing waits on it,
+    /// so it never throws: a poll that fails is simply retried by the next.</summary>
     internal async Task PollAsync()
     {
-        if (!_link.IsConnected) return;
-        var status = await _link.GetStatusAsync().ConfigureAwait(false);
-        var settings = _settings ?? await _link.GetSettingsAsync().ConfigureAwait(false);
-        _threads.Post(() => ApplyStatus(status, settings));
+        try
+        {
+            if (!_link.IsConnected) return;
+            var status = await _link.GetStatusAsync().ConfigureAwait(false);
+            var settings = _settings ?? await _link.GetSettingsAsync().ConfigureAwait(false);
+            _threads.Post(() => ApplyStatus(status, settings));
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // The next poll tries again.
+        }
     }
 
     public void Dispose()

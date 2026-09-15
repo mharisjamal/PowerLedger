@@ -31,6 +31,7 @@ internal sealed class TrayIcon : IDisposable
     private Icon? _current;
     private int? _shown;
     private bool _drawn;
+    private bool _disposed;
 
     public TrayIcon(Action open, Action exit, StartWithWindows autostart)
     {
@@ -49,6 +50,7 @@ internal sealed class TrayIcon : IDisposable
     /// <summary>Updates the tooltip, and the icon when the rounded watts changed.</summary>
     public void Show(double? watts, string tooltip)
     {
+        if (_disposed) return;
         _icon.Text = tooltip.Length > 127 ? tooltip[..127] : tooltip;
         var rounded = TrayGlyph.Round(watts);
         if (_drawn && rounded == _shown) return;
@@ -62,6 +64,8 @@ internal sealed class TrayIcon : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _icon.Visible = false;
         _icon.Dispose();
         _current?.Dispose();

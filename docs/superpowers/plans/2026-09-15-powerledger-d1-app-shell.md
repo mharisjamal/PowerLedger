@@ -1276,10 +1276,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         {
             return await RequestAsync(channel, request, cancel).ConfigureAwait(false);
         }
-        catch (Exception error) when (error is IOException or ObjectDisposedException or TimeoutException
-                                      || (error is OperationCanceledException && !cancel.IsCancellationRequested))
+        catch (Exception error) when (error is not OperationCanceledException || !cancel.IsCancellationRequested)
         {
-            return null;
+            return null;   // whatever broke, the caller gets "no answer"; only its own cancellation goes back to it
         }
     }
 
@@ -2476,13 +2475,21 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         _threads.Post(() => ApplyHistory(snapshot));
     }
 
-    /// <summary>Asks the service for its status, and for its settings when they are not known yet.</summary>
+    /// <summary>Asks the service for its status, and for its settings when they are not known yet. Nothing waits on it,
+    /// so it never throws: a poll that fails is simply retried by the next.</summary>
     internal async Task PollAsync()
     {
-        if (!_link.IsConnected) return;
-        var status = await _link.GetStatusAsync().ConfigureAwait(false);
-        var settings = _settings ?? await _link.GetSettingsAsync().ConfigureAwait(false);
-        _threads.Post(() => ApplyStatus(status, settings));
+        try
+        {
+            if (!_link.IsConnected) return;
+            var status = await _link.GetStatusAsync().ConfigureAwait(false);
+            var settings = _settings ?? await _link.GetSettingsAsync().ConfigureAwait(false);
+            _threads.Post(() => ApplyStatus(status, settings));
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // The next poll tries again.
+        }
     }
 
     public void Dispose()
@@ -4311,6 +4318,7 @@ internal sealed class TrayIcon : IDisposable
     private Icon? _current;
     private int? _shown;
     private bool _drawn;
+    private bool _disposed;
 
     public TrayIcon(Action open, Action exit, StartWithWindows autostart)
     {
@@ -4329,6 +4337,7 @@ internal sealed class TrayIcon : IDisposable
     /// <summary>Updates the tooltip, and the icon when the rounded watts changed.</summary>
     public void Show(double? watts, string tooltip)
     {
+        if (_disposed) return;
         _icon.Text = tooltip.Length > 127 ? tooltip[..127] : tooltip;
         var rounded = TrayGlyph.Round(watts);
         if (_drawn && rounded == _shown) return;
@@ -4342,6 +4351,8 @@ internal sealed class TrayIcon : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _icon.Visible = false;
         _icon.Dispose();
         _current?.Dispose();
@@ -4662,6 +4673,21 @@ public partial class App : Application
         _window.Activate();
     }
 
+    /// <summary>Windows is signing out or shutting down: let the window close instead of hiding it.</summary>
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        _exiting = true;
+        base.OnSessionEnding(e);
+    }
+
+    /// <summary>However the App ends, the tray icon goes with it rather than lingering until the mouse passes over it.</summary>
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _tray?.Dispose();
+        base.OnExit(e);
+    }
+
+    /// <summary>"Exit UI" in the tray menu. It is an event handler, so nothing may escape it: the App ends either way.</summary>
     private async void ExitUi()
     {
         _exiting = true;
@@ -4678,6 +4704,10 @@ public partial class App : Application
             _theme?.Dispose();
             _database?.Dispose();
             _instance?.Dispose();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Ending anyway; nothing left to tell.
         }
         finally
         {
@@ -4991,6 +5021,24 @@ D2 (Breakdown, Report, Settings, the wizard, exports and the monthly PDF) uses:
 git add docs/superpowers/specs/2026-09-08-powerledger-design.md docs/superpowers/plans
 git commit -m "Complete Plan D1: the tray, the window and the Now screen"
 ```
+
+---
+
+## After the final review
+
+One whole-branch review ran once every task was committed. Of its points, three were real, though none could crash the
+App: .NET does not end a process for an unobserved task. They are fixed in one commit, and the code blocks above already
+show the fixes:
+
+| Problem | Fix |
+|---|---|
+| A request that failed in an unexpected way escaped `SendAsync` instead of reading as "no answer". | Everything but the caller's own cancellation reads as no answer. |
+| The status poll, which nothing waits on, could end with an exception nobody sees. | It contains any failure; the next poll tries again. |
+| "Exit UI" is an `async void` handler, and a failure while tidying up escaped it. | It contains failures and ends the App either way. |
+
+The review missed one thing the fixes also cover. When Windows signs out or shuts down, the window hid itself instead of
+closing, so `OnSessionEnding` now lets it close, and `OnExit` takes the tray icon away however the App ends. The fourth
+point, `Max` over empty slots in the day chart, was already guarded by the count check before it.
 
 ---
 
