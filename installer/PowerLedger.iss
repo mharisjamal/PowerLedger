@@ -1,14 +1,14 @@
 ; PowerLedger's installer (spec §13). Build it with installer\build.ps1, which publishes both programs first.
-; Framework-dependent: the .NET 10 Desktop Runtime is downloaded when it is missing, so this stays small.
+; Self-contained: both programs carry the .NET 10 runtime, so setup downloads nothing and the PC needs no .NET.
 
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
+#ifndef Compression
+  #define Compression "lzma2/ultra64"
+#endif
 #define Publish "..\artifacts\publish"
 #define ServiceName "PowerLedger"
-#ifndef RuntimeUrl
-  #define RuntimeUrl "https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe"
-#endif
 
 [Setup]
 AppId={{8E496D40-C77E-4F75-8C93-ED9D1E8BAF20}
@@ -20,16 +20,24 @@ DefaultDirName={autopf}\PowerLedger
 DisableProgramGroupPage=yes
 DisableDirPage=auto
 PrivilegesRequired=admin
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+; A native build for each: x64 Windows gets the x64 build, Arm64 Windows 10 and 11 the Arm64 build (see [Files]).
+; 32-bit Windows is refused with Inno Setup's own message.
+ArchitecturesAllowed=x64os or arm64
+ArchitecturesInstallIn64BitMode=x64os or arm64
 MinVersion=10.0.17763
 AppMutex=PowerLedger.App
 CloseApplications=yes
 RestartApplications=no
 OutputDir=output
 OutputBaseFilename=PowerLedger-{#AppVersion}-setup
-Compression=lzma2/max
+; One solid stream with a 256 MB dictionary, so the service's copy of the runtime compresses against the App's. Setup
+; needs about 256 MB of memory to unpack it. build.ps1 -Fast and the test builds pass lzma2/fast, which keeps its own
+; small dictionary: about twice the size, compiled several times sooner.
+Compression={#Compression}
 SolidCompression=yes
+#if Compression == "lzma2/ultra64"
+LZMADictionarySize=262144
+#endif
 WizardStyle=modern
 UninstallDisplayIcon={app}\PowerLedger.exe
 UninstallDisplayName=PowerLedger
@@ -39,8 +47,12 @@ UninstallLogging=yes
 ; SignTool=signtool sign /fd sha256 /tr http://timestamp.acs.microsoft.com /td sha256 $f
 
 [Files]
-Source: "{#Publish}\App\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#Publish}\Service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Each build carries its own runtime; the Check installs the one for this PC. solidbreak starts the Arm64 build in a
+; compression chunk of its own, so each PC unpacks only its own build instead of reading through the other one.
+Source: "{#Publish}\win-x64\App\*"; DestDir: "{app}"; Check: not IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Publish}\win-x64\Service\*"; DestDir: "{app}\Service"; Check: not IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Publish}\win-arm64\App\*"; DestDir: "{app}"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs solidbreak
+Source: "{#Publish}\win-arm64\Service\*"; DestDir: "{app}\Service"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\PowerLedger"; Filename: "{app}\PowerLedger.exe"; Comment: "How much power this PC uses, and what it costs"
@@ -50,9 +62,6 @@ Name: "{autoprograms}\PowerLedger"; Filename: "{app}\PowerLedger.exe"; Comment: 
 Filename: "{app}\PowerLedger.exe"; Description: "Open PowerLedger"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [Code]
-var
-  RuntimePage: TDownloadWizardPage;
-
 function RunHidden(const FileName, Params: string): Integer;
 var
   Code: Integer;
@@ -116,26 +125,6 @@ begin
   Net('start {#ServiceName}');
 end;
 
-{ The Desktop Runtime is present when dotnet's shared folder holds a 10.x version of it. }
-function RuntimeFolderPresent: Boolean;
-var
-  Found: TFindRec;
-begin
-  Result := FindFirst(ExpandConstant('{commonpf64}\dotnet\shared\Microsoft.WindowsDesktop.App\10.*'), Found);
-  if Result then
-    FindClose(Found);
-end;
-
-function DesktopRuntimeInstalled: Boolean;
-begin
-#ifdef ForceRuntimeDownload
-  { Test builds made by build.ps1 -TestVariants behave as if the runtime were missing. }
-  Result := False;
-#else
-  Result := RuntimeFolderPresent;
-#endif
-end;
-
 const
   EVENT_MODIFY_STATE = $0002;
 
@@ -165,58 +154,10 @@ begin
   Log(Format('Asked PowerLedger to exit; waited %d ms.', [Waited]));
 end;
 
-procedure InitializeWizard;
-begin
-  RuntimePage := CreateDownloadPage('Getting .NET', 'PowerLedger needs the .NET 10 Desktop Runtime, which is being downloaded from Microsoft.', nil);
-end;
-
-function NextButtonClick(CurPageID: Integer): Boolean;
-var
-  Started: Boolean;
-  Code: Integer;
-begin
-  Result := True;
-  if (CurPageID <> wpReady) or DesktopRuntimeInstalled then
-    Exit;
-  RuntimePage.Clear;
-  RuntimePage.Add('{#RuntimeUrl}', 'windowsdesktop-runtime-win-x64.exe', '');
-  RuntimePage.Show;
-  try
-    try
-      RuntimePage.Download;
-    except
-      if not RuntimePage.AbortedByUser then
-        SuppressibleMsgBox('The .NET 10 Desktop Runtime could not be downloaded: ' + GetExceptionMessage + #13#10 +
-          'Install it from https://dotnet.microsoft.com/download/dotnet/10.0 and run this setup again.', mbError, MB_OK, IDOK);
-      Result := False;
-      Exit;
-    end;
-  finally
-    RuntimePage.Hide;
-  end;
-  Started := Exec(ExpandConstant('{tmp}\windowsdesktop-runtime-win-x64.exe'), '/install /quiet /norestart', '', SW_SHOW, ewWaitUntilTerminated, Code);
-  if Started then
-    Log(Format('Runtime installer exit code %d', [Code]))
-  else
-    Log(Format('Runtime installer did not start (error %d)', [Code]));
-  if not Started or ((Code <> 0) and (Code <> 3010)) or not RuntimeFolderPresent then
-  begin
-    SuppressibleMsgBox('The .NET 10 Desktop Runtime could not be installed (code ' + IntToStr(Code) + ').', mbError, MB_OK, IDOK);
-    Result := False;
-  end;
-end;
-
-{ A silent install needs the runtime already (spec §13): nobody would see its download fail or be asked about it. }
 function InitializeSetup: Boolean;
 begin
   Result := True;
-  if WizardSilent and not DesktopRuntimeInstalled then
-  begin
-    Log('The .NET 10 Desktop Runtime is missing; a silent install cannot fetch it.');
-    Result := False;
-    Exit;
-  end;
-  { Setup's own AppMutex check comes next; a setup refused above leaves the App running. }
+  { Setup's own AppMutex check comes next. }
   CloseApp;
 end;
 
@@ -226,10 +167,22 @@ begin
   Result := '';
 end;
 
+{ The build [Files] installed on this PC. }
+function BuildName: string;
+begin
+  if IsArm64 then
+    Result := 'Arm64'
+  else
+    Result := 'x64';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
+    Log('Installed the ' + BuildName + ' build.');
     RegisterService;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
