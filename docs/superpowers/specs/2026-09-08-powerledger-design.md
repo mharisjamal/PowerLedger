@@ -85,8 +85,8 @@ Sampling runs at 1 Hz (configurable 1–5 s). Every source is read inside its ow
 | Source | Reads | Mechanism | Needs driver |
 |---|---|---|---|
 | CPU | package W, cores W, iGPU W, DRAM W, load | Windows Energy Meter Interface, which Windows 11 fills with the processor's RAPL rails, read through the `Energy Meter` performance counters as raw picowatt-hour values in well under a millisecond. `GetSystemTimes` for load | no |
-| Discrete GPU | power W, load, present | NVML through the installed NVIDIA driver (`nvml.dll`, loaded from System32 only). A card Windows has switched off (D3, read from the device's power data without waking it) counts as 0 W and is not queried. Many laptop GPUs, the GeForce MX330 included, report no power at all; those fall back to the load model. AMD and Intel cards are not read yet; the `GPU Engine` performance counters are the driver-free route to their load | no |
-| Battery | discharge/charge rate mW, AC line status | `CallNtPowerInformation(SystemBatteryState)` (Rate is negative when discharging). A UPS on USB also appears as a battery, flagged short-term in `SystemPowerCapabilities`; it powers more than the machine and is ignored | no |
+| Discrete GPU | power W, load, present | NVML through the installed NVIDIA driver (`nvml.dll`, loaded from System32 only). A card Windows has switched off (D3, read from the device's power data without waking it) counts as 0 W and is not queried. Many laptop GPUs, the GeForce MX330 included, report no power at all; those fall back to the load model. An AMD Radeon RX or Intel Arc card (found through DXGI by vendor, a discrete model name and at least 1 GB of its own memory; integrated graphics are inside the CPU package reading) has no power reading, so its load, the busiest engine in Windows' `GPU Engine` performance counters, read every 5 s, feeds the same load model with the card's rated power from the TDP table | no |
+| Battery | discharge/charge rate mW, AC line status | `CallNtPowerInformation(SystemBatteryState)` (Rate is negative when discharging). A UPS on USB also appears as a battery. It powers more than the machine, so it is ignored when Windows flags it short-term in `SystemPowerCapabilities`, and a known desktop enclosure (below) keeps an unflagged one from making the machine a laptop | no |
 | Display | brightness %, display on/off, monitor count and size | WMI `WmiMonitorBrightness` ("not supported" on a desktop means no brightness), `PowerSettingRegisterNotification(GUID_CONSOLE_DISPLAY_STATE)` with a callback, `WmiMonitorBasicDisplayParams` + `WmiMonitorConnectionParams`: the built-in panel is the monitor with an internal or embedded connection, never simply the first one listed | no |
 | Activity | user idle seconds, session locked | `GetLastInputInfo`, which only describes the caller's own session, so the App reports it over the pipe; session-change events from the service control manager for the lock state | no |
 | Fans | count only | Taken from the machine profile, not measured; reading fan tachometers needs a kernel driver and buys about a watt | no |
@@ -162,7 +162,7 @@ A bucket counts as calibrated once it holds ≥ 5 minutes of samples and the mac
 | Component | Default |
 |---|---|
 | Laptop baseline (board, RAM, SSD, radios) | 5 W |
-| Laptop internal panel | `1.5 W + 4.5 W × brightness`, scaled ×0.8 up to 14", ×1.0 above 14" and below 17", ×1.3 from 17" (diagonal from EDID; unknown = ×1.0) |
+| Built-in panel (a laptop's, or an all-in-one's when its size is known) | `1.5 W + 4.5 W × brightness`, scaled ×0.8 up to 14", ×1.0 above 14" and below 17", ×1.3 from 17" and below 20", ×3.0 from 20" (an all-in-one's panel; diagonal from EDID; unknown = ×1.0) |
 | Desktop board | 12 W |
 | RAM per stick | DDR4 2.5 W, DDR5 1.5 W (`Win32_PhysicalMemory.SMBIOSMemoryType`) |
 | Drive | SSD 2 W, HDD 6 W (`MSFT_PhysicalDisk.MediaType`) |
@@ -177,7 +177,7 @@ The model tables ship as JSON resources in `Sensors` (`tdp-table.json`) and are 
 
 ### Machine profile detection
 
-Chassis type from `Win32_SystemEnclosure.ChassisTypes` plus battery presence decides laptop vs desktop. The wizard shows what was detected and lets the user correct it. Detected items: CPU and GPU names, RAM sticks and type, drives and media type, monitors and sizes, fan count, PSU tier (asked, not detectable).
+Chassis type from `Win32_SystemEnclosure.ChassisTypes` decides laptop vs desktop: a portable enclosure is a laptop and any other known one a desktop, even with a battery present, which on a desktop is a UPS; only an unknown enclosure falls back to battery presence. The energy meter counts as a CPU sensor only when it publishes a package rail. The wizard shows what was detected and lets the user correct it. Detected items: CPU and GPU names, RAM sticks and type, drives and media type, monitors and sizes, fan count, PSU tier (asked, not detectable).
 
 ## 6. Energy accounting
 
@@ -238,6 +238,8 @@ Cost is computed at query time as `Σ energy × tariff effective at that time`, 
 ### Stack
 
 WPF on .NET 10 with its own `WindowChrome`, `CommunityToolkit.Mvvm`, QuestPDF for PDF. The meter, the budget bar, the sparkline and the charts are lightweight controls drawn with `DrawingContext`, whose geometry is tested as pure functions; WPF-UI's Fluent styles and LiveCharts2's SkiaSharp were dropped in Plan D1 because the design overrides the first almost everywhere and the second is far larger than four simple drawings need. The tray icon is WinForms' `NotifyIcon`, which also shows the monthly report's notification. One ViewModel per screen; no logic in code-behind.
+
+The window asks for 1180 × 900 and fits itself, before it first shows, to the work area of the screen it opens on, with its minimum size shrinking to match; each page scrolls what no longer fits, so a 1080p laptop at 125 % or 150 % scaling and a 1366 × 768 screen show the whole window.
 
 ### Screens
 
