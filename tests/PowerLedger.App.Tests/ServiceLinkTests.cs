@@ -17,7 +17,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     public ServiceLinkTests()
     {
         _service = new FakeService(_name);
-        _link = new PipeServiceLink(_name, new FixedIdle(42), _clock);
+        _link = new PipeServiceLink(_name, new FixedIdle(42), _clock, new TrustAnyServer());
         _link.FrameReceived += _frames.Enqueue;
         _link.ConnectionChanged += _changes.Enqueue;
     }
@@ -81,5 +81,56 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     private sealed class FixedIdle(double seconds) : IIdleSource
     {
         public double IdleSeconds() => seconds;
+    }
+
+    [Fact]
+    public async Task Settings_a_tariff_and_a_reset_reach_the_service()
+    {
+        var settings = ServiceSettings.Default with { IdleThresholdSeconds = 600 };
+        (await _link.SetSettingsAsync(settings)).ShouldBe(WriteResult.Done);
+        (await _link.SetTariffAsync(0.17m, "USD", null)).ShouldBe(WriteResult.Done);
+        (await _link.ResetCalibrationAsync()).ShouldBe(WriteResult.Done);
+
+        _service.Requests.OfType<SetSettingsRequest>().Single().Settings.ShouldBe(settings);
+        var tariff = _service.Requests.OfType<SetTariffRequest>().Single();
+        (tariff.PricePerKwh, tariff.Currency, tariff.EffectiveFrom).ShouldBe((0.17m, "USD", (DateTimeOffset?)null));
+        _service.Requests.OfType<ResetCalibrationRequest>().Count().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_refusal_comes_back_in_the_services_words()
+    {
+        _service.Refuse = "The idle threshold must be between 60 and 1800 seconds.";
+        var result = await _link.SetSettingsAsync(ServiceSettings.Default);
+        result.Succeeded.ShouldBeFalse();
+        result.Problem.ShouldBe("The idle threshold must be between 60 and 1800 seconds.");
+    }
+
+    [Fact]
+    public async Task A_server_that_fails_the_check_is_sent_nothing()
+    {
+        var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
+        await using var service = new FakeService(name);
+        await using var checkedLink = new PipeServiceLink(name, new FixedIdle(0), _clock, new RefuseAll());
+        service.Start();
+        checkedLink.Start();
+        await WaitFor.True(() => checkedLink.IsConnected);
+
+        (await checkedLink.SetTariffAsync(0.2m, "EUR", null)).Problem.ShouldBe(RefuseAll.Reason);
+        service.Requests.OfType<SetTariffRequest>().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Nothing_is_changed_while_the_service_is_away()
+    {
+        await using var alone = new PipeServiceLink($"PowerLedger.nobody.{Guid.NewGuid():N}", new FixedIdle(0), _clock, new TrustAnyServer());
+        (await alone.ResetCalibrationAsync()).ShouldBe(WriteResult.NotConnected);
+    }
+
+    private sealed class RefuseAll : IServerCheck
+    {
+        public const string Reason = "Not the installed service.";
+
+        public string? Refusal(Microsoft.Win32.SafeHandles.SafePipeHandle pipe) => Reason;
     }
 }

@@ -6,6 +6,19 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.App;
 
+/// <summary>What became of a change sent to the service: <see cref="Problem"/> is null when it was applied, and otherwise
+/// says why not in words the App can show.</summary>
+internal sealed record WriteResult(string? Problem)
+{
+    public static WriteResult Done { get; } = new((string?)null);
+
+    public static WriteResult NotConnected { get; } = new("The service isn't running, so nothing was changed.");
+
+    public static WriteResult NoAnswer { get; } = new("The service didn't answer, so the change may not have been made.");
+
+    public bool Succeeded => Problem is null;
+}
+
 /// <summary>What the App needs from the service (spec §8). Events are raised on a background thread; a handler must not
 /// throw and must hand its work to the UI thread itself.</summary>
 internal interface IServiceLink : IAsyncDisposable
@@ -25,6 +38,15 @@ internal interface IServiceLink : IAsyncDisposable
 
     /// <summary>Null when not connected, or when the service did not answer in time.</summary>
     Task<ServiceSettings?> GetSettingsAsync(CancellationToken cancel = default);
+
+    /// <summary>Asks the service to use these settings (spec §8), once the server has passed the check.</summary>
+    Task<WriteResult> SetSettingsAsync(ServiceSettings settings, CancellationToken cancel = default);
+
+    /// <summary>Adds a tariff; <paramref name="effectiveFrom"/> null means from now (spec §8).</summary>
+    Task<WriteResult> SetTariffAsync(decimal pricePerKwh, string currency, DateTimeOffset? effectiveFrom, CancellationToken cancel = default);
+
+    /// <summary>Forgets the learned baseline (spec §5).</summary>
+    Task<WriteResult> ResetCalibrationAsync(CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -58,9 +80,10 @@ internal sealed class LastInputIdleSource : IIdleSource
 /// <summary>
 /// The App's end of \\.\pipe\PowerLedger.v1. It connects, subscribes, passes frames on, answers requests by id and
 /// reports idle time every five seconds. When the service goes away it tries again after 1, 2, 4, 8, 16 and then every
-/// 30 seconds (spec §8), and subscribes again once back.
+/// 30 seconds (spec §8), and subscribes again once back. Each connection's server is checked when it connects, and a
+/// change is sent only to one that passed.
 /// </summary>
-internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimeProvider clock) : IServiceLink
+internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimeProvider clock, IServerCheck check) : IServiceLink
 {
     public static readonly TimeSpan ActivityEvery = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
@@ -71,6 +94,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     private readonly ConcurrentDictionary<long, TaskCompletionSource<PipeMessage>> _pending = new();
     private long _lastId;
     private volatile MessageChannel? _channel;
+    private volatile string? _refusal;
     private Task? _run;
 
     public event Action<ReadingFrame>? FrameReceived;
@@ -86,6 +110,14 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public async Task<ServiceSettings?> GetSettingsAsync(CancellationToken cancel = default)
         => await SendAsync(new GetSettingsRequest(NextId()), cancel).ConfigureAwait(false) is SettingsReply reply ? reply.Settings : null;
+
+    public Task<WriteResult> SetSettingsAsync(ServiceSettings settings, CancellationToken cancel = default)
+        => WriteAsync(new SetSettingsRequest(NextId(), settings), cancel);
+
+    public Task<WriteResult> SetTariffAsync(decimal pricePerKwh, string currency, DateTimeOffset? effectiveFrom, CancellationToken cancel = default)
+        => WriteAsync(new SetTariffRequest(NextId(), pricePerKwh, currency, effectiveFrom), cancel);
+
+    public Task<WriteResult> ResetCalibrationAsync(CancellationToken cancel = default) => WriteAsync(new ResetCalibrationRequest(NextId()), cancel);
 
     public async ValueTask DisposeAsync()
     {
@@ -106,7 +138,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
                 await using var stream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
                 await stream.ConnectAsync((int)ConnectTimeout.TotalMilliseconds, stop).ConfigureAwait(false);
                 failures = 0;
-                await ServeAsync(stream, stop).ConfigureAwait(false);
+                await ServeAsync(stream, check.Refusal(stream.SafePipeHandle), stop).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
             {
@@ -129,8 +161,8 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         }
     }
 
-    /// <summary>One connection, from subscribing to its end.</summary>
-    private async Task ServeAsync(Stream stream, CancellationToken stop)
+    /// <summary>One connection, from subscribing to its end. <paramref name="refusal"/> is the server check's answer.</summary>
+    private async Task ServeAsync(Stream stream, string? refusal, CancellationToken stop)
     {
         using var connection = CancellationTokenSource.CreateLinkedTokenSource(stop);
         await using var channel = new MessageChannel(stream);
@@ -139,6 +171,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         try
         {
             if (await RequestAsync(channel, new SubscribeRequest(NextId()), connection.Token).ConfigureAwait(false) is not OkReply) return;
+            _refusal = refusal;
             _channel = channel;
             ConnectionChanged?.Invoke(true);
             reporting = ReportActivityAsync(channel, connection.Token);
@@ -205,6 +238,19 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         {
             return null;   // whatever broke, the caller gets "no answer"; only its own cancellation goes back to it
         }
+    }
+
+    /// <summary>A change: sent only while connected to a server that passed the check, and answered in words.</summary>
+    private async Task<WriteResult> WriteAsync(PipeRequest request, CancellationToken cancel)
+    {
+        if (_channel is null) return WriteResult.NotConnected;
+        if (_refusal is { } refusal) return new WriteResult(refusal);
+        return await SendAsync(request, cancel).ConfigureAwait(false) switch
+        {
+            OkReply => WriteResult.Done,
+            ErrorReply error => new WriteResult(error.Message),
+            _ => WriteResult.NoAnswer,
+        };
     }
 
     private async Task<PipeMessage> RequestAsync(MessageChannel channel, PipeRequest request, CancellationToken cancel)

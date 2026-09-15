@@ -19,6 +19,9 @@ internal sealed class FakeService(string name) : IAsyncDisposable
 
     public ServiceStatus Status { get; set; } = Statuses.Running();
 
+    /// <summary>When set, the service refuses every change with this message, as it does a value out of range.</summary>
+    public string? Refuse { get; set; }
+
     public bool HasClient => _client is not null;
 
     public void Start()
@@ -91,6 +94,7 @@ internal sealed class FakeService(string name) : IAsyncDisposable
     {
         GetStatusRequest r => new StatusReply(r.Id, Status),
         GetSettingsRequest r => new SettingsReply(r.Id, ServiceSettings.Default),
+        SetSettingsRequest or SetTariffRequest or ResetCalibrationRequest when Refuse is { } refusal => new ErrorReply(request.Id, refusal),
         _ => new OkReply(request.Id),
     };
 }

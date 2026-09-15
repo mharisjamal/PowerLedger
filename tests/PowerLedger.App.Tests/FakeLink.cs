@@ -31,5 +31,25 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<ServiceSettings?> GetSettingsAsync(CancellationToken cancel = default) => Task.FromResult(IsConnected ? Settings : null);
 
+    /// <summary>Every change the App asked for, in order.</summary>
+    public List<object> Writes { get; } = [];
+
+    /// <summary>What every change comes back as.</summary>
+    public WriteResult Answer { get; set; } = WriteResult.Done;
+
+    public Task<WriteResult> SetSettingsAsync(ServiceSettings settings, CancellationToken cancel = default) => Write(settings);
+
+    public Task<WriteResult> SetTariffAsync(decimal pricePerKwh, string currency, DateTimeOffset? effectiveFrom, CancellationToken cancel = default)
+        => Write((pricePerKwh, currency, effectiveFrom));
+
+    public Task<WriteResult> ResetCalibrationAsync(CancellationToken cancel = default) => Write("reset");
+
+    private Task<WriteResult> Write(object change)
+    {
+        if (!IsConnected) return Task.FromResult(WriteResult.NotConnected);
+        Writes.Add(change);
+        return Task.FromResult(Answer);
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
