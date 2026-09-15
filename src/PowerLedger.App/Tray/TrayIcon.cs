@@ -23,24 +23,30 @@ internal static class TrayGlyph
 
 /// <summary>
 /// The tray icon (spec §9). It draws the live watts on the brand's amber tile, or the logo until there is a reading, and
-/// redraws only when the rounded value changes; the tooltip gives now and today; the menu opens the window, toggles
-/// start with Windows, and exits the UI while the service keeps logging. Call it on the UI thread.
+/// redraws only when the rounded value changes; the tooltip gives now and today; the menu opens the window, restarts into
+/// a downloaded update while one is ready (spec §13), toggles start with Windows, and exits the UI while the service keeps
+/// logging. Call it on the UI thread.
 /// </summary>
 internal sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
+    private readonly ToolStripMenuItem _update;
     private Icon? _current;
     private int? _shown;
     private bool _drawn;
     private bool _disposed;
-    private string? _open;
+    private Action? _clicked;
+    private Action? _install;
 
     public TrayIcon(Action open, Action exit, StartWithWindows autostart)
     {
         var startWithWindows = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true, Checked = autostart.IsEnabled };
         startWithWindows.CheckedChanged += (_, _) => autostart.Set(startWithWindows.Checked);
+        _update = new ToolStripMenuItem("Restart to update") { Visible = false };
+        _update.Click += (_, _) => _install?.Invoke();
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open", null, (_, _) => open());
+        menu.Items.Add(_update);
         menu.Items.Add(startWithWindows);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit UI", null, (_, _) => exit());
@@ -50,7 +56,7 @@ internal sealed class TrayIcon : IDisposable
         };
         _icon = new NotifyIcon { ContextMenuStrip = menu, Text = "PowerLedger", Visible = true };
         _icon.DoubleClick += (_, _) => open();
-        _icon.BalloonTipClicked += (_, _) => Launch(_open);
+        _icon.BalloonTipClicked += (_, _) => _clicked?.Invoke();
         Show(null, "PowerLedger · waiting for the service");
     }
 
@@ -70,10 +76,24 @@ internal sealed class TrayIcon : IDisposable
     }
 
     /// <summary>A notification from the tray, the monthly report's (spec §9). Clicking it opens <paramref name="open"/>.</summary>
-    public void Notify(string title, string text, string? open)
+    public void Notify(string title, string text, string? open) => Balloon(title, text, () => Launch(open));
+
+    /// <summary>A notification whose click runs <paramref name="clicked"/>: an update's, which opens the window (spec §13).</summary>
+    public void Announce(string title, string text, Action clicked) => Balloon(title, text, clicked);
+
+    /// <summary>"Restart to update to X.Y.Z" in the menu while <paramref name="version"/> is ready; null takes it away.</summary>
+    public void OfferUpdate(string? version, Action install)
     {
         if (_disposed) return;
-        _open = open;
+        _install = install;
+        _update.Text = $"Restart to update to {version}";
+        _update.Visible = version is not null;
+    }
+
+    private void Balloon(string title, string text, Action clicked)
+    {
+        if (_disposed) return;
+        _clicked = clicked;
         _icon.ShowBalloonTip(10_000, title, text, ToolTipIcon.None);
     }
 
