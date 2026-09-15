@@ -80,8 +80,8 @@ Pyrsys B.V., Inno Setup's publisher. `build.ps1` publishes both programs self-co
 into `artifacts\publish`, and compiles `installer\PowerLedger.iss` into `installer\output`. The one installer holds
 both builds and installs the one that matches the PC; it downloads nothing. Its compression takes a few minutes;
 `-Fast` is quicker, for local builds, and makes a bigger installer. The installer is built with Inno Setup 7.1 or later; Inno
-Setup 6's 32-bit compiler can't use its 256 MB compression dictionary. `build.ps1` finds Inno Setup 7 on PATH or in its
-usual folders, or takes the compiler's path as `-Iscc`.
+Setup 6's 32-bit compiler can't use its 256 MB compression dictionary. `build.ps1` finds Inno Setup 7 in its usual
+folders, then on PATH, or takes the compiler's path as `-Iscc`; it refuses an older compiler, even one first on PATH.
 
 ## Test the installer
 

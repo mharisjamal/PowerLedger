@@ -5,7 +5,7 @@ Publishes PowerLedger and compiles its installer into installer\output.
 .DESCRIPTION
 Needs Inno Setup 7.1 or later (https://jrsoftware.org/isinfo.php); installer\get-inno-setup.ps1 installs the pinned one.
 Inno Setup 6's 32-bit compiler can't use the 256 MB compression dictionary the script sets. Uses -Iscc when given, else
-ISCC.exe on PATH, else Inno Setup 7's, installed for this user or for everyone.
+Inno Setup 7 installed for this user or for everyone, else an ISCC.exe on PATH that is Inno Setup 7; it refuses older ones.
 The version comes from Directory.Build.props, so the installer and the programs always agree.
 The installer holds the x64 and the Arm64 build, each with its own .NET runtime, and downloads nothing. Its strong
 compression takes a few minutes; -Fast is quicker and makes a bigger installer.
@@ -43,19 +43,31 @@ if (-not $version) { throw 'No <Version> in Directory.Build.props.' }
 
 if (-not $SkipPublish) { & (Join-Path $root 'scripts\publish.ps1') -Configuration $Configuration }
 
+# The major version of an ISCC.exe, from the banner it prints, since the file itself carries no version.
+function Get-InnoMajor([string]$Path) {
+    $help = & $Path '/?' 2>&1 | Out-String
+    if ($help -match 'Inno Setup (\d+) Command-Line Compiler') { [int]$Matches[1] } else { 0 }
+}
+
+# Inno Setup 7's own folders first: a machine can also have Inno Setup 6 on PATH, as GitHub's Windows runners do.
 function Find-Iscc {
-    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
     foreach ($base in "$env:LOCALAPPDATA\Programs", $env:ProgramFiles, ${env:ProgramFiles(x86)} | Where-Object { $_ }) {
         $candidate = Join-Path $base 'Inno Setup 7\ISCC.exe'
         if (Test-Path $candidate) { return $candidate }
     }
-    throw 'Inno Setup is not installed. Run installer\get-inno-setup.ps1, or get it from https://jrsoftware.org/isinfo.php, and run this again.'
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command -and (Get-InnoMajor $command.Source) -ge 7) { return $command.Source }
+    throw 'Inno Setup 7 is not installed. Run installer\get-inno-setup.ps1, or get it from https://jrsoftware.org/isinfo.php, and run this again.'
 }
 
 if (-not $Iscc) { $Iscc = Find-Iscc }
 elseif (-not (Test-Path $Iscc -PathType Leaf)) { throw "There is no ISCC.exe at $Iscc." }
-"Compiling with $Iscc"
+$major = Get-InnoMajor $Iscc
+if ($major -lt 7) {
+    $found = if ($major) { "Inno Setup $major's compiler" } else { "not Inno Setup's compiler" }
+    throw "$Iscc is $found. The installer needs Inno Setup 7, whose 64-bit compiler can use its 256 MB dictionary; run installer\get-inno-setup.ps1."
+}
+"Compiling with $Iscc (Inno Setup $major)"
 
 function Invoke-Iscc([string[]]$Options) {
     & $Iscc @Options $script
