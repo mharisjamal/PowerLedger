@@ -4333,7 +4333,8 @@ internal sealed class StartWithWindows(string exePath, string keyPath = StartWit
 ```csharp
 namespace PowerLedger.App;
 
-/// <summary>One App per session: a second start signals the first to show its window, then exits.</summary>
+/// <summary>One App per session: a second start signals the first to show its window, then exits. The named mutex is only
+/// held open, never owned: its existence is the signal, and a mutex owned by one thread cannot be released from another.</summary>
 internal sealed class SingleInstance : IDisposable
 {
     private readonly Mutex _mutex;
@@ -4342,7 +4343,7 @@ internal sealed class SingleInstance : IDisposable
 
     public SingleInstance(string name = "PowerLedger.App")
     {
-        _mutex = new Mutex(initiallyOwned: true, $@"Local\{name}", out var created);
+        _mutex = new Mutex(initiallyOwned: false, $@"Local\{name}", out var created);
         IsFirst = created;
         _show = new EventWaitHandle(false, EventResetMode.AutoReset, $@"Local\{name}.Show");
     }
@@ -4360,7 +4361,6 @@ internal sealed class SingleInstance : IDisposable
     {
         _wait?.Unregister(null);
         _show.Dispose();
-        if (IsFirst) _mutex.ReleaseMutex();
         _mutex.Dispose();
     }
 }
