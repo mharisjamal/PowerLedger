@@ -85,4 +85,38 @@ public sealed class HistoryReaderTests : IDisposable
     [Fact]
     public void A_damaged_inventory_gives_no_names_rather_than_an_error()
         => HistoryReader.Names(new InventoryRecord("hash", Now, "{ not json")).ShouldBeNull();
+
+    [Fact]
+    public void A_range_reads_its_totals_days_and_series_together()
+    {
+        var minutes = new AggregateRepository(_writer);
+        minutes.UpsertMinute(Minute(Now.AddMinutes(-30)));
+        minutes.UpsertMinute(Minute(Now.AddMinutes(-29)));
+
+        using var readOnly = new SqliteDatabase(_path, readOnly: true);
+        var reader = new HistoryReader(readOnly);
+        var range = Ranges.Today(Now, TimeZoneInfo.Utc, System.Globalization.CultureInfo.InvariantCulture);
+        var report = reader.Read(range, TimeZoneInfo.Utc).ShouldNotBeNull();
+
+        report.Range.ShouldBe(range);
+        report.Totals.EnergyKwh.ShouldBe(0.001, 1e-12);
+        report.Days.Count.ShouldBe(1);
+        report.Series.Count.ShouldBe(174);                                   // 14.5 hours of five-minute buckets
+        report.Series.Sum(b => b.EnergyWh).ShouldBe(1, 1e-9);
+        reader.FirstDay(TimeZoneInfo.Utc).ShouldBe(new DateOnly(2026, 9, 15));
+        reader.Csv(range, ExportGrain.Minute).ShouldNotBeNull().Count.ShouldBe(3);
+        reader.Csv(range, ExportGrain.Raw).ShouldNotBeNull().Count.ShouldBe(1);   // no raw rows: the header alone
+    }
+
+    [Fact]
+    public void A_range_over_a_database_that_cannot_be_opened_reads_as_nothing()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), $"powerledger-missing-{Guid.NewGuid():N}.db");
+        using var database = new SqliteDatabase(missing, readOnly: true);
+        var reader = new HistoryReader(database);
+        var range = Ranges.Today(Now, TimeZoneInfo.Utc, System.Globalization.CultureInfo.InvariantCulture);
+        reader.Read(range, TimeZoneInfo.Utc).ShouldBeNull();
+        reader.Csv(range, ExportGrain.Hour).ShouldBeNull();
+        reader.FirstDay(TimeZoneInfo.Utc).ShouldBeNull();
+    }
 }

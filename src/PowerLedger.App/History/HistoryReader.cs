@@ -22,7 +22,7 @@ internal interface IHistory
 }
 
 /// <summary>The App's read-only view of the service's database (spec §3: the App never writes it).</summary>
-internal sealed class HistoryReader(SqliteDatabase database) : IHistory
+internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeHistory
 {
     public HistorySnapshot? Read(DateTimeOffset now, TimeZoneInfo zone)
     {
@@ -38,6 +38,50 @@ internal sealed class HistoryReader(SqliteDatabase database) : IHistory
             var tariff = new TariffRepository(database).Schedule().At(now);
             var machine = Names(new InventoryRepository(database).Latest());
             return new HistorySnapshot(today, month, days, slots, dayStart, tariff, machine);
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
+    public RangeReport? Read(DateRange range, TimeZoneInfo zone)
+    {
+        try
+        {
+            var queries = new ReportQueries(database);
+            var (totals, days) = queries.Report(range.From, range.To, zone);
+            return new RangeReport(range, totals, days, queries.Series(range.From, range.To, range.Bucket));
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
+    public IReadOnlyList<string>? Csv(DateRange range, ExportGrain grain)
+    {
+        try
+        {
+            var aggregates = new AggregateRepository(database);
+            return grain switch
+            {
+                ExportGrain.Raw => CsvExport.Raw(new RawSampleRepository(database).Read(range.From, range.To)),
+                ExportGrain.Minute => CsvExport.Rows(aggregates.ReadMinutes(range.From, range.To)),
+                _ => CsvExport.Rows(aggregates.ReadHours(range.From, range.To)),
+            };
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
+    public DateOnly? FirstDay(TimeZoneInfo zone)
+    {
+        try
+        {
+            return new AggregateRepository(database).FirstMinuteStart() is { } first ? Ranges.LocalDay(first, zone) : null;
         }
         catch (SqliteException)
         {
