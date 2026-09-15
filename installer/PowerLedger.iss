@@ -171,6 +171,7 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
+  Started: Boolean;
   Code: Integer;
 begin
   Result := True;
@@ -192,8 +193,12 @@ begin
   finally
     RuntimePage.Hide;
   end;
-  if not Exec(ExpandConstant('{tmp}\windowsdesktop-runtime-win-x64.exe'), '/install /quiet /norestart', '', SW_SHOW, ewWaitUntilTerminated, Code)
-     or ((Code <> 0) and (Code <> 3010)) or not RuntimeFolderPresent then
+  Started := Exec(ExpandConstant('{tmp}\windowsdesktop-runtime-win-x64.exe'), '/install /quiet /norestart', '', SW_SHOW, ewWaitUntilTerminated, Code);
+  if Started then
+    Log(Format('Runtime installer exit code %d', [Code]))
+  else
+    Log(Format('Runtime installer did not start (error %d)', [Code]));
+  if not Started or ((Code <> 0) and (Code <> 3010)) or not RuntimeFolderPresent then
   begin
     SuppressibleMsgBox('The .NET 10 Desktop Runtime could not be installed (code ' + IntToStr(Code) + ').', mbError, MB_OK, IDOK);
     Result := False;
