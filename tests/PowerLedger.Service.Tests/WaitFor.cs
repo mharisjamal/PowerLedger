@@ -3,8 +3,9 @@ namespace PowerLedger.Service.Tests;
 internal static class WaitFor
 {
     /// <summary>Polls on real time until the condition holds; fails the test after <paramref name="timeoutMs"/>. Yields for the
-    /// first 100 ms rather than sleeping, because a timer sleep lasts a whole 15 ms scheduler tick on Windows.</summary>
-    public static async Task True(Func<bool> condition, int timeoutMs = 5000)
+    /// first 100 ms rather than sleeping, because a timer sleep lasts a whole 15 ms scheduler tick on Windows. The limit is
+    /// generous because a loaded machine, running every test assembly at once, has stalled a single tick for over 5 s.</summary>
+    public static async Task True(Func<bool> condition, int timeoutMs = 15000)
     {
         var start = Environment.TickCount64;
         while (!condition())
