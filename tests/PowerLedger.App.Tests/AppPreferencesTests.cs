@@ -7,7 +7,7 @@ namespace PowerLedger.App.Tests;
 public sealed class AppPreferencesTests : IDisposable
 {
     private readonly string _folder = Path.Combine(Path.GetTempPath(), $"powerledger-prefs-{Guid.NewGuid():N}");
-    private readonly string _runKey = $@"Software\PowerLedgerTests\{Guid.NewGuid():N}";
+    private readonly string _runKey = $@"Software\PowerLedger.Tests.{Guid.NewGuid():N}";
     private readonly List<ThemeChoice> _themes = [];
     private readonly List<double> _factors = [];
 
