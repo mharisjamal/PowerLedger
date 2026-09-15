@@ -88,20 +88,7 @@ public static class HardwareInventory
             rows.Count > 0 ? (rows[0]["Name"] as string)?.Trim() : null, null);
 
         var gpuName = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT Name, AdapterCompatibility FROM Win32_VideoController", rows =>
-        {
-            string? fallback = null;
-            foreach (var row in rows)
-            {
-                var name = (row["Name"] as string)?.Trim();
-                var vendor = row["AdapterCompatibility"] as string ?? "";
-                if (vendor.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) || vendor.Contains("Advanced Micro", StringComparison.OrdinalIgnoreCase))
-                {
-                    return name;      // prefer the discrete card over the integrated one
-                }
-                fallback ??= name;
-            }
-            return fallback;
-        }, null);
+            DiscreteGpu.PreferredName(rows.Select(row => ((row["Name"] as string)?.Trim(), row["AdapterCompatibility"] as string))), null);
 
         var (sticks, ddr5) = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory", rows =>
         {

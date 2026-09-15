@@ -6,7 +6,8 @@ namespace PowerLedger.Sensors;
 /// <summary>
 /// Thermal design power by model name, for the parts that report no watts of their own (spec §5).
 /// Windows reports decorated names, so a key matches when it appears anywhere in the name; the longest
-/// matching key wins, so "i7-1165G7" beats "i7-1165".
+/// matching key wins, so "i7-1165G7" beats "i7-1165". A variant therefore needs a key of its own or it is
+/// rated as the model its name begins with: "RX 7900 XTX" sits beside "RX 7900 XT", and "RX 6800M" beside "RX 6800".
 /// </summary>
 public sealed class TdpTable(IReadOnlyDictionary<string, double> cpu, IReadOnlyDictionary<string, double> gpu)
 {

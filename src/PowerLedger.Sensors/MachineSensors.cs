@@ -34,17 +34,22 @@ public sealed class MachineSensors : IDisposable
         Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null)
     {
         var display = new DisplaySource(displayOn);
-        var sources = new List<ISensorSource>
-        {
+        List<ISensorSource> sources =
+        [
             new EnergyMeterSource(),
-            new NvidiaSource(),
+            .. Graphics(new NvidiaSource(), static () => new GpuLoadSource()),
             new BatterySource(),
             new CpuLoadSource(),
             new ActivitySource(sessionLocked, userIdleSeconds),
             display,
-        };
+        ];
         return new MachineSensors(new Sampler(sources), new SampleValidator(validatorOptions), display);
     }
+
+    /// <summary>NVIDIA's own library when it answers; otherwise Windows' GPU load counters, for an AMD or Intel card. The
+    /// second is only built when the first has nothing to say, so the two never both fill the discrete GPU's fields.</summary>
+    internal static IReadOnlyList<ISensorSource> Graphics(ISensorSource nvidia, Func<ISensorSource> amdOrIntel)
+        => nvidia.Supported ? [nvidia] : [nvidia, amdOrIntel()];
 
     /// <summary>One validated tick. Never throws.</summary>
     public Sample Read(DateTimeOffset timestamp, double deltaSeconds)
