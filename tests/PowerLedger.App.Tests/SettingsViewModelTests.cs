@@ -17,6 +17,12 @@ public class SettingsViewModelTests
 
     private SettingsViewModel Model() => new(_link, _history, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD");
 
+    /// <summary>Runs what the service's answers left for the UI thread, and whatever that leaves in turn.</summary>
+    private static void Answer(Queue<Action> answers)
+    {
+        while (answers.TryDequeue(out var next)) next();
+    }
+
     [Fact]
     public void Showing_it_reads_the_service_the_tariffs_and_the_detection()
     {
@@ -164,6 +170,86 @@ public class SettingsViewModelTests
         (await model.Service.SaveAsync()).ShouldBeTrue();
         _clock.Advance(SettingsViewModel.StatusEvery * 3);
         _link.StatusReads.ShouldBe(before);
+    }
+
+    [Fact]
+    public void A_monitor_ticked_saves_itself_and_is_still_ticked_after_leaving_settings_and_coming_back()
+    {
+        // Leaving Settings fills it again from the service, which once dropped a tick that waited for a Save button further down.
+        _link.Settings = ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultDesktop with { Monitors = [new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false }] },
+        };
+        _link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Aoc with { Counted = false, WattsNow = 0 });
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+        model.Service.Monitors[1].Counted.ShouldBeFalse();
+
+        model.Service.Monitors[1].Counted = true;
+        model.Service.Message.ShouldBe("Saved.");
+        model.Hide();
+        _link.Settings = (ServiceSettings)_link.Writes.Single();   // what the service holds now
+        model.Show();
+
+        model.Service.Monitors[1].Counted.ShouldBeTrue();
+        _link.Writes.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void A_save_fills_no_box_again_so_what_is_changed_while_it_is_on_its_way_stays_and_is_sent_after_it()
+    {
+        var answers = new Queue<Action>();
+        _link.Status = Statuses.WithMonitors();
+        _link.Connect(true);
+        var model = new SettingsViewModel(_link, _history, _ui, new UiThreads(answers.Enqueue, action => action()), _clock, TimeZoneInfo.Utc, English, "USD");
+        model.Show();
+        Answer(answers);
+        var form = model.Service;
+        var (dell, aoc) = (form.Monitors[0], form.Monitors[1]);
+
+        form.FanCount = "2";   // sent, and its answer is on its way
+        form.SsdCount = "3";
+        aoc.Watts = "17";
+        Answer(answers);
+
+        (form.FanCount, form.SsdCount, aoc.Watts, aoc.Source).ShouldBe(("2", "3", "17", "typed"));
+        form.Monitors.ShouldBe([dell, aoc]);
+        var sent = _link.Writes.Cast<ServiceSettings>().ToList();
+        sent.Count.ShouldBe(2);
+        (sent[1].Profile.FanCount, sent[1].Profile.SsdCount).ShouldBe((2, 3));
+        sent[1].Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Aoc.Key, Watts = 17 }]);
+    }
+
+    [Fact]
+    public void The_calibration_line_follows_the_sample_interval_and_the_chassis_saved()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.Service.SampleInterval = "2";
+        model.Calibration.ShouldBe("Learning on battery: 30m of 1h 00m needed.");
+
+        model.Service.Chassis = ChassisKind.Desktop;
+        model.Calibration.ShouldBe("Not used on a desktop: its readings are always estimated.");
+    }
+
+    [Fact]
+    public void Filling_settings_reading_the_status_every_ten_seconds_and_the_service_coming_up_send_nothing()
+    {
+        _link.Status = Statuses.WithMonitors();
+        var model = Model();
+        model.Show();
+        _link.Connect(true);   // the service comes up while Settings shows, and fills it
+        _link.Status = Statuses.WithMonitors(Statuses.Dell with { OnWatts = 28.1 }, Statuses.Aoc with { CountedByDefault = false, Counted = false });
+        _clock.Advance(SettingsViewModel.StatusEvery);
+        model.Service.Monitors[0].Watts.ShouldBe("28.1");
+        model.Hide();
+        model.Show();
+
+        _link.Writes.ShouldBeEmpty();
+        model.Service.IsLoaded.ShouldBeTrue();
     }
 
     [Fact]

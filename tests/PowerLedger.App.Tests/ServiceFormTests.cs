@@ -338,6 +338,19 @@ public class ServiceFormTests
         dell.Source.ShouldBe("measured for this model");
     }
 
+    [Fact]
+    public void Loading_the_settings_again_clears_what_was_said_of_the_last_save()
+    {
+        var form = SavingItself();
+        form.FanCount = "two";
+        form.Message.ShouldBe("Type the fans as a whole number.");
+
+        form.Load(ServiceSettings.Default);
+
+        (form.FanCount, form.Message).ShouldBe(("1", null));
+        _link.Writes.ShouldBeEmpty();
+    }
+
     [Theory]
     [InlineData(false)]   // no status read yet
     [InlineData(true)]    // a status that lists none
@@ -1081,12 +1094,19 @@ public class ServiceFormTests
         form.Monitors.ShouldBeEmpty();
     }
 
-    [Fact]
-    public void A_form_the_service_never_filled_cannot_be_saved()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_form_the_service_never_filled_cannot_be_saved(bool savesItself)
     {
-        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        var form = new ServiceForm(_link, UiThreads.Inline, English, savesItself);
         form.IsLoaded.ShouldBeFalse();
-        form.Save.CanExecute(null).ShouldBeFalse();
+
+        form.FanCount = "2";
+        if (!savesItself) (await form.SaveAsync()).ShouldBeFalse();
+
+        form.Message.ShouldBe("The service hasn't sent its settings yet.");
+        _link.Writes.ShouldBeEmpty();
     }
 
     [Fact]

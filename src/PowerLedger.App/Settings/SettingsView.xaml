@@ -77,7 +77,9 @@
 
             <Border Style="{StaticResource Section}"><TextBlock Style="{StaticResource Text.Eyebrow}" Text="MACHINE" /></Border>
             <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,0,0,6" Text="{Binding Detected, StringFormat=Detected: {0}}" />
-            <StackPanel DataContext="{Binding Service}" IsEnabled="{Binding IsLoaded}">
+            <!-- The service's settings save themselves. A box gives the form what was typed in it once it is left or Enter is pressed;
+                 a tick or a choice gives it at once. -->
+            <StackPanel DataContext="{Binding Service}" IsEnabled="{Binding IsLoaded}" KeyDown="TakeTyped">
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Chassis" />
                     <RadioButton Style="{StaticResource Choice}" Content="Laptop"
@@ -96,18 +98,18 @@
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Memory sticks" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding RamSticks, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Memory sticks" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding RamSticks, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Memory sticks" />
                     <CheckBox Style="{StaticResource Tick}" Content="DDR5" Margin="14,0,0,0" IsChecked="{Binding RamIsDdr5}" />
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="SSDs · hard drives · fans" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding SsdCount, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SSDs" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Margin="8,0,0,0" Text="{Binding HddCount, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Hard drives" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Margin="8,0,0,0" Text="{Binding FanCount, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Fans" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding SsdCount, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="SSDs" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Margin="8,0,0,0" Text="{Binding HddCount, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Hard drives" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Margin="8,0,0,0" Text="{Binding FanCount, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Fans" />
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Built-in panel, inches" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding PanelInches, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Built-in panel, inches" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding PanelInches, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Built-in panel, inches" />
                     <TextBlock Style="{StaticResource Aside}" Text="0 for none" />
                 </StackPanel>
                 <!-- Each external monitor the service detected: its figure and where it came from, what it draws now and its
@@ -126,7 +128,7 @@
                                 <TextBlock Style="{StaticResource Label}" TextTrimming="CharacterEllipsis">
                                     <Run Text="{Binding Name, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Size, Mode=OneWay}" FontSize="12" Foreground="{DynamicResource Brush.Ink3}" />
                                 </TextBlock>
-                                <TextBox Grid.Column="1" Style="{StaticResource Field}" Width="56" Text="{Binding Watts, UpdateSourceTrigger=PropertyChanged}"
+                                <TextBox Grid.Column="1" Style="{StaticResource Field}" Width="56" Text="{Binding Watts, UpdateSourceTrigger=LostFocus}"
                                          AutomationProperties.Name="{Binding Name, StringFormat=Watts for {0}}" />
                                 <TextBlock Grid.Column="2" Style="{StaticResource Aside}" Text="W" Margin="8,0,0,0" />
                                 <StackPanel Grid.Column="3" Margin="16,0,0,0" VerticalAlignment="Center">
@@ -165,19 +167,21 @@
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Extras such as lights and pumps, W" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding ExtrasWatts, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Extras in watts" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding ExtrasWatts, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Extras in watts" />
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Processor · graphics rated power, W" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding CpuTdp, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Processor rated power" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Margin="8,0,0,0" Text="{Binding GpuTdp, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Graphics rated power" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding CpuTdp, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Processor rated power" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Margin="8,0,0,0" Text="{Binding GpuTdp, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Graphics rated power" />
                     <TextBlock Style="{StaticResource Aside}" Text="blank: from PowerLedger's table" />
                 </StackPanel>
+                <!-- How the last save went, between the two sections, where it can be seen while either is edited. -->
+                <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
 
                 <Border Style="{StaticResource Section}"><TextBlock Style="{StaticResource Text.Eyebrow}" Text="SAMPLING AND HISTORY" /></Border>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Idle after, minutes" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding IdleMinutes, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Idle after, minutes" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding IdleMinutes, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Idle after, minutes" />
                     <TextBlock Style="{StaticResource Aside}" Text="1 to 30" />
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
@@ -190,16 +194,14 @@
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Keep every reading for, hours" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding RawHours, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Hours of every reading" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding RawHours, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Hours of every reading" />
                     <TextBlock Style="{StaticResource Aside}" Text="24 to 168" />
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Keep minute totals for, years" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding HistoryYears, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Years of minute totals" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding HistoryYears, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Years of minute totals" />
                     <TextBlock Style="{StaticResource Aside}" Text="1 to 5; hourly totals are kept for good" />
                 </StackPanel>
-                <Button Style="{StaticResource Quiet}" Content="Save settings" Command="{Binding Save}" HorizontalAlignment="Left" Margin="0,10,0,0" />
-                <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
             </StackPanel>
 
             <Border Style="{StaticResource Section}"><TextBlock Style="{StaticResource Text.Eyebrow}" Text="CALIBRATION" /></Border>

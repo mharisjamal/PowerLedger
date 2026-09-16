@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -39,7 +40,7 @@ public class RenderingTests
         (Page.Breakdown, "breakdown", shell => shell.Breakdown.Range.Choice = RangeChoice.SevenDays, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Breakdown, "custom", shell => shell.Breakdown.Range.Choice = RangeChoice.Custom, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Report, "report", _ => { }, shell => new ReportView { DataContext = shell.Report }),
-        (Page.Settings, "settings", _ => { }, shell => new SettingsView { DataContext = shell.Settings }),
+        (Page.Settings, "settings", SavedSettings, shell => new SettingsView { DataContext = shell.Settings }),
         (Page.Now, "wizard", shell => shell.BeginSetup(), shell => new WizardView { DataContext = shell.Wizard }),
         (Page.Now, "wizard-machine", MachineStep, shell => new WizardView { DataContext = shell.Wizard }),
         (Page.Now, "wizard-laptop", LaptopStep, shell => new WizardView { DataContext = shell.Wizard }),
@@ -252,6 +253,76 @@ public class RenderingTests
         });
 
     [Fact]
+    public void Settings_saves_a_typed_value_once_its_box_is_left_or_enter_is_pressed_and_a_tick_at_once()
+        => OnUi(() =>
+        {
+            UseTheme(Theme.Dark);
+            var link = new FakeLink();
+            var settings = SettingsScreen(link);
+            settings.Show();
+            var view = new SettingsView { DataContext = settings };
+            var window = new Window
+            {
+                Content = view, Width = 1180, Height = 900, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                ShowInTaskbar = false, ShowActivated = false,
+            };
+            window.Show();
+            try
+            {
+                Pump(TimeSpan.FromMilliseconds(300));
+                Find<Button>(view, button => Equals(button.Content, "Save settings")).ShouldBeNull();
+                var (fans, ssds, dell) = (Box("Fans"), Box("SSDs"), Box($"Watts for {Statuses.Dell.Name}"));
+
+                // What is typed waits in its box until Enter is pressed there.
+                FocusManager.SetFocusedElement(window, fans);
+                fans.Text = "3";
+                link.Writes.ShouldBeEmpty();
+                PressEnter(fans);
+                Sent().Profile.FanCount.ShouldBe(3);
+
+                // Or until the box is left.
+                FocusManager.SetFocusedElement(window, ssds);
+                ssds.Text = "2";
+                link.Writes.Count.ShouldBe(1);
+                FocusManager.SetFocusedElement(window, dell);
+                Sent().Profile.SsdCount.ShouldBe(2);
+
+                // A monitor's figure too, inside its row.
+                dell.Text = "30";
+                PressEnter(dell);
+                Sent().Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Dell.Key, Watts = 30 }]);
+
+                // A tick saves at once, with the figures given to the form and not one still being typed.
+                dell.Text = "40";
+                Find<CheckBox>(view, box => Equals(box.Content, "DDR5")).ShouldNotBeNull().IsChecked = true;
+                (Sent().Profile.RamIsDdr5, Sent().Profile.Monitors.Single().Watts).ShouldBe((true, 30.0));
+                link.Writes.Count.ShouldBe(4);
+
+                // One line says how the last save went, between the machine and sampling, where it shows while either is edited.
+                Pump(TimeSpan.FromMilliseconds(300));
+                var said = Find<TextBlock>(view, text => text.Text == "Saved.").ShouldNotBeNull();
+                said.IsVisible.ShouldBeTrue();
+                var rated = Find<TextBlock>(view, text => text.Text == "Processor · graphics rated power, W").ShouldNotBeNull();
+                var sampling = Find<TextBlock>(view, text => text.Text == "SAMPLING AND HISTORY").ShouldNotBeNull();
+                Top(said).ShouldBeGreaterThan(Top(rated));
+                Top(said).ShouldBeLessThan(Top(sampling));
+            }
+            finally
+            {
+                window.Close();
+            }
+
+            TextBox Box(string name) => Find<TextBox>(view, box => AutomationProperties.GetName(box) == name).ShouldNotBeNull(name);
+
+            ServiceSettings Sent() => (ServiceSettings)link.Writes[^1];
+
+            double Top(FrameworkElement element) => element.TranslatePoint(default, view).Y;
+
+            static void PressEnter(TextBox box)
+                => box.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(box), 0, Key.Enter) { RoutedEvent = Keyboard.KeyDownEvent });
+        });
+
+    [Fact]
     public void The_update_card_draws_in_the_rail_in_both_themes()
     {
         Directory.CreateDirectory(Folder);
@@ -315,6 +386,14 @@ public class RenderingTests
             new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 2, 0), (_, _) => { }, _ => { });
         updater.Start();
         return updater;
+    }
+
+    /// <summary>Settings just after DDR5 was ticked, which saved itself, so the line that says how the last save went shows.</summary>
+    private static void SavedSettings(ShellViewModel shell)
+    {
+        shell.Page = Page.Settings;
+        shell.Settings.Service.RamIsDdr5 = true;
+        shell.Settings.Service.Message.ShouldBe("Saved.");
     }
 
     /// <summary>The wizard at its longest step: the machine, for a desktop, which adds the power supply's rating, with two
@@ -511,10 +590,11 @@ public class RenderingTests
 
     /// <summary>Settings against a running service, with a tariff, this laptop's detection and two external monitors: one in
     /// Energy Star's list whose brightness was read, on a plug of its own, and a portable one estimated from its size whose
-    /// brightness wasn't, running off the laptop.</summary>
-    private static SettingsViewModel SettingsScreen()
+    /// brightness wasn't, running off the laptop. The service is <paramref name="link"/> when it is given.</summary>
+    private static SettingsViewModel SettingsScreen(FakeLink? link = null)
     {
-        var link = new FakeLink { Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) };
+        link ??= new FakeLink();
+        link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable);
         link.Connect(true);
         return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");

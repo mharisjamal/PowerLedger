@@ -14,8 +14,9 @@ internal sealed record SourceLine(string Name, string State, string Detail);
 /// The Settings screen (spec §9): the tariff and its history, the machine profile with what was detected and each external
 /// monitor with its figure and brightness (Plan J), sampling and retention, calibration with a reset that asks first, the
 /// App's own preferences, and About. It reads when shown, and the status again every ten seconds while shown, off the UI
-/// thread. The service form is filled when the screen shows and after a save; when the service comes up while the screen
-/// shows, only an empty form is filled, and the monitors follow each status without losing what was typed or ticked.
+/// thread. The service form is filled when the screen shows, and saves itself as the user changes it, with nothing filled
+/// again after a save; when the service comes up while the screen shows, only an empty form is filled, and the monitors
+/// follow each status without losing what was typed or ticked.
 /// </summary>
 internal sealed class SettingsViewModel : ObservableObject, IDisposable
 {
@@ -57,9 +58,9 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         _culture = culture;
         _co2 = ui.Current.Co2KgPerKwh.ToString("0.00", culture);
         Tariff = new TariffForm(link, threads, clock, zone, culture, regionCurrency);
-        Service = new ServiceForm(link, threads, culture);
+        Service = new ServiceForm(link, threads, culture, savesItself: true);
         Tariff.Saved += ReadTariffs;
-        Service.Saved += ReadSaved;
+        Service.Saved += OnSaved;
         SaveCo2 = new RelayCommand(ApplyCo2);
         ResetCalibration = new RelayCommand(() => ConfirmingReset = true);
         CancelReset = new RelayCommand(() => ConfirmingReset = false);
@@ -174,7 +175,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         Tariff.Saved -= ReadTariffs;
-        Service.Saved -= ReadSaved;
+        Service.Saved -= OnSaved;
         _link.ConnectionChanged -= OnConnectionChanged;
         Hide();
     }
@@ -229,10 +230,14 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         _threads.Post(() => ShowStatus(status));
     }
 
-    /// <summary>The service took the settings: fill the form with what it now holds, while the screen shows.</summary>
-    private void ReadSaved(ServiceSettings saved)
+    /// <summary>The service took the settings the form sent. The form is left as it is, since the user may have changed it
+    /// since; the calibration line speaks of the chassis and sample interval sent, from the status read again now while the
+    /// screen shows. Raised on the UI thread.</summary>
+    private void OnSaved(ServiceSettings settings)
     {
-        if (_timer is not null) _threads.Background(() => _ = ReadAllAsync(refill: true));
+        _sampleSeconds = settings.SampleIntervalSeconds;
+        _chassis = settings.Profile.Chassis;
+        if (_timer is not null) _threads.Background(() => _ = ReadStatusAsync());
     }
 
     private void ReadTariffs()

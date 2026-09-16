@@ -1,9 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using PowerLedger.Contracts;
 
 namespace PowerLedger.App;
@@ -29,7 +27,6 @@ internal sealed class ServiceForm : ObservableObject
     private readonly UiThreads _threads;
     private readonly CultureInfo _culture;
     private readonly bool _savesItself;
-    private readonly RelayCommand _save;
     private MachineProfile _profile = MachineProfile.DefaultLaptop;
     private IReadOnlyList<MonitorChoice> _choices = [];
     private bool _isLoaded;
@@ -68,21 +65,13 @@ internal sealed class ServiceForm : ObservableObject
         _threads = threads;
         _culture = culture;
         _savesItself = savesItself;
-        _save = new RelayCommand(() => _ = SaveAsync(), () => IsLoaded);
     }
 
     /// <summary>Raised on the UI thread once the service has taken the settings, with the settings it took.</summary>
     public event Action<ServiceSettings>? Saved;
 
     /// <summary>The service has sent its settings, so the form holds real values.</summary>
-    public bool IsLoaded
-    {
-        get => _isLoaded;
-        private set
-        {
-            if (SetProperty(ref _isLoaded, value)) _save.NotifyCanExecuteChanged();
-        }
-    }
+    public bool IsLoaded { get => _isLoaded; private set => SetProperty(ref _isLoaded, value); }
 
     public ChassisKind Chassis
     {
@@ -136,12 +125,11 @@ internal sealed class ServiceForm : ObservableObject
 
     public string HistoryYears { get => _historyYears; set => Change(ref _historyYears, value); }
 
+    /// <summary>"Saving…", "Saved." or why the settings weren't sent or taken.</summary>
     public string? Message { get => _message; private set => SetProperty(ref _message, value); }
 
-    public ICommand Save => _save;
-
-    /// <summary>Fills the form from the service's settings. The monitors are listed afresh by <see cref="ShowMonitors"/>,
-    /// with the choices these settings hold.</summary>
+    /// <summary>Fills the form from the service's settings, and clears what was said of the last save. The monitors are listed
+    /// afresh by <see cref="ShowMonitors"/>, with the choices these settings hold.</summary>
     public void Load(ServiceSettings settings) => Quietly(() =>
     {
         var p = settings.Profile;
@@ -150,6 +138,7 @@ internal sealed class ServiceForm : ObservableObject
         foreach (var row in Monitors) row.Changed -= OnChanged;
         Monitors.Clear();
         OnPropertyChanged(nameof(HasMonitors));
+        Message = null;
         Chassis = p.Chassis;
         PsuTier = p.PsuTier;
         RamSticks = Whole(p.RamSticks);
