@@ -662,4 +662,38 @@ git commit -m "Make this 0.3.0, and say how updates behave on mobile data"
 
 ## Results
 
-(Filled in after Task 9.)
+2026-09-16. Tasks 1–4 and 5–8 were built at the same time in two worktrees, then integrated, reviewed and verified by the
+lead on `plan-i/updates` and fast-forwarded into `main`; released as **v0.3.0**.
+
+**Verified**
+
+- `dotnet build -c Release`: 0 warnings. Every test outside `Installed`: 939 pass (Core 117, Storage 49, Sensors 260,
+  Service 131, App 382 with the UI renders and the real connection-cost read).
+- `ConnectionCost` on the development laptop: `Metered = False`, raw cost `0x1` (unrestricted), GUIDs and vtable right
+  first time; the reviewer also checked them against Microsoft's documentation and the registry (`ThreadingModel=Both`).
+- Installers at full compression: universal **95.7 MB**, x64 **56.7 MB**, Arm64 **50.1 MB** — an update downloads about
+  41% less.
+- **Windows Sandbox, end to end, 19 of 19**: 0.3.0 installed; a stand-in feed offered 0.3.1 with all three installers;
+  the App took `PowerLedger-0.3.1-setup-x64.exe` and never touched the universal one; "Restart to update" brought the
+  service and the App back as 0.3.1 with "Updated to 0.3.1"; the next check cleared the used x64 installer and kept its
+  setup log.
+- CI run 35093157172, both jobs green: the installer test's new Architecture step installed the x64 installer on the x64
+  runner (PE 0x8664) and the Arm64 installer on the Arm64 runner (PE 0xAA64), 62 of 62 checks on each.
+- Released: <https://github.com/mharisjamal/PowerLedger/releases/tag/v0.3.0>, three assets, each digest checked by
+  `release.ps1` against the file built from the tagged commit.
+
+**Review** (security first): nothing lets the feed steer the App to an unlisted installer — the asset names are generated
+from the parsed version, and every check applies to whichever asset is picked, with no quiet fallback after a failed one.
+Fixed before release: the Updates folder's cleanup didn't recognise per-architecture names, so each update would have
+left ~56 MB behind for good; the tray announced a waiting update as "ready"; a failed Download would have retried on
+metered data by itself; a checked download was dropped when a metered check followed a failed install; Download gave no
+feedback while another check ran; `release.ps1` could stop waiting for GitHub's digests before every file was listed; CI
+compiled three installers at full compression where it only installs two of them. Left as they are: while an update is
+ready, a newer one found on a metered connection waits until that one is installed; the tray announces each version once,
+not again when a waiting download completes.
+
+**Deviations from the plan's code**: `NetworkListManager` can't be `sealed` (the compiler refuses the COM cast); a
+feed test's expected message changed with the new refusal; the tray callback carries whether the update is ready.
+
+**Not covered**: metered behaviour on a real metered connection (Sandbox has no network) — the owner's hotspot check. A
+0.2.x copy updating to 0.3.0 downloads the universal installer once, since it predates per-architecture assets.
