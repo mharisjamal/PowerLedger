@@ -119,4 +119,31 @@ public class MonitorRowTests
         var off = new MonitorRow(Fast with { PowerState = MonitorPowerState.Off, RefreshWatts = 0, WattsNow = 0.2 }, null, English);
         (off.Size, off.Now).ShouldBe(("27 in · 2560 × 1440 · 165 Hz", "off · 0.2 W now"));
     }
+
+    [Theory]
+    [InlineData(MonitorPowerState.On, true, true, 24.3, "on · 24.3 W now · HDR on: may draw much more")]
+    [InlineData(MonitorPowerState.Unknown, true, true, 24.3, "can't tell if it's on · 24.3 W now · HDR on: may draw much more")]
+    [InlineData(MonitorPowerState.Standby, true, true, 0.3, "standby · 0.3 W now")]
+    [InlineData(MonitorPowerState.Off, true, true, 0.2, "off · 0.2 W now")]
+    [InlineData(MonitorPowerState.On, false, true, 0, "on · not counted")]
+    [InlineData(MonitorPowerState.On, true, false, 24.3, "on · 24.3 W now")]
+    [InlineData(MonitorPowerState.On, true, null, 24.3, "on · 24.3 W now")]
+    public void HDR_on_says_that_a_counted_monitor_drawing_its_figure_on_may_draw_much_more(
+        MonitorPowerState state, bool counted, bool? hdr, double watts, string now)
+    {
+        // HDR can double what a monitor draws, and no figure for it is known, so nothing is added and no number is given.
+        // Off or on standby, a monitor counts at its off or sleep figure whatever HDR is set to, and one not counted adds
+        // nothing.
+        var row = new MonitorRow(Statuses.Dell with { PowerState = state, Counted = counted, Hdr = hdr, WattsNow = watts }, null, English);
+
+        row.Now.ShouldBe(now);
+    }
+
+    [Fact]
+    public void A_monitor_at_a_high_refresh_rate_with_hdr_on_says_both()
+    {
+        var row = new MonitorRow(Fast with { PowerState = MonitorPowerState.On, Hdr = true }, null, English);
+
+        row.Now.ShouldBe("on · 26.6 W now, incl. 2.3 W for 165 Hz · HDR on: may draw much more");
+    }
 }

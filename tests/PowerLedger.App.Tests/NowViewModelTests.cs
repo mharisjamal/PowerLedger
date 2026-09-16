@@ -215,6 +215,35 @@ public class NowViewModelTests
     }
 
     [Fact]
+    public void The_display_row_says_hdr_is_on_for_a_monitor_it_adds_that_draws_its_figure_on()
+    {
+        // HDR can double what a monitor draws, and no figure for it is known, so the reading may be low. Off or on standby, a
+        // monitor counts at its off or sleep figure whatever HDR is set to.
+        var hdr = Statuses.Dell with { Key = "DELA0B1-2", Hdr = true };
+        _history.Snapshot = Snapshots.Typical(Now);
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+
+        string With(params MonitorStatus[] monitors)
+        {
+            _link.Status = Statuses.WithMonitors(monitors);
+            _clock.Advance(NowViewModel.StatusEvery);
+            return model.Live.Budget[2].Detail;
+        }
+
+        With(hdr with { PowerState = MonitorPowerState.On }).ShouldBe("15.3 in · brightness 60% · plus 1 monitor, HDR on");
+        With(Statuses.Dell, hdr).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, HDR on");
+        With(Statuses.Dell with { PowerState = MonitorPowerState.Off, WattsNow = 0.2 }, hdr, Statuses.Aoc)
+            .ShouldBe("15.3 in · brightness 60% · plus 3 monitors, 1 off, HDR on, estimated");
+        With(Statuses.Dell, hdr with { PowerState = MonitorPowerState.Off, WattsNow = 0.2 }).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 off");
+        With(Statuses.Dell, hdr with { PowerState = MonitorPowerState.Standby, WattsNow = 0.3 }).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 on standby");
+        With(Statuses.Dell, hdr with { Counted = false, WattsNow = 0 }).ShouldBe("15.3 in · brightness 60% · plus 1 monitor");
+        With(Statuses.Dell, hdr with { Hdr = false }).ShouldBe("15.3 in · brightness 60% · plus 2 monitors");
+    }
+
+    [Fact]
     public async Task A_display_band_with_no_panel_to_speak_of_says_what_it_counts()
     {
         _link.Status = Statuses.WithMonitors();

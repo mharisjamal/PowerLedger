@@ -88,8 +88,9 @@ internal sealed class MonitorRow : ObservableObject
 
     /// <summary>Whether the monitor is on, as it said, and what the service counts it as drawing now: "on · 24.3 W now",
     /// "standby · 0.3 W now", "off · 0.2 W now" or, where PowerLedger can't tell, "can't tell if it's on · 24.3 W now". What a
-    /// refresh rate above 60 Hz adds is said with it: "on · 26.6 W now, incl. 2.3 W for 165 Hz". One that isn't counted is
-    /// "not counted", or "off · not counted" when it said.</summary>
+    /// refresh rate above 60 Hz adds is said with it, and so is HDR, while the monitor draws its figure on:
+    /// "on · 26.6 W now, incl. 2.3 W for 165 Hz · HDR on: may draw much more". One that isn't counted is "not counted", or
+    /// "off · not counted" when it said.</summary>
     public string Now { get => _now; private set => SetProperty(ref _now, value); }
 
     /// <summary>Raised once <see cref="Watts"/>, <see cref="Counted"/> or <see cref="OwnPlug"/> is set to a new value and the
@@ -220,6 +221,12 @@ internal sealed class MonitorRow : ObservableObject
         if (monitor.Counted && monitor.RefreshWatts >= LeastRefreshWatts && Hertz(monitor.RefreshHz) is { } hertz)
         {
             now += $", incl. {Format.Watts(monitor.RefreshWatts, _culture)} W for {hertz}";
+        }
+        // HDR can double what a monitor draws, and no figure for that is known, so nothing is added for it and no number is
+        // given. Off or on standby, a monitor counts at its off or sleep figure whatever HDR is set to.
+        if (monitor.Counted && monitor.Hdr == true && monitor.PowerState is not (MonitorPowerState.Off or MonitorPowerState.Standby))
+        {
+            now += " · HDR on: may draw much more";
         }
         Now = state is null ? now : $"{state} · {now}";
     }

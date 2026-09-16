@@ -38,6 +38,9 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     /// every one said the same, "off", "both off" or "all on standby"; null when none said either.</summary>
     private string? _monitorStates;
 
+    /// <summary>Whether HDR is on for a monitor counted that draws its figure on, which may then draw much more.</summary>
+    private bool _monitorsHdr;
+
     /// <summary>How the figures of the monitors counted were got, by the least sure of them: "estimated", "brightness
     /// assumed", or null when each was measured for its model, at a brightness read from it unless it is off or on standby,
     /// with nothing added for its refresh rate, or typed.</summary>
@@ -265,6 +268,9 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var counted = status.Monitors?.Where(monitor => monitor is { Counted: true }).ToList() ?? [];
         _monitors = counted.Count;
         _monitorStates = PowerStates(counted);
+        // HDR can double what a monitor draws, and no figure for that is known. Off or on standby, a monitor counts at its off
+        // or sleep figure whatever HDR is set to.
+        _monitorsHdr = counted.Exists(monitor => monitor.Hdr == true && monitor.PowerState is not (MonitorPowerState.Off or MonitorPowerState.Standby));
         // Off, a monitor counts at its off figure and, on standby, at its sleep figure. Those are listed for its model or
         // estimated as its figure on is, so an estimated one is still estimated, but no brightness scales them. The status
         // doesn't say which a typed monitor's are, so, as when it is on, a typed monitor adds nothing. What a refresh rate
@@ -355,8 +361,8 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>The display band: the built-in panel, as big and bright as it is, plus the external monitors the service
-    /// counts (Plan J), how many of them said they were off or on standby, and how the least sure of their figures was got:
-    /// "plus 2 monitors, 1 off, estimated".</summary>
+    /// counts (Plan J), how many of them said they were off or on standby, whether HDR is on for one drawing its figure on,
+    /// and how the least sure of their figures was got: "plus 2 monitors, 1 off, HDR on, estimated".</summary>
     private string DisplayDetail(MachineNames? machine, ReadingFrame frame)
     {
         if (!frame.DisplayOn) return "display off";
@@ -364,7 +370,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var brightness = frame.Brightness is { } b ? "brightness " + Format.Percent(b, _culture) : null;
         var panel = Join(size, brightness);
         var count = _monitors == 1 ? "1 monitor" : $"{_monitors.ToString(_culture)} monitors";
-        var monitors = string.Join(", ", new[] { count, _monitorStates, _monitorFigures }.OfType<string>());
+        var monitors = string.Join(", ", new[] { count, _monitorStates, _monitorsHdr ? "HDR on" : null, _monitorFigures }.OfType<string>());
         return (panel.Length > 0, _monitors > 0) switch
         {
             (true, true) => $"{panel} · plus {monitors}",
