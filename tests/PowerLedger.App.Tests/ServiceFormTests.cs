@@ -500,6 +500,27 @@ public class ServiceFormTests
         ]);
     }
 
+    [Theory]
+    [InlineData(ChassisKind.Desktop, ChassisKind.Laptop, true)]    // a portable monitor on a desktop has a plug of its own
+    [InlineData(ChassisKind.Laptop, ChassisKind.Desktop, false)]   // and on a laptop runs off it
+    public async Task Correcting_the_chassis_saves_the_plug_each_monitor_listed_shows(ChassisKind loaded, ChassisKind corrected, bool portableOwnPlug)
+    {
+        // The service took each plug shown for the chassis loaded. For the chassis corrected it would take the portable monitor's
+        // plug otherwise, so what the user saw is said, for every monitor listed.
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = loaded == ChassisKind.Laptop ? MachineProfile.DefaultLaptop : MachineProfile.DefaultDesktop });
+        form.ShowMonitors([Statuses.Dell, Statuses.Portable with { OwnPlug = portableOwnPlug, OwnPlugByDefault = portableOwnPlug }]);
+        form.Chassis = corrected;
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, OwnPlug = true },
+            new MonitorChoice { Key = Statuses.Portable.Key, OwnPlug = portableOwnPlug },
+        ]);
+    }
+
     [Fact]
     public async Task A_refresh_keeps_what_the_user_ticked_and_a_box_they_havent_ticked_follows_what_the_service_would_take()
     {
@@ -523,8 +544,13 @@ public class ServiceFormTests
         (ticked.Counted, ticked.OwnPlug).ShouldBe((true, true));
         (untouched.Counted, untouched.OwnPlug).ShouldBe((false, true));
         (await form.SaveAsync()).ShouldBeTrue();
-        // Each choice says only what differs from what the service would take now.
-        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Portable.Key, Counted = true }]);
+        // The form still shows the laptop it loaded, and saves it, for which the service would take these portable monitors to
+        // run off it, so each plug is said as it shows, with whether the monitor counts as it shows.
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Portable.Key, Counted = true, OwnPlug = true },
+            new MonitorChoice { Key = other.Key, Counted = false, OwnPlug = true },
+        ]);
     }
 
     [Fact]
