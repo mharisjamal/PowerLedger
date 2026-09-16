@@ -17,6 +17,9 @@ public sealed record ServiceSettings
     public const int MinHistoryRetentionYears = 1;
     public const int MaxHistoryRetentionYears = 5;
 
+    /// <summary>The most monitor choices a profile can hold, and the most monitors one brightness report can name.</summary>
+    public const int MaxMonitors = 16;
+
     public MachineProfile Profile { get; init; } = MachineProfile.DefaultLaptop;
 
     /// <summary>Seconds without input after which the user counts as idle (spec §6).</summary>
@@ -68,7 +71,7 @@ public sealed record ServiceSettings
     private static string? ValidateMonitors(IReadOnlyList<MonitorChoice>? monitors)
     {
         if (monitors is null) return "The monitor choices are missing.";
-        if (monitors.Count > 16) return "At most 16 monitors can be listed.";
+        if (monitors.Count > MaxMonitors) return $"At most {MaxMonitors} monitors can be listed.";
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var monitor in monitors)
         {

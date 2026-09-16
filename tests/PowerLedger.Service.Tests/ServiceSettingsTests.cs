@@ -74,7 +74,7 @@ public class ServiceSettingsTests
     public void Monitor_choices_outside_their_limits_are_refused()
     {
         var desktop = MachineProfile.DefaultDesktop;
-        With(desktop with { Monitors = [.. Enumerable.Range(0, 17).Select(i => Choice($"M{i}"))] }).ShouldNotBeNull();
+        With(desktop with { Monitors = [.. Enumerable.Range(0, 17).Select(i => Choice($"M{i}"))] }).ShouldBe("At most 16 monitors can be listed.");
         With(desktop with { Monitors = [Choice("")] }).ShouldNotBeNull();
         With(desktop with { Monitors = [Choice(new string('K', 201))] }).ShouldNotBeNull();
         foreach (var watts in new[] { -1, 500.5, double.NaN, double.PositiveInfinity })

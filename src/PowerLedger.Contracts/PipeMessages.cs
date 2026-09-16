@@ -55,7 +55,7 @@ public sealed record ReportBrightnessRequest(long Id, IReadOnlyList<MonitorBrigh
     public string? Validate()
     {
         if (Monitors is null) return "The brightness readings are missing.";
-        if (Monitors.Count > 16) return "At most 16 monitors can report a brightness.";
+        if (Monitors.Count > ServiceSettings.MaxMonitors) return $"At most {ServiceSettings.MaxMonitors} monitors can report a brightness.";
         foreach (var monitor in Monitors)
         {
             if (monitor?.Instance is not { Length: >= 1 and <= 260 }) return "A monitor's instance must be between 1 and 260 characters.";

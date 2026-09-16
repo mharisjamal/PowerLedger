@@ -126,7 +126,7 @@ public class PipeProtocolTests
     [Fact]
     public void A_brightness_report_outside_its_limits_is_refused_rather_than_crashing()
     {
-        Report([.. Enumerable.Range(0, 17).Select(i => Reading($"I{i}"))]).Validate().ShouldNotBeNull();
+        Report([.. Enumerable.Range(0, 17).Select(i => Reading($"I{i}"))]).Validate().ShouldBe("At most 16 monitors can report a brightness.");
         Report(Reading("")).Validate().ShouldNotBeNull();
         Report(Reading(new string('I', 261))).Validate().ShouldNotBeNull();
         foreach (var brightness in new[] { -0.01, 1.01, double.NaN, double.PositiveInfinity })
