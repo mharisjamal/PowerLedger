@@ -10,7 +10,7 @@ public static class MonitorMakers
 {
     private static readonly Dictionary<string, string> Brands = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["ACI"] = "ASUS",       // registered to Ancor Communications, but most ASUS monitors report it
+        ["ACI"] = "ASUS",       // registered to Ancor Communications, but ASUS's older monitors report it
         ["ACR"] = "Acer",
         ["AOA"] = "AOpen",
         ["AOC"] = "AOC",

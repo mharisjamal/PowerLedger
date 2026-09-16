@@ -48,11 +48,12 @@ public sealed record CatalogueMonitor(string Brand, string ModelNumber, string M
 /// </para>
 /// <para>
 /// An exact name keeps its listing whatever resolution the monitor gives. Over linuxhw's collection of real EDIDs, 42 of
-/// 1,412 exact matches disagreed with their listing's resolution. Of the 19 monitors among them, 17 were one model in two
-/// modes, where an estimate from the mode the monitor gave would be further off than the listing: EDIDs of Dell's
-/// 5120 × 2160 U4025QW give 2560 × 1080 and of its 8K UP3218K 3840 × 2160, and the list has Philips' 329P1 at
-/// 3840 × 2169. Acer's V206HQLB was a panel variant, and only ASUS's PA328, the name of its 4K PA328Q and the list's model
-/// number for its 1440p PA328CGV, another model.
+/// 1,412 exact matches disagreed with their listing's resolution, and 37 of them, of 17 models, were the listed model all
+/// the same. Most of those give a mode other than their panel's, as Dell's 5120 × 2160 U4025QW gives 2560 × 1080 and its
+/// 8K UP3218K 3840 × 2160, and the list has Philips' 329P1 at 3840 × 2169; an estimate from the resolution they give would
+/// be off the listing by a third at the median. The other five, of two models, matched another model's listing: ASUS's
+/// 4K PA328Q names itself PA328, the list's model number for its 1440p PA328CGV, and Acer's 1366 × 768 V206HQLB is taken
+/// for its 1600 × 900 V206HQL b, because names are compared in upper case.
 /// </para>
 /// <para>
 /// Of the listings that match, those with the monitor's resolution, either way round, win; then a whole name over a
