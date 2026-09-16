@@ -1,6 +1,6 @@
 namespace PowerLedger.Core;
 
-/// <summary>Energy contributed by one tick. DisplayWh covers the internal panel plus opted-in external monitors;
+/// <summary>Energy contributed by one tick. DisplayWh covers the internal panel plus the external monitors counted;
 /// RestWh is everything else (broader than Components.Unattributed, which excludes the itemised parts such as RAM, board and PSU loss).
 /// A gap tick (see <see cref="EnergyIntegrator"/>) carries only GapSeconds.</summary>
 public sealed record EnergySlice(

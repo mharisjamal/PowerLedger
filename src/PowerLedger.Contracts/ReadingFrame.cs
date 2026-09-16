@@ -18,7 +18,7 @@ public sealed record ReadingFrame(
     bool OnBattery, bool DisplayOn, bool UserIdle, bool SessionLocked,
     double CpuLoad, double? GpuLoad, double? Brightness, bool Suspect) : PipeMessage
 {
-    /// <summary>The display band: the internal panel plus opted-in external monitors (spec §6).</summary>
+    /// <summary>The display band: the internal panel plus the external monitors counted (spec §6).</summary>
     [JsonIgnore]
     public double DisplayBandW => Components.Display + Components.Monitors;
 
