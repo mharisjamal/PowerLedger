@@ -88,7 +88,7 @@ public partial class App : Application
         // One reader for the whole run: it remembers which monitors have given a brightness and which have failed, and
         // so which to leave alone, and for how long.
         _brightnessReader = new DdcBrightness();
-        _brightness = new BrightnessReporter(_link, _brightnessReader, _preferences, TimeProvider.System);
+        _brightness = new BrightnessReporter(_link, _brightnessReader, new DisplayConfigReader(), _preferences, TimeProvider.System);
         _now.PropertyChanged += OnNowChanged;
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
         // The installer asks this before it replaces or removes the App (installer\PowerLedger.iss).

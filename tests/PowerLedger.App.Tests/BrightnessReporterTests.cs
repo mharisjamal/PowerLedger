@@ -10,13 +10,14 @@ public sealed class BrightnessReporterTests : IDisposable
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 9, 16, 9, 0, 0, TimeSpan.Zero));
     private readonly FakeLink _link = new() { Status = Statuses.WithMonitors() };
     private readonly FakeReader _reader = new();
+    private readonly FakeDisplays _displays = new();
     private readonly FakeUiSettings _ui = new();
     private readonly BrightnessReporter _reporter;
 
     public BrightnessReporterTests()
     {
         _link.Connect(true);
-        _reporter = new BrightnessReporter(_link, _reader, _ui, _clock);
+        _reporter = new BrightnessReporter(_link, _reader, _displays, _ui, _clock);
     }
 
     public void Dispose() => _reporter.Dispose();
@@ -24,6 +25,8 @@ public sealed class BrightnessReporterTests : IDisposable
     private static MonitorBrightness Reported(MonitorStatus monitor, double brightness) => new() { Instance = monitor.Instance, Brightness = brightness };
 
     private static MonitorPowerReading Reported(MonitorStatus monitor, MonitorPowerState state) => new() { Instance = monitor.Instance, State = state };
+
+    private static MonitorDisplayReading Driven(MonitorStatus monitor, double refreshHz, bool hdr) => new() { Instance = monitor.Instance, RefreshHz = refreshHz, Hdr = hdr };
 
     [Fact]
     public void The_monitors_are_read_a_minute_after_start_and_every_minute_after()
@@ -34,12 +37,14 @@ public sealed class BrightnessReporterTests : IDisposable
         _reader.Reads.ShouldBe(0);
         _clock.Advance(TimeSpan.FromSeconds(1));
         _reader.Reads.ShouldBe(1);
+        _displays.Reads.ShouldBe(1);
         _link.BrightnessReports.Count.ShouldBe(1);
 
         _clock.Advance(BrightnessReporter.ReadEvery - TimeSpan.FromSeconds(1));
         _reader.Reads.ShouldBe(1);
         _clock.Advance(TimeSpan.FromSeconds(1));
         _reader.Reads.ShouldBe(2);
+        _displays.Reads.ShouldBe(2);
         _link.BrightnessReports.Count.ShouldBe(2);
 
         BrightnessReporter.FirstRead.ShouldBe(TimeSpan.FromMinutes(1));
@@ -72,6 +77,31 @@ public sealed class BrightnessReporterTests : IDisposable
     }
 
     [Fact]
+    public async Task How_Windows_drives_each_monitor_is_reported_under_the_instance_the_service_names_it_by()
+    {
+        _displays.Readings = [new DisplayReading(Statuses.DellPath, 143.998, true), new DisplayReading(Statuses.AocPath, 60, false)];
+
+        await _reporter.ReportAsync();
+
+        _link.BrightnessReports.Single().Displays.ShouldBe([Driven(Statuses.Dell, 143.998, true), Driven(Statuses.Aoc, 60, false)]);
+    }
+
+    [Fact]
+    public async Task A_report_is_sent_with_display_settings_alone_when_no_monitor_answers_over_its_cable()
+    {
+        // Windows describes a monitor whether or not it answers DDC/CI, as many behind docks don't.
+        _reader.Readings = [];
+        _displays.Readings = [new DisplayReading(Statuses.AocPath, 75, false)];
+
+        await _reporter.ReportAsync();
+
+        var report = _link.BrightnessReports.Single();
+        report.Monitors.ShouldBeEmpty();
+        report.Power.ShouldBeEmpty();
+        report.Displays.ShouldBe([Driven(Statuses.Aoc, 75, false)]);
+    }
+
+    [Fact]
     public async Task Only_the_monitors_the_service_lists_are_reported()
     {
         _link.Status = Statuses.WithMonitors(Statuses.Dell);
@@ -81,12 +111,19 @@ public sealed class BrightnessReporterTests : IDisposable
             new DdcReading(@"MONITOR\DELA0B1\{4d36e96e-e325-11ce-bfc1-08002be10318}\0001", 0.5, MonitorPowerState.On),       // not a display's path
             new DdcReading(Statuses.DellPath, 0.6, MonitorPowerState.On),
         ];
+        _displays.Readings =
+        [
+            new DisplayReading(Statuses.AocPath, 75, false),
+            new DisplayReading(@"\\?\DISPLAY#BOE0A1C#4&1a2b3c4d&0&UID8388688#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}", 120, false),   // a laptop's panel
+            new DisplayReading(Statuses.DellPath, 144, true),
+        ];
 
         await _reporter.ReportAsync();
 
         var report = _link.BrightnessReports.Single();
         report.Monitors.ShouldBe([Reported(Statuses.Dell, 0.6)]);
         report.Power.ShouldBe([Reported(Statuses.Dell, MonitorPowerState.On)]);
+        report.Displays.ShouldBe([Driven(Statuses.Dell, 144, true)]);
     }
 
     [Fact]
@@ -98,6 +135,7 @@ public sealed class BrightnessReporterTests : IDisposable
         await _reporter.ReportAsync();
 
         _reader.Reads.ShouldBe(0);
+        _displays.Reads.ShouldBe(0);
         _link.BrightnessReports.ShouldBeEmpty();
     }
 
@@ -109,6 +147,7 @@ public sealed class BrightnessReporterTests : IDisposable
         await _reporter.ReportAsync();
 
         _reader.Reads.ShouldBe(0);
+        _displays.Reads.ShouldBe(0);
         _link.BrightnessReports.ShouldBeEmpty();
     }
 
@@ -121,6 +160,7 @@ public sealed class BrightnessReporterTests : IDisposable
         await _reporter.ReportAsync();
 
         _reader.Reads.ShouldBe(0);
+        _displays.Reads.ShouldBe(0);
         _link.BrightnessReports.ShouldBeEmpty();
     }
 
@@ -146,12 +186,14 @@ public sealed class BrightnessReporterTests : IDisposable
 
         _clock.Advance(BrightnessReporter.FirstRead + BrightnessReporter.ReadEvery);
         _reader.Reads.ShouldBe(0);
+        _displays.Reads.ShouldBe(0);
         _link.StatusReads.ShouldBe(statusReads);
         _link.BrightnessReports.ShouldBeEmpty();
 
         _ui.ReadMonitorBrightness(true);
         _clock.Advance(BrightnessReporter.ReadEvery);
         _reader.Reads.ShouldBe(1);
+        _displays.Reads.ShouldBe(1);
         _link.BrightnessReports.Count.ShouldBe(1);
     }
 
@@ -163,12 +205,14 @@ public sealed class BrightnessReporterTests : IDisposable
         await _reporter.ReportAsync();
 
         _reader.Reads.ShouldBe(0);
+        _displays.Reads.ShouldBe(0);
     }
 
     [Fact]
-    public async Task When_no_monitor_answers_nothing_is_sent()
+    public async Task When_neither_the_monitors_nor_Windows_give_anything_nothing_is_sent()
     {
         _reader.Readings = [];
+        _displays.Readings = [];
 
         await _reporter.ReportAsync();
 
@@ -194,10 +238,13 @@ public sealed class BrightnessReporterTests : IDisposable
         _link.BrightnessReports.Count.ShouldBe(2);
     }
 
-    [Fact]
-    public async Task A_reader_that_throws_is_swallowed()
+    [Theory]
+    [InlineData(true)]     // the monitors' reader
+    [InlineData(false)]    // Windows' display configuration
+    public async Task A_reader_that_throws_is_swallowed(bool monitors)
     {
-        _reader.Throws = new InvalidOperationException("No desktop.");
+        if (monitors) _reader.Throws = new InvalidOperationException("No desktop.");
+        else _displays.Throws = new InvalidOperationException("No desktop.");
 
         await Should.NotThrowAsync(_reporter.ReportAsync);
 
@@ -225,6 +272,22 @@ public sealed class BrightnessReporterTests : IDisposable
         public int Reads { get; private set; }
 
         public IReadOnlyList<DdcReading> Read()
+        {
+            Reads++;
+            return Throws is { } error ? throw error : Readings;
+        }
+    }
+
+    /// <summary>Windows' display configuration as a test sets it up, counting the reads.</summary>
+    private sealed class FakeDisplays : IDisplayReader
+    {
+        public IReadOnlyList<DisplayReading> Readings { get; set; } = [new DisplayReading(Statuses.DellPath, 60, false)];
+
+        public Exception? Throws { get; set; }
+
+        public int Reads { get; private set; }
+
+        public IReadOnlyList<DisplayReading> Read()
         {
             Reads++;
             return Throws is { } error ? throw error : Readings;
