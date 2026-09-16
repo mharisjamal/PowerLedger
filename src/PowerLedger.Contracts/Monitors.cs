@@ -62,6 +62,17 @@ public sealed record MonitorStatus
     /// say or said too long ago.</summary>
     public MonitorPowerState PowerState { get; init; }
 
+    /// <summary>The refresh rate Windows drives the monitor at, in hertz, as the App last read it; null when unknown.</summary>
+    public double? RefreshHz { get; init; }
+
+    /// <summary>The watts the model adds for a refresh rate above the 60 Hz the list's figures were measured at; 0 when none
+    /// is added.</summary>
+    public double RefreshWatts { get; init; }
+
+    /// <summary>Whether HDR is on for the monitor, as the App last read it; null when unknown. With HDR on a monitor can draw
+    /// far more than its figure, and no figure for that is known.</summary>
+    public bool? Hdr { get; init; }
+
     public MonitorSource Source { get; init; }
 
     public bool Counted { get; init; }
@@ -111,6 +122,20 @@ public enum MonitorPowerState
 
     /// <summary>Off, from its own button or from the PC: it draws its off figure.</summary>
     Off = 3,
+}
+
+/// <summary>How Windows drives one monitor, as the App read it: the refresh rate it sends and whether HDR is on.</summary>
+public sealed record MonitorDisplayReading
+{
+    /// <summary>The monitor's device instance, as <see cref="MonitorKeys"/> gives it.</summary>
+    public string Instance { get; init; } = "";
+
+    /// <summary>The physical refresh rate Windows drives the monitor at, in hertz. With variable refresh on, the monitor
+    /// may run slower than this while a game draws fewer frames.</summary>
+    public double RefreshHz { get; init; }
+
+    /// <summary>Whether HDR is switched on for the monitor.</summary>
+    public bool Hdr { get; init; }
 }
 
 /// <summary>The power state the App read from one monitor.</summary>

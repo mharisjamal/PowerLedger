@@ -1,4 +1,4 @@
-# Settings that save themselves, and monitors that are switched off
+# Settings that save themselves; monitors switched off, refresh rate, 200-nit figures and HDR
 
 2026-09-17. Approved by the owner the same day for 0.4.1. Changes the main spec's §5, §9 and §11, and the monitors spec.
 
@@ -68,6 +68,37 @@ user unticks it, and has to be told again when it is switched back on.
 - **Honest limits.** Many monitors stop answering once switched off at their own button, and some docks and adapters pass
   nothing on. For those, PowerLedger can't tell, and the Count tick decides. A monitor switched off can take up to a
   minute to be noticed.
+
+## 3. Refresh rate (owner's request, researched)
+
+- **Evidence.** On LCD monitors only the panel electronics (timing controller, column drivers) scale with refresh; the
+  backlight doesn't. Measured: an ASUS PG279Q (27" 1440p) +1 W from 60 to 144 Hz; a Monoprice Dark Matter 34 (3440x1440)
+  +4.3 W, 20.0 to 24.3 W. LG's LM270WQA panel specifies 5.6 W of electronics at 144 Hz beside 31.3 W of LEDs. No data for
+  OLED. ENERGY STAR measures at 60 Hz unless the manual names another default.
+- **Model.** For a counted LCD monitor that is on, add `c x MP x max(0, f - 60)`: `MP` is its megapixels, `f` its refresh
+  rate. `c = 0.006 W per megapixel per Hz` (fitted to the two measurements, range 0.003-0.010). A 1440p monitor at 165 Hz adds
+  about 2.3 W, at 240 Hz about 4 W. No term for OLED, for a typed figure, for an unknown resolution or refresh, or while the
+  monitor is off or on standby. The status carries the refresh rate and the watts added.
+- **Reading it.** The App reads each monitor's physical refresh rate once a minute with `QueryDisplayConfig` (with
+  `QDC_VIRTUAL_REFRESH_RATE_AWARE`: the target mode's `vSyncFreq` when Dynamic Refresh Rate boosts the path), matched to
+  the monitor by the target's device path, and reports it (`reportBrightness` gains a displays list). The service can't
+  call it from session 0.
+- **Limits.** With variable refresh on, a game drawing fewer frames runs the monitor slower than the rate Windows reports,
+  and no normal program can read the actual rate, so the figure is an upper bound then. The graphics card's own extra draw
+  at high refresh is already in its reading.
+
+## 4. The list's figure is at 200 nits
+
+- ENERGY STAR sets each monitor to 200 cd/m2 for the on-mode test, not to 75% of its range. Where the list gives a model's
+  maximum luminance, the brightness scale takes its anchor at `200 / max nits` (clamped to 0.05-1) instead of 0.75; an
+  estimate takes the median maximum luminance of its alike monitors, and 0.75 where there is none. A brightness that can't be
+  read is still assumed to be 75%.
+
+## 5. HDR
+
+- The App reads whether HDR is on for each monitor (`DisplayConfigGetDeviceInfo`: `highDynamicRangeUserEnabled` from
+  `ADVANCED_COLOR_INFO_2` where Windows has it, else `advancedColorEnabled`) and reports it. HDR can double a monitor's draw,
+  and no figure per model is known, so nothing is added: the row and the Now screen say HDR is on and the reading may be low.
 
 ## Testing
 

@@ -46,11 +46,16 @@ public sealed record ResetCalibrationRequest(long Id) : PipeRequest(Id);
 /// and cannot see input, so the App reports it every few seconds.</summary>
 public sealed record ReportActivityRequest(long Id, double IdleSeconds) : PipeRequest(Id);
 
-/// <summary>The brightness and the power state of the external monitors that answered in the sender's session, acknowledged
-/// with an <see cref="OkReply"/>. The service runs in session 0 and cannot reach the monitors, so the App reads them: the
-/// power state every minute, the brightness every few. <paramref name="Power"/> came later, so a request without it is one
-/// from an App that reads no power states.</summary>
-public sealed record ReportBrightnessRequest(long Id, IReadOnlyList<MonitorBrightness> Monitors, IReadOnlyList<MonitorPowerReading>? Power = null)
+/// <summary>The brightness and the power state of the external monitors that answered in the sender's session, and the
+/// refresh rate and HDR state Windows drives each at, acknowledged with an <see cref="OkReply"/>. The service runs in session
+/// 0 and cannot reach the monitors or the user's display settings, so the App reads them: the power state and the display
+/// settings every minute, the brightness every few. <paramref name="Power"/> and <paramref name="Displays"/> came later, so a
+/// request without them is one from an App that reads neither.</summary>
+public sealed record ReportBrightnessRequest(
+    long Id,
+    IReadOnlyList<MonitorBrightness> Monitors,
+    IReadOnlyList<MonitorPowerReading>? Power = null,
+    IReadOnlyList<MonitorDisplayReading>? Displays = null)
     : PipeRequest(Id)
 {
     /// <summary>Null when every reading is acceptable; otherwise the first problem, in words the App can show.</summary>
@@ -63,13 +68,24 @@ public sealed record ReportBrightnessRequest(long Id, IReadOnlyList<MonitorBrigh
             if (monitor?.Instance is not { Length: >= 1 and <= 260 }) return "A monitor's instance must be between 1 and 260 characters.";
             if (!double.IsFinite(monitor.Brightness) || monitor.Brightness is < 0 or > 1) return "A brightness must be between 0 and 1.";
         }
-        if (Power is null) return null;
-        if (Power.Count > ServiceSettings.MaxMonitors) return $"At most {ServiceSettings.MaxMonitors} monitors can report a power state.";
-        foreach (var reading in Power)
+        if (Power is not null)
         {
-            if (reading?.Instance is not { Length: >= 1 and <= 260 }) return "A monitor's instance must be between 1 and 260 characters.";
-            if (reading.State is not (MonitorPowerState.On or MonitorPowerState.Standby or MonitorPowerState.Off))
-                return "A monitor's power state must be on, standby or off.";
+            if (Power.Count > ServiceSettings.MaxMonitors) return $"At most {ServiceSettings.MaxMonitors} monitors can report a power state.";
+            foreach (var reading in Power)
+            {
+                if (reading?.Instance is not { Length: >= 1 and <= 260 }) return "A monitor's instance must be between 1 and 260 characters.";
+                if (reading.State is not (MonitorPowerState.On or MonitorPowerState.Standby or MonitorPowerState.Off))
+                    return "A monitor's power state must be on, standby or off.";
+            }
+        }
+        if (Displays is not null)
+        {
+            if (Displays.Count > ServiceSettings.MaxMonitors) return $"At most {ServiceSettings.MaxMonitors} monitors can report how they are driven.";
+            foreach (var display in Displays)
+            {
+                if (display?.Instance is not { Length: >= 1 and <= 260 }) return "A monitor's instance must be between 1 and 260 characters.";
+                if (!double.IsFinite(display.RefreshHz) || display.RefreshHz is < 1 or > 1000) return "A refresh rate must be between 1 and 1000 Hz.";
+            }
         }
         return null;
     }
