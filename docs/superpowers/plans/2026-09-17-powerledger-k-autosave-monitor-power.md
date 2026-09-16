@@ -68,9 +68,18 @@ commits at `d95c4f9`.
   others, it lands within 9.04% for half of them and 25.6% for nine in ten.
 - On the development laptop, the display configuration reader found one path, the built-in panel, at 60.052 Hz with HDR
   off, and the DDC/CI reader got no answer from the panel in two reads, as expected of a laptop's own screen.
-<!-- lead: review: findings, and the fix for each -->
-<!-- lead: installers at full compression: universal, x64 and Arm64 sizes -->
-<!-- lead: Windows Sandbox, end to end: N of N, and what the run covered -->
+- Whole-branch review: 2 findings, both fixed. High: a monitor that said off or standby before it ever gave a brightness
+  was excluded for the session after one failed read, so switching it on went unnoticed; a power-mode answer now counts
+  as having answered, and a failure gets the back-off. Low: unticking the monitor preference also stopped the display
+  settings read; Windows' refresh rate and HDR are now read whatever the tick says, and the tick is named for what it stops.
+  Checked sound: every display-config struct against wingdi.h, autosave (no save loops, last change wins, the wizard
+  doesn't save itself), the watts in every state, staleness and the pipe across versions.
+- Installers at full compression: universal **96.1 MB**, x64 **56.8 MB**, Arm64 **50.2 MB**.
+- **Windows Sandbox, end to end, 61 of 61**: 0.3.0 updated itself to 0.4.1 through the App, the old monitor settings
+  stayed waiting for a monitor, the service logged no error and the App still answered six minutes on; in Settings the
+  idle threshold typed as 10 minutes was saved by itself once its box was left (300 s to 600 s), there was no Save
+  settings button, and the value was still there after leaving Settings and coming back; a fresh 0.4.1 install's wizard
+  never asked about monitors. Sandbox has no external monitor, so power states, refresh and HDR weren't met there.
 <!-- lead: CI run and both jobs' results -->
 <!-- lead: release link -->
 
