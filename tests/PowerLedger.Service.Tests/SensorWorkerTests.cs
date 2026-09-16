@@ -115,7 +115,7 @@ public class SensorWorkerTests
         try
         {
             (await Read(0)).ShouldNotBeNull();
-            board.Watts(displayOn: true).ShouldBe(28.32, 1e-9);
+            board.Watts(displayOn: true).Total.ShouldBe(28.32, 1e-9);
 
             var hung = Read(1);
             await WaitFor.True(() => Built(built) is [{ Reads: 2 }]);
@@ -125,10 +125,10 @@ public class SensorWorkerTests
             if (!returnsBeforeTheNextRead) (await Read(12)).ShouldNotBeNull();      // a fresh set, which hands over the Dell it finds
             gate.Set();
             await WaitFor.True(() => Built(built)[0].Disposed);                     // only once the stuck read has returned
-            board.Watts(displayOn: true).ShouldBe(28.32, 1e-9);
+            board.Watts(displayOn: true).Total.ShouldBe(28.32, 1e-9);
 
             for (var second = 13; second < 16; second++) (await Read(second)).ShouldNotBeNull();
-            board.Watts(displayOn: true).ShouldBe(28.32, 1e-9);
+            board.Watts(displayOn: true).Total.ShouldBe(28.32, 1e-9);
         }
         finally
         {
