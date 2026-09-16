@@ -319,12 +319,12 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     [InlineData("capabilities throw")]
     [InlineData("brightness fails")]
     [InlineData("brightness throws")]
-    public void A_monitor_that_fails_any_call_before_it_has_given_a_brightness_is_not_asked_again_while_the_app_runs(string failure)
+    public void A_monitor_that_fails_any_call_before_it_has_given_a_brightness_or_a_power_state_is_not_asked_again_while_the_app_runs(string failure)
     {
-        var dell = Failing(new FakeMonitor(Dell), failure);
+        var dell = Failing(new FakeMonitor(Dell) { PowerMode = 0 }, failure);   // its power mode, when asked, says nothing the standard gives
         var reader = Reader(new FakeDisplay(dell), new FakeDisplay(new FakeMonitor(Lg)));
 
-        reader.Read().ShouldContain(new DdcReading(Lg, 0.6, MonitorPowerState.On));   // with the Dell's power state, if it gave one first
+        reader.Read().ShouldBe([new DdcReading(Lg, 0.6, MonitorPowerState.On)]);
         var asked = dell.Calls;
         asked.ShouldBeGreaterThan(0);
 
@@ -492,7 +492,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     [InlineData("brightness fails")]
     public void A_monitor_that_has_given_a_brightness_and_fails_as_it_wakes_from_a_resume_is_asked_again_at_the_next_read(string failure)
     {
-        // A resume forgets what the monitor answered, but not that it has given a brightness: the requests didn't upset it
+        // A resume forgets what the monitor answered, but not that it has given an answer: the requests didn't upset it
         // then, and a resume doesn't change its firmware.
         var dell = new FakeMonitor(Dell);
         var reader = Reader(new FakeDisplay(dell));
@@ -509,11 +509,11 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void A_monitor_whose_answers_have_given_no_brightness_is_not_asked_again_after_a_failure_while_the_app_runs()
+    public void A_monitor_whose_answers_have_given_neither_a_brightness_nor_a_power_state_is_not_asked_again_after_a_failure_while_the_app_runs()
     {
-        var dell = new FakeMonitor(Dell) { Brightness = (50, 50, 50) };   // it answers, but with no range
+        var dell = new FakeMonitor(Dell) { Brightness = (50, 50, 50), PowerMode = 0 };   // it answers, but with no range and no state
         var reader = Reader(new FakeDisplay(dell));
-        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);   // a power state isn't a brightness
+        reader.Read().ShouldBeEmpty();
 
         Silent(dell);
         _clock.Advance(BrightnessReporter.ReadEvery);
@@ -528,6 +528,32 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         }
 
         dell.Calls.ShouldBe(asked);
+    }
+
+    [Fact]
+    public void A_monitor_off_at_start_that_then_fails_is_asked_again_on_the_back_off_schedule_and_says_it_is_on_once_switched_on()
+    {
+        // Switched off at its own button before the App started: it says so, so its brightness is never asked, but a power
+        // state is an answer, and shows the requests don't upset it as well as a brightness does.
+        var dell = new FakeMonitor(Dell) { PowerMode = 4 };
+        var reader = Reader(new FakeDisplay(dell));
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.Off)]);
+        var start = _clock.GetUtcNow();
+
+        Silent(dell);   // and then stops answering altogether
+        var asked = new List<int>();   // the minutes after that first read at which the monitor is asked
+        for (var read = 0; read < 15; read++)
+        {
+            _clock.Advance(BrightnessReporter.ReadEvery);
+            var calls = dell.Calls;
+            reader.Read().ShouldBeEmpty();
+            if (dell.Calls > calls) asked.Add((int)(_clock.GetUtcNow() - start).TotalMinutes);
+        }
+        asked.ShouldBe([1, 2, 4, 8]);   // left alone for 1, 2, 4 and then 8 minutes, not for the rest of the session
+
+        Answering(dell);   // switched on
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);   // at the end of that wait
     }
 
     [Theory]

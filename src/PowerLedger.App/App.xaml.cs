@@ -85,8 +85,8 @@ public partial class App : Application
                 var (title, text) = MonthlyReports.Toast(written);
                 _tray?.Notify(title, text, written[0].Path);
             }));
-        // One reader for the whole run: it remembers which monitors have given a brightness and which have failed, and
-        // so which to leave alone, and for how long.
+        // One reader for the whole run: it remembers which monitors have given a brightness or a power state and which have
+        // failed, and so which to leave alone, and for how long.
         _brightnessReader = new DdcBrightness();
         _brightness = new BrightnessReporter(_link, _brightnessReader, new DisplayConfigReader(), _preferences, TimeProvider.System);
         _now.PropertyChanged += OnNowChanged;
