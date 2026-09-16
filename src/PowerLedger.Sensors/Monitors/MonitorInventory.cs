@@ -14,8 +14,8 @@ namespace PowerLedger.Sensors;
 /// <param name="Name">The name the monitor gives itself, e.g. "DELL U2723QE"; empty when it gives none.</param>
 /// <param name="Inches">The diagonal, snapped to a common size (see <see cref="MonitorInventory.Diagonal"/>); 0 when the
 /// monitor gives no size, or one under ten inches, which is an aspect ratio or nonsense.</param>
-/// <param name="Width">The native resolution: the mode the monitor prefers, or 0 by 0 when it lists none or WMI didn't
-/// answer for its modes.</param>
+/// <param name="Width">The native resolution: the mode the monitor prefers, or the one last read for its instance when a
+/// read gives none; 0 by 0 when none ever was.</param>
 public sealed record MonitorFacts(
     string Instance,
     string Key,
@@ -56,6 +56,10 @@ public static class MonitorInventory
     /// <see cref="From"/>). Sensor sets are built afresh after a resume or a read that hung, so it is kept here, where it
     /// lasts as long as the service does.</summary>
     private static readonly HashSet<string> SharedKeys = new(StringComparer.Ordinal);
+
+    /// <summary>The native resolution last read for each instance since the service started (see <see cref="From"/>), kept
+    /// here for the same reason.</summary>
+    private static readonly Dictionary<string, (int Width, int Height)> Resolutions = new(StringComparer.Ordinal);
 
     /// <summary>The active external monitors, read from WMI, or null when WMI didn't say which are attached (see
     /// <see cref="From"/>). Never throws.</summary>
@@ -117,21 +121,25 @@ public static class MonitorInventory
             return byInstance;
         });
 
-        return From(ids, connections, sizes, nativeModes, SharedKeys);
+        return From(ids, connections, sizes, nativeModes, SharedKeys, Resolutions);
     }
 
     /// <summary>The same, from rows already read, with null for a class WMI didn't answer — the part tests drive.</summary>
     /// <param name="sharedKeys">The serial keys two attached monitors were found sharing before, which this adds to. It is
     /// locked while in use, because a sensor set that was abandoned may still be reading.</param>
+    /// <param name="resolutions">The native resolution last read for each instance, which this reads and updates (see
+    /// <see cref="Resolution"/>).</param>
     /// <returns>Null when WmiMonitorID, WmiMonitorConnectionParams or WmiMonitorBasicDisplayParams didn't answer, because
     /// without any one of them an attached monitor would be left out as if it were unplugged. The native modes give only the
-    /// resolutions, and some drivers never answer for them, so without them the monitors come back at 0 by 0.</returns>
+    /// resolutions, and some drivers never answer for them, so without them each monitor keeps the resolution last read for
+    /// its instance, or comes back at 0 by 0 when none was.</returns>
     internal static IReadOnlyList<MonitorFacts>? From(
         IReadOnlyList<(string Instance, ushort[] Maker, ushort[] Product, ushort[] Serial, ushort[] Name)>? ids,
         IReadOnlyDictionary<string, uint>? connections,
         IReadOnlyList<(string Instance, bool Active, double WidthCm, double HeightCm)>? sizes,
         IReadOnlyDictionary<string, (int Width, int Height)>? nativeModes,
-        HashSet<string> sharedKeys)
+        HashSet<string> sharedKeys,
+        Dictionary<string, (int Width, int Height)> resolutions)
     {
         if (ids is null || connections is null || sizes is null) return null;
         var connectionOf = ByInstance(connections.Select(pair => (pair.Key, pair.Value)));
@@ -150,7 +158,7 @@ public static class MonitorInventory
             var productCode = Text(product);
             var serialNumber = Text(serial);
             var inches = Diagonal(size.WidthCm, size.HeightCm);
-            var (width, height) = modeOf.GetValueOrDefault(instance);
+            var (width, height) = Resolution(instance, modeOf, resolutions);
             monitors.Add(new MonitorFacts(
                 instance,
                 // A serial number of fewer than four characters, or of one character repeated, as "0", "0000" and "1111111"
@@ -176,6 +184,22 @@ public static class MonitorInventory
         {
             sharedKeys.UnionWith(monitors.GroupBy(monitor => monitor.Key).Where(group => group.Count() > 1).Select(group => group.Key));
             return [.. monitors.Select(monitor => sharedKeys.Contains(monitor.Key) ? monitor with { Key = monitor.Instance } : monitor)];
+        }
+    }
+
+    /// <summary>The native resolution a read gives the monitor at <paramref name="instance"/>, which is remembered for
+    /// it; or, when the read gives none, the one last read for that instance; or 0 by 0 when none ever was.</summary>
+    /// <remarks>A monitor's native resolution doesn't change, but some drivers fail to answer for the modes now and then, or
+    /// leave a monitor out while it wakes, and a monitor read at 0 by 0 would have its figure worked out again without it.
+    /// Only a resolution read replaces the one remembered. The memory is locked while in use, because a sensor set that was
+    /// abandoned may still be reading.</remarks>
+    private static (int Width, int Height) Resolution(
+        string instance, Dictionary<string, (int Width, int Height)> read, Dictionary<string, (int Width, int Height)> remembered)
+    {
+        lock (remembered)
+        {
+            if (read.TryGetValue(instance, out var resolution)) remembered[instance] = resolution;
+            return remembered.GetValueOrDefault(instance);
         }
     }
 

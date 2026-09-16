@@ -384,6 +384,32 @@ public class MonitorBoardTests
     }
 
     [Fact]
+    public void A_monitor_keeps_its_figure_when_the_native_modes_fail_to_answer_once_between_two_good_reads()
+    {
+        // The monitor the list doesn't know, whose estimate goes by its resolution, as WMI's four classes give it to the
+        // inventory, which remembers from one read to the next as the service's does.
+        static ushort[] Codes(string text) => [.. text.Select(c => (ushort)c)];
+        HashSet<string> sharedKeys = [];
+        var resolutions = new Dictionary<string, (int Width, int Height)>();
+        IReadOnlyList<MonitorFacts> Read(bool modesAnswer) => MonitorInventory.From(
+            [(Unnamed.Instance + "_0", Codes("GSM"), Codes("5B08"), Codes(""), Codes(""))],
+            new Dictionary<string, uint> { [Unnamed.Instance] = 5 },
+            [(Unnamed.Instance, true, 60, 34)],
+            modesAnswer ? new Dictionary<string, (int Width, int Height)> { [Unnamed.Instance] = (1920, 1080) } : null,
+            sharedKeys,
+            resolutions).ShouldNotBeNull();
+
+        _board.Detected(Read(modesAnswer: true));
+        var figure = _board.Status(displayOn: true).ShouldHaveSingleItem().OnWatts;
+        figure.ShouldBe(14.41);
+
+        _board.Detected(Read(modesAnswer: false));
+        _board.Status(displayOn: true).ShouldHaveSingleItem().OnWatts.ShouldBe(figure);
+        _board.Detected(Read(modesAnswer: true));
+        _board.Status(displayOn: true).ShouldHaveSingleItem().OnWatts.ShouldBe(figure);
+    }
+
+    [Fact]
     public void A_monitor_that_changes_is_worked_out_again_and_keeps_its_brightness()
     {
         _board.Detected([Unnamed]);

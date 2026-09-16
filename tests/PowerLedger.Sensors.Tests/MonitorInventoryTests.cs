@@ -26,19 +26,28 @@ public class MonitorInventoryTests
     /// <summary>Text as WMI gives it: a character code each, padded with zeros to the array's fixed length.</summary>
     private static ushort[] Codes(string text) => [.. text.Select(c => (ushort)c), .. new ushort[16 - text.Length]];
 
-    private static IReadOnlyList<MonitorFacts> From(params Display[] displays) => From(sharedKeys: [], displays);
+    /// <summary>What the inventory remembers from one read to the next, as the service's does while it runs.</summary>
+    private sealed class Memory
+    {
+        public HashSet<string> SharedKeys { get; } = [];
 
-    /// <summary>The inventory of the displays, given the serial keys monitors were found sharing before.</summary>
-    private static IReadOnlyList<MonitorFacts> From(HashSet<string> sharedKeys, params Display[] displays)
-        => Inventory(unanswered: null, sharedKeys, displays).ShouldNotBeNull();
+        public Dictionary<string, (int Width, int Height)> Resolutions { get; } = [];
+    }
+
+    private static IReadOnlyList<MonitorFacts> From(params Display[] displays) => From(new Memory(), displays);
+
+    /// <summary>The inventory of the displays, given what it remembers from the reads before.</summary>
+    private static IReadOnlyList<MonitorFacts> From(Memory memory, params Display[] displays)
+        => Inventory(unanswered: null, memory, displays).ShouldNotBeNull();
 
     /// <summary>The inventory of the displays when WMI answers for every class but <paramref name="unanswered"/>.</summary>
-    private static IReadOnlyList<MonitorFacts>? Inventory(string? unanswered, HashSet<string> sharedKeys, params Display[] displays) => MonitorInventory.From(
+    private static IReadOnlyList<MonitorFacts>? Inventory(string? unanswered, Memory memory, params Display[] displays) => MonitorInventory.From(
         unanswered == "WmiMonitorID" ? null : [.. displays.Select(d => (d.Instance, Codes(d.Maker), Codes(d.Product), Codes(d.Serial), Codes(d.Name)))],
         unanswered == "WmiMonitorConnectionParams" ? null : displays.Where(d => d.Connection is not null).ToDictionary(d => d.Instance, d => d.Connection!.Value),
         unanswered == "WmiMonitorBasicDisplayParams" ? null : [.. displays.Select(d => (d.Instance, d.Active, d.WidthCm, d.HeightCm))],
         unanswered == "WmiMonitorListedSupportedSourceModes" ? null : displays.Where(d => d.Mode is not null).ToDictionary(d => d.Instance, d => d.Mode!.Value),
-        sharedKeys);
+        memory.SharedKeys,
+        memory.Resolutions);
 
     [Theory]
     [InlineData(0x80000000u)]   // internal
@@ -91,16 +100,39 @@ public class MonitorInventoryTests
     [InlineData("WmiMonitorConnectionParams")]
     [InlineData("WmiMonitorBasicDisplayParams")]
     public void When_a_class_that_says_which_monitors_are_attached_does_not_answer_there_is_no_answer_rather_than_no_monitors(string unanswered)
-        => Inventory(unanswered, sharedKeys: [], Dell, Lg).ShouldBeNull();
+        => Inventory(unanswered, new Memory(), Dell, Lg).ShouldBeNull();
 
     [Fact]
-    public void When_only_the_native_modes_do_not_answer_the_monitors_come_back_without_a_resolution()
+    public void When_only_the_native_modes_do_not_answer_monitors_never_given_a_resolution_come_back_without_one()
     {
         // Some drivers never answer for them, and they give nothing but the resolution.
-        var monitors = Inventory(unanswered: "WmiMonitorListedSupportedSourceModes", sharedKeys: [], Dell, Lg).ShouldNotBeNull();
+        var monitors = Inventory(unanswered: "WmiMonitorListedSupportedSourceModes", new Memory(), Dell, Lg).ShouldNotBeNull();
 
         monitors.Select(m => m.Name).ShouldBe(["DELL U2723QE", "LG HDR 4K"]);
         monitors.ShouldAllBe(m => m.Width == 0 && m.Height == 0);
+    }
+
+    [Fact]
+    public void A_monitor_a_read_gives_no_resolution_keeps_the_one_last_read_for_its_instance()
+    {
+        // A monitor's native resolution doesn't change, but a driver may fail to answer for the modes now and then, or leave
+        // a monitor out while it wakes.
+        var memory = new Memory();
+        var read = From(memory, Dell).ShouldHaveSingleItem();
+
+        Inventory(unanswered: "WmiMonitorListedSupportedSourceModes", memory, Dell).ShouldNotBeNull().ShouldHaveSingleItem().ShouldBe(read);
+        From(memory, Dell with { Mode = null }).ShouldHaveSingleItem().ShouldBe(read);
+    }
+
+    [Fact]
+    public void Only_a_resolution_read_replaces_the_one_kept_and_a_monitor_never_given_one_stays_at_0_by_0()
+    {
+        var memory = new Memory();
+        From(memory, Dell, Lg with { Mode = null });
+        From(memory, Dell with { Mode = (2560, 1440) }, Lg with { Mode = null });
+
+        Inventory(unanswered: "WmiMonitorListedSupportedSourceModes", memory, Dell, Lg).ShouldNotBeNull()
+            .Select(m => (m.Width, m.Height)).ShouldBe([(2560, 1440), (0, 0)]);
     }
 
     [Fact]
@@ -111,7 +143,8 @@ public class MonitorInventoryTests
             new Dictionary<string, uint> { [@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353"] = DisplayPort },
             [(@"display\dela0b1\5&2f5a1b&0&uid4353_0", true, 60, 34)],
             new Dictionary<string, (int Width, int Height)> { [@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353_0"] = (3840, 2160) },
-            sharedKeys: []);
+            sharedKeys: [],
+            resolutions: []);
 
         monitors.ShouldNotBeNull().ShouldHaveSingleItem().Width.ShouldBe(3840);
     }
@@ -146,14 +179,14 @@ public class MonitorInventoryTests
     {
         // Otherwise a user who unticks one of two twins and then unplugs the other would find the one left counted again:
         // alone, it would take the serial's key, not the instance its choice was saved under.
-        HashSet<string> sharedKeys = [];
+        var memory = new Memory();
         var left = Dell with { Serial = "16843009" };
         var right = left with { Instance = @"DISPLAY\DELA0B1\5&2f5a1b&0&UID4355_0" };
         var third = Dell with { Instance = @"DISPLAY\DELA0B1\5&2f5a1b&0&UID4356_0" };     // a serial of its own
-        From(sharedKeys, left, right);
+        From(memory, left, right);
 
-        From(sharedKeys, left).ShouldHaveSingleItem().Key.ShouldBe(@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353");
-        From(sharedKeys, right, third).Select(m => m.Key).ShouldBe([@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4355", "DELA0B1-7MKZG34"]);
+        From(memory, left).ShouldHaveSingleItem().Key.ShouldBe(@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353");
+        From(memory, right, third).Select(m => m.Key).ShouldBe([@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4355", "DELA0B1-7MKZG34"]);
     }
 
     [Theory]
