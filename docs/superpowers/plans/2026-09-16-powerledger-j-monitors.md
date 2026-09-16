@@ -580,8 +580,14 @@ at once for the first review's findings and three at once for the second's. The 
 - WMI on the development laptop refuses `WmiMonitorAnalogVideoInputParams`, a monitor class it has no instances of, with
   "Not supported", and a class that doesn't exist with "Invalid class": the two refusals now read as no monitors. The
   refusal with every monitor unplugged couldn't be seen there, since the laptop's own panel is always attached.
-<!-- lead: installers at full compression: universal, x64 and Arm64 sizes -->
-<!-- lead: Windows Sandbox, end to end: N of N, and what the run covered -->
+- Installers at full compression: universal **96.0 MB**, x64 **56.8 MB**, Arm64 **50.2 MB**.
+- **Windows Sandbox, end to end, 58 of 58**, run before and again after the second review's fixes. 0.3.0 installed as a
+  desktop with its old default of one uncounted monitor; a stand-in feed offered 0.4.0, the App took the x64 installer,
+  and "Restart to update" brought the service and the App back as 0.4.0 with "Updated to 0.4.0". Sandbox has no
+  external monitor, so the old settings stayed waiting for one; Settings showed "External monitors: none detected"; the
+  service took an empty brightness report, logged no error, and the App still answered six minutes on. A silent
+  uninstall then removed the service and both data folders, and a fresh 0.4.0 install's wizard never asked about
+  monitors and saved no default monitor choices.
 <!-- lead: CI run and both jobs' results, and the release link -->
 
 **First review** (whole branch): 8 findings, none critical, 5 important and 3 minor, all fixed.
