@@ -13,9 +13,10 @@ public class SensorWorkerTests
         var built = new List<FakeSensorSet>();
         using var worker = new SensorWorker(() => Add(built, new FakeSensorSet()), Timeout, new FakeTimeProvider());
         for (var i = 0; i < 3; i++) (await worker.ReadAsync(Samples.T0.AddSeconds(i), 1, CancellationToken.None)).ShouldNotBeNull();
-        built.Count.ShouldBe(1);
-        built[0].Reads.ShouldBe(3);
-        built[0].ThreadId.ShouldNotBe(Environment.CurrentManagedThreadId);
+        var sets = Built(built);
+        sets.Length.ShouldBe(1);
+        sets[0].Reads.ShouldBe(3);
+        sets[0].ThreadId.ShouldNotBe(Environment.CurrentManagedThreadId);
     }
 
     [Fact]
@@ -25,21 +26,22 @@ public class SensorWorkerTests
         using var gate = new ManualResetEventSlim(false);
         var built = new List<FakeSensorSet>();
         using var worker = new SensorWorker(
-            () => Add(built, built.Count == 0 ? new FakeSensorSet((t, d) => { gate.Wait(); return Samples.At(t, d); }) : new FakeSensorSet()),
+            () => Add(built, Built(built).Length == 0 ? new FakeSensorSet((t, d) => { gate.Wait(); return Samples.At(t, d); }) : new FakeSensorSet()),
             Timeout, clock);
 
         var hung = worker.ReadAsync(Samples.T0, 1, CancellationToken.None);
-        await WaitFor.True(() => built.Count == 1 && built[0].Reads == 1);
+        await WaitFor.True(() => Built(built) is [{ Reads: 1 }]);
         clock.Advance(Timeout);
         (await hung).ShouldBeNull();
         worker.Abandoned.ShouldBe(1);
 
         (await worker.ReadAsync(Samples.T0.AddSeconds(1), 1, CancellationToken.None)).ShouldNotBeNull();
-        built.Count.ShouldBe(2);
+        var sets = Built(built);
+        sets.Length.ShouldBe(2);
 
-        built[0].Disposed.ShouldBeFalse();   // still stuck in its call
+        sets[0].Disposed.ShouldBeFalse();   // still stuck in its call
         gate.Set();
-        await WaitFor.True(() => built[0].Disposed);
+        await WaitFor.True(() => sets[0].Disposed);
     }
 
     [Fact]
@@ -49,9 +51,9 @@ public class SensorWorkerTests
         using var worker = new SensorWorker(() => Add(built, new FakeSensorSet()), Timeout, new FakeTimeProvider());
         await worker.ReadAsync(Samples.T0, 1, CancellationToken.None);
         worker.Rebuild();
-        await WaitFor.True(() => built[0].Disposed);
+        await WaitFor.True(() => Built(built)[0].Disposed);
         await worker.ReadAsync(Samples.T0.AddSeconds(1), 1, CancellationToken.None);
-        built.Count.ShouldBe(2);
+        Built(built).Length.ShouldBe(2);
     }
 
     [Fact]
@@ -80,5 +82,12 @@ public class SensorWorkerTests
     {
         lock (built) built.Add(set);
         return set;
+    }
+
+    /// <summary>The sets built so far, copied under the lock <see cref="Add"/> takes. A list counts an item before it stores
+    /// it, so a read that doesn't take the lock can find a set counted that isn't there yet.</summary>
+    private static FakeSensorSet[] Built(List<FakeSensorSet> built)
+    {
+        lock (built) return [.. built];
     }
 }
