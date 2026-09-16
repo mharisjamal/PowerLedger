@@ -20,6 +20,8 @@ public sealed record MonitorChoice
 {
     public string Key { get; init; } = "";
 
+    /// <summary>Whether the monitor counts. It matters only for a monitor with a plug of its own: one that runs off this PC
+    /// is inside the PC's own draw, and always counts.</summary>
     public bool Counted { get; init; } = true;
 
     /// <summary>On-mode watts typed by the user, or null for PowerLedger's own figure.</summary>
@@ -57,8 +59,9 @@ public sealed record MonitorStatus
 
     public bool Counted { get; init; }
 
-    /// <summary>Whether the monitor counts when the user hasn't said: false only where the settings from before monitors
-    /// were detected left monitors out (<see cref="MachineProfile.CountMonitorsByDefault"/>).</summary>
+    /// <summary>Whether the monitor, if it has a plug of its own, counts when the user hasn't said: false only where the
+    /// settings from before monitors were detected left monitors out (<see cref="MachineProfile.CountMonitorsByDefault"/>).
+    /// A monitor that runs off this PC always counts.</summary>
     public bool CountedByDefault { get; init; } = true;
 
     /// <summary>Whether the monitor is taken to have a plug of its own, drawing outside the PC, rather than to run off the

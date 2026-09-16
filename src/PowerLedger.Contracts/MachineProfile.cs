@@ -52,8 +52,9 @@ public sealed record MachineProfile
     /// only so settings from then can be carried over, and no longer reach the model.</summary>
     public IReadOnlyList<MonitorChoice> Monitors { get; init; } = [];
 
-    /// <summary>Whether an external monitor the user hasn't chosen for counts. False only where the settings from before
-    /// monitors were detected left monitors out, so a monitor first seen later is left out as they were.</summary>
+    /// <summary>Whether an external monitor with a plug of its own that the user hasn't chosen for counts; one that runs off
+    /// this PC always counts. False only where the settings from before monitors were detected left monitors out, so a
+    /// monitor first seen later is left out as they were.</summary>
     public bool CountMonitorsByDefault { get; init; } = true;
 
     public static MachineProfile DefaultLaptop { get; } = new();
