@@ -171,12 +171,13 @@ public class SettingsTests
     public void The_model_counts_what_the_monitors_it_is_given_draw()
     {
         var model = ModelFactory.Build(
-            ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop }, Facts.Desktop(), new CalibrationLearner(), new FixedDraw(27.5));
+            ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop }, Facts.Desktop(), new CalibrationLearner(),
+            new FixedDraw(new MonitorWatts(OwnPlug: 20, FromPc: 7.5)));
         model.Evaluate(Samples.At(Samples.T0)).Components.Monitors.ShouldBe(27.5);
     }
 
-    private sealed class FixedDraw(double watts) : IMonitorDraw
+    private sealed class FixedDraw(MonitorWatts watts) : IMonitorDraw
     {
-        public double Watts(bool displayOn) => watts;
+        public MonitorWatts Watts(bool displayOn) => watts;
     }
 }

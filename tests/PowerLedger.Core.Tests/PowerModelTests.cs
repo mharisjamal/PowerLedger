@@ -47,24 +47,82 @@ public class PowerModelTests
     }
 
     [Fact]
-    public void Measured_mode_still_adds_the_monitors()
+    public void On_battery_a_monitor_with_a_plug_of_its_own_is_added_to_the_measured_rate()
     {
-        var r = Laptop(monitors: new FixedDraw(25)).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
+        var r = Laptop(monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 0))).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
         r.Quality.ShouldBe(Quality.Measured);
         r.Components.Monitors.ShouldBe(25);
-        r.TotalW.ShouldBe(34.2 + 25, 0.001);
-        r.Components.Sum.ShouldBe(r.TotalW, 0.001);
+        r.Components.Unattributed.ShouldBe(34.2 - 14.6 - 4.1 - 4.2, 1e-9);
+        r.TotalW.ShouldBe(34.2 + 25, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void On_battery_a_monitor_running_off_the_laptop_is_already_in_the_measured_rate()
+    {
+        // A 15.6-inch portable monitor on the laptop's USB-C port: the battery delivers what it draws.
+        var r = Laptop(monitors: new FixedDraw(new(OwnPlug: 0, FromPc: 6.2))).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
+        r.Quality.ShouldBe(Quality.Measured);
+        r.TotalW.ShouldBe(34.2, 1e-9);
+        r.Components.Monitors.ShouldBe(6.2, 1e-9);
+        r.Components.Unattributed.ShouldBe(34.2 - 14.6 - 4.1 - 4.2 - 6.2, 1e-9);
+        r.Components.PsuLoss.ShouldBe(0);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void On_battery_with_both_kinds_of_monitor_only_the_one_with_its_own_plug_is_added()
+    {
+        var r = Laptop(monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 6.2))).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
+        r.Quality.ShouldBe(Quality.Measured);
+        r.TotalW.ShouldBe(34.2 + 25, 1e-9);
+        r.Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
+        r.Components.Unattributed.ShouldBe(34.2 - 14.6 - 4.1 - 4.2 - 6.2, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void With_a_learned_baseline_a_monitor_running_off_the_laptop_goes_through_the_adapter_and_one_with_its_own_plug_does_not()
+    {
+        var r = Laptop(baseline: 9.0, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 6.2))).Evaluate(TestData.Laptop());
+        var throughAdapter = 14.6 + 4.1 + 4.2 + 6.2 + 9.0;
+        r.Quality.ShouldBe(Quality.Calibrated);
+        r.Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
+        r.Components.Unattributed.ShouldBe(9.0);
+        r.Components.PsuLoss.ShouldBe(throughAdapter / 0.9 - throughAdapter, 1e-9);
+        r.TotalW.ShouldBe(throughAdapter / 0.9 + 25, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void Without_calibration_a_monitor_running_off_the_laptop_goes_through_the_adapter_and_one_with_its_own_plug_does_not()
+    {
+        var monitors = new FixedDraw(new(OwnPlug: 25, FromPc: 6.2));
+        var r = Laptop(monitors: monitors).Evaluate(TestData.Laptop());
+        var throughAdapter = 14.6 + 4.1 + 4.2 + 6.2 + 5.0;
+        r.Quality.ShouldBe(Quality.Estimated);
+        r.Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
+        r.Components.PsuLoss.ShouldBe(throughAdapter / 0.9 - throughAdapter, 1e-9);
+        r.TotalW.ShouldBe(throughAdapter / 0.9 + 25, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+
+        // On battery with no rate to measure, nothing is lost in an adapter.
+        var battery = Laptop(monitors: monitors).Evaluate(TestData.Laptop(onBattery: true, battery: null));
+        battery.Quality.ShouldBe(Quality.Estimated);
+        battery.Components.PsuLoss.ShouldBe(0, 1e-9);
+        battery.TotalW.ShouldBe(throughAdapter + 25, 1e-9);
+        battery.Components.Sum.ShouldBe(battery.TotalW, 1e-9);
     }
 
     [Fact]
     public void The_monitors_are_asked_what_they_draw_with_the_display_as_it_is_and_a_model_given_none_counts_none()
     {
-        var monitors = new FixedDraw(on: 25, off: 0.4);
-        Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: true)).Components.Monitors.ShouldBe(25);
+        var monitors = new FixedDraw(on: new(OwnPlug: 25, FromPc: 6.2), off: new(OwnPlug: 0.4, FromPc: 0.2));
+        Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: true)).Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
         var off = Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: false));
-        off.Components.Monitors.ShouldBe(0.4);
-        off.TotalW.ShouldBe((14.6 + 4.1 + 5.0) / 0.9 + 0.4, 0.001);
-        off.Components.Sum.ShouldBe(off.TotalW, 0.001);
+        off.Components.Monitors.ShouldBe(0.4 + 0.2, 1e-9);
+        off.TotalW.ShouldBe((14.6 + 4.1 + 5.0 + 0.2) / 0.9 + 0.4, 1e-9);
+        off.Components.Sum.ShouldBe(off.TotalW, 1e-9);
         Laptop().Evaluate(TestData.Laptop()).Components.Monitors.ShouldBe(0);
         Desktop().Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null)).Components.Monitors.ShouldBe(0);
     }
@@ -135,14 +193,26 @@ public class PowerModelTests
     }
 
     [Fact]
-    public void External_monitors_are_added_after_the_supply_efficiency_division()
+    public void External_monitors_with_their_own_plugs_are_added_after_the_supply_efficiency_division()
     {
-        var r = Desktop(monitors: new FixedDraw(50)).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
+        var r = Desktop(monitors: new FixedDraw(new(OwnPlug: 50, FromPc: 0))).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
         var pcParts = 50 + 120 + 2 * 2.5 + 2 + (12 + 3 * 1);
         r.Components.Monitors.ShouldBe(50);
-        r.Components.PsuLoss.ShouldBe(pcParts / 0.85 - pcParts, 0.001);
-        r.TotalW.ShouldBe(pcParts / 0.85 + 50, 0.001);
-        r.Components.Sum.ShouldBe(r.TotalW, 0.001);
+        r.Components.PsuLoss.ShouldBe(pcParts / 0.85 - pcParts, 1e-9);
+        r.TotalW.ShouldBe(pcParts / 0.85 + 50, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void On_a_desktop_a_monitor_running_off_the_pc_goes_through_its_supply_and_one_with_its_own_plug_does_not()
+    {
+        var r = Desktop(monitors: new FixedDraw(new(OwnPlug: 50, FromPc: 7))).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
+        var throughSupply = 50 + 120 + 2 * 2.5 + 2 + (12 + 3 * 1) + 7;
+        r.Quality.ShouldBe(Quality.Estimated);
+        r.Components.Monitors.ShouldBe(50 + 7, 1e-9);
+        r.Components.PsuLoss.ShouldBe(throughSupply / 0.85 - throughSupply, 1e-9);
+        r.TotalW.ShouldBe(throughSupply / 0.85 + 50, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
     [Fact]
@@ -238,13 +308,18 @@ public class PowerModelTests
     [Fact]
     public void A_monitors_draw_that_is_not_a_number_yields_a_zeroed_suspect_reading_too()
     {
-        var bad = Laptop(monitors: new FixedDraw(double.NaN)).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
-        bad.TotalW.ShouldBe(0);
-        bad.Suspect.ShouldBeTrue();
+        var ownPlug = Laptop(monitors: new FixedDraw(new(OwnPlug: double.NaN, FromPc: 0))).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
+        ownPlug.TotalW.ShouldBe(0);
+        ownPlug.Suspect.ShouldBeTrue();
+
+        var fromPc = Laptop(monitors: new FixedDraw(new(OwnPlug: 0, FromPc: double.NaN))).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
+        fromPc.TotalW.ShouldBe(0);
+        fromPc.Suspect.ShouldBeTrue();
+        Laptop(monitors: new FixedDraw(new(OwnPlug: 0, FromPc: double.NaN))).Evaluate(TestData.Laptop()).Suspect.ShouldBeTrue();
     }
 
-    private sealed class FixedDraw(double on, double off = 0) : IMonitorDraw
+    private sealed class FixedDraw(MonitorWatts on, MonitorWatts off = default) : IMonitorDraw
     {
-        public double Watts(bool displayOn) => displayOn ? on : off;
+        public MonitorWatts Watts(bool displayOn) => displayOn ? on : off;
     }
 }

@@ -6,8 +6,10 @@ namespace PowerLedger.Core;
 /// Turns one <see cref="Sample"/> into a <see cref="Reading"/> (spec §5).
 /// On a laptop the battery discharge rate is the truth when available; otherwise the parts are summed
 /// with a learned (laptop) or default "rest of system" baseline and divided by supply efficiency.
-/// Desktops are always estimated. External monitors are wall-powered: what the <see cref="IMonitorDraw"/> says they draw
-/// (nothing, when the model is given none) is added after the efficiency division.
+/// Desktops are always estimated. The external monitors draw what the <see cref="IMonitorDraw"/> says (nothing, when the
+/// model is given none). A monitor with a plug of its own is added after the efficiency division, and on top of a measured
+/// rate; one running off the PC, as a portable monitor on a laptop's USB-C port does, draws through the PC's supply or
+/// battery, so it goes inside the division and is already in a measured rate.
 /// </summary>
 public sealed class PowerModel
 {
@@ -54,10 +56,12 @@ public sealed class PowerModel
 
         if (isLaptop && s.HasDischargeRate && s.BatteryRateW is { } measured)
         {
+            // The battery delivers what the monitors running off the laptop draw, so the measured rate already holds them:
+            // they come out of the remainder, and only the monitors with a plug of their own are added.
             var measuredParts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
-                Monitors: monitors, PsuLoss: 0, Unattributed: measured - cpu - gpu - display);
-            return Build(s, measured + monitors, Quality.Measured, measuredParts, userIdle);
+                Monitors: monitors.Total, PsuLoss: 0, Unattributed: measured - cpu - gpu - display - monitors.FromPc);
+            return Build(s, measured + monitors.OwnPlug, Quality.Measured, measuredParts, userIdle);
         }
 
         Components parts;
@@ -67,14 +71,14 @@ public sealed class PowerModel
             // The learned baseline was observed on battery, so it already contains any extras drawing from the battery.
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
-                Monitors: monitors, PsuLoss: 0, Unattributed: learned);
+                Monitors: monitors.Total, PsuLoss: 0, Unattributed: learned);
             quality = Quality.Calibrated;
         }
         else if (isLaptop)
         {
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: _profile.ExtrasWatts,
-                Monitors: monitors, PsuLoss: 0, Unattributed: LaptopBaselineW);
+                Monitors: monitors.Total, PsuLoss: 0, Unattributed: LaptopBaselineW);
             quality = Quality.Estimated;
         }
         else
@@ -82,17 +86,18 @@ public sealed class PowerModel
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: RamWatts(), Storage: StorageWatts(),
                 Board: DesktopBoardW + _profile.FanCount * FanW, Extras: _profile.ExtrasWatts,
-                Monitors: monitors, PsuLoss: 0, Unattributed: 0);
+                Monitors: monitors.Total, PsuLoss: 0, Unattributed: 0);
             quality = Quality.Estimated;
         }
 
-        // External monitors are wall-powered: they sit outside the PC's supply, so they are added after the efficiency division.
-        var beforePsu = parts.Sum - parts.Monitors;
+        // A monitor with a plug of its own sits outside the PC's supply, so it is added after the efficiency division. One
+        // running off the PC draws through the supply like any other part, so it is divided with them.
+        var beforePsu = parts.Sum - monitors.OwnPlug;
         var efficiency = isLaptop
             ? (s.OnBattery ? 1.0 : _options.LaptopAdapterEfficiency)
             : PsuEfficiency.For(_profile.PsuTier);
         var psuLoss = beforePsu / efficiency - beforePsu;
-        var total = beforePsu + psuLoss + parts.Monitors;
+        var total = beforePsu + psuLoss + monitors.OwnPlug;
         return Build(s, total, quality, parts with { PsuLoss = psuLoss }, userIdle);
     }
 

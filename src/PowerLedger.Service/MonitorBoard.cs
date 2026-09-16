@@ -67,15 +67,15 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     }
 
     /// <summary>What every counted monitor draws: with the display on, a figure the user typed as it is, or PowerLedger's
-    /// own at the monitor's brightness; asleep, its sleep figure.</summary>
-    public double Watts(bool displayOn)
+    /// own at the monitor's brightness; asleep, its sleep figure. Every monitor is taken to have a plug of its own.</summary>
+    public MonitorWatts Watts(bool displayOn)
     {
         var now = clock.GetTimestamp();
         lock (_gate)
         {
             var watts = 0.0;
             foreach (var monitor in _monitors) watts += Describe(monitor, displayOn, now).WattsNow;
-            return watts;
+            return new MonitorWatts(OwnPlug: watts, FromPc: 0);
         }
     }
 

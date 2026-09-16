@@ -40,7 +40,11 @@ public class MonitorPowerTests
     [Fact]
     public void No_monitors_draw_nothing_with_the_display_on_or_off()
     {
-        NoMonitors.Instance.Watts(displayOn: true).ShouldBe(0);
-        NoMonitors.Instance.Watts(displayOn: false).ShouldBe(0);
+        NoMonitors.Instance.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
+        NoMonitors.Instance.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
     }
+
+    [Fact]
+    public void What_monitors_draw_in_all_is_what_they_draw_from_their_own_plugs_and_from_the_pc()
+        => new MonitorWatts(OwnPlug: 25, FromPc: 6.2).Total.ShouldBe(31.2, 1e-9);
 }

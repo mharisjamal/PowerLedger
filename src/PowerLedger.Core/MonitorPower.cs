@@ -3,8 +3,17 @@ namespace PowerLedger.Core;
 /// <summary>What the external monitors draw right now; the service's board implements it (Plan J).</summary>
 public interface IMonitorDraw
 {
-    /// <summary>Watts for every monitor that counts, with the display on or asleep.</summary>
-    double Watts(bool displayOn);
+    /// <summary>Watts for every monitor that counts, with the display on or asleep, by where they draw from.</summary>
+    MonitorWatts Watts(bool displayOn);
+}
+
+/// <summary>What the monitors that count draw, split by where they draw from.</summary>
+/// <param name="OwnPlug">Watts for the monitors with a plug of their own, which draw outside the PC.</param>
+/// <param name="FromPc">Watts for the monitors that run off the PC, as a portable monitor on a laptop's USB-C port does,
+/// which the PC's own supply or battery delivers.</param>
+public readonly record struct MonitorWatts(double OwnPlug, double FromPc)
+{
+    public double Total => OwnPlug + FromPc;
 }
 
 /// <summary>No external monitors: the model's default, and what tests use unless they say otherwise.</summary>
@@ -16,7 +25,7 @@ public sealed class NoMonitors : IMonitorDraw
 
     public static NoMonitors Instance { get; } = new();
 
-    public double Watts(bool displayOn) => 0;
+    public MonitorWatts Watts(bool displayOn) => new(OwnPlug: 0, FromPc: 0);
 }
 
 /// <summary>
