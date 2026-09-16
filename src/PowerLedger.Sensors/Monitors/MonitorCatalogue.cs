@@ -12,7 +12,12 @@ namespace PowerLedger.Sensors;
 /// doesn't give them.</param>
 /// <param name="MaxNits">The maximum luminance in cd/m², or null where the list doesn't give one (it writes 0).</param>
 public sealed record CatalogueMonitor(string Brand, string ModelNumber, string ModelName, double Inches, int Width, int Height,
-    string Panel, double OnW, double SleepW, double OffW, double? MaxNits = null);
+    string Panel, double OnW, double SleepW, double OffW, double? MaxNits = null)
+{
+    /// <summary>Whether the list gives the panel as an OLED one ("OLED", "QD-OLED"), for which nothing is known of what a
+    /// higher refresh rate adds (spec §3).</summary>
+    public bool Oled => Panel.Contains("OLED", StringComparison.OrdinalIgnoreCase);
+}
 
 /// <summary>
 /// Energy Star's certified monitors (spec §5), shipped with PowerLedger: looks a detected monitor up by maker, model name

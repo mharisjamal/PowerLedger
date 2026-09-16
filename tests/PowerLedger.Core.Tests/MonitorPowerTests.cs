@@ -67,6 +67,25 @@ public class MonitorPowerTests
         MonitorPower.At(20, null, MonitorPower.Anchor(null)).ShouldBe(20, 1e-9);
     }
 
+    [Theory]
+    [InlineData(2560, 1440, 165.0, 2.322432)]     // 3.6864 megapixels, 105 Hz above 60
+    [InlineData(2560, 1440, 240.0, 3.981312)]
+    [InlineData(3840, 2160, 144.0, 4.1803776)]
+    [InlineData(1440, 2560, 165.0, 2.322432)]     // given the short side first
+    [InlineData(1920, 1080, 60.0, 0.0)]
+    [InlineData(1920, 1080, 59.94, 0.0)]
+    public void A_refresh_rate_above_60_hz_adds_six_thousandths_of_a_watt_a_megapixel_a_hertz(int width, int height, double refreshHz, double watts)
+        => MonitorPower.Refresh(width, height, refreshHz).ShouldBe(watts, 1e-9);
+
+    [Theory]
+    [InlineData(0, 0, 165.0)]
+    [InlineData(2560, 0, 165.0)]
+    [InlineData(2560, 1440, null)]
+    [InlineData(2560, 1440, double.NaN)]
+    [InlineData(2560, 1440, double.PositiveInfinity)]
+    public void Without_a_resolution_or_a_refresh_rate_nothing_is_added(int width, int height, double? refreshHz)
+        => MonitorPower.Refresh(width, height, refreshHz).ShouldBe(0);
+
     [Fact]
     public void No_monitors_draw_nothing_with_the_display_on_or_off()
     {

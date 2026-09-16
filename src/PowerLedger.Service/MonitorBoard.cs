@@ -99,7 +99,9 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     /// <param name="displays">How Windows drives each monitor, or null from an App that doesn't read it, which leaves the
     /// refresh rates and HDR states as they were.</param>
     public void Report(
-        IReadOnlyList<MonitorBrightness> readings, IReadOnlyList<MonitorPowerReading>? power = null, IReadOnlyList<MonitorDisplayReading>? displays = null)
+        IReadOnlyList<MonitorBrightness> readings,
+        IReadOnlyList<MonitorPowerReading>? power = null,
+        IReadOnlyList<MonitorDisplayReading>? displays = null)
     {
         var now = clock.GetTimestamp();
         lock (_gate)
@@ -159,10 +161,12 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         var name = facts.Name.Length > 0 ? facts.Name : $"{facts.Maker} {facts.ProductCode}".Trim();
         if (catalogue.Find(facts.Maker, facts.Name, facts.Inches, facts.Width, facts.Height) is { } listed)
         {
-            return new Figured(facts, name, listed.OnW, listed.SleepW, listed.OffW, MonitorPower.Anchor(listed.MaxNits), MonitorSource.Model);
+            return new Figured(
+                facts, name, listed.OnW, listed.SleepW, listed.OffW, MonitorPower.Anchor(listed.MaxNits), listed.Oled, MonitorSource.Model);
         }
+        // An estimate comes mostly from LCD monitors, so the monitor is taken for one.
         var (onW, sleepW, offW, maxNits) = MonitorEstimate.For(facts.Inches, facts.Width, facts.Height, catalogue);
-        return new Figured(facts, name, onW, sleepW, offW, MonitorPower.Anchor(maxNits), MonitorSource.Estimate);
+        return new Figured(facts, name, onW, sleepW, offW, MonitorPower.Anchor(maxNits), Oled: false, MonitorSource.Estimate);
     }
 
     /// <summary>The attached monitor with this instance, in any case, or null. Called with the lock held.</summary>
@@ -194,6 +198,12 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
         // list's test luminance, so it is scaled from where that sits on the monitor's brightness scale to the monitor's.
         var onNow = choice?.Watts ?? MonitorPower.At(monitor.OnW, brightness, monitor.Anchor);
+        // An LCD panel driven faster than the list's 60 Hz draws more while it is on (spec §3). Nothing is known of what an
+        // OLED panel adds, and a figure the user typed is already what the monitor draws as they use it.
+        var drivenOn = counted && displayOn && state is (MonitorPowerState.On or MonitorPowerState.Unknown);
+        var refreshWatts = drivenOn && choice?.Watts is null && !monitor.Oled
+            ? MonitorPower.Refresh(facts.Width, facts.Height, display?.RefreshHz)
+            : 0;
         return new MonitorStatus
         {
             Key = facts.Key,
@@ -207,6 +217,7 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             OffWatts = monitor.OffW,
             PowerState = state,
             RefreshHz = display?.RefreshHz,
+            RefreshWatts = refreshWatts,
             Hdr = display?.Hdr,
             Source = choice?.Watts is null ? monitor.Source : MonitorSource.Typed,
             Counted = counted,
@@ -221,7 +232,7 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             {
                 MonitorPowerState.Off => monitor.OffW,
                 MonitorPowerState.Standby => monitor.SleepW,
-                _ => displayOn ? onNow : monitor.SleepW,
+                _ => displayOn ? onNow + refreshWatts : monitor.SleepW,
             },
         };
     }
@@ -240,6 +251,8 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     /// <param name="Name">The name the monitor gives, or its maker and product code when it gives none.</param>
     /// <param name="Anchor">Where <paramref name="OnW"/> sits on the monitor's brightness scale (see
     /// <see cref="MonitorPower.Anchor"/>).</param>
+    /// <param name="Oled">Whether the list gives the monitor an OLED panel, which adds no refresh term.</param>
     /// <param name="Source">Where <paramref name="OnW"/> came from: the list or the estimate, never the user.</param>
-    private sealed record Figured(MonitorFacts Facts, string Name, double OnW, double SleepW, double OffW, double Anchor, MonitorSource Source);
+    private sealed record Figured(
+        MonitorFacts Facts, string Name, double OnW, double SleepW, double OffW, double Anchor, bool Oled, MonitorSource Source);
 }

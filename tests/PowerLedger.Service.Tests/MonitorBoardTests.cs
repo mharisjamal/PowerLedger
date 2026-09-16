@@ -606,6 +606,83 @@ public class MonitorBoardTests
     }
 
     [Fact]
+    public void An_lcd_monitor_driven_above_60_hz_adds_the_refresh_term_while_it_is_on_or_unknown_with_the_displays_on()
+    {
+        // A 27-inch 1440p monitor the list doesn't know, at 165 Hz: 0.006 W for each of its 3.6864 megapixels and 105 Hz.
+        var fast = Unnamed with { Width = 2560, Height = 1440 };
+        _board.Detected([fast]);
+        _board.Report([], displays: [Shown(fast, 165)]);
+
+        var unknown = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (unknown.PowerState, unknown.RefreshHz).ShouldBe((MonitorPowerState.Unknown, (double?)165));
+        unknown.RefreshWatts.ShouldBe(2.322432, 1e-9);
+        unknown.WattsNow.ShouldBe(unknown.OnWatts + 2.322432, 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(unknown.WattsNow, 1e-9);
+
+        _board.Report([], [Said(fast, MonitorPowerState.On)]);
+        _board.Status(displayOn: true).ShouldHaveSingleItem().RefreshWatts.ShouldBe(2.322432, 1e-9);
+
+        // Nothing is added with the displays off, in standby, switched off, or left out.
+        var asleep = _board.Status(displayOn: false).ShouldHaveSingleItem();
+        (asleep.RefreshWatts, asleep.WattsNow).ShouldBe((0.0, asleep.SleepWatts));
+        _board.Report([], [Said(fast, MonitorPowerState.Standby)]);
+        var standby = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (standby.RefreshWatts, standby.WattsNow).ShouldBe((0.0, standby.SleepWatts));
+        _board.Report([], [Said(fast, MonitorPowerState.Off)]);
+        var off = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (off.RefreshWatts, off.WattsNow).ShouldBe((0.0, off.OffWatts));
+        _board.Report([], [Said(fast, MonitorPowerState.On)]);
+        _board.Choose(Laptop(new MonitorChoice { Key = fast.Key, Counted = false }));
+        var leftOut = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (leftOut.RefreshHz, leftOut.RefreshWatts, leftOut.WattsNow).ShouldBe(((double?)165, 0.0, 0.0));
+
+        // Nor once the refresh rate has gone stale.
+        _board.Choose(Laptop());
+        _clock.Advance(MonitorBoard.DisplayStale + TimeSpan.FromSeconds(1));
+        _board.Report([], [Said(fast, MonitorPowerState.On)]);
+        var stale = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (stale.RefreshHz, stale.RefreshWatts).ShouldBe((null, 0.0));
+    }
+
+    [Fact]
+    public void An_oled_monitor_adds_no_refresh_term()
+    {
+        // MSI's 26.7-inch 1440p OLED from the shipped table, at 240 Hz. Its 21.3 W were measured at its 200 cd/m², its
+        // brightest.
+        var board = new MonitorBoard(MonitorCatalogue.Parse(new StringReader("""
+            brand,model_number,model_name,alternatives,inches,width,height,panel,on_w,sleep_w,off_w,max_nits,hdr,certified
+            MSI,PRO MAX 271QPX14G,PRO MAX 271QPX14G,,26.7,2560,1440,OLED,21.3,0.36,0.23,200,,2026-04-24
+            """)), _clock);
+        var oled = new MonitorFacts(@"DISPLAY\MSI3CB1\7&2B3C&0&UID4356", "MSI3CB1-00001", "MSI", "3CB1", "MSI 271QPX14G", 26.7, 2560, 1440);
+        board.Detected([oled]);
+        board.Report([], displays: [Shown(oled, 240)]);
+
+        var monitor = board.Status(displayOn: true).ShouldHaveSingleItem();
+        (monitor.Source, monitor.RefreshHz, monitor.RefreshWatts).ShouldBe((MonitorSource.Model, (double?)240, 0.0));
+        monitor.WattsNow.ShouldBe(MonitorPower.At(21.3, null, 1), 1e-9);
+    }
+
+    [Fact]
+    public void A_typed_figure_or_an_unknown_resolution_or_refresh_rate_adds_no_refresh_term()
+    {
+        var fast = Unnamed with { Width = 2560, Height = 1440 };
+        _board.Detected([Dell, fast]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Watts = 30 }));
+        _board.Report([], displays: [Shown(Dell, 144)]);
+
+        var status = _board.Status(displayOn: true);
+        (status[0].RefreshHz, status[0].RefreshWatts, status[0].WattsNow).ShouldBe(((double?)144, 0.0, 30.0));
+        (status[1].RefreshHz, status[1].RefreshWatts).ShouldBe((null, 0.0));
+
+        // A monitor that doesn't give its resolution.
+        var unsized = Unnamed with { Width = 0, Height = 0 };
+        _board.Detected([unsized]);
+        _board.Report([], displays: [Shown(unsized, 165)]);
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (monitor.RefreshHz, monitor.RefreshWatts).ShouldBe(((double?)165, 0.0));
+    }
+
+    [Fact]
     public void A_monitor_missing_from_one_detection_keeps_a_display_reading_that_is_still_fresh()
     {
         _board.Detected([Dell]);

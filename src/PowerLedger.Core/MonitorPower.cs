@@ -52,6 +52,14 @@ public static class MonitorPower
     /// the bottom of its scale.</summary>
     public const double LowestAnchor = 0.05;
 
+    /// <summary>The refresh rate Energy Star measures a monitor at, unless its manual names another default.</summary>
+    public const double ListedRefreshHz = 60;
+
+    /// <summary>What an LCD monitor's electronics add for each megapixel and each hertz above 60 (spec §3), fitted to two
+    /// measurements that alone give from 0.003 to 0.010: ASUS's 27-inch 1440p PG279Q drew 1 W more at 144 Hz than at 60, and
+    /// Monoprice's 3440 × 1440 Dark Matter 34 went from 20.0 to 24.3 W.</summary>
+    public const double RefreshWattsPerMegapixelHz = 0.006;
+
     /// <summary>What a monitor draws asleep when the list gives no figure for it: the median <c>sleep_w</c> of the shipped
     /// table, 0.23 W over its 1,580 monitors, all of which give one.</summary>
     public const double DefaultSleepW = 0.23;
@@ -72,6 +80,19 @@ public static class MonitorPower
     {
         var b = brightness is { } value && double.IsFinite(value) ? Math.Clamp(value, 0, 1) : ListedBrightness;
         return listedOnW * Share(b) / Share(anchor);
+    }
+
+    /// <summary>What driving a monitor's panel faster than the list's 60 Hz adds (spec §3): its timing controller and column
+    /// drivers work harder, and its backlight doesn't. <see cref="RefreshWattsPerMegapixelHz"/> watts for each megapixel and
+    /// each hertz above 60, or 0 when the resolution or the refresh rate is unknown.</summary>
+    /// <param name="width">The native width in pixels, or 0 when unknown.</param>
+    /// <param name="height">The native height in pixels, or 0 when unknown.</param>
+    /// <param name="refreshHz">The refresh rate Windows drives the monitor at, or null when unknown.</param>
+    public static double Refresh(int width, int height, double? refreshHz)
+    {
+        if (width <= 0 || height <= 0 || refreshHz is not { } hz || !double.IsFinite(hz)) return 0;
+        var megapixels = (double)width * height / 1_000_000;
+        return RefreshWattsPerMegapixelHz * megapixels * Math.Max(0, hz - ListedRefreshHz);
     }
 
     private static double Share(double b) => FixedShare + (1 - FixedShare) * b;

@@ -417,6 +417,19 @@ public class MonitorCatalogueTests
     }
 
     [Fact]
+    public void A_monitor_is_taken_for_an_oled_one_when_the_list_says_its_panel_is()
+    {
+        // MSI lists its 26.7-inch 1440p PRO MAX 271QPX14G with an OLED panel.
+        Shipped.Find("MSI", "MSI 271QPX14G", 26.7, 2560, 1440).ShouldNotBeNull().Oled.ShouldBeTrue();
+        Shipped.Find("DEL", "DELL U2723QE", 27, 3840, 2160).ShouldNotBeNull().Oled.ShouldBeFalse();
+        Shipped.Monitors.Count(monitor => monitor.Oled).ShouldBe(32);
+
+        Parse(Header, DellU2723Qe.Replace("IPS LCD", "QD-OLED")).Monitors.Single().Oled.ShouldBeTrue();
+        Parse(Header, DellU2723Qe.Replace("IPS LCD", "oled")).Monitors.Single().Oled.ShouldBeTrue();
+        Parse(Header, DellU2723Qe.Replace("IPS LCD", "")).Monitors.Single().Oled.ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_luminance_of_zero_is_unknown_and_a_missing_sleep_figure_is_the_typical_one()
     {
         Shipped.Monitors.Single(monitor => monitor.Brand == "ASUS" && monitor.ModelNumber == "MS27UC").MaxNits.ShouldBeNull();
