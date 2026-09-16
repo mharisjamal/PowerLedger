@@ -32,19 +32,22 @@ internal interface IBrightnessReader
 /// properly; without it the request would go to a monitor nothing has vouched for, and the user's Count tick decides for it
 /// instead. A monitor that says it is off or on standby is taken at its word: its brightness is left for a read that finds
 /// it on, and that isn't a failure, so one switched off at its own button that still answers goes on saying so every read.
-/// A monitor that fails its power-mode request but answers another in the same read, what it supports or its brightness, is
-/// taken not to support power mode, and isn't asked it again until a display change or a resume.
+/// A monitor whose power-mode request fails is asked its brightness next, due or not, as only that answer tells a monitor
+/// that doesn't support power mode from one that has stopped answering. One that fails its power-mode request in
+/// <see cref="PowerModeTries"/> reads in a row, answering its brightness each time, is taken not to support power mode, and
+/// isn't asked it again until a display change or a resume; fewer are taken as passing, and an answer starts the count
+/// again.
 ///
-/// A monitor fails a read when its capabilities or brightness request fails, or when it answers nothing it is sent; the
-/// power state it gave before failing is still reported. How long a monitor that fails is left alone depends on whether it
-/// has given a brightness this session. One that hasn't is left alone for the rest of the session, as its firmware may be
-/// one the requests upset. One that has given a brightness has shown they don't, and most often fails for a reason Windows
-/// doesn't announce - it was switched off at its own button, set to another input, or is still waking - so it is left
-/// alone only for a while: the next read asks it again, each failure in a row after that doubles the wait, up to
-/// <see cref="LongestWait"/>, and a read it doesn't fail ends it.
+/// A monitor fails a read when its capabilities or brightness request fails; the power state it gave before failing is
+/// still reported. How long a monitor that fails is left alone depends on whether it has given a brightness this session.
+/// One that hasn't is left alone for the rest of the session, as its firmware may be one the requests upset. One that has
+/// given a brightness has shown they don't, and most often fails for a reason Windows doesn't announce - it was switched off
+/// at its own button, set to another input, or is still waking - so it is left alone only for a while: the next read asks
+/// it again, each failure in a row after that doubles the wait, up to <see cref="LongestWait"/>, and a read it doesn't fail
+/// ends it.
 ///
 /// A display change (a monitor plugged in or out, or display settings changed) or a resume from sleep ends all of this:
-/// either forgets everything every monitor has answered, whether it supports power mode and when it last gave its
+/// either forgets everything every monitor has answered, its count of power-mode failures and when it last gave its
 /// brightness included, and every failure, because a monitor commonly fails, or answers wrongly, while it is waking up or
 /// while it is being plugged in. Only which monitors have given a brightness is kept, as neither event changes a monitor's
 /// firmware. <see cref="Dispose"/> must be called once the reader is no longer wanted: the events it listens for come from
@@ -60,6 +63,11 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// <summary>VCP code D6, Power Mode, in VESA's Monitor Control Command Set: the only code a monitor is ever asked for with
     /// GetVCPFeatureAndVCPFeatureReply.</summary>
     internal const byte PowerModeCode = 0xD6;
+
+    /// <summary>How many failed power-mode requests in a row, each in a read in which the monitor answered its brightness,
+    /// take the monitor not to support power mode. Fewer are taken as passing, as a monitor still waking, or busy with
+    /// another program's request, can fail one.</summary>
+    internal const int PowerModeTries = 3;
 
     /// <summary>The wait between one request to a monitor and the next in the same read, so that a monitor slow to finish one
     /// request isn't sent the next at once.</summary>
@@ -103,9 +111,10 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// <summary>Monitors that said they don't support brightness: never asked anything again until cleared.</summary>
     private readonly HashSet<string> _unsupported = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Monitors that failed their power-mode request in a read in which they answered another, so are taken not to
-    /// support power mode: never asked it again until cleared.</summary>
-    private readonly HashSet<string> _noPowerMode = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>How many times in a row each monitor has failed its power-mode request in a read in which it answered its
+    /// brightness. An answer to the request takes a monitor off; one that reaches <see cref="PowerModeTries"/> is taken not to
+    /// support power mode, and never asked it again until cleared.</summary>
+    private readonly Dictionary<string, int> _powerModeFailures = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The <see cref="TimeProvider.GetTimestamp"/> at which each monitor last answered its brightness request, which
     /// decides when its brightness is next due. An answer without a range counts, so a monitor that gives one isn't asked
@@ -233,7 +242,10 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// known, its brightness, when that is due, or its power mode, unless it has been taken not to support that.</summary>
     private bool Askable(string path)
         => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_unsupported.Contains(path) && !_failed.Contains(path) && !Waiting(path)
-           && (!_readable.Contains(path) || BrightnessDue(path) || !_noPowerMode.Contains(path));
+           && (!_readable.Contains(path) || BrightnessDue(path) || !NoPowerMode(path));
+
+    /// <summary>Whether the monitor has been taken not to support power mode.</summary>
+    private bool NoPowerMode(string path) => _powerModeFailures.GetValueOrDefault(path) >= PowerModeTries;
 
     /// <summary>Whether the monitor's brightness is to be asked: it hasn't answered its brightness request since the App
     /// started or the reader last forgot, or its last answer is <see cref="BrightnessEvery"/> old.</summary>
@@ -260,7 +272,6 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     private DdcReading? Ask(IntPtr monitor, string path)
     {
         var sent = false;   // whether the monitor has been sent a request in this read, which the next one waits after
-        var answered = false;   // whether the monitor has answered a request in this read
         MonitorPowerState? power = null;
         double? brightness = null;
         try
@@ -276,34 +287,29 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
                     return null;
                 }
                 _readable.Add(path);
-                answered = true;
             }
             var powerModeFailed = false;
-            if (!_noPowerMode.Contains(path))
+            if (!NoPowerMode(path))
             {
                 Next(ref sent);
                 if (PowerMode(monitor) is { } mode)
                 {
+                    _powerModeFailures.Remove(path);   // it answered, so its failures of this request in a row are over
                     power = PowerState(mode);
-                    answered = true;
                 }
                 else powerModeFailed = true;
             }
             // A monitor that says it is off or on standby is taken at its word, and its brightness is left for a read that
-            // finds it on.
-            if (power is not (MonitorPowerState.Off or MonitorPowerState.Standby) && BrightnessDue(path))
+            // finds it on. One whose power mode failed is asked its brightness whether or not that is due, as only the answer
+            // tells a monitor that doesn't support power mode from one that has stopped answering.
+            if (powerModeFailed || (power is not (MonitorPowerState.Off or MonitorPowerState.Standby) && BrightnessDue(path)))
             {
                 Next(ref sent);
                 if (_windows.Brightness(monitor) is not { } setting) return Failed(path, power);
                 _brightnessAt[path] = _clock.GetTimestamp();
                 brightness = Normalise(setting.Minimum, setting.Current, setting.Maximum);
                 if (brightness is not null) _answered.Add(path);
-                answered = true;
-            }
-            if (powerModeFailed)
-            {
-                if (!answered) return Failed(path, power);   // it answered nothing in this read, so it has failed as a whole
-                _noPowerMode.Add(path);   // it answered its other requests, so it doesn't support this one
+                if (powerModeFailed) _powerModeFailures[path] = _powerModeFailures.GetValueOrDefault(path) + 1;   // it still answers
             }
         }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -386,7 +392,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         if (Interlocked.Exchange(ref _resetDue, 0) == 0) return;
         _readable.Clear();
         _unsupported.Clear();
-        _noPowerMode.Clear();
+        _powerModeFailures.Clear();
         _brightnessAt.Clear();
         _failed.Clear();
         _waiting.Clear();
