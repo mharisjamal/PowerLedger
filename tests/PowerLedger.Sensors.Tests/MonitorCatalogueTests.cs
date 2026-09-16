@@ -81,6 +81,40 @@ public class MonitorCatalogueTests
     }
 
     [Fact]
+    public void A_monitor_is_found_without_the_series_word_the_list_puts_before_its_model()
+    {
+        // EIZO lists the EV2740X as the FlexScan EV2740X, and MSI the MP243X as the PRO MP243X; the monitors leave the word out.
+        var eizo = Shipped.Find("ENC", "EV2740X", 27, 3840, 2160).ShouldNotBeNull();
+        eizo.ModelName.ShouldBe("FlexScan EV2740X");
+        eizo.OnW.ShouldBe(17);
+        Shipped.Find("MSI", "MSI MP243X", 24, 1920, 1080).ShouldNotBeNull().ModelNumber.ShouldBe("PRO MP243X");
+
+        // Only the last word names the model: MSI's PRO MP241 E14V is no MP241.
+        Shipped.Find("MSI", "MSI MP241", 23.8, 1920, 1080).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_name_edid_cut_short_at_thirteen_characters_matches_the_longer_names_it_begins()
+    {
+        // EDID holds thirteen characters of a name, so the PA27UCDMR and the VG27AQML1A can name themselves only this far.
+        Shipped.Find("AUS", "ASUS PA27UCDM", 27, 3840, 2160).ShouldNotBeNull().ModelNumber.ShouldBe("PA27UCDMR");
+        Shipped.Find("AUS", "ASUS VG27AQML", 27, 2560, 1440).ShouldNotBeNull().ModelNumber.ShouldBe("VG27AQML1A");
+
+        // The size must still agree, and a shorter name was not cut.
+        Shipped.Find("AUS", "ASUS PA27UCDM", 32, 3840, 2160).ShouldBeNull();
+        Shipped.Find("AUS", "ASUS PA27UCD", 27, 3840, 2160).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_whole_name_of_thirteen_characters_still_wins_over_the_longer_names_it_begins()
+    {
+        // Philips lists the 27B2N2100 at 13.48 W beside the 27B2N2100A and 27B2N2100F, whose median would be 13.86 W.
+        var monitor = Shipped.Find("PHL", "PHL 27B2N2100", 27, 1920, 1080).ShouldNotBeNull();
+        monitor.ModelNumber.ShouldBe("27B2N2100");
+        monitor.OnW.ShouldBe(13.48);
+    }
+
+    [Fact]
     public void A_monitor_listed_more_than_once_takes_the_median_of_its_listings()
     {
         // BenQ lists the GW2480 twice, at 10.2 W and 10 W.
