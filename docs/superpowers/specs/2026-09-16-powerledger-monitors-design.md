@@ -47,7 +47,7 @@ says where it came from.
 8. The reading's quality label keeps describing the PC's own reading; the labels beside it say how the monitors in the
    reading were figured.
 9. A monitor that fails a brightness request is left alone for the rest of the session, until a display change or a
-   resume, not for an hour.
+   resume.
 
 ## Where the numbers come from
 
@@ -191,10 +191,10 @@ preferences stops the reads.
 - **Settings.** A row per monitor: name, size and resolution, watts, where the figure came from, what it draws now,
   whether brightness could be read ("brightness 60%, read from the monitor", "brightness unknown, assumed 75%", or just
   "brightness unknown" for a typed figure, which no brightness scales), a typed override, and the wizard's **Count it**
-  and **has its own plug** boxes, with the same note. Clearing a typed figure goes back to PowerLedger's own. The rows
-  follow the service's status every ten seconds without losing a figure being typed or a box the user ticked, while a
-  box the user hasn't touched follows the service's defaults, so adding a monitor later shows it here without another
-  wizard. With no external monitor, the row says "none detected". About credits the ENERGY STAR list.
+  and **has its own plug** boxes, with a note like the wizard's. Clearing a typed figure goes back to PowerLedger's own.
+  The rows follow the service's status every ten seconds without losing a figure being typed or a box the user ticked,
+  while a box the user hasn't touched follows the service's defaults, so adding a monitor later shows it here without
+  another wizard. With no external monitor, the row says "none detected". About credits the ENERGY STAR list.
 - **Now, Breakdown and Report.** The Now screen's display row adds the monitors counted ("plus 2 monitors") and how the
   least sure of their figures was got: ", estimated" when any was estimated, otherwise ", brightness assumed" when a
   listed figure's brightness couldn't be read; figures measured for their models at a brightness read, and typed
@@ -308,8 +308,9 @@ preferences stops the reads.
   otherwise.
 - A few monitors land on the wrong side of the catalogue's rules. ASRock's monitors report `ASR`, which the registry
   doesn't list, so they match exact names only, and the PG27FF1A and its siblings miss the `PG27FF********` family
-  ASRock lists them under. Koorui's monitors report `HKC`, which is HKC's, so they miss Koorui's own listings. ASUS's 4K
-  PA328Q names itself PA328, the list's model number for its 1440p PA328CGV, and Acer's 1366 × 768 V206HQLB is taken for
-  its 1600 × 900 V206HQL b, because names are compared in upper case; as exact names, both keep those listings.
+  ASRock lists them under. Koorui's monitors report `HKC`, which stands for HKC here, so they miss Koorui's own
+  listings. ASUS's 4K PA328Q names itself PA328, the list's model number for its 1440p PA328CGV, and Acer's 1366 × 768
+  V206HQLB is taken for its 1600 × 900 V206HQL b, because names are compared in upper case; as exact names, both keep
+  those listings.
 - Twins that share a serial number are known for twins only once both have been attached since the service started.
   After a restart with one of them attached, it takes the shared key until the other is attached again.
