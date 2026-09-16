@@ -185,6 +185,36 @@ public class NowViewModelTests
     }
 
     [Fact]
+    public void A_refresh_term_makes_the_display_row_say_estimated_where_it_would_otherwise_say_nothing()
+    {
+        // What a refresh rate above 60 Hz adds is estimated, so a listed figure with it is partly estimated. That part is
+        // smaller than an assumed brightness can be out by, so where a brightness is assumed, the row still says that.
+        var fast = Statuses.Dell with { Key = "GSM5B08-2", Width = 2560, Height = 1440, RefreshHz = 165, RefreshWatts = 2.322432, WattsNow = 26.6 };
+        var unread = Statuses.Dell with { Key = "DELA0B1-2", Brightness = null };
+        _history.Snapshot = Snapshots.Typical(Now);
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+
+        string With(params MonitorStatus[] monitors)
+        {
+            _link.Status = Statuses.WithMonitors(monitors);
+            _clock.Advance(NowViewModel.StatusEvery);
+            return model.Live.Budget[2].Detail;
+        }
+
+        With(fast).ShouldBe("15.3 in · brightness 60% · plus 1 monitor, estimated");
+        With(Statuses.Dell, fast).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, estimated");
+        With(fast, unread).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, brightness assumed");
+        With(fast, Statuses.Aoc).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, estimated");
+
+        // A hair above 60 Hz adds what shows as 0.0 W, and the service adds nothing for an OLED panel or a typed figure.
+        With(fast with { RefreshHz = 60.02, RefreshWatts = 0.000442, WattsNow = 24.3 }).ShouldBe("15.3 in · brightness 60% · plus 1 monitor");
+        With(fast with { RefreshWatts = 0, WattsNow = 24.3 }).ShouldBe("15.3 in · brightness 60% · plus 1 monitor");
+    }
+
+    [Fact]
     public async Task A_display_band_with_no_panel_to_speak_of_says_what_it_counts()
     {
         _link.Status = Statuses.WithMonitors();

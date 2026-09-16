@@ -40,7 +40,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
 
     /// <summary>How the figures of the monitors counted were got, by the least sure of them: "estimated", "brightness
     /// assumed", or null when each was measured for its model, at a brightness read from it unless it is off or on standby,
-    /// or typed.</summary>
+    /// with nothing added for its refresh rate, or typed.</summary>
     private string? _monitorFigures;
 
     private ReadingFrame? _last;
@@ -267,12 +267,14 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         _monitorStates = PowerStates(counted);
         // Off, a monitor counts at its off figure and, on standby, at its sleep figure. Those are listed for its model or
         // estimated as its figure on is, so an estimated one is still estimated, but no brightness scales them. The status
-        // doesn't say which a typed monitor's are, so, as when it is on, a typed monitor adds nothing.
+        // doesn't say which a typed monitor's are, so, as when it is on, a typed monitor adds nothing. What a refresh rate
+        // above 60 Hz adds is estimated, which makes a listed figure partly estimated; that part is smaller than an assumed
+        // brightness can be out by, so it is said only where nothing less sure is.
         _monitorFigures = counted.Exists(monitor => monitor.Source == MonitorSource.Estimate) ? "estimated"
             : counted.Exists(monitor => monitor.Source == MonitorSource.Model && monitor.PowerState is not (MonitorPowerState.Off or MonitorPowerState.Standby)
                 && !(monitor.Brightness is { } brightness && double.IsFinite(brightness)))
                 ? "brightness assumed"
-                : null;
+                : counted.Exists(monitor => monitor.RefreshWatts >= MonitorRow.LeastRefreshWatts) ? "estimated" : null;
         var desktop = _settings?.Profile.Chassis == ChassisKind.Desktop;
         IsSensorless = !Supported(status, "energy-meter") && (desktop || !Supported(status, "battery"));
         var interval = _settings?.SampleIntervalSeconds ?? 1;
