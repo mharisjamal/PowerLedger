@@ -41,6 +41,7 @@ public class RenderingTests
         (Page.Report, "report", _ => { }, shell => new ReportView { DataContext = shell.Report }),
         (Page.Settings, "settings", _ => { }, shell => new SettingsView { DataContext = shell.Settings }),
         (Page.Now, "wizard", shell => shell.BeginSetup(), shell => new WizardView { DataContext = shell.Wizard }),
+        (Page.Now, "wizard-machine", MachineStep, shell => new WizardView { DataContext = shell.Wizard }),
     ];
 
     /// <summary>
@@ -130,6 +131,13 @@ public class RenderingTests
                     var statusTop = window.StatusBar.TranslatePoint(default, window).Y;
                     scroller.TranslatePoint(new Point(0, scroller.ActualHeight), window).Y.ShouldBeLessThanOrEqualTo(statusTop + 0.5, $"{name} runs under the status bar");
                     (statusTop + window.StatusBar.ActualHeight).ShouldBeLessThanOrEqualTo(window.ActualHeight, $"{name} pushes the status bar out");
+                    if (page == Page.Now && shell.IsSetup)
+                    {
+                        foreach (var monitor in shell.Wizard.Machine.Monitors)
+                        {
+                            Find<TextBox>(window, box => AutomationProperties.GetName(box) == $"Watts for {monitor.Name}").ShouldNotBeNull(name).IsVisible.ShouldBeTrue(name);
+                        }
+                    }
                     (scroller.ExtentHeight > scroller.ViewportHeight).ShouldBe(scrolls, $"{name} is {scroller.ExtentHeight:0} tall in a view {scroller.ViewportHeight:0} tall");
                     scroller.ComputedVerticalScrollBarVisibility.ShouldBe(scrolls ? Visibility.Visible : Visibility.Collapsed, name);
                     Save(window, 880, (int)height, $"short-{name}.png");
@@ -215,13 +223,15 @@ public class RenderingTests
         return updater;
     }
 
-    /// <summary>The wizard at its longest step: the machine, for a desktop, which adds the power supply's rating.</summary>
+    /// <summary>The wizard at its longest step: the machine, for a desktop, which adds the power supply's rating, with two
+    /// external monitors listed.</summary>
     private static void MachineStep(ShellViewModel shell)
     {
         shell.BeginSetup();
         shell.Wizard.Next.Execute(null);
         shell.Wizard.Step.ShouldBe(SetupStep.Machine);
         shell.Wizard.Machine.Chassis = ChassisKind.Desktop;
+        shell.Wizard.Machine.Monitors.Count.ShouldBe(2);
     }
 
     private static void Render()
@@ -399,9 +409,11 @@ public class RenderingTests
             TimeZoneInfo.Utc, English, "USD");
     }
 
+    /// <summary>The wizard against a running service that detected two external monitors: one in Energy Star's list, one
+    /// estimated from its size.</summary>
     private static WizardViewModel WizardScreen()
     {
-        var link = new FakeLink();
+        var link = new FakeLink { Status = Statuses.WithMonitors() };
         link.Connect(true);
         return new WizardViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");

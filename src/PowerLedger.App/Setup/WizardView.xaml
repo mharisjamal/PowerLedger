@@ -108,19 +108,41 @@
                         <RadioButton Style="{StaticResource Choice}" Content="Platinum" IsChecked="{Binding PsuTier, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:PsuTier.Platinum}}" />
                         <RadioButton Style="{StaticResource Choice}" Content="Titanium" IsChecked="{Binding PsuTier, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:PsuTier.Titanium}}" />
                     </StackPanel>
-                    <StackPanel Style="{StaticResource Row}">
-                        <TextBlock Style="{StaticResource Label}" Text="External monitors" />
-                        <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding ExternalMonitors, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="External monitors" />
-                        <CheckBox Style="{StaticResource Tick}" Content="Count them, at" Margin="14,0,8,0" IsChecked="{Binding IncludeMonitors}" />
-                        <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding MonitorWatts, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Watts per monitor" />
-                        <TextBlock Style="{StaticResource Text.Muted}" Text="W each" VerticalAlignment="Center" Margin="10,0,0,0" />
-                    </StackPanel>
+                    <!-- Each external monitor the service detected; none on a machine without one. -->
+                    <ItemsControl ItemsSource="{Binding Monitors}" Focusable="False" Visibility="{Binding HasMonitors, Converter={StaticResource VisibleWhen}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:MonitorRow}">
+                                <Grid Margin="0,5">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="250" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Style="{StaticResource Label}" TextTrimming="CharacterEllipsis">
+                                        <Run Text="{Binding Name, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Size, Mode=OneWay}" FontSize="12" Foreground="{DynamicResource Brush.Ink3}" />
+                                    </TextBlock>
+                                    <TextBox Grid.Column="1" Style="{StaticResource Field}" Width="56" Text="{Binding Watts, UpdateSourceTrigger=PropertyChanged}"
+                                             AutomationProperties.Name="{Binding Name, StringFormat=Watts for {0}}" />
+                                    <TextBlock Grid.Column="2" Style="{StaticResource Text.Muted}" Text="W" VerticalAlignment="Center" Margin="8,0,0,0" />
+                                    <CheckBox Grid.Column="3" Style="{StaticResource Tick}" Content="Count it" Margin="16,0,0,0" IsChecked="{Binding Counted}"
+                                              AutomationProperties.Name="{Binding Name, StringFormat=Count {0}}" />
+                                    <!-- Narrow enough that an estimate's note breaks at its dash rather than leaving a word behind. -->
+                                    <TextBlock Grid.Column="4" Style="{StaticResource Text.Muted}" Text="{Binding Source}" TextWrapping="Wrap" VerticalAlignment="Center"
+                                               HorizontalAlignment="Left" MaxWidth="165" Margin="16,0,0,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Extras such as lights and pumps, W" />
                         <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding ExtrasWatts, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Extras in watts" />
                     </StackPanel>
-                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,8,0,0"
-                               Text="External monitors have their own plugs, so they count only if you tick the box. The rest of the machine, memory and drives among them, is in Settings." />
+                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding HasMonitors, Converter={StaticResource VisibleWhen}}"
+                               Text="Monitors have their own plugs: untick one to leave it out. The rest of the machine, memory and drives among them, is in Settings." />
+                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding HasMonitors, Converter={StaticResource HiddenWhen}}"
+                               Text="The rest of the machine, memory and drives among them, is in Settings." />
                     <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
                 </StackPanel>
             </StackPanel>

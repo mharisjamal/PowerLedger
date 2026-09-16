@@ -189,4 +189,99 @@ public class WizardViewModelTests
         model.Machine.Chassis.ShouldBe(ChassisKind.Desktop);
         model.Readings.ShouldNotContain("On battery its readings are measured");
     }
+
+    [Theory]
+    [InlineData(false)]   // this service lists none
+    [InlineData(true)]    // a service from before monitors, which sends no list and no choices
+    public async Task Without_external_monitors_the_machine_step_lists_none_and_saves_nothing_about_them(bool olderService)
+    {
+        _link.Status = Statuses.Running() with { Monitors = olderService ? null : [] };
+        if (olderService) _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Monitors = null! } };
+        _link.Connect(true);
+        var model = Model();
+        await model.NextAsync();
+
+        model.Machine.HasMonitors.ShouldBeFalse();
+        model.Machine.Monitors.ShouldBeEmpty();
+        await model.NextAsync();
+
+        model.Step.ShouldBe(SetupStep.Readings);
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Each_monitor_is_listed_by_name_with_its_size_its_figure_and_where_the_figure_came_from()
+    {
+        _link.Status = Statuses.WithMonitors();
+        _link.Connect(true);
+        var model = Model();
+        await model.NextAsync();
+
+        model.Machine.HasMonitors.ShouldBeTrue();
+        model.Machine.Monitors.Select(m => (m.Name, m.Size, m.Watts, m.Source, m.Counted)).ShouldBe(
+        [
+            ("DELL U2723QE", "27 in · 3840 × 2160", "26.9", "measured for this model", true),
+            ("24B1XH5", "23.8 in · 1920 × 1080", "13.4", "estimated from its size — correct it if you know better", true),
+        ]);
+    }
+
+    [Fact]
+    public async Task Saving_the_machine_saves_a_choice_for_each_monitor_counted_as_ticked()
+    {
+        _link.Status = Statuses.WithMonitors();
+        _link.Connect(true);
+        var model = Model();
+        await model.NextAsync();
+        model.Machine.Monitors[1].Counted = false;
+        await model.NextAsync();
+
+        model.Step.ShouldBe(SetupStep.Readings);
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, Counted = true, Watts = null },
+            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false, Watts = null },
+        ]);
+    }
+
+    [Fact]
+    public async Task A_figure_typed_for_an_estimated_monitor_is_saved_as_its_watts()
+    {
+        _link.Status = Statuses.WithMonitors();
+        _link.Connect(true);
+        var model = Model();
+        await model.NextAsync();
+        model.Machine.Monitors[1].Watts = "17.5";
+        await model.NextAsync();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, Counted = true, Watts = null },
+            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = true, Watts = 17.5 },
+        ]);
+    }
+
+    [Fact]
+    public async Task Setup_run_again_shows_the_choices_already_made()
+    {
+        var typed = Statuses.Dell with { OnWatts = 30, Source = MonitorSource.Typed };
+        _link.Status = Statuses.WithMonitors(typed, Statuses.Aoc);
+        _link.Settings = ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultLaptop with
+            {
+                Monitors = [new MonitorChoice { Key = Statuses.Dell.Key, Counted = true, Watts = 30 }, new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false }],
+            },
+        };
+        _link.Connect(true);
+        var model = Model();
+        await model.NextAsync();
+
+        model.Machine.Monitors.Select(m => (m.Watts, m.Source, m.Counted)).ShouldBe(
+        [
+            ("30", "typed", true),
+            ("13.4", "estimated from its size — correct it if you know better", false),
+        ]);
+        await model.NextAsync();
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(_link.Settings.Profile.Monitors);
+    }
 }

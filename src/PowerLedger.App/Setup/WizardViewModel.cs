@@ -16,11 +16,11 @@ internal enum SetupStep
 }
 
 /// <summary>
-/// The first-run wizard (spec §9): the tariff, the detected hardware to confirm, and what measured, calibrated and
-/// estimated mean on this machine. A step saves before the wizard moves on and stays put when the save fails; an empty
-/// tariff means later. Without the service the machine can't be saved, so that step says so and moves on. The service
-/// may come up after the wizard does, as at the first start after installing, so the wizard reads again when it
-/// connects. Finishing is remembered in ui.json.
+/// The first-run wizard (spec §9): the tariff, the detected hardware to confirm, with each external monitor the service
+/// detected (Plan J), and what measured, calibrated and estimated mean on this machine. A step saves before the wizard
+/// moves on and stays put when the save fails; an empty tariff means later. Without the service the machine can't be
+/// saved, so that step says so and moves on. The service may come up after the wizard does, as at the first start after
+/// installing, so the wizard reads again when it connects. Finishing is remembered in ui.json.
 /// </summary>
 internal sealed class WizardViewModel : ObservableObject, IDisposable
 {
@@ -159,6 +159,7 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
         _threads.Post(() =>
         {
             if (settings is not null && (refill || !Machine.IsLoaded)) Machine.Load(settings);
+            if (status is not null) Machine.ShowMonitors(status.Monitors ?? []);   // a service before monitors lists none
             Detected = detected?.Summary(_culture) ?? "The service hasn't detected this machine yet; it does when it starts.";
             _status = status;
             Readings = ReadingsFor(_status, Machine.Chassis);

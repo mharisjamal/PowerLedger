@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -7,10 +8,11 @@ using PowerLedger.Contracts;
 namespace PowerLedger.App;
 
 /// <summary>
-/// What the service is told (spec §8): the machine profile as detected and corrected, the idle threshold in minutes, the
-/// sample interval, and how long history is kept. Numbers are typed in the user's culture. Each one that can't be read is
-/// named; then the service's own checks run before the settings are sent, whole. A form the service never filled can't
-/// be saved, so a stopped service is never sent defaults.
+/// What the service is told (spec §8): the machine profile as detected and corrected, with a choice for each external
+/// monitor the service detected, the idle threshold in minutes, the sample interval, and how long history is kept. Numbers
+/// are typed in the user's culture. Each one that can't be read is named; then the service's own checks run before the
+/// settings are sent, whole. A form the service never filled can't be saved, so a stopped service is never sent defaults.
+/// What the form doesn't show is sent as the service sent it, so the choices for monitors not attached now are kept.
 /// </summary>
 internal sealed class ServiceForm : ObservableObject
 {
@@ -18,6 +20,8 @@ internal sealed class ServiceForm : ObservableObject
     private readonly UiThreads _threads;
     private readonly CultureInfo _culture;
     private readonly RelayCommand _save;
+    private MachineProfile _profile = MachineProfile.DefaultLaptop;
+    private IReadOnlyList<MonitorChoice> _choices = [];
     private bool _isLoaded;
     private ChassisKind _chassis = MachineProfile.DefaultLaptop.Chassis;
     private PsuTier _psuTier = MachineProfile.DefaultLaptop.PsuTier;
@@ -94,6 +98,12 @@ internal sealed class ServiceForm : ObservableObject
 
     public string MonitorWatts { get => _monitorWatts; set => SetProperty(ref _monitorWatts, value); }
 
+    /// <summary>The external monitors the service detected, each with the user's choice for it (Plan J).</summary>
+    public ObservableCollection<MonitorRow> Monitors { get; } = [];
+
+    /// <summary>The monitor rows show only when there are monitors to list.</summary>
+    public bool HasMonitors => Monitors.Count > 0;
+
     public string ExtrasWatts { get => _extrasWatts; set => SetProperty(ref _extrasWatts, value); }
 
     /// <summary>The processor's rated watts; blank uses the bundled table.</summary>
@@ -115,10 +125,15 @@ internal sealed class ServiceForm : ObservableObject
 
     public ICommand Save => _save;
 
-    /// <summary>Fills the form from the service's settings.</summary>
+    /// <summary>Fills the form from the service's settings. The monitors are listed afresh by <see cref="ShowMonitors"/>,
+    /// with the choices these settings hold.</summary>
     public void Load(ServiceSettings settings)
     {
         var p = settings.Profile;
+        _profile = p;
+        _choices = p.Monitors ?? [];   // settings from a service before monitors hold no list
+        Monitors.Clear();
+        OnPropertyChanged(nameof(HasMonitors));
         Chassis = p.Chassis;
         PsuTier = p.PsuTier;
         RamSticks = Whole(p.RamSticks);
@@ -138,6 +153,18 @@ internal sealed class ServiceForm : ObservableObject
         RawHours = Whole(settings.RawRetentionHours);
         HistoryYears = Whole(settings.HistoryRetentionYears);
         IsLoaded = true;
+    }
+
+    /// <summary>Lists the external monitors in the service's status, once each, with the user's choice for each from the
+    /// settings last loaded.</summary>
+    public void ShowMonitors(IReadOnlyList<MonitorStatus> monitors)
+    {
+        Monitors.Clear();
+        foreach (var monitor in monitors.OfType<MonitorStatus>().DistinctBy(monitor => monitor.Key))
+        {
+            Monitors.Add(new MonitorRow(monitor, _choices.FirstOrDefault(choice => choice?.Key == monitor.Key), _culture));
+        }
+        OnPropertyChanged(nameof(HasMonitors));
     }
 
     /// <summary>Sends the settings typed, and says whether the service took them.</summary>
@@ -165,12 +192,14 @@ internal sealed class ServiceForm : ObservableObject
         int ramSticks = 0, ssds = 0, hdds = 0, fans = 0, monitors = 0, idle = 0, interval = 0, rawHours = 0, years = 0;
         double panel = 0, monitorWatts = 0, extras = 0;
         double? cpu = null, gpu = null;
+        IReadOnlyList<MonitorChoice> choices = [];
         _ = problem is null
             && Int(RamSticks, "the memory sticks", out ramSticks, ref problem) && Int(SsdCount, "the SSDs", out ssds, ref problem)
             && Int(HddCount, "the hard drives", out hdds, ref problem) && Int(FanCount, "the fans", out fans, ref problem)
             && Double(PanelInches, "the panel size in inches", out panel, ref problem)
             && Int(ExternalMonitors, "the external monitors", out monitors, ref problem)
             && Double(MonitorWatts, "a monitor's watts", out monitorWatts, ref problem)
+            && Choices(out choices, ref problem)
             && Double(ExtrasWatts, "the extras in watts", out extras, ref problem)
             && Optional(CpuTdp, "the processor's rated watts", out cpu, ref problem)
             && Optional(GpuTdp, "the graphics card's rated watts", out gpu, ref problem)
@@ -183,11 +212,11 @@ internal sealed class ServiceForm : ObservableObject
 
         var settings = new ServiceSettings
         {
-            Profile = new MachineProfile
+            Profile = _profile with
             {
                 Chassis = Chassis, PsuTier = PsuTier, RamSticks = ramSticks, RamIsDdr5 = RamIsDdr5, SsdCount = ssds, HddCount = hdds,
                 FanCount = fans, DisplayDiagonalInches = panel, ExternalMonitors = monitors, IncludeMonitors = IncludeMonitors,
-                MonitorWatts = monitorWatts, ExtrasWatts = extras, CpuTdpOverrideW = cpu, GpuTdpOverrideW = gpu,
+                MonitorWatts = monitorWatts, ExtrasWatts = extras, CpuTdpOverrideW = cpu, GpuTdpOverrideW = gpu, Monitors = choices,
             },
             IdleThresholdSeconds = idle * 60,
             SampleIntervalSeconds = interval,
@@ -196,6 +225,20 @@ internal sealed class ServiceForm : ObservableObject
         };
         problem = settings.Validate();
         return problem is null ? settings : null;
+    }
+
+    /// <summary>A choice for each monitor listed, then the choices loaded for monitors not attached now, as they were.</summary>
+    private bool Choices(out IReadOnlyList<MonitorChoice> choices, ref string? problem)
+    {
+        choices = [];
+        var listed = new List<MonitorChoice>();
+        foreach (var row in Monitors)
+        {
+            if (!Optional(row.Watts, $"the watts for {row.Name}", out var watts, ref problem)) return false;
+            listed.Add(row.Choice(watts));
+        }
+        choices = [.. listed, .. _choices.Where(choice => choice is not null && !listed.Exists(row => row.Key == choice.Key))];
+        return true;
     }
 
     private bool Int(string text, string what, out int value, ref string? problem)
