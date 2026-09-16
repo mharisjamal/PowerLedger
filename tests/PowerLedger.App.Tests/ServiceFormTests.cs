@@ -377,7 +377,8 @@ public class ServiceFormTests
         ticked.Counted = false;
         ticked.Counted = true;   // and back again, which is still the user's
 
-        // Say the chassis was saved as a desktop elsewhere, and the service now leaves monitors out unless told.
+        // Say the service has since taken settings saved elsewhere: a desktop's, where no monitor is taken to run off the PC,
+        // carried over from before monitors were detected, when they were left out unless the user said otherwise.
         form.ShowMonitors(
         [
             Statuses.Portable with { CountedByDefault = false, OwnPlugByDefault = true, OwnPlug = true },
