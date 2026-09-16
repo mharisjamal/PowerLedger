@@ -6,13 +6,15 @@ using PowerLedger.Core;
 namespace PowerLedger.App;
 
 /// <summary>
-/// One external monitor as the wizard and Settings list it (Plan J): what the service detected and worked out — the
-/// monitor's name, size and figure, where the figure came from, its brightness and what it draws now — with the user's
-/// choice: whether it counts, a figure of their own, and whether it has a plug of its own. A monitor without a choice
-/// counts, and has a plug of its own, as the service's defaults say, at PowerLedger's own figure; one that runs off this PC
-/// always counts, being part of what the PC draws. A figure the user typed is theirs until they clear it. The service's word
-/// is refreshed with its status, and the choice with its settings when a save reads them again; what the user typed or ticked
-/// never is, and a box they haven't touched follows the service's figure, defaults and choice.
+/// One external monitor as the wizard and Settings list it (Plan J): what the service detected, was told and worked out —
+/// the monitor's name, size and resolution, the refresh rate Windows drives it at, its figure and where that came from,
+/// whether it is on as the monitor said or PowerLedger can't tell, its brightness, what it draws now with what its refresh
+/// rate adds, and whether HDR is on, which may make it draw much more than any figure says — with the user's choice: whether
+/// it counts, a figure of their own, and whether it has a plug of its own. A monitor without a choice counts, and has a plug
+/// of its own, as the service's defaults say, at PowerLedger's own figure; one that runs off this PC always counts, being part
+/// of what the PC draws. A figure the user typed is theirs until they clear it. The service's word is refreshed with its
+/// status, and the choice with the settings a save reads again or sends; what the user typed or ticked never is, and a box
+/// they haven't touched follows the service's figure, defaults and choice.
 /// </summary>
 internal sealed class MonitorRow : ObservableObject
 {
