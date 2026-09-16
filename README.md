@@ -36,8 +36,12 @@ security fixes arrive with PowerLedger's updates.
 
 PowerLedger updates itself from this repository's releases. A minute after the App starts, and every hour after, it
 asks GitHub for the latest release; when there is a newer one, it downloads the installer quietly into
-`%LOCALAPPDATA%\PowerLedger\Updates` and keeps it only when its size and SHA-256 are the ones GitHub lists. Then a card at
-the bottom of the window's rail, one notification from the tray and an item in the tray menu offer **Restart to update**:
+`%LOCALAPPDATA%\PowerLedger\Updates` and keeps it only when its size and SHA-256 are the ones GitHub lists. On a metered
+connection — a phone hotspot, mobile data — nothing is downloaded: the card says the version is available with its size
+and a **Download** button, so you can still take it there and then, and otherwise it waits for a connection that isn't
+metered. An update takes the installer built for the PC, about 56 MB, and falls back to the universal one when a release
+doesn't carry one. Then a card at the bottom of the window's rail, one notification from the tray and an item in
+the tray menu offer **Restart to update**:
 Windows asks for permission, setup closes the App, updates the service and opens the new version. The check sends nothing
 about you or your PC; GitHub sees the request, with your IP address and `PowerLedger/<version>` as its user agent.
 Settings turns the checks off (**Download new versions quietly, then ask**) and has **Check now**. Drafts and
@@ -89,8 +93,10 @@ pwsh installer\build.ps1
 release from github.com/jrsoftware/issrc and refuses it unless its SHA-256 matches and it is validly signed by
 Pyrsys B.V., Inno Setup's publisher. `build.ps1` publishes both programs self-contained, for win-x64 and win-arm64,
 into `artifacts\publish`, and compiles `installer\PowerLedger.iss` into `installer\output`. The one installer holds
-both builds and installs the one that matches the PC; it downloads nothing. Its compression takes a few minutes;
-`-Fast` is quicker, for local builds, and makes a bigger installer. The installer is built with Inno Setup 7.1 or later; Inno
+both builds and installs the one that matches the PC; it downloads nothing. `-For` picks which to compile: `both`
+(default) holds every build; `x64` and `arm64` hold only their own, about 40% smaller, which is what an update
+downloads; `-For both,x64,arm64` makes all three, as a release does. Its compression takes a few minutes; `-Fast` is
+quicker, for local builds, and makes a bigger installer. The installer is built with Inno Setup 7.1 or later; Inno
 Setup 6's 32-bit compiler can't use its 256 MB compression dictionary. `build.ps1` finds Inno Setup 7 in its usual
 folders, then on PATH, or takes the compiler's path as `-Iscc`; it refuses an older compiler, even one first on PATH.
 
@@ -130,11 +136,12 @@ Raise `<Version>` in `Directory.Build.props`, commit and push `main`, write the 
 pwsh scripts\release.ps1 -Notes notes.md
 ```
 
-It checks that `main` is clean and pushed and that the version isn't released yet, builds the installer, creates the
-GitHub release `v<version>` at that commit with the notes and the installer, and checks that the SHA-256 GitHub lists is
-the local file's: every installed copy checks its download against it. `-Draft` makes a draft, which nobody is offered
-until it is published on GitHub; `-SkipBuild` uses the installer already in `installer\output`. `gh` has to be signed in
-to an account that can publish to the repository, or `GH_TOKEN` has to hold a token for one.
+It checks that `main` is clean and pushed and that the version isn't released yet, builds the universal installer and
+one per architecture, creates the GitHub release `v<version>` at that commit with the notes and all three installers,
+and checks that the SHA-256 GitHub lists for each is the local file's: every installed copy checks its download
+against it, taking whichever matches the PC. `-Draft` makes a draft, which nobody is offered until it is published on
+GitHub; `-SkipBuild` uses the installers already in `installer\output`. `gh` has to be signed in to an account that
+can publish to the repository, or `GH_TOKEN` has to hold a token for one.
 
 ## Documents
 
