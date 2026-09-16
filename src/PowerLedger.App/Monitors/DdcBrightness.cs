@@ -174,8 +174,9 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// <summary>What a monitor's power mode, the value of VCP code D6, says about whether it is on, or null for a value the
     /// standard doesn't define. The Monitor Control Command Set defines 1 as on, 2 as standby and 3 as suspend, both taken as
     /// standby here, 4 as off, and 5 as switched off the way the monitor's own power button does it. A reply carries the value
-    /// in two bytes, and one with anything in the upper byte is none of these, so it is no state rather than a guess.</summary>
-    internal static MonitorPowerState? PowerState(uint mode) => mode switch
+    /// in two bytes, and the standard's values for this code are the low byte's, so whatever a monitor leaves in the byte above
+    /// is ignored.</summary>
+    internal static MonitorPowerState? PowerState(uint mode) => (mode & 0xFF) switch
     {
         1 => MonitorPowerState.On,
         2 or 3 => MonitorPowerState.Standby,

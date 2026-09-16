@@ -52,6 +52,8 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     [InlineData(3u, MonitorPowerState.Standby)]     // suspend
     [InlineData(4u, MonitorPowerState.Off)]
     [InlineData(5u, MonitorPowerState.Off)]         // switched off as its own power button does
+    [InlineData(0x0101u, MonitorPowerState.On)]     // something in the byte above, which the value doesn't use
+    [InlineData(0xFF04u, MonitorPowerState.Off)]
     public void A_power_mode_reads_as_on_standby_or_off(uint mode, MonitorPowerState state)
         => DdcBrightness.PowerState(mode).ShouldBe(state);
 
@@ -59,7 +61,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     [InlineData(0u)]
     [InlineData(6u)]
     [InlineData(0xFFu)]
-    [InlineData(0x101u)]            // on, but with something in the byte above
+    [InlineData(0x0100u)]           // nothing in the low byte
     [InlineData(uint.MaxValue)]
     public void A_power_mode_the_standard_doesnt_give_is_no_state(uint mode)
         => DdcBrightness.PowerState(mode).ShouldBeNull();
