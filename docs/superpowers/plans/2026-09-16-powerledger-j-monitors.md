@@ -588,7 +588,14 @@ at once for the first review's findings and three at once for the second's. The 
   service took an empty brightness report, logged no error, and the App still answered six minutes on. A silent
   uninstall then removed the service and both data folders, and a fresh 0.4.0 install's wizard never asked about
   monitors and saved no default monitor choices.
-<!-- lead: CI run and both jobs' results, and the release link -->
+- CI run 35140536195, both jobs green: every test outside Hardware, UI and Installed passed (Core 134, Storage 49,
+  Sensors 412, Service 204, App 513), and the installer test installed the x64 installer on the x64 runner (PE 0x8664)
+  and the Arm64 installer on the Arm64 runner (PE 0xAA64), 62 of 62 checks on each.
+- Released: <https://github.com/mharisjamal/PowerLedger/releases/tag/v0.4.0>, three assets, each digest checked by
+  `release.ps1` against the file built from the tagged commit.
+- Before the release, at the owner's request, the whole history was rewritten so every commit and tag is authored by
+  the owner's GitHub account (mharisjamal) rather than an unlinked name; files and dates are unchanged, and the tags
+  v0.1.0 to v0.3.0 moved with their releases. Commit hashes quoted in earlier plans predate the rewrite.
 
 **First review** (whole branch): 8 findings, none critical, 5 important and 3 minor, all fixed.
 
