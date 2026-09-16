@@ -51,6 +51,10 @@ public sealed record MachineProfile
     /// reach the model.</summary>
     public IReadOnlyList<MonitorChoice> Monitors { get; init; } = [];
 
+    /// <summary>Whether an external monitor the user hasn't chosen for counts. False only where the settings from before
+    /// monitors were detected left monitors out, so a monitor first seen later is left out as they were.</summary>
+    public bool CountMonitorsByDefault { get; init; } = true;
+
     public static MachineProfile DefaultLaptop { get; } = new();
 
     public static MachineProfile DefaultDesktop { get; } = new()
@@ -73,9 +77,9 @@ public sealed record MachineProfile
 
     /// <summary>Every member but <see cref="Monitors"/>. A member added to the profile must be added here, and a test
     /// fails until it is.</summary>
-    private (ChassisKind, int, bool, int, int, int, PsuTier, double, int, bool, double, double, double?, double?) Members() =>
+    private (ChassisKind, int, bool, int, int, int, PsuTier, double, int, bool, double, double, double?, double?, bool) Members() =>
         (Chassis, RamSticks, RamIsDdr5, SsdCount, HddCount, FanCount, PsuTier, ExtrasWatts, ExternalMonitors, IncludeMonitors,
-            MonitorWatts, DisplayDiagonalInches, CpuTdpOverrideW, GpuTdpOverrideW);
+            MonitorWatts, DisplayDiagonalInches, CpuTdpOverrideW, GpuTdpOverrideW, CountMonitorsByDefault);
 
     private static bool SameChoices(IReadOnlyList<MonitorChoice>? a, IReadOnlyList<MonitorChoice>? b) =>
         ReferenceEquals(a, b) || (a is not null && b is not null && a.SequenceEqual(b));

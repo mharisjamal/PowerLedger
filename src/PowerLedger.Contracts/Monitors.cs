@@ -13,8 +13,9 @@ public enum MonitorSource
     Typed = 2,
 }
 
-/// <summary>What the user said about one monitor: whether it counts, and a figure of their own. A monitor with no choice
-/// counts, with the figure PowerLedger works out.</summary>
+/// <summary>What the user said about one monitor: whether it counts, a figure of their own, and whether it has a plug of its
+/// own. A monitor with no choice takes PowerLedger's defaults (see <see cref="MonitorStatus.CountedByDefault"/> and
+/// <see cref="MonitorStatus.OwnPlugByDefault"/>), with the figure PowerLedger works out.</summary>
 public sealed record MonitorChoice
 {
     public string Key { get; init; } = "";
@@ -23,6 +24,10 @@ public sealed record MonitorChoice
 
     /// <summary>On-mode watts typed by the user, or null for PowerLedger's own figure.</summary>
     public double? Watts { get; init; }
+
+    /// <summary>True for a monitor with a plug of its own, false for one that runs off this PC, or null for PowerLedger's
+    /// guess.</summary>
+    public bool? OwnPlug { get; init; }
 }
 
 /// <summary>One external monitor as the service sees it, for the App (spec §9).</summary>
@@ -51,6 +56,18 @@ public sealed record MonitorStatus
     public MonitorSource Source { get; init; }
 
     public bool Counted { get; init; }
+
+    /// <summary>Whether the monitor counts when the user hasn't said: false only where the settings from before monitors
+    /// were detected left monitors out (<see cref="MachineProfile.CountMonitorsByDefault"/>).</summary>
+    public bool CountedByDefault { get; init; } = true;
+
+    /// <summary>Whether the monitor is taken to have a plug of its own, drawing outside the PC, rather than to run off the
+    /// PC, whose own reading already holds what it draws.</summary>
+    public bool OwnPlug { get; init; } = true;
+
+    /// <summary>What <see cref="OwnPlug"/> is when the user hasn't said: false for a monitor of 17.3 inches or less on a
+    /// laptop, which is taken for a portable one running off the laptop.</summary>
+    public bool OwnPlugByDefault { get; init; } = true;
 
     /// <summary>The brightness the App last reported, 0–1, or null when the monitor didn't answer.</summary>
     public double? Brightness { get; init; }
