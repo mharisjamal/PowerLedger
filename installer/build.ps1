@@ -25,13 +25,19 @@ Compresses with lzma2/fast instead of lzma2/ultra64, for a quick local build.
 .PARAMETER TestVariants
 Also compiles the build the installer test needs into installer\output\test: the next patch version, for the upgrade.
 It is compressed with lzma2/fast, since the test doesn't care about its size.
+
+.PARAMETER For
+Which installers to compile: `both` holds every build, `x64` and `arm64` only their own and are about 40% smaller,
+which is what an update downloads.
 #>
 param(
     [string]$Configuration = 'Release',
     [string]$Iscc,
     [switch]$SkipPublish,
     [switch]$Fast,
-    [switch]$TestVariants
+    [switch]$TestVariants,
+    [ValidateSet('both', 'x64', 'arm64')]
+    [string[]]$For = @('both')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,23 +84,34 @@ $fastCompression = '/DCompression=lzma2/fast'
 
 # Inno Setup doesn't count files it picks per architecture toward the disk space setup asks for, so it is told what the
 # bigger build takes.
-$payload = (Get-ChildItem (Join-Path $root 'artifacts\publish') -Directory | ForEach-Object {
-        (Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum).Sum
-    } | Measure-Object -Maximum).Maximum
-if (-not $payload) { throw 'artifacts\publish is empty; run this without -SkipPublish.' }
-$payloadOption = "/DPayloadBytes=$([long]$payload)"
+$sizes = @{}
+foreach ($folder in Get-ChildItem (Join-Path $root 'artifacts\publish') -Directory) {
+    $sizes[$folder.Name] = (Get-ChildItem $folder.FullName -Recurse -File | Measure-Object Length -Sum).Sum
+}
+if ($sizes.Count -eq 0) { throw 'artifacts\publish is empty; run this without -SkipPublish.' }
+function Payload([string]$Architecture) {
+    $bytes = switch ($Architecture) {
+        'x64' { $sizes['win-x64'] }
+        'arm64' { $sizes['win-arm64'] }
+        default { ($sizes.Values | Measure-Object -Maximum).Maximum }
+    }
+    "/DPayloadBytes=$([long]$bytes)"
+}
 
-$options = @("/DAppVersion=$version", $payloadOption)
-if ($Fast) { $options += $fastCompression }
-Invoke-Iscc $options
-$made = @(Join-Path $PSScriptRoot "output\PowerLedger-$version-setup.exe")
+$made = @()
+foreach ($architecture in $For) {
+    $options = @("/DAppVersion=$version", (Payload $architecture), "/DArchitecture=$architecture")
+    if ($Fast) { $options += $fastCompression }
+    Invoke-Iscc $options
+    $made += Join-Path $PSScriptRoot ("output\PowerLedger-$version-setup{0}.exe" -f $(if ($architecture -eq 'both') { '' } else { "-$architecture" }))
+}
 
 if ($TestVariants) {
     $test = Join-Path $PSScriptRoot 'output\test'
     $current = [version]$version
     $next = '{0}.{1}.{2}' -f $current.Major, $current.Minor, ([Math]::Max($current.Build, 0) + 1)
     $upgrade = "PowerLedger-$next-setup"
-    Invoke-Iscc @("/DAppVersion=$next", $payloadOption, $fastCompression, "/O$test", "/F$upgrade")
+    Invoke-Iscc @("/DAppVersion=$next", (Payload 'both'), $fastCompression, "/O$test", "/F$upgrade")
     $made += Join-Path $test "$upgrade.exe"
 }
 

@@ -10,6 +10,9 @@
 #ifndef PayloadBytes
   #define PayloadBytes "0"
 #endif
+#ifndef Architecture
+  #define Architecture "both"
+#endif
 #define Publish "..\artifacts\publish"
 #define ServiceName "PowerLedger"
 
@@ -23,10 +26,21 @@ DefaultDirName={autopf}\PowerLedger
 DisableProgramGroupPage=yes
 DisableDirPage=auto
 PrivilegesRequired=admin
+#if Architecture == "x64"
+ArchitecturesAllowed=x64os
+ArchitecturesInstallIn64BitMode=x64os
+OutputBaseFilename=PowerLedger-{#AppVersion}-setup-x64
+#elif Architecture == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+OutputBaseFilename=PowerLedger-{#AppVersion}-setup-arm64
+#else
 ; A native build for each: x64 Windows gets the x64 build, Arm64 Windows 10 and 11 the Arm64 build (see [Files]).
 ; 32-bit Windows is refused with Inno Setup's own message.
 ArchitecturesAllowed=x64os or arm64
 ArchitecturesInstallIn64BitMode=x64os or arm64
+OutputBaseFilename=PowerLedger-{#AppVersion}-setup
+#endif
 MinVersion=10.0.17763
 ; Inno Setup doesn't count files picked per architecture (the Checks in [Files]) toward the disk space it asks for, so
 ; build.ps1 passes the bigger build's size; without it the destination page claimed a few MB.
@@ -35,7 +49,6 @@ AppMutex=PowerLedger.App
 CloseApplications=yes
 RestartApplications=no
 OutputDir=output
-OutputBaseFilename=PowerLedger-{#AppVersion}-setup
 ; One solid stream with a 256 MB dictionary, so the service's copy of the runtime compresses against the App's. Setup
 ; needs about 256 MB of memory to unpack it. build.ps1 -Fast and the test builds pass lzma2/fast, which keeps its own
 ; small dictionary: about twice the size, compiled several times sooner.
@@ -61,10 +74,14 @@ UninstallLogging=yes
 ; Each build carries its own runtime; the Check installs the one for this PC. x64 comes first, so x64 PCs, most of
 ; them, unpack only their own build; Arm64 PCs read through the x64 build first, a few seconds. One stream, rather than
 ; a chunk per build, keeps the installer 12 MB smaller, because the builds share many identical files.
+#if Architecture != "arm64"
 Source: "{#Publish}\win-x64\App\*"; DestDir: "{app}"; Check: not IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#Publish}\win-x64\Service\*"; DestDir: "{app}\Service"; Check: not IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
+#if Architecture != "x64"
 Source: "{#Publish}\win-arm64\App\*"; DestDir: "{app}"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#Publish}\win-arm64\Service\*"; DestDir: "{app}\Service"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 
 [Icons]
 Name: "{autoprograms}\PowerLedger"; Filename: "{app}\PowerLedger.exe"; Comment: "How much power this PC uses, and what it costs"
