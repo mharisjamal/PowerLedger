@@ -23,6 +23,8 @@ public sealed class BrightnessReporterTests : IDisposable
 
     private static MonitorBrightness Reported(MonitorStatus monitor, double brightness) => new() { Instance = monitor.Instance, Brightness = brightness };
 
+    private static MonitorPowerReading Reported(MonitorStatus monitor, MonitorPowerState state) => new() { Instance = monitor.Instance, State = state };
+
     [Fact]
     public void The_monitors_are_read_a_minute_after_start_and_every_five_minutes_after()
     {
@@ -47,11 +49,26 @@ public sealed class BrightnessReporterTests : IDisposable
     [Fact]
     public async Task Each_reading_is_reported_under_the_instance_the_service_names_the_monitor_by()
     {
-        _reader.Readings = [new DdcReading(Statuses.DellPath, 0.6, MonitorPowerState.On), new DdcReading(Statuses.AocPath, 0.35, MonitorPowerState.On)];
+        _reader.Readings = [new DdcReading(Statuses.DellPath, 0.6, MonitorPowerState.On), new DdcReading(Statuses.AocPath, 0.35, null)];
 
         await _reporter.ReportAsync();
 
-        _link.BrightnessReports.Single().Monitors.ShouldBe([Reported(Statuses.Dell, 0.6), Reported(Statuses.Aoc, 0.35)]);
+        var report = _link.BrightnessReports.Single();
+        report.Monitors.ShouldBe([Reported(Statuses.Dell, 0.6), Reported(Statuses.Aoc, 0.35)]);
+        report.Power.ShouldBe([Reported(Statuses.Dell, MonitorPowerState.On)]);   // the AOC gave no power state
+    }
+
+    [Fact]
+    public async Task A_report_is_sent_with_power_states_alone_when_no_brightness_was_read()
+    {
+        // Brightness is asked less often than the power mode, so most reads give power states only.
+        _reader.Readings = [new DdcReading(Statuses.DellPath, null, MonitorPowerState.Off), new DdcReading(Statuses.AocPath, null, MonitorPowerState.Standby)];
+
+        await _reporter.ReportAsync();
+
+        var report = _link.BrightnessReports.Single();
+        report.Monitors.ShouldBeEmpty();
+        report.Power.ShouldBe([Reported(Statuses.Dell, MonitorPowerState.Off), Reported(Statuses.Aoc, MonitorPowerState.Standby)]);
     }
 
     [Fact]
@@ -67,7 +84,9 @@ public sealed class BrightnessReporterTests : IDisposable
 
         await _reporter.ReportAsync();
 
-        _link.BrightnessReports.Single().Monitors.ShouldBe([Reported(Statuses.Dell, 0.6)]);
+        var report = _link.BrightnessReports.Single();
+        report.Monitors.ShouldBe([Reported(Statuses.Dell, 0.6)]);
+        report.Power.ShouldBe([Reported(Statuses.Dell, MonitorPowerState.On)]);
     }
 
     [Fact]
@@ -96,6 +115,7 @@ public sealed class BrightnessReporterTests : IDisposable
     [Fact]
     public async Task While_the_displays_are_off_no_monitor_is_asked()
     {
+        _reader.Readings = [new DdcReading(Statuses.DellPath, null, MonitorPowerState.Standby)];
         _link.Status = Statuses.WithMonitors() with { Last = Frames.At(_clock.GetUtcNow()) with { DisplayOn = false } };
 
         await _reporter.ReportAsync();
