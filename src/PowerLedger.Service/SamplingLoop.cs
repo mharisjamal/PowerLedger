@@ -201,7 +201,7 @@ internal sealed class SamplingLoop : BackgroundService
         _settings = settings;
         _facts = facts;
         _calibration.Use(facts.Hash, now);
-        _model = ModelFactory.Build(settings, facts, _calibration.Learner);
+        _model = ModelFactory.Build(settings, facts, _calibration.Learner, NoMonitors.Instance);
         _board.Publish(settings);
     }
 
@@ -334,7 +334,7 @@ internal sealed class SamplingLoop : BackgroundService
         var intervalChanged = settings.SampleIntervalSeconds != _settings.SampleIntervalSeconds;
         _settingsStore.Save(settings);
         _settings = settings;
-        _model = ModelFactory.Build(settings, _facts!, _calibration.Learner);
+        _model = ModelFactory.Build(settings, _facts!, _calibration.Learner, NoMonitors.Instance);
         _board.Publish(settings);
         return intervalChanged;
     }

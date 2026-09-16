@@ -93,14 +93,28 @@ public class SettingsTests
     [Fact]
     public void The_model_falls_back_to_the_chassis_default_for_a_processor_the_table_does_not_know()
     {
-        var model = ModelFactory.Build(ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop }, Facts.Desktop(), new CalibrationLearner());
+        var model = ModelFactory.Build(
+            ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop }, Facts.Desktop(), new CalibrationLearner(), NoMonitors.Instance);
         model.Evaluate(Samples.At(Samples.T0, cpuW: null, cpuLoad: 1)).Components.Cpu.ShouldBe(HardwareFacts.DesktopDefaults.CpuTdpW);
     }
 
     [Fact]
     public void The_model_uses_the_bundled_tdp_for_a_known_processor()
     {
-        var model = ModelFactory.Build(ServiceSettings.Default, Facts.Laptop(), new CalibrationLearner());
+        var model = ModelFactory.Build(ServiceSettings.Default, Facts.Laptop(), new CalibrationLearner(), NoMonitors.Instance);
         model.Evaluate(Samples.At(Samples.T0, cpuW: null, cpuLoad: 1)).Components.Cpu.ShouldBe(28);
+    }
+
+    [Fact]
+    public void The_model_counts_what_the_monitors_it_is_given_draw()
+    {
+        var model = ModelFactory.Build(
+            ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop }, Facts.Desktop(), new CalibrationLearner(), new FixedDraw(27.5));
+        model.Evaluate(Samples.At(Samples.T0)).Components.Monitors.ShouldBe(27.5);
+    }
+
+    private sealed class FixedDraw(double watts) : IMonitorDraw
+    {
+        public double Watts(bool displayOn) => watts;
     }
 }
