@@ -31,8 +31,10 @@ size and resolution. Each is counted at the figure the ENERGY STAR Certified Dis
 model the list doesn't have, at an estimate from its size and resolution. Where a monitor allows it, the App reads its
 brightness over the display cable, read-only, and the figure follows it; a monitor it can't read is taken to be at 75%
 brightness. The setup wizard lists the monitors it found, and asks nothing about monitors on a laptop on its own screen.
-In Settings you can leave a monitor out, type a figure of your own, which is used as typed, or untick **Read brightness
-from monitors (read-only)**.
+A portable monitor running off a laptop's USB-C port is part of what the laptop draws, so it always counts and is never
+counted twice; on a laptop, a monitor of 17.3 inches or less is taken to be one. If yours has a plug of its own, tick
+**has its own plug** beside it, in the wizard or in Settings. In Settings you can leave out a monitor with its own plug,
+type a figure of your own, which is used as typed, or untick **Read brightness from monitors (read-only)**.
 
 The monitor figures come from the dataset
 [ENERGY STAR Certified Displays](https://data.energystar.gov/Active-Specifications/ENERGY-STAR-Certified-Displays/qbg3-d468),
