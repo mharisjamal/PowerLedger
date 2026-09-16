@@ -6,10 +6,11 @@ as an update.
 
 .DESCRIPTION
 Run it from main, clean and pushed: the release is tagged at that commit. It refuses a version already released, builds
-the installer with installer\build.ps1 (or uses the one already in installer\output with -SkipBuild), creates the release
-vX.Y.Z with the notes in -Notes and the installer attached, and checks that the SHA-256 GitHub lists for the installer is
-the local file's, since every installed copy checks its download against that digest (spec §13). -Draft makes a draft,
-which nobody is offered until it is published on GitHub.
+the universal installer and one per architecture with installer\build.ps1 -For both,x64,arm64 (or uses the ones already
+in installer\output with -SkipBuild), since an update downloads whichever matches the PC, creates the release vX.Y.Z with
+the notes in -Notes and all three installers attached, and checks that the SHA-256 GitHub lists for each is the local
+file's, since every installed copy checks its download against that digest (spec §13). -Draft makes a draft, which
+nobody is offered until it is published on GitHub.
 
 gh must be signed in to an account that may publish to the repository, or GH_TOKEN must hold a token for one.
 
@@ -38,7 +39,11 @@ $version = ([xml](Get-Content (Join-Path $root 'Directory.Build.props'))).Projec
 if (-not $version) { throw 'No <Version> in Directory.Build.props.' }
 $tag = "v$version"
 $Notes = (Resolve-Path $Notes).Path
-$installer = Join-Path $root "installer\output\PowerLedger-$version-setup.exe"
+$installers = @(
+    Join-Path $root "installer\output\PowerLedger-$version-setup.exe"
+    Join-Path $root "installer\output\PowerLedger-$version-setup-x64.exe"
+    Join-Path $root "installer\output\PowerLedger-$version-setup-arm64.exe"
+)
 
 # The release is tagged at the commit that was built, which must be main as GitHub has it.
 $branch = Invoke-Native 'git branch' { git -C $root branch --show-current }
@@ -51,23 +56,26 @@ if ($head -ne $pushed) { throw "main ($head) isn't what GitHub has ($pushed); pu
 gh release view $tag --repo $Repo --json tagName *> $null
 if ($LASTEXITCODE -eq 0) { throw "$tag is already released; raise <Version> in Directory.Build.props for a new one." }
 
-if (-not $SkipBuild) { & (Join-Path $root 'installer\build.ps1') }
-if (-not (Test-Path $installer)) { throw "There is no installer at $installer; build it with installer\build.ps1." }
-$sha = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+if (-not $SkipBuild) { & (Join-Path $root 'installer\build.ps1') -For both,x64,arm64 }
+foreach ($file in $installers) { if (-not (Test-Path $file)) { throw "There is no installer at $file; build it with installer\build.ps1 -For both,x64,arm64." } }
+$shas = @{}
+foreach ($file in $installers) { $shas[(Split-Path $file -Leaf)] = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() }
 
-$create = @('release', 'create', $tag, $installer, '--repo', $Repo, '--target', $head, '--title', "PowerLedger $version", '--notes-file', $Notes)
+$create = @('release', 'create', $tag) + $installers + @('--repo', $Repo, '--target', $head, '--title', "PowerLedger $version", '--notes-file', $Notes)
 if ($Draft) { $create += '--draft' }
 Invoke-Native 'gh release create' { gh @create } | Out-Host
 
 # Installed copies check their download against this digest, so it has to be the file built here. GitHub works it out
 # after the upload, so it can take a few seconds to appear.
 foreach ($attempt in 1..20) {
-    $listed = (Invoke-Native 'gh release view' { gh release view $tag --repo $Repo --json assets } | ConvertFrom-Json).assets |
-        Where-Object name -eq (Split-Path $installer -Leaf)
-    if ($listed.digest) { break }
+    $listed = (Invoke-Native 'gh release view' { gh release view $tag --repo $Repo --json assets } | ConvertFrom-Json).assets
+    if (@($listed | Where-Object { -not $_.digest }).Count -eq 0) { break }
     Start-Sleep -Seconds 3
 }
-if ($listed.digest -ne "sha256:$sha") { throw "GitHub lists $($listed.digest ?? 'no SHA-256') for the installer, not sha256:$sha." }
+foreach ($name in $shas.Keys) {
+    $digest = ($listed | Where-Object name -eq $name).digest
+    if ($digest -ne "sha256:$($shas[$name])") { throw "GitHub lists $($digest ?? 'no SHA-256') for $name, not sha256:$($shas[$name])." }
+}
 if (-not $Draft) { Invoke-Native 'git fetch' { git -C $root fetch --quiet --tags origin } | Out-Null }
 "Released ${tag}: https://github.com/$Repo/releases/tag/$tag"
-"Installer SHA-256: $sha"
+foreach ($name in $shas.Keys) { "${name}: $($shas[$name])" }
