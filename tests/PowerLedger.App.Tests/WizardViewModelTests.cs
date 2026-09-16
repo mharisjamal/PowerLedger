@@ -226,7 +226,7 @@ public class WizardViewModelTests
     }
 
     [Fact]
-    public async Task Saving_the_machine_saves_a_choice_for_each_monitor_counted_as_ticked()
+    public async Task Saving_the_machine_saves_a_choice_for_a_monitor_unticked_and_none_for_one_left_counted()
     {
         _link.Status = Statuses.WithMonitors();
         _link.Connect(true);
@@ -236,11 +236,7 @@ public class WizardViewModelTests
         await model.NextAsync();
 
         model.Step.ShouldBe(SetupStep.Readings);
-        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
-        [
-            new MonitorChoice { Key = Statuses.Dell.Key, Counted = true, Watts = null },
-            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false, Watts = null },
-        ]);
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false, Watts = null }]);
     }
 
     [Fact]
@@ -253,11 +249,7 @@ public class WizardViewModelTests
         model.Machine.Monitors[1].Watts = "17.5";
         await model.NextAsync();
 
-        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
-        [
-            new MonitorChoice { Key = Statuses.Dell.Key, Counted = true, Watts = null },
-            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = true, Watts = 17.5 },
-        ]);
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Aoc.Key, Counted = true, Watts = 17.5 }]);
     }
 
     [Fact]

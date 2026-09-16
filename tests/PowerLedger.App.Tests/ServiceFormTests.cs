@@ -65,19 +65,37 @@ public class ServiceFormTests
         form.Message.ShouldBe("Saved.");
     }
 
-    [Fact]
-    public async Task The_old_monitor_count_and_figure_go_back_as_the_service_sent_them()
+    [Theory]
+    [InlineData(false)]   // no status read yet
+    [InlineData(true)]    // a status that lists none
+    public void While_no_monitor_is_listed_the_old_monitor_count_choice_and_figure_go_back_as_the_service_sent_them(bool statusRead)
     {
-        // They no longer reach the model and the form no longer shows them; the service carries them over to the
-        // monitors it detects, once, so the form must neither change them nor put them back to their defaults.
-        var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 30 };
+        // They no longer reach the model and the form doesn't show them; the service carries them over to the monitors it
+        // detects, once, so until the form lists a monitor it must neither change them nor put them back to their defaults.
+        var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 30, Monitors = [] };
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = old });
+        if (statusRead) form.ShowMonitors([]);
+
+        var profile = form.Read(out _).ShouldNotBeNull().Profile;
+
+        (profile.ExternalMonitors, profile.IncludeMonitors, profile.MonitorWatts).ShouldBe((2, true, 30.0));
+    }
+
+    [Fact]
+    public void Once_a_monitor_is_listed_the_choices_shown_replace_the_old_monitor_count_and_choice()
+    {
+        // A monitor counted at its own figure saves no choice, so with the old count kept the service would find nothing
+        // chosen at its next start and carry the count over again, on top of what the user saved. The old figure no longer
+        // reaches the model, and goes back as the service sent it.
+        var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 30, Monitors = [] };
         var form = new ServiceForm(_link, UiThreads.Inline, English);
         form.Load(ServiceSettings.Default with { Profile = old });
         form.ShowMonitors([Statuses.Dell]);
 
-        (await form.SaveAsync()).ShouldBeTrue();
+        var profile = form.Read(out _).ShouldNotBeNull().Profile;
 
-        ((ServiceSettings)_link.Writes.Single()).Profile.ShouldBe(old with { Monitors = [new MonitorChoice { Key = Statuses.Dell.Key }] });
+        (profile.ExternalMonitors, profile.IncludeMonitors, profile.MonitorWatts).ShouldBe((0, false, 30.0));
     }
 
     [Fact]
@@ -156,7 +174,7 @@ public class ServiceFormTests
 
         (await form.SaveAsync()).ShouldBeTrue();
 
-        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.Single().Watts.ShouldBeNull();
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBeEmpty();   // counted at its own figure, which needs no choice
     }
 
     [Fact]
@@ -213,7 +231,66 @@ public class ServiceFormTests
         var sent = _link.Writes.Cast<ServiceSettings>().ToList();
         sent.Count.ShouldBe(2);
         sent[0].Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Dell.Key, Counted = false }, unplugged]);
-        sent[1].Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Dell.Key, Counted = true }, unplugged]);
+        sent[1].Profile.Monitors.ShouldBe([unplugged]);   // counted again, the Dell needs no choice, and the one loaded for it goes
+    }
+
+    [Fact]
+    public async Task A_monitors_choice_is_saved_only_when_it_isnt_counted_or_has_a_figure_typed()
+    {
+        // A monitor with no choice counts, at PowerLedger's own figure, so a choice that says no more needs no entry.
+        var form = Form();
+        var third = Statuses.Aoc with { Key = "AOC2402-2" };
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc, third]);
+        form.Monitors[1].Counted = false;
+        form.Monitors[2].Watts = "17";
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false },
+            new MonitorChoice { Key = third.Key, Watts = 17 },
+        ]);
+    }
+
+    [Fact]
+    public async Task Of_the_choices_for_monitors_not_attached_now_only_those_that_say_something_are_kept_in_the_order_loaded()
+    {
+        MonitorChoice[] loaded =
+        [
+            new MonitorChoice { Key = "LEN66F2-V906LMHT", Counted = false },
+            new MonitorChoice { Key = "SAM0F9E-HNTW700123" },   // counted at its own figure, as carrying the old settings over can leave one
+            new MonitorChoice { Key = "GSM5B09-104NTAB2C123", Watts = 41 },
+        ];
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Monitors = loaded } });
+        form.ShowMonitors([Statuses.Dell]);
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe([loaded[0], loaded[2]]);
+    }
+
+    [Fact]
+    public void A_save_puts_the_monitors_attached_first_and_drops_the_choices_for_those_unseen_longest_beyond_the_limit()
+    {
+        // Each save puts the monitors attached first, so the choices loaded run from the monitor seen most recently.
+        MonitorChoice[] unplugged = [.. Enumerable.Range(0, 20).Select(i => new MonitorChoice { Key = $"GSM5B09-{i}", Counted = false })];
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Monitors = unplugged } });
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        form.Monitors[0].Counted = false;
+        form.Monitors[1].Watts = "17";
+
+        var settings = form.Read(out var problem);
+
+        problem.ShouldBeNull();
+        settings.ShouldNotBeNull().Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, Counted = false },
+            new MonitorChoice { Key = Statuses.Aoc.Key, Watts = 17 },
+            .. unplugged.Take(14),
+        ]);
     }
 
     [Fact]
@@ -247,7 +324,8 @@ public class ServiceFormTests
         form.Monitors.Single().Watts = typed;
         (await form.SaveAsync()).ShouldBeTrue();
 
-        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.Single().Watts.ShouldBe(saved);
+        // Without a figure of its own, the counted monitor needs no choice.
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.Select(m => m.Watts).ShouldBe(saved is null ? [] : [saved]);
     }
 
     [Fact]
@@ -266,7 +344,9 @@ public class ServiceFormTests
         row.Watts = "";
         (await form.SaveAsync()).ShouldBeTrue();
 
-        _link.Writes.Cast<ServiceSettings>().Select(s => s.Profile.Monitors.Single().Watts).ShouldBe([30.0, null]);
+        var sent = _link.Writes.Cast<ServiceSettings>().ToList();
+        sent[0].Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Dell.Key, Watts = 30 }]);
+        sent[1].Profile.Monitors.ShouldBeEmpty();   // cleared, it counts at PowerLedger's own figure, which needs no choice
     }
 
     [Fact]
