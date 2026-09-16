@@ -12,8 +12,10 @@ and printed as PASS, FAIL or SKIP, and the exit code is the number of failures. 
 <Results>\dialogs.log.
 
 The default steps are silent, so CI can run them: Preflight, Install, Service, Data, Recovery, ServiceStop, Upgrade,
-UninstallKeep, Reinstall, Cleanup. Upgrade runs setup as the App's Restart to update does, with /UPDATE=1, and checks
-that the App opens again; UninstallKeep then closes it. Three more need a desktop. InstallWizard and UninstallDelete
+UninstallKeep, Reinstall, Architecture, Cleanup. Upgrade runs setup as the App's Restart to update does, with /UPDATE=1, and checks
+that the App opens again; UninstallKeep then closes it. Architecture installs the per-architecture build an update would
+download, `-x64` or `-arm64` to match this PC, over what Reinstall left, and is skipped when that installer wasn't built.
+Three more need a desktop. InstallWizard and UninstallDelete
 start setup or the uninstaller and answer it themselves (InstallWizard installs with the wizard, as somebody new to
 PowerLedger would, for a clean Windows such as Windows Sandbox); DriveWizard waits for a setup somebody else started,
 unelevated say, and drives it to the end.
@@ -29,9 +31,9 @@ folder only when this run's Preflight found none there.
 #>
 param(
     [ValidateSet('Preflight', 'Install', 'Service', 'Data', 'Recovery', 'ServiceStop', 'Upgrade', 'UninstallKeep', 'Reinstall',
-        'UninstallDelete', 'InstallWizard', 'DriveWizard', 'Cleanup')]
+        'Architecture', 'UninstallDelete', 'InstallWizard', 'DriveWizard', 'Cleanup')]
     [string[]]$Step = @('Preflight', 'Install', 'Service', 'Data', 'Recovery', 'ServiceStop', 'Upgrade', 'UninstallKeep',
-        'Reinstall', 'Cleanup'),
+        'Reinstall', 'Architecture', 'Cleanup'),
     [string]$Setup,
     [string]$Upgrade,
     [string]$Results,
@@ -664,6 +666,23 @@ function Step-Reinstall {
     Check Reinstall 'service running' { Assert (Wait-ServiceRunning 30) (Get-ServiceState) }
     Check Reinstall 'status: no database notice' { $status = Get-PipeStatus; Assert ($null -eq $status.databaseNotice) "databaseNotice $($status.databaseNotice ?? 'null')" }
     Confirm-HistoryKept Reinstall $before
+}
+
+# The per-architecture installer an update downloads: it must install over what is already there, on this PC's architecture.
+function Step-Architecture {
+    $architecture = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'x64' }
+    $own = Join-Path $output "PowerLedger-$version-setup-$architecture.exe"
+    if (-not (Test-Path $own)) {
+        Skip Architecture "the $architecture installer installs over what is there" "no $([IO.Path]::GetFileName($own)); build it with installer\build.ps1 -For both,x64,arm64"
+        return
+    }
+    Check Architecture "the $architecture installer exits 0" { $code = Invoke-Setup $own $Silent; Assert ($code -eq 0) "exit code $code" }
+    Check Architecture 'service running' { Assert (Wait-ServiceRunning 30) (Get-ServiceState) }
+    Check Architecture "App and service are this PC's build" {
+        $expected = $PeMachines["$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"]
+        $found = foreach ($exe in $AppExe, $ServiceExe) { '{0} 0x{1:X4}' -f (Split-Path $exe -Leaf), (Get-PeMachine $exe) }
+        Assert (@($AppExe, $ServiceExe | Where-Object { (Get-PeMachine $_) -ne $expected }).Count -eq 0) ($found -join ', ')
+    }
 }
 
 function Step-UninstallDelete {
