@@ -126,7 +126,7 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         {
             return new Figured(facts, name, listed.OnW, listed.SleepW, MonitorSource.Model);
         }
-        var (onW, sleepW) = MonitorEstimate.For(facts.Inches, facts.Width, facts.Height, catalogue);
+        var (onW, sleepW, _) = MonitorEstimate.For(facts.Inches, facts.Width, facts.Height, catalogue);
         return new Figured(facts, name, onW, sleepW, MonitorSource.Estimate);
     }
 
