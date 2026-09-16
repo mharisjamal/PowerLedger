@@ -25,10 +25,19 @@ public class MonitorBoardTests
     internal static readonly MonitorFacts Unnamed = new(
         @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", "GSM", "5B08", "", 27, 1920, 1080);
 
+    /// <summary>A 15.6-inch portable monitor, which the list doesn't know.</summary>
+    internal static readonly MonitorFacts Portable = new(
+        @"DISPLAY\AUS1B2C\7&3C4D&0&UID4355", "AUS1B2C-N7LMTF012345", "AUS", "1B2C", "ASUS MB16AC", 15.6, 1920, 1080);
+
     private readonly FakeTimeProvider _clock = new();
     private readonly MonitorBoard _board;
 
     public MonitorBoardTests() => _board = new MonitorBoard(Catalogue, _clock);
+
+    /// <summary>A laptop's profile holding these choices, as the loop gives the board its settings.</summary>
+    private static MachineProfile Laptop(params MonitorChoice[] choices) => MachineProfile.DefaultLaptop with { Monitors = choices };
+
+    private static MachineProfile Desktop(params MonitorChoice[] choices) => MachineProfile.DefaultDesktop with { Monitors = choices };
 
     [Fact]
     public void With_no_monitors_the_list_is_empty_and_they_draw_nothing()
@@ -59,11 +68,15 @@ public class MonitorBoardTests
             SleepWatts = 0.74,
             Source = MonitorSource.Model,
             Counted = true,
+            CountedByDefault = true,
+            OwnPlug = true,
+            OwnPlugByDefault = true,
             Brightness = null,
             WattsNow = monitor.WattsNow,
         });
         monitor.WattsNow.ShouldBe(28.32, 1e-9);
         _board.Watts(displayOn: true).OwnPlug.ShouldBe(28.32, 1e-9);
+        _board.Watts(displayOn: true).FromPc.ShouldBe(0);
     }
 
     [Fact]
@@ -83,10 +96,11 @@ public class MonitorBoardTests
     public void A_monitor_the_user_does_not_count_draws_nothing_but_still_shows_its_figure()
     {
         _board.Detected([Dell, Unnamed]);
-        _board.Choose([new MonitorChoice { Key = Unnamed.Key, Counted = false }]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Unnamed.Key, Counted = false }));
 
         var status = _board.Status(displayOn: true);
         status.Select(m => m.Counted).ShouldBe([true, false]);
+        status.Select(m => m.CountedByDefault).ShouldBe([true, true]);
         status[1].OnWatts.ShouldBe(14.41);
         status[1].WattsNow.ShouldBe(0);
         _board.Watts(displayOn: true).OwnPlug.ShouldBe(28.32, 1e-9);
@@ -94,10 +108,120 @@ public class MonitorBoardTests
     }
 
     [Fact]
+    public void With_monitors_left_out_by_default_one_the_user_has_not_chosen_for_is_not_counted_and_a_choice_counts_it()
+    {
+        _board.Detected([Dell, Unnamed]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Unnamed.Key, Counted = true }) with { CountMonitorsByDefault = false });
+
+        var status = _board.Status(displayOn: true);
+        status.Select(m => (m.Counted, m.CountedByDefault)).ShouldBe([(false, false), (true, false)]);
+        status[0].OnWatts.ShouldBe(28.32);
+        status[0].WattsNow.ShouldBe(0);
+        status[1].WattsNow.ShouldBe(14.41, 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(14.41, 1e-9);
+        _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.13, 1e-9);
+
+        // Counting by default again, the monitor with no choice counts.
+        _board.Choose(Laptop(new MonitorChoice { Key = Unnamed.Key, Counted = true }));
+        _board.Status(displayOn: true).Select(m => (m.Counted, m.CountedByDefault)).ShouldBe([(true, true), (true, true)]);
+    }
+
+    [Theory]
+    [InlineData(ChassisKind.Laptop, 15.6, false)]
+    [InlineData(ChassisKind.Laptop, 17.3, false)]
+    [InlineData(ChassisKind.Laptop, 18.5, true)]
+    [InlineData(ChassisKind.Laptop, 24, true)]
+    [InlineData(ChassisKind.Laptop, 0, true)]
+    [InlineData(ChassisKind.Desktop, 15.6, true)]
+    public void Only_a_monitor_small_enough_to_be_a_portable_one_is_taken_to_run_off_a_laptop(ChassisKind chassis, double inches, bool ownPlug)
+    {
+        _board.Detected([Portable with { Inches = inches }]);
+        _board.Choose(chassis == ChassisKind.Laptop ? Laptop() : Desktop());
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        monitor.OwnPlugByDefault.ShouldBe(ownPlug);
+        monitor.OwnPlug.ShouldBe(ownPlug);
+        monitor.Counted.ShouldBeTrue();
+        monitor.WattsNow.ShouldBeGreaterThan(0);
+        _board.Watts(displayOn: true).ShouldBe(ownPlug ? new MonitorWatts(OwnPlug: monitor.WattsNow, FromPc: 0) : new MonitorWatts(OwnPlug: 0, FromPc: monitor.WattsNow));
+    }
+
+    [Fact]
+    public void On_a_laptop_a_portable_monitor_draws_from_it_beside_a_desk_monitor_with_a_plug_of_its_own()
+    {
+        _board.Detected([Dell, Portable]);
+        _board.Choose(Laptop());
+
+        var status = _board.Status(displayOn: true);
+        var estimate = MonitorEstimate.For(15.6, 1920, 1080, Catalogue);
+        status[1].ShouldBe(new MonitorStatus
+        {
+            Key = Portable.Key,
+            Instance = Portable.Instance,
+            Name = "ASUS MB16AC",
+            Inches = 15.6,
+            Width = 1920,
+            Height = 1080,
+            OnWatts = estimate.OnW,
+            SleepWatts = estimate.SleepW,
+            Source = MonitorSource.Estimate,
+            Counted = true,
+            CountedByDefault = true,
+            OwnPlug = false,
+            OwnPlugByDefault = false,
+            Brightness = null,
+            WattsNow = status[1].WattsNow,
+        });
+        status[0].OwnPlug.ShouldBeTrue();
+        status[1].WattsNow.ShouldBe(estimate.OnW, 1e-9);
+
+        var on = _board.Watts(displayOn: true);
+        on.OwnPlug.ShouldBe(28.32, 1e-9);
+        on.FromPc.ShouldBe(estimate.OnW, 1e-9);
+        var asleep = _board.Watts(displayOn: false);
+        asleep.OwnPlug.ShouldBe(0.74, 1e-9);
+        asleep.FromPc.ShouldBe(estimate.SleepW, 1e-9);
+    }
+
+    [Fact]
+    public void What_the_user_says_about_a_monitor_s_plug_wins_over_the_guess()
+    {
+        _board.Detected([Portable]);
+
+        // A portable monitor on a charger of its own.
+        _board.Choose(Laptop(new MonitorChoice { Key = Portable.Key, OwnPlug = true }));
+        var charged = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (charged.OwnPlug, charged.OwnPlugByDefault).ShouldBe((true, false));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: charged.WattsNow, FromPc: 0));
+
+        // The same monitor running off a desktop's USB-C port.
+        _board.Choose(Desktop(new MonitorChoice { Key = Portable.Key, OwnPlug = false }));
+        var powered = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (powered.OwnPlug, powered.OwnPlugByDefault).ShouldBe((false, true));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: powered.WattsNow));
+    }
+
+    [Fact]
+    public void A_typed_figure_for_a_monitor_running_off_the_pc_is_taken_as_it_is_and_one_worked_out_is_scaled_by_brightness()
+    {
+        _board.Detected([Dell, Portable]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Portable.Key, Watts = 6 }, new MonitorChoice { Key = Dell.Key, OwnPlug = false }));
+        _board.Report(
+        [
+            new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.2 },
+            new MonitorBrightness { Instance = Portable.Instance, Brightness = 0.2 },
+        ]);
+
+        var on = _board.Watts(displayOn: true);
+        on.OwnPlug.ShouldBe(0);
+        on.FromPc.ShouldBe(MonitorPower.At(28.32, 0.2) + 6, 1e-9);
+    }
+
+    [Fact]
     public void A_typed_figure_wins_and_the_sleep_figure_stays_the_one_worked_out()
     {
         _board.Detected([Dell]);
-        _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 40 }]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Watts = 40 }));
 
         var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
         monitor.Source.ShouldBe(MonitorSource.Typed);
@@ -106,7 +230,7 @@ public class MonitorBoardTests
         _board.Watts(displayOn: true).OwnPlug.ShouldBe(40, 1e-9);
 
         // New choices replace the old ones whole.
-        _board.Choose([]);
+        _board.Choose(Laptop());
         _board.Status(displayOn: true).ShouldHaveSingleItem().Source.ShouldBe(MonitorSource.Model);
     }
 
@@ -133,7 +257,7 @@ public class MonitorBoardTests
     public void A_typed_figure_is_taken_as_it_is_whatever_the_brightness()
     {
         _board.Detected([Dell]);
-        _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 30 }]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Watts = 30 }));
         _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.2 }]);
 
         var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
@@ -148,7 +272,7 @@ public class MonitorBoardTests
     public void With_the_display_off_a_monitor_with_a_typed_figure_draws_its_sleep_figure()
     {
         _board.Detected([Dell]);
-        _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 30 }]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Watts = 30 }));
         _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.2 }]);
 
         _board.Status(displayOn: false).ShouldHaveSingleItem().WattsNow.ShouldBe(0.74);
@@ -159,7 +283,7 @@ public class MonitorBoardTests
     public void A_listed_figure_beside_a_typed_one_is_still_scaled_by_the_same_brightness()
     {
         _board.Detected([Dell, Unnamed]);
-        _board.Choose([new MonitorChoice { Key = Unnamed.Key, Watts = 30 }]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Unnamed.Key, Watts = 30 }));
         _board.Report(
         [
             new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.2 },
@@ -251,7 +375,11 @@ public class MonitorBoardTests
                 _board.Detected([Dell]);
             }),
             Repeat(() => _board.Report([new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.5 }])),
-            Repeat(() => _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 30 }])),
+            Repeat(() =>
+            {
+                _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Watts = 30 }));
+                _board.Choose(Desktop(new MonitorChoice { Key = Dell.Key, OwnPlug = false }));
+            }),
             Repeat(() => _board.Watts(displayOn: true).Total.ShouldBeGreaterThan(0)),
             Repeat(() => _board.Status(displayOn: false).ShouldNotBeEmpty()));
     }

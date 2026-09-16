@@ -16,6 +16,10 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     /// or a monitor that stopped answering, and counts as unknown.</summary>
     public static readonly TimeSpan BrightnessStale = TimeSpan.FromMinutes(15);
 
+    /// <summary>The largest monitor taken, on a laptop, for a portable one running off it when the user hasn't said.
+    /// Portable monitors come in 13 to 17.3 inches; a monitor that gives no size is taken to have a plug of its own.</summary>
+    public const double LargestPortableInches = 17.3;
+
     private readonly Lock _gate = new();
 
     /// <summary>The last reading for each monitor by instance, kept while it is fresh even if the monitor goes missing from
@@ -24,6 +28,13 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
 
     private Figured[] _monitors = [];
     private Dictionary<string, MonitorChoice> _choices = new(StringComparer.Ordinal);
+
+    /// <summary>What a monitor the user hasn't chosen for takes from the profile: whether it counts, and whether the PC is a
+    /// laptop, which a monitor small enough is taken to run off. Until the settings are chosen, a laptop's that counts its
+    /// monitors, as the default settings are.</summary>
+    private bool _countedByDefault = true;
+
+    private bool _onLaptop = true;
 
     /// <summary>What WMI found. Figures are worked out only for monitors that are new or changed, and outside the lock.</summary>
     public void Detected(IReadOnlyList<MonitorFacts> monitors)
@@ -42,12 +53,19 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         }
     }
 
-    /// <summary>The user's choices from the settings, replacing the ones before.</summary>
-    public void Choose(IReadOnlyList<MonitorChoice> choices)
+    /// <summary>The user's choices from the settings' profile, replacing the ones before, with what the profile says for a
+    /// monitor they haven't chosen for: whether it counts, and the chassis, which decides whether it is taken to run off
+    /// the PC.</summary>
+    public void Choose(MachineProfile profile)
     {
         var byKey = new Dictionary<string, MonitorChoice>(StringComparer.Ordinal);
-        foreach (var choice in choices) byKey[choice.Key] = choice;
-        lock (_gate) _choices = byKey;
+        foreach (var choice in profile.Monitors) byKey[choice.Key] = choice;
+        lock (_gate)
+        {
+            _choices = byKey;
+            _countedByDefault = profile.CountMonitorsByDefault;
+            _onLaptop = profile.Chassis == ChassisKind.Laptop;
+        }
     }
 
     /// <summary>The App's report; a brightness older than <see cref="BrightnessStale"/> counts as unknown. Only a monitor
@@ -66,16 +84,23 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         }
     }
 
-    /// <summary>What every counted monitor draws: with the display on, a figure the user typed as it is, or PowerLedger's
-    /// own at the monitor's brightness; asleep, its sleep figure. Every monitor is taken to have a plug of its own.</summary>
+    /// <summary>What every counted monitor draws, split by whether it has a plug of its own or runs off the PC: with the
+    /// display on, a figure the user typed as it is, or PowerLedger's own at the monitor's brightness; asleep, its sleep
+    /// figure.</summary>
     public MonitorWatts Watts(bool displayOn)
     {
         var now = clock.GetTimestamp();
         lock (_gate)
         {
-            var watts = 0.0;
-            foreach (var monitor in _monitors) watts += Describe(monitor, displayOn, now).WattsNow;
-            return new MonitorWatts(OwnPlug: watts, FromPc: 0);
+            var ownPlug = 0.0;
+            var fromPc = 0.0;
+            foreach (var monitor in _monitors)
+            {
+                var status = Describe(monitor, displayOn, now);
+                if (status.OwnPlug) ownPlug += status.WattsNow;
+                else fromPc += status.WattsNow;
+            }
+            return new MonitorWatts(ownPlug, fromPc);
         }
     }
 
@@ -104,7 +129,10 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         var facts = monitor.Facts;
         var choice = _choices.GetValueOrDefault(facts.Key);
         var onW = choice?.Watts ?? monitor.OnW;
-        var counted = choice?.Counted ?? true;
+        var counted = choice?.Counted ?? _countedByDefault;
+        // A laptop's small monitor is taken for a portable one, running off the laptop's USB-C port; any other has a plug of
+        // its own.
+        var ownPlugByDefault = !(_onLaptop && facts.Inches is > 0 and <= LargestPortableInches);
         double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, now) ? reading.Brightness : null;
         // A figure the user typed is what the monitor draws as they use it, so it is taken as it is, and the brightness is
         // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
@@ -122,6 +150,9 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             SleepWatts = monitor.SleepW,
             Source = choice?.Watts is null ? monitor.Source : MonitorSource.Typed,
             Counted = counted,
+            CountedByDefault = _countedByDefault,
+            OwnPlug = choice?.OwnPlug ?? ownPlugByDefault,
+            OwnPlugByDefault = ownPlugByDefault,
             Brightness = brightness,
             WattsNow = !counted ? 0 : displayOn ? onNow : monitor.SleepW,
         };

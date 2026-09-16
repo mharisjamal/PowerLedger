@@ -209,12 +209,12 @@ internal sealed class SamplingLoop : BackgroundService
         Use(settings);
     }
 
-    /// <summary>Puts settings already saved in force: the monitor board takes the user's choices, the model is built
-    /// afresh, and the pipe answers with them.</summary>
+    /// <summary>Puts settings already saved in force: the monitor board takes the user's choices and the profile's defaults,
+    /// the model is built afresh, and the pipe answers with them.</summary>
     private void Use(ServiceSettings settings)
     {
         _settings = settings;
-        _monitors.Choose(settings.Profile.Monitors);
+        _monitors.Choose(settings.Profile);
         _model = ModelFactory.Build(settings, _facts!, _calibration.Learner, _monitors);
         _board.Publish(settings);
     }
