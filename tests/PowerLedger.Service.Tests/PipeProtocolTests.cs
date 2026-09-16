@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using PowerLedger.Contracts;
 using Shouldly;
 
@@ -38,13 +39,21 @@ public class PipeProtocolTests
         PipeProtocol.Deserialize(Trim(line)).ShouldBe(message);
     }
 
+    private static MonitorStatus Monitor() => new()
+    {
+        Key = "DELA0B1-4C4A3833", Instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", Name = "DELL U2723QE", Inches = 27, Width = 3840,
+        Height = 2160, OnWatts = 28.3, SleepWatts = 0.3, Source = MonitorSource.Model, Counted = true, Brightness = 0.6, WattsNow = 30.5,
+    };
+
+    private static ServiceStatus Status() => new(
+        "0.1.0", At, 42,
+        [new SourceStatus("battery", true, null, 0, null), new SourceStatus("nvidia-gpu", false, "no NVIDIA driver", 0, null)],
+        3, 1, new CalibrationStatus(900, 1800, 2, 12), "64596c2b0f03e58f", 123456, null, null, Frame());
+
     [Fact]
     public void Status_and_settings_replies_survive_the_wire()
     {
-        var status = new ServiceStatus(
-            "0.1.0", At, 42,
-            [new SourceStatus("battery", true, null, 0, null), new SourceStatus("nvidia-gpu", false, "no NVIDIA driver", 0, null)],
-            3, 1, new CalibrationStatus(900, 1800, 2, 12), "64596c2b0f03e58f", 123456, null, null, Frame());
+        var status = Status();
         var line = PipeProtocol.Serialize(new StatusReply(10, status));
         var back = PipeProtocol.Deserialize(Trim(line)).ShouldBeOfType<StatusReply>();
         back.Id.ShouldBe(10);
@@ -57,6 +66,117 @@ public class PipeProtocolTests
         var settings = ServiceSettings.Default with { SampleIntervalSeconds = 2, Profile = MachineProfile.DefaultDesktop with { PsuTier = PsuTier.Gold } };
         PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(new SettingsReply(11, settings))))
             .ShouldBeOfType<SettingsReply>().Settings.ShouldBe(settings);
+    }
+
+    [Fact]
+    public void A_status_carries_each_monitor_with_its_source_as_a_number()
+    {
+        var status = Status() with
+        {
+            Monitors =
+            [
+                Monitor(),
+                Monitor() with
+                {
+                    Key = @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", Instance = @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", Name = "GSM 5B08",
+                    Source = MonitorSource.Estimate, Counted = false, Brightness = null, WattsNow = 0,
+                },
+            ],
+        };
+        var line = PipeProtocol.Serialize(new StatusReply(12, status));
+        Encoding.UTF8.GetString(line).ShouldContain("\"source\":1");
+        var back = PipeProtocol.Deserialize(Trim(line)).ShouldBeOfType<StatusReply>().Status;
+        back.Monitors.ShouldNotBeNull().ShouldBe(status.Monitors!);
+        PipeProtocol.Serialize(new StatusReply(12, back)).ShouldBe(line);
+    }
+
+    [Fact]
+    public void A_status_from_a_service_that_sends_no_monitors_reads_as_null()
+    {
+        var older = JsonNode.Parse(Trim(PipeProtocol.Serialize(new StatusReply(13, Status()))))!;
+        older["status"]!.AsObject().Remove("monitors").ShouldBeTrue();
+        var back = PipeProtocol.Deserialize(Encoding.UTF8.GetBytes(older.ToJsonString())).ShouldBeOfType<StatusReply>().Status;
+        back.Monitors.ShouldBeNull();
+        back.Version.ShouldBe("0.1.0");
+    }
+
+    [Fact]
+    public void A_brightness_report_survives_the_wire_under_its_own_kind()
+    {
+        var report = new ReportBrightnessRequest(14,
+        [
+            new MonitorBrightness { Instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", Brightness = 0.6 },
+            new MonitorBrightness { Instance = @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", Brightness = 0 },
+        ]);
+        Text(report).ShouldStartWith("""{"type":"reportBrightness","monitors":[{"instance":""");
+        Text(report).ShouldContain("\"brightness\":0.6},{\"instance\":");
+        var back = PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(report))).ShouldBeOfType<ReportBrightnessRequest>();
+        back.Id.ShouldBe(14);
+        back.Monitors.ShouldBe(report.Monitors);
+    }
+
+    [Fact]
+    public void A_brightness_report_within_its_limits_is_accepted()
+    {
+        Report().Validate().ShouldBeNull();
+        Report(Reading(brightness: 0), Reading(new string('I', 260), brightness: 1)).Validate().ShouldBeNull();
+        Report([.. Enumerable.Range(0, 16).Select(i => Reading($"I{i}"))]).Validate().ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_brightness_report_outside_its_limits_is_refused_rather_than_crashing()
+    {
+        Report([.. Enumerable.Range(0, 17).Select(i => Reading($"I{i}"))]).Validate().ShouldNotBeNull();
+        Report(Reading("")).Validate().ShouldNotBeNull();
+        Report(Reading(new string('I', 261))).Validate().ShouldNotBeNull();
+        foreach (var brightness in new[] { -0.01, 1.01, double.NaN, double.PositiveInfinity })
+            Report(Reading(brightness: brightness)).Validate().ShouldNotBeNull();
+        new ReportBrightnessRequest(17, null!).Validate().ShouldNotBeNull();
+        Report([null!]).Validate().ShouldNotBeNull();
+        Report(Reading(null!)).Validate().ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void Monitor_sources_keep_their_numbers_because_they_travel_as_numbers()
+    {
+        ((int)MonitorSource.Model).ShouldBe(0);
+        ((int)MonitorSource.Estimate).ShouldBe(1);
+        ((int)MonitorSource.Typed).ShouldBe(2);
+    }
+
+    [Fact]
+    public void Monitor_choices_survive_the_wire_and_the_store()
+    {
+        var settings = ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultDesktop with
+            {
+                Monitors = [new MonitorChoice { Key = "DELA0B1-4C4A3833", Watts = 30 }, new MonitorChoice { Key = "GSM5B08-77", Counted = false }],
+            },
+        };
+        PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(new SettingsReply(15, settings))))
+            .ShouldBeOfType<SettingsReply>().Settings.ShouldBe(settings);
+        PipeProtocol.DeserializeSettings(PipeProtocol.SerializeSettings(settings)).ShouldBe(settings);
+    }
+
+    [Fact]
+    public void Settings_stored_before_monitors_were_detected_load_with_no_monitor_choices()
+    {
+        var settings = PipeProtocol.DeserializeSettings("""{"profile":{"chassis":0,"externalMonitors":2,"includeMonitors":true,"monitorWatts":30}}""")
+            .ShouldNotBeNull();
+        settings.Profile.Monitors.ShouldBeEmpty();
+        settings.Profile.ExternalMonitors.ShouldBe(2);
+        settings.Validate().ShouldBeNull();
+    }
+
+    [Fact]
+    public void Settings_from_an_app_that_sends_no_monitor_choices_arrive_without_them_and_are_refused()
+    {
+        var older = JsonNode.Parse(Trim(PipeProtocol.Serialize(new SetSettingsRequest(16, ServiceSettings.Default))))!;
+        older["settings"]!["profile"]!.AsObject().Remove("monitors").ShouldBeTrue();
+        var request = PipeProtocol.Deserialize(Encoding.UTF8.GetBytes(older.ToJsonString())).ShouldBeOfType<SetSettingsRequest>();
+        request.Settings.Profile.Monitors.ShouldBeNull();
+        request.Settings.Validate().ShouldNotBeNull();
     }
 
     [Fact]
@@ -89,6 +209,11 @@ public class PipeProtocolTests
         settings.Profile.ShouldBe(MachineProfile.DefaultLaptop);
         PipeProtocol.DeserializeSettings("{ nope").ShouldBeNull();
     }
+
+    private static ReportBrightnessRequest Report(params MonitorBrightness[] readings) => new(17, readings);
+
+    private static MonitorBrightness Reading(string instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", double brightness = 0.5)
+        => new() { Instance = instance, Brightness = brightness };
 
     private static string Text(PipeMessage message) => Encoding.UTF8.GetString(PipeProtocol.Serialize(message));
 

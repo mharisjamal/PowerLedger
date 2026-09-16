@@ -45,6 +45,9 @@ public sealed record MachineProfile
     public double DisplayDiagonalInches { get; init; } = 15.6;
     public double? CpuTdpOverrideW { get; init; }
     public double? GpuTdpOverrideW { get; init; }
+    /// <summary>The user's choice for each external monitor, by <see cref="MonitorChoice.Key"/>. A monitor with no choice
+    /// counts, at PowerLedger's own figure.</summary>
+    public IReadOnlyList<MonitorChoice> Monitors { get; init; } = [];
 
     public static MachineProfile DefaultLaptop { get; } = new();
 
@@ -56,4 +59,23 @@ public sealed record MachineProfile
         ExternalMonitors = 1,
         DisplayDiagonalInches = 0,
     };
+
+    /// <summary>
+    /// A record compares a list by reference, so a profile read back from the pipe or the database would never equal the
+    /// one written. A profile compares its monitor choices one by one instead, and every other member as a record would.
+    /// </summary>
+    public bool Equals(MachineProfile? other) =>
+        ReferenceEquals(this, other)
+        || (other is not null && Members().Equals(other.Members()) && SameChoices(Monitors, other.Monitors));
+
+    public override int GetHashCode() => HashCode.Combine(Members(), Monitors?.Count);
+
+    /// <summary>Every member but <see cref="Monitors"/>. A member added to the profile must be added here, and a test
+    /// fails until it is.</summary>
+    private (ChassisKind, int, bool, int, int, int, PsuTier, double, int, bool, double, double, double?, double?) Members() =>
+        (Chassis, RamSticks, RamIsDdr5, SsdCount, HddCount, FanCount, PsuTier, ExtrasWatts, ExternalMonitors, IncludeMonitors,
+            MonitorWatts, DisplayDiagonalInches, CpuTdpOverrideW, GpuTdpOverrideW);
+
+    private static bool SameChoices(IReadOnlyList<MonitorChoice>? a, IReadOnlyList<MonitorChoice>? b) =>
+        ReferenceEquals(a, b) || (a is not null && b is not null && a.SequenceEqual(b));
 }

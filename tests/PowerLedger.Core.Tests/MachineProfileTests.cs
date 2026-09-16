@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using PowerLedger.Contracts;
 using Shouldly;
@@ -40,5 +42,44 @@ public class MachineProfileTests
         p.MonitorWatts.ShouldBe(25);
         p.RamSticks.ShouldBe(1);
         p.CpuTdpOverrideW.ShouldBeNull();
+        p.Monitors.ShouldBeEmpty();
     }
+
+    [Fact]
+    public void Profiles_with_the_same_monitor_choices_are_equal_whatever_list_holds_them()
+    {
+        var choice = new MonitorChoice { Key = "DELA0B1-4C4A3833", Watts = 30 };
+        var profile = MachineProfile.DefaultDesktop with { Monitors = [choice] };
+        var copy = MachineProfile.DefaultDesktop with { Monitors = new List<MonitorChoice> { choice with { } } };
+        copy.ShouldBe(profile);
+        copy.GetHashCode().ShouldBe(profile.GetHashCode());
+        (copy == profile).ShouldBeTrue();
+
+        profile.ShouldNotBe(MachineProfile.DefaultDesktop with { Monitors = [choice with { Counted = false }] });
+        profile.ShouldNotBe(MachineProfile.DefaultDesktop with { Monitors = [choice, choice with { Key = "GSM5B08-77" }] });
+        profile.ShouldNotBe(MachineProfile.DefaultDesktop);
+        profile.ShouldNotBe(MachineProfile.DefaultDesktop with { Monitors = null! });
+    }
+
+    [Fact]
+    public void Every_member_takes_part_in_equality()
+    {
+        foreach (var property in typeof(MachineProfile).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            var changed = MachineProfile.DefaultDesktop with { };
+            property.SetValue(changed, Different(property.GetValue(changed), property.PropertyType));
+            changed.Equals(MachineProfile.DefaultDesktop).ShouldBeFalse(property.Name);
+        }
+    }
+
+    private static object Different(object? value, Type type) => value switch
+    {
+        Enum member => Enum.ToObject(type, Convert.ToInt32(member, CultureInfo.InvariantCulture) + 1),
+        int number => number + 1,
+        double number => number + 1,
+        bool flag => !flag,
+        null when type == typeof(double?) => 1.0,
+        IReadOnlyList<MonitorChoice> => new[] { new MonitorChoice { Key = "DELA0B1-4C4A3833" } },
+        _ => throw new InvalidOperationException($"Give {type.Name} a different value here."),
+    };
 }

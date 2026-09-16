@@ -61,5 +61,42 @@ public class ServiceSettingsTests
     public void A_missing_profile_is_rejected_rather_than_crashing()
         => (ServiceSettings.Default with { Profile = null! }).Validate().ShouldNotBeNull();
 
+    [Fact]
+    public void Monitor_choices_within_their_limits_are_accepted()
+    {
+        var desktop = MachineProfile.DefaultDesktop;
+        With(desktop with { Monitors = [Choice("DELA0B1-1234", watts: 0), Choice("GSM5B08-77", watts: 500, counted: false), Choice(new string('K', 200))] })
+            .ShouldBeNull();
+        With(desktop with { Monitors = [.. Enumerable.Range(0, 16).Select(i => Choice($"M{i}"))] }).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Monitor_choices_outside_their_limits_are_refused()
+    {
+        var desktop = MachineProfile.DefaultDesktop;
+        With(desktop with { Monitors = [.. Enumerable.Range(0, 17).Select(i => Choice($"M{i}"))] }).ShouldNotBeNull();
+        With(desktop with { Monitors = [Choice("")] }).ShouldNotBeNull();
+        With(desktop with { Monitors = [Choice(new string('K', 201))] }).ShouldNotBeNull();
+        foreach (var watts in new[] { -1, 500.5, double.NaN, double.PositiveInfinity })
+            With(desktop with { Monitors = [Choice(watts: watts)] }).ShouldBe("A monitor must draw between 0 and 500 W.");
+    }
+
+    [Fact]
+    public void A_monitor_can_be_listed_only_once()
+        => With(MachineProfile.DefaultDesktop with { Monitors = [Choice("DELA0B1-1234"), Choice("DELA0B1-1234", watts: 30)] })
+            .ShouldBe("Each monitor can be listed once.");
+
+    [Fact]
+    public void Missing_monitor_choices_are_rejected_rather_than_crashing()
+    {
+        var desktop = MachineProfile.DefaultDesktop;
+        With(desktop with { Monitors = null! }).ShouldNotBeNull();
+        With(desktop with { Monitors = [null!] }).ShouldNotBeNull();
+        With(desktop with { Monitors = [Choice(null!)] }).ShouldNotBeNull();
+    }
+
     private static string? With(MachineProfile profile) => (ServiceSettings.Default with { Profile = profile }).Validate();
+
+    private static MonitorChoice Choice(string key = "DELA0B1-1234", double? watts = null, bool counted = true)
+        => new() { Key = key, Watts = watts, Counted = counted };
 }

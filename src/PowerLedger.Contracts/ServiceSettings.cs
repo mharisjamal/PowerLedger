@@ -62,6 +62,20 @@ public sealed record ServiceSettings
             return "The panel size must be 0 for none, or between 7 and 50 inches.";
         if (p.CpuTdpOverrideW is { } cpu && !InRange(cpu, 1, 1000)) return "The processor's rated power must be between 1 and 1000 W.";
         if (p.GpuTdpOverrideW is { } gpu && !InRange(gpu, 1, 1500)) return "The graphics card's rated power must be between 1 and 1500 W.";
+        return ValidateMonitors(p.Monitors);
+    }
+
+    private static string? ValidateMonitors(IReadOnlyList<MonitorChoice>? monitors)
+    {
+        if (monitors is null) return "The monitor choices are missing.";
+        if (monitors.Count > 16) return "At most 16 monitors can be listed.";
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var monitor in monitors)
+        {
+            if (monitor?.Key is not { Length: >= 1 and <= 200 }) return "A monitor's key must be between 1 and 200 characters.";
+            if (monitor.Watts is { } watts && !InRange(watts, 0, 500)) return "A monitor must draw between 0 and 500 W.";
+            if (!keys.Add(monitor.Key)) return "Each monitor can be listed once.";
+        }
         return null;
     }
 

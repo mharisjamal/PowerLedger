@@ -15,6 +15,7 @@ namespace PowerLedger.Contracts;
 [JsonDerivedType(typeof(SetTariffRequest), "setTariff")]
 [JsonDerivedType(typeof(ResetCalibrationRequest), "resetCalibration")]
 [JsonDerivedType(typeof(ReportActivityRequest), "reportActivity")]
+[JsonDerivedType(typeof(ReportBrightnessRequest), "reportBrightness")]
 [JsonDerivedType(typeof(OkReply), "ok")]
 [JsonDerivedType(typeof(ErrorReply), "error")]
 [JsonDerivedType(typeof(StatusReply), "status")]
@@ -44,6 +45,25 @@ public sealed record ResetCalibrationRequest(long Id) : PipeRequest(Id);
 /// <summary>Seconds since the last keyboard or mouse input in the sender's session. The service runs in session 0
 /// and cannot see input, so the App reports it every few seconds.</summary>
 public sealed record ReportActivityRequest(long Id, double IdleSeconds) : PipeRequest(Id);
+
+/// <summary>The brightness of the external monitors that answered in the sender's session, acknowledged with an
+/// <see cref="OkReply"/>. The service runs in session 0 and cannot reach the monitors, so the App reads them every few
+/// minutes.</summary>
+public sealed record ReportBrightnessRequest(long Id, IReadOnlyList<MonitorBrightness> Monitors) : PipeRequest(Id)
+{
+    /// <summary>Null when every reading is acceptable; otherwise the first problem, in words the App can show.</summary>
+    public string? Validate()
+    {
+        if (Monitors is null) return "The brightness readings are missing.";
+        if (Monitors.Count > 16) return "At most 16 monitors can report a brightness.";
+        foreach (var monitor in Monitors)
+        {
+            if (monitor?.Instance is not { Length: >= 1 and <= 260 }) return "A monitor's instance must be between 1 and 260 characters.";
+            if (!double.IsFinite(monitor.Brightness) || monitor.Brightness is < 0 or > 1) return "A brightness must be between 0 and 1.";
+        }
+        return null;
+    }
+}
 
 /// <summary>The request with this id succeeded.</summary>
 public sealed record OkReply(long Id) : PipeMessage;
