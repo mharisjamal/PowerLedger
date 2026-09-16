@@ -38,8 +38,9 @@ asks nothing about monitors on a laptop on its own screen. A portable monitor ru
 of what the laptop draws, so it always counts and is never counted twice; on a laptop, a monitor of 17.3 inches or less
 is taken to be one. If yours has a plug of its own, tick **has its own plug** beside it, in the wizard or in Settings.
 Settings saves each change by itself: a tick at once, a typed value when you leave its box or press Enter. There you can
-leave out a monitor with its own plug, type a figure of your own, which is used as typed, or untick **Read brightness
-from monitors (read-only)** to stop the App reading the monitors.
+leave out a monitor with its own plug, type a figure of your own, which is used as typed, or untick **Read monitors'
+brightness and whether they're on (read-only)** to stop the App sending requests to the monitors; refresh rate and HDR
+still come from Windows.
 
 The monitor figures come from the dataset
 [ENERGY STAR Certified Displays](https://data.energystar.gov/Active-Specifications/ENERGY-STAR-Certified-Displays/qbg3-d468),

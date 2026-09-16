@@ -114,7 +114,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Applies at the next read of the monitors, within five minutes.</summary>
+    /// <summary>Applies at the next read of the monitors, within a minute.</summary>
     public bool ReadMonitorBrightness
     {
         get => _ui.Current.ReadMonitorBrightness;

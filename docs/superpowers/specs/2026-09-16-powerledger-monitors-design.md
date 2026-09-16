@@ -256,8 +256,9 @@ the display-cable commands badly. So:
   while its readings say the displays are on: a brightness counts as unknown after 15 minutes of that, and a power
   state, refresh rate or HDR state after 3.
 
-Settings shows each monitor's brightness, read or assumed, whether it is on, and its refresh rate, and **Read brightness
-from monitors (read-only)** among its preferences stops all of these reads.
+Settings shows each monitor's brightness, read or assumed, whether it is on, and its refresh rate. **Read monitors'
+brightness and whether they're on (read-only)** among its preferences stops the requests sent to monitors; the refresh
+rate and HDR state still come from Windows' display settings.
 
 ## What the user sees
 
