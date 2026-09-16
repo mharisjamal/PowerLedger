@@ -202,6 +202,41 @@ public class MonitorBoardTests
     }
 
     [Fact]
+    public void A_monitor_running_off_the_pc_counts_even_when_the_user_chose_not_to_count_it()
+    {
+        // What it draws is inside what the laptop itself draws, so leaving it out would mean nothing.
+        _board.Detected([Portable]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Portable.Key, Counted = false }));
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (monitor.OwnPlug, monitor.Counted, monitor.CountedByDefault).ShouldBe((false, true, true));
+        monitor.WattsNow.ShouldBe(MonitorEstimate.For(15.6, 1920, 1080, Catalogue).OnW, 1e-9);
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: monitor.WattsNow));
+        _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: monitor.SleepWatts));
+
+        // Said to have a plug of its own, the same monitor is left out as the user chose.
+        _board.Choose(Laptop(new MonitorChoice { Key = Portable.Key, Counted = false, OwnPlug = true }));
+        var charged = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (charged.OwnPlug, charged.Counted, charged.WattsNow).ShouldBe((true, false, 0.0));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
+    }
+
+    [Fact]
+    public void With_monitors_left_out_by_default_a_portable_monitor_running_off_a_laptop_still_counts_and_a_desk_monitor_does_not()
+    {
+        _board.Detected([Portable, Unnamed with { Inches = 24 }]);
+        _board.Choose(Laptop() with { CountMonitorsByDefault = false });
+
+        var status = _board.Status(displayOn: true);
+        status.Select(m => (m.OwnPlug, m.Counted, m.CountedByDefault)).ShouldBe([(false, true, false), (true, false, false)]);
+        status[0].WattsNow.ShouldBeGreaterThan(0);
+        status[1].OnWatts.ShouldBeGreaterThan(0);
+        status[1].WattsNow.ShouldBe(0);
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: status[0].WattsNow));
+        _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: status[0].SleepWatts));
+    }
+
+    [Fact]
     public void A_typed_figure_for_a_monitor_running_off_the_pc_is_taken_as_it_is_and_one_worked_out_is_scaled_by_brightness()
     {
         _board.Detected([Dell, Portable]);

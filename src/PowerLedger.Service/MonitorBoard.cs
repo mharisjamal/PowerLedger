@@ -29,8 +29,9 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     private Figured[] _monitors = [];
     private Dictionary<string, MonitorChoice> _choices = new(StringComparer.Ordinal);
 
-    /// <summary>Whether a monitor the user hasn't chosen for counts, as the profile says. Until the board is given settings,
-    /// it goes by the default ones, which count every monitor.</summary>
+    /// <summary>Whether a monitor with a plug of its own that the user hasn't chosen for counts, as the profile says; one
+    /// running off the PC always counts. Until the board is given settings, it goes by the default ones, which count every
+    /// monitor.</summary>
     private bool _countedByDefault = true;
 
     /// <summary>Whether the profile is a laptop's, which a monitor small enough is taken to run off when the user hasn't said.
@@ -55,8 +56,8 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     }
 
     /// <summary>The user's choices from the settings' profile, replacing the ones before, with what the profile says for a
-    /// monitor they haven't chosen for: whether it counts, and the chassis, which decides whether it is taken to run off
-    /// the PC.</summary>
+    /// monitor they haven't chosen for: whether it counts when it has a plug of its own, and the chassis, which decides
+    /// whether it is taken to run off the PC.</summary>
     public void Choose(MachineProfile profile)
     {
         var byKey = new Dictionary<string, MonitorChoice>(StringComparer.Ordinal);
@@ -85,9 +86,9 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         }
     }
 
-    /// <summary>What every counted monitor draws, split by whether it has a plug of its own or runs off the PC: with the
-    /// display on, a figure the user typed as it is, or PowerLedger's own at the monitor's brightness; asleep, its sleep
-    /// figure.</summary>
+    /// <summary>What every counted monitor draws, split by whether it has a plug of its own or runs off the PC, which always
+    /// counts: with the display on, a figure the user typed as it is, or PowerLedger's own at the monitor's brightness;
+    /// asleep, its sleep figure.</summary>
     public MonitorWatts Watts(bool displayOn)
     {
         var now = clock.GetTimestamp();
@@ -130,10 +131,13 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         var facts = monitor.Facts;
         var choice = _choices.GetValueOrDefault(facts.Key);
         var onW = choice?.Watts ?? monitor.OnW;
-        var counted = choice?.Counted ?? _countedByDefault;
         // A laptop's small monitor is taken for a portable one, running off the laptop's USB-C port; any other has a plug of
         // its own.
         var ownPlugByDefault = !(_onLaptop && facts.Inches is > 0 and <= LargestPortableInches);
+        var ownPlug = choice?.OwnPlug ?? ownPlugByDefault;
+        // What a monitor running off the PC draws is inside what the PC itself draws, so leaving it out would mean nothing,
+        // and it always counts. Only a monitor with a plug of its own counts as the user chose, or as the profile says.
+        var counted = !ownPlug || (choice?.Counted ?? _countedByDefault);
         double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, now) ? reading.Brightness : null;
         // A figure the user typed is what the monitor draws as they use it, so it is taken as it is, and the brightness is
         // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
@@ -152,7 +156,7 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             Source = choice?.Watts is null ? monitor.Source : MonitorSource.Typed,
             Counted = counted,
             CountedByDefault = _countedByDefault,
-            OwnPlug = choice?.OwnPlug ?? ownPlugByDefault,
+            OwnPlug = ownPlug,
             OwnPlugByDefault = ownPlugByDefault,
             Brightness = brightness,
             WattsNow = !counted ? 0 : displayOn ? onNow : monitor.SleepW,
