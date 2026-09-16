@@ -55,6 +55,13 @@ public sealed record MonitorStatus
 
     public double SleepWatts { get; init; }
 
+    /// <summary>What the monitor draws switched off.</summary>
+    public double OffWatts { get; init; }
+
+    /// <summary>Whether the monitor is on, as the App last read it, or <see cref="MonitorPowerState.Unknown"/> when it didn't
+    /// say or said too long ago.</summary>
+    public MonitorPowerState PowerState { get; init; }
+
     public MonitorSource Source { get; init; }
 
     public bool Counted { get; init; }
@@ -87,6 +94,33 @@ public sealed record MonitorBrightness
 
     /// <summary>0–1.</summary>
     public double Brightness { get; init; }
+}
+
+/// <summary>Whether a monitor is on, as it says over its display cable (MCCS VCP code D6). Piped as an integer: append new
+/// members, never renumber.</summary>
+public enum MonitorPowerState
+{
+    /// <summary>The monitor hasn't said, or said too long ago: it counts as the displays and the user's choice say.</summary>
+    Unknown = 0,
+
+    /// <summary>On: it draws its figure at its brightness.</summary>
+    On = 1,
+
+    /// <summary>Standby or suspend: it draws its sleep figure.</summary>
+    Standby = 2,
+
+    /// <summary>Off, from its own button or from the PC: it draws its off figure.</summary>
+    Off = 3,
+}
+
+/// <summary>The power state the App read from one monitor.</summary>
+public sealed record MonitorPowerReading
+{
+    /// <summary>The monitor's device instance, as <see cref="MonitorKeys"/> gives it.</summary>
+    public string Instance { get; init; } = "";
+
+    /// <summary>On, standby or off; a reading is never <see cref="MonitorPowerState.Unknown"/>.</summary>
+    public MonitorPowerState State { get; init; }
 }
 
 /// <summary>
