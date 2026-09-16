@@ -63,6 +63,10 @@ public static class MonitorInventory
 
     /// <summary>The active external monitors, read from WMI, or null when WMI didn't say which are attached (see
     /// <see cref="From"/>). Never throws.</summary>
+    /// <remarks>Once no display is left, as when a desktop's only monitor is unplugged, WMI refuses every monitor class
+    /// rather than list none. <see cref="Wmi.ReadOrNull{T}"/> reads a refusal that means a class has no instances as no
+    /// rows (see <see cref="Wmi.MeansNoInstances"/>), so that comes back as no monitors, not as no answer, which would leave
+    /// the last monitor counted.</remarks>
     public static IReadOnlyList<MonitorFacts>? Read()
     {
         var ids = Wmi.ReadOrNull(@"\\.\root\wmi", "SELECT InstanceName, ManufacturerName, ProductCodeID, SerialNumberID, UserFriendlyName FROM WmiMonitorID", rows =>
@@ -124,7 +128,8 @@ public static class MonitorInventory
         return From(ids, connections, sizes, nativeModes, SharedKeys, Resolutions);
     }
 
-    /// <summary>The same, from rows already read, with null for a class WMI didn't answer — the part tests drive.</summary>
+    /// <summary>The same, from rows already read, with null for a class WMI didn't answer and no rows for one that has no
+    /// instances — the part tests drive.</summary>
     /// <param name="sharedKeys">The serial keys two attached monitors were found sharing before, which this adds to. It is
     /// locked while in use, because a sensor set that was abandoned may still be reading.</param>
     /// <param name="resolutions">The native resolution last read for each instance, which this reads and updates (see

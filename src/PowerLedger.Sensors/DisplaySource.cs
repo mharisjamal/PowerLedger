@@ -1,5 +1,3 @@
-using System.Management;
-
 namespace PowerLedger.Sensors;
 
 /// <param name="Brightness">0..1 for the internal panel; null where the machine has no brightness control.</param>
@@ -97,20 +95,14 @@ public sealed class DisplaySource : ISensorSource
 
     private static DisplayState QueryWmi()
     {
-        var monitors = Wmi.Read(@"\\.\root\wmi", "SELECT Active FROM WmiMonitorBasicDisplayParams",
+        // Once no display is left, as when a desktop's only monitor is unplugged, WMI refuses the class rather than list none.
+        // That is an answer, none active, and must not fail the query, since only a query that answers hands the monitors over.
+        var monitors = Wmi.ReadInstances(@"\\.\root\wmi", "SELECT Active FROM WmiMonitorBasicDisplayParams",
             rows => rows.Count(row => row["Active"] is true));
 
-        double? brightness;
-        try
-        {
-            brightness = Wmi.Read(@"\\.\root\wmi", "SELECT CurrentBrightness FROM WmiMonitorBrightness",
-                rows => rows.Count > 0 ? Convert.ToDouble(rows[0]["CurrentBrightness"]) / 100.0 : (double?)null);
-        }
-        catch (ManagementException error) when (error.ErrorCode == ManagementStatus.NotSupported)
-        {
-            // A desktop: WMI refuses outright when no panel has a brightness Windows controls.
-            brightness = null;
-        }
+        // A desktop: WMI refuses outright when no panel has a brightness Windows controls, which is no brightness.
+        var brightness = Wmi.ReadInstances(@"\\.\root\wmi", "SELECT CurrentBrightness FROM WmiMonitorBrightness",
+            rows => rows.Count > 0 ? Convert.ToDouble(rows[0]["CurrentBrightness"]) / 100.0 : (double?)null);
 
         return new DisplayState(brightness, Math.Max(monitors, 1));
     }

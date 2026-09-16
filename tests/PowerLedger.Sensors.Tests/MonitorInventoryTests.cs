@@ -1,3 +1,4 @@
+using System.Management;
 using PowerLedger.Sensors;
 using Shouldly;
 
@@ -41,13 +42,22 @@ public class MonitorInventoryTests
         => Inventory(unanswered: null, memory, displays).ShouldNotBeNull();
 
     /// <summary>The inventory of the displays when WMI answers for every class but <paramref name="unanswered"/>.</summary>
-    private static IReadOnlyList<MonitorFacts>? Inventory(string? unanswered, Memory memory, params Display[] displays) => MonitorInventory.From(
-        unanswered == "WmiMonitorID" ? null : [.. displays.Select(d => (d.Instance, Codes(d.Maker), Codes(d.Product), Codes(d.Serial), Codes(d.Name)))],
-        unanswered == "WmiMonitorConnectionParams" ? null : displays.Where(d => d.Connection is not null).ToDictionary(d => d.Instance, d => d.Connection!.Value),
-        unanswered == "WmiMonitorBasicDisplayParams" ? null : [.. displays.Select(d => (d.Instance, d.Active, d.WidthCm, d.HeightCm))],
-        unanswered == "WmiMonitorListedSupportedSourceModes" ? null : displays.Where(d => d.Mode is not null).ToDictionary(d => d.Instance, d => d.Mode!.Value),
+    private static IReadOnlyList<MonitorFacts>? Inventory(string? unanswered, Memory memory, params Display[] displays)
+        => Inventory(wmiClass => wmiClass == unanswered ? null : displays, memory);
+
+    /// <summary>The inventory when each WMI class lists the displays <paramref name="listed"/> gives for it, or doesn't
+    /// answer where that is null.</summary>
+    private static IReadOnlyList<MonitorFacts>? Inventory(Func<string, Display[]?> listed, Memory memory) => MonitorInventory.From(
+        listed("WmiMonitorID")?.Select(d => (d.Instance, Codes(d.Maker), Codes(d.Product), Codes(d.Serial), Codes(d.Name))).ToList(),
+        listed("WmiMonitorConnectionParams")?.Where(d => d.Connection is not null).ToDictionary(d => d.Instance, d => d.Connection!.Value),
+        listed("WmiMonitorBasicDisplayParams")?.Select(d => (d.Instance, d.Active, d.WidthCm, d.HeightCm)).ToList(),
+        listed("WmiMonitorListedSupportedSourceModes")?.Where(d => d.Mode is not null).ToDictionary(d => d.Instance, d => d.Mode!.Value),
         memory.SharedKeys,
         memory.Resolutions);
+
+    /// <summary>What a class WMI refuses with <paramref name="status"/> lists, as the inventory reads the refusal: no display
+    /// when the status means the class has no instances, and no answer otherwise.</summary>
+    private static Display[]? Refused(ManagementStatus status) => Wmi.MeansNoInstances(status) ? [] : null;
 
     [Theory]
     [InlineData(0x80000000u)]   // internal
@@ -96,11 +106,24 @@ public class MonitorInventoryTests
     }
 
     [Theory]
-    [InlineData("WmiMonitorID")]
-    [InlineData("WmiMonitorConnectionParams")]
-    [InlineData("WmiMonitorBasicDisplayParams")]
-    public void When_a_class_that_says_which_monitors_are_attached_does_not_answer_there_is_no_answer_rather_than_no_monitors(string unanswered)
-        => Inventory(unanswered, new Memory(), Dell, Lg).ShouldBeNull();
+    [InlineData("WmiMonitorID", ManagementStatus.Timedout)]
+    [InlineData("WmiMonitorConnectionParams", ManagementStatus.Timedout)]
+    [InlineData("WmiMonitorBasicDisplayParams", ManagementStatus.Timedout)]
+    [InlineData("WmiMonitorID", ManagementStatus.AccessDenied)]
+    [InlineData("WmiMonitorConnectionParams", ManagementStatus.ProviderFailure)]
+    [InlineData("WmiMonitorBasicDisplayParams", ManagementStatus.Failed)]
+    public void When_a_class_that_says_which_monitors_are_attached_does_not_answer_there_is_no_answer_rather_than_no_monitors(string refused, ManagementStatus status)
+        => Inventory(wmiClass => wmiClass == refused ? Refused(status) : [Dell, Lg], new Memory()).ShouldBeNull();
+
+    [Theory]
+    [InlineData(ManagementStatus.NotSupported)]
+    [InlineData(ManagementStatus.InvalidClass)]
+    public void Once_no_display_is_left_the_classes_refuse_as_having_no_instances_and_the_answer_is_no_monitors(ManagementStatus status)
+    {
+        // As on a desktop whose only monitor was unplugged: WMI refuses every monitor class rather than list none, and a
+        // refusal read as no answer would leave that monitor counted.
+        Inventory(_ => Refused(status), new Memory()).ShouldNotBeNull().ShouldBeEmpty();
+    }
 
     [Fact]
     public void When_only_the_native_modes_do_not_answer_monitors_never_given_a_resolution_come_back_without_one()
@@ -122,6 +145,19 @@ public class MonitorInventoryTests
 
         Inventory(unanswered: "WmiMonitorListedSupportedSourceModes", memory, Dell).ShouldNotBeNull().ShouldHaveSingleItem().ShouldBe(read);
         From(memory, Dell with { Mode = null }).ShouldHaveSingleItem().ShouldBe(read);
+    }
+
+    [Theory]
+    [InlineData(ManagementStatus.NotSupported)]
+    [InlineData(ManagementStatus.InvalidClass)]
+    public void When_only_the_native_modes_have_no_instances_each_monitor_keeps_the_resolution_last_read_for_its_instance(ManagementStatus status)
+    {
+        // The modes give nothing but the resolutions, so a driver that lists none says nothing of which monitors are attached.
+        var memory = new Memory();
+        var read = From(memory, Dell, Lg);
+
+        Inventory(wmiClass => wmiClass == "WmiMonitorListedSupportedSourceModes" ? Refused(status) : [Dell, Lg], memory)
+            .ShouldNotBeNull().ShouldBe(read);
     }
 
     [Fact]

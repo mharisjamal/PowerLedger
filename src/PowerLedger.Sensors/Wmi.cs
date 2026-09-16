@@ -17,6 +17,13 @@ internal static class Wmi
     /// restarting, or a namespace the caller may not read.</summary>
     public static bool IsFailure(Exception error) => error is ManagementException or COMException or UnauthorizedAccessException;
 
+    /// <summary>Whether WMI refusing a query with <paramref name="status"/> says only that its class has no instances, which
+    /// is an answer: none. The provider behind the classes in root\wmi, the monitor classes among them, refuses with "Not
+    /// supported" when no device provides an instance rather than list none, and a class that isn't registered at all,
+    /// "Invalid class", has none either. Any other status, a timeout, access denied or a provider failure among them, is
+    /// WMI failing to answer.</summary>
+    public static bool MeansNoInstances(ManagementStatus status) => status is ManagementStatus.NotSupported or ManagementStatus.InvalidClass;
+
     /// <summary>Runs one query and folds its rows. Throws whatever WMI throws; see <see cref="IsFailure"/>.</summary>
     public static T Read<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold)
     {
@@ -35,21 +42,39 @@ internal static class Wmi
         }
     }
 
-    /// <summary>As <see cref="Read{T}"/>, but a query WMI cannot answer comes back as <paramref name="fallback"/>.</summary>
-    public static T ReadOr<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold, T fallback)
+    /// <summary>As <see cref="Read{T}"/>, but a query WMI refuses because its class has no instances (see
+    /// <see cref="MeansNoInstances"/>) folds no rows, for a class whose provider refuses rather than list none.</summary>
+    public static T ReadInstances<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold)
     {
         try
         {
             return Read(scope, query, fold);
+        }
+        catch (ManagementException error) when (MeansNoInstances(error.ErrorCode))
+        {
+            return fold([]);
+        }
+    }
+
+    /// <summary>As <see cref="Read{T}"/>, but a query WMI cannot answer comes back as <paramref name="fallback"/>.</summary>
+    public static T ReadOr<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold, T fallback)
+        => Or(() => Read(scope, query, fold), fallback);
+
+    /// <summary>As <see cref="ReadInstances{T}"/>, but a query WMI cannot answer comes back as null, for a caller that must
+    /// tell no answer apart from an empty one.</summary>
+    public static T? ReadOrNull<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold) where T : class
+        => Or<T?>(() => ReadInstances(scope, query, fold), null);
+
+    /// <summary>What <paramref name="read"/> gives, or <paramref name="fallback"/> when WMI cannot answer.</summary>
+    private static T Or<T>(Func<T> read, T fallback)
+    {
+        try
+        {
+            return read();
         }
         catch (Exception error) when (IsFailure(error))
         {
             return fallback;
         }
     }
-
-    /// <summary>As <see cref="Read{T}"/>, but a query WMI cannot answer comes back as null, for a caller that must tell no
-    /// answer apart from an empty one.</summary>
-    public static T? ReadOrNull<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold) where T : class
-        => ReadOr<T?>(scope, query, fold, null);
 }

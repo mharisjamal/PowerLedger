@@ -89,6 +89,17 @@ public class DisplaySourceTests
     private static readonly MonitorFacts Dell = new(
         @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", "DELA0B1-7MKZG34", "DEL", "A0B1", "DELL U2723QE", 27, 3840, 2160);
 
+    /// <summary>The display query on a desktop when its monitor classes list the Dell, or when WMI refuses them with
+    /// <paramref name="refusal"/>. A refusal that means they have no instances is an answer, one display and no brightness
+    /// as when they list the Dell; any other is WMI failing, and throws.</summary>
+    private static DisplayState Query(ManagementStatus? refusal)
+        => refusal is { } status && !Wmi.MeansNoInstances(status) ? throw new ManagementException(status.ToString()) : new DisplayState(null, 1);
+
+    /// <summary>The monitors the inventory finds when the classes list the Dell, or when WMI refuses them with
+    /// <paramref name="refusal"/>: none when the refusal means they have no instances, and no answer otherwise.</summary>
+    private static IReadOnlyList<MonitorFacts>? Inventory(ManagementStatus? refusal)
+        => refusal is not { } status ? [Dell] : Wmi.MeansNoInstances(status) ? [] : null;
+
     [Fact]
     public void The_monitors_found_are_handed_on_at_first_and_after_that_only_when_they_change()
     {
@@ -132,6 +143,45 @@ public class DisplaySourceTests
         attached = null;                                // a class the inventory needs didn't answer
         source.Contribute(new SampleDraft());
         attached = [Dell];
+        source.Contribute(new SampleDraft());
+
+        handed.ShouldHaveSingleItem().ShouldBe([Dell]);
+    }
+
+    [Theory]
+    [InlineData(ManagementStatus.NotSupported)]
+    [InlineData(ManagementStatus.InvalidClass)]
+    public void When_the_last_monitor_goes_and_wmi_refuses_its_classes_as_having_no_instances_none_are_handed_on(ManagementStatus refusal)
+    {
+        // A desktop whose only monitor was unplugged, or switched off and dropped off the cable. WMI refuses every monitor
+        // class, the display query's too, rather than list none, and whoever was told of the monitor would go on counting it.
+        ManagementStatus? classes = null;
+        var handed = new List<IReadOnlyList<MonitorFacts>>();
+        var source = new DisplaySource(() => Query(classes), () => true, refreshEvery: TimeSpan.Zero,
+            monitors: () => Inventory(classes), detected: handed.Add);
+
+        source.Contribute(new SampleDraft());
+        classes = refusal;
+        source.Contribute(new SampleDraft());
+
+        handed.Count.ShouldBe(2);
+        handed[0].ShouldBe([Dell]);
+        handed[1].ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData(ManagementStatus.Timedout)]
+    [InlineData(ManagementStatus.AccessDenied)]
+    [InlineData(ManagementStatus.ProviderFailure)]
+    public void When_wmi_refuses_the_monitor_classes_for_any_other_reason_the_monitors_handed_on_before_stay(ManagementStatus refusal)
+    {
+        ManagementStatus? classes = null;
+        var handed = new List<IReadOnlyList<MonitorFacts>>();
+        var source = new DisplaySource(() => Query(classes), () => true, refreshEvery: TimeSpan.Zero,
+            monitors: () => Inventory(classes), detected: handed.Add);
+
+        source.Contribute(new SampleDraft());
+        classes = refusal;
         source.Contribute(new SampleDraft());
 
         handed.ShouldHaveSingleItem().ShouldBe([Dell]);
