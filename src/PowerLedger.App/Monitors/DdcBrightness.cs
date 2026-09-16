@@ -16,16 +16,23 @@ internal interface IBrightnessReader
 /// <summary>
 /// DDC/CI brightness (spec §5), read-only and careful, because Microsoft warns many monitors implement the commands badly:
 /// each physical monitor is asked for its capabilities once, and read only if it reports brightness support, 50 ms after
-/// it answered; a monitor that says it has no brightness, or that fails any call, is then left alone for the rest of the
-/// session - never asked either request again; nothing is ever written. GetMonitorCapabilities and GetMonitorBrightness
-/// are the only requests a monitor is sent, one read at a time, and every handle a read opens is destroyed before it
-/// returns.
+/// it answered; a monitor that says it has no brightness is then left alone for the rest of the session - never asked
+/// either request again; nothing is ever written. GetMonitorCapabilities and GetMonitorBrightness are the only requests a
+/// monitor is sent, one read at a time, and every handle a read opens is destroyed before it returns.
 ///
-/// The one exception is a display change (a monitor plugged in or out, or display settings changed) or a resume from
-/// sleep: either forgets everything every monitor has answered, because a monitor commonly fails, or answers wrongly,
-/// while it is waking up or while it is being plugged in. <see cref="Dispose"/> must be called once the reader is no
-/// longer wanted: the events it listens for come from the static <see cref="SystemEvents"/> class, which would otherwise
-/// keep the reader alive for as long as the process runs.
+/// How long a monitor that fails a call is left alone depends on whether it has given a brightness this session. One that
+/// hasn't is left alone for the rest of the session, as its firmware may be one the requests upset. One that has given a
+/// brightness has shown they don't, and most often fails for a reason Windows doesn't announce - it was switched off at
+/// its own button, set to another input, or is still waking - so it is left alone only for a while: the next read asks it
+/// again, each failure in a row after that doubles the wait, up to <see cref="LongestWait"/>, and answering its brightness
+/// request ends it.
+///
+/// A display change (a monitor plugged in or out, or display settings changed) or a resume from sleep ends all of this:
+/// either forgets everything every monitor has answered, and every failure, because a monitor commonly fails, or answers
+/// wrongly, while it is waking up or while it is being plugged in. Only which monitors have given a brightness is kept, as
+/// neither event changes a monitor's firmware. <see cref="Dispose"/> must be called once the reader is no longer wanted:
+/// the events it listens for come from the static <see cref="SystemEvents"/> class, which would otherwise keep the reader
+/// alive for as long as the process runs.
 /// </summary>
 internal sealed class DdcBrightness : IBrightnessReader, IDisposable
 {
@@ -37,10 +44,24 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// monitor slow to finish one request isn't sent the next at once.</summary>
     internal static readonly TimeSpan RequestGap = TimeSpan.FromMilliseconds(50);
 
+    /// <summary>How long a monitor that has given a brightness is left alone after it first fails: one read, so the next
+    /// scheduled read asks it again.</summary>
+    internal static readonly TimeSpan FirstWait = BrightnessReporter.ReadEvery;
+
+    /// <summary>The longest a monitor that has given a brightness is left alone, however many reads in a row it has
+    /// failed.</summary>
+    internal static readonly TimeSpan LongestWait = TimeSpan.FromHours(1);
+
     /// <summary>How a monitor's device interface path begins; Contracts' MonitorKeys reads the rest.</summary>
     private const string DisplayPath = @"\\?\DISPLAY#";
 
+    /// <summary>How early a read may start and still end a wait: half a read. Reads are scheduled a read apart, but one
+    /// that starts a moment late and the next, which starts on time, are a little less than that apart, and the read due
+    /// when a wait ends should still ask.</summary>
+    private static readonly TimeSpan Leeway = BrightnessReporter.ReadEvery / 2;
+
     private readonly IMonitorCalls _windows;
+    private readonly TimeProvider _clock;
     private readonly Action<TimeSpan> _pause;
     private readonly ISystemEvents _events;
 
@@ -49,30 +70,40 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     private readonly Lock _gate = new();
 
     /// <summary>Monitors that said they support brightness, so are read without asking again what they support. Cleared,
-    /// with the two sets below, by a display change or a resume.</summary>
+    /// with the next three, by a display change or a resume.</summary>
     private readonly HashSet<string> _readable = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Monitors that said they don't support brightness: never asked anything again until cleared.</summary>
     private readonly HashSet<string> _unsupported = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Monitors that failed a call: left alone until cleared. Every one of these three sets is keyed by device
-    /// path and gains at most one entry per monitor Windows has ever reported this run, so together they are bounded by
-    /// the physical monitors the PC has shown - a handful at most - never by how long the App runs or how often it
-    /// reads.</summary>
+    /// <summary>Monitors that failed a call without having given a brightness this session: left alone until
+    /// cleared.</summary>
     private readonly HashSet<string> _failed = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Monitors that have given a brightness and failed since, each with how long it is left alone and the
+    /// <see cref="TimeProvider.GetTimestamp"/> of its last failure. Answering its brightness request takes a monitor off,
+    /// and so does clearing.</summary>
+    private readonly Dictionary<string, (TimeSpan Wait, long At)> _waiting = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Monitors that have given a brightness this session, which decides how a failure is taken; never cleared.
+    /// Every one of these five collections is keyed by device path and holds at most one entry per monitor Windows has
+    /// ever reported this run, so together they are bounded by the physical monitors the PC has shown - a handful at
+    /// most - never by how long the App runs or how often it reads.</summary>
+    private readonly HashSet<string> _answered = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>1 once a display change or a resume has happened that no read has acted on yet.</summary>
     private int _resetDue;
 
     public DdcBrightness()
-        : this(new WindowsMonitorCalls(), Thread.Sleep, new WindowsSystemEvents())
+        : this(new WindowsMonitorCalls(), TimeProvider.System, Thread.Sleep, new WindowsSystemEvents())
     {
     }
 
     /// <param name="pause">Waits on the reading thread; <see cref="Thread.Sleep(TimeSpan)"/> outside tests.</param>
-    public DdcBrightness(IMonitorCalls windows, Action<TimeSpan> pause, ISystemEvents events)
+    public DdcBrightness(IMonitorCalls windows, TimeProvider clock, Action<TimeSpan> pause, ISystemEvents events)
     {
         _windows = windows;
+        _clock = clock;
         _pause = pause;
         _events = events;
         _events.DisplaySettingsChanged += OnDisplaySettingsChanged;
@@ -150,7 +181,11 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     }
 
     private bool Askable(string path)
-        => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_unsupported.Contains(path) && !_failed.Contains(path);
+        => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_unsupported.Contains(path) && !_failed.Contains(path) && !Waiting(path);
+
+    /// <summary>Whether the monitor has given a brightness, failed since, and is still being left alone for it.</summary>
+    private bool Waiting(string path)
+        => _waiting.TryGetValue(path, out var failure) && _clock.GetElapsedTime(failure.At) < failure.Wait - Leeway;
 
     /// <summary>
     /// Whether each physical monitor is the attached monitor at the same place in its list. Windows documents neither
@@ -179,7 +214,11 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
                 _readable.Add(path);
                 _pause(RequestGap);
             }
-            return _windows.Brightness(monitor) is { } setting ? Normalise(setting.Minimum, setting.Current, setting.Maximum) : Failed(path);
+            if (_windows.Brightness(monitor) is not { } setting) return Failed(path);
+            _waiting.Remove(path);   // it answered, so its failures in a row are over
+            if (Normalise(setting.Minimum, setting.Current, setting.Maximum) is not { } brightness) return null;
+            _answered.Add(path);
+            return brightness;
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -187,10 +226,19 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         }
     }
 
-    /// <summary>Asks the monitor nothing again for the rest of the session, until a display change or a resume clears it
-    /// (<see cref="Reset"/>).</summary>
+    /// <summary>Leaves a monitor that has given a brightness this session alone for <see cref="FirstWait"/> after its first
+    /// failure in a row, and for twice as long as the time before after each one that follows, up to
+    /// <see cref="LongestWait"/>. Any other monitor is asked nothing again for the rest of the session, until a display
+    /// change or a resume clears it (<see cref="Reset"/>).</summary>
     private double? Failed(string path)
     {
+        if (_answered.Contains(path))
+        {
+            // What it has said it supports is kept, so it isn't asked that again when the wait is over.
+            var wait = _waiting.TryGetValue(path, out var last) ? TimeSpan.FromTicks(Math.Min(last.Wait.Ticks * 2, LongestWait.Ticks)) : FirstWait;
+            _waiting[path] = (wait, _clock.GetTimestamp());
+            return null;
+        }
         _readable.Remove(path);
         _failed.Add(path);
         return null;
@@ -208,24 +256,26 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         if (e.Mode == PowerModes.Resume) Reset();
     }
 
-    /// <summary>Makes the reader forget what every monitor has answered, so each is asked afresh, capabilities first.
-    /// SystemEvents raises a handler through the synchronization context of the thread that added it, and the App creates
-    /// this reader on its UI thread, so this runs on the UI thread, perhaps while a read has held <see cref="_gate"/> for
-    /// seconds, waiting on a slow monitor. It must not wait for that read, so it only marks the reset as due, and the
-    /// reader forgets before it next looks at a monitor: the next one in the read already running, or the first in the
-    /// next read (<see cref="ForgetIfReset"/>).</summary>
+    /// <summary>Makes the reader forget what every monitor has answered, and every failure, so each is asked afresh,
+    /// capabilities first. SystemEvents raises a handler through the synchronization context of the thread that added
+    /// it, and the App creates this reader on its UI thread, so this runs on the UI thread, perhaps while a read has held
+    /// <see cref="_gate"/> for seconds, waiting on a slow monitor. It must not wait for that read, so it only marks the
+    /// reset as due, and the reader forgets before it next looks at a monitor: the next one in the read already running,
+    /// or the first in the next read (<see cref="ForgetIfReset"/>).</summary>
     private void Reset() => Volatile.Write(ref _resetDue, 1);
 
-    /// <summary>Forgets what every monitor has answered if a display change or a resume has happened since this last
-    /// looked. Called with <see cref="_gate"/> held, before a display's monitors are looked at and before each one is
-    /// asked. A reset that arrives just after this looks is still due at the next look, so none is lost, and whatever a
-    /// monitor answered in between is forgotten then.</summary>
+    /// <summary>Forgets what every monitor has answered, and every failure, if a display change or a resume has happened
+    /// since this last looked; which monitors have given a brightness is kept. Called with <see cref="_gate"/> held,
+    /// before a display's monitors are looked at and before each one is asked. A reset that arrives just after this looks
+    /// is still due at the next look, so none is lost, and whatever a monitor answered in between is forgotten
+    /// then.</summary>
     private void ForgetIfReset()
     {
         if (Interlocked.Exchange(ref _resetDue, 0) == 0) return;
         _readable.Clear();
         _unsupported.Clear();
         _failed.Clear();
+        _waiting.Clear();
     }
 }
 
