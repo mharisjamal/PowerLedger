@@ -13,7 +13,8 @@ namespace PowerLedger.Sensors;
 /// <param name="Name">The name the monitor gives itself, e.g. "DELL U2723QE"; empty when it gives none.</param>
 /// <param name="Inches">The diagonal, snapped to a common size (see <see cref="MonitorInventory.Diagonal"/>); 0 when the
 /// monitor gives no size, or one under ten inches, which is an aspect ratio or nonsense.</param>
-/// <param name="Width">The native resolution: the mode the monitor prefers, or 0 by 0 when it lists none.</param>
+/// <param name="Width">The native resolution: the mode the monitor prefers, or 0 by 0 when it lists none or WMI didn't
+/// answer for its modes.</param>
 public sealed record MonitorFacts(
     string Instance,
     string Key,
@@ -46,10 +47,11 @@ public static class MonitorInventory
     /// or nonsense where EDID's size belongs, and a size that small would only mislead the catalogue and the estimate.</summary>
     private const double SmallestExternalInches = 10;
 
-    /// <summary>The active external monitors, read from WMI. Never throws; a failed class reads as nothing.</summary>
-    public static IReadOnlyList<MonitorFacts> Read()
+    /// <summary>The active external monitors, read from WMI, or null when WMI didn't say which are attached (see
+    /// <see cref="From"/>). Never throws.</summary>
+    public static IReadOnlyList<MonitorFacts>? Read()
     {
-        var ids = Wmi.ReadOr(@"\\.\root\wmi", "SELECT InstanceName, ManufacturerName, ProductCodeID, SerialNumberID, UserFriendlyName FROM WmiMonitorID", rows =>
+        var ids = Wmi.ReadOrNull(@"\\.\root\wmi", "SELECT InstanceName, ManufacturerName, ProductCodeID, SerialNumberID, UserFriendlyName FROM WmiMonitorID", rows =>
         {
             var found = new List<(string, ushort[], ushort[], ushort[], ushort[])>();
             foreach (var row in rows)
@@ -59,9 +61,9 @@ public static class MonitorInventory
                 found.Add((name, Codes(row["ManufacturerName"]), Codes(row["ProductCodeID"]), Codes(row["SerialNumberID"]), Codes(row["UserFriendlyName"])));
             }
             return found;
-        }, []);
+        });
 
-        var connections = Wmi.ReadOr(@"\\.\root\wmi", "SELECT InstanceName, VideoOutputTechnology FROM WmiMonitorConnectionParams", rows =>
+        var connections = Wmi.ReadOrNull(@"\\.\root\wmi", "SELECT InstanceName, VideoOutputTechnology FROM WmiMonitorConnectionParams", rows =>
         {
             var byInstance = new Dictionary<string, uint>();
             foreach (var row in rows)
@@ -69,9 +71,9 @@ public static class MonitorInventory
                 if (row["InstanceName"] is string name && row["VideoOutputTechnology"] is uint connection) byInstance[name] = connection;
             }
             return byInstance;
-        }, []);
+        });
 
-        var sizes = Wmi.ReadOr(@"\\.\root\wmi", "SELECT InstanceName, Active, MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
+        var sizes = Wmi.ReadOrNull(@"\\.\root\wmi", "SELECT InstanceName, Active, MaxHorizontalImageSize, MaxVerticalImageSize FROM WmiMonitorBasicDisplayParams", rows =>
         {
             var found = new List<(string, bool, double, double)>();
             foreach (var row in rows)
@@ -80,9 +82,9 @@ public static class MonitorInventory
                 found.Add((name, row["Active"] is true, row["MaxHorizontalImageSize"] is byte width ? width : 0, row["MaxVerticalImageSize"] is byte height ? height : 0));
             }
             return found;
-        }, []);
+        });
 
-        var nativeModes = Wmi.ReadOr(@"\\.\root\wmi", "SELECT InstanceName, MonitorSourceModes, PreferredMonitorSourceModeIndex FROM WmiMonitorListedSupportedSourceModes", rows =>
+        var nativeModes = Wmi.ReadOrNull(@"\\.\root\wmi", "SELECT InstanceName, MonitorSourceModes, PreferredMonitorSourceModeIndex FROM WmiMonitorListedSupportedSourceModes", rows =>
         {
             var byInstance = new Dictionary<string, (int Width, int Height)>();
             foreach (var row in rows)
@@ -103,21 +105,25 @@ public static class MonitorInventory
                 }
             }
             return byInstance;
-        }, []);
+        });
 
         return From(ids, connections, sizes, nativeModes);
     }
 
-    /// <summary>The same, from rows already read — the part tests drive.</summary>
-    internal static IReadOnlyList<MonitorFacts> From(
-        IReadOnlyList<(string Instance, ushort[] Maker, ushort[] Product, ushort[] Serial, ushort[] Name)> ids,
-        IReadOnlyDictionary<string, uint> connections,
-        IReadOnlyList<(string Instance, bool Active, double WidthCm, double HeightCm)> sizes,
-        IReadOnlyDictionary<string, (int Width, int Height)> nativeModes)
+    /// <summary>The same, from rows already read, with null for a class WMI didn't answer — the part tests drive.</summary>
+    /// <returns>Null when WmiMonitorID, WmiMonitorConnectionParams or WmiMonitorBasicDisplayParams didn't answer, because
+    /// without any one of them an attached monitor would be left out as if it were unplugged. The native modes give only the
+    /// resolutions, and some drivers never answer for them, so without them the monitors come back at 0 by 0.</returns>
+    internal static IReadOnlyList<MonitorFacts>? From(
+        IReadOnlyList<(string Instance, ushort[] Maker, ushort[] Product, ushort[] Serial, ushort[] Name)>? ids,
+        IReadOnlyDictionary<string, uint>? connections,
+        IReadOnlyList<(string Instance, bool Active, double WidthCm, double HeightCm)>? sizes,
+        IReadOnlyDictionary<string, (int Width, int Height)>? nativeModes)
     {
+        if (ids is null || connections is null || sizes is null) return null;
         var connectionOf = ByInstance(connections.Select(pair => (pair.Key, pair.Value)));
         var sizeOf = ByInstance(sizes.Select(size => (size.Instance, (size.Active, size.WidthCm, size.HeightCm))));
-        var modeOf = ByInstance(nativeModes.Select(pair => (pair.Key, pair.Value)));
+        var modeOf = ByInstance(nativeModes?.Select(pair => (pair.Key, pair.Value)) ?? []);
 
         var monitors = new List<MonitorFacts>();
         foreach (var (instanceName, maker, product, serial, name) in ids)

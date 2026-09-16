@@ -39,7 +39,11 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     private bool _onLaptop = true;
 
     /// <summary>What WMI found. Figures are worked out only for monitors that are new or changed, and outside the lock.</summary>
-    public void Detected(IReadOnlyList<MonitorFacts> monitors)
+    /// <param name="retired">The token of the sensor set that found them, cancelled once the set is abandoned or thrown away.
+    /// A set abandoned because a read hung finishes that read on its own, perhaps long after the set that replaced it has
+    /// said what it found, so what it finds then is ignored. The token is cancelled before the replacement is built and is
+    /// checked under the lock the list is stored under, so a retired set's list never lands after its replacement's.</param>
+    public void Detected(IReadOnlyList<MonitorFacts> monitors, CancellationToken retired = default)
     {
         Figured[] known;
         lock (_gate) known = _monitors;
@@ -47,6 +51,7 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         var now = clock.GetTimestamp();
         lock (_gate)
         {
+            if (retired.IsCancellationRequested) return;
             _monitors = figured;
             foreach (var instance in _brightness.Where(reading => IsStale(reading.Value.At, now)).Select(reading => reading.Key).ToList())
             {

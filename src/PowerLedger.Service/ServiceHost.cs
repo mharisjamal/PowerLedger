@@ -91,8 +91,8 @@ internal static class ServiceHost
         // In session 0 input is invisible, so idle time comes from the App; a console run reads its own session.
         Func<double?>? idle = asService ? signals.UserIdleSeconds : null;
         return new LoopEnvironment(
-            Sensors: () => new MachineSensorSet(MachineSensors.Create(
-                () => signals.DisplayOn, () => signals.SessionLocked, idle, monitorsDetected: monitors.Detected)),
+            Sensors: retired => new MachineSensorSet(MachineSensors.Create(
+                () => signals.DisplayOn, () => signals.SessionLocked, idle, monitorsDetected: found => monitors.Detected(found, retired))),
             Inventory: HardwareInventory.Detect,
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
             SystemShuttingDown: () => shutdown.SystemShuttingDown,

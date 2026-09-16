@@ -368,6 +368,22 @@ public class MonitorBoardTests
     }
 
     [Fact]
+    public void What_a_sensor_set_finds_once_it_is_retired_is_ignored_and_its_replacement_is_not()
+    {
+        using var abandoned = new CancellationTokenSource();
+        using var replacement = new CancellationTokenSource();
+        _board.Detected([Dell, Unnamed], abandoned.Token);
+        abandoned.Cancel();
+
+        _board.Detected([], abandoned.Token);
+        _board.Status(displayOn: true).Select(m => m.Key).ShouldBe([Dell.Key, Unnamed.Key]);
+
+        _board.Detected([Dell], replacement.Token);
+        _board.Status(displayOn: true).ShouldHaveSingleItem().Key.ShouldBe(Dell.Key);
+        _board.Watts(displayOn: true).ShouldBe(28.32, 1e-9);
+    }
+
+    [Fact]
     public void A_monitor_that_changes_is_worked_out_again_and_keeps_its_brightness()
     {
         _board.Detected([Unnamed]);

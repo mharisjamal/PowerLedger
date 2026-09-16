@@ -26,11 +26,14 @@ public class MonitorInventoryTests
     /// <summary>Text as WMI gives it: a character code each, padded with zeros to the array's fixed length.</summary>
     private static ushort[] Codes(string text) => [.. text.Select(c => (ushort)c), .. new ushort[16 - text.Length]];
 
-    private static IReadOnlyList<MonitorFacts> From(params Display[] displays) => MonitorInventory.From(
-        [.. displays.Select(d => (d.Instance, Codes(d.Maker), Codes(d.Product), Codes(d.Serial), Codes(d.Name)))],
-        displays.Where(d => d.Connection is not null).ToDictionary(d => d.Instance, d => d.Connection!.Value),
-        [.. displays.Select(d => (d.Instance, d.Active, d.WidthCm, d.HeightCm))],
-        displays.Where(d => d.Mode is not null).ToDictionary(d => d.Instance, d => d.Mode!.Value));
+    private static IReadOnlyList<MonitorFacts> From(params Display[] displays) => Inventory(unanswered: null, displays).ShouldNotBeNull();
+
+    /// <summary>The inventory of the displays when WMI answers for every class but <paramref name="unanswered"/>.</summary>
+    private static IReadOnlyList<MonitorFacts>? Inventory(string? unanswered, params Display[] displays) => MonitorInventory.From(
+        unanswered == "WmiMonitorID" ? null : [.. displays.Select(d => (d.Instance, Codes(d.Maker), Codes(d.Product), Codes(d.Serial), Codes(d.Name)))],
+        unanswered == "WmiMonitorConnectionParams" ? null : displays.Where(d => d.Connection is not null).ToDictionary(d => d.Instance, d => d.Connection!.Value),
+        unanswered == "WmiMonitorBasicDisplayParams" ? null : [.. displays.Select(d => (d.Instance, d.Active, d.WidthCm, d.HeightCm))],
+        unanswered == "WmiMonitorListedSupportedSourceModes" ? null : displays.Where(d => d.Mode is not null).ToDictionary(d => d.Instance, d => d.Mode!.Value));
 
     [Theory]
     [InlineData(0x80000000u)]   // internal
@@ -78,6 +81,23 @@ public class MonitorInventoryTests
         monitor.Height.ShouldBe(0);
     }
 
+    [Theory]
+    [InlineData("WmiMonitorID")]
+    [InlineData("WmiMonitorConnectionParams")]
+    [InlineData("WmiMonitorBasicDisplayParams")]
+    public void When_a_class_that_says_which_monitors_are_attached_does_not_answer_there_is_no_answer_rather_than_no_monitors(string unanswered)
+        => Inventory(unanswered, Dell, Lg).ShouldBeNull();
+
+    [Fact]
+    public void When_only_the_native_modes_do_not_answer_the_monitors_come_back_without_a_resolution()
+    {
+        // Some drivers never answer for them, and they give nothing but the resolution.
+        var monitors = Inventory(unanswered: "WmiMonitorListedSupportedSourceModes", Dell, Lg).ShouldNotBeNull();
+
+        monitors.Select(m => m.Name).ShouldBe(["DELL U2723QE", "LG HDR 4K"]);
+        monitors.ShouldAllBe(m => m.Width == 0 && m.Height == 0);
+    }
+
     [Fact]
     public void Windows_instance_names_join_across_its_classes_whatever_their_case_or_suffix()
     {
@@ -87,7 +107,7 @@ public class MonitorInventoryTests
             [(@"display\dela0b1\5&2f5a1b&0&uid4353_0", true, 60, 34)],
             new Dictionary<string, (int Width, int Height)> { [@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353_0"] = (3840, 2160) });
 
-        monitors.ShouldHaveSingleItem().Width.ShouldBe(3840);
+        monitors.ShouldNotBeNull().ShouldHaveSingleItem().Width.ShouldBe(3840);
     }
 
     [Theory]

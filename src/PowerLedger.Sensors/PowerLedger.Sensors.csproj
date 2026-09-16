@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="PowerLedger.Sensors.Tests" />
+    <InternalsVisibleTo Include="PowerLedger.Service.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -17,13 +17,14 @@ internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationS
 }
 
 /// <summary>What the loop needs from the machine and the host, so tests can supply fakes.</summary>
-/// <param name="Sensors">Builds a sensor set, on the sensor thread; again after every resume or abandoned set.</param>
+/// <param name="Sensors">Builds a sensor set, on the sensor thread; again after every resume or abandoned set. The token
+/// is cancelled once the set is abandoned or thrown away (see <see cref="SensorWorker"/>).</param>
 /// <param name="Inventory">Detects the hardware, at start and on every resume.</param>
 /// <param name="SystemUptime">How long Windows has been running, to tell a boot from a service restart.</param>
 /// <param name="SystemShuttingDown">True once the service control manager has announced a shutdown.</param>
 /// <param name="DatabaseNotice">What start-up had to do to the database, for the status screen.</param>
 internal sealed record LoopEnvironment(
-    Func<ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice);
+    Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice);
 
 /// <summary>
 /// The service's heart (spec §3, §6, §7). Once a sample interval it reads the sensors, runs the model, feeds the

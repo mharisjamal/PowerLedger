@@ -121,6 +121,44 @@ public class DisplaySourceTests
     }
 
     [Fact]
+    public void Monitors_wmi_did_not_answer_for_are_not_handed_on_so_the_ones_handed_on_before_stay()
+    {
+        IReadOnlyList<MonitorFacts>? attached = [Dell];
+        var handed = new List<IReadOnlyList<MonitorFacts>>();
+        var source = new DisplaySource(() => new DisplayState(0.5, 1), () => true, refreshEvery: TimeSpan.Zero,
+            monitors: () => attached, detected: handed.Add);
+
+        source.Contribute(new SampleDraft());
+        attached = null;                                // a class the inventory needs didn't answer
+        source.Contribute(new SampleDraft());
+        attached = [Dell];
+        source.Contribute(new SampleDraft());
+
+        handed.ShouldHaveSingleItem().ShouldBe([Dell]);
+    }
+
+    [Fact]
+    public void A_fresh_source_hands_on_the_first_monitors_wmi_answers_with_though_an_older_source_handed_on_the_same()
+    {
+        // The service builds a fresh source whenever it replaces a sensor set, and the board must be right at once.
+        IReadOnlyList<MonitorFacts>? attached = [Dell];
+        var handed = new List<IReadOnlyList<MonitorFacts>>();
+        DisplaySource Source() => new(() => new DisplayState(0.5, 1), () => true, refreshEvery: TimeSpan.Zero,
+            monitors: () => attached, detected: handed.Add);
+
+        Source().Contribute(new SampleDraft());
+        var replacement = Source();
+        attached = null;
+        replacement.Contribute(new SampleDraft());
+        attached = [Dell];
+        replacement.Contribute(new SampleDraft());
+        replacement.Contribute(new SampleDraft());
+
+        handed.Count.ShouldBe(2);
+        handed[1].ShouldBe([Dell]);
+    }
+
+    [Fact]
     public void The_monitors_are_read_only_when_the_display_query_is_due()
     {
         var reads = 0;

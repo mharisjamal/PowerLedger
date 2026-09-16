@@ -416,7 +416,7 @@ public class SamplingLoopTests
             Monitors = new MonitorBoard(MonitorBoardTests.Catalogue, Clock);
             makeSet ??= _ => new FakeSensorSet((ts, delta) => Samples.At(ts, delta, batteryW: 20));
             var environment = new LoopEnvironment(
-                Sensors: () =>
+                Sensors: _ =>
                 {
                     lock (_sets)
                     {

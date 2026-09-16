@@ -19,7 +19,7 @@ public sealed class DisplaySource : ISensorSource
     private readonly Func<DisplayState> _query;
     private readonly Func<bool> _displayOn;
     private readonly TimeSpan _refreshEvery;
-    private readonly Func<IReadOnlyList<MonitorFacts>> _monitors;
+    private readonly Func<IReadOnlyList<MonitorFacts>?> _monitors;
     private readonly Action<IReadOnlyList<MonitorFacts>>? _detected;
     private DisplayState _state = new(null, 1);
     private IReadOnlyList<MonitorFacts>? _handedOver;
@@ -36,7 +36,7 @@ public sealed class DisplaySource : ISensorSource
     /// <summary>Test seam: any source of display state and of monitors.</summary>
     internal DisplaySource(
         Func<DisplayState> query, Func<bool> displayOn, TimeSpan? refreshEvery = null,
-        Func<IReadOnlyList<MonitorFacts>>? monitors = null, Action<IReadOnlyList<MonitorFacts>>? detected = null)
+        Func<IReadOnlyList<MonitorFacts>?>? monitors = null, Action<IReadOnlyList<MonitorFacts>>? detected = null)
     {
         _query = query;
         _displayOn = displayOn;
@@ -79,16 +79,17 @@ public sealed class DisplaySource : ISensorSource
         draft.MonitorCount = _state.MonitorCount;
         draft.DisplayOn = _displayOn();
 
-        // Only once WMI has just answered, so that a WMI hiccup, which the inventory reads as no monitors, doesn't unplug them.
+        // Only on a refresh WMI answered: the monitors keep the display query's schedule, and are left alone while WMI fails.
         if (refreshed && _detected is not null) HandOverMonitors(_detected);
     }
 
     /// <summary>Reads the external monitors and passes them on if they changed. The draft is filled first, so a handover
     /// that throws costs the tick nothing it measured; what was handed over is noted only once it has been taken, so a
-    /// handover that failed is tried again on the next refresh.</summary>
+    /// handover that failed is tried again on the next refresh. When WMI didn't say which monitors are attached, nothing is
+    /// passed on, so whoever was told keeps what it was told rather than hearing that they were unplugged.</summary>
     private void HandOverMonitors(Action<IReadOnlyList<MonitorFacts>> detected)
     {
-        var monitors = _monitors();
+        if (_monitors() is not { } monitors) return;
         if (_handedOver is not null && _handedOver.SequenceEqual(monitors)) return;
         detected(monitors);
         _handedOver = monitors;

@@ -84,7 +84,7 @@ public class RealHardwareTests
     [Fact]
     public void The_monitor_inventory_answers_with_only_the_external_monitors()
     {
-        var monitors = Should.NotThrow(() => MonitorInventory.Read());
+        var monitors = Should.NotThrow(() => MonitorInventory.Read()).ShouldNotBeNull();
 
         // Windows' own word on which displays are built in: none of them may come back. The development laptop has only
         // its own panel, so there its list is empty.

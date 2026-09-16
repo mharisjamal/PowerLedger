@@ -15,6 +15,9 @@ internal sealed class FakeSensorSet(Func<DateTimeOffset, double, Sample>? script
 
     public bool Disposed => _disposed;
 
+    /// <summary>The token the worker built it with.</summary>
+    public CancellationToken Retired { get; init; }
+
     public Sample Read(DateTimeOffset timestamp, double deltaSeconds)
     {
         Interlocked.Increment(ref _reads);

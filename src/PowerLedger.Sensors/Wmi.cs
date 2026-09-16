@@ -47,4 +47,9 @@ internal static class Wmi
             return fallback;
         }
     }
+
+    /// <summary>As <see cref="Read{T}"/>, but a query WMI cannot answer comes back as null, for a caller that must tell no
+    /// answer apart from an empty one.</summary>
+    public static T? ReadOrNull<T>(string scope, string query, Func<IReadOnlyList<ManagementBaseObject>, T> fold) where T : class
+        => ReadOr<T?>(scope, query, fold, null);
 }

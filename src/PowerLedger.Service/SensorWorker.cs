@@ -12,10 +12,11 @@ internal sealed record TickResult(Sample Sample, IReadOnlyList<SourceHealth> Hea
 /// <summary>
 /// Runs every call into a sensor set on one dedicated thread, so a native call that hangs cannot stall the loop (Plan
 /// B's watchdog rule). A read that overruns its timeout abandons the set: the stuck thread is left to finish on its own
-/// and dispose the set when its call returns, and the next read builds a fresh set on a fresh thread. The loop is the
-/// only caller.
+/// and dispose the set when its call returns, and the next read builds a fresh set on a fresh thread. Each set is built
+/// with a token that is cancelled the moment the set is abandoned or thrown away, before a fresh one can be built, so
+/// whatever a stuck call passes on when it returns can be told apart and ignored. The loop is the only caller.
 /// </summary>
-internal sealed class SensorWorker(Func<ISensorSet> factory, TimeSpan timeout, TimeProvider clock) : IDisposable
+internal sealed class SensorWorker(Func<CancellationToken, ISensorSet> factory, TimeSpan timeout, TimeProvider clock) : IDisposable
 {
     private Lane? _lane;
 
@@ -53,10 +54,11 @@ internal sealed class SensorWorker(Func<ISensorSet> factory, TimeSpan timeout, T
     private sealed class Lane
     {
         private readonly BlockingCollection<Action> _work = new();
-        private readonly Func<ISensorSet> _factory;
+        private readonly CancellationTokenSource _retired = new();
+        private readonly Func<CancellationToken, ISensorSet> _factory;
         private ISensorSet? _set;
 
-        public Lane(Func<ISensorSet> factory)
+        public Lane(Func<CancellationToken, ISensorSet> factory)
         {
             _factory = factory;
             new Thread(Drain) { IsBackground = true, Name = "PowerLedger sensors" }.Start();
@@ -69,7 +71,7 @@ internal sealed class SensorWorker(Func<ISensorSet> factory, TimeSpan timeout, T
             {
                 try
                 {
-                    done.SetResult(call(_set ??= _factory()));
+                    done.SetResult(call(_set ??= _factory(_retired.Token)));
                 }
                 catch (Exception error)
                 {
@@ -79,8 +81,13 @@ internal sealed class SensorWorker(Func<ISensorSet> factory, TimeSpan timeout, T
             return done.Task;
         }
 
-        /// <summary>No more work. The thread disposes the set once the call it is running, if any, returns.</summary>
-        public void Retire() => _work.CompleteAdding();
+        /// <summary>No more work, and the set's token is cancelled at once. The thread disposes the set once the call it is
+        /// running, if any, returns.</summary>
+        public void Retire()
+        {
+            _retired.Cancel();
+            _work.CompleteAdding();
+        }
 
         private void Drain()
         {
