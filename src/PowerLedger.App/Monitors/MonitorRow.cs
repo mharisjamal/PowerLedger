@@ -11,15 +11,19 @@ namespace PowerLedger.App;
 /// choice: whether it counts, a figure of their own, and whether it has a plug of its own. A monitor without a choice
 /// counts, and has a plug of its own, as the service's defaults say, at PowerLedger's own figure; one that runs off this PC
 /// always counts, being part of what the PC draws. A figure the user typed is theirs until they clear it. The service's word
-/// is refreshed with its status; what the user typed or ticked never is, and a box they haven't touched follows the
-/// service's figure and defaults.
+/// is refreshed with its status, and the choice with its settings when a save reads them again; what the user typed or ticked
+/// never is, and a box they haven't touched follows the service's figure, defaults and choice.
 /// </summary>
 internal sealed class MonitorRow : ObservableObject
 {
     private readonly CultureInfo _culture;
 
-    /// <summary>The figure the user's choice holds, or null for PowerLedger's own.</summary>
-    private readonly double? _typed;
+    /// <summary>The user's choice for the monitor in the settings the form last took, or null for none.</summary>
+    private MonitorChoice? _choice;
+
+    /// <summary>What the service last said of the monitor: its status, with whether a monitor without a choice counts as its
+    /// settings say when a save has read them since.</summary>
+    private MonitorStatus _monitor;
 
     /// <summary>PowerLedger's own figure, or null until the service gives it: while it holds a typed figure for the monitor
     /// it reports only that one, so the last own figure it gave is kept.</summary>
@@ -31,11 +35,11 @@ internal sealed class MonitorRow : ObservableObject
     /// <summary>Whether the service takes the monitor to have a plug of its own when the user hasn't said, as it last said.</summary>
     private bool _ownPlugByDefault;
 
-    /// <summary>Whether <see cref="Counted"/> is the user's, ticked by them or held by their choice, so no default moves it.</summary>
-    private bool _countedChosen;
+    /// <summary>Whether the user has ticked or unticked <see cref="Counted"/>, so neither a default nor a choice moves it.</summary>
+    private bool _countedTicked;
 
-    /// <summary>Whether <see cref="OwnPlug"/> is the user's, ticked by them or held by their choice.</summary>
-    private bool _ownPlugChosen;
+    /// <summary>Whether the user has ticked or unticked <see cref="OwnPlug"/>, so neither a default nor a choice moves it.</summary>
+    private bool _ownPlugTicked;
 
     private string _name = "";
     private string _size = "";
@@ -50,11 +54,10 @@ internal sealed class MonitorRow : ObservableObject
     {
         _culture = culture;
         Key = monitor.Key;
-        _typed = choice?.Watts;
+        _choice = choice;
+        _monitor = monitor;
         _counted = choice?.Counted ?? monitor.CountedByDefault;
         _ownPlug = choice?.OwnPlug ?? monitor.OwnPlugByDefault;
-        _countedChosen = choice is not null;
-        _ownPlugChosen = choice?.OwnPlug is not null;
         Show(monitor);
         _filled = Fill();
         _watts = _filled;
@@ -91,7 +94,7 @@ internal sealed class MonitorRow : ObservableObject
         get => !OwnPlug || _counted;
         set
         {
-            if (OwnPlug && SetProperty(ref _counted, value)) _countedChosen = true;
+            if (OwnPlug && SetProperty(ref _counted, value)) _countedTicked = true;
         }
     }
 
@@ -102,7 +105,7 @@ internal sealed class MonitorRow : ObservableObject
         set
         {
             if (!SetProperty(ref _ownPlug, value)) return;
-            _ownPlugChosen = true;
+            _ownPlugTicked = true;
             OnPropertyChanged(nameof(Counted));
         }
     }
@@ -115,11 +118,21 @@ internal sealed class MonitorRow : ObservableObject
     internal void Refresh(MonitorStatus monitor)
     {
         var untouched = Watts == _filled;
+        _monitor = monitor;
         Show(monitor);
-        _filled = Fill();
-        if (untouched) Watts = _filled;
-        if (!_countedChosen) SetProperty(ref _counted, CountedByDefault, nameof(Counted));
-        if (!_ownPlugChosen && SetProperty(ref _ownPlug, _ownPlugByDefault, nameof(OwnPlug))) OnPropertyChanged(nameof(Counted));
+        Follow(untouched);
+    }
+
+    /// <summary>The choice the service holds for the monitor, and whether it counts a monitor without one, from its settings
+    /// read again since the row was listed. A figure the user has typed stays, and so does a box they have ticked; one they
+    /// haven't follows.</summary>
+    internal void Take(MonitorChoice? choice, bool countedByDefault)
+    {
+        var untouched = Watts == _filled;
+        _choice = choice;
+        _monitor = _monitor with { CountedByDefault = countedByDefault };
+        Show(_monitor);
+        Follow(untouched);
     }
 
     /// <summary>The choice to save, given the watts the form read from <see cref="Watts"/>: a figure counts as typed only
@@ -145,7 +158,7 @@ internal sealed class MonitorRow : ObservableObject
         // reports a typed figure the choice doesn't hold hasn't caught up with a save yet, so nothing is claimed for it. A
         // monitor that doesn't give both its size and its resolution is estimated as the median of all monitors, not from
         // its size.
-        Source = _typed is not null ? "typed" : monitor.Source switch
+        Source = _choice?.Watts is not null ? "typed" : monitor.Source switch
         {
             MonitorSource.Model => "measured for this model",
             MonitorSource.Estimate when double.IsFinite(monitor.Inches) && monitor is { Inches: > 0, Width: > 0, Height: > 0 }
@@ -162,7 +175,17 @@ internal sealed class MonitorRow : ObservableObject
         Now = monitor.Counted ? $"{Format.Watts(monitor.WattsNow, _culture)} W now" : "not counted";
     }
 
-    private string Fill() => _typed is { } typed ? Figure(typed) : _own is { } own ? Figure(own) : "";
+    /// <summary>Puts the service's figure, defaults and choice in what the user hasn't changed: the figure's box when
+    /// <paramref name="untouched"/>, and each box they haven't ticked.</summary>
+    private void Follow(bool untouched)
+    {
+        _filled = Fill();
+        if (untouched) Watts = _filled;
+        if (!_countedTicked) SetProperty(ref _counted, _choice?.Counted ?? CountedByDefault, nameof(Counted));
+        if (!_ownPlugTicked && SetProperty(ref _ownPlug, _choice?.OwnPlug ?? _ownPlugByDefault, nameof(OwnPlug))) OnPropertyChanged(nameof(Counted));
+    }
+
+    private string Fill() => _choice?.Watts is { } typed ? Figure(typed) : _own is { } own ? Figure(own) : "";
 
     /// <summary>Whole or one-decimal watts: "27", "26.9".</summary>
     private string Figure(double watts) => watts.ToString("0.#", _culture);

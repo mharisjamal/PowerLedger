@@ -99,6 +99,144 @@ public class ServiceFormTests
     }
 
     [Fact]
+    public async Task A_save_after_the_service_carried_the_old_monitor_settings_over_leaves_monitors_out_as_they_were()
+    {
+        // The old settings left monitors out, and Settings loaded them before the laptop was docked. At the first reading that
+        // finds the Dell, the service carries them over: a monitor without a choice is left out, and the old count is cleared.
+        // Settings lists the Dell left out, and a save of anything must not put back the settings it loaded, which would count
+        // the Dell from then on, with nothing left to carry over.
+        var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 2, Monitors = [] };
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = old });
+        form.ShowMonitors([]);
+        var carried = old with { ExternalMonitors = 0, CountMonitorsByDefault = false };
+        _link.Settings = ServiceSettings.Default with { Profile = carried };
+        form.ShowMonitors([Statuses.Dell with { CountedByDefault = false, Counted = false, WattsNow = 0 }]);
+        form.IdleMinutes = "10";
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        var sent = (ServiceSettings)_link.Writes.Single();
+        sent.Profile.ShouldBe(carried);   // monitors left out unless chosen, the old count cleared, and no choice for the Dell
+        sent.IdleThresholdSeconds.ShouldBe(600);
+        form.Monitors.Single().Counted.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(false)]   // docked after the form listed no monitor
+    [InlineData(true)]    // listed at its own figure by the reading that carried the old settings over
+    public async Task A_save_after_the_service_carried_the_old_monitor_settings_over_keeps_the_figure_typed_then_and_shows_it(bool listedBefore)
+    {
+        // The old settings counted monitors at a figure the user typed, which the service gives the Dell when it carries them over.
+        var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 1, IncludeMonitors = true, MonitorWatts = 30, Monitors = [] };
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = old });
+        form.ShowMonitors(listedBefore ? [Statuses.Dell] : []);
+        var carried = old with { ExternalMonitors = 0, IncludeMonitors = false, Monitors = [new MonitorChoice { Key = Statuses.Dell.Key, Watts = 30 }] };
+        _link.Settings = ServiceSettings.Default with { Profile = carried };
+        form.ShowMonitors([Statuses.Dell with { OnWatts = 30, Source = MonitorSource.Typed, WattsNow = 30 }]);
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.ShouldBe(carried);
+        (form.Monitors.Single().Watts, form.Monitors.Single().Source).ShouldBe(("30", "typed"));
+    }
+
+    [Fact]
+    public async Task A_save_that_reads_the_settings_again_keeps_what_the_user_typed_and_ticked_and_takes_the_rest_from_the_service()
+    {
+        // The reading that carried the old settings over listed the Dell and the AOC at their own figures, and gave them and a
+        // Samsung unplugged since the figure typed before. The user typed a figure for the Dell and left the AOC out: what they
+        // changed stays, the AOC's figure, which they didn't touch, is the one carried over, and the Samsung, which the form
+        // doesn't list, keeps its choice.
+        const string samsung = "SAM0F9E-HNTW700123";
+        var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 3, IncludeMonitors = true, MonitorWatts = 30, Monitors = [] };
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = old });
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        var (dell, aoc) = (form.Monitors[0], form.Monitors[1]);
+        dell.Watts = "22";
+        aoc.Counted = false;
+        _link.Settings = ServiceSettings.Default with
+        {
+            Profile = old with
+            {
+                ExternalMonitors = 0, IncludeMonitors = false,
+                Monitors = [.. new[] { Statuses.Dell.Key, Statuses.Aoc.Key, samsung }.Select(key => new MonitorChoice { Key = key, Watts = 30 })],
+            },
+        };
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        var profile = ((ServiceSettings)_link.Writes.Single()).Profile;
+        profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, Watts = 22 },
+            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false, Watts = 30 },
+            new MonitorChoice { Key = samsung, Watts = 30 },
+        ]);
+        (profile.CountMonitorsByDefault, profile.ExternalMonitors, profile.IncludeMonitors, profile.MonitorWatts).ShouldBe((true, 0, false, 30.0));
+        (dell.Watts, aoc.Watts, aoc.Source, aoc.Counted).ShouldBe(("22", "30", "typed", false));
+    }
+
+    [Fact]
+    public async Task A_save_that_reads_the_settings_again_leaves_out_a_monitor_the_user_didnt_tick_once_the_service_leaves_monitors_out()
+    {
+        // The reading that carried over old settings that left monitors out listed the monitors as counted, before it carried them
+        // over. A box the user hasn't touched follows the service as it is now; one they ticked stays.
+        var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 2, Monitors = [] };
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = old });
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        var (dell, aoc) = (form.Monitors[0], form.Monitors[1]);
+        aoc.Counted = false;
+        aoc.Counted = true;   // and back again, which is the user's
+        _link.Settings = ServiceSettings.Default with { Profile = old with { ExternalMonitors = 0, CountMonitorsByDefault = false } };
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        var profile = ((ServiceSettings)_link.Writes.Single()).Profile;
+        profile.CountMonitorsByDefault.ShouldBeFalse();
+        profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Aoc.Key, Counted = true }]);
+        (dell.Counted, aoc.Counted).ShouldBe((false, true));
+    }
+
+    [Fact]
+    public async Task A_save_listing_no_monitor_after_the_service_carried_the_old_monitor_settings_over_keeps_what_it_carried_over()
+    {
+        // The Dell was docked and undocked again before Settings listed it, or the wizard, which reads the status once, shows. The
+        // old settings loaded no longer go back as they came: they would drop the figure carried over until the service next
+        // starts, and carry them over again then.
+        var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 1, IncludeMonitors = true, MonitorWatts = 30, Monitors = [] };
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = old });
+        form.ShowMonitors([]);
+        var carried = old with { ExternalMonitors = 0, IncludeMonitors = false, Monitors = [new MonitorChoice { Key = Statuses.Dell.Key, Watts = 30 }] };
+        _link.Settings = ServiceSettings.Default with { Profile = carried };
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.ShouldBe(carried);
+    }
+
+    [Theory]
+    [InlineData(true, "The service didn't answer, so nothing was changed.")]
+    [InlineData(false, "The service isn't running, so nothing was changed.")]
+    public async Task A_save_that_cant_read_the_settings_again_sends_nothing(bool connected, string message)
+    {
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { ExternalMonitors = 2, Monitors = [] } });
+        form.ShowMonitors([Statuses.Dell with { CountedByDefault = false, Counted = false, WattsNow = 0 }]);
+        _link.Settings = null;   // not sent in time
+        _link.Connect(connected);
+
+        (await form.SaveAsync()).ShouldBeFalse();
+
+        form.Message.ShouldBe(message);
+        _link.Writes.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Each_monitor_says_whether_its_brightness_was_read_and_what_it_draws_now()
     {
         var form = Form();
@@ -267,27 +405,23 @@ public class ServiceFormTests
         form.Monitors.Select(m => (m.Counted, m.OwnPlug)).ShouldBe([(true, false), (false, true)]);
     }
 
-    [Fact]
-    public async Task A_monitor_counted_where_the_service_wouldnt_count_it_or_left_out_where_it_would_saves_a_choice()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]   // settings from before monitors were detected left monitors out
+    public async Task A_monitor_counted_where_the_service_wouldnt_count_it_or_left_out_where_it_would_saves_a_choice(bool countedByDefault)
     {
-        var form = Form();
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { CountMonitorsByDefault = countedByDefault } });
         form.ShowMonitors(
         [
-            Statuses.Dell,
-            Statuses.Aoc,
-            Statuses.Dell with { Key = "DELA0B1-2", CountedByDefault = false, Counted = false },
-            Statuses.Aoc with { Key = "AOC2402-2", CountedByDefault = false, Counted = false },
+            Statuses.Dell with { CountedByDefault = countedByDefault, Counted = countedByDefault },
+            Statuses.Aoc with { CountedByDefault = countedByDefault, Counted = countedByDefault },
         ]);
-        form.Monitors[1].Counted = false;
-        form.Monitors[3].Counted = true;
+        form.Monitors[1].Counted = !countedByDefault;
 
         (await form.SaveAsync()).ShouldBeTrue();
 
-        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
-        [
-            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false },
-            new MonitorChoice { Key = "AOC2402-2", Counted = true },
-        ]);
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Aoc.Key, Counted = !countedByDefault }]);
     }
 
     [Fact]
@@ -379,6 +513,7 @@ public class ServiceFormTests
 
         // Say the service has since taken settings saved elsewhere: a desktop's, where no monitor is taken to run off the PC,
         // carried over from before monitors were detected, when they were left out unless the user said otherwise.
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop with { CountMonitorsByDefault = false } };
         form.ShowMonitors(
         [
             Statuses.Portable with { CountedByDefault = false, OwnPlugByDefault = true, OwnPlug = true },

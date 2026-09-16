@@ -16,7 +16,9 @@ namespace PowerLedger.App;
 /// those for the monitors listed, as many as the service takes. The monitor count and the choice to count monitors from
 /// before monitors were detected go back as the service sent them while the form lists no monitor, so the service still
 /// carries them over to the monitors it finds; once the form lists one, the choices it shows replace them. The old figure,
-/// which no longer reaches the model, always goes back as it came.
+/// which no longer reaches the model, always goes back as it came. When the settings loaded are behind the service's, as
+/// they are once it has carried the old monitor settings over, a save reads them again and takes from them what the form
+/// doesn't show, so it never puts back what was carried over; what the user typed and ticked stays.
 /// </summary>
 internal sealed class ServiceForm : ObservableObject
 {
@@ -147,8 +149,9 @@ internal sealed class ServiceForm : ObservableObject
     }
 
     /// <summary>Lists the external monitors in the service's status, once each and in its order, with the user's choice for
-    /// each from the settings last loaded. A monitor already listed keeps its row, and with it what the user typed and
-    /// ticked, so a status read while a figure is being typed takes nothing away; a monitor unplugged goes.</summary>
+    /// each from the settings last loaded, or read again by a save. A monitor already listed keeps its row, and with it what
+    /// the user typed and ticked, so a status read while a figure is being typed takes nothing away; a monitor unplugged
+    /// goes.</summary>
     public void ShowMonitors(IReadOnlyList<MonitorStatus> monitors)
     {
         var listed = monitors.OfType<MonitorStatus>().DistinctBy(monitor => monitor.Key).ToList();
@@ -162,7 +165,7 @@ internal sealed class ServiceForm : ObservableObject
             var row = Monitors.FirstOrDefault(candidate => candidate.Key == monitor.Key);
             if (row is null)
             {
-                Monitors.Insert(index, new MonitorRow(monitor, _choices.FirstOrDefault(choice => choice?.Key == monitor.Key), _culture));
+                Monitors.Insert(index, new MonitorRow(monitor, ChoiceFor(monitor.Key), _culture));
                 continue;
             }
             var at = Monitors.IndexOf(row);
@@ -172,7 +175,8 @@ internal sealed class ServiceForm : ObservableObject
         OnPropertyChanged(nameof(HasMonitors));
     }
 
-    /// <summary>Sends the settings typed, and says whether the service took them.</summary>
+    /// <summary>Sends the settings typed, and says whether the service took them. When the settings loaded are behind the
+    /// service's, its settings are read again first, and nothing is sent without them.</summary>
     public async Task<bool> SaveAsync()
     {
         if (Read(out var problem) is not { } settings)
@@ -181,6 +185,14 @@ internal sealed class ServiceForm : ObservableObject
             return false;
         }
         Message = "Saving…";
+        if (IsBehind)
+        {
+            var current = await _link.GetSettingsAsync().ConfigureAwait(false);
+            var caughtUp = new TaskCompletionSource<ServiceSettings?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _threads.Post(() => caughtUp.SetResult(CatchUp(current)));   // the rows are the UI thread's
+            if (await caughtUp.Task.ConfigureAwait(false) is not { } read) return false;
+            settings = read;
+        }
         var result = await _link.SetSettingsAsync(settings).ConfigureAwait(false);
         _threads.Post(() =>
         {
@@ -230,6 +242,36 @@ internal sealed class ServiceForm : ObservableObject
         problem = settings.Validate();
         return problem is null ? settings : null;
     }
+
+    /// <summary>Whether the settings loaded may be behind the service's: they still hold monitor settings from before monitors
+    /// were detected, which the service carries over at the first reading that finds a monitor, or the monitors listed say a
+    /// monitor without a choice counts otherwise than they do.</summary>
+    private bool IsBehind => _profile.ExternalMonitors > 0 || _profile.IncludeMonitors
+        || Monitors.Any(row => row.CountedByDefault != _profile.CountMonitorsByDefault);
+
+    /// <summary>
+    /// The settings the form describes, once it has taken from the settings the service sent again what it doesn't show: whether
+    /// a monitor without a choice counts, the monitor settings from before monitors were detected, and the choices for monitors
+    /// not listed. Each monitor listed takes its choice from them where the user hasn't typed or ticked. Null, with the problem
+    /// said, when the service sent none or the settings can't be sent. Call on the UI thread.
+    /// </summary>
+    private ServiceSettings? CatchUp(ServiceSettings? current)
+    {
+        if (current is null)
+        {
+            Message = _link.IsConnected ? "The service didn't answer, so nothing was changed." : WriteResult.NotConnected.Problem;
+            return null;
+        }
+        _profile = current.Profile;
+        _choices = current.Profile.Monitors ?? [];   // settings from a service before monitors hold no list
+        foreach (var row in Monitors) row.Take(ChoiceFor(row.Key), _profile.CountMonitorsByDefault);
+        if (Read(out var problem) is { } settings) return settings;
+        Message = problem;
+        return null;
+    }
+
+    /// <summary>The choice the settings last taken hold for the monitor, or null.</summary>
+    private MonitorChoice? ChoiceFor(string key) => _choices.FirstOrDefault(choice => choice?.Key == key);
 
     /// <summary>
     /// The choices that say what PowerLedger wouldn't assume: first those for the monitors listed, in their order, then those
