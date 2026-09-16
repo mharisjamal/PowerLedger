@@ -77,11 +77,13 @@ internal sealed class MonitorRow : ObservableObject
     /// better" or, for a monitor without its size or resolution, "estimated — correct it if you know better", or "typed".</summary>
     public string Source { get => _source; private set => SetProperty(ref _source, value); }
 
-    /// <summary>"brightness 60%, read from the monitor", or "brightness unknown, assumed 75%"; for a typed figure, which no
-    /// brightness scales, just "brightness unknown".</summary>
+    /// <summary>"brightness 60%, read from the monitor", or "brightness unknown, assumed 75%"; for a typed figure, or the off
+    /// or sleep figure of a monitor off or on standby, which no brightness scales, just "brightness unknown".</summary>
     public string Brightness { get => _brightness; private set => SetProperty(ref _brightness, value); }
 
-    /// <summary>What the service counts it as drawing now: "24.3 W now", or "not counted".</summary>
+    /// <summary>Whether the monitor is on, as it said, and what the service counts it as drawing now: "on · 24.3 W now",
+    /// "standby · 0.3 W now", "off · 0.2 W now" or, where PowerLedger can't tell, "can't tell if it's on · 24.3 W now". One
+    /// that isn't counted is "not counted", or "off · not counted" when it said.</summary>
     public string Now { get => _now; private set => SetProperty(ref _now, value); }
 
     /// <summary>On-mode watts, as typed; blank for PowerLedger's own figure.</summary>
@@ -177,13 +179,24 @@ internal sealed class MonitorRow : ObservableObject
             MonitorSource.Estimate => "estimated — correct it if you know better",
             _ => "",
         };
-        // A figure the service reports as typed is taken as it is, so no brightness is assumed for it.
+        // A figure the service reports as typed is taken as it is, and a monitor off or on standby counts at its off or sleep
+        // figure, so no brightness is assumed for either.
         Brightness = monitor.Brightness is { } brightness && double.IsFinite(brightness)
             ? $"brightness {Format.Percent(brightness, _culture)}, read from the monitor"
-            : monitor.Source == MonitorSource.Typed
+            : monitor.Source == MonitorSource.Typed || monitor.PowerState is MonitorPowerState.Off or MonitorPowerState.Standby
                 ? "brightness unknown"
                 : $"brightness unknown, assumed {Format.Percent(MonitorPower.ListedBrightness, _culture)}";
-        Now = monitor.Counted ? $"{Format.Watts(monitor.WattsNow, _culture)} W now" : "not counted";
+        // The state is the monitor's own answer. Where it hasn't given one lately, PowerLedger can't tell and the Count tick
+        // decides, which matters only for a monitor that counts.
+        var state = monitor.PowerState switch
+        {
+            MonitorPowerState.On => "on",
+            MonitorPowerState.Standby => "standby",
+            MonitorPowerState.Off => "off",
+            _ => monitor.Counted ? "can't tell if it's on" : null,
+        };
+        var now = monitor.Counted ? $"{Format.Watts(monitor.WattsNow, _culture)} W now" : "not counted";
+        Now = state is null ? now : $"{state} · {now}";
     }
 
     /// <summary>Puts the service's figure, defaults and choice in what the user hasn't changed: the figure's box when

@@ -245,8 +245,8 @@ public class ServiceFormTests
 
         form.Monitors.Select(m => (m.Brightness, m.Now)).ShouldBe(
         [
-            ("brightness 60%, read from the monitor", "24.3 W now"),
-            ("brightness unknown, assumed 75%", "13.4 W now"),
+            ("brightness 60%, read from the monitor", "can't tell if it's on · 24.3 W now"),
+            ("brightness unknown, assumed 75%", "can't tell if it's on · 13.4 W now"),
             ("brightness unknown, assumed 75%", "not counted"),
         ]);
     }
@@ -265,8 +265,8 @@ public class ServiceFormTests
 
         form.Monitors.Select(m => (m.Brightness, m.Now)).ShouldBe(
         [
-            ("brightness 60%, read from the monitor", "30.0 W now"),
-            ("brightness unknown", "30.0 W now"),
+            ("brightness 60%, read from the monitor", "can't tell if it's on · 30.0 W now"),
+            ("brightness unknown", "can't tell if it's on · 30.0 W now"),
         ]);
     }
 
@@ -283,8 +283,8 @@ public class ServiceFormTests
 
         form.Monitors.ShouldBe([dell, aoc]);   // the same rows, so a box being typed in keeps its place
         (aoc.Watts, dell.Counted).ShouldBe(("17", false));
-        (dell.Brightness, dell.Now).ShouldBe(("brightness 80%, read from the monitor", "26.9 W now"));
-        (aoc.Brightness, aoc.Now).ShouldBe(("brightness 50%, read from the monitor", "11.9 W now"));
+        (dell.Brightness, dell.Now).ShouldBe(("brightness 80%, read from the monitor", "can't tell if it's on · 26.9 W now"));
+        (aoc.Brightness, aoc.Now).ShouldBe(("brightness 50%, read from the monitor", "can't tell if it's on · 11.9 W now"));
     }
 
     [Fact]

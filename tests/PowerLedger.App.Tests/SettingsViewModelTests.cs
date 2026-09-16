@@ -187,8 +187,8 @@ public class SettingsViewModelTests
         model.Service.HasMonitors.ShouldBeTrue();
         model.Service.Monitors.Select(m => (m.Name, m.Size, m.Watts, m.Source, m.Brightness, m.Now, m.Counted)).ShouldBe(
         [
-            ("DELL U2723QE", "27 in · 3840 × 2160", "26.9", "measured for this model", "brightness 60%, read from the monitor", "24.3 W now", true),
-            ("24B1XH5", "23.8 in · 1920 × 1080", "13.4", "estimated from its size — correct it if you know better", "brightness unknown, assumed 75%", "13.4 W now", true),
+            ("DELL U2723QE", "27 in · 3840 × 2160", "26.9", "measured for this model", "brightness 60%, read from the monitor", "can't tell if it's on · 24.3 W now", true),
+            ("24B1XH5", "23.8 in · 1920 × 1080", "13.4", "estimated from its size — correct it if you know better", "brightness unknown, assumed 75%", "can't tell if it's on · 13.4 W now", true),
         ]);
     }
 
@@ -206,7 +206,7 @@ public class SettingsViewModelTests
         _clock.Advance(SettingsViewModel.StatusEvery);
 
         model.Service.Monitors[1].ShouldBeSameAs(aoc);
-        (aoc.Watts, aoc.Brightness, aoc.Now).ShouldBe(("1", "brightness 40%, read from the monitor", "10.6 W now"));
+        (aoc.Watts, aoc.Brightness, aoc.Now).ShouldBe(("1", "brightness 40%, read from the monitor", "can't tell if it's on · 10.6 W now"));
     }
 
     [Fact]
