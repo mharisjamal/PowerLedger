@@ -43,7 +43,7 @@ public class MonitorBoardTests
     public void With_no_monitors_the_list_is_empty_and_they_draw_nothing()
     {
         _board.Status(displayOn: true).ShouldBeEmpty();
-        _board.Watts(displayOn: true).Total.ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
 
         _board.Detected([]);
         _board.Status(displayOn: false).ShouldNotBeNull().ShouldBeEmpty();
@@ -143,7 +143,7 @@ public class MonitorBoardTests
         monitor.OwnPlug.ShouldBe(ownPlug);
         monitor.Counted.ShouldBeTrue();
         monitor.WattsNow.ShouldBeGreaterThan(0);
-        _board.Watts(displayOn: true).Total.ShouldBe(ownPlug ? new MonitorWatts(OwnPlug: monitor.WattsNow, FromPc: 0) : new MonitorWatts(OwnPlug: 0, FromPc: monitor.WattsNow));
+        _board.Watts(displayOn: true).ShouldBe(ownPlug ? new MonitorWatts(OwnPlug: monitor.WattsNow, FromPc: 0) : new MonitorWatts(OwnPlug: 0, FromPc: monitor.WattsNow));
     }
 
     [Fact]
@@ -192,13 +192,13 @@ public class MonitorBoardTests
         _board.Choose(Laptop(new MonitorChoice { Key = Portable.Key, OwnPlug = true }));
         var charged = _board.Status(displayOn: true).ShouldHaveSingleItem();
         (charged.OwnPlug, charged.OwnPlugByDefault).ShouldBe((true, false));
-        _board.Watts(displayOn: true).Total.ShouldBe(new MonitorWatts(OwnPlug: charged.WattsNow, FromPc: 0));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: charged.WattsNow, FromPc: 0));
 
         // The same monitor running off a desktop's USB-C port.
         _board.Choose(Desktop(new MonitorChoice { Key = Portable.Key, OwnPlug = false }));
         var powered = _board.Status(displayOn: true).ShouldHaveSingleItem();
         (powered.OwnPlug, powered.OwnPlugByDefault).ShouldBe((false, true));
-        _board.Watts(displayOn: true).Total.ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: powered.WattsNow));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: powered.WattsNow));
     }
 
     [Fact]
@@ -211,14 +211,14 @@ public class MonitorBoardTests
         var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
         (monitor.OwnPlug, monitor.Counted, monitor.CountedByDefault).ShouldBe((false, true, true));
         monitor.WattsNow.ShouldBe(MonitorEstimate.For(15.6, 1920, 1080, Catalogue).OnW, 1e-9);
-        _board.Watts(displayOn: true).Total.ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: monitor.WattsNow));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: monitor.WattsNow));
         _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: monitor.SleepWatts));
 
         // Said to have a plug of its own, the same monitor is left out as the user chose.
         _board.Choose(Laptop(new MonitorChoice { Key = Portable.Key, Counted = false, OwnPlug = true }));
         var charged = _board.Status(displayOn: true).ShouldHaveSingleItem();
         (charged.OwnPlug, charged.Counted, charged.WattsNow).ShouldBe((true, false, 0.0));
-        _board.Watts(displayOn: true).Total.ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public class MonitorBoardTests
         status[0].WattsNow.ShouldBeGreaterThan(0);
         status[1].OnWatts.ShouldBeGreaterThan(0);
         status[1].WattsNow.ShouldBe(0);
-        _board.Watts(displayOn: true).Total.ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: status[0].WattsNow));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: status[0].WattsNow));
         _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: status[0].SleepWatts));
     }
 
