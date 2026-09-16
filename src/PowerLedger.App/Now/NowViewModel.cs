@@ -34,8 +34,13 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     private ServiceSettings? _settings;
     private int _monitors;
 
+    /// <summary>How many of the monitors counted said they were off or on standby: "1 off", "1 off, 1 on standby" or, when
+    /// every one said the same, "off", "both off" or "all on standby"; null when none said either.</summary>
+    private string? _monitorStates;
+
     /// <summary>How the figures of the monitors counted were got, by the least sure of them: "estimated", "brightness
-    /// assumed", or null when each was measured for its model at a brightness read from it, or typed.</summary>
+    /// assumed", or null when each was measured for its model, at a brightness read from it unless it is off or on standby,
+    /// or typed.</summary>
     private string? _monitorFigures;
 
     private ReadingFrame? _last;
@@ -259,8 +264,13 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         if (status is null) return;
         var counted = status.Monitors?.Where(monitor => monitor is { Counted: true }).ToList() ?? [];
         _monitors = counted.Count;
+        _monitorStates = PowerStates(counted);
+        // Off, a monitor counts at its off figure and, on standby, at its sleep figure. Those are listed for its model or
+        // estimated as its figure on is, so an estimated one is still estimated, but no brightness scales them. The status
+        // doesn't say which a typed monitor's are, so, as when it is on, a typed monitor adds nothing.
         _monitorFigures = counted.Exists(monitor => monitor.Source == MonitorSource.Estimate) ? "estimated"
-            : counted.Exists(monitor => monitor.Source == MonitorSource.Model && !(monitor.Brightness is { } brightness && double.IsFinite(brightness)))
+            : counted.Exists(monitor => monitor.Source == MonitorSource.Model && monitor.PowerState is not (MonitorPowerState.Off or MonitorPowerState.Standby)
+                && !(monitor.Brightness is { } brightness && double.IsFinite(brightness)))
                 ? "brightness assumed"
                 : null;
         var desktop = _settings?.Profile.Chassis == ChassisKind.Desktop;
@@ -343,14 +353,16 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>The display band: the built-in panel, as big and bright as it is, plus the external monitors the service
-    /// counts (Plan J), and how the least sure of their figures was got: "plus 2 monitors, estimated".</summary>
+    /// counts (Plan J), how many of them said they were off or on standby, and how the least sure of their figures was got:
+    /// "plus 2 monitors, 1 off, estimated".</summary>
     private string DisplayDetail(MachineNames? machine, ReadingFrame frame)
     {
         if (!frame.DisplayOn) return "display off";
         var size = machine is { DisplayDiagonalInches: > 0 } ? machine.DisplayDiagonalInches.ToString("0.#", _culture) + " in" : null;
         var brightness = frame.Brightness is { } b ? "brightness " + Format.Percent(b, _culture) : null;
         var panel = Join(size, brightness);
-        var monitors = (_monitors == 1 ? "1 monitor" : $"{_monitors.ToString(_culture)} monitors") + (_monitorFigures is { } figures ? ", " + figures : "");
+        var count = _monitors == 1 ? "1 monitor" : $"{_monitors.ToString(_culture)} monitors";
+        var monitors = string.Join(", ", new[] { count, _monitorStates, _monitorFigures }.OfType<string>());
         return (panel.Length > 0, _monitors > 0) switch
         {
             (true, true) => $"{panel} · plus {monitors}",
@@ -358,6 +370,20 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
             (false, true) => monitors,
             _ => frame.Components.Display > 0 ? "built-in panel" : "nothing counted",
         };
+    }
+
+    /// <summary>How many of the monitors counted said they were off, and how many on standby, as the display row says it.
+    /// A monitor that said it was on, or hasn't said, counts at its figure on, so nothing is said of it.</summary>
+    private string? PowerStates(List<MonitorStatus> counted)
+    {
+        string? Said(MonitorPowerState state, string word) => counted.Count(monitor => monitor.PowerState == state) switch
+        {
+            0 => null,
+            var some when some < counted.Count => $"{some.ToString(_culture)} {word}",
+            _ => counted.Count switch { 1 => word, 2 => "both " + word, _ => "all " + word },
+        };
+        var said = string.Join(", ", new[] { Said(MonitorPowerState.Off, "off"), Said(MonitorPowerState.Standby, "on standby") }.OfType<string>());
+        return said.Length > 0 ? said : null;
     }
 
     private string? Load(double? load) => load is { } value ? Format.Percent(value, _culture) + " load" : null;

@@ -113,6 +113,78 @@ public class NowViewModelTests
     }
 
     [Fact]
+    public void The_display_row_says_how_many_of_the_monitors_it_adds_are_off_or_on_standby()
+    {
+        // A monitor that hasn't said, or said too long ago, counts at its figure on, as one that said it was on does, so the
+        // row says nothing of either.
+        var on = Statuses.Dell with { PowerState = MonitorPowerState.On };
+        var unknown = Statuses.Dell with { Key = "DELA0B1-2" };
+        var off = Statuses.Dell with { Key = "DELA0B1-3", PowerState = MonitorPowerState.Off, WattsNow = 0.2 };
+        var standby = Statuses.Dell with { Key = "DELA0B1-4", PowerState = MonitorPowerState.Standby, WattsNow = 0.3 };
+        _history.Snapshot = Snapshots.Typical(Now);
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+
+        string With(params MonitorStatus[] monitors)
+        {
+            _link.Status = Statuses.WithMonitors(monitors);
+            _clock.Advance(NowViewModel.StatusEvery);
+            return model.Live.Budget[2].Detail;
+        }
+
+        With(on, unknown).ShouldBe("15.3 in · brightness 60% · plus 2 monitors");
+        With(on, off).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 off");
+        With(standby, unknown).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 on standby");
+        With(off, standby, on).ShouldBe("15.3 in · brightness 60% · plus 3 monitors, 1 off, 1 on standby");
+        With(off, off with { Key = "DELA0B1-5" }, unknown).ShouldBe("15.3 in · brightness 60% · plus 3 monitors, 2 off");
+        With(off, standby).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 off, 1 on standby");
+        With(on, off with { Counted = false, WattsNow = 0 }).ShouldBe("15.3 in · brightness 60% · plus 1 monitor");   // only those it adds
+
+        // When every monitor it adds says the same, the row says so without counting them again.
+        With(off).ShouldBe("15.3 in · brightness 60% · plus 1 monitor, off");
+        With(off, off with { Key = "DELA0B1-5" }).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, both off");
+        With(standby).ShouldBe("15.3 in · brightness 60% · plus 1 monitor, on standby");
+        With(standby, standby with { Key = "DELA0B1-5" }, standby with { Key = "DELA0B1-6" })
+            .ShouldBe("15.3 in · brightness 60% · plus 3 monitors, all on standby");
+    }
+
+    [Fact]
+    public void A_monitor_off_or_on_standby_still_says_how_it_was_figured_but_assumes_no_brightness()
+    {
+        // Off, a monitor counts at its off figure and, on standby, at its sleep figure. Those are listed for its model or
+        // estimated as its figure on is, so an estimated one still makes the row say so, but no brightness scales them.
+        var unread = Statuses.Dell with { Key = "DELA0B1-2", Brightness = null };
+        var typed = Statuses.Aoc with { Key = "AOC2402-2", OnWatts = 17, Source = MonitorSource.Typed, WattsNow = 17 };
+        _history.Snapshot = Snapshots.Typical(Now);
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+
+        string With(params MonitorStatus[] monitors)
+        {
+            _link.Status = Statuses.WithMonitors(monitors);
+            _clock.Advance(NowViewModel.StatusEvery);
+            return model.Live.Budget[2].Detail;
+        }
+
+        With(Statuses.Dell, Statuses.Aoc with { PowerState = MonitorPowerState.Off, WattsNow = 0.2 })
+            .ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 off, estimated");
+        With(Statuses.Dell, Statuses.Aoc with { PowerState = MonitorPowerState.Standby, WattsNow = 0.2 })
+            .ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 on standby, estimated");
+        With(Statuses.Dell, unread with { PowerState = MonitorPowerState.Off, WattsNow = 0.2 })
+            .ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 off");
+        With(Statuses.Dell, unread with { PowerState = MonitorPowerState.Standby, WattsNow = 0.3 })
+            .ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 on standby");
+        With(Statuses.Dell with { PowerState = MonitorPowerState.Off, WattsNow = 0.2 }, unread with { PowerState = MonitorPowerState.On })
+            .ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 off, brightness assumed");
+        With(Statuses.Dell, typed with { PowerState = MonitorPowerState.Off, WattsNow = 0.2 })
+            .ShouldBe("15.3 in · brightness 60% · plus 2 monitors, 1 off");   // a typed monitor adds nothing, as it does on
+    }
+
+    [Fact]
     public async Task A_display_band_with_no_panel_to_speak_of_says_what_it_counts()
     {
         _link.Status = Statuses.WithMonitors();
@@ -122,6 +194,10 @@ public class NowViewModelTests
         _link.Connect(true);
         _link.Push(Frames.At(Now) with { Brightness = null });
         model.Live.Budget[2].Detail.ShouldBe("2 monitors, estimated");
+
+        _link.Status = Statuses.WithMonitors(Statuses.Dell with { PowerState = MonitorPowerState.Off, WattsNow = 0.2 }, Statuses.Aoc);
+        await model.PollAsync();
+        model.Live.Budget[2].Detail.ShouldBe("2 monitors, 1 off, estimated");
 
         _link.Status = Statuses.Running();
         await model.PollAsync();
