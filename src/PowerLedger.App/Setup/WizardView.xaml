@@ -29,6 +29,24 @@
             <Setter Property="LineHeight" Value="20" />
             <Setter Property="Margin" Value="0,0,0,12" />
         </Style>
+        <!-- A monitor's "Count it". One that runs off the PC always counts, so its box shows ticked, can't be unticked, and says why. -->
+        <Style x:Key="Counts" TargetType="CheckBox" BasedOn="{StaticResource Tick}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding OwnPlug}" Value="False">
+                    <Setter Property="ToolTip" Value="Runs off this PC, so it counts as part of what the PC draws" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- A monitor's "has its own plug", asked only on a laptop. A desktop still shows it for a monitor held to run off the PC,
+             so that can be undone. -->
+        <Style x:Key="Plug" TargetType="CheckBox" BasedOn="{StaticResource Tick}">
+            <Setter Property="Visibility" Value="{Binding DataContext.IsDesktop, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource HiddenWhen}}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding OwnPlug}" Value="False">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
@@ -126,8 +144,12 @@
                                     <TextBox Grid.Column="1" Style="{StaticResource Field}" Width="56" Text="{Binding Watts, UpdateSourceTrigger=PropertyChanged}"
                                              AutomationProperties.Name="{Binding Name, StringFormat=Watts for {0}}" />
                                     <TextBlock Grid.Column="2" Style="{StaticResource Text.Muted}" Text="W" VerticalAlignment="Center" Margin="8,0,0,0" />
-                                    <CheckBox Grid.Column="3" Style="{StaticResource Tick}" Content="Count it" Margin="16,0,0,0" IsChecked="{Binding Counted}"
-                                              AutomationProperties.Name="{Binding Name, StringFormat=Count {0}}" />
+                                    <StackPanel Grid.Column="3" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <CheckBox Style="{StaticResource Counts}" Content="Count it" IsChecked="{Binding Counted}" IsEnabled="{Binding OwnPlug}"
+                                                  ToolTipService.ShowOnDisabled="True" AutomationProperties.Name="{Binding Name, StringFormat=Count {0}}" />
+                                        <CheckBox Style="{StaticResource Plug}" Content="has its own plug" Margin="0,4,0,0" IsChecked="{Binding OwnPlug}"
+                                                  AutomationProperties.Name="{Binding Name, StringFormat={}{0} has its own plug}" />
+                                    </StackPanel>
                                     <!-- Narrow enough that an estimate's note breaks at its dash rather than leaving a word behind. -->
                                     <TextBlock Grid.Column="4" Style="{StaticResource Text.Muted}" Text="{Binding Source}" TextWrapping="Wrap" VerticalAlignment="Center"
                                                HorizontalAlignment="Left" MaxWidth="165" Margin="16,0,0,0" />
@@ -139,8 +161,19 @@
                         <TextBlock Style="{StaticResource Label}" Text="Extras such as lights and pumps, W" />
                         <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding ExtrasWatts, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Extras in watts" />
                     </StackPanel>
-                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding HasMonitors, Converter={StaticResource VisibleWhen}}"
-                               Text="Monitors have their own plugs: untick one to leave it out. The rest of the machine, memory and drives among them, is in Settings." />
+                    <!-- On a laptop, which monitors are taken to run off it, and what that means for counting them. -->
+                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding HasMonitors, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Muted}">
+                                <Setter Property="Text" Value="A monitor of 17.3 inches or less is taken to run off this laptop, so it counts as part of what the laptop draws; tick &quot;has its own plug&quot; if it has one. Untick a monitor with its own plug to leave it out. The rest of the machine, memory and drives among them, is in Settings." />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsDesktop}" Value="True">
+                                        <Setter Property="Text" Value="Untick a monitor to leave it out. The rest of the machine, memory and drives among them, is in Settings." />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                     <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding HasMonitors, Converter={StaticResource HiddenWhen}}"
                                Text="The rest of the machine, memory and drives among them, is in Settings." />
                     <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />

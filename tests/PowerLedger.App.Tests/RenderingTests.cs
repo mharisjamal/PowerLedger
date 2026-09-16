@@ -42,12 +42,14 @@ public class RenderingTests
         (Page.Settings, "settings", _ => { }, shell => new SettingsView { DataContext = shell.Settings }),
         (Page.Now, "wizard", shell => shell.BeginSetup(), shell => new WizardView { DataContext = shell.Wizard }),
         (Page.Now, "wizard-machine", MachineStep, shell => new WizardView { DataContext = shell.Wizard }),
+        (Page.Now, "wizard-laptop", LaptopStep, shell => new WizardView { DataContext = shell.Wizard }),
     ];
 
     /// <summary>
     /// The pages in a short window, 880 wide, as narrow as the window gets: each is drawn at the top and, when it scrolls,
-    /// at the end. At 560 high every page but the wizard is longer than the window and scrolls; the wizard, at its longest
-    /// step, fits whole, and it scrolls in a window shorter still.
+    /// at the end. At 560 high every page but the wizard is longer than the window and scrolls; the wizard's machine step,
+    /// its longest, fits whole for a desktop, which adds the power supply's rating, and for a laptop, which asks of each
+    /// monitor whether it has a plug of its own, and it scrolls in a window shorter still.
     /// </summary>
     private static readonly (string Name, Page Page, Action<ShellViewModel> Prepare, double Height, bool Scrolls)[] ShortPages =
     [
@@ -56,8 +58,15 @@ public class RenderingTests
         ("report", Page.Report, _ => { }, 560, true),
         ("settings", Page.Settings, _ => { }, 560, true),
         ("wizard", Page.Now, MachineStep, 560, false),
+        ("wizard-laptop", Page.Now, LaptopStep, 560, false),
         ("wizard-448", Page.Now, MachineStep, 448, true),
     ];
+
+    /// <summary>What the notes under the monitor rows say before what is particular to Settings or the wizard.</summary>
+    private const string LaptopMonitorsNote = "A monitor of 17.3 inches or less is taken to run off this laptop, so it counts as part of what the laptop draws; "
+        + "tick \"has its own plug\" if it has one. Untick a monitor with its own plug to leave it out.";
+
+    private const string DesktopMonitorsNote = "Untick a monitor to leave it out.";
 
     [Fact]
     public void The_window_draws_every_screen_in_both_themes()
@@ -133,11 +142,21 @@ public class RenderingTests
                     (statusTop + window.StatusBar.ActualHeight).ShouldBeLessThanOrEqualTo(window.ActualHeight, $"{name} pushes the status bar out");
                     if (shell.Current is WizardViewModel or SettingsViewModel)
                     {
-                        var monitors = shell.IsSetup ? shell.Wizard.Machine.Monitors : shell.Settings.Service.Monitors;
-                        monitors.Count.ShouldBe(2, name);
-                        foreach (var monitor in monitors)
+                        var form = shell.IsSetup ? shell.Wizard.Machine : shell.Settings.Service;
+                        form.Monitors.Count.ShouldBe(2, name);
+                        var rows = Find<ItemsControl>(window, items => items.ItemsSource == form.Monitors).ShouldNotBeNull(name);
+                        foreach (var monitor in form.Monitors)
                         {
-                            Find<TextBox>(window, box => AutomationProperties.GetName(box) == $"Watts for {monitor.Name}").ShouldNotBeNull(name).IsVisible.ShouldBeTrue(name);
+                            var row = rows.ItemContainerGenerator.ContainerFromItem(monitor).ShouldBeAssignableTo<DependencyObject>(name);
+                            Find<TextBox>(row, box => AutomationProperties.GetName(box) == $"Watts for {monitor.Name}").ShouldNotBeNull(name).IsVisible.ShouldBeTrue(name);
+                            // A row keeps its boxes and where its figure came from inside the page, however many boxes it shows.
+                            var plug = Find<CheckBox>(row, box => AutomationProperties.GetName(box) == $"{monitor.Name} has its own plug").ShouldNotBeNull(name);
+                            plug.IsVisible.ShouldBe(!form.IsDesktop || !monitor.OwnPlug, name);
+                            var source = Find<TextBlock>(row, text => text.Text == monitor.Source).ShouldNotBeNull(name);
+                            foreach (var part in plug.IsVisible ? new FrameworkElement[] { plug, source } : [source])
+                            {
+                                part.TranslatePoint(new Point(part.ActualWidth, 0), scroller).X.ShouldBeLessThanOrEqualTo(scroller.ViewportWidth + 0.5, $"{name}: {monitor.Name}");
+                            }
                         }
                     }
                     (scroller.ExtentHeight > scroller.ViewportHeight).ShouldBe(scrolls, $"{name} is {scroller.ExtentHeight:0} tall in a view {scroller.ViewportHeight:0} tall");
@@ -158,6 +177,70 @@ public class RenderingTests
             }
         });
     }
+
+    [Fact]
+    public void Only_a_laptop_asks_whether_each_monitor_has_a_plug_of_its_own_and_one_that_runs_off_the_pc_stays_counted()
+        => OnUi(() =>
+        {
+            UseTheme(Theme.Dark);
+            var settings = SettingsScreen();
+            settings.Show();
+            var wizard = WizardScreen();
+            wizard.Start();
+            wizard.Next.Execute(null);
+            wizard.Step.ShouldBe(SetupStep.Machine);
+            (string Name, ServiceForm Form, FrameworkElement View, string After)[] screens =
+            [
+                ("settings", settings.Service, new SettingsView { DataContext = settings }, " Clear a monitor's watts to go back to PowerLedger's own figure."),
+                ("wizard", wizard.Machine, new WizardView { DataContext = wizard }, " The rest of the machine, memory and drives among them, is in Settings."),
+            ];
+            foreach (var (name, form, view, after) in screens)
+            {
+                var window = new Window
+                {
+                    Content = view, Width = 1180, Height = 900, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                window.Show();
+                try
+                {
+                    // Settings lists a portable monitor, which runs off the laptop; the wizard's second monitor is said to.
+                    var (own, runsOff) = (form.Monitors[0], form.Monitors[1]);
+                    runsOff.OwnPlug = false;
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    var rows = Find<ItemsControl>(view, items => items.ItemsSource == form.Monitors).ShouldNotBeNull(name);
+                    foreach (var chassis in new[] { ChassisKind.Laptop, ChassisKind.Desktop })
+                    {
+                        form.Chassis = chassis;
+                        Pump(TimeSpan.FromMilliseconds(300));
+                        var what = $"{name} on a {chassis}";
+
+                        var note = Find<TextBlock>(view, text => text.IsVisible && text.Text.EndsWith(after, StringComparison.Ordinal)).ShouldNotBeNull(what);
+                        note.Text.ShouldBe((chassis == ChassisKind.Laptop ? LaptopMonitorsNote : DesktopMonitorsNote) + after, what);
+
+                        // A desktop doesn't ask about plugs, but still shows the box of a monitor held to run off it, so that can be undone.
+                        Box(own, $"{own.Name} has its own plug").IsVisible.ShouldBe(chassis == ChassisKind.Laptop, what);
+                        Box(runsOff, $"{runsOff.Name} has its own plug").IsVisible.ShouldBeTrue(what);
+
+                        var counts = Box(own, $"Count {own.Name}");
+                        (counts.IsEnabled, counts.IsChecked).ShouldBe((true, (bool?)true), what);
+                        counts.ToolTip.ShouldBeNull(what);
+                        var alwaysCounts = Box(runsOff, $"Count {runsOff.Name}");
+                        (alwaysCounts.IsEnabled, alwaysCounts.IsChecked).ShouldBe((false, (bool?)true), what);
+                        alwaysCounts.ToolTip.ShouldBe("Runs off this PC, so it counts as part of what the PC draws", what);
+                        ToolTipService.GetShowOnDisabled(alwaysCounts).ShouldBeTrue(what);
+                    }
+
+                    CheckBox Box(MonitorRow monitor, string label)
+                        => Find<CheckBox>(rows.ItemContainerGenerator.ContainerFromItem(monitor).ShouldBeAssignableTo<DependencyObject>(name), box => AutomationProperties.GetName(box) == label)
+                            .ShouldNotBeNull($"{name}: {label}");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
 
     [Fact]
     public void The_update_card_draws_in_the_rail_in_both_themes()
@@ -229,10 +312,18 @@ public class RenderingTests
     /// external monitors listed.</summary>
     private static void MachineStep(ShellViewModel shell)
     {
+        LaptopStep(shell);
+        shell.Wizard.Machine.Chassis = ChassisKind.Desktop;
+    }
+
+    /// <summary>The wizard's machine step as the service detected it, a laptop, which asks of each of the two external
+    /// monitors listed whether it has a plug of its own.</summary>
+    private static void LaptopStep(ShellViewModel shell)
+    {
         shell.BeginSetup();
         shell.Wizard.Next.Execute(null);
         shell.Wizard.Step.ShouldBe(SetupStep.Machine);
-        shell.Wizard.Machine.Chassis = ChassisKind.Desktop;
+        shell.Wizard.Machine.Chassis.ShouldBe(ChassisKind.Laptop);
         shell.Wizard.Machine.Monitors.Count.ShouldBe(2);
     }
 
@@ -366,11 +457,13 @@ public class RenderingTests
     }
 
     /// <summary>A Tuesday afternoon eight days into September: asleep until 07:30, a working morning, an idle patch, a peak at
-    /// 14:00; and now, on battery, the two external monitors Settings lists, counted on top of the battery's report.</summary>
+    /// 14:00; and now, on battery, the two external monitors Settings lists: the Dell, on a plug of its own, counted on top of
+    /// the battery's report, and the portable one, running off the laptop, which the report already holds.</summary>
     private static NowViewModel NowScreen()
     {
-        var link = new FakeLink { Status = Statuses.WithMonitors() };
-        var monitors = Statuses.Dell.WattsNow + Statuses.Aoc.WattsNow;
+        var link = new FakeLink { Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) };
+        var ownPlug = Statuses.Dell.WattsNow;
+        var monitors = ownPlug + Statuses.Portable.WattsNow;
         var history = new FakeHistory();
         var model = new NowViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English,
             co2KgPerKwh: 0.38, startService: () => { });
@@ -383,7 +476,7 @@ public class RenderingTests
         {
             seed = (seed * 9301 + 49297) % 233280;
             watts = Math.Clamp(watts + (seed / 233280.0 - 0.5) * 3, 27, 41);
-            link.Push(Frames.At(Now.AddSeconds(-s), totalW: watts + monitors, cpu: watts * 0.43, gpu: watts * 0.12, display: 4.0, monitors: monitors));
+            link.Push(Frames.At(Now.AddSeconds(-s), totalW: watts + ownPlug, cpu: watts * 0.43, gpu: watts * 0.12, display: 4.0, monitors: monitors));
         }
         return model;
     }
@@ -408,10 +501,11 @@ public class RenderingTests
     }
 
     /// <summary>Settings against a running service, with a tariff, this laptop's detection and two external monitors: one in
-    /// Energy Star's list whose brightness was read, one estimated from its size whose brightness wasn't.</summary>
+    /// Energy Star's list whose brightness was read, on a plug of its own, and a portable one estimated from its size whose
+    /// brightness wasn't, running off the laptop.</summary>
     private static SettingsViewModel SettingsScreen()
     {
-        var link = new FakeLink { Status = Statuses.WithMonitors() };
+        var link = new FakeLink { Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) };
         link.Connect(true);
         return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");

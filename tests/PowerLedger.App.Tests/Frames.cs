@@ -5,7 +5,7 @@ namespace PowerLedger.App.Tests;
 /// <summary>Readings as the service would push them.</summary>
 internal static class Frames
 {
-    /// <param name="monitors">What the external monitors counted add, which is part of <paramref name="totalW"/>.</param>
+    /// <param name="monitors">What the external monitors counted draw, which is part of <paramref name="totalW"/>.</param>
     public static ReadingFrame At(
         DateTimeOffset at, double totalW = 34.2, Quality quality = Quality.Measured,
         double cpu = 14.6, double gpu = 4.1, double display = 4.0, bool gpuMeasured = false, double? gpuLoad = 0.31, double monitors = 0)
