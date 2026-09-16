@@ -141,10 +141,10 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         var name = facts.Name.Length > 0 ? facts.Name : $"{facts.Maker} {facts.ProductCode}".Trim();
         if (catalogue.Find(facts.Maker, facts.Name, facts.Inches, facts.Width, facts.Height) is { } listed)
         {
-            return new Figured(facts, name, listed.OnW, listed.SleepW, listed.OffW, MonitorSource.Model);
+            return new Figured(facts, name, listed.OnW, listed.SleepW, listed.OffW, MonitorPower.Anchor(listed.MaxNits), MonitorSource.Model);
         }
-        var (onW, sleepW, offW) = MonitorEstimate.For(facts.Inches, facts.Width, facts.Height, catalogue);
-        return new Figured(facts, name, onW, sleepW, offW, MonitorSource.Estimate);
+        var (onW, sleepW, offW, maxNits) = MonitorEstimate.For(facts.Inches, facts.Width, facts.Height, catalogue);
+        return new Figured(facts, name, onW, sleepW, offW, MonitorPower.Anchor(maxNits), MonitorSource.Estimate);
     }
 
     /// <summary>The attached monitor with this instance, in any case, or null. Called with the lock held.</summary>
@@ -172,8 +172,8 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             : MonitorPowerState.Unknown;
         // A figure the user typed is what the monitor draws as they use it, so it is taken as it is, and the brightness is
         // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
-        // list's test brightness, so it is scaled to the monitor's.
-        var onNow = choice?.Watts ?? MonitorPower.At(monitor.OnW, brightness);
+        // list's test luminance, so it is scaled from where that sits on the monitor's brightness scale to the monitor's.
+        var onNow = choice?.Watts ?? MonitorPower.At(monitor.OnW, brightness, monitor.Anchor);
         return new MonitorStatus
         {
             Key = facts.Key,
@@ -216,6 +216,8 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     private bool IsStale(long at, long now, TimeSpan stale) => clock.GetElapsedTime(at, now) > stale;
 
     /// <param name="Name">The name the monitor gives, or its maker and product code when it gives none.</param>
+    /// <param name="Anchor">Where <paramref name="OnW"/> sits on the monitor's brightness scale (see
+    /// <see cref="MonitorPower.Anchor"/>).</param>
     /// <param name="Source">Where <paramref name="OnW"/> came from: the list or the estimate, never the user.</param>
-    private sealed record Figured(MonitorFacts Facts, string Name, double OnW, double SleepW, double OffW, MonitorSource Source);
+    private sealed record Figured(MonitorFacts Facts, string Name, double OnW, double SleepW, double OffW, double Anchor, MonitorSource Source);
 }

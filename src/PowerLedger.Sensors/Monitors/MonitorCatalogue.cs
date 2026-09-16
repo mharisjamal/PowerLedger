@@ -239,6 +239,7 @@ public sealed class MonitorCatalogue
             OnW = Median(tied.Select(monitor => monitor.OnW)),
             SleepW = Median(tied.Select(monitor => monitor.SleepW)),
             OffW = Median(tied.Select(monitor => monitor.OffW)),
+            MaxNits = Median(tied.Select(monitor => monitor.MaxNits)),
         };
     }
 
@@ -280,6 +281,13 @@ public sealed class MonitorCatalogue
         var sorted = values.Order().ToArray();
         var middle = sorted.Length / 2;
         return sorted.Length % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+    }
+
+    /// <summary>The median of the values that are given, or null when none is.</summary>
+    internal static double? Median(IEnumerable<double?> values)
+    {
+        var given = values.OfType<double>().ToList();
+        return given.Count > 0 ? Median(given) : null;
     }
 
     /// <summary>Each listing a normalised name matches, with how closely, and whether by its exact name or number: one of

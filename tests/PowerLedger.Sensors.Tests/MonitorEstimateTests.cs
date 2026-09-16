@@ -7,7 +7,7 @@ public class MonitorEstimateTests
 {
     private const string Header = "brand,model_number,model_name,alternatives,inches,width,height,panel,on_w,sleep_w,off_w,max_nits,hdr,certified";
 
-    private static (double OnW, double SleepW, double OffW) For(double inches, int width, int height)
+    private static (double OnW, double SleepW, double OffW, double? MaxNits) For(double inches, int width, int height)
         => MonitorEstimate.For(inches, width, height, MonitorCatalogue.Shipped);
 
     /// <summary>The shipped table's four listings over 57 inches: two signage displays, an 85.5-inch display, and a 24-inch
@@ -19,12 +19,15 @@ public class MonitorEstimateTests
         "PHILIPS,65BDL4650D,65BDL4650D,,64.5,3840,2160,TFT LCD,124.21,0.73,0,500,,2023-05-18",
         "PLANAR,2E0I1,2E0I1,2E0I1yyyyy,85.5,3840,2160,IPS LCD,130.45,0.52,,500,,2026-01-09")));
 
-    /// <summary>Three 27-inch 1080p monitors from the shipped table, which draw 0.09 W, 0.29 W and 0.14 W switched off.</summary>
-    private static MonitorCatalogue TwentySevenInch => MonitorCatalogue.Parse(new StringReader(string.Join("\n",
-        Header,
+    /// <summary>Three 27-inch 1080p monitors from the shipped table, which draw 0.09 W, 0.29 W and 0.14 W switched off and
+    /// reach 227.6, 250 and 250 cd/m².</summary>
+    private static MonitorCatalogue TwentySevenInch => TwentySevenInchFrom(
         "Acer,CB272,CB272,CB27******,27,1920,1080,IPS LCD,14.41,0.11,0.09,227.6,,2024-08-15",
         "Acer,CB273,CB273_v,CB273***,27,1920,1080,IPS LCD,17.07,0.35,0.29,250,,2025-04-22",
-        "PHILIPS,27B2N2100,27B2N2100,,27,1920,1080,IPS LCD,13.48,0.17,0.14,250,,2024-07-17")));
+        "PHILIPS,27B2N2100,27B2N2100,,27,1920,1080,IPS LCD,13.48,0.17,0.14,250,,2024-07-17");
+
+    private static MonitorCatalogue TwentySevenInchFrom(params string[] listings)
+        => MonitorCatalogue.Parse(new StringReader(string.Join("\n", listings.Prepend(Header))));
 
     [Fact]
     public void Each_certified_monitor_estimated_from_all_the_others_lands_close_to_what_it_measured()
@@ -46,17 +49,31 @@ public class MonitorEstimateTests
     [Fact]
     public void A_24_inch_1080p_monitor_draws_what_the_hundreds_certified_like_it_draw()
     {
-        var (on, sleep, off) = For(24, 1920, 1080);
+        var (on, sleep, off, nits) = For(24, 1920, 1080);
         on.ShouldBeInRange(10, 16);
         sleep.ShouldBeInRange(0.1, 0.4);
         off.ShouldBeInRange(0.05, 0.3);
+        nits.ShouldNotBeNull().ShouldBeInRange(200, 400);
     }
 
     [Fact]
-    public void An_estimated_monitor_draws_the_median_off_figure_of_the_monitors_like_it()
+    public void An_estimated_monitor_takes_the_median_off_figure_and_maximum_luminance_of_the_monitors_like_it()
     {
-        MonitorEstimate.For(27, 1920, 1080, TwentySevenInch).ShouldBe((14.41, 0.17, 0.14));
-        MonitorEstimate.For(0, 0, 0, TwentySevenInch).ShouldBe((14.41, 0.17, 0.14));
+        MonitorEstimate.For(27, 1920, 1080, TwentySevenInch).ShouldBe((14.41, 0.17, 0.14, (double?)250));
+        MonitorEstimate.For(0, 0, 0, TwentySevenInch).ShouldBe((14.41, 0.17, 0.14, (double?)250));
+    }
+
+    [Fact]
+    public void A_monitor_like_it_that_gives_no_maximum_luminance_takes_no_part_in_that_median()
+    {
+        MonitorEstimate.For(27, 1920, 1080, TwentySevenInchFrom(
+            "Acer,CB272,CB272,CB27******,27,1920,1080,IPS LCD,14.41,0.11,0.09,227.6,,2024-08-15",
+            "Acer,CB273,CB273_v,CB273***,27,1920,1080,IPS LCD,17.07,0.35,0.29,250,,2025-04-22",
+            "PHILIPS,27B2N2100,27B2N2100,,27,1920,1080,IPS LCD,13.48,0.17,0.14,0,,2024-07-17")).MaxNits.ShouldNotBeNull().ShouldBe(238.8, 1e-9);
+        MonitorEstimate.For(27, 1920, 1080, TwentySevenInchFrom(
+            "Acer,CB272,CB272,CB27******,27,1920,1080,IPS LCD,14.41,0.11,0.09,,,2024-08-15",
+            "Acer,CB273,CB273_v,CB273***,27,1920,1080,IPS LCD,17.07,0.35,0.29,0,,2025-04-22",
+            "PHILIPS,27B2N2100,27B2N2100,,27,1920,1080,IPS LCD,13.48,0.17,0.14,0,,2024-07-17")).MaxNits.ShouldBeNull();
     }
 
     [Fact]
@@ -81,11 +98,12 @@ public class MonitorEstimateTests
     public void A_49_inch_super_ultrawide_with_too_few_like_it_listed_is_estimated_from_the_formula()
     {
         // The list has one 49-inch 3840 × 1080 monitor, Philips' 49B2U5300C at 33.72 W: too few for a median.
-        var (on, sleep, off) = For(49, 3840, 1080);
+        var (on, sleep, off, nits) = For(49, 3840, 1080);
         on.ShouldBe(MonitorEstimate.Formula(49, 3840, 1080));
         on.ShouldBe(34.2152, 0.0001);
         sleep.ShouldBe(0.23);
         off.ShouldBe(0.16);
+        nits.ShouldBeNull();
     }
 
     [Theory]
@@ -108,10 +126,11 @@ public class MonitorEstimateTests
     [InlineData(27, 1920, 0)]
     public void A_monitor_that_does_not_give_its_size_or_resolution_takes_the_median_of_all(double inches, int width, int height)
     {
-        var (on, sleep, off) = For(inches, width, height);
+        var (on, sleep, off, nits) = For(inches, width, height);
         on.ShouldBeInRange(13.5, 15);
         sleep.ShouldBeInRange(0.1, 0.4);
         off.ShouldBeInRange(0.05, 0.3);
+        nits.ShouldNotBeNull().ShouldBeInRange(200, 400);
     }
 
     [Fact]
@@ -122,14 +141,15 @@ public class MonitorEstimateTests
     [Fact]
     public void A_screen_bigger_than_any_monitor_is_estimated_from_the_formula()
         // A 65-inch television used as a monitor would otherwise take the 49-inch super-ultrawides' median, 48 W.
-        => For(65, 3840, 2160).ShouldBe((MonitorEstimate.Formula(65, 3840, 2160), 0.23, 0.16));
+        => For(65, 3840, 2160).ShouldBe((MonitorEstimate.Formula(65, 3840, 2160), 0.23, 0.16, (double?)null));
 
     [Fact]
     public void With_too_few_monitors_for_a_median_one_that_does_not_give_its_size_is_taken_for_the_commonest()
     {
-        var (on, sleep, off) = MonitorEstimate.For(0, 0, 0, Televisions);
+        var (on, sleep, off, nits) = MonitorEstimate.For(0, 0, 0, Televisions);
         on.ShouldBe(MonitorEstimate.Formula(23.8, 1920, 1080));
         sleep.ShouldBe(0.23);
         off.ShouldBe(0.16);
+        nits.ShouldBeNull();
     }
 }

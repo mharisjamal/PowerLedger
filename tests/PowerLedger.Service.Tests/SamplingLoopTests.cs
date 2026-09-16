@@ -164,9 +164,9 @@ public class SamplingLoopTests
         var status = loop.Board.Status.ShouldNotBeNull();
         var monitor = status.Monitors.ShouldNotBeNull().ShouldHaveSingleItem();
         monitor.Name.ShouldBe("DELL U2723QE");
-        monitor.WattsNow.ShouldBe(28.32, 1e-9);
-        status.Last.ShouldNotBeNull().Components.Monitors.ShouldBe(28.32, 1e-9);
-        status.Last.TotalW.ShouldBe(20 + 28.32, 1e-9);                   // on top of the battery's measured 20 W
+        monitor.WattsNow.ShouldBe(MonitorBoardTests.DellAt(null), 1e-9);
+        status.Last.ShouldNotBeNull().Components.Monitors.ShouldBe(MonitorBoardTests.DellAt(null), 1e-9);
+        status.Last.TotalW.ShouldBe(20 + MonitorBoardTests.DellAt(null), 1e-9);   // on top of the battery's measured 20 W
     }
 
     [Fact]
@@ -184,12 +184,12 @@ public class SamplingLoopTests
         await loop.StopAsync();
 
         // The battery's 20 W less the processor's 8 W, the 15.3-inch panel's 3.75 W at half brightness, and the portable
-        // monitor's 6 W. The Dell has a plug of its own, so its 28.32 W are added to the battery's and none of them is learned.
+        // monitor's 6 W. The Dell has a plug of its own, so its 33.69 W are added to the battery's and none of them is learned.
         var status = loop.Board.Status.ShouldNotBeNull();
         status.Monitors.ShouldNotBeNull().Select(m => m.OwnPlug).ShouldBe([true, false]);
         var last = status.Last.ShouldNotBeNull();
-        last.TotalW.ShouldBe(20 + 28.32, 1e-9);
-        last.Components.Monitors.ShouldBe(28.32 + 6, 1e-9);
+        last.TotalW.ShouldBe(20 + MonitorBoardTests.DellAt(null), 1e-9);
+        last.Components.Monitors.ShouldBe(MonitorBoardTests.DellAt(null) + 6, 1e-9);
         last.Components.Unattributed.ShouldBe(20 - 8 - 3.75 - 6, 1e-9);
 
         var learned = new CalibrationLearner();
@@ -346,7 +346,7 @@ public class SamplingLoopTests
 
         new SettingsStore(new SettingsRepository(t.Db)).Load().ShouldNotBeNull().Profile.Monitors.ShouldBeEmpty();
         loop.Board.Settings.ShouldNotBeNull().Profile.Monitors.ShouldBeEmpty();
-        loop.Board.Status.ShouldNotBeNull().Last.ShouldNotBeNull().Components.Monitors.ShouldBe(28.32, 1e-9);
+        loop.Board.Status.ShouldNotBeNull().Last.ShouldNotBeNull().Components.Monitors.ShouldBe(MonitorBoardTests.DellAt(null), 1e-9);
     }
 
     [Fact]

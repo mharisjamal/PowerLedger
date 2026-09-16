@@ -3,7 +3,6 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Microsoft.Extensions.Logging.Abstractions;
 using PowerLedger.Contracts;
-using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
 
@@ -75,13 +74,13 @@ public sealed class PipeServerTests : IAsyncLifetime
     public async Task A_brightness_report_over_the_pipe_changes_what_a_monitor_draws_now()
     {
         _monitors.Detected([MonitorBoardTests.Dell]);
-        _monitors.Status(displayOn: true).ShouldHaveSingleItem().WattsNow.ShouldBe(28.32, 1e-9);
+        _monitors.Status(displayOn: true).ShouldHaveSingleItem().WattsNow.ShouldBe(MonitorBoardTests.DellAt(null), 1e-9);
         await using var client = await ConnectAsync();
 
         await client.WriteAsync(new ReportBrightnessRequest(1, [new MonitorBrightness { Instance = MonitorBoardTests.Dell.Instance, Brightness = 0 }]));
 
         (await client.ReadAsync()).ShouldBe(new OkReply(1));
-        _monitors.Status(displayOn: true).ShouldHaveSingleItem().WattsNow.ShouldBe(MonitorPower.At(28.32, 0), 1e-9);
+        _monitors.Status(displayOn: true).ShouldHaveSingleItem().WattsNow.ShouldBe(MonitorBoardTests.DellAt(0), 1e-9);
     }
 
     [Fact]

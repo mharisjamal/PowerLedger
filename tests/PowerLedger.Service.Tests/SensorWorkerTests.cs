@@ -88,7 +88,7 @@ public class SensorWorkerTests
     public async Task The_monitors_an_abandoned_set_finds_when_its_stuck_read_returns_never_reach_the_board(bool returnsBeforeTheNextRead)
     {
         // The service's wiring, with WMI played by the test. The first set hangs the second time it looks at the monitors,
-        // and comes back having found none, though the Dell, which counts 28.32 W, is still attached.
+        // and comes back having found none, though the Dell, which counts 33.69 W, is still attached.
         var clock = new FakeTimeProvider();
         var board = new MonitorBoard(MonitorBoardTests.Catalogue, clock);
         using var gate = new ManualResetEventSlim(false);
@@ -115,7 +115,7 @@ public class SensorWorkerTests
         try
         {
             (await Read(0)).ShouldNotBeNull();
-            board.Watts(displayOn: true).Total.ShouldBe(28.32, 1e-9);
+            board.Watts(displayOn: true).Total.ShouldBe(MonitorBoardTests.DellAt(null), 1e-9);
 
             var hung = Read(1);
             await WaitFor.True(() => Built(built) is [{ Reads: 2 }]);
@@ -125,10 +125,10 @@ public class SensorWorkerTests
             if (!returnsBeforeTheNextRead) (await Read(12)).ShouldNotBeNull();      // a fresh set, which hands over the Dell it finds
             gate.Set();
             await WaitFor.True(() => Built(built)[0].Disposed);                     // only once the stuck read has returned
-            board.Watts(displayOn: true).Total.ShouldBe(28.32, 1e-9);
+            board.Watts(displayOn: true).Total.ShouldBe(MonitorBoardTests.DellAt(null), 1e-9);
 
             for (var second = 13; second < 16; second++) (await Read(second)).ShouldNotBeNull();
-            board.Watts(displayOn: true).Total.ShouldBe(28.32, 1e-9);
+            board.Watts(displayOn: true).Total.ShouldBe(MonitorBoardTests.DellAt(null), 1e-9);
         }
         finally
         {

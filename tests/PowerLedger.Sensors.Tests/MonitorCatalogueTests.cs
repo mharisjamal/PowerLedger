@@ -139,6 +139,22 @@ public class MonitorCatalogueTests
         var b227Q = Shipped.Find("ACR", "Acer B227Q", 21.5, 1920, 1080).ShouldNotBeNull();
         b227Q.ModelName.ShouldBe("B227Q_q");
         b227Q.OffW.ShouldBe(0.11, 1e-9);
+
+        // BenQ lists the GW2790 at 300 cd/m² under the GW2790-B, which is first, and at 250 under the GW2790-L.
+        var gw2790 = Shipped.Find("BNQ", "BenQ GW2790", 27, 1920, 1080).ShouldNotBeNull();
+        gw2790.ModelNumber.ShouldBe("GW2790-B");
+        gw2790.MaxNits.ShouldBe(275);
+    }
+
+    [Fact]
+    public void A_listing_that_gives_no_maximum_luminance_takes_no_part_in_its_model_s_median()
+    {
+        const string GW2790B = "BenQ,GW2790-B,GW2790,GW2790E|BL2790|GW2790T|BL2790T,27,1920,1080,IPS LCD,14.8,0.2,0.14,300,,2024-01-08";
+        const string GW2790L = "BenQ,GW2790-L,GW2790,BL2790|BL2790T|GW2790E|GW2790T,27,1920,1080,TFT LCD,16.46,0.2,0.18,250,,2023-12-07";
+
+        Parse(Header, GW2790L.Replace(",250,", ",0,"), GW2790B).Find("BNQ", "BenQ GW2790", 27, 1920, 1080).ShouldNotBeNull().MaxNits.ShouldBe(300);
+        Parse(Header, GW2790B.Replace(",300,", ",,"), GW2790L.Replace(",250,", ",0,")).Find("BNQ", "BenQ GW2790", 27, 1920, 1080)
+            .ShouldNotBeNull().MaxNits.ShouldBeNull();
     }
 
     [Fact]

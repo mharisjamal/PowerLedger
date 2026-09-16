@@ -33,13 +33,24 @@ public sealed class NoMonitors : IMonitorDraw
 /// <summary>
 /// A monitor's draw at a brightness (spec §5). Power is close to linear in screen luminance, and a monitor's fixed
 /// electronics are 28–51% of its full-brightness draw (measured, TechPowerUp 2021–2026), so the draw at brightness b is
-/// <c>P_full × (0.45 + 0.55 b)</c>. Energy Star's on-mode figure is taken as the draw at 75%, and a monitor whose
-/// brightness is unknown is assumed to sit there too.
+/// <c>P_full × (0.45 + 0.55 b)</c>. Energy Star measures a monitor's on-mode figure at 200 cd/m². Where the list gives the
+/// monitor's maximum luminance, that sits at 200 over it on the monitor's brightness scale; where it doesn't, the figure is
+/// taken to sit at 75%. A monitor whose brightness is unknown is assumed to sit at 75%.
 /// </summary>
 public static class MonitorPower
 {
     public const double FixedShare = 0.45;
+
+    /// <summary>The brightness a monitor that doesn't give its brightness is assumed to sit at, and where the list's figure
+    /// is taken to sit for a monitor whose maximum luminance is unknown.</summary>
     public const double ListedBrightness = 0.75;
+
+    /// <summary>The luminance Energy Star sets a monitor to for its on-mode figure, in cd/m².</summary>
+    public const double ListedNits = 200;
+
+    /// <summary>The lowest brightness the list's figure is taken to sit at, for a monitor so bright that 200 cd/m² is near
+    /// the bottom of its scale.</summary>
+    public const double LowestAnchor = 0.05;
 
     /// <summary>What a monitor draws asleep when the list gives no figure for it: the median <c>sleep_w</c> of the shipped
     /// table, 0.23 W over its 1,580 monitors, all of which give one.</summary>
@@ -49,12 +60,18 @@ public static class MonitorPower
     /// shipped table, 0.16 W over the 1,572 of its 1,580 monitors that give one.</summary>
     public const double DefaultOffW = 0.16;
 
-    /// <summary>The draw of a monitor listed at <paramref name="listedOnW"/> at <paramref name="brightness"/>, 0–1, where
-    /// null, NaN or infinity means unknown.</summary>
-    public static double At(double listedOnW, double? brightness)
+    /// <summary>Where the list's figure sits on a monitor's brightness scale: 200 cd/m² over its maximum luminance, clamped to
+    /// 0.05–1, or <see cref="ListedBrightness"/> when the maximum luminance is unknown.</summary>
+    public static double Anchor(double? maxNits)
+        => maxNits is { } nits && double.IsFinite(nits) && nits > 0 ? Math.Clamp(ListedNits / nits, LowestAnchor, 1) : ListedBrightness;
+
+    /// <summary>The draw at <paramref name="brightness"/>, 0–1, where null, NaN or infinity means unknown, of a monitor listed
+    /// at <paramref name="listedOnW"/>.</summary>
+    /// <param name="anchor">Where the listed figure sits on the monitor's brightness scale (see <see cref="Anchor"/>).</param>
+    public static double At(double listedOnW, double? brightness, double anchor)
     {
         var b = brightness is { } value && double.IsFinite(value) ? Math.Clamp(value, 0, 1) : ListedBrightness;
-        return listedOnW * Share(b) / Share(ListedBrightness);
+        return listedOnW * Share(b) / Share(anchor);
     }
 
     private static double Share(double b) => FixedShare + (1 - FixedShare) * b;

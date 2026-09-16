@@ -3,12 +3,12 @@ using PowerLedger.Core;
 namespace PowerLedger.Sensors;
 
 /// <summary>
-/// A monitor's on-mode, sleep and off watts from its size and resolution, for one the list doesn't know (spec §5): the
-/// median of the certified monitors in the same size class and resolution class when there are at least three, otherwise
-/// Energy Star's allowance formula scaled to what a monitor typically draws, with the typical sleep and off figures. A
-/// monitor that doesn't give its size or resolution takes the median of them all. Estimated this way from all the others,
-/// each certified monitor's figure lands within 9% of what it measured for half of them and within 26% for nine in ten, and
-/// one in a hundred needs the formula.
+/// A monitor's on-mode, sleep and off watts and its maximum luminance from its size and resolution, for one the list doesn't
+/// know (spec §5): the medians of the certified monitors in the same size class and resolution class when there are at
+/// least three, the luminance's over those that give one; otherwise Energy Star's allowance formula scaled to what a monitor
+/// typically draws, with the typical sleep and off figures and no luminance. A monitor that doesn't give its size or
+/// resolution takes the medians of them all. Estimated this way from all the others, each certified monitor's figure lands
+/// within 9% of what it measured for half of them and within 26% for nine in ten, and one in a hundred needs the formula.
 /// </summary>
 public static class MonitorEstimate
 {
@@ -41,14 +41,15 @@ public static class MonitorEstimate
     /// <param name="width">The native width in pixels, or 0 when unknown. The resolution may be given either way round.</param>
     /// <param name="height">The native height in pixels, or 0 when unknown.</param>
     /// <param name="catalogue">The certified monitors to go by.</param>
-    public static (double OnW, double SleepW, double OffW) For(double inches, int width, int height, MonitorCatalogue catalogue)
+    public static (double OnW, double SleepW, double OffW, double? MaxNits) For(double inches, int width, int height, MonitorCatalogue catalogue)
         => For(inches, width, height, catalogue.Monitors);
 
     /// <summary>The same, from any set of certified monitors, so tests can leave one out.</summary>
-    internal static (double OnW, double SleepW, double OffW) For(double inches, int width, int height, IEnumerable<CatalogueMonitor> certified)
+    internal static (double OnW, double SleepW, double OffW, double? MaxNits) For(
+        double inches, int width, int height, IEnumerable<CatalogueMonitor> certified)
     {
         var known = double.IsFinite(inches) && inches > 0 && width > 0 && height > 0;
-        if (known && inches > LargestMonitor) return (Formula(inches, width, height), MonitorPower.DefaultSleepW, MonitorPower.DefaultOffW);
+        if (known && inches > LargestMonitor) return (Formula(inches, width, height), MonitorPower.DefaultSleepW, MonitorPower.DefaultOffW, null);
 
         var alike = certified.Where(monitor => monitor.Inches <= LargestMonitor).ToList();
         if (known)
@@ -60,11 +61,11 @@ public static class MonitorEstimate
         if (alike.Count >= FewestAlike)
         {
             return (MonitorCatalogue.Median(alike.Select(monitor => monitor.OnW)), MonitorCatalogue.Median(alike.Select(monitor => monitor.SleepW)),
-                MonitorCatalogue.Median(alike.Select(monitor => monitor.OffW)));
+                MonitorCatalogue.Median(alike.Select(monitor => monitor.OffW)), MonitorCatalogue.Median(alike.Select(monitor => monitor.MaxNits)));
         }
         return known
-            ? (Formula(inches, width, height), MonitorPower.DefaultSleepW, MonitorPower.DefaultOffW)
-            : (Formula(CommonestInches, CommonestWidth, CommonestHeight), MonitorPower.DefaultSleepW, MonitorPower.DefaultOffW);
+            ? (Formula(inches, width, height), MonitorPower.DefaultSleepW, MonitorPower.DefaultOffW, null)
+            : (Formula(CommonestInches, CommonestWidth, CommonestHeight), MonitorPower.DefaultSleepW, MonitorPower.DefaultOffW, null);
     }
 
     /// <summary>

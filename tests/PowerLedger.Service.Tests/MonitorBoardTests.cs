@@ -42,6 +42,14 @@ public class MonitorBoardTests
     /// <summary>What the App read from a monitor about whether it is on.</summary>
     private static MonitorPowerReading Said(MonitorFacts monitor, MonitorPowerState state) => new() { Instance = monitor.Instance, State = state };
 
+    /// <summary>What the Dell draws at a brightness, or at the one assumed for null: its 28.32 W were measured at 200 of its
+    /// 400 cd/m², half way up its scale.</summary>
+    internal static double DellAt(double? brightness) => MonitorPower.At(28.32, brightness, 0.5);
+
+    /// <summary>What the unnamed monitor draws at a brightness, or at the one assumed for null: the 27-inch 1080p monitors'
+    /// median 14.41 W, measured at 200 of their median 250 cd/m², 80% of the way up.</summary>
+    internal static double UnnamedAt(double? brightness) => MonitorPower.At(14.41, brightness, 0.8);
+
     [Fact]
     public void With_no_monitors_the_list_is_empty_and_they_draw_nothing()
     {
@@ -54,7 +62,7 @@ public class MonitorBoardTests
     }
 
     [Fact]
-    public void A_monitor_the_list_knows_counts_at_its_measured_figure()
+    public void A_monitor_the_list_knows_counts_its_measured_figure_at_the_brightness_assumed()
     {
         _board.Detected([Dell]);
 
@@ -79,9 +87,30 @@ public class MonitorBoardTests
             Brightness = null,
             WattsNow = monitor.WattsNow,
         });
-        monitor.WattsNow.ShouldBe(28.32, 1e-9);
-        _board.Watts(displayOn: true).OwnPlug.ShouldBe(28.32, 1e-9);
+        monitor.WattsNow.ShouldBe(DellAt(null), 1e-9);
+        monitor.WattsNow.ShouldBe(33.69, 0.005);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(DellAt(null), 1e-9);
         _board.Watts(displayOn: true).FromPc.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_figure_worked_out_is_the_draw_where_200_nits_sits_on_the_monitor_s_brightness_scale()
+    {
+        // The Dell reaches 400 cd/m², so it draws its listed 28.32 W half way up. The 27-inch 1080p monitors reach 250 at the
+        // median, so the unnamed monitor draws their 14.41 W at 80%. The portable monitor's figure comes from the formula,
+        // with no luminance, so it draws that figure at 75%.
+        _board.Detected([Dell, Unnamed, Portable]);
+        _board.Report(
+        [
+            new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.5 },
+            new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.8 },
+            new MonitorBrightness { Instance = Portable.Instance, Brightness = 0.75 },
+        ]);
+
+        var status = _board.Status(displayOn: true);
+        status[0].WattsNow.ShouldBe(28.32, 1e-9);
+        status[1].WattsNow.ShouldBe(14.41, 1e-9);
+        status[2].WattsNow.ShouldBe(MonitorEstimate.For(15.6, 1920, 1080, Catalogue).OnW, 1e-9);
     }
 
     [Fact]
@@ -109,7 +138,7 @@ public class MonitorBoardTests
         status.Select(m => m.CountedByDefault).ShouldBe([true, true]);
         status[1].OnWatts.ShouldBe(14.41);
         status[1].WattsNow.ShouldBe(0);
-        _board.Watts(displayOn: true).OwnPlug.ShouldBe(28.32, 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(DellAt(null), 1e-9);
         _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.74, 1e-9);
     }
 
@@ -123,8 +152,8 @@ public class MonitorBoardTests
         status.Select(m => (m.Counted, m.CountedByDefault)).ShouldBe([(false, false), (true, false)]);
         status[0].OnWatts.ShouldBe(28.32);
         status[0].WattsNow.ShouldBe(0);
-        status[1].WattsNow.ShouldBe(14.41, 1e-9);
-        _board.Watts(displayOn: true).OwnPlug.ShouldBe(14.41, 1e-9);
+        status[1].WattsNow.ShouldBe(UnnamedAt(null), 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(UnnamedAt(null), 1e-9);
         _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.13, 1e-9);
 
         // Counting by default again, the monitor with no choice counts.
@@ -184,7 +213,7 @@ public class MonitorBoardTests
         status[1].WattsNow.ShouldBe(estimate.OnW, 1e-9);
 
         var on = _board.Watts(displayOn: true);
-        on.OwnPlug.ShouldBe(28.32, 1e-9);
+        on.OwnPlug.ShouldBe(DellAt(null), 1e-9);
         on.FromPc.ShouldBe(estimate.OnW, 1e-9);
         var asleep = _board.Watts(displayOn: false);
         asleep.OwnPlug.ShouldBe(0.74, 1e-9);
@@ -257,7 +286,7 @@ public class MonitorBoardTests
 
         var on = _board.Watts(displayOn: true);
         on.OwnPlug.ShouldBe(0);
-        on.FromPc.ShouldBe(MonitorPower.At(28.32, 0.2) + 6, 1e-9);
+        on.FromPc.ShouldBe(DellAt(0.2) + 6, 1e-9);
     }
 
     [Fact]
@@ -286,14 +315,14 @@ public class MonitorBoardTests
         var bright = _board.Status(displayOn: true).ShouldHaveSingleItem();
         bright.Brightness.ShouldBe(1);
         bright.OnWatts.ShouldBe(28.32);
-        bright.WattsNow.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
-        _board.Watts(displayOn: true).OwnPlug.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
+        bright.WattsNow.ShouldBe(DellAt(1), 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(DellAt(1), 1e-9);
 
         _clock.Advance(MonitorBoard.BrightnessStale);
         _board.Status(displayOn: true).ShouldHaveSingleItem().Brightness.ShouldBe(1);
         _clock.Advance(TimeSpan.FromSeconds(1));
         _board.Status(displayOn: true).ShouldHaveSingleItem().Brightness.ShouldBeNull();
-        _board.Watts(displayOn: true).OwnPlug.ShouldBe(28.32, 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(DellAt(null), 1e-9);
     }
 
     [Fact]
@@ -335,9 +364,9 @@ public class MonitorBoardTests
 
         var status = _board.Status(displayOn: true);
         status.Select(m => m.Source).ShouldBe([MonitorSource.Model, MonitorSource.Typed]);
-        status[0].WattsNow.ShouldBe(MonitorPower.At(28.32, 0.2), 1e-9);
+        status[0].WattsNow.ShouldBe(DellAt(0.2), 1e-9);
         status[1].WattsNow.ShouldBe(30);
-        _board.Watts(displayOn: true).OwnPlug.ShouldBe(MonitorPower.At(28.32, 0.2) + 30, 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(DellAt(0.2) + 30, 1e-9);
     }
 
     [Fact]
@@ -387,8 +416,8 @@ public class MonitorBoardTests
         _board.Report([], [Said(Dell, MonitorPowerState.On)]);
         var on = _board.Status(displayOn: true).ShouldHaveSingleItem();
         on.PowerState.ShouldBe(MonitorPowerState.On);
-        on.WattsNow.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
-        _board.Watts(displayOn: true).OwnPlug.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
+        on.WattsNow.ShouldBe(DellAt(1), 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(DellAt(1), 1e-9);
         _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0.74, FromPc: 0));
     }
 
@@ -407,7 +436,7 @@ public class MonitorBoardTests
         var stale = _board.Status(displayOn: true).ShouldHaveSingleItem();
         stale.PowerState.ShouldBe(MonitorPowerState.Unknown);
         stale.Brightness.ShouldBe(1);   // a brightness stays fresh for longer
-        stale.WattsNow.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
+        stale.WattsNow.ShouldBe(DellAt(1), 1e-9);
         _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.74);
 
         // A new report counts again, after a detection has dropped the stale one.
@@ -481,7 +510,7 @@ public class MonitorBoardTests
         _board.Detected([Dell, Unnamed]);
         var unnamed = _board.Status(displayOn: true)[1];
         unnamed.PowerState.ShouldBe(MonitorPowerState.Unknown);
-        unnamed.WattsNow.ShouldBe(14.41, 1e-9);
+        unnamed.WattsNow.ShouldBe(UnnamedAt(null), 1e-9);
     }
 
     [Fact]
@@ -517,7 +546,7 @@ public class MonitorBoardTests
         _board.Detected([Dell]);
 
         _board.Status(displayOn: true).ShouldHaveSingleItem().Key.ShouldBe(Dell.Key);
-        _board.Watts(displayOn: true).OwnPlug.ShouldBe(28.32, 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(DellAt(null), 1e-9);
     }
 
     [Fact]
@@ -533,7 +562,7 @@ public class MonitorBoardTests
 
         _board.Detected([Dell], replacement.Token);
         _board.Status(displayOn: true).ShouldHaveSingleItem().Key.ShouldBe(Dell.Key);
-        _board.Watts(displayOn: true).Total.ShouldBe(28.32, 1e-9);
+        _board.Watts(displayOn: true).Total.ShouldBe(DellAt(null), 1e-9);
     }
 
     [Fact]
