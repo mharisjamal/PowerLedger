@@ -64,7 +64,12 @@ public partial class App : Application
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
             new ConnectionCost(), _preferences, threads, TimeProvider.System, zone, culture, Updater.RunningVersion(version),
-            release => _tray?.Announce($"PowerLedger {release.Name} is ready", "Open PowerLedger and choose Restart to update.", ShowWindow),
+            (release, ready) => _tray?.Announce(
+                $"PowerLedger {release.Name} is {(ready ? "ready" : "available")}",
+                ready
+                    ? "Open PowerLedger and choose Restart to update."
+                    : "PowerLedger waits for a connection that isn't metered; open it to take this one now.",
+                ShowWindow),
             OpenPage);
         _updates.PropertyChanged += OnUpdatesChanged;
         _settings = new SettingsViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates);

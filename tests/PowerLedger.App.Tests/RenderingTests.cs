@@ -190,7 +190,7 @@ public class RenderingTests
     {
         var feed = new FakeFeed { Latest = UpdaterTests.Release("0.3.0") };
         var updater = new Updater(feed, new FakeDownloader(), new FakeSetup(), new FakeCost(), new FakeUiSettings(), UiThreads.Inline,
-            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 2, 0), _ => { }, _ => { });
+            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 2, 0), (_, _) => { }, _ => { });
         updater.CheckAsync().GetAwaiter().GetResult();
         return updater;
     }
@@ -200,7 +200,7 @@ public class RenderingTests
     {
         var feed = new FakeFeed { Latest = UpdaterTests.Release("0.3.0") with { Size = 58 * 1024 * 1024 } };
         var updater = new Updater(feed, new FakeDownloader(), new FakeSetup(), new FakeCost { Metered = true }, new FakeUiSettings(),
-            UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 2, 0), _ => { }, _ => { });
+            UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 2, 0), (_, _) => { }, _ => { });
         updater.CheckAsync().GetAwaiter().GetResult();
         return updater;
     }
@@ -210,7 +210,7 @@ public class RenderingTests
     {
         var ui = new FakeUiSettings { Current = UiPreferences.Default with { LastVersion = "0.1.0" } };
         var updater = new Updater(new FakeFeed(), new FakeDownloader(), new FakeSetup(), new FakeCost(), ui, UiThreads.Inline,
-            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 2, 0), _ => { }, _ => { });
+            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 2, 0), (_, _) => { }, _ => { });
         updater.Start();
         return updater;
     }

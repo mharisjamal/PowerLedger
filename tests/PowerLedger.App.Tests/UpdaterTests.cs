@@ -15,7 +15,7 @@ public class UpdaterTests
     private readonly FakeSetup _setup = new();
     private readonly FakeCost _cost = new();
     private readonly FakeUiSettings _ui = new();
-    private readonly List<Release> _announced = [];
+    private readonly List<(Release Release, bool Ready)> _announced = [];
     private readonly List<Uri> _opened = [];
 
     internal static Release Release(string version) => new(
@@ -23,7 +23,7 @@ public class UpdaterTests
         new Uri($"{GitHubReleaseFeed.Downloads}v{version}/PowerLedger-{version}-setup.exe"), $"PowerLedger-{version}-setup.exe", 1000, new byte[32]);
 
     private Updater Updater(string running = "0.2.0") => new(
-        _feed, _downloader, _setup, _cost, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, Version.Parse(running), _announced.Add, _opened.Add);
+        _feed, _downloader, _setup, _cost, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, Version.Parse(running), (release, ready) => _announced.Add((release, ready)), _opened.Add);
 
     [Fact]
     public async Task A_newer_release_is_downloaded_quietly_then_offered()
@@ -78,7 +78,8 @@ public class UpdaterTests
         updater.ActionLabel.ShouldBe("Download");
         updater.ReadyVersion.ShouldBeNull();                    // nothing to restart into yet
         updater.Status.ShouldBe("PowerLedger 0.3.0 is available · 58 MB · waiting for a connection that isn't metered");
-        _announced.Select(r => r.Name).ShouldBe(new[] { "0.3.0" });   // the tray still says so once
+        _announced.Single().Release.Name.ShouldBe("0.3.0");
+        _announced.Single().Ready.ShouldBeFalse();              // the tray offers it, rather than saying it is ready to restart into
     }
 
     [Fact]
@@ -94,6 +95,26 @@ public class UpdaterTests
         await WaitFor.True(() => updater.Stage == UpdateStage.Ready);
         _downloader.Downloads.Single().Name.ShouldBe("0.3.0");
         updater.ActionLabel.ShouldBe("Restart to update");
+    }
+
+    /// <summary>Download is one attempt, not leave for the allowance: a download that fails asks again.</summary>
+    [Fact]
+    public async Task A_download_that_fails_on_a_metered_connection_asks_again_rather_than_spending_more()
+    {
+        _cost.Metered = true;
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        await updater.CheckAsync();
+        _downloader.Failure = new UpdateException("The download stalled; PowerLedger tries again later.");
+
+        updater.Act.Execute(null);                              // the card's Download
+        await WaitFor.True(() => updater.Status.StartsWith("The download stalled", StringComparison.Ordinal));
+
+        _downloader.Failure = null;
+        await updater.CheckAsync();                             // the next hourly check, still metered
+
+        updater.Stage.ShouldBe(UpdateStage.Available);
+        _downloader.Downloads.ShouldBeEmpty();
     }
 
     [Fact]
@@ -120,7 +141,7 @@ public class UpdaterTests
         var updater = Updater();
         await updater.CheckAsync();
         await updater.CheckAsync();
-        _announced.Select(r => r.Name).ShouldBe(new[] { "0.3.0" });
+        _announced.Select(a => a.Release.Name).ShouldBe(new[] { "0.3.0" });
         _ui.Current.AnnouncedVersion.ShouldBe("0.3.0");
 
         var later = Updater();                       // the App's next start
@@ -129,7 +150,7 @@ public class UpdaterTests
 
         _feed.Latest = Release("0.4.0");
         await later.CheckAsync();
-        _announced.Select(r => r.Name).ShouldBe(new[] { "0.3.0", "0.4.0" });
+        _announced.Select(a => a.Release.Name).ShouldBe(new[] { "0.3.0", "0.4.0" });
         later.Title.ShouldBe("PowerLedger 0.4.0 is ready");
     }
 

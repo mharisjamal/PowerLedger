@@ -55,7 +55,7 @@ internal sealed class Updater : ObservableObject, IDisposable
     private readonly TimeProvider _clock;
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
-    private readonly Action<Release> _announce;
+    private readonly Action<Release, bool> _announce;
     private readonly Action<Uri> _open;
     private readonly CancellationTokenSource _stop = new();
     private ITimer? _timer;
@@ -73,7 +73,7 @@ internal sealed class Updater : ObservableObject, IDisposable
     /// <param name="open">Opens a page in the browser.</param>
     public Updater(
         IReleaseFeed feed, IUpdateDownloader downloader, ISetupRunner setup, IConnectionCost cost, IUiSettings ui, UiThreads threads,
-        TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, Version running, Action<Release> announce, Action<Uri> open)
+        TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, Version running, Action<Release, bool> announce, Action<Uri> open)
     {
         _feed = feed;
         _downloader = downloader;
@@ -234,6 +234,7 @@ internal sealed class Updater : ObservableObject, IDisposable
                 _threads.Post(() => Waiting(release));
                 return;
             }
+            _wanted = null;   // one Download is one attempt: a download that fails asks again rather than spending more of the allowance
             var progress = new Percent(done => _threads.Post(() => Status = $"Downloading {release.Name}… {done.ToString("P0", _culture)}"));
             var installer = await _downloader.DownloadAsync(release, progress, _stop.Token).ConfigureAwait(false);
             _threads.Post(() => Offer(release, installer));
@@ -270,7 +271,7 @@ internal sealed class Updater : ObservableObject, IDisposable
         _installer = installer;
         Status = $"PowerLedger {release.Name} is ready to install";
         Show(UpdateStage.Ready);
-        Announce(release);
+        Announce(release, ready: true);
     }
 
     /// <summary>A newer release, found while somebody is paying for every byte: the card offers it rather than taking it.</summary>
@@ -281,15 +282,16 @@ internal sealed class Updater : ObservableObject, IDisposable
         _installer = null;
         Status = $"PowerLedger {release.Name} is available · {Megabytes(release)} · waiting for a connection that isn't metered";
         Show(UpdateStage.Available);
-        Announce(release);
+        Announce(release, ready: false);
     }
 
-    /// <summary>The tray says a version is there once, whether it is downloaded or waiting.</summary>
-    private void Announce(Release release)
+    /// <summary>The tray says a version is there once: ready to restart into, or there to take when the connection is one
+    /// somebody pays for.</summary>
+    private void Announce(Release release, bool ready)
     {
         if (_ui.Current.AnnouncedVersion == release.Name) return;
         _ui.Announced(release.Name);
-        _announce(release);
+        _announce(release, ready);
     }
 
     /// <summary>The download's size as the card gives it: whole megabytes.</summary>
