@@ -67,6 +67,7 @@ internal sealed class SamplingLoop : BackgroundService
     private DateTimeOffset _minute;
     private DateTimeOffset? _foldFrom;
     private bool _suspended;
+    private bool _carryOverMonitors;
     private long _ticks;
     private long _databaseBytes;
     private int _failures;
@@ -186,6 +187,8 @@ internal sealed class SamplingLoop : BackgroundService
         var reason = _sessions.Start(now, _environment.SystemUptime(), _raw.Latest());
         _log.LogInformation("PowerLedger {Version} started ({Reason})", Version, reason);
         Detect(now, stored);
+        // Settings from before monitors were detected wait for a tick that finds one; a first run has none to carry over.
+        _carryOverMonitors = stored is not null && ProfilePolicy.HasMonitorsToCarryOver(_settings.Profile);
         RefreshDatabaseSize();
     }
 
@@ -201,11 +204,18 @@ internal sealed class SamplingLoop : BackgroundService
             _settingsStore.SaveProfileHash(facts.Hash);
             _log.LogInformation("Machine profile taken from detection for hardware {Hash}", facts.Hash);
         }
-        _settings = settings;
         _facts = facts;
         _calibration.Use(facts.Hash, now);
+        Use(settings);
+    }
+
+    /// <summary>Puts settings already saved in force: the monitor board takes the user's choices, the model is built
+    /// afresh, and the pipe answers with them.</summary>
+    private void Use(ServiceSettings settings)
+    {
+        _settings = settings;
         _monitors.Choose(settings.Profile.Monitors);
-        _model = ModelFactory.Build(settings, facts, _calibration.Learner, _monitors);
+        _model = ModelFactory.Build(settings, _facts!, _calibration.Learner, _monitors);
         _board.Publish(settings);
     }
 
@@ -228,7 +238,9 @@ internal sealed class SamplingLoop : BackgroundService
             _feed.Publish(frame);
             OnMinute(now);
             var ticks = Ticks + 1;
-            Publish(result, frame, ticks);
+            var monitors = _monitors.Status(result.Sample.DisplayOn);
+            Publish(result, frame, ticks, monitors);
+            if (_carryOverMonitors && monitors.Count > 0) CarryOverMonitors(monitors);
             Interlocked.Exchange(ref _ticks, ticks);
             _failures = 0;
         }
@@ -268,10 +280,38 @@ internal sealed class SamplingLoop : BackgroundService
         _foldFrom = null;
     }
 
-    private void Publish(TickResult result, ReadingFrame frame, long ticks) => _board.Publish(new ServiceStatus(
-        Version, _startedAt, ticks, [.. result.Health.Select(Frames.From)], result.SuspectCount, _worker.Abandoned,
-        _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame,
-        _monitors.Status(result.Sample.DisplayOn)));
+    private void Publish(TickResult result, ReadingFrame frame, long ticks, IReadOnlyList<MonitorStatus> monitors)
+        => _board.Publish(new ServiceStatus(
+            Version, _startedAt, ticks, [.. result.Health.Select(Frames.From)], result.SuspectCount, _worker.Abandoned,
+            _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame, monitors));
+
+    /// <summary>
+    /// Carries the monitor settings from before monitors were detected over to the monitors now attached, and saves them
+    /// (Plan J). Tried at the first tick that finds a monitor, once a run: settings that could not be saved still hold the
+    /// old count, so the next start tries again.
+    /// </summary>
+    private void CarryOverMonitors(IReadOnlyList<MonitorStatus> attached)
+    {
+        _carryOverMonitors = false;
+        if (!ProfilePolicy.HasMonitorsToCarryOver(_settings.Profile)) return;         // settings applied since start chose already
+        var settings = _settings with { Profile = ProfilePolicy.CarryOverMonitors(_settings.Profile, attached.Select(monitor => monitor.Key)) };
+        if (settings.Validate() is { } problem)
+        {
+            _log.LogWarning("The old monitor settings could not be carried over ({Problem})", problem);
+            return;
+        }
+        try
+        {
+            _settingsStore.Save(settings);
+        }
+        catch (Exception error)
+        {
+            _log.LogWarning(error, "The old monitor settings could not be saved; the next start will try again");
+            return;
+        }
+        Use(settings);
+        _log.LogInformation("The old monitor settings were carried over to {Count} detected monitors", attached.Count);
+    }
 
     /// <summary>
     /// Carries out a command, or fails it. The loop completes one that succeeds only after starting the tick timer over
@@ -338,10 +378,7 @@ internal sealed class SamplingLoop : BackgroundService
         if (settings.Validate() is { } problem) throw new ArgumentException(problem, nameof(settings));
         var intervalChanged = settings.SampleIntervalSeconds != _settings.SampleIntervalSeconds;
         _settingsStore.Save(settings);
-        _settings = settings;
-        _monitors.Choose(settings.Profile.Monitors);
-        _model = ModelFactory.Build(settings, _facts!, _calibration.Learner, _monitors);
-        _board.Publish(settings);
+        Use(settings);
         return intervalChanged;
     }
 

@@ -22,10 +22,14 @@ internal sealed class SettingsStore(SettingsRepository settings)
 
 /// <summary>
 /// When detection may touch the machine profile (Plan B handoff): on the first run, and when the hardware hash
-/// changes, which means a different machine. Otherwise the stored profile, with the user's corrections, stands.
+/// changes, which means a different machine. Otherwise the stored profile, with the user's corrections, stands, except
+/// that monitor settings from before monitors were detected pass to the monitors once they are.
 /// </summary>
 internal static class ProfilePolicy
 {
+    /// <summary>The figure every external monitor was given before the user typed one.</summary>
+    private const double OldDefaultMonitorWatts = 25;
+
     /// <returns>The settings to use, and whether they differ from what was stored.</returns>
     public static (ServiceSettings Settings, bool Changed) Apply(ServiceSettings? stored, string? storedHash, InventoryFacts facts)
     {
@@ -33,4 +37,30 @@ internal static class ProfilePolicy
         var basis = stored?.Profile ?? (facts.Chassis == ChassisKind.Laptop ? MachineProfile.DefaultLaptop : MachineProfile.DefaultDesktop);
         return ((stored ?? ServiceSettings.Default) with { Profile = facts.ToProfile(basis) }, true);
     }
+
+    /// <summary>Whether the profile holds monitor settings from before monitors were detected (Plan J) that no monitor has
+    /// taken over yet: a count of monitors or the choice to count them, and no choice for any one monitor.</summary>
+    public static bool HasMonitorsToCarryOver(MachineProfile profile)
+        => profile.Monitors.Count == 0 && (profile.IncludeMonitors || profile.ExternalMonitors > 0);
+
+    /// <summary>
+    /// The old monitor settings carried over to the monitors now detected. Monitors the user counted stay counted, at the
+    /// figure they typed, or at each monitor's own figure when theirs was the old default; monitors the user had but didn't
+    /// count stay uncounted. The old count and choice are cleared, so this happens once.
+    /// </summary>
+    /// <param name="detected">The keys of the external monitors attached.</param>
+    public static MachineProfile CarryOverMonitors(MachineProfile profile, IEnumerable<string> detected) => profile with
+    {
+        Monitors =
+        [
+            .. detected.Distinct(StringComparer.Ordinal).Select(key => new MonitorChoice
+            {
+                Key = key,
+                Counted = profile.IncludeMonitors,
+                Watts = profile.IncludeMonitors && profile.MonitorWatts != OldDefaultMonitorWatts ? profile.MonitorWatts : null,
+            }),
+        ],
+        ExternalMonitors = 0,
+        IncludeMonitors = false,
+    };
 }

@@ -196,6 +196,85 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task Old_monitor_settings_wait_for_a_monitor_to_be_detected_and_are_then_carried_over_once()
+    {
+        using var t = new TestDatabase();
+        var store = new SettingsStore(new SettingsRepository(t.Db));
+        var old = ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultLaptop with { ExternalMonitors = 1, IncludeMonitors = true, MonitorWatts = 30 },
+        };
+        store.Save(old);
+        store.SaveProfileHash(Facts.Laptop().Hash);
+        await using var loop = new Harness(t);
+        await loop.StartAsync();
+
+        // Upgraded with the monitor unplugged: the old settings stay as they are.
+        await loop.Ticks(2);
+        store.Load().ShouldBe(old);
+        loop.Board.Settings.ShouldBe(old);
+
+        loop.Monitors.Detected([MonitorBoardTests.Dell]);
+        await loop.Ticks(1);
+        var carried = old with
+        {
+            Profile = old.Profile with
+            {
+                ExternalMonitors = 0, IncludeMonitors = false, Monitors = [new MonitorChoice { Key = MonitorBoardTests.Dell.Key, Watts = 30 }],
+            },
+        };
+        store.Load().ShouldBe(carried);
+        loop.Board.Settings.ShouldBe(carried);
+
+        await loop.Ticks(1);
+        var status = loop.Board.Status.ShouldNotBeNull();
+        status.Monitors.ShouldNotBeNull().ShouldHaveSingleItem().Source.ShouldBe(MonitorSource.Typed);
+        status.Last.ShouldNotBeNull().Components.Monitors.ShouldBe(30, 1e-9);
+
+        // Only once: a monitor plugged in later counts at its own figure, and the settings are left alone.
+        loop.Monitors.Detected([MonitorBoardTests.Dell, MonitorBoardTests.Unnamed]);
+        await loop.Ticks(2);
+        store.Load().ShouldBe(carried);
+        loop.Board.Status.ShouldNotBeNull().Monitors.ShouldNotBeNull().Select(m => m.Counted).ShouldBe([true, true]);
+    }
+
+    [Fact]
+    public async Task Monitors_old_settings_had_but_did_not_count_stay_uncounted()
+    {
+        using var t = new TestDatabase();
+        var store = new SettingsStore(new SettingsRepository(t.Db));
+        store.Save(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { ExternalMonitors = 2 } });
+        store.SaveProfileHash(Facts.Laptop().Hash);
+        await using var loop = new Harness(t);
+        loop.Monitors.Detected([MonitorBoardTests.Dell]);
+        await loop.StartAsync();
+
+        await loop.Ticks(2);
+
+        var profile = store.Load().ShouldNotBeNull().Profile;
+        profile.Monitors.ShouldBe([new MonitorChoice { Key = MonitorBoardTests.Dell.Key, Counted = false }]);
+        profile.ExternalMonitors.ShouldBe(0);
+        var status = loop.Board.Status.ShouldNotBeNull();
+        status.Monitors.ShouldNotBeNull().ShouldHaveSingleItem().Counted.ShouldBeFalse();
+        status.Last.ShouldNotBeNull().Components.Monitors.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_fresh_install_carries_nothing_over_and_counts_the_monitors_it_detects()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t);
+        loop.Monitors.Detected([MonitorBoardTests.Dell]);
+        await loop.StartAsync();
+
+        await loop.Ticks(2);
+
+        new SettingsStore(new SettingsRepository(t.Db)).Load().ShouldNotBeNull().Profile.Monitors.ShouldBeEmpty();
+        loop.Board.Settings.ShouldNotBeNull().Profile.Monitors.ShouldBeEmpty();
+        loop.Board.Status.ShouldNotBeNull().Last.ShouldNotBeNull().Components.Monitors.ShouldBe(28.32, 1e-9);
+    }
+
+    [Fact]
     public async Task A_resume_is_done_only_once_its_new_timer_runs()
     {
         using var t = new TestDatabase();

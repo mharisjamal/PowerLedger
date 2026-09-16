@@ -68,6 +68,68 @@ public class SettingsTests
         settings.SampleIntervalSeconds.ShouldBe(2);
     }
 
+    private const string DellKey = "DELA0B1-7MKZG34";
+    private const string LgKey = @"DISPLAY\GSM5B08\7&1A2B&0&UID4354";
+
+    [Fact]
+    public void Monitors_the_user_counted_are_carried_over_counted_at_the_figure_they_typed()
+    {
+        var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 30, ExtrasWatts = 6 };
+        ProfilePolicy.HasMonitorsToCarryOver(old).ShouldBeTrue();
+
+        var carried = ProfilePolicy.CarryOverMonitors(old, [DellKey, LgKey]);
+
+        carried.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = DellKey, Counted = true, Watts = 30 },
+            new MonitorChoice { Key = LgKey, Counted = true, Watts = 30 },
+        ]);
+        carried.ShouldBe(old with { ExternalMonitors = 0, IncludeMonitors = false, Monitors = carried.Monitors });
+        ProfilePolicy.HasMonitorsToCarryOver(carried).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Monitors_counted_at_the_old_default_figure_take_the_figure_worked_out_for_each()
+    {
+        var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 1, IncludeMonitors = true, MonitorWatts = 25 };
+
+        ProfilePolicy.CarryOverMonitors(old, [DellKey]).Monitors.ShouldBe([new MonitorChoice { Key = DellKey, Counted = true, Watts = null }]);
+    }
+
+    [Fact]
+    public void Choosing_to_count_monitors_is_carried_over_even_without_a_count()
+    {
+        var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 0, IncludeMonitors = true, MonitorWatts = 18 };
+        ProfilePolicy.HasMonitorsToCarryOver(old).ShouldBeTrue();
+
+        ProfilePolicy.CarryOverMonitors(old, [DellKey]).Monitors.ShouldBe([new MonitorChoice { Key = DellKey, Counted = true, Watts = 18 }]);
+    }
+
+    [Fact]
+    public void Monitors_the_user_had_but_did_not_count_are_carried_over_not_counted()
+    {
+        var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = false, MonitorWatts = 30 };
+        ProfilePolicy.HasMonitorsToCarryOver(old).ShouldBeTrue();
+
+        var carried = ProfilePolicy.CarryOverMonitors(old, [DellKey, LgKey]);
+
+        carried.Monitors.ShouldBe([new MonitorChoice { Key = DellKey, Counted = false }, new MonitorChoice { Key = LgKey, Counted = false }]);
+        carried.ExternalMonitors.ShouldBe(0);
+        carried.IncludeMonitors.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_profile_without_old_monitor_settings_or_with_monitor_choices_already_has_nothing_to_carry_over()
+    {
+        ProfilePolicy.HasMonitorsToCarryOver(MachineProfile.DefaultLaptop).ShouldBeFalse();
+        ProfilePolicy.HasMonitorsToCarryOver(MachineProfile.DefaultDesktop).ShouldBeFalse();
+        ProfilePolicy.HasMonitorsToCarryOver(MachineProfile.DefaultDesktop with { MonitorWatts = 30 }).ShouldBeFalse();
+        ProfilePolicy.HasMonitorsToCarryOver(MachineProfile.DefaultDesktop with
+        {
+            ExternalMonitors = 2, IncludeMonitors = true, Monitors = [new MonitorChoice { Key = DellKey, Counted = false }],
+        }).ShouldBeFalse();
+    }
+
     [Fact]
     public void The_store_round_trips_settings_and_the_profile_hash()
     {
