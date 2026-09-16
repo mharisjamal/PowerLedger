@@ -6,7 +6,8 @@ namespace PowerLedger.Core;
 /// Turns one <see cref="Sample"/> into a <see cref="Reading"/> (spec §5).
 /// On a laptop the battery discharge rate is the truth when available; otherwise the parts are summed
 /// with a learned (laptop) or default "rest of system" baseline and divided by supply efficiency.
-/// Desktops are always estimated. Wall-powered external monitors are added after the efficiency division.
+/// Desktops are always estimated. External monitors are wall-powered: what the <see cref="IMonitorDraw"/> says they draw
+/// (nothing, when the model is given none) is added after the efficiency division.
 /// </summary>
 public sealed class PowerModel
 {
@@ -26,13 +27,15 @@ public sealed class PowerModel
     private readonly HardwareFacts _facts;
     private readonly PowerModelOptions _options;
     private readonly IBaselineProvider _baselines;
+    private readonly IMonitorDraw _monitors;
 
-    public PowerModel(MachineProfile profile, HardwareFacts facts, PowerModelOptions options, IBaselineProvider baselines)
+    public PowerModel(MachineProfile profile, HardwareFacts facts, PowerModelOptions options, IBaselineProvider baselines, IMonitorDraw? monitors = null)
     {
         _profile = profile;
         _facts = facts;
         _options = options;
         _baselines = baselines;
+        _monitors = monitors ?? NoMonitors.Instance;
     }
 
     /// <summary>
@@ -45,7 +48,7 @@ public sealed class PowerModel
         var cpu = CpuWatts(s);
         var gpu = GpuWatts(s);
         var display = DisplayModel.PanelWatts(_profile, s.Brightness, s.DisplayOn);
-        var monitors = DisplayModel.MonitorWatts(_profile, s.DisplayOn);
+        var monitors = _monitors.Watts(s.DisplayOn);
         var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds;
         var isLaptop = _profile.Chassis == ChassisKind.Laptop;
 

@@ -46,7 +46,9 @@ public sealed record MachineProfile
     public double? CpuTdpOverrideW { get; init; }
     public double? GpuTdpOverrideW { get; init; }
     /// <summary>The user's choice for each external monitor, by <see cref="MonitorChoice.Key"/>. A monitor with no choice
-    /// counts, at PowerLedger's own figure.</summary>
+    /// counts, at PowerLedger's own figure. <see cref="ExternalMonitors"/>, <see cref="IncludeMonitors"/> and
+    /// <see cref="MonitorWatts"/> came before it: they stay only so settings from then can be carried over, and no longer
+    /// reach the model.</summary>
     public IReadOnlyList<MonitorChoice> Monitors { get; init; } = [];
 
     public static MachineProfile DefaultLaptop { get; } = new();

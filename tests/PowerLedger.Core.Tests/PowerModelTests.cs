@@ -6,11 +6,12 @@ namespace PowerLedger.Core.Tests;
 
 public class PowerModelTests
 {
-    private static PowerModel Laptop(double? baseline = null, PowerModelOptions? options = null, MachineProfile? profile = null)
-        => new(profile ?? MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, options ?? new PowerModelOptions(), new FixedBaseline(baseline));
+    private static PowerModel Laptop(
+        double? baseline = null, PowerModelOptions? options = null, MachineProfile? profile = null, IMonitorDraw? monitors = null)
+        => new(profile ?? MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, options ?? new PowerModelOptions(), new FixedBaseline(baseline), monitors);
 
-    private static PowerModel Desktop(double? baseline = null, MachineProfile? profile = null)
-        => new(profile ?? MachineProfile.DefaultDesktop, HardwareFacts.DesktopDefaults, new PowerModelOptions(), new FixedBaseline(baseline));
+    private static PowerModel Desktop(double? baseline = null, MachineProfile? profile = null, IMonitorDraw? monitors = null)
+        => new(profile ?? MachineProfile.DefaultDesktop, HardwareFacts.DesktopDefaults, new PowerModelOptions(), new FixedBaseline(baseline), monitors);
 
     [Fact]
     public void On_battery_the_discharge_rate_is_the_total_and_the_remainder_becomes_rest()
@@ -46,14 +47,26 @@ public class PowerModelTests
     }
 
     [Fact]
-    public void Measured_mode_still_adds_opted_in_monitors()
+    public void Measured_mode_still_adds_the_monitors()
     {
-        var profile = MachineProfile.DefaultLaptop with { ExternalMonitors = 1, IncludeMonitors = true, MonitorWatts = 25 };
-        var r = Laptop(profile: profile).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
+        var r = Laptop(monitors: new FixedDraw(25)).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
         r.Quality.ShouldBe(Quality.Measured);
         r.Components.Monitors.ShouldBe(25);
         r.TotalW.ShouldBe(34.2 + 25, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
+    }
+
+    [Fact]
+    public void The_monitors_are_asked_what_they_draw_with_the_display_as_it_is_and_a_model_given_none_counts_none()
+    {
+        var monitors = new FixedDraw(on: 25, off: 0.4);
+        Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: true)).Components.Monitors.ShouldBe(25);
+        var off = Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: false));
+        off.Components.Monitors.ShouldBe(0.4);
+        off.TotalW.ShouldBe((14.6 + 4.1 + 5.0) / 0.9 + 0.4, 0.001);
+        off.Components.Sum.ShouldBe(off.TotalW, 0.001);
+        Laptop().Evaluate(TestData.Laptop()).Components.Monitors.ShouldBe(0);
+        Desktop().Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null)).Components.Monitors.ShouldBe(0);
     }
 
     [Fact]
@@ -124,8 +137,7 @@ public class PowerModelTests
     [Fact]
     public void External_monitors_are_added_after_the_supply_efficiency_division()
     {
-        var profile = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 25 };
-        var r = Desktop(profile: profile).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
+        var r = Desktop(monitors: new FixedDraw(50)).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
         var pcParts = 50 + 120 + 2 * 2.5 + 2 + (12 + 3 * 1);
         r.Components.Monitors.ShouldBe(50);
         r.Components.PsuLoss.ShouldBe(pcParts / 0.85 - pcParts, 0.001);
@@ -221,5 +233,18 @@ public class PowerModelTests
 
         var noEfficiency = new PowerModel(MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, new PowerModelOptions(LaptopAdapterEfficiency: 0), new FixedBaseline(null));
         noEfficiency.Evaluate(TestData.Laptop()).TotalW.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_monitors_draw_that_is_not_a_number_yields_a_zeroed_suspect_reading_too()
+    {
+        var bad = Laptop(monitors: new FixedDraw(double.NaN)).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true));
+        bad.TotalW.ShouldBe(0);
+        bad.Suspect.ShouldBeTrue();
+    }
+
+    private sealed class FixedDraw(double on, double off = 0) : IMonitorDraw
+    {
+        public double Watts(bool displayOn) => displayOn ? on : off;
     }
 }

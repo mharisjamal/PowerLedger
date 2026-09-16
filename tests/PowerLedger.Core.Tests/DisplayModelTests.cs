@@ -62,15 +62,6 @@ public class DisplayModelTests
     public void NaN_brightness_counts_as_fifty_percent()
         => DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, double.NaN, true).ShouldBe(3.75, 0.001);
 
-    [Fact]
-    public void External_monitors_count_only_when_opted_in()
-    {
-        var two = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 25 };
-        DisplayModel.MonitorWatts(two, displayOn: true).ShouldBe(50);
-        DisplayModel.MonitorWatts(two, displayOn: false).ShouldBe(1.0, 0.001);
-        DisplayModel.MonitorWatts(MachineProfile.DefaultDesktop, displayOn: true).ShouldBe(0);
-    }
-
     [Theory]
     [InlineData(PsuTier.White, 0.82)]
     [InlineData(PsuTier.Bronze, 0.85)]

@@ -2,12 +2,12 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.Core;
 
-/// <summary>Watts drawn by the built-in panel, a laptop's or an all-in-one's, and by opted-in external monitors.</summary>
+/// <summary>Watts drawn by the built-in panel, a laptop's or an all-in-one's. External monitors are an
+/// <see cref="IMonitorDraw"/>'s.</summary>
 public static class DisplayModel
 {
     public const double PanelBaseW = 1.5;
     public const double PanelRangeW = 4.5;
-    public const double MonitorSleepW = 0.5;
 
     /// <summary>Built-in panel watts. A laptop's panel always counts, at an unknown size too; any other machine's counts
     /// when the profile gives its size, as an all-in-one's does, and a desktop's default of 0 means none. 0 while the
@@ -32,11 +32,4 @@ public static class DisplayModel
     };
 
     private static bool HasPanel(MachineProfile profile) => profile.Chassis == ChassisKind.Laptop || profile.DisplayDiagonalInches > 0;
-
-    /// <summary>Total watts for all opted-in external monitors (profile.MonitorWatts is per monitor); 0 when not opted in.</summary>
-    public static double MonitorWatts(MachineProfile profile, bool displayOn)
-    {
-        if (!profile.IncludeMonitors || profile.ExternalMonitors <= 0) return 0;
-        return profile.ExternalMonitors * (displayOn ? profile.MonitorWatts : MonitorSleepW);
-    }
 }
