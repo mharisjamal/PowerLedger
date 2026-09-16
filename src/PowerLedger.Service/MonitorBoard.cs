@@ -6,25 +6,31 @@ namespace PowerLedger.Service;
 
 /// <summary>
 /// The external monitors the service knows (Plan J): what WMI detected, each one's figures from the catalogue, the estimate
-/// or the user, the user's choices, and the brightness and power state the App last reported. Detection writes from the
-/// sensor thread, the App's reports from the pipe's, and the choices from the loop, which also reads the board every tick
-/// for the model and for the status. So every member takes the one lock, and nothing outside the board is called while it
-/// is held.
+/// or the user, the user's choices, and the brightness, power state, refresh rate and HDR state the App last reported.
+/// Detection writes from the sensor thread, the App's reports from the pipe's, and the choices from the loop, which also
+/// reads the board every tick for the model and for the status. So every member takes the one lock, and nothing outside the
+/// board is called while it is held.
+/// <para>
+/// The App reads the monitors only while the service's latest reading says the displays are on, so what it reported ages
+/// only while they are on: a monitor last known to be off keeps counting as off while the displays sleep, and after they
+/// wake until the App reads it again.
+/// </para>
 /// </summary>
 internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider clock) : IMonitorDraw
 {
-    /// <summary>The App reads the brightness every five minutes, so a brightness older than this is from an App that stopped
-    /// reporting or a monitor that stopped answering, and counts as unknown.</summary>
+    /// <summary>The App reads the brightness every five minutes while the displays are on, so a brightness older than this,
+    /// in time the displays were on, is from an App that stopped reporting or a monitor that stopped answering, and counts as
+    /// unknown.</summary>
     public static readonly TimeSpan BrightnessStale = TimeSpan.FromMinutes(15);
 
     /// <summary>The App reads whether each monitor is on every minute while the displays are on, so a power state older than
-    /// this is from before the displays went off, from an App that stopped reporting or from a monitor that stopped
-    /// answering, and counts as unknown.</summary>
+    /// this, in time the displays were on, is from an App that stopped reporting or a monitor that stopped answering, and
+    /// counts as unknown.</summary>
     public static readonly TimeSpan PowerStale = TimeSpan.FromMinutes(3);
 
     /// <summary>The App reads how Windows drives each monitor every minute while the displays are on, so a refresh rate or
-    /// HDR state older than this is from before the displays went off, from an App that stopped reporting or from a monitor
-    /// Windows no longer drives, and counts as unknown.</summary>
+    /// HDR state older than this, in time the displays were on, is from an App that stopped reporting or a monitor Windows no
+    /// longer drives, and counts as unknown.</summary>
     public static readonly TimeSpan DisplayStale = TimeSpan.FromMinutes(3);
 
     /// <summary>The largest monitor taken, on a laptop, for a portable one running off it when the user hasn't said.
@@ -33,15 +39,25 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
 
     private readonly Lock _gate = new();
 
-    /// <summary>The last reading for each monitor by instance, kept while it is fresh even if the monitor goes missing from
-    /// a detection for a moment, as monitors do while they wake.</summary>
-    private readonly Dictionary<string, (double Brightness, long At)> _brightness = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The last reading for each monitor by instance, with how long the displays had been on when it came, kept while
+    /// it is fresh even if the monitor goes missing from a detection for a moment, as monitors do while they wake.</summary>
+    private readonly Dictionary<string, (double Brightness, TimeSpan At)> _brightness = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The last power state for each monitor by instance, kept as its brightness is.</summary>
-    private readonly Dictionary<string, (MonitorPowerState State, long At)> _power = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (MonitorPowerState State, TimeSpan At)> _power = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The last refresh rate and HDR state for each monitor by instance, kept as its brightness is.</summary>
-    private readonly Dictionary<string, ((double RefreshHz, bool Hdr) Display, long At)> _displays = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ((double RefreshHz, bool Hdr) Display, TimeSpan At)> _displays = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How long the displays had been on when the latest reading said whether they are, counted from the board's
+    /// start: the clock what the App reported ages by.</summary>
+    private TimeSpan _displaysOnFor;
+
+    /// <summary>When the latest reading said whether the displays are on.</summary>
+    private long _seenAt = clock.GetTimestamp();
+
+    /// <summary>Whether the latest reading said the displays are on. Until a reading says, they are taken to be.</summary>
+    private bool _displaysOn = true;
 
     private Figured[] _monitors = [];
     private Dictionary<string, MonitorChoice> _choices = new(StringComparer.Ordinal);
@@ -70,9 +86,10 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         {
             if (retired.IsCancellationRequested) return;
             _monitors = figured;
-            DropStale(_brightness, BrightnessStale, now);
-            DropStale(_power, PowerStale, now);
-            DropStale(_displays, DisplayStale, now);
+            var on = DisplaysOnFor(now);
+            DropStale(_brightness, BrightnessStale, on);
+            DropStale(_power, PowerStale, on);
+            DropStale(_displays, DisplayStale, on);
         }
     }
 
@@ -106,23 +123,24 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         var now = clock.GetTimestamp();
         lock (_gate)
         {
+            var on = DisplaysOnFor(now);
             foreach (var reading in readings)
             {
                 if (!double.IsFinite(reading.Brightness)) continue;
                 var monitor = Attached(reading.Instance);
-                if (monitor is not null) _brightness[monitor.Facts.Instance] = (Math.Clamp(reading.Brightness, 0, 1), now);
+                if (monitor is not null) _brightness[monitor.Facts.Instance] = (Math.Clamp(reading.Brightness, 0, 1), on);
             }
             foreach (var reading in power ?? [])
             {
                 if (reading.State is not (MonitorPowerState.On or MonitorPowerState.Standby or MonitorPowerState.Off)) continue;
                 var monitor = Attached(reading.Instance);
-                if (monitor is not null) _power[monitor.Facts.Instance] = (reading.State, now);
+                if (monitor is not null) _power[monitor.Facts.Instance] = (reading.State, on);
             }
             foreach (var display in displays ?? [])
             {
                 if (!double.IsFinite(display.RefreshHz) || display.RefreshHz <= 0) continue;
                 var monitor = Attached(display.Instance);
-                if (monitor is not null) _displays[monitor.Facts.Instance] = ((display.RefreshHz, display.Hdr), now);
+                if (monitor is not null) _displays[monitor.Facts.Instance] = ((display.RefreshHz, display.Hdr), on);
             }
         }
     }
@@ -130,17 +148,26 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     /// <summary>What every counted monitor draws, split by whether it has a plug of its own or runs off the PC, which always
     /// counts. A monitor that says it is off draws its off figure, and one in standby its sleep figure. One that says it is
     /// on, or hasn't said, draws as the displays are: with the display on, a figure the user typed as it is, or PowerLedger's
-    /// own at the monitor's brightness; asleep, its sleep figure.</summary>
+    /// own at the monitor's brightness with what its refresh rate adds; asleep, its sleep figure.</summary>
+    /// <param name="displayOn">Whether the reading that asks says the displays are on. The model asks once a reading, so from
+    /// now on what the App reported ages as this says, until the next reading.</param>
     public MonitorWatts Watts(bool displayOn)
     {
         var now = clock.GetTimestamp();
         lock (_gate)
         {
+            if (now > _seenAt)
+            {
+                _displaysOnFor = DisplaysOnFor(now);
+                _seenAt = now;
+            }
+            _displaysOn = displayOn;
+            var on = DisplaysOnFor(now);
             var ownPlug = 0.0;
             var fromPc = 0.0;
             foreach (var monitor in _monitors)
             {
-                var status = Describe(monitor, displayOn, now);
+                var status = Describe(monitor, displayOn, on);
                 if (status.OwnPlug) ownPlug += status.WattsNow;
                 else fromPc += status.WattsNow;
             }
@@ -152,7 +179,11 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     public IReadOnlyList<MonitorStatus> Status(bool displayOn)
     {
         var now = clock.GetTimestamp();
-        lock (_gate) return [.. _monitors.Select(monitor => Describe(monitor, displayOn, now))];
+        lock (_gate)
+        {
+            var on = DisplaysOnFor(now);
+            return [.. _monitors.Select(monitor => Describe(monitor, displayOn, on))];
+        }
     }
 
     /// <summary>The list's figures for this model or, for a model it doesn't know, the estimate from its size and resolution.</summary>
@@ -173,8 +204,9 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     private Figured? Attached(string instance)
         => Array.Find(_monitors, monitor => monitor.Facts.Instance.Equals(instance, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>One monitor as it stands at <paramref name="now"/>. Called with the lock held.</summary>
-    private MonitorStatus Describe(Figured monitor, bool displayOn, long now)
+    /// <summary>One monitor as it stands once the displays have been on for <paramref name="on"/>. Called with the lock
+    /// held.</summary>
+    private MonitorStatus Describe(Figured monitor, bool displayOn, TimeSpan on)
     {
         var facts = monitor.Facts;
         var choice = _choices.GetValueOrDefault(facts.Key);
@@ -186,14 +218,14 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         // What a monitor running off the PC draws is inside what the PC itself draws, so leaving it out would mean nothing,
         // and it always counts. Only a monitor with a plug of its own counts as the user chose, or as the profile says.
         var counted = !ownPlug || (choice?.Counted ?? _countedByDefault);
-        double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, now, BrightnessStale)
+        double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, on, BrightnessStale)
             ? reading.Brightness
             : null;
-        var state = _power.TryGetValue(facts.Instance, out var said) && !IsStale(said.At, now, PowerStale)
+        var state = _power.TryGetValue(facts.Instance, out var said) && !IsStale(said.At, on, PowerStale)
             ? said.State
             : MonitorPowerState.Unknown;
         (double RefreshHz, bool Hdr)? display =
-            _displays.TryGetValue(facts.Instance, out var driven) && !IsStale(driven.At, now, DisplayStale) ? driven.Display : null;
+            _displays.TryGetValue(facts.Instance, out var driven) && !IsStale(driven.At, on, DisplayStale) ? driven.Display : null;
         // A figure the user typed is what the monitor draws as they use it, so it is taken as it is, and the brightness is
         // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
         // list's test luminance, so it is scaled from where that sits on the monitor's brightness scale to the monitor's.
@@ -237,16 +269,24 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         };
     }
 
-    /// <summary>Drops the readings older than <paramref name="stale"/>. Called with the lock held.</summary>
-    private void DropStale<T>(Dictionary<string, (T Reading, long At)> readings, TimeSpan stale, long now)
+    /// <summary>How long the displays have been on at <paramref name="now"/>, going by what the latest reading said since it
+    /// came. Called with the lock held.</summary>
+    private TimeSpan DisplaysOnFor(long now)
+        => _displaysOn && now > _seenAt ? _displaysOnFor + clock.GetElapsedTime(_seenAt, now) : _displaysOnFor;
+
+    /// <summary>Drops the readings older than <paramref name="stale"/> in time the displays were on. Called with the lock
+    /// held.</summary>
+    private static void DropStale<T>(Dictionary<string, (T Reading, TimeSpan At)> readings, TimeSpan stale, TimeSpan on)
     {
-        foreach (var instance in readings.Where(reading => IsStale(reading.Value.At, now, stale)).Select(reading => reading.Key).ToList())
+        foreach (var instance in readings.Where(reading => IsStale(reading.Value.At, on, stale)).Select(reading => reading.Key).ToList())
         {
             readings.Remove(instance);
         }
     }
 
-    private bool IsStale(long at, long now, TimeSpan stale) => clock.GetElapsedTime(at, now) > stale;
+    /// <summary>Whether a reading taken when the displays had been on for <paramref name="at"/> is older than
+    /// <paramref name="stale"/> now that they have been on for <paramref name="on"/>.</summary>
+    private static bool IsStale(TimeSpan at, TimeSpan on, TimeSpan stale) => on - at > stale;
 
     /// <param name="Name">The name the monitor gives, or its maker and product code when it gives none.</param>
     /// <param name="Anchor">Where <paramref name="OnW"/> sits on the monitor's brightness scale (see

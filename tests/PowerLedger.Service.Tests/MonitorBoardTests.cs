@@ -456,6 +456,48 @@ public class MonitorBoardTests
     }
 
     [Fact]
+    public void While_a_reading_says_the_displays_are_off_nothing_the_app_reported_goes_stale()
+    {
+        _board.Detected([Dell]);
+        _board.Report(
+            [new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.2 }], [Said(Dell, MonitorPowerState.Off)], [Shown(Dell, 144, hdr: true)]);
+        _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.3);
+
+        // The App reads nothing while the displays are off, so a night later the monitor last known off still counts so, and
+        // a detection drops none of it.
+        _clock.Advance(TimeSpan.FromHours(8));
+        _board.Detected([Dell]);
+        var asleep = _board.Status(displayOn: false).ShouldHaveSingleItem();
+        (asleep.PowerState, asleep.WattsNow).ShouldBe((MonitorPowerState.Off, 0.3));
+        asleep.Brightness.ShouldBe(0.2);
+        asleep.RefreshHz.ShouldBe(144);
+        asleep.Hdr.ShouldBe(true);
+        _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.3);
+
+        // With the displays on again, only the time they are on counts.
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(0.3);
+        _clock.Advance(MonitorBoard.PowerStale);
+        _board.Status(displayOn: true).ShouldHaveSingleItem().PowerState.ShouldBe(MonitorPowerState.Off);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        var stale = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (stale.PowerState, stale.RefreshHz, stale.Hdr).ShouldBe((MonitorPowerState.Unknown, (double?)null, (bool?)null));
+        stale.Brightness.ShouldBe(0.2);
+    }
+
+    [Fact]
+    public void What_had_gone_stale_before_the_displays_went_off_stays_unknown_while_they_are_off()
+    {
+        _board.Detected([Dell]);
+        _board.Report([], [Said(Dell, MonitorPowerState.Off)]);
+        _clock.Advance(MonitorBoard.PowerStale + TimeSpan.FromSeconds(1));
+        _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.74);
+
+        _clock.Advance(TimeSpan.FromHours(1));
+        _board.Status(displayOn: false).ShouldHaveSingleItem().PowerState.ShouldBe(MonitorPowerState.Unknown);
+        _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.74);
+    }
+
+    [Fact]
     public void A_monitor_with_a_typed_figure_that_says_it_is_off_or_in_standby_draws_its_off_or_sleep_figure()
     {
         _board.Detected([Dell]);
