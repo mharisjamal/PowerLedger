@@ -178,23 +178,40 @@ public sealed class BrightnessReporterTests : IDisposable
     }
 
     [Fact]
-    public void While_the_user_doesnt_allow_it_no_monitor_is_asked_and_the_service_is_sent_nothing()
+    public void While_the_user_doesnt_allow_it_no_monitor_is_asked_but_how_Windows_drives_each_is_still_reported()
     {
+        // The tick stops the requests sent to the monitors; Windows' display settings ask no monitor anything.
         _reporter.Start();
         _ui.ReadMonitorBrightness(false);
-        var statusReads = _link.StatusReads;
 
         _clock.Advance(BrightnessReporter.FirstRead + BrightnessReporter.ReadEvery);
         _reader.Reads.ShouldBe(0);
-        _displays.Reads.ShouldBe(0);
-        _link.StatusReads.ShouldBe(statusReads);
-        _link.BrightnessReports.ShouldBeEmpty();
+        _displays.Reads.ShouldBe(2);
+        _link.BrightnessReports.Count.ShouldBe(2);
+        foreach (var report in _link.BrightnessReports)
+        {
+            report.Monitors.ShouldBeEmpty();
+            report.Power.ShouldBeEmpty();
+            report.Displays.ShouldBe([Driven(Statuses.Dell, 60, false)]);
+        }
 
         _ui.ReadMonitorBrightness(true);
         _clock.Advance(BrightnessReporter.ReadEvery);
         _reader.Reads.ShouldBe(1);
-        _displays.Reads.ShouldBe(1);
-        _link.BrightnessReports.Count.ShouldBe(1);
+        _displays.Reads.ShouldBe(3);
+        _link.BrightnessReports[^1].Power.ShouldBe([Reported(Statuses.Dell, MonitorPowerState.On)]);
+    }
+
+    [Fact]
+    public async Task While_the_user_doesnt_allow_it_and_Windows_describes_no_listed_monitor_nothing_is_sent()
+    {
+        _ui.ReadMonitorBrightness(false);
+        _displays.Readings = [];
+
+        await _reporter.ReportAsync();
+
+        _reader.Reads.ShouldBe(0);
+        _link.BrightnessReports.ShouldBeEmpty();
     }
 
     [Fact]
