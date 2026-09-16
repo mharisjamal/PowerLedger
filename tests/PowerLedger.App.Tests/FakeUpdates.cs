@@ -40,6 +40,12 @@ internal sealed class FakeDownloader : IUpdateDownloader
     public void Clean(Version running) => Cleaned.Add(running);
 }
 
+/// <summary>A connection whose cost the test sets.</summary>
+internal sealed class FakeCost : IConnectionCost
+{
+    public bool Metered { get; set; }
+}
+
 /// <summary>Setup as the test scripts it: an exit code, a wait the test ends, or a refusal.</summary>
 internal sealed class FakeSetup : ISetupRunner
 {

@@ -13,6 +13,7 @@ public class UpdaterTests
     private readonly FakeFeed _feed = new();
     private readonly FakeDownloader _downloader = new();
     private readonly FakeSetup _setup = new();
+    private readonly FakeCost _cost = new();
     private readonly FakeUiSettings _ui = new();
     private readonly List<Release> _announced = [];
     private readonly List<Uri> _opened = [];
@@ -22,7 +23,7 @@ public class UpdaterTests
         new Uri($"{GitHubReleaseFeed.Downloads}v{version}/PowerLedger-{version}-setup.exe"), $"PowerLedger-{version}-setup.exe", 1000, new byte[32]);
 
     private Updater Updater(string running = "0.2.0") => new(
-        _feed, _downloader, _setup, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, Version.Parse(running), _announced.Add, _opened.Add);
+        _feed, _downloader, _setup, _cost, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, Version.Parse(running), _announced.Add, _opened.Add);
 
     [Fact]
     public async Task A_newer_release_is_downloaded_quietly_then_offered()
@@ -58,6 +59,58 @@ public class UpdaterTests
         gate.SetResult();
         await check;
         updater.ShowCard.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task On_a_metered_connection_an_update_is_offered_rather_than_downloaded()
+    {
+        _cost.Metered = true;
+        _feed.Latest = Release("0.3.0") with { Size = 58 * 1024 * 1024 };
+        var updater = Updater();
+
+        await updater.CheckAsync();
+
+        _downloader.Downloads.ShouldBeEmpty();
+        updater.Stage.ShouldBe(UpdateStage.Available);
+        updater.ShowCard.ShouldBeTrue();
+        updater.Title.ShouldBe("PowerLedger 0.3.0 is available");
+        updater.Detail.ShouldBe("58 MB · waiting for a connection that isn't metered");
+        updater.ActionLabel.ShouldBe("Download");
+        updater.ReadyVersion.ShouldBeNull();                    // nothing to restart into yet
+        updater.Status.ShouldBe("PowerLedger 0.3.0 is available · 58 MB · waiting for a connection that isn't metered");
+        _announced.Select(r => r.Name).ShouldBe(new[] { "0.3.0" });   // the tray still says so once
+    }
+
+    [Fact]
+    public async Task Download_takes_an_update_over_a_metered_connection_because_it_was_asked_for()
+    {
+        _cost.Metered = true;
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        await updater.CheckAsync();
+
+        updater.Act.Execute(null);                              // the card's Download
+
+        await WaitFor.True(() => updater.Stage == UpdateStage.Ready);
+        _downloader.Downloads.Single().Name.ShouldBe("0.3.0");
+        updater.ActionLabel.ShouldBe("Restart to update");
+    }
+
+    [Fact]
+    public async Task Off_the_metered_connection_the_next_check_downloads_it_quietly()
+    {
+        _cost.Metered = true;
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        await updater.CheckAsync();
+        updater.Stage.ShouldBe(UpdateStage.Available);
+
+        _cost.Metered = false;
+        await updater.CheckAsync();
+
+        updater.Stage.ShouldBe(UpdateStage.Ready);
+        _downloader.Downloads.Count.ShouldBe(1);
+        _announced.Count.ShouldBe(1);                           // still only announced once
     }
 
     [Fact]

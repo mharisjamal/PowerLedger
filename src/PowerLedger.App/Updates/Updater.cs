@@ -13,6 +13,9 @@ internal enum UpdateStage
     /// <summary>No card: up to date, not checked yet, or still downloading quietly.</summary>
     None,
 
+    /// <summary>Found, but the connection is metered, so it waits for Download or a connection that isn't.</summary>
+    Available,
+
     /// <summary>Downloaded and checked: "Restart to update".</summary>
     Ready,
 
@@ -28,8 +31,10 @@ internal enum UpdateStage
 
 /// <summary>
 /// Updates (spec §13). A minute after the App starts and every hour after, while the user allows it, asks the feed for
-/// the newest release and downloads a newer one quietly; once it is checked, the card offers it, the tray announces it once
-/// per version and its menu offers it too. Installing starts setup, which closes the App and opens the new version. Old
+/// the newest release: the check itself runs on any connection, being a couple of kilobytes, but a newer release is
+/// downloaded quietly only where nobody pays by the byte. On a metered connection the card offers it with Download
+/// instead, and taking it there is the user's own choice; otherwise the next check off that connection downloads it. Once
+/// it is checked, the card offers it, the tray announces it once per version and its menu offers it too. Installing starts setup, which closes the App and opens the new version. Old
 /// downloads are cleared when the App starts and at each check. The card and Settings' Updates row bind here, and
 /// everything they read changes on the UI thread.
 /// </summary>
@@ -44,6 +49,7 @@ internal sealed class Updater : ObservableObject, IDisposable
     private readonly IReleaseFeed _feed;
     private readonly IUpdateDownloader _downloader;
     private readonly ISetupRunner _setup;
+    private readonly IConnectionCost _cost;
     private readonly IUiSettings _ui;
     private readonly UiThreads _threads;
     private readonly TimeProvider _clock;
@@ -56,6 +62,7 @@ internal sealed class Updater : ObservableObject, IDisposable
     private int _checking;
     private Release? _release;
     private string? _installer;
+    private string? _wanted;   // the version the user asked for over metered data
     private UpdateStage _stage;
     private bool _dismissed;
     private string? _problem;
@@ -65,12 +72,13 @@ internal sealed class Updater : ObservableObject, IDisposable
     /// <param name="announce">The tray's notification, once per version.</param>
     /// <param name="open">Opens a page in the browser.</param>
     public Updater(
-        IReleaseFeed feed, IUpdateDownloader downloader, ISetupRunner setup, IUiSettings ui, UiThreads threads, TimeProvider clock,
-        TimeZoneInfo zone, CultureInfo culture, Version running, Action<Release> announce, Action<Uri> open)
+        IReleaseFeed feed, IUpdateDownloader downloader, ISetupRunner setup, IConnectionCost cost, IUiSettings ui, UiThreads threads,
+        TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, Version running, Action<Release> announce, Action<Uri> open)
     {
         _feed = feed;
         _downloader = downloader;
         _setup = setup;
+        _cost = cost;
         _ui = ui;
         _threads = threads;
         _clock = clock;
@@ -104,6 +112,7 @@ internal sealed class Updater : ObservableObject, IDisposable
 
     public string Title => _stage switch
     {
+        UpdateStage.Available => $"PowerLedger {_release?.Name} is available",
         UpdateStage.Ready => $"PowerLedger {_release?.Name} is ready",
         UpdateStage.Installing => $"Installing {_release?.Name}…",
         UpdateStage.Failed => "The update didn't install",
@@ -114,6 +123,7 @@ internal sealed class Updater : ObservableObject, IDisposable
     /// <summary>A line under the title, or null.</summary>
     public string? Detail => _stage switch
     {
+        UpdateStage.Available => _release is { } release ? $"{Megabytes(release)} · waiting for a connection that isn't metered" : null,
         UpdateStage.Installing => "Windows asks for permission",
         UpdateStage.Failed => _problem,
         _ => null,
@@ -122,15 +132,16 @@ internal sealed class Updater : ObservableObject, IDisposable
     /// <summary>The card's button, or null for none.</summary>
     public string? ActionLabel => _stage switch
     {
+        UpdateStage.Available => "Download",
         UpdateStage.Ready => "Restart to update",
         UpdateStage.Failed => "Try again",
         _ => null,
     };
 
-    public bool CanDismiss => _stage is UpdateStage.Ready or UpdateStage.Failed or UpdateStage.Updated;
+    public bool CanDismiss => _stage is UpdateStage.Available or UpdateStage.Ready or UpdateStage.Failed or UpdateStage.Updated;
 
     /// <summary>"What's new" shows: the release's page, or for "Updated" the running version's.</summary>
-    public bool HasNotes => _stage is UpdateStage.Ready or UpdateStage.Updated;
+    public bool HasNotes => _stage is UpdateStage.Available or UpdateStage.Ready or UpdateStage.Updated;
 
     /// <summary>The version the tray menu offers to restart into: a checked download that isn't being installed, or null.</summary>
     public string? ReadyVersion => (_stage is UpdateStage.Ready or UpdateStage.Failed) && _installer is not null ? _release?.Name : null;
@@ -193,6 +204,14 @@ internal sealed class Updater : ObservableObject, IDisposable
         _threads.Background(() => _ = RunSetupAsync(release, installer, log));
     }
 
+    /// <summary>The card's Download: this version may use the metered connection, because the user asked for it.</summary>
+    public void Download()
+    {
+        if (_stage != UpdateStage.Available || _release is not { } release) return;
+        _wanted = release.Name;
+        _threads.Background(() => _ = CheckAsync());
+    }
+
     /// <summary>Clears old downloads, asks the feed, downloads a newer release quietly, and offers it once it is checked. The
     /// clearing is here as well as in <see cref="Start"/> because the new version starts while setup is still running from
     /// the installer that brought it, which can't be deleted until setup ends. A check already running makes this one a
@@ -208,6 +227,11 @@ internal sealed class Updater : ObservableObject, IDisposable
             if (release is null || release.Version <= Running)
             {
                 _threads.Post(() => Status = $"PowerLedger is up to date · checked {Clock()}");
+                return;
+            }
+            if (_cost.Metered && _wanted != release.Name)
+            {
+                _threads.Post(() => Waiting(release));
                 return;
             }
             var progress = new Percent(done => _threads.Post(() => Status = $"Downloading {release.Name}… {done.ToString("P0", _culture)}"));
@@ -246,15 +270,40 @@ internal sealed class Updater : ObservableObject, IDisposable
         _installer = installer;
         Status = $"PowerLedger {release.Name} is ready to install";
         Show(UpdateStage.Ready);
+        Announce(release);
+    }
+
+    /// <summary>A newer release, found while somebody is paying for every byte: the card offers it rather than taking it.</summary>
+    private void Waiting(Release release)
+    {
+        if (_stage is UpdateStage.Installing or UpdateStage.Ready) return;
+        _release = release;
+        _installer = null;
+        Status = $"PowerLedger {release.Name} is available · {Megabytes(release)} · waiting for a connection that isn't metered";
+        Show(UpdateStage.Available);
+        Announce(release);
+    }
+
+    /// <summary>The tray says a version is there once, whether it is downloaded or waiting.</summary>
+    private void Announce(Release release)
+    {
         if (_ui.Current.AnnouncedVersion == release.Name) return;
         _ui.Announced(release.Name);
         _announce(release);
     }
 
-    /// <summary>The card's button: install what is ready; after a failure, install again while the download is good, or
-    /// check and download afresh when it isn't.</summary>
+    /// <summary>The download's size as the card gives it: whole megabytes.</summary>
+    private string Megabytes(Release release) => $"{(release.Size / (1024.0 * 1024.0)).ToString("0", _culture)} MB";
+
+    /// <summary>The card's button: download what is waiting for a connection nobody pays for; install what is ready; after a
+    /// failure, install again while the download is good, or check and download afresh when it isn't.</summary>
     private void OnAct()
     {
+        if (_stage == UpdateStage.Available)
+        {
+            Download();
+            return;
+        }
         if (_stage == UpdateStage.Failed && _installer is null)
         {
             Show(UpdateStage.None);
