@@ -51,7 +51,7 @@ public sealed class BrightnessReporterTests : IDisposable
 
         await _reporter.ReportAsync();
 
-        _link.BrightnessReports.Single().ShouldBe([Reported(Statuses.Dell, 0.6), Reported(Statuses.Aoc, 0.35)]);
+        _link.BrightnessReports.Single().Monitors.ShouldBe([Reported(Statuses.Dell, 0.6), Reported(Statuses.Aoc, 0.35)]);
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class BrightnessReporterTests : IDisposable
 
         await _reporter.ReportAsync();
 
-        _link.BrightnessReports.Single().ShouldBe([Reported(Statuses.Dell, 0.6)]);
+        _link.BrightnessReports.Single().Monitors.ShouldBe([Reported(Statuses.Dell, 0.6)]);
     }
 
     [Fact]
