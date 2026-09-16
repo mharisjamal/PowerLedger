@@ -46,9 +46,10 @@ public sealed record MachineProfile
     public double? CpuTdpOverrideW { get; init; }
     public double? GpuTdpOverrideW { get; init; }
     /// <summary>The user's choice for each external monitor, by <see cref="MonitorChoice.Key"/>. A monitor with no choice
-    /// counts, at PowerLedger's own figure. <see cref="ExternalMonitors"/>, <see cref="IncludeMonitors"/> and
-    /// <see cref="MonitorWatts"/> came before it: they stay only so settings from then can be carried over, and no longer
-    /// reach the model.</summary>
+    /// takes PowerLedger's own figure and its guess at whether the monitor has a plug of its own, and counts as
+    /// <see cref="CountMonitorsByDefault"/> says; a monitor that runs off this PC counts whatever its choice.
+    /// <see cref="ExternalMonitors"/>, <see cref="IncludeMonitors"/> and <see cref="MonitorWatts"/> came before it: they stay
+    /// only so settings from then can be carried over, and no longer reach the model.</summary>
     public IReadOnlyList<MonitorChoice> Monitors { get; init; } = [];
 
     /// <summary>Whether an external monitor the user hasn't chosen for counts. False only where the settings from before
