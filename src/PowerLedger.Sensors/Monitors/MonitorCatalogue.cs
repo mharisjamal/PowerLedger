@@ -41,10 +41,24 @@ public sealed record CatalogueMonitor(string Brand, string ModelNumber, string M
 /// </para>
 /// <para>
 /// A match must agree with the monitor's size to within an inch, which stops vague names matching the wrong panel; for a
-/// monitor that doesn't give its size, the listings its name matches must agree on one among themselves. Of the listings
-/// that match, those with the monitor's resolution, either way round, win; then a whole name over a placeholder, and more
-/// characters before the placeholder over fewer; then the closest size. Listings still tied are one monitor listed more
-/// than once, often with different figures, so the answer is the first of them with their median watts.
+/// monitor that doesn't give its size, the listings its name matches must agree on one among themselves. A match by
+/// anything but an exact name must also be listed at the monitor's resolution, either way round, when the monitor gives
+/// one, which stops a family taking in a sibling of another resolution: ViewSonic's 1080p VX2418 lists VX24***********,
+/// which would otherwise take in the 4K VX2478-4K-HD.
+/// </para>
+/// <para>
+/// An exact name keeps its listing whatever resolution the monitor gives. Over linuxhw's collection of real EDIDs, 42 of
+/// 1,412 exact matches disagreed with their listing's resolution. Of the 19 monitors among them, 17 were one model in two
+/// modes, where an estimate from the mode the monitor gave would be further off than the listing: EDIDs of Dell's
+/// 5120 × 2160 U4025QW give 2560 × 1080 and of its 8K UP3218K 3840 × 2160, and the list has Philips' 329P1 at
+/// 3840 × 2169. Acer's V206HQLB was a panel variant, and only ASUS's PA328, the name of its 4K PA328Q and the list's model
+/// number for its 1440p PA328CGV, another model.
+/// </para>
+/// <para>
+/// Of the listings that match, those with the monitor's resolution, either way round, win; then a whole name over a
+/// placeholder, and more characters before the placeholder over fewer; then the closest size. Listings still tied are one
+/// monitor listed more than once, often with different figures, so the answer is the first of them with their median
+/// watts.
 /// </para>
 /// </summary>
 public sealed class MonitorCatalogue
@@ -184,15 +198,17 @@ public sealed class MonitorCatalogue
         var key = Normalise(name, brand);
         if (!IsKey(key)) return null;
         var sized = double.IsFinite(inches) && inches > 0;
+        var resolved = width > 0 && height > 0;
 
         var matches = Matches(key, cut: name.Trim().Length == EdidNameLength)
             .Where(match => brand is null ? match.Exact : _monitors[match.Listing].Brand.Equals(brand, StringComparison.OrdinalIgnoreCase))
             .Where(match => !sized || Math.Abs(_monitors[match.Listing].Inches - inches) <= SizeTolerance)
+            .Where(match => match.Exact || !resolved || HasResolution(_monitors[match.Listing], width, height))
             .OrderBy(match => match.Listing)
             .ToList();
         if (matches.Count == 0) return null;
 
-        if (width > 0 && height > 0 && matches.Exists(match => HasResolution(_monitors[match.Listing], width, height)))
+        if (resolved && matches.Exists(match => HasResolution(_monitors[match.Listing], width, height)))
         {
             matches = matches.FindAll(match => HasResolution(_monitors[match.Listing], width, height));
         }

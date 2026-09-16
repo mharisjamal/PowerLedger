@@ -96,13 +96,13 @@ public class MonitorCatalogueTests
     [Fact]
     public void A_name_edid_cut_short_at_thirteen_characters_matches_the_longer_names_it_begins()
     {
-        // EDID holds thirteen characters of a name, so the PA27UCDMR and the VG27AQML1A can name themselves only this far.
-        Shipped.Find("AUS", "ASUS PA27UCDM", 27, 3840, 2160).ShouldNotBeNull().ModelNumber.ShouldBe("PA27UCDMR");
+        // EDID holds thirteen characters of a name, so the VG27AQML1A and the VX2776-4K-MHDU can name themselves only this far.
         Shipped.Find("AUS", "ASUS VG27AQML", 27, 2560, 1440).ShouldNotBeNull().ModelNumber.ShouldBe("VG27AQML1A");
+        Shipped.Find("VSC", "VX2776-4K-mhd", 27, 3840, 2160).ShouldNotBeNull().ModelName.ShouldBe("VX2776-4K-MHDU");
 
         // The size must still agree, and a shorter name was not cut.
-        Shipped.Find("AUS", "ASUS PA27UCDM", 32, 3840, 2160).ShouldBeNull();
-        Shipped.Find("AUS", "ASUS PA27UCD", 27, 3840, 2160).ShouldBeNull();
+        Shipped.Find("AUS", "ASUS VG27AQML", 32, 2560, 1440).ShouldBeNull();
+        Shipped.Find("AUS", "ASUS VG27AQM", 27, 2560, 1440).ShouldBeNull();
     }
 
     [Fact]
@@ -179,6 +179,44 @@ public class MonitorCatalogueTests
         wide.OnW.ShouldBe(9.98, 1e-9);
 
         Shipped.Find("ACR", "Acer V206HQL", 19.5, 1366, 768).ShouldNotBeNull().OnW.ShouldBe(7.5);
+    }
+
+    [Theory]
+    // ViewSonic lists the family VX24*********** under its 1080p VX2418, which would take in the 4K VX2478-4K-HD.
+    [InlineData("VSC", "VX2478-4K-HD", 23.8, 3840, 2160)]
+    // Acer lists SA27***** under the 1080p KA272 and SA272 and the 4K EK271K, but under no 2560 × 1440 monitor.
+    [InlineData("ACR", "SA272U", 27, 2560, 1440)]
+    // AOpen lists 27HC***** under its 1080p 27CL1, which would take in the 2560 × 1440 27HC5UR.
+    [InlineData("AOP", "27HC5UR", 27, 2560, 1440)]
+    public void A_family_takes_in_a_monitor_only_where_it_is_listed_at_the_monitors_resolution(
+        string maker, string name, double inches, int width, int height)
+        => Shipped.Find(maker, name, inches, width, height).ShouldBeNull();
+
+    [Fact]
+    public void A_family_still_takes_in_a_monitor_at_a_resolution_it_is_listed_at_or_one_that_gives_none()
+    {
+        // The 27HC5R is the 27HC5UR's 1080p sibling.
+        Shipped.Find("AOP", "27HC5R", 27, 1920, 1080).ShouldNotBeNull().ModelNumber.ShouldBe("27CL1_a");
+        Shipped.Find("AOP", "27HC5R", 27, 0, 0).ShouldNotBeNull().ModelNumber.ShouldBe("27CL1_a");
+    }
+
+    [Fact]
+    public void A_series_word_left_out_or_a_name_cut_short_also_needs_a_listing_at_the_monitors_resolution()
+    {
+        // MSI lists the PRO MP243X at 1920 × 1080 only, and ASUS the VG27AQML1A at 2560 × 1440 only.
+        Shipped.Find("MSI", "MSI MP243X", 24, 2560, 1440).ShouldBeNull();
+        Shipped.Find("AUS", "ASUS VG27AQML", 27, 3840, 2160).ShouldBeNull();
+    }
+
+    [Fact]
+    public void An_exact_name_keeps_its_listing_whatever_resolution_the_monitor_gives()
+    {
+        // Real EDIDs of Dell's 5120 × 2160 U4025QW give 2560 × 1080, and the list has Philips' 329P1 at 3840 × 2169. Each is
+        // the model all the same, and an estimate from the resolution the monitor gives would be further off.
+        var dell = Shipped.Find("DEL", "U4025QW", 40, 2560, 1080).ShouldNotBeNull();
+        dell.ModelNumber.ShouldBe("U4025QWt");
+        dell.OnW.ShouldBe(44.72);
+        Shipped.Find("PHL", "329P1", 31.5, 3840, 2160).ShouldNotBeNull().ModelName.ShouldBe("329P1RN");
     }
 
     [Fact]
