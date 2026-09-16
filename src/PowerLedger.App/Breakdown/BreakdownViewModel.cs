@@ -1,18 +1,23 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
+using PowerLedger.Contracts;
 using PowerLedger.Storage;
 
 namespace PowerLedger.App;
 
 /// <summary>
 /// The Breakdown screen (spec §9): power by component over a range, as a stacked chart in watts or watt-hours and as each
-/// band's energy and share. It reads when shown, when the range changes and every minute while shown, off the UI thread;
-/// switching the unit redraws from the last read.
+/// band's energy and share, with a footnote that says what the display band holds. It reads when shown, when the range
+/// changes and every minute while shown, off the UI thread, the monitors the service counts included; switching the unit
+/// redraws from the last read.
 /// </summary>
 internal sealed class BreakdownViewModel : ObservableObject, IDisposable
 {
     public static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(1);
 
+    private const string Units = " W is the average while the machine was on; Wh is the energy in each bucket.";
+
+    private readonly IServiceLink _link;
     private readonly IRangeHistory _history;
     private readonly UiThreads _threads;
     private readonly TimeProvider _clock;
@@ -29,14 +34,17 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     private IReadOnlyList<PartRow> _parts = [];
     private bool _hasNegativeRest;
     private string? _message;
+    private string _footnote;
 
-    public BreakdownViewModel(IRangeHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture)
+    public BreakdownViewModel(IServiceLink link, IRangeHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture)
     {
+        _link = link;
         _history = history;
         _threads = threads;
         _clock = clock;
         _zone = zone;
         _culture = culture;
+        _footnote = FootnoteFor(null);
         Range = new RangePicker(RangeChoice.Today, Ranges.LocalDay(clock.GetUtcNow(), zone));
         Range.Changed += Refresh;
     }
@@ -77,6 +85,9 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
 
     public bool HasMessage => Message is not null;
 
+    /// <summary>What the display band holds, with the monitors the service counts now, and what the units mean.</summary>
+    public string Footnote { get => _footnote; private set => SetProperty(ref _footnote, value); }
+
     /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
     public void Show()
     {
@@ -95,23 +106,41 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     {
         var read = ++_reads;
         var range = Range.Resolve(_clock.GetUtcNow(), _zone, _culture);
-        _threads.Background(() =>
-        {
-            var report = _history.Read(range, _zone);
-            _threads.Post(() =>
-            {
-                if (read != _reads) return;
-                _range = range;
-                _report = report;
-                Rebuild();
-            });
-        });
+        _threads.Background(() => _ = ReadAsync(read, range));
     }
 
     public void Dispose()
     {
         Range.Changed -= Refresh;
         Hide();
+    }
+
+    /// <summary>"Display is the built-in panel plus 2 monitors." When the service hasn't said which monitors it counts, the
+    /// footnote doesn't guess.</summary>
+    private string FootnoteFor(ServiceStatus? status)
+    {
+        var display = status?.Monitors?.Count(monitor => monitor is { Counted: true }) switch
+        {
+            null => "Display is the built-in panel plus any monitors PowerLedger counts.",
+            0 => "Display is the built-in panel.",
+            1 => "Display is the built-in panel plus 1 monitor.",
+            { } counted => $"Display is the built-in panel plus {counted.ToString(_culture)} monitors.",
+        };
+        return display + Units;
+    }
+
+    private async Task ReadAsync(int read, DateRange range)
+    {
+        var report = _history.Read(range, _zone);
+        var status = await _link.GetStatusAsync().ConfigureAwait(false);
+        _threads.Post(() =>
+        {
+            if (read != _reads) return;
+            _range = range;
+            _report = report;
+            Footnote = FootnoteFor(status);
+            Rebuild();
+        });
     }
 
     private void Rebuild()

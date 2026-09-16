@@ -50,6 +50,46 @@ public class NowViewModelTests
     }
 
     [Fact]
+    public void The_display_row_adds_the_monitors_the_service_counts()
+    {
+        _link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Aoc, Statuses.Aoc with { Key = "AOC2402-2", Counted = false });
+        _history.Snapshot = Snapshots.Typical(Now);
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+
+        model.Live.Budget[2].Detail.ShouldBe("15.3 in · brightness 60% · plus 2 monitors");
+
+        _link.Status = Statuses.WithMonitors(Statuses.Dell);
+        _clock.Advance(NowViewModel.StatusEvery);
+        model.Live.Budget[2].Detail.ShouldBe("15.3 in · brightness 60% · plus 1 monitor");
+
+        _link.Status = Statuses.Running();
+        _clock.Advance(NowViewModel.StatusEvery);
+        model.Live.Budget[2].Detail.ShouldBe("15.3 in · brightness 60%");
+    }
+
+    [Fact]
+    public async Task A_display_band_with_no_panel_to_speak_of_says_what_it_counts()
+    {
+        _link.Status = Statuses.WithMonitors();
+        _history.Snapshot = Snapshots.Typical(Now) with { Machine = new MachineNames("AMD Ryzen 7 7700X", null, 0) };
+        var model = Model();
+        model.RefreshHistory();
+        _link.Connect(true);
+        _link.Push(Frames.At(Now) with { Brightness = null });
+        model.Live.Budget[2].Detail.ShouldBe("2 monitors");
+
+        _link.Status = Statuses.Running();
+        await model.PollAsync();
+        model.Live.Budget[2].Detail.ShouldBe("built-in panel");
+
+        _link.Push(Frames.At(Now, display: 0) with { Brightness = null });
+        model.Live.Budget[2].Detail.ShouldBe("nothing counted");
+    }
+
+    [Fact]
     public void A_card_windows_has_switched_off_says_so()
     {
         var model = Model();

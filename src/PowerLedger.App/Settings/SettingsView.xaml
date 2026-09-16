@@ -92,12 +92,43 @@
                     <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding PanelInches, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Built-in panel, inches" />
                     <TextBlock Style="{StaticResource Aside}" Text="0 for none" />
                 </StackPanel>
-                <StackPanel Style="{StaticResource Row}">
+                <!-- Each external monitor the service detected: its figure and where it came from, what it draws now and its
+                     brightness, a figure of the user's own and whether it counts. -->
+                <ItemsControl ItemsSource="{Binding Monitors}" Focusable="False" Visibility="{Binding HasMonitors, Converter={StaticResource VisibleWhen}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type local:MonitorRow}">
+                            <Grid Margin="0,5">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="230" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Label}" TextTrimming="CharacterEllipsis">
+                                    <Run Text="{Binding Name, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Size, Mode=OneWay}" FontSize="12" Foreground="{DynamicResource Brush.Ink3}" />
+                                </TextBlock>
+                                <TextBox Grid.Column="1" Style="{StaticResource Field}" Width="56" Text="{Binding Watts, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="{Binding Name, StringFormat=Watts for {0}}" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource Aside}" Text="W" Margin="8,0,0,0" />
+                                <CheckBox Grid.Column="3" Style="{StaticResource Tick}" Content="Count it" Margin="16,0,0,0" IsChecked="{Binding Counted}"
+                                          AutomationProperties.Name="{Binding Name, StringFormat=Count {0}}" />
+                                <StackPanel Grid.Column="4" Margin="16,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Text="{Binding Source}"
+                                               Visibility="{Binding Source, Converter={StaticResource VisibleWhenText}}" />
+                                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap">
+                                        <Run Text="{Binding Now, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Brightness, Mode=OneWay}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Style="{StaticResource Note}" Margin="0,2,0,6" Visibility="{Binding HasMonitors, Converter={StaticResource VisibleWhen}}"
+                           Text="Monitors have their own plugs: untick one to leave it out. Clear a monitor's watts to go back to PowerLedger's own figure." />
+                <StackPanel Style="{StaticResource Row}" Visibility="{Binding HasMonitors, Converter={StaticResource HiddenWhen}}">
                     <TextBlock Style="{StaticResource Label}" Text="External monitors" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding ExternalMonitors, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="External monitors" />
-                    <CheckBox Style="{StaticResource Tick}" Content="Count them, at" Margin="14,0,8,0" IsChecked="{Binding IncludeMonitors}" />
-                    <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding MonitorWatts, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Watts per monitor" />
-                    <TextBlock Style="{StaticResource Aside}" Text="W each" />
+                    <TextBlock Style="{StaticResource Text.Muted}" VerticalAlignment="Center" Text="none detected" />
                 </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Extras such as lights and pumps, W" />

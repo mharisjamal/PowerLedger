@@ -131,9 +131,11 @@ public class RenderingTests
                     var statusTop = window.StatusBar.TranslatePoint(default, window).Y;
                     scroller.TranslatePoint(new Point(0, scroller.ActualHeight), window).Y.ShouldBeLessThanOrEqualTo(statusTop + 0.5, $"{name} runs under the status bar");
                     (statusTop + window.StatusBar.ActualHeight).ShouldBeLessThanOrEqualTo(window.ActualHeight, $"{name} pushes the status bar out");
-                    if (page == Page.Now && shell.IsSetup)
+                    if (shell.Current is WizardViewModel or SettingsViewModel)
                     {
-                        foreach (var monitor in shell.Wizard.Machine.Monitors)
+                        var monitors = shell.IsSetup ? shell.Wizard.Machine.Monitors : shell.Settings.Service.Monitors;
+                        monitors.Count.ShouldBe(2, name);
+                        foreach (var monitor in monitors)
                         {
                             Find<TextBox>(window, box => AutomationProperties.GetName(box) == $"Watts for {monitor.Name}").ShouldNotBeNull(name).IsVisible.ShouldBeTrue(name);
                         }
@@ -384,11 +386,13 @@ public class RenderingTests
         return model;
     }
 
-    /// <summary>The same machine's last seven days: asleep overnight, working days, quiet evenings.</summary>
+    /// <summary>The same machine's last seven days: asleep overnight, working days, quiet evenings; two monitors counted now.</summary>
     private static BreakdownViewModel BreakdownScreen()
     {
+        var link = new FakeLink { Status = Statuses.WithMonitors() };
+        link.Connect(true);
         var history = new FakeRangeHistory { Answer = range => Reports.Typical(range) with { Series = Week(range) } };
-        var model = new BreakdownViewModel(history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English);
+        var model = new BreakdownViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English);
         return model;
     }
 
@@ -400,10 +404,11 @@ public class RenderingTests
             TimeZoneInfo.Utc, English, 0.38);
     }
 
-    /// <summary>Settings against a running service, with a tariff and this laptop's detection.</summary>
+    /// <summary>Settings against a running service, with a tariff, this laptop's detection and two external monitors: one in
+    /// Energy Star's list whose brightness was read, one estimated from its size whose brightness wasn't.</summary>
     private static SettingsViewModel SettingsScreen()
     {
-        var link = new FakeLink();
+        var link = new FakeLink { Status = Statuses.WithMonitors() };
         link.Connect(true);
         return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");

@@ -26,7 +26,6 @@ public class ServiceFormTests
         form.Chassis.ShouldBe(ChassisKind.Laptop);
         form.RamSticks.ShouldBe("1");
         form.PanelInches.ShouldBe("15.6");
-        form.MonitorWatts.ShouldBe("25");
         form.CpuTdp.ShouldBe("");
         form.IdleMinutes.ShouldBe("5");
         form.SampleInterval.ShouldBe("1");
@@ -46,9 +45,6 @@ public class ServiceFormTests
         form.HddCount = "1";
         form.FanCount = "5";
         form.PanelInches = "0";
-        form.ExternalMonitors = "2";
-        form.IncludeMonitors = true;
-        form.MonitorWatts = "30";
         form.ExtrasWatts = "12.5";
         form.CpuTdp = "125";
         form.GpuTdp = " ";
@@ -63,16 +59,110 @@ public class ServiceFormTests
         sent.Profile.ShouldBe(new MachineProfile
         {
             Chassis = ChassisKind.Desktop, PsuTier = PsuTier.Gold, RamSticks = 4, RamIsDdr5 = true, SsdCount = 2, HddCount = 1,
-            FanCount = 5, DisplayDiagonalInches = 0, ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 30, ExtrasWatts = 12.5,
-            CpuTdpOverrideW = 125, GpuTdpOverrideW = null,
+            FanCount = 5, DisplayDiagonalInches = 0, ExtrasWatts = 12.5, CpuTdpOverrideW = 125, GpuTdpOverrideW = null,
         });
         (sent.IdleThresholdSeconds, sent.SampleIntervalSeconds, sent.RawRetentionHours, sent.HistoryRetentionYears).ShouldBe((600, 2, 72, 5));
         form.Message.ShouldBe("Saved.");
     }
 
+    [Fact]
+    public async Task The_old_monitor_count_and_figure_go_back_as_the_service_sent_them()
+    {
+        // They no longer reach the model and the form no longer shows them; the service carries them over to the
+        // monitors it detects, once, so the form must neither change them nor put them back to their defaults.
+        var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = true, MonitorWatts = 30 };
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = old });
+        form.ShowMonitors([Statuses.Dell]);
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.ShouldBe(old with { Monitors = [new MonitorChoice { Key = Statuses.Dell.Key }] });
+    }
+
+    [Fact]
+    public void Each_monitor_says_whether_its_brightness_was_read_and_what_it_draws_now()
+    {
+        var form = Form();
+
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc, Statuses.Aoc with { Key = "AOC2402-2", Counted = false, WattsNow = 0 }]);
+
+        form.Monitors.Select(m => (m.Brightness, m.Now)).ShouldBe(
+        [
+            ("brightness 60%, read from the monitor", "24.3 W now"),
+            ("brightness unknown, assumed 75%", "13.4 W now"),
+            ("brightness unknown, assumed 75%", "not counted"),
+        ]);
+    }
+
+    [Fact]
+    public void A_refresh_keeps_what_the_user_typed_and_ticked_and_shows_what_the_service_says_now()
+    {
+        var form = Form();
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        var (dell, aoc) = (form.Monitors[0], form.Monitors[1]);
+        aoc.Watts = "17";
+        dell.Counted = false;
+
+        form.ShowMonitors([Statuses.Dell with { Brightness = 0.8, WattsNow = 26.9 }, Statuses.Aoc with { Brightness = 0.5, WattsNow = 11.9 }]);
+
+        form.Monitors.ShouldBe([dell, aoc]);   // the same rows, so a box being typed in keeps its place
+        (aoc.Watts, dell.Counted).ShouldBe(("17", false));
+        (dell.Brightness, dell.Now).ShouldBe(("brightness 80%, read from the monitor", "26.9 W now"));
+        (aoc.Brightness, aoc.Now).ShouldBe(("brightness 50%, read from the monitor", "11.9 W now"));
+    }
+
+    [Fact]
+    public void A_refresh_follows_the_services_figure_in_a_box_the_user_hasnt_touched()
+    {
+        // Just after a save that cleared a typed figure the service may still report it, and the box is left blank.
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Monitors = [new MonitorChoice { Key = Statuses.Dell.Key }] } });
+        form.ShowMonitors([Statuses.Dell with { OnWatts = 30, Source = MonitorSource.Typed }]);
+        var row = form.Monitors.Single();
+        (row.Watts, row.Source).ShouldBe(("", ""));
+
+        form.ShowMonitors([Statuses.Dell]);
+
+        (row.Watts, row.Source).ShouldBe(("26.9", "measured for this model"));
+    }
+
+    [Fact]
+    public async Task A_figure_powerledger_worked_out_before_the_service_reported_a_typed_one_still_isnt_saved_as_typed()
+    {
+        var form = Form();
+        form.ShowMonitors([Statuses.Dell]);
+        form.ShowMonitors([Statuses.Dell with { OnWatts = 30, Source = MonitorSource.Typed }]);   // a figure typed in the wizard since
+        form.Monitors.Single().Watts = "26.9";
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.Single().Watts.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_refresh_adds_a_monitor_plugged_in_and_drops_one_unplugged_in_the_services_order()
+    {
+        var form = Form();
+        form.ShowMonitors([Statuses.Dell]);
+        var dell = form.Monitors.Single();
+        dell.Watts = "22";
+
+        form.ShowMonitors([Statuses.Aoc, Statuses.Dell]);
+        form.Monitors.Select(m => m.Key).ShouldBe([Statuses.Aoc.Key, Statuses.Dell.Key]);
+        form.Monitors[1].ShouldBeSameAs(dell);
+        dell.Watts.ShouldBe("22");
+
+        form.ShowMonitors([Statuses.Aoc]);
+        form.Monitors.Select(m => m.Key).ShouldBe([Statuses.Aoc.Key]);
+        form.HasMonitors.ShouldBeTrue();
+
+        form.ShowMonitors([]);
+        form.HasMonitors.ShouldBeFalse();
+    }
+
     [Theory]
     [InlineData("RamSticks", "two", "Type the memory sticks as a whole number.")]
-    [InlineData("MonitorWatts", "lots", "Type a monitor's watts as a number.")]
     [InlineData("IdleMinutes", "45", "The idle threshold is between 1 and 30 minutes.")]
     [InlineData("RawHours", "12", "Second-by-second history must be kept between 24 and 168 hours.")]
     [InlineData("PanelInches", "80", "The panel size must be 0 for none, or between 7 and 50 inches.")]

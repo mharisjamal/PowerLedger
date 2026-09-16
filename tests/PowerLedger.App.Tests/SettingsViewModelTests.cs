@@ -177,6 +177,67 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void Showing_it_lists_each_monitor_with_its_figure_its_source_and_its_brightness()
+    {
+        _link.Status = Statuses.WithMonitors();
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.Service.HasMonitors.ShouldBeTrue();
+        model.Service.Monitors.Select(m => (m.Name, m.Size, m.Watts, m.Source, m.Brightness, m.Now, m.Counted)).ShouldBe(
+        [
+            ("DELL U2723QE", "27 in · 3840 × 2160", "26.9", "measured for this model", "brightness 60%, read from the monitor", "24.3 W now", true),
+            ("24B1XH5", "23.8 in · 1920 × 1080", "13.4", "estimated from its size — correct it if you know better", "brightness unknown, assumed 75%", "13.4 W now", true),
+        ]);
+    }
+
+    [Fact]
+    public void The_monitors_refresh_with_the_status_without_losing_a_figure_being_typed()
+    {
+        _link.Status = Statuses.WithMonitors();
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+        var aoc = model.Service.Monitors[1];
+        aoc.Watts = "1";   // on the way to 18
+
+        _link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Aoc with { Brightness = 0.4, WattsNow = 10.6 });
+        _clock.Advance(SettingsViewModel.StatusEvery);
+
+        model.Service.Monitors[1].ShouldBeSameAs(aoc);
+        (aoc.Watts, aoc.Brightness, aoc.Now).ShouldBe(("1", "brightness 40%, read from the monitor", "10.6 W now"));
+    }
+
+    [Fact]
+    public void A_monitor_plugged_in_while_settings_shows_appears_within_ten_seconds()
+    {
+        _link.Status = Statuses.WithMonitors(Statuses.Dell);
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        _link.Status = Statuses.WithMonitors();
+        _clock.Advance(SettingsViewModel.StatusEvery);
+
+        model.Service.Monitors.Select(m => m.Name).ShouldBe(["DELL U2723QE", "24B1XH5"]);
+    }
+
+    [Fact]
+    public async Task A_service_from_before_monitors_lists_none_and_its_settings_still_save()
+    {
+        _link.Status = Statuses.Running() with { Monitors = null };
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Monitors = null! } };
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.Service.HasMonitors.ShouldBeFalse();
+        (await model.Service.SaveAsync()).ShouldBeTrue();
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void The_status_is_read_again_every_ten_seconds_while_shown()
     {
         _link.Connect(true);

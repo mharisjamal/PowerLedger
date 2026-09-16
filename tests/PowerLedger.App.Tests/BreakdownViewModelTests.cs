@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.Time.Testing;
+using PowerLedger.Contracts;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -10,8 +11,47 @@ public class BreakdownViewModelTests
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly FakeRangeHistory _history = new();
+    private readonly FakeLink _link = new();
 
-    private BreakdownViewModel Model(UiThreads? threads = null) => new(_history, threads ?? UiThreads.Inline, _clock, TimeZoneInfo.Utc, English);
+    private BreakdownViewModel Model(UiThreads? threads = null) => new(_link, _history, threads ?? UiThreads.Inline, _clock, TimeZoneInfo.Utc, English);
+
+    [Theory]
+    [InlineData(2, "Display is the built-in panel plus 2 monitors.")]
+    [InlineData(1, "Display is the built-in panel plus 1 monitor.")]
+    [InlineData(0, "Display is the built-in panel.")]
+    public void The_footnote_says_how_many_monitors_the_display_band_counts(int counted, string display)
+    {
+        MonitorStatus[] monitors = [Statuses.Dell with { Counted = counted > 0 }, Statuses.Aoc with { Counted = counted > 1 }];
+        _link.Status = Statuses.Running() with { Monitors = monitors };
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.Footnote.ShouldBe(display + " W is the average while the machine was on; Wh is the energy in each bucket.");
+    }
+
+    [Fact]
+    public void Without_the_services_word_on_monitors_the_footnote_doesnt_guess()
+    {
+        var model = Model();
+        model.Show();
+
+        model.Footnote.ShouldStartWith("Display is the built-in panel plus any monitors PowerLedger counts.");
+    }
+
+    [Fact]
+    public void Monitors_plugged_in_reach_the_footnote_with_the_next_read()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+        model.Footnote.ShouldStartWith("Display is the built-in panel.");
+
+        _link.Status = Statuses.WithMonitors();
+        _clock.Advance(BreakdownViewModel.RefreshEvery);
+
+        model.Footnote.ShouldStartWith("Display is the built-in panel plus 2 monitors.");
+    }
 
     [Fact]
     public void It_shows_today_in_watts_when_the_page_opens()

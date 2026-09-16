@@ -12,7 +12,8 @@ namespace PowerLedger.App;
 /// monitor the service detected, the idle threshold in minutes, the sample interval, and how long history is kept. Numbers
 /// are typed in the user's culture. Each one that can't be read is named; then the service's own checks run before the
 /// settings are sent, whole. A form the service never filled can't be saved, so a stopped service is never sent defaults.
-/// What the form doesn't show is sent as the service sent it, so the choices for monitors not attached now are kept.
+/// What the form doesn't show is sent as the service sent it: the choices for monitors not attached now, and the monitor
+/// count and figure from before monitors were detected, which the service carries over to the monitors it finds.
 /// </summary>
 internal sealed class ServiceForm : ObservableObject
 {
@@ -31,9 +32,6 @@ internal sealed class ServiceForm : ObservableObject
     private string _hddCount = "";
     private string _fanCount = "";
     private string _panelInches = "";
-    private string _externalMonitors = "";
-    private bool _includeMonitors;
-    private string _monitorWatts = "";
     private string _extrasWatts = "";
     private string _cpuTdp = "";
     private string _gpuTdp = "";
@@ -91,13 +89,6 @@ internal sealed class ServiceForm : ObservableObject
     /// <summary>The built-in panel's diagonal in inches; 0 for none.</summary>
     public string PanelInches { get => _panelInches; set => SetProperty(ref _panelInches, value); }
 
-    public string ExternalMonitors { get => _externalMonitors; set => SetProperty(ref _externalMonitors, value); }
-
-    /// <summary>External monitors count only when the user says so: they have their own plugs.</summary>
-    public bool IncludeMonitors { get => _includeMonitors; set => SetProperty(ref _includeMonitors, value); }
-
-    public string MonitorWatts { get => _monitorWatts; set => SetProperty(ref _monitorWatts, value); }
-
     /// <summary>The external monitors the service detected, each with the user's choice for it (Plan J).</summary>
     public ObservableCollection<MonitorRow> Monitors { get; } = [];
 
@@ -142,9 +133,6 @@ internal sealed class ServiceForm : ObservableObject
         HddCount = Whole(p.HddCount);
         FanCount = Whole(p.FanCount);
         PanelInches = Number(p.DisplayDiagonalInches);
-        ExternalMonitors = Whole(p.ExternalMonitors);
-        IncludeMonitors = p.IncludeMonitors;
-        MonitorWatts = Number(p.MonitorWatts);
         ExtrasWatts = Number(p.ExtrasWatts);
         CpuTdp = p.CpuTdpOverrideW is { } cpu ? Number(cpu) : "";
         GpuTdp = p.GpuTdpOverrideW is { } gpu ? Number(gpu) : "";
@@ -155,14 +143,28 @@ internal sealed class ServiceForm : ObservableObject
         IsLoaded = true;
     }
 
-    /// <summary>Lists the external monitors in the service's status, once each, with the user's choice for each from the
-    /// settings last loaded.</summary>
+    /// <summary>Lists the external monitors in the service's status, once each and in its order, with the user's choice for
+    /// each from the settings last loaded. A monitor already listed keeps its row, and with it what the user typed and
+    /// ticked, so a status read while a figure is being typed takes nothing away; a monitor unplugged goes.</summary>
     public void ShowMonitors(IReadOnlyList<MonitorStatus> monitors)
     {
-        Monitors.Clear();
-        foreach (var monitor in monitors.OfType<MonitorStatus>().DistinctBy(monitor => monitor.Key))
+        var listed = monitors.OfType<MonitorStatus>().DistinctBy(monitor => monitor.Key).ToList();
+        for (var index = Monitors.Count - 1; index >= 0; index--)
         {
-            Monitors.Add(new MonitorRow(monitor, _choices.FirstOrDefault(choice => choice?.Key == monitor.Key), _culture));
+            if (!listed.Exists(monitor => monitor.Key == Monitors[index].Key)) Monitors.RemoveAt(index);
+        }
+        for (var index = 0; index < listed.Count; index++)
+        {
+            var monitor = listed[index];
+            var row = Monitors.FirstOrDefault(candidate => candidate.Key == monitor.Key);
+            if (row is null)
+            {
+                Monitors.Insert(index, new MonitorRow(monitor, _choices.FirstOrDefault(choice => choice?.Key == monitor.Key), _culture));
+                continue;
+            }
+            var at = Monitors.IndexOf(row);
+            if (at != index) Monitors.Move(at, index);
+            row.Refresh(monitor);
         }
         OnPropertyChanged(nameof(HasMonitors));
     }
@@ -189,16 +191,14 @@ internal sealed class ServiceForm : ObservableObject
     internal ServiceSettings? Read(out string? problem)
     {
         problem = !IsLoaded ? "The service hasn't sent its settings yet." : null;
-        int ramSticks = 0, ssds = 0, hdds = 0, fans = 0, monitors = 0, idle = 0, interval = 0, rawHours = 0, years = 0;
-        double panel = 0, monitorWatts = 0, extras = 0;
+        int ramSticks = 0, ssds = 0, hdds = 0, fans = 0, idle = 0, interval = 0, rawHours = 0, years = 0;
+        double panel = 0, extras = 0;
         double? cpu = null, gpu = null;
         IReadOnlyList<MonitorChoice> choices = [];
         _ = problem is null
             && Int(RamSticks, "the memory sticks", out ramSticks, ref problem) && Int(SsdCount, "the SSDs", out ssds, ref problem)
             && Int(HddCount, "the hard drives", out hdds, ref problem) && Int(FanCount, "the fans", out fans, ref problem)
             && Double(PanelInches, "the panel size in inches", out panel, ref problem)
-            && Int(ExternalMonitors, "the external monitors", out monitors, ref problem)
-            && Double(MonitorWatts, "a monitor's watts", out monitorWatts, ref problem)
             && Choices(out choices, ref problem)
             && Double(ExtrasWatts, "the extras in watts", out extras, ref problem)
             && Optional(CpuTdp, "the processor's rated watts", out cpu, ref problem)
@@ -215,8 +215,8 @@ internal sealed class ServiceForm : ObservableObject
             Profile = _profile with
             {
                 Chassis = Chassis, PsuTier = PsuTier, RamSticks = ramSticks, RamIsDdr5 = RamIsDdr5, SsdCount = ssds, HddCount = hdds,
-                FanCount = fans, DisplayDiagonalInches = panel, ExternalMonitors = monitors, IncludeMonitors = IncludeMonitors,
-                MonitorWatts = monitorWatts, ExtrasWatts = extras, CpuTdpOverrideW = cpu, GpuTdpOverrideW = gpu, Monitors = choices,
+                FanCount = fans, DisplayDiagonalInches = panel, ExtrasWatts = extras, CpuTdpOverrideW = cpu, GpuTdpOverrideW = gpu,
+                Monitors = choices,
             },
             IdleThresholdSeconds = idle * 60,
             SampleIntervalSeconds = interval,

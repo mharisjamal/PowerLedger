@@ -11,10 +11,11 @@ namespace PowerLedger.App;
 internal sealed record SourceLine(string Name, string State, string Detail);
 
 /// <summary>
-/// The Settings screen (spec §9): the tariff and its history, the machine profile with what was detected, sampling and
-/// retention, calibration with a reset that asks first, the App's own preferences, and About. It reads when shown, and the
-/// status again every ten seconds while shown, off the UI thread. The service form is filled when the screen shows and
-/// after a save; when the service comes up while the screen shows, only an empty form is filled, so nothing typed is lost.
+/// The Settings screen (spec §9): the tariff and its history, the machine profile with what was detected and each external
+/// monitor with its figure and brightness (Plan J), sampling and retention, calibration with a reset that asks first, the
+/// App's own preferences, and About. It reads when shown, and the status again every ten seconds while shown, off the UI
+/// thread. The service form is filled when the screen shows and after a save; when the service comes up while the screen
+/// shows, only an empty form is filled, and the monitors follow each status without losing what was typed or ticked.
 /// </summary>
 internal sealed class SettingsViewModel : ObservableObject, IDisposable
 {
@@ -267,6 +268,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             Database = Format.Missing;
             return;
         }
+        Service.ShowMonitors(status.Monitors ?? []);   // a service from before monitors lists none
         var c = status.Calibration;
         var learned = Format.Duration(c.BatterySamples * _sampleSeconds / 3600.0);
         // The battery on a desktop is a UPS, which powers more than the machine, so a desktop's readings never use it.

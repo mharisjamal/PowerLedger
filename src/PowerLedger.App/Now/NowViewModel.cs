@@ -32,6 +32,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     private ITimer? _graceTimer;
     private HistorySnapshot? _snapshot;
     private ServiceSettings? _settings;
+    private int _monitors;
     private ReadingFrame? _last;
     private double _livePeak;
     private DateOnly _liveDay;
@@ -251,6 +252,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     {
         if (settings is not null) _settings = settings;
         if (status is null) return;
+        _monitors = status.Monitors?.Count(monitor => monitor is { Counted: true }) ?? 0;
         var desktop = _settings?.Profile.Chassis == ChassisKind.Desktop;
         IsSensorless = !Supported(status, "energy-meter") && (desktop || !Supported(status, "battery"));
         var interval = _settings?.SampleIntervalSeconds ?? 1;
@@ -330,13 +332,22 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         return Join(name, Load(frame.GpuLoad), frame.GpuMeasured ? "measured" : "modelled");
     }
 
+    /// <summary>The display band: the built-in panel, as big and bright as it is, plus the external monitors the service
+    /// counts (Plan J).</summary>
     private string DisplayDetail(MachineNames? machine, ReadingFrame frame)
     {
         if (!frame.DisplayOn) return "display off";
         var size = machine is { DisplayDiagonalInches: > 0 } ? machine.DisplayDiagonalInches.ToString("0.#", _culture) + " in" : null;
         var brightness = frame.Brightness is { } b ? "brightness " + Format.Percent(b, _culture) : null;
-        var text = Join(size, brightness);
-        return text.Length > 0 ? text : "monitors included in the profile";
+        var panel = Join(size, brightness);
+        var monitors = _monitors == 1 ? "1 monitor" : $"{_monitors.ToString(_culture)} monitors";
+        return (panel.Length > 0, _monitors > 0) switch
+        {
+            (true, true) => $"{panel} · plus {monitors}",
+            (true, false) => panel,
+            (false, true) => monitors,
+            _ => frame.Components.Display > 0 ? "built-in panel" : "nothing counted",
+        };
     }
 
     private string? Load(double? load) => load is { } value ? Format.Percent(value, _culture) + " load" : null;
