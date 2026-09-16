@@ -192,7 +192,9 @@ public class RenderingTests
             wizard.Step.ShouldBe(SetupStep.Machine);
             (string Name, ServiceForm Form, FrameworkElement View, string After)[] screens =
             [
-                ("settings", settings.Service, new SettingsView { DataContext = settings }, " Clear a monitor's watts to go back to PowerLedger's own figure."),
+                ("settings", settings.Service, new SettingsView { DataContext = settings },
+                    " PowerLedger reads whether each monitor is on; where it can't tell, unticking a monitor while it's off keeps it out."
+                    + " Clear a monitor's watts to go back to PowerLedger's own figure."),
                 ("wizard", wizard.Machine, new WizardView { DataContext = wizard }, " The rest of the machine, memory and drives among them, is in Settings."),
             ];
             foreach (var (name, form, view, after) in screens)
