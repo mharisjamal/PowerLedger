@@ -148,6 +148,54 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task Detected_monitors_are_listed_in_the_status_and_added_to_the_reading()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t);
+        await loop.StartAsync();
+        await loop.Ticks(1);
+        var alone = loop.Board.Status.ShouldNotBeNull();
+        alone.Monitors.ShouldNotBeNull().ShouldBeEmpty();
+        alone.Last.ShouldNotBeNull().TotalW.ShouldBe(20, 1e-9);
+
+        loop.Monitors.Detected([MonitorBoardTests.Dell]);                  // as the sensor thread does
+        await loop.Ticks(1);
+
+        var status = loop.Board.Status.ShouldNotBeNull();
+        var monitor = status.Monitors.ShouldNotBeNull().ShouldHaveSingleItem();
+        monitor.Name.ShouldBe("DELL U2723QE");
+        monitor.WattsNow.ShouldBe(28.32, 1e-9);
+        status.Last.ShouldNotBeNull().Components.Monitors.ShouldBe(28.32, 1e-9);
+        status.Last.TotalW.ShouldBe(20 + 28.32, 1e-9);                   // on top of the battery's measured 20 W
+    }
+
+    [Fact]
+    public async Task The_users_monitor_choices_reach_the_board_from_the_stored_settings_and_from_new_ones()
+    {
+        using var t = new TestDatabase();
+        new SettingsStore(new SettingsRepository(t.Db)).Save(ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultLaptop with { Monitors = [new MonitorChoice { Key = MonitorBoardTests.Dell.Key, Watts = 40 }] },
+        });
+        await using var loop = new Harness(t);
+        loop.Monitors.Detected([MonitorBoardTests.Dell]);
+        await loop.StartAsync();
+        await loop.Ticks(1);
+        loop.Board.Status.ShouldNotBeNull().Last.ShouldNotBeNull().Components.Monitors.ShouldBe(40, 1e-9);
+
+        var settings = loop.Board.Settings.ShouldNotBeNull();
+        await loop.Send(new ApplySettingsCommand(settings with
+        {
+            Profile = settings.Profile with { Monitors = [new MonitorChoice { Key = MonitorBoardTests.Dell.Key, Counted = false }] },
+        }));
+        await loop.Ticks(1);
+
+        var status = loop.Board.Status.ShouldNotBeNull();
+        status.Last.ShouldNotBeNull().Components.Monitors.ShouldBe(0);
+        status.Monitors.ShouldNotBeNull().ShouldHaveSingleItem().Counted.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task A_resume_is_done_only_once_its_new_timer_runs()
     {
         using var t = new TestDatabase();
@@ -198,7 +246,8 @@ public class SamplingLoopTests
         }
     }
 
-    /// <summary>The loop wired to a fake clock, fake sensors that report 20 W from the battery, and a temp database.</summary>
+    /// <summary>The loop wired to a fake clock, fake sensors that report 20 W from the battery, a monitor board that sees only
+    /// the monitors a test says it detected, and a temp database.</summary>
     private sealed class Harness : IAsyncDisposable
     {
         private readonly SamplingLoop _loop;
@@ -210,6 +259,7 @@ public class SamplingLoopTests
             Func<FakeTimeProvider, TimeProvider>? loopClock = null)
         {
             Clock.SetLocalTimeZone(Plus2);
+            Monitors = new MonitorBoard(MonitorBoardTests.Catalogue, Clock);
             makeSet ??= _ => new FakeSensorSet((ts, delta) => Samples.At(ts, delta, batteryW: 20));
             var environment = new LoopEnvironment(
                 Sensors: () =>
@@ -226,10 +276,12 @@ public class SamplingLoopTests
                 SystemShuttingDown: () => false,
                 DatabaseNotice: null);
             var clock = loopClock?.Invoke(Clock) ?? Clock;
-            _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, clock, NullLogger<SamplingLoop>.Instance, options);
+            _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Monitors, clock, NullLogger<SamplingLoop>.Instance, options);
         }
 
         public FakeTimeProvider Clock { get; } = new(Start);
+
+        public MonitorBoard Monitors { get; }
 
         public LoopCommands Commands { get; } = new();
 

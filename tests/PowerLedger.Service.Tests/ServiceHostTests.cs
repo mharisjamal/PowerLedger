@@ -35,6 +35,7 @@ public class ServiceHostTests
             status.Sources.ShouldContain(s => s.Name == "battery");
             status.Last.ShouldNotBeNull().TotalW.ShouldBeGreaterThan(0);
             status.InventoryHash.Length.ShouldBe(16);
+            status.Monitors.ShouldNotBeNull();              // a list, even with no external monitor, so the App knows to report brightness
         }
         finally
         {

@@ -85,4 +85,96 @@ public class DisplaySourceTests
         draft.MonitorCount.ShouldBe(1);                 // until WMI answers, one display is assumed
         draft.Brightness.ShouldBeNull();
     }
+
+    private static readonly MonitorFacts Dell = new(
+        @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", "DELA0B1-7MKZG34", "DEL", "A0B1", "DELL U2723QE", 27, 3840, 2160);
+
+    [Fact]
+    public void The_monitors_found_are_handed_on_at_first_and_after_that_only_when_they_change()
+    {
+        IReadOnlyList<MonitorFacts> attached = [];
+        var handed = new List<IReadOnlyList<MonitorFacts>>();
+        var source = new DisplaySource(() => new DisplayState(0.5, 1), () => true, refreshEvery: TimeSpan.Zero,
+            monitors: () => attached, detected: handed.Add);
+
+        source.Contribute(new SampleDraft());
+        handed.ShouldHaveSingleItem().ShouldBeEmpty();
+        source.Contribute(new SampleDraft());
+        handed.Count.ShouldBe(1);
+
+        attached = [Dell];
+        source.Contribute(new SampleDraft());
+        attached = [Dell with { }];                     // the same monitor, read afresh
+        source.Contribute(new SampleDraft());
+        attached = [Dell with { Width = 2560, Height = 1440 }];
+        source.Contribute(new SampleDraft());
+        attached = [Dell with { Name = "DELL U2723QX" }];
+        source.Contribute(new SampleDraft());
+        attached = [];
+        source.Contribute(new SampleDraft());
+
+        handed.Count.ShouldBe(5);
+        handed[1].ShouldBe([Dell]);
+        handed[2].ShouldHaveSingleItem().Width.ShouldBe(2560);
+        handed[3].ShouldHaveSingleItem().Name.ShouldBe("DELL U2723QX");
+        handed[4].ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void The_monitors_are_read_only_when_the_display_query_is_due()
+    {
+        var reads = 0;
+        var source = new DisplaySource(() => new DisplayState(0.5, 1), () => true, refreshEvery: TimeSpan.FromMinutes(1),
+            monitors: () => { reads++; return []; }, detected: _ => { });
+
+        for (var tick = 0; tick < 10; tick++) source.Contribute(new SampleDraft());
+        reads.ShouldBe(1);
+
+        source.Refresh();
+        source.Contribute(new SampleDraft());
+        reads.ShouldBe(2);
+    }
+
+    [Fact]
+    public void With_nobody_to_hand_them_to_the_monitors_are_not_read()
+    {
+        var reads = 0;
+        new DisplaySource(() => new DisplayState(0.5, 1), () => true, monitors: () => { reads++; return []; }).Contribute(new SampleDraft());
+
+        reads.ShouldBe(0);
+    }
+
+    [Fact]
+    public void While_the_display_query_fails_the_monitors_are_not_read_so_a_hiccup_does_not_unplug_them()
+    {
+        var fail = true;
+        var reads = 0;
+        var handed = 0;
+        var source = new DisplaySource(() => fail ? throw new COMException("RPC server unavailable") : new DisplayState(0.5, 1), () => true,
+            refreshEvery: TimeSpan.Zero, monitors: () => { reads++; return [Dell]; }, detected: _ => handed++);
+
+        source.Contribute(new SampleDraft());
+        reads.ShouldBe(0);
+
+        fail = false;
+        source.Contribute(new SampleDraft());
+        reads.ShouldBe(1);
+        handed.ShouldBe(1);
+    }
+
+    [Fact]
+    public void A_handover_that_throws_costs_the_tick_nothing_it_measured_and_is_tried_again_next_time()
+    {
+        var handed = 0;
+        var source = new DisplaySource(() => new DisplayState(0.6, 2), () => true, refreshEvery: TimeSpan.Zero,
+            monitors: () => [Dell], detected: _ => { if (++handed == 1) throw new InvalidOperationException("the board is broken"); });
+
+        var draft = new SampleDraft();
+        Should.Throw<InvalidOperationException>(() => source.Contribute(draft));
+        draft.Brightness.ShouldBe(0.6);
+        draft.MonitorCount.ShouldBe(2);
+
+        source.Contribute(new SampleDraft());
+        handed.ShouldBe(2);
+    }
 }

@@ -57,6 +57,17 @@ public class MachineSensorsTests
     }
 
     [Fact]
+    public void The_monitors_this_machine_has_reach_whoever_asked_for_them_on_the_first_tick()
+    {
+        IReadOnlyList<MonitorFacts>? found = null;
+        using var sensors = MachineSensors.Create(() => true, () => false, monitorsDetected: monitors => found = monitors);
+
+        sensors.Read(DateTimeOffset.UtcNow, 1.0);
+
+        found.ShouldNotBeNull();
+    }
+
+    [Fact]
     public void Disposing_the_set_disposes_its_sources()
     {
         var sensors = MachineSensors.Create(() => true, () => false);

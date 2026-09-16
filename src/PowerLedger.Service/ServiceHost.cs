@@ -68,6 +68,7 @@ internal static class ServiceHost
         services.AddSingleton<LoopCommands>();
         services.AddSingleton<LiveFeed>();
         services.AddSingleton<StatusBoard>();
+        services.AddSingleton(provider => new MonitorBoard(MonitorCatalogue.Shipped, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton(provider => OpenedDatabase.Open(paths.Database, provider.GetRequiredService<TimeProvider>().GetUtcNow(), folderNotice));
         services.AddSingleton(provider => provider.GetRequiredService<OpenedDatabase>().Database);
         services.AddSingleton(provider => new TariffRepository(provider.GetRequiredService<SqliteDatabase>()));
@@ -86,10 +87,12 @@ internal static class ServiceHost
     {
         var signals = provider.GetRequiredService<ServiceSignals>();
         var shutdown = provider.GetRequiredService<ShutdownSignal>();
+        var monitors = provider.GetRequiredService<MonitorBoard>();
         // In session 0 input is invisible, so idle time comes from the App; a console run reads its own session.
         Func<double?>? idle = asService ? signals.UserIdleSeconds : null;
         return new LoopEnvironment(
-            Sensors: () => new MachineSensorSet(MachineSensors.Create(() => signals.DisplayOn, () => signals.SessionLocked, idle)),
+            Sensors: () => new MachineSensorSet(MachineSensors.Create(
+                () => signals.DisplayOn, () => signals.SessionLocked, idle, monitorsDetected: monitors.Detected)),
             Inventory: HardwareInventory.Detect,
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
             SystemShuttingDown: () => shutdown.SystemShuttingDown,

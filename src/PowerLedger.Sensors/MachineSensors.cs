@@ -29,11 +29,14 @@ public sealed class MachineSensors : IDisposable
     /// <param name="userIdleSeconds">Idle time from the user's session. Leave null in a process that runs in that session;
     /// the Service, in session 0, must supply it.</param>
     /// <param name="validatorOptions">Overrides for the plausible ranges and windows.</param>
+    /// <param name="monitorsDetected">Told which external monitors are attached, from the thread that reads the set, when the
+    /// set is first read and whenever they change (checked once a minute). Leave null to skip reading them.</param>
     public static MachineSensors Create(
         Func<bool> displayOn, Func<bool> sessionLocked,
-        Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null)
+        Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null,
+        Action<IReadOnlyList<MonitorFacts>>? monitorsDetected = null)
     {
-        var display = new DisplaySource(displayOn);
+        var display = new DisplaySource(displayOn, monitorsDetected);
         List<ISensorSource> sources =
         [
             new EnergyMeterSource(),

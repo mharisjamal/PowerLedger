@@ -13,12 +13,14 @@ public sealed class PipeHandlerTests : IDisposable
     private readonly StatusBoard _board = new();
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly ServiceSignals _signals;
+    private readonly MonitorBoard _monitors;
     private readonly PipeHandler _handler;
 
     public PipeHandlerTests()
     {
         _signals = new ServiceSignals(_clock);
-        _handler = new PipeHandler(_commands, _board, _signals, new TariffRepository(_database.Db), _clock);
+        _monitors = new MonitorBoard(MonitorBoardTests.Catalogue, _clock);
+        _handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock);
     }
 
     [Fact]
@@ -82,6 +84,32 @@ public sealed class PipeHandlerTests : IDisposable
         (await Send(new ReportActivityRequest(14, 42))).ShouldBe(new OkReply(14));
         _signals.UserIdleSeconds().ShouldBe(42);
         (await Send(new ReportActivityRequest(15, double.NaN))).ShouldBeOfType<ErrorReply>();
+    }
+
+    [Fact]
+    public async Task A_brightness_report_goes_to_the_monitor_board_without_bothering_the_loop()
+    {
+        _monitors.Detected([MonitorBoardTests.Dell]);
+
+        (await Send(new ReportBrightnessRequest(18, [new MonitorBrightness { Instance = MonitorBoardTests.Dell.Instance, Brightness = 0.4 }])))
+            .ShouldBe(new OkReply(18));
+
+        _monitors.Status(displayOn: true).ShouldHaveSingleItem().Brightness.ShouldBe(0.4);
+        _commands.Reader.TryRead(out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_bad_brightness_report_is_refused_saying_what_is_wrong_and_changes_nothing()
+    {
+        _monitors.Detected([MonitorBoardTests.Dell]);
+
+        (await Send(new ReportBrightnessRequest(19, [new MonitorBrightness { Instance = MonitorBoardTests.Dell.Instance, Brightness = 1.5 }])))
+            .ShouldBe(new ErrorReply(19, "A brightness must be between 0 and 1."));
+        (await Send(new ReportBrightnessRequest(20, [new MonitorBrightness { Instance = "", Brightness = 0.5 }])))
+            .ShouldBe(new ErrorReply(20, "A monitor's instance must be between 1 and 260 characters."));
+        (await Send(new ReportBrightnessRequest(21, null!))).ShouldBe(new ErrorReply(21, "The brightness readings are missing."));
+
+        _monitors.Status(displayOn: true).ShouldHaveSingleItem().Brightness.ShouldBeNull();
     }
 
     [Fact]

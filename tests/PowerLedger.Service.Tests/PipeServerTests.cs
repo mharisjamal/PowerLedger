@@ -3,6 +3,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Microsoft.Extensions.Logging.Abstractions;
 using PowerLedger.Contracts;
+using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
 
@@ -15,11 +16,12 @@ public sealed class PipeServerTests : IAsyncLifetime
     private readonly StatusBoard _board = new();
     private readonly LiveFeed _feed = new();
     private readonly ServiceSignals _signals = new(TimeProvider.System);
+    private readonly MonitorBoard _monitors = new(MonitorBoardTests.Catalogue, TimeProvider.System);
     private PipeServer _server = null!;
 
     public async Task InitializeAsync()
     {
-        var handler = new PipeHandler(new LoopCommands(), _board, _signals, new TariffRepository(_database.Db), TimeProvider.System);
+        var handler = new PipeHandler(new LoopCommands(), _board, _monitors, _signals, new TariffRepository(_database.Db), TimeProvider.System);
         _server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, _name);
         await _server.StartAsync(CancellationToken.None);
         await _server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
@@ -67,6 +69,19 @@ public sealed class PipeServerTests : IAsyncLifetime
 
         await b.DisposeAsync();
         await WaitFor.True(() => _signals.UserIdleSeconds() is > 29);
+    }
+
+    [Fact]
+    public async Task A_brightness_report_over_the_pipe_changes_what_a_monitor_draws_now()
+    {
+        _monitors.Detected([MonitorBoardTests.Dell]);
+        _monitors.Status(displayOn: true).ShouldHaveSingleItem().WattsNow.ShouldBe(28.32, 1e-9);
+        await using var client = await ConnectAsync();
+
+        await client.WriteAsync(new ReportBrightnessRequest(1, [new MonitorBrightness { Instance = MonitorBoardTests.Dell.Instance, Brightness = 0 }]));
+
+        (await client.ReadAsync()).ShouldBe(new OkReply(1));
+        _monitors.Status(displayOn: true).ShouldHaveSingleItem().WattsNow.ShouldBe(MonitorPower.At(28.32, 0), 1e-9);
     }
 
     [Fact]

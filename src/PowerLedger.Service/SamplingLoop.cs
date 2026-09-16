@@ -30,7 +30,8 @@ internal sealed record LoopEnvironment(
 /// learner, buffers the reading and pushes it to subscribers. At each minute boundary it writes the batch, folds the
 /// finished minute and hour, and runs whatever housekeeping is due. Between ticks it carries out suspend, resume,
 /// settings and calibration commands. Nothing else touches the sensor set, the model, the learner, the buffer, the
-/// sessions or the settings, so none of them needs a lock.
+/// sessions or the settings, so none of them needs a lock. The monitor board is shared: the sensor thread writes what it
+/// detects and the pipe what the App reports, so the board locks for itself.
 /// </summary>
 internal sealed class SamplingLoop : BackgroundService
 {
@@ -43,6 +44,7 @@ internal sealed class SamplingLoop : BackgroundService
     private readonly LoopCommands _commands;
     private readonly LiveFeed _feed;
     private readonly StatusBoard _board;
+    private readonly MonitorBoard _monitors;
     private readonly TimeProvider _clock;
     private readonly ILogger<SamplingLoop> _log;
     private readonly LoopOptions _options;
@@ -71,13 +73,14 @@ internal sealed class SamplingLoop : BackgroundService
 
     public SamplingLoop(
         SqliteDatabase database, LoopEnvironment environment, LoopCommands commands, LiveFeed feed, StatusBoard board,
-        TimeProvider clock, ILogger<SamplingLoop> log, LoopOptions? options = null)
+        MonitorBoard monitors, TimeProvider clock, ILogger<SamplingLoop> log, LoopOptions? options = null)
     {
         _database = database;
         _environment = environment;
         _commands = commands;
         _feed = feed;
         _board = board;
+        _monitors = monitors;
         _clock = clock;
         _log = log;
         _options = options ?? LoopOptions.Default;
@@ -201,7 +204,8 @@ internal sealed class SamplingLoop : BackgroundService
         _settings = settings;
         _facts = facts;
         _calibration.Use(facts.Hash, now);
-        _model = ModelFactory.Build(settings, facts, _calibration.Learner, NoMonitors.Instance);
+        _monitors.Choose(settings.Profile.Monitors);
+        _model = ModelFactory.Build(settings, facts, _calibration.Learner, _monitors);
         _board.Publish(settings);
     }
 
@@ -266,7 +270,8 @@ internal sealed class SamplingLoop : BackgroundService
 
     private void Publish(TickResult result, ReadingFrame frame, long ticks) => _board.Publish(new ServiceStatus(
         Version, _startedAt, ticks, [.. result.Health.Select(Frames.From)], result.SuspectCount, _worker.Abandoned,
-        _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame));
+        _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame,
+        _monitors.Status(result.Sample.DisplayOn)));
 
     /// <summary>
     /// Carries out a command, or fails it. The loop completes one that succeeds only after starting the tick timer over
@@ -334,7 +339,8 @@ internal sealed class SamplingLoop : BackgroundService
         var intervalChanged = settings.SampleIntervalSeconds != _settings.SampleIntervalSeconds;
         _settingsStore.Save(settings);
         _settings = settings;
-        _model = ModelFactory.Build(settings, _facts!, _calibration.Learner, NoMonitors.Instance);
+        _monitors.Choose(settings.Profile.Monitors);
+        _model = ModelFactory.Build(settings, _facts!, _calibration.Learner, _monitors);
         _board.Publish(settings);
         return intervalChanged;
     }

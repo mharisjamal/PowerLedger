@@ -10,7 +10,8 @@ namespace PowerLedger.Service;
 /// file or runs a command (spec §11). Anything that changes what the loop is doing goes to the loop as a command, and
 /// the reply waits until the loop has done it.
 /// </summary>
-internal sealed partial class PipeHandler(LoopCommands commands, StatusBoard board, ServiceSignals signals, TariffRepository tariffs, TimeProvider clock)
+internal sealed partial class PipeHandler(
+    LoopCommands commands, StatusBoard board, MonitorBoard monitors, ServiceSignals signals, TariffRepository tariffs, TimeProvider clock)
 {
     /// <summary>How long a request waits for the loop before the client is told it did not answer.</summary>
     public static readonly TimeSpan LoopTimeout = TimeSpan.FromSeconds(10);
@@ -44,6 +45,10 @@ internal sealed partial class PipeHandler(LoopCommands commands, StatusBoard boa
                 if (!double.IsFinite(request.IdleSeconds) || request.IdleSeconds < 0)
                     return new ErrorReply(request.Id, "Idle time must be a number of seconds, zero or more.");
                 signals.ReportIdle(client, request.IdleSeconds);
+                return new OkReply(request.Id);
+            case ReportBrightnessRequest request:
+                if (request.Validate() is { } invalid) return new ErrorReply(request.Id, invalid);
+                monitors.Report(request.Monitors);
                 return new OkReply(request.Id);
             case PipeRequest request:
                 return new ErrorReply(request.Id, "The service does not handle that request.");

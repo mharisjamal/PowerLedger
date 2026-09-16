@@ -7,9 +7,9 @@ namespace PowerLedger.Sensors;
 public readonly record struct DisplayState(double? Brightness, int MonitorCount);
 
 /// <summary>
-/// Panel brightness and monitor count. WMI is slow, so the query runs on a timer and every tick reuses the answer
-/// (spec §4). Whether the screen is lit comes from the service's power notifications. The panel's size is the
-/// hardware inventory's business, not this source's.
+/// Panel brightness and monitor count, and the external monitors attached. WMI is slow, so the queries run on a timer and
+/// every tick reuses the answer (spec §4). Whether the screen is lit comes from the service's power notifications. The
+/// panel's size is the hardware inventory's business, not this source's.
 /// </summary>
 public sealed class DisplaySource : ISensorSource
 {
@@ -19,19 +19,30 @@ public sealed class DisplaySource : ISensorSource
     private readonly Func<DisplayState> _query;
     private readonly Func<bool> _displayOn;
     private readonly TimeSpan _refreshEvery;
+    private readonly Func<IReadOnlyList<MonitorFacts>> _monitors;
+    private readonly Action<IReadOnlyList<MonitorFacts>>? _detected;
     private DisplayState _state = new(null, 1);
+    private IReadOnlyList<MonitorFacts>? _handedOver;
     private DateTimeOffset _nextReadAt = DateTimeOffset.MinValue;
     private volatile bool _refreshRequested;
 
     /// <param name="displayOn">The service supplies this from GUID_CONSOLE_DISPLAY_STATE; the preview passes true.</param>
-    public DisplaySource(Func<bool> displayOn) : this(QueryWmi, displayOn) { }
+    /// <param name="monitorsDetected">Told which external monitors are attached, on the thread that reads this source: on the
+    /// first read, and then whenever the monitors found on a refresh differ from the ones it was last told of. Without it
+    /// the monitors are not read at all.</param>
+    public DisplaySource(Func<bool> displayOn, Action<IReadOnlyList<MonitorFacts>>? monitorsDetected = null)
+        : this(QueryWmi, displayOn, monitors: MonitorInventory.Read, detected: monitorsDetected) { }
 
-    /// <summary>Test seam: any source of display state.</summary>
-    internal DisplaySource(Func<DisplayState> query, Func<bool> displayOn, TimeSpan? refreshEvery = null)
+    /// <summary>Test seam: any source of display state and of monitors.</summary>
+    internal DisplaySource(
+        Func<DisplayState> query, Func<bool> displayOn, TimeSpan? refreshEvery = null,
+        Func<IReadOnlyList<MonitorFacts>>? monitors = null, Action<IReadOnlyList<MonitorFacts>>? detected = null)
     {
         _query = query;
         _displayOn = displayOn;
         _refreshEvery = refreshEvery ?? TimeSpan.FromMinutes(1);
+        _monitors = monitors ?? (() => []);
+        _detected = detected;
     }
 
     public string Name => "display";
@@ -46,6 +57,7 @@ public sealed class DisplaySource : ISensorSource
     public void Contribute(SampleDraft draft)
     {
         var now = DateTimeOffset.UtcNow;
+        var refreshed = false;
         if (_refreshRequested || now >= _nextReadAt)
         {
             // Cleared before the query, so a Refresh that arrives while it runs is not lost.
@@ -54,6 +66,7 @@ public sealed class DisplaySource : ISensorSource
             {
                 _state = _query();
                 _nextReadAt = now + _refreshEvery;
+                refreshed = true;
             }
             catch (Exception error) when (Wmi.IsFailure(error))
             {
@@ -65,6 +78,20 @@ public sealed class DisplaySource : ISensorSource
         draft.Brightness = _state.Brightness;
         draft.MonitorCount = _state.MonitorCount;
         draft.DisplayOn = _displayOn();
+
+        // Only once WMI has just answered, so that a WMI hiccup, which the inventory reads as no monitors, doesn't unplug them.
+        if (refreshed && _detected is not null) HandOverMonitors(_detected);
+    }
+
+    /// <summary>Reads the external monitors and passes them on if they changed. The draft is filled first, so a handover
+    /// that throws costs the tick nothing it measured; what was handed over is noted only once it has been taken, so a
+    /// handover that failed is tried again on the next refresh.</summary>
+    private void HandOverMonitors(Action<IReadOnlyList<MonitorFacts>> detected)
+    {
+        var monitors = _monitors();
+        if (_handedOver is not null && _handedOver.SequenceEqual(monitors)) return;
+        detected(monitors);
+        _handedOver = monitors;
     }
 
     private static DisplayState QueryWmi()
