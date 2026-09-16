@@ -1,3 +1,5 @@
+using System.Globalization;
+using PowerLedger.Core;
 using PowerLedger.Sensors;
 using Shouldly;
 
@@ -22,7 +24,7 @@ public class MonitorCatalogueTests
     {
         Shipped.ShouldBeSameAs(MonitorCatalogue.Shipped);
         Shipped.Monitors.Count.ShouldBeGreaterThan(1000);
-        Shipped.Monitors.ShouldContain(new CatalogueMonitor("DELL", "U2723QEt", "U2723QE", 27, 3840, 2160, "IPS LCD", 28.32, 0.74, 400));
+        Shipped.Monitors.ShouldContain(new CatalogueMonitor("DELL", "U2723QEt", "U2723QE", 27, 3840, 2160, "IPS LCD", 28.32, 0.74, 0.3, 400));
     }
 
     [Fact]
@@ -32,6 +34,7 @@ public class MonitorCatalogueTests
         monitor.ModelNumber.ShouldBe("U2723QEt");
         monitor.OnW.ShouldBe(28.32);
         monitor.SleepW.ShouldBe(0.74);
+        monitor.OffW.ShouldBe(0.3);
 
         // E2318HNf gives E2318HX as its model name, so only the number without its revision letter names the E2318HN.
         Shipped.Find("DEL", "DELL E2318HN", 23, 1920, 1080).ShouldNotBeNull().ModelNumber.ShouldBe("E2318HNf");
@@ -122,12 +125,20 @@ public class MonitorCatalogueTests
         benq.ModelNumber.ShouldBe("GW2480-B");
         benq.OnW.ShouldBe(10.1, 1e-9);
         benq.SleepW.ShouldBe(0.2, 1e-9);
+        benq.OffW.ShouldBe(0.1, 1e-9);
 
         // Nine listings name the B247Y, from 9.48 W to 14.93 W; the first in the table gives the name.
         var acer = Shipped.Find("ACR", "Acer B247Y", 23.8, 1920, 1080).ShouldNotBeNull();
         acer.ModelName.ShouldBe("B247Y");
         acer.OnW.ShouldBe(13.35, 1e-9);
         acer.SleepW.ShouldBe(0.2, 1e-9);
+        acer.OffW.ShouldBe(0.15, 1e-9);
+
+        // Three listings name the 21.5-inch B227Q, drawing 0.1 W, 0.14 W and 0.11 W switched off; the first in the table
+        // gives the name, not its figure.
+        var b227Q = Shipped.Find("ACR", "Acer B227Q", 21.5, 1920, 1080).ShouldNotBeNull();
+        b227Q.ModelName.ShouldBe("B227Q_q");
+        b227Q.OffW.ShouldBe(0.11, 1e-9);
     }
 
     [Fact]
@@ -396,7 +407,26 @@ public class MonitorCatalogueTests
 
         var monitor = Parse(Header, "ASUS,MS27UC,MS27UC,MS27*****|MS27UCE,27,3840,2160,IPS LCD,24.87,,0.09,,,2024-07-17").Monitors.Single();
         monitor.SleepW.ShouldBe(0.2);
+        monitor.OffW.ShouldBe(0.09);
         monitor.MaxNits.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_missing_off_figure_is_the_median_of_the_ones_the_shipped_table_gives()
+    {
+        // The table as its fields are written, before a missing figure is filled in.
+        using var table = new StreamReader(typeof(MonitorCatalogue).Assembly
+            .GetManifestResourceStream("PowerLedger.Sensors.Monitors.energy-star-monitors.csv").ShouldNotBeNull());
+        var records = MonitorCatalogue.Records(table).Select(record => record.Fields).ToList();
+        var offW = records[0].IndexOf("off_w");
+        var given = records.Skip(1).Select(fields => fields[offW]).Where(field => field.Length > 0)
+            .Select(field => double.Parse(field, CultureInfo.InvariantCulture)).ToList();
+
+        given.Count.ShouldBeGreaterThan(1000);
+        Math.Round(MonitorCatalogue.Median(given), 2).ShouldBe(MonitorPower.DefaultOffW);
+
+        // Jetwing's listing gives no off figure.
+        Parse(Header, Jetwing).Monitors.Single().OffW.ShouldBe(MonitorPower.DefaultOffW);
     }
 
     [Fact]
@@ -404,8 +434,12 @@ public class MonitorCatalogueTests
     {
         Should.Throw<InvalidDataException>(() => Parse("brand,model_number,model_name,inches,width,height,panel,on_w,sleep_w,max_nits"))
             .Message.ShouldContain("alternatives");
+        Should.Throw<InvalidDataException>(() => Parse(Header.Replace(",off_w", ""), DellU2723Qe.Replace(",0.3,", ",")))
+            .Message.ShouldContain("off_w");
         Should.Throw<InvalidDataException>(() => Parse(Header, DellU2723Qe.Replace("28.32", "lots")))
             .Message.ShouldContain("line 2");
+        Should.Throw<InvalidDataException>(() => Parse(Header, DellU2723Qe.Replace(",0.3,", ",none,")))
+            .Message.ShouldContain("off_w");
         Should.Throw<InvalidDataException>(() => Parse(Header, DellU2723Qe + ",extra"))
             .Message.ShouldContain("line 2");
     }

@@ -8,9 +8,11 @@ namespace PowerLedger.Sensors;
 /// <summary>A certified monitor from the shipped Energy Star table: what it is listed as, and what it drew when tested.</summary>
 /// <param name="Panel">The panel as the list gives it ("IPS LCD"), or empty.</param>
 /// <param name="OnW">On-mode watts, measured at the test's brightness.</param>
+/// <param name="OffW">Off-mode watts, what it drew switched off, or <see cref="MonitorPower.DefaultOffW"/> where the list
+/// doesn't give them.</param>
 /// <param name="MaxNits">The maximum luminance in cd/m², or null where the list doesn't give one (it writes 0).</param>
 public sealed record CatalogueMonitor(string Brand, string ModelNumber, string ModelName, double Inches, int Width, int Height,
-    string Panel, double OnW, double SleepW, double? MaxNits = null);
+    string Panel, double OnW, double SleepW, double OffW, double? MaxNits = null);
 
 /// <summary>
 /// Energy Star's certified monitors (spec §5), shipped with PowerLedger: looks a detected monitor up by maker, model name
@@ -158,6 +160,7 @@ public sealed class MonitorCatalogue
         var panel = Column(header, "panel");
         var onW = Column(header, "on_w");
         var sleepW = Column(header, "sleep_w");
+        var offW = Column(header, "off_w");
         var maxNits = Column(header, "max_nits");
 
         var listings = new List<(CatalogueMonitor, string[])>();
@@ -183,7 +186,8 @@ public sealed class MonitorCatalogue
             var monitor = new CatalogueMonitor(
                 fields[brand], fields[modelNumber], fields[modelName],
                 Number(inches), Pixels(width), Pixels(height), fields[panel],
-                Number(onW), fields[sleepW].Length == 0 ? MonitorPower.DefaultSleepW : Number(sleepW), nits > 0 ? nits : null);
+                Number(onW), fields[sleepW].Length == 0 ? MonitorPower.DefaultSleepW : Number(sleepW),
+                fields[offW].Length == 0 ? MonitorPower.DefaultOffW : Number(offW), nits > 0 ? nits : null);
             listings.Add((monitor, fields[alternatives].Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
         }
         return new MonitorCatalogue(listings);
@@ -234,6 +238,7 @@ public sealed class MonitorCatalogue
         {
             OnW = Median(tied.Select(monitor => monitor.OnW)),
             SleepW = Median(tied.Select(monitor => monitor.SleepW)),
+            OffW = Median(tied.Select(monitor => monitor.OffW)),
         };
     }
 
@@ -394,7 +399,7 @@ public sealed class MonitorCatalogue
 
     /// <summary>A table's records, each with the line it starts on. A quoted field may hold commas, doubled quotes and line
     /// breaks; blank lines are skipped.</summary>
-    private static IEnumerable<(int Line, List<string> Fields)> Records(TextReader reader)
+    internal static IEnumerable<(int Line, List<string> Fields)> Records(TextReader reader)
     {
         var text = reader.ReadToEnd();
         var fields = new List<string>();

@@ -42,6 +42,10 @@ public static class MonitorPower
     public const double ListedBrightness = 0.75;
     public const double DefaultSleepW = 0.2;
 
+    /// <summary>What a monitor draws switched off when the list gives no figure for it: the median <c>off_w</c> of the
+    /// shipped table, 0.16 W over the 1,572 of its 1,580 monitors that give one.</summary>
+    public const double DefaultOffW = 0.16;
+
     /// <summary>The draw of a monitor listed at <paramref name="listedOnW"/> at <paramref name="brightness"/>, 0–1, where
     /// null, NaN or infinity means unknown.</summary>
     public static double At(double listedOnW, double? brightness)
