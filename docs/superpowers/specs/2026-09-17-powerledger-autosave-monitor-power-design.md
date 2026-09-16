@@ -48,10 +48,10 @@ user unticks it, and has to be told again when it is switched back on.
   `GetVCPFeatureAndVCPFeatureReply`. That is a read, like the brightness request.
   - It asks once a minute, while the service says the displays are on. Brightness is still read every five minutes.
   - The answer maps as: 1 is on; 2 (standby) and 3 (suspend) are standby; 4 and 5 are off.
-  - A monitor that fails this one request, while it answers the others, is taken not to support it until a display change
+  - A monitor that fails this one request three reads in a row, while it answers the others, is taken not to support it until a display change
     or a resume. The failure and back-off rules for brightness apply as they are.
 - **Reporting it.** The App sends the answers with the brightness report (`reportBrightness` gains a power list). The
-  service keeps each attached monitor's state. A state older than three minutes, or never reported, is unknown.
+  service keeps each attached monitor's state. A state older than three minutes of displays-on time, or never reported, is unknown.
 - **What the model counts** for a monitor that counts:
   - off: its off watts;
   - standby: its sleep watts;
@@ -75,7 +75,7 @@ user unticks it, and has to be told again when it is switched back on.
   backlight doesn't. Measured: an ASUS PG279Q (27" 1440p) +1 W from 60 to 144 Hz; a Monoprice Dark Matter 34 (3440x1440)
   +4.3 W, 20.0 to 24.3 W. LG's LM270WQA panel specifies 5.6 W of electronics at 144 Hz beside 31.3 W of LEDs. No data for
   OLED. ENERGY STAR measures at 60 Hz unless the manual names another default.
-- **Model.** For a counted LCD monitor that is on, add `c x MP x max(0, f - 60)`: `MP` is its megapixels, `f` its refresh
+- **Model.** For a counted LCD monitor that is on or hasn't said, with the displays on, add `c x MP x max(0, f - 60)`: `MP` is its megapixels, `f` its refresh
   rate. `c = 0.006 W per megapixel per Hz` (fitted to the two measurements, range 0.003-0.010). A 1440p monitor at 165 Hz adds
   about 2.3 W, at 240 Hz about 4 W. No term for OLED, for a typed figure, for an unknown resolution or refresh, or while the
   monitor is off or on standby. The status carries the refresh rate and the watts added.
