@@ -111,19 +111,26 @@ public class PipeProtocolTests
         [
             new MonitorPowerReading { Instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", State = MonitorPowerState.On },
             new MonitorPowerReading { Instance = @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", State = MonitorPowerState.Off },
+        ],
+        [
+            new MonitorDisplayReading { Instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", RefreshHz = 165, Hdr = true },
+            new MonitorDisplayReading { Instance = @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", RefreshHz = 59.94, Hdr = false },
         ]);
         Text(report).ShouldStartWith("""{"type":"reportBrightness","monitors":[{"instance":""");
         Text(report).ShouldContain("\"brightness\":0.6},{\"instance\":");
         Text(report).ShouldContain("\"power\":[{\"instance\":");
         Text(report).ShouldContain("\"state\":1},{\"instance\":");
+        Text(report).ShouldContain("\"displays\":[{\"instance\":");
+        Text(report).ShouldContain("\"refreshHz\":165,\"hdr\":true},{\"instance\":");
         var back = PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(report))).ShouldBeOfType<ReportBrightnessRequest>();
         back.Id.ShouldBe(14);
         back.Monitors.ShouldBe(report.Monitors);
         back.Power.ShouldNotBeNull().ShouldBe(report.Power!);
+        back.Displays.ShouldNotBeNull().ShouldBe(report.Displays!);
     }
 
     [Fact]
-    public void A_brightness_report_from_an_app_that_reads_no_power_states_arrives_without_them()
+    public void A_brightness_report_from_an_app_that_reads_no_power_states_or_displays_arrives_without_them()
     {
         var older = PipeProtocol.Deserialize(Encoding.UTF8.GetBytes(
                 """{"type":"reportBrightness","monitors":[{"instance":"DISPLAY\\DELA0B1\\5&2F5A1B&0&UID4353","brightness":0.6}],"id":15}"""))
@@ -131,10 +138,20 @@ public class PipeProtocolTests
         older.Id.ShouldBe(15);
         older.Monitors.ShouldBe([Reading(brightness: 0.6)]);
         older.Power.ShouldBeNull();
+        older.Displays.ShouldBeNull();
         older.Validate().ShouldBeNull();
 
-        var sent = new ReportBrightnessRequest(16, [Reading()]);
-        PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(sent))).ShouldBeOfType<ReportBrightnessRequest>().Power.ShouldBeNull();
+        // An App that reads power states but not displays.
+        var powerOnly = PipeProtocol.Deserialize(Encoding.UTF8.GetBytes(
+                """{"type":"reportBrightness","monitors":[],"power":[{"instance":"DISPLAY\\DELA0B1\\5&2F5A1B&0&UID4353","state":3}],"id":16}"""))
+            .ShouldBeOfType<ReportBrightnessRequest>();
+        powerOnly.Power.ShouldNotBeNull().ShouldBe([Said(MonitorPowerState.Off)]);
+        powerOnly.Displays.ShouldBeNull();
+        powerOnly.Validate().ShouldBeNull();
+
+        var sent = PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(new ReportBrightnessRequest(17, [Reading()])))).ShouldBeOfType<ReportBrightnessRequest>();
+        sent.Power.ShouldBeNull();
+        sent.Displays.ShouldBeNull();
     }
 
     [Fact]
@@ -172,6 +189,22 @@ public class PipeProtocolTests
         Report([], Said(instance: new string('I', 261))).Validate().ShouldNotBeNull();
         Report([], Said(instance: null!)).Validate().ShouldNotBeNull();
         Report([], [null!]).Validate().ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void A_report_s_display_readings_within_their_limits_are_accepted_and_outside_them_refused()
+    {
+        Driven(Shown(1), Shown(59.94, hdr: true), Shown(1000), Shown(instance: new string('I', 260))).Validate().ShouldBeNull();
+        Driven([.. Enumerable.Range(0, 16).Select(i => Shown(instance: $"I{i}"))]).Validate().ShouldBeNull();
+
+        Driven([.. Enumerable.Range(0, 17).Select(i => Shown(instance: $"I{i}"))]).Validate()
+            .ShouldBe("At most 16 monitors can report how they are driven.");
+        foreach (var refreshHz in new[] { 0.99, 1000.01, 0, -60, double.NaN, double.PositiveInfinity })
+            Driven(Shown(refreshHz)).Validate().ShouldBe("A refresh rate must be between 1 and 1000 Hz.");
+        Driven(Shown(instance: "")).Validate().ShouldNotBeNull();
+        Driven(Shown(instance: new string('I', 261))).Validate().ShouldNotBeNull();
+        Driven(Shown(instance: null!)).Validate().ShouldNotBeNull();
+        Driven([null!]).Validate().ShouldNotBeNull();
     }
 
     [Fact]
@@ -281,6 +314,11 @@ public class PipeProtocolTests
 
     private static MonitorPowerReading Said(MonitorPowerState state = MonitorPowerState.On, string instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")
         => new() { Instance = instance, State = state };
+
+    private static ReportBrightnessRequest Driven(params MonitorDisplayReading[] displays) => new(17, [], null, displays);
+
+    private static MonitorDisplayReading Shown(double refreshHz = 60, bool hdr = false, string instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")
+        => new() { Instance = instance, RefreshHz = refreshHz, Hdr = hdr };
 
     private static string Text(PipeMessage message) => Encoding.UTF8.GetString(PipeProtocol.Serialize(message));
 

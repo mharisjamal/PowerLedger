@@ -102,19 +102,22 @@ public sealed class PipeHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_report_s_power_states_go_to_the_monitor_board_with_its_brightness()
+    public async Task A_report_s_power_states_and_display_readings_go_to_the_monitor_board_with_its_brightness()
     {
         _monitors.Detected([MonitorBoardTests.Dell]);
 
         (await Send(new ReportBrightnessRequest(22,
             [new MonitorBrightness { Instance = MonitorBoardTests.Dell.Instance, Brightness = 0.4 }],
-            [new MonitorPowerReading { Instance = MonitorBoardTests.Dell.Instance, State = MonitorPowerState.Off }])))
+            [new MonitorPowerReading { Instance = MonitorBoardTests.Dell.Instance, State = MonitorPowerState.Off }],
+            [new MonitorDisplayReading { Instance = MonitorBoardTests.Dell.Instance, RefreshHz = 144, Hdr = true }])))
             .ShouldBe(new OkReply(22));
 
         var monitor = _monitors.Status(displayOn: true).ShouldHaveSingleItem();
         monitor.Brightness.ShouldBe(0.4);
         monitor.PowerState.ShouldBe(MonitorPowerState.Off);
         monitor.WattsNow.ShouldBe(0.3);
+        monitor.RefreshHz.ShouldBe(144);
+        monitor.Hdr.ShouldBe(true);
         _commands.Reader.TryRead(out _).ShouldBeFalse();
     }
 
@@ -135,10 +138,16 @@ public sealed class PipeHandlerTests : IDisposable
                 new MonitorPowerReading { Instance = MonitorBoardTests.Dell.Instance, State = MonitorPowerState.Unknown },
             ])))
             .ShouldBe(new ErrorReply(23, "A monitor's power state must be on, standby or off."));
+        (await Send(new ReportBrightnessRequest(24,
+            [new MonitorBrightness { Instance = MonitorBoardTests.Dell.Instance, Brightness = 0.5 }],
+            [new MonitorPowerReading { Instance = MonitorBoardTests.Dell.Instance, State = MonitorPowerState.Off }],
+            [new MonitorDisplayReading { Instance = MonitorBoardTests.Dell.Instance, RefreshHz = 0, Hdr = true }])))
+            .ShouldBe(new ErrorReply(24, "A refresh rate must be between 1 and 1000 Hz."));
 
         var monitor = _monitors.Status(displayOn: true).ShouldHaveSingleItem();
         monitor.Brightness.ShouldBeNull();
         monitor.PowerState.ShouldBe(MonitorPowerState.Unknown);
+        monitor.Hdr.ShouldBeNull();
     }
 
     [Fact]

@@ -42,6 +42,10 @@ public class MonitorBoardTests
     /// <summary>What the App read from a monitor about whether it is on.</summary>
     private static MonitorPowerReading Said(MonitorFacts monitor, MonitorPowerState state) => new() { Instance = monitor.Instance, State = state };
 
+    /// <summary>What the App read about how Windows drives a monitor.</summary>
+    private static MonitorDisplayReading Shown(MonitorFacts monitor, double refreshHz, bool hdr = false)
+        => new() { Instance = monitor.Instance, RefreshHz = refreshHz, Hdr = hdr };
+
     /// <summary>What the Dell draws at a brightness, or at the one assumed for null: its 28.32 W were measured at 200 of its
     /// 400 cd/m², half way up its scale.</summary>
     internal static double DellAt(double? brightness) => MonitorPower.At(28.32, brightness, 0.5);
@@ -79,6 +83,9 @@ public class MonitorBoardTests
             SleepWatts = 0.74,
             OffWatts = 0.3,
             PowerState = MonitorPowerState.Unknown,
+            RefreshHz = null,
+            RefreshWatts = 0,
+            Hdr = null,
             Source = MonitorSource.Model,
             Counted = true,
             CountedByDefault = true,
@@ -201,6 +208,9 @@ public class MonitorBoardTests
             SleepWatts = estimate.SleepW,
             OffWatts = estimate.OffW,
             PowerState = MonitorPowerState.Unknown,
+            RefreshHz = null,
+            RefreshWatts = 0,
+            Hdr = null,
             Source = MonitorSource.Estimate,
             Counted = true,
             CountedByDefault = true,
@@ -540,6 +550,73 @@ public class MonitorBoardTests
     }
 
     [Fact]
+    public void The_refresh_rate_and_hdr_state_the_app_reads_are_shown_until_they_go_stale_and_hdr_changes_no_watts()
+    {
+        _board.Detected([Dell, Unnamed]);
+        _board.Report([], displays: [Shown(Dell, 144, hdr: true), Shown(Unnamed, 60)]);
+
+        var status = _board.Status(displayOn: true);
+        status[0].RefreshHz.ShouldBe(144);
+        status[0].Hdr.ShouldBe(true);
+        status[1].RefreshHz.ShouldBe(60);
+        status[1].Hdr.ShouldBe(false);
+        var withHdr = _board.Watts(displayOn: true);
+        _board.Report([], displays: [Shown(Dell, 144, hdr: false)]);
+        _board.Watts(displayOn: true).ShouldBe(withHdr);
+
+        MonitorBoard.DisplayStale.ShouldBe(TimeSpan.FromMinutes(3));
+        _clock.Advance(MonitorBoard.DisplayStale);
+        _board.Status(displayOn: true).Select(m => m.RefreshHz).ShouldBe([144, 60]);
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        var stale = _board.Status(displayOn: true);
+        stale.Select(m => m.RefreshHz).ShouldBe([null, null]);
+        stale.Select(m => m.Hdr).ShouldBe([null, null]);
+    }
+
+    [Fact]
+    public void A_display_reading_finds_its_monitor_by_instance_in_any_case_and_one_for_a_monitor_that_is_not_attached_is_forgotten()
+    {
+        _board.Detected([Dell]);
+        _board.Report([], displays:
+        [
+            new MonitorDisplayReading { Instance = Dell.Instance.ToLowerInvariant(), RefreshHz = 120, Hdr = true },
+            Shown(Unnamed, 165),
+        ]);
+
+        _board.Status(displayOn: true).ShouldHaveSingleItem().RefreshHz.ShouldBe(120);
+        _board.Detected([Dell, Unnamed]);
+        var unnamed = _board.Status(displayOn: true)[1];
+        unnamed.RefreshHz.ShouldBeNull();
+        unnamed.Hdr.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_report_without_display_readings_leaves_them_as_they_were_and_a_refresh_rate_that_is_no_rate_is_ignored()
+    {
+        _board.Detected([Dell]);
+        _board.Report([], displays: [Shown(Dell, 144, hdr: true)]);
+
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.5 }], [Said(Dell, MonitorPowerState.On)]);
+        _board.Report([], displays: [Shown(Dell, double.NaN), Shown(Dell, double.PositiveInfinity), Shown(Dell, 0), Shown(Dell, -60)]);
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        monitor.RefreshHz.ShouldBe(144);
+        monitor.Hdr.ShouldBe(true);
+    }
+
+    [Fact]
+    public void A_monitor_missing_from_one_detection_keeps_a_display_reading_that_is_still_fresh()
+    {
+        _board.Detected([Dell]);
+        _board.Report([], displays: [Shown(Dell, 144, hdr: true)]);
+        _board.Detected([]);
+        _board.Detected([Dell]);
+
+        _board.Status(displayOn: true).ShouldHaveSingleItem().RefreshHz.ShouldBe(144);
+    }
+
+    [Fact]
     public void An_unplugged_monitor_disappears()
     {
         _board.Detected([Dell, Unnamed]);
@@ -635,7 +712,8 @@ public class MonitorBoardTests
             }),
             Repeat(() => _board.Report(
                 [new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.5 }],
-                [Said(Dell, MonitorPowerState.Standby), Said(Unnamed, MonitorPowerState.Off)])),
+                [Said(Dell, MonitorPowerState.Standby), Said(Unnamed, MonitorPowerState.Off)],
+                [Shown(Dell, 144, hdr: true), Shown(Unnamed, 60)])),
             Repeat(() =>
             {
                 _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Watts = 30 }));

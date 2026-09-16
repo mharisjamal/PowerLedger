@@ -22,6 +22,11 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     /// answering, and counts as unknown.</summary>
     public static readonly TimeSpan PowerStale = TimeSpan.FromMinutes(3);
 
+    /// <summary>The App reads how Windows drives each monitor every minute while the displays are on, so a refresh rate or
+    /// HDR state older than this is from before the displays went off, from an App that stopped reporting or from a monitor
+    /// Windows no longer drives, and counts as unknown.</summary>
+    public static readonly TimeSpan DisplayStale = TimeSpan.FromMinutes(3);
+
     /// <summary>The largest monitor taken, on a laptop, for a portable one running off it when the user hasn't said.
     /// Portable monitors come in 13 to 17.3 inches; a monitor that gives no size is taken to have a plug of its own.</summary>
     public const double LargestPortableInches = 17.3;
@@ -34,6 +39,9 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
 
     /// <summary>The last power state for each monitor by instance, kept as its brightness is.</summary>
     private readonly Dictionary<string, (MonitorPowerState State, long At)> _power = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The last refresh rate and HDR state for each monitor by instance, kept as its brightness is.</summary>
+    private readonly Dictionary<string, ((double RefreshHz, bool Hdr) Display, long At)> _displays = new(StringComparer.OrdinalIgnoreCase);
 
     private Figured[] _monitors = [];
     private Dictionary<string, MonitorChoice> _choices = new(StringComparer.Ordinal);
@@ -64,6 +72,7 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             _monitors = figured;
             DropStale(_brightness, BrightnessStale, now);
             DropStale(_power, PowerStale, now);
+            DropStale(_displays, DisplayStale, now);
         }
     }
 
@@ -82,12 +91,15 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         }
     }
 
-    /// <summary>The App's report; a brightness older than <see cref="BrightnessStale"/>, and a power state older than
-    /// <see cref="PowerStale"/>, counts as unknown. Only a monitor that is attached is remembered, so a client can't fill the
-    /// service's memory with instances it made up.</summary>
+    /// <summary>The App's report; a brightness older than <see cref="BrightnessStale"/>, a power state older than
+    /// <see cref="PowerStale"/>, and a refresh rate and HDR state older than <see cref="DisplayStale"/>, count as unknown. Only
+    /// a monitor that is attached is remembered, so a client can't fill the service's memory with instances it made up.</summary>
     /// <param name="power">Whether each monitor is on, or null from an App that doesn't read it, which leaves the power
     /// states as they were.</param>
-    public void Report(IReadOnlyList<MonitorBrightness> readings, IReadOnlyList<MonitorPowerReading>? power = null)
+    /// <param name="displays">How Windows drives each monitor, or null from an App that doesn't read it, which leaves the
+    /// refresh rates and HDR states as they were.</param>
+    public void Report(
+        IReadOnlyList<MonitorBrightness> readings, IReadOnlyList<MonitorPowerReading>? power = null, IReadOnlyList<MonitorDisplayReading>? displays = null)
     {
         var now = clock.GetTimestamp();
         lock (_gate)
@@ -103,6 +115,12 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
                 if (reading.State is not (MonitorPowerState.On or MonitorPowerState.Standby or MonitorPowerState.Off)) continue;
                 var monitor = Attached(reading.Instance);
                 if (monitor is not null) _power[monitor.Facts.Instance] = (reading.State, now);
+            }
+            foreach (var display in displays ?? [])
+            {
+                if (!double.IsFinite(display.RefreshHz) || display.RefreshHz <= 0) continue;
+                var monitor = Attached(display.Instance);
+                if (monitor is not null) _displays[monitor.Facts.Instance] = ((display.RefreshHz, display.Hdr), now);
             }
         }
     }
@@ -170,6 +188,8 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         var state = _power.TryGetValue(facts.Instance, out var said) && !IsStale(said.At, now, PowerStale)
             ? said.State
             : MonitorPowerState.Unknown;
+        (double RefreshHz, bool Hdr)? display =
+            _displays.TryGetValue(facts.Instance, out var driven) && !IsStale(driven.At, now, DisplayStale) ? driven.Display : null;
         // A figure the user typed is what the monitor draws as they use it, so it is taken as it is, and the brightness is
         // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
         // list's test luminance, so it is scaled from where that sits on the monitor's brightness scale to the monitor's.
@@ -186,6 +206,8 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             SleepWatts = monitor.SleepW,
             OffWatts = monitor.OffW,
             PowerState = state,
+            RefreshHz = display?.RefreshHz,
+            Hdr = display?.Hdr,
             Source = choice?.Watts is null ? monitor.Source : MonitorSource.Typed,
             Counted = counted,
             CountedByDefault = _countedByDefault,
