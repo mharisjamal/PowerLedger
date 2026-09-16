@@ -556,4 +556,70 @@ a migration that happens only once.
 
 ## Results
 
-(Filled in after wave 3.)
+2026-09-16. Built by waves of parallel agents, each in a worktree of its own, as the Execution table sets out: the data
+agent first, then agents A to D at once, then E and F from the merged first wave. The lead merged each branch onto
+`plan-j/monitors` as it finished. The fixes went the same way: agents of their own for the decisions at merge, then five
+at once for the review's findings. The branch holds 59 commits at `2406638`.
+
+**Verified**
+
+- `dotnet build -c Release`: 0 warnings. Every test outside `Hardware` and `Installed`, run at `2406638`: 1,286 pass
+  (Core 134, Storage 49, Sensors 390, Service 204, App 509 with the UI renders).
+- The estimate, with each of the table's 1,576 monitors up to 57" estimated from all the others: within 9.04% of what it
+  measured for half of them and within 25.6% for nine in ten; `MonitorEstimateTests` holds 12% and 35%.
+- The catalogue before and after the review's fixes, run over the 33,385 named monitors with a size in linuxhw's
+  DigitalDisplay collection of real EDIDs: model matches went from 2,501 to 2,301, and matches whose resolution
+  disagrees with their listing's from 190 to 55, all of them exact names or series words. 213 monitors went to the
+  estimate, and 13 found a listing they hadn't. `MonitorCatalogue.cs` and `MonitorMakers.cs` note the limits left as
+  they are.
+- A flaky test fixed (`2aa4dd6`): `SensorWorkerTests.A_hung_read_abandons_the_set_and_the_next_read_starts_a_fresh_one`
+  threw a `NullReferenceException` at its poll, which read the list of sets built without the lock `Add` takes, and
+  `List<T>.Add` sets the count before it stores the item. Run back to back for 60 seconds while the App tests ran, it
+  failed 1,057 times in 68,107 runs; with every read of the list copied under the lock, the same loop under the same
+  load failed in none of 55,382.
+<!-- lead: installers at full compression: universal, x64 and Arm64 sizes -->
+<!-- lead: Windows Sandbox, end to end: N of N, and what the run covered -->
+<!-- lead: CI run and both jobs' results, and the release link -->
+
+**Review** (whole branch): 8 findings, none critical, 5 important and 3 minor, all fixed.
+
+- **Important.** An abandoned sensor set could hand the board a stale list after its replacement had handed over the
+  monitors attached, leaving them uncounted, and a WMI class that failed read as no monitors: each set's token is now
+  cancelled before its replacement is built and checked under the board's lock, a read that doesn't say which monitors
+  are attached leaves the list alone, and a monitor keeps the resolution last read for it.
+- **Important.** A USB-C portable monitor on a laptop was counted twice: a monitor now has a plug of its own or runs off
+  the PC, a laptop's monitor of 17.3" or less is taken to run off it, and one that does always counts, isn't added to a
+  measured rate and is taken out of what the learner learns; the wizard and Settings ask on a laptop whether each
+  monitor has its own plug.
+- **Important.** A family or a name cut short could match a model of another resolution, since resolution only broke
+  ties: those matches now need a listing at the monitor's resolution, while exact names and series words keep theirs.
+- **Important.** Old settings that didn't count monitors lost that for a monitor attached later: the carry-over now sets
+  `CountMonitorsByDefault` from them, and writes choices only for a typed figure other than the old 25 W.
+- **Important.** The quality badge said nothing of the estimated monitor figures in a reading: the badge still describes
+  the PC's own reading, and the Now screen's display row and live note, Breakdown's footnote and the report's quality
+  legend say how the monitors were figured.
+- **Minor.** Maker codes missing from the table turned off the brand check: `ACI` and `AOP` (ASUS's and AOpen's), `APP`,
+  `TSB` and `HEC` were added, and a maker without a brand matches exact names only.
+- **Minor.** Twin monitors that share a serial number changed key when one was unplugged: a serial number under four
+  characters, or of one character repeated, keys a monitor by its instance, and monitors whose serial key was found
+  shared stay keyed by instance while the service runs.
+- **Minor.** A monitor that failed a brightness read was asked again after an hour: it is left alone until a display
+  change or a resume.
+
+**Decided at merge** (the design's section of that name): a figure the user typed is used as typed, never scaled by
+brightness; a monitor's choice is saved only when it differs from the service's defaults or holds a typed figure, so the
+choices for monitors unplugged no longer pile up until the limit of 16 refuses every save, and the ones kept run from
+the most recently seen; saving a form that lists monitors clears the old count and the choice to count monitors. The
+review's fixes added the rest of that section: the plug, the default carried over, the resolution a family needs, the
+list a stale read can't wipe, the badge left to the PC's own reading, and a failed monitor left alone for the session.
+
+**Deviations from the plan's code**: the model asks the monitors for `MonitorWatts`, split between those with a plug of
+their own and those running off the PC, not one figure, and `MonitorBoard.Choose` takes the whole profile, for its
+default for counting and its chassis; `MonitorChoice` gains `OwnPlug`, `MonitorStatus` the plug and both defaults, and
+`MachineProfile` `CountMonitorsByDefault`, which the carry-over (Task 10) sets instead of writing a choice for each
+monitor; `MonitorInventory.Read` gives null when WMI doesn't say which monitors are attached, and keeps the serial keys
+found shared and the resolutions read; the sensor worker builds each set with a cancellation token; the estimate has a
+16-inch size class for portable monitors; a maker code without a brand matches exact names only, where Task 4 let it
+match any brand, and a family or a name cut short needs the monitor's resolution; the DDC/CI reader, first built to try
+a failed monitor again after an hour, leaves it alone as Task 7 asked, until a display change or a resume; and one
+constant, `ServiceSettings.MaxMonitors`, bounds both the choices and a brightness report.
