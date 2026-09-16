@@ -34,6 +34,12 @@ public sealed record CatalogueMonitor(string Brand, string ModelNumber, string M
 /// is anything shorter than four characters or without both a letter and a digit, which names a family, not a model.
 /// </para>
 /// <para>
+/// Only a whole identifier, with or without Dell's letter or Acer's suffix, is a model's exact name or number. The last
+/// word of one, a placeholder and a name cut short can each take in other models, so a monitor whose maker code has no
+/// brand here, and could be any maker's, matches exact names only; otherwise Vizio's VA220E would be taken for a ViewSonic
+/// of the VA22*********** family.
+/// </para>
+/// <para>
 /// A match must agree with the monitor's size to within an inch, which stops vague names matching the wrong panel; for a
 /// monitor that doesn't give its size, the listings its name matches must agree on one among themselves. Of the listings
 /// that match, those with the monitor's resolution, either way round, win; then a whole name over a placeholder, and more
@@ -72,6 +78,9 @@ public sealed class MonitorCatalogue
     /// <summary>Listings by whole identifier.</summary>
     private readonly Dictionary<string, List<int>> _whole = new(StringComparer.Ordinal);
 
+    /// <summary>Listings by the last word of an identifier of several, where that isn't also a whole identifier of theirs.</summary>
+    private readonly Dictionary<string, List<int>> _lastWords = new(StringComparer.Ordinal);
+
     /// <summary>Listings by the part of an identifier before its placeholders, with how many characters they stand for.</summary>
     private readonly Dictionary<string, List<(int Listing, int Run)>> _prefixes = new(StringComparer.Ordinal);
 
@@ -82,17 +91,24 @@ public sealed class MonitorCatalogue
         {
             var (monitor, alternatives) = listings[listing];
             var keys = new HashSet<(string Key, int Run)>();
+            var lastWords = new HashSet<(string Key, int Run)>();
             foreach (var identifier in alternatives.Prepend(monitor.ModelName).Prepend(monitor.ModelNumber))
             {
                 keys.UnionWith(Keys(identifier, monitor.Brand));
                 if (identifier.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) is [_, .., var last])
                 {
-                    keys.UnionWith(Keys(last, monitor.Brand));
+                    lastWords.UnionWith(Keys(last, monitor.Brand));
                 }
             }
+            lastWords.ExceptWith(keys);
             foreach (var (key, run) in keys)
             {
                 if (run == 0) Add(_whole, key, listing);
+                else Add(_prefixes, key, (listing, run));
+            }
+            foreach (var (key, run) in lastWords)
+            {
+                if (run == 0) Add(_lastWords, key, listing);
                 else Add(_prefixes, key, (listing, run));
             }
         }
@@ -154,7 +170,8 @@ public sealed class MonitorCatalogue
     }
 
     /// <summary>The certified monitor this one is, or null when the list doesn't know it.</summary>
-    /// <param name="maker">The maker code from the monitor's EDID, such as "DEL". A code without a brand here matches any brand.</param>
+    /// <param name="maker">The maker code from the monitor's EDID, such as "DEL". A code without a brand here matches any brand,
+    /// but only by a model's exact name or number.</param>
     /// <param name="name">The name the monitor gives, such as "DELL U2723QE". One of thirteen characters, all EDID holds, may
     /// have been cut short.</param>
     /// <param name="inches">The monitor's diagonal, or 0 when it doesn't give one.</param>
@@ -169,7 +186,7 @@ public sealed class MonitorCatalogue
         var sized = double.IsFinite(inches) && inches > 0;
 
         var matches = Matches(key, cut: name.Trim().Length == EdidNameLength)
-            .Where(match => brand is null || _monitors[match.Listing].Brand.Equals(brand, StringComparison.OrdinalIgnoreCase))
+            .Where(match => brand is null ? match.Exact : _monitors[match.Listing].Brand.Equals(brand, StringComparison.OrdinalIgnoreCase))
             .Where(match => !sized || Math.Abs(_monitors[match.Listing].Inches - inches) <= SizeTolerance)
             .OrderBy(match => match.Listing)
             .ToList();
@@ -238,42 +255,48 @@ public sealed class MonitorCatalogue
         return sorted.Length % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
     }
 
-    /// <summary>Each listing a normalised name matches, with how closely.</summary>
+    /// <summary>Each listing a normalised name matches, with how closely, and whether by its exact name or number: one of
+    /// its whole identifiers.</summary>
     /// <param name="cut">Whether the name may have been cut short, so that it also matches, as far as it goes, the
     /// identifiers it is the start of.</param>
-    private List<(int Listing, int Closeness)> Matches(string key, bool cut)
+    private List<(int Listing, int Closeness, bool Exact)> Matches(string key, bool cut)
     {
-        var closeness = new Dictionary<int, int>();
-        void Match(int listing, int howClosely)
+        var found = new Dictionary<int, (int Closeness, bool Exact)>();
+        void Match(int listing, int howClosely, bool exact)
         {
-            if (closeness.GetValueOrDefault(listing) < howClosely) closeness[listing] = howClosely;
+            var (closeness, wasExact) = found.GetValueOrDefault(listing);
+            found[listing] = (Math.Max(closeness, howClosely), wasExact || exact);
         }
 
         foreach (var listing in _whole.GetValueOrDefault(key) ?? [])
         {
-            Match(listing, Whole);
+            Match(listing, Whole, exact: true);
+        }
+        foreach (var listing in _lastWords.GetValueOrDefault(key) ?? [])
+        {
+            Match(listing, Whole, exact: false);
         }
         for (var length = ShortestKey; length <= key.Length; length++)
         {
             foreach (var (listing, run) in _prefixes.GetValueOrDefault(key[..length]) ?? [])
             {
-                if (key.Length - length <= run) Match(listing, length);
+                if (key.Length - length <= run) Match(listing, length, exact: false);
             }
         }
         if (cut)
         {
-            foreach (var (identifier, listings) in _whole)
+            foreach (var (identifier, listings) in _whole.Concat(_lastWords))
             {
                 if (identifier.Length <= key.Length || !identifier.StartsWith(key, StringComparison.Ordinal)) continue;
-                foreach (var listing in listings) Match(listing, key.Length);
+                foreach (var listing in listings) Match(listing, key.Length, exact: false);
             }
             foreach (var (stem, listings) in _prefixes)
             {
                 if (stem.Length <= key.Length || !stem.StartsWith(key, StringComparison.Ordinal)) continue;
-                foreach (var (listing, _) in listings) Match(listing, key.Length);
+                foreach (var (listing, _) in listings) Match(listing, key.Length, exact: false);
             }
         }
-        return [.. closeness.Select(pair => (pair.Key, pair.Value))];
+        return [.. found.Select(pair => (pair.Key, pair.Value.Closeness, pair.Value.Exact))];
     }
 
     /// <summary>What one of a listing's identifiers is indexed under: each key, with how many characters its trailing

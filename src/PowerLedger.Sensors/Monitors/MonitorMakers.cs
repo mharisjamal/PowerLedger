@@ -2,16 +2,20 @@ namespace PowerLedger.Sensors;
 
 /// <summary>
 /// The brand Energy Star's table lists a monitor under, from the three-letter maker code in the monitor's EDID. The codes
-/// are those of the UEFI Forum's PNP ID registry; each brand is spelt as the table spells it, and the few makers the table
-/// has no monitors from keep their own spelling.
+/// are those of the UEFI Forum's PNP ID registry, and a few a maker's monitors report though the registry doesn't give them
+/// to that maker; each brand is spelt as the table spells it, and the few makers the table has no monitors from keep their
+/// own spelling.
 /// </summary>
 public static class MonitorMakers
 {
     private static readonly Dictionary<string, string> Brands = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["ACI"] = "ASUS",       // registered to Ancor Communications, but most ASUS monitors report it
         ["ACR"] = "Acer",
         ["AOA"] = "AOpen",
         ["AOC"] = "AOC",
+        ["AOP"] = "AOpen",      // not in the registry, but AOpen's monitors report it rather than AOA
+        ["APP"] = "Apple",
         ["AUS"] = "ASUS",
         ["BNQ"] = "BenQ",
         ["DEL"] = "DELL",
@@ -20,6 +24,7 @@ public static class MonitorMakers
         ["ELO"] = "ELO",        // Elo TouchSystems
         ["GBT"] = "GIGABYTE",
         ["GSM"] = "LG",         // registered as Goldstar
+        ["HEC"] = "Hisense",    // Hisense Electric
         ["HKC"] = "HKC",
         ["HPN"] = "HP",         // HP Inc.
         ["HWP"] = "HP",         // Hewlett Packard
@@ -33,6 +38,7 @@ public static class MonitorMakers
         ["SHP"] = "Sharp",
         ["SNY"] = "SONY",
         ["SPT"] = "SCEPTRE",
+        ["TSB"] = "Toshiba",
         ["VSC"] = "ViewSonic",
     };
 

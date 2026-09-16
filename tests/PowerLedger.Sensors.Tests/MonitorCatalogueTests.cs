@@ -157,10 +157,12 @@ public class MonitorCatalogueTests
     }
 
     [Fact]
-    public void Planar_writes_its_placeholders_as_y_and_an_unknown_maker_matches_by_name_alone()
+    public void Planar_writes_its_placeholders_as_y()
     {
-        Shipped.Find("PNR", "2E0I1ABCDE", 85.5, 3840, 2160).ShouldNotBeNull().Brand.ShouldBe("PLANAR");
-        Shipped.Find("PNR", "2E0I1ABCDEF", 85.5, 3840, 2160).ShouldBeNull();
+        // Planar lists the 2E0I1 as 2E0I1yyyyy too. Were the y's letters, that would be a name of the model's own, which a
+        // maker without a brand here may match; as placeholders it is only the model's family, which such a maker may not.
+        Shipped.Find("PNR", "2E0I1", 85.5, 3840, 2160).ShouldNotBeNull().Brand.ShouldBe("PLANAR");
+        Shipped.Find("PNR", "2E0I1YYYYY", 85.5, 3840, 2160).ShouldBeNull();
     }
 
     [Fact]
@@ -216,6 +218,35 @@ public class MonitorCatalogueTests
         Shipped.Find("", "U2723QE", 27, 3840, 2160).ShouldNotBeNull().Brand.ShouldBe("DELL");
     }
 
+    [Fact]
+    public void An_unknown_maker_matches_only_a_name_the_list_gives_whole()
+    {
+        // A family could be any maker's: Vizio's VA220E is no ViewSonic of the VA22*********** family, Armaggeddon's XF24HD
+        // no Acer of XF24*****, and VIZTA's 27N50, a 4K monitor, no 1080p Koorui of 27N5******.
+        Shipped.Find("VIZ", "VA220E", 21.5, 1920, 1080).ShouldBeNull();
+        Shipped.Find("ARM", "XF24HD", 23.8, 1920, 1080).ShouldBeNull();
+        Shipped.Find("JRY", "27N50", 27, 3840, 2160).ShouldBeNull();
+
+        // So could a series word or a name cut short: EIZO's FlexScan EV2740X and ViewSonic's VX2776-4K-MHDU are found only
+        // by their own makers.
+        Shipped.Find("XYZ", "EV2740X", 27, 3840, 2160).ShouldBeNull();
+        Shipped.Find("ENC", "EV2740X", 27, 3840, 2160).ShouldNotBeNull().ModelNumber.ShouldBe("FlexScan EV2740X");
+        Shipped.Find("XYZ", "VX2776-4K-mhd", 27, 3840, 2160).ShouldBeNull();
+        Shipped.Find("VSC", "VX2776-4K-mhd", 27, 3840, 2160).ShouldNotBeNull().ModelName.ShouldBe("VX2776-4K-MHDU");
+    }
+
+    [Fact]
+    public void The_codes_asus_and_aopen_monitors_report_match_only_their_own_brand()
+    {
+        // Most ASUS monitors report ACI, which ViewSonic's VX24*********** and VG24********** families took for any maker's.
+        Shipped.Find("ACI", "VX24A", 24, 2560, 1440).ShouldBeNull();
+        Shipped.Find("ACI", "VG248", 24, 1920, 1080).ShouldBeNull();
+
+        // AOpen's report AOP, which Acer's 16PMXXXXXX, a 2880 × 1800 portable, took in; AOpen's own families still take them.
+        Shipped.Find("AOP", "16PM6Q", 15.6, 1920, 1080).ShouldBeNull();
+        Shipped.Find("AOP", "27HC5R", 27, 1920, 1080).ShouldNotBeNull().ModelNumber.ShouldBe("27CL1_a");
+    }
+
     [Theory]
     [InlineData("DELL U2723QE", "DELL", "U2723QE")]
     [InlineData("HP 322pb Monitor", "HP", "322PB")]
@@ -248,6 +279,11 @@ public class MonitorCatalogueTests
     [InlineData("AOA", "AOpen")]
     [InlineData("ELO", "ELO")]
     [InlineData("SHP", "Sharp")]
+    [InlineData("ACI", "ASUS")]
+    [InlineData("AOP", "AOpen")]
+    [InlineData("APP", "Apple")]
+    [InlineData("HEC", "Hisense")]
+    [InlineData("TSB", "Toshiba")]
     [InlineData(" del ", "DELL")]
     public void A_maker_code_gives_the_brand_the_table_lists_it_under(string code, string brand)
         => MonitorMakers.Brand(code).ShouldBe(brand);
