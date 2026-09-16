@@ -86,8 +86,19 @@ internal sealed class MonitorRow : ObservableObject
     /// that isn't counted is "not counted", or "off · not counted" when it said.</summary>
     public string Now { get => _now; private set => SetProperty(ref _now, value); }
 
+    /// <summary>Raised once <see cref="Watts"/>, <see cref="Counted"/> or <see cref="OwnPlug"/> is set to a new value and the
+    /// row has taken it: by the user, and for <see cref="Watts"/> also by the row following the service's figure.</summary>
+    internal event Action? Changed;
+
     /// <summary>On-mode watts, as typed; blank for PowerLedger's own figure.</summary>
-    public string Watts { get => _watts; set => SetProperty(ref _watts, value); }
+    public string Watts
+    {
+        get => _watts;
+        set
+        {
+            if (SetProperty(ref _watts, value)) Changed?.Invoke();
+        }
+    }
 
     /// <summary>Whether the monitor counts. One that runs off this PC always does, being part of what the PC draws, so while
     /// it does its box shows ticked and takes no change, and what was ticked before comes back once it has a plug of its
@@ -97,7 +108,9 @@ internal sealed class MonitorRow : ObservableObject
         get => !OwnPlug || _counted;
         set
         {
-            if (OwnPlug && SetProperty(ref _counted, value)) _countedTicked = true;
+            if (!OwnPlug || !SetProperty(ref _counted, value)) return;
+            _countedTicked = true;
+            Changed?.Invoke();
         }
     }
 
@@ -111,6 +124,7 @@ internal sealed class MonitorRow : ObservableObject
             _ownPlugTicked = true;
             OnPropertyChanged(nameof(Counted));
             OnPropertyChanged(nameof(ShowsPlug));
+            Changed?.Invoke();
         }
     }
 

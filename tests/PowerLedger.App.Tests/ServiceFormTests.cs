@@ -18,6 +18,22 @@ public class ServiceFormTests
         return form;
     }
 
+    /// <summary>A form that saves itself, as Settings' does. When <paramref name="answers"/> is given, what the service's
+    /// answers leave for the UI thread waits there, as it does while a save is on its way, until the test runs it.</summary>
+    private ServiceForm SavingItself(Queue<Action>? answers = null)
+    {
+        var threads = answers is null ? UiThreads.Inline : new UiThreads(answers.Enqueue, action => action());
+        var form = new ServiceForm(_link, threads, English, savesItself: true);
+        form.Load(ServiceSettings.Default);
+        return form;
+    }
+
+    /// <summary>Runs what the service's answers left for the UI thread, and whatever that leaves in turn.</summary>
+    private static void Answer(Queue<Action> answers)
+    {
+        while (answers.TryDequeue(out var next)) next();
+    }
+
     [Fact]
     public void Loading_fills_every_field()
     {
@@ -63,6 +79,187 @@ public class ServiceFormTests
         });
         (sent.IdleThresholdSeconds, sent.SampleIntervalSeconds, sent.RawRetentionHours, sent.HistoryRetentionYears).ShouldBe((600, 2, 72, 5));
         form.Message.ShouldBe("Saved.");
+    }
+
+    [Theory]
+    [InlineData(nameof(ServiceForm.RamIsDdr5), true)]
+    [InlineData(nameof(ServiceForm.Chassis), ChassisKind.Desktop)]
+    [InlineData(nameof(ServiceForm.PsuTier), PsuTier.Gold)]
+    [InlineData(nameof(ServiceForm.SampleInterval), "3")]
+    public void A_form_that_saves_itself_sends_a_tick_or_a_segmented_choice_at_once_and_once(string field, object chosen)
+    {
+        var form = SavingItself();
+
+        typeof(ServiceForm).GetProperty(field)!.SetValue(form, chosen);
+
+        _link.Writes.Single().ShouldBe(form.Read(out _));
+        _link.Writes.Single().ShouldNotBe(ServiceSettings.Default);
+        form.Message.ShouldBe("Saved.");
+    }
+
+    [Theory]
+    [InlineData(nameof(ServiceForm.RamSticks), "4")]
+    [InlineData(nameof(ServiceForm.SsdCount), "2")]
+    [InlineData(nameof(ServiceForm.HddCount), "1")]
+    [InlineData(nameof(ServiceForm.FanCount), "5")]
+    [InlineData(nameof(ServiceForm.PanelInches), "14")]
+    [InlineData(nameof(ServiceForm.ExtrasWatts), "12.5")]
+    [InlineData(nameof(ServiceForm.CpuTdp), "125")]
+    [InlineData(nameof(ServiceForm.GpuTdp), "80")]
+    [InlineData(nameof(ServiceForm.IdleMinutes), "10")]
+    [InlineData(nameof(ServiceForm.RawHours), "72")]
+    [InlineData(nameof(ServiceForm.HistoryYears), "5")]
+    public void A_typed_value_saves_once_its_box_gives_it_to_the_form(string field, string typed)
+    {
+        // The view gives a typed value to the form when its box loses focus or Enter is pressed, not at each keystroke.
+        var form = SavingItself();
+
+        typeof(ServiceForm).GetProperty(field)!.SetValue(form, typed);
+
+        _link.Writes.Single().ShouldBe(form.Read(out _));
+        _link.Writes.Single().ShouldNotBe(ServiceSettings.Default);
+        form.Message.ShouldBe("Saved.");
+    }
+
+    [Fact]
+    public void A_monitors_ticks_and_figure_save_at_once_and_once_each()
+    {
+        var form = SavingItself();
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        var (dell, aoc) = (form.Monitors[0], form.Monitors[1]);
+
+        aoc.Counted = false;
+        dell.OwnPlug = false;
+        aoc.Watts = "17";
+
+        _link.Writes.Cast<ServiceSettings>().Select(sent => sent.Profile).ShouldBe(
+        [
+            MachineProfile.DefaultLaptop with { Monitors = [new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false }] },
+            MachineProfile.DefaultLaptop with
+            {
+                Monitors = [new MonitorChoice { Key = Statuses.Dell.Key, OwnPlug = false }, new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false }],
+            },
+            MachineProfile.DefaultLaptop with
+            {
+                Monitors = [new MonitorChoice { Key = Statuses.Dell.Key, OwnPlug = false }, new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false, Watts = 17 }],
+            },
+        ]);
+    }
+
+    [Theory]
+    [InlineData(nameof(ServiceForm.FanCount), "two", "Type the fans as a whole number.")]
+    [InlineData(nameof(ServiceForm.IdleMinutes), "45", "The idle threshold is between 1 and 30 minutes.")]
+    [InlineData(nameof(ServiceForm.PanelInches), "80", "The panel size must be 0 for none, or between 7 and 50 inches.")]
+    public void A_value_that_cannot_be_sent_is_said_stays_in_its_box_and_sends_nothing_until_it_is_put_right(string field, string typed, string problem)
+    {
+        var form = SavingItself();
+        var property = typeof(ServiceForm).GetProperty(field)!;
+        var loaded = property.GetValue(form);
+
+        property.SetValue(form, typed);
+
+        form.Message.ShouldBe(problem);
+        property.GetValue(form).ShouldBe(typed);
+        _link.Writes.ShouldBeEmpty();
+
+        property.SetValue(form, loaded);
+        _link.Writes.Single().ShouldBe(ServiceSettings.Default);
+        form.Message.ShouldBe("Saved.");
+    }
+
+    [Fact]
+    public void A_monitors_figure_that_cannot_be_sent_is_said_and_sends_nothing()
+    {
+        var form = SavingItself();
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+
+        form.Monitors[1].Watts = "lots";
+
+        form.Message.ShouldBe("Type the watts for 24B1XH5 as a number.");
+        form.Monitors[1].Watts.ShouldBe("lots");
+        _link.Writes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Loading_the_settings_and_what_the_service_says_of_the_monitors_since_send_nothing()
+    {
+        // The service's figure moves a box the user hasn't typed in, and its defaults and choices move boxes they haven't
+        // ticked, but only what the user changes is sent.
+        var form = SavingItself();
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        form.ShowMonitors([Statuses.Dell with { OnWatts = 28.1 }, Statuses.Portable, Statuses.Aoc with { CountedByDefault = false, Counted = false }]);
+        form.Monitors[0].Watts.ShouldBe("28.1");
+
+        form.Load(ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultDesktop with { Monitors = [new MonitorChoice { Key = Statuses.Dell.Key, Counted = false, Watts = 30 }] },
+            IdleThresholdSeconds = 600,
+        });
+        form.ShowMonitors([Statuses.Dell with { OnWatts = 30, Source = MonitorSource.Typed, Counted = false }]);
+
+        _link.Writes.ShouldBeEmpty();
+        form.Message.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_save_that_reads_the_settings_again_sends_once()
+    {
+        // Reading them again puts the figure carried over in the box the user didn't type in, which isn't the user's change.
+        var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 1, IncludeMonitors = true, MonitorWatts = 30, Monitors = [] };
+        var form = new ServiceForm(_link, UiThreads.Inline, English, savesItself: true);
+        form.Load(ServiceSettings.Default with { Profile = old });
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        var carried = old with
+        {
+            ExternalMonitors = 0, IncludeMonitors = false,
+            Monitors = [.. new[] { Statuses.Dell.Key, Statuses.Aoc.Key }.Select(key => new MonitorChoice { Key = key, Watts = 30 })],
+        };
+        _link.Settings = ServiceSettings.Default with { Profile = carried };
+
+        form.Monitors[1].Counted = false;
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, Watts = 30 },
+            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false, Watts = 30 },
+        ]);
+        form.Monitors[0].Watts.ShouldBe("30");
+    }
+
+    [Fact]
+    public void Changes_made_while_a_save_is_on_its_way_are_sent_together_after_it_and_the_last_one_wins()
+    {
+        var answers = new Queue<Action>();
+        var form = SavingItself(answers);
+
+        form.FanCount = "2";
+        form.FanCount = "3";
+        form.RamIsDdr5 = true;
+        form.FanCount = "4";
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.FanCount.ShouldBe(2);   // the rest wait for its answer
+        form.Message.ShouldBe("Saving…");
+
+        Answer(answers);
+
+        _link.Writes.Cast<ServiceSettings>().Select(sent => (sent.Profile.FanCount, sent.Profile.RamIsDdr5)).ShouldBe([(2, false), (4, true)]);
+        form.Message.ShouldBe("Saved.");
+    }
+
+    [Fact]
+    public async Task A_form_that_doesnt_save_itself_sends_nothing_until_it_is_saved()
+    {
+        // The wizard's form, which saves when Next is pressed.
+        var form = Form();
+        form.ShowMonitors([Statuses.Dell]);
+
+        form.FanCount = "4";
+        form.RamIsDdr5 = true;
+        form.Monitors.Single().Counted = false;
+
+        _link.Writes.ShouldBeEmpty();
+        (await form.SaveAsync()).ShouldBeTrue();
+        _link.Writes.Count.ShouldBe(1);
     }
 
     [Theory]

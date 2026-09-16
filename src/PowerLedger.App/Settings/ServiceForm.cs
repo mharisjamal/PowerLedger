@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -18,13 +19,16 @@ namespace PowerLedger.App;
 /// carries them over to the monitors it finds; once the form lists one, the choices it shows replace them. The old figure,
 /// which no longer reaches the model, always goes back as it came. When the settings loaded are behind the service's, as
 /// they are once it has carried the old monitor settings over, a save reads them again and takes from them what the form
-/// doesn't show, so it never puts back what was carried over; what the user typed and ticked stays.
+/// doesn't show, so it never puts back what was carried over; what the user typed and ticked stays. A form that saves itself,
+/// as Settings' does, sends the settings whenever the user changes a value, one save at a time, while what the form fills in
+/// itself, from the service's settings or its status, sends nothing. The wizard's form saves when asked.
 /// </summary>
 internal sealed class ServiceForm : ObservableObject
 {
     private readonly IServiceLink _link;
     private readonly UiThreads _threads;
     private readonly CultureInfo _culture;
+    private readonly bool _savesItself;
     private readonly RelayCommand _save;
     private MachineProfile _profile = MachineProfile.DefaultLaptop;
     private IReadOnlyList<MonitorChoice> _choices = [];
@@ -46,11 +50,24 @@ internal sealed class ServiceForm : ObservableObject
     private string _historyYears = "";
     private string? _message;
 
-    public ServiceForm(IServiceLink link, UiThreads threads, CultureInfo culture)
+    /// <summary>The form is changing what it shows itself, as it loads the settings, follows the service's word for the
+    /// monitors or takes the settings a save read again, so nothing it changes is taken for the user's change.</summary>
+    private bool _quiet;
+
+    /// <summary>A save the form started by itself is on its way.</summary>
+    private bool _saving;
+
+    /// <summary>The user changed something while that save was on its way, so the settings are sent again once it is done.</summary>
+    private bool _changedSince;
+
+    /// <param name="savesItself">Send the settings whenever the user changes something, as Settings does; the wizard sends
+    /// them when Next is pressed.</param>
+    public ServiceForm(IServiceLink link, UiThreads threads, CultureInfo culture, bool savesItself = false)
     {
         _link = link;
         _threads = threads;
         _culture = culture;
+        _savesItself = savesItself;
         _save = new RelayCommand(() => _ = SaveAsync(), () => IsLoaded);
     }
 
@@ -72,27 +89,29 @@ internal sealed class ServiceForm : ObservableObject
         get => _chassis;
         set
         {
-            if (SetProperty(ref _chassis, value)) OnPropertyChanged(nameof(IsDesktop));
+            if (!SetProperty(ref _chassis, value)) return;
+            OnPropertyChanged(nameof(IsDesktop));
+            OnChanged();
         }
     }
 
     /// <summary>A desktop's power supply matters; a laptop's adapter is modelled instead.</summary>
     public bool IsDesktop => Chassis == ChassisKind.Desktop;
 
-    public PsuTier PsuTier { get => _psuTier; set => SetProperty(ref _psuTier, value); }
+    public PsuTier PsuTier { get => _psuTier; set => Change(ref _psuTier, value); }
 
-    public string RamSticks { get => _ramSticks; set => SetProperty(ref _ramSticks, value); }
+    public string RamSticks { get => _ramSticks; set => Change(ref _ramSticks, value); }
 
-    public bool RamIsDdr5 { get => _ramIsDdr5; set => SetProperty(ref _ramIsDdr5, value); }
+    public bool RamIsDdr5 { get => _ramIsDdr5; set => Change(ref _ramIsDdr5, value); }
 
-    public string SsdCount { get => _ssdCount; set => SetProperty(ref _ssdCount, value); }
+    public string SsdCount { get => _ssdCount; set => Change(ref _ssdCount, value); }
 
-    public string HddCount { get => _hddCount; set => SetProperty(ref _hddCount, value); }
+    public string HddCount { get => _hddCount; set => Change(ref _hddCount, value); }
 
-    public string FanCount { get => _fanCount; set => SetProperty(ref _fanCount, value); }
+    public string FanCount { get => _fanCount; set => Change(ref _fanCount, value); }
 
     /// <summary>The built-in panel's diagonal in inches; 0 for none.</summary>
-    public string PanelInches { get => _panelInches; set => SetProperty(ref _panelInches, value); }
+    public string PanelInches { get => _panelInches; set => Change(ref _panelInches, value); }
 
     /// <summary>The external monitors the service detected, each with the user's choice for it (Plan J).</summary>
     public ObservableCollection<MonitorRow> Monitors { get; } = [];
@@ -100,22 +119,22 @@ internal sealed class ServiceForm : ObservableObject
     /// <summary>The monitor rows show only when there are monitors to list.</summary>
     public bool HasMonitors => Monitors.Count > 0;
 
-    public string ExtrasWatts { get => _extrasWatts; set => SetProperty(ref _extrasWatts, value); }
+    public string ExtrasWatts { get => _extrasWatts; set => Change(ref _extrasWatts, value); }
 
     /// <summary>The processor's rated watts; blank uses the bundled table.</summary>
-    public string CpuTdp { get => _cpuTdp; set => SetProperty(ref _cpuTdp, value); }
+    public string CpuTdp { get => _cpuTdp; set => Change(ref _cpuTdp, value); }
 
     /// <summary>The graphics card's rated watts; blank uses the bundled table.</summary>
-    public string GpuTdp { get => _gpuTdp; set => SetProperty(ref _gpuTdp, value); }
+    public string GpuTdp { get => _gpuTdp; set => Change(ref _gpuTdp, value); }
 
-    public string IdleMinutes { get => _idleMinutes; set => SetProperty(ref _idleMinutes, value); }
+    public string IdleMinutes { get => _idleMinutes; set => Change(ref _idleMinutes, value); }
 
     /// <summary>"1" to "5" seconds, chosen with segmented buttons.</summary>
-    public string SampleInterval { get => _sampleInterval; set => SetProperty(ref _sampleInterval, value); }
+    public string SampleInterval { get => _sampleInterval; set => Change(ref _sampleInterval, value); }
 
-    public string RawHours { get => _rawHours; set => SetProperty(ref _rawHours, value); }
+    public string RawHours { get => _rawHours; set => Change(ref _rawHours, value); }
 
-    public string HistoryYears { get => _historyYears; set => SetProperty(ref _historyYears, value); }
+    public string HistoryYears { get => _historyYears; set => Change(ref _historyYears, value); }
 
     public string? Message { get => _message; private set => SetProperty(ref _message, value); }
 
@@ -123,11 +142,12 @@ internal sealed class ServiceForm : ObservableObject
 
     /// <summary>Fills the form from the service's settings. The monitors are listed afresh by <see cref="ShowMonitors"/>,
     /// with the choices these settings hold.</summary>
-    public void Load(ServiceSettings settings)
+    public void Load(ServiceSettings settings) => Quietly(() =>
     {
         var p = settings.Profile;
         _profile = p;
         _choices = p.Monitors ?? [];   // settings from a service before monitors hold no list
+        foreach (var row in Monitors) row.Changed -= OnChanged;
         Monitors.Clear();
         OnPropertyChanged(nameof(HasMonitors));
         Chassis = p.Chassis;
@@ -146,7 +166,7 @@ internal sealed class ServiceForm : ObservableObject
         RawHours = Whole(settings.RawRetentionHours);
         HistoryYears = Whole(settings.HistoryRetentionYears);
         IsLoaded = true;
-    }
+    });
 
     /// <summary>Lists the external monitors in the service's status, once each and in its order, with the user's choice for
     /// each from the settings last loaded, or read again by a save. A monitor already listed keeps its row, and with it what
@@ -157,7 +177,9 @@ internal sealed class ServiceForm : ObservableObject
         var listed = monitors.OfType<MonitorStatus>().DistinctBy(monitor => monitor.Key).ToList();
         for (var index = Monitors.Count - 1; index >= 0; index--)
         {
-            if (!listed.Exists(monitor => monitor.Key == Monitors[index].Key)) Monitors.RemoveAt(index);
+            if (listed.Exists(monitor => monitor.Key == Monitors[index].Key)) continue;
+            Monitors[index].Changed -= OnChanged;
+            Monitors.RemoveAt(index);
         }
         for (var index = 0; index < listed.Count; index++)
         {
@@ -165,12 +187,14 @@ internal sealed class ServiceForm : ObservableObject
             var row = Monitors.FirstOrDefault(candidate => candidate.Key == monitor.Key);
             if (row is null)
             {
-                Monitors.Insert(index, new MonitorRow(monitor, ChoiceFor(monitor.Key), _culture));
+                row = new MonitorRow(monitor, ChoiceFor(monitor.Key), _culture);
+                row.Changed += OnChanged;
+                Monitors.Insert(index, row);
                 continue;
             }
             var at = Monitors.IndexOf(row);
             if (at != index) Monitors.Move(at, index);
-            row.Refresh(monitor);
+            Quietly(() => row.Refresh(monitor));
         }
         OnPropertyChanged(nameof(HasMonitors));
     }
@@ -264,7 +288,10 @@ internal sealed class ServiceForm : ObservableObject
         }
         _profile = current.Profile;
         _choices = current.Profile.Monitors ?? [];   // settings from a service before monitors hold no list
-        foreach (var row in Monitors) row.Take(ChoiceFor(row.Key), _profile.CountMonitorsByDefault);
+        Quietly(() =>
+        {
+            foreach (var row in Monitors) row.Take(ChoiceFor(row.Key), _profile.CountMonitorsByDefault);
+        });
         if (Read(out var problem) is { } settings) return settings;
         Message = problem;
         return null;
@@ -272,6 +299,62 @@ internal sealed class ServiceForm : ObservableObject
 
     /// <summary>The choice the settings last taken hold for the monitor, or null.</summary>
     private MonitorChoice? ChoiceFor(string key) => _choices.FirstOrDefault(choice => choice?.Key == key);
+
+    /// <summary>Takes a value the user set, and says so.</summary>
+    private void Change<T>(ref T field, T value, [CallerMemberName] string? property = null)
+    {
+        if (SetProperty(ref field, value, property)) OnChanged();
+    }
+
+    /// <summary>Makes a change the user didn't: nothing it changes is sent. Call on the UI thread.</summary>
+    private void Quietly(Action change)
+    {
+        var quiet = _quiet;
+        _quiet = true;
+        try
+        {
+            change();
+        }
+        finally
+        {
+            _quiet = quiet;
+        }
+    }
+
+    /// <summary>The user changed something. A form that saves itself sends the settings now, or, while a save it started is
+    /// on its way, once that save is done. Call on the UI thread.</summary>
+    private void OnChanged()
+    {
+        if (_quiet || !_savesItself) return;
+        if (_saving)
+        {
+            _changedSince = true;
+            return;
+        }
+        _saving = true;
+        _ = SaveInTurnAsync();
+    }
+
+    /// <summary>Sends the settings, and once that save is done, on the UI thread, sends them again if the user changed anything
+    /// while it was on its way. So one save is on its way at a time, and however many changes were made meanwhile, one more
+    /// save carries the last of them.</summary>
+    private async Task SaveInTurnAsync()
+    {
+        try
+        {
+            await SaveAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _threads.Post(() =>
+            {
+                _saving = false;
+                if (!_changedSince) return;
+                _changedSince = false;
+                OnChanged();
+            });
+        }
+    }
 
     /// <summary>
     /// The choices that say what PowerLedger wouldn't assume: first those for the monitors listed, in their order, then those
