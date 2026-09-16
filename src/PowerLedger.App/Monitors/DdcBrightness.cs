@@ -4,15 +4,15 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.App;
 
-/// <summary>What one monitor answered in a read, under the device path Windows names it by: its brightness, when it gave one,
-/// and its power state, when its power mode is one. It has at least one of the two.</summary>
+/// <summary>What one monitor answered in a read, under the device path Windows names it by: its brightness, when it was asked
+/// for that and gave one, and its power state, when its power mode is one. It has at least one of the two.</summary>
 internal sealed record DdcReading(string DevicePath, double? Brightness, MonitorPowerState? Power);
 
 internal interface IBrightnessReader
 {
-    /// <summary>Every monitor that answered, with its brightness and whether it is on. Slow (about 40 ms a request, with 50 ms
-    /// between one monitor's requests, and more the first time, when each is asked what it supports): call it off the UI
-    /// thread.</summary>
+    /// <summary>Every monitor that answered, with its power state and, when that was due, its brightness. Slow (about 40 ms a
+    /// request, with 50 ms between one monitor's requests, and more the first time, when each is asked what it supports):
+    /// call it off the UI thread.</summary>
     IReadOnlyList<DdcReading> Read();
 }
 
@@ -20,30 +20,34 @@ internal interface IBrightnessReader
 /// DDC/CI brightness and power mode (spec §5), read-only and careful, because Microsoft warns many monitors implement the
 /// commands badly: each physical monitor is asked for its capabilities once, and read only if it reports brightness
 /// support; a monitor that says it has no brightness is then left alone for the rest of the session - never asked anything
-/// again; nothing is ever written. A monitor that reports brightness is asked for its brightness, then for its power mode
-/// (MCCS VCP code D6), each request <see cref="RequestGap"/> after it answered the one before. GetMonitorCapabilities,
-/// GetMonitorBrightness and GetVCPFeatureAndVCPFeatureReply for code D6 alone are the only requests a monitor is sent, all
-/// three of them Get requests, one read at a time, and every handle a read opens is destroyed before it returns.
+/// again; nothing is ever written. A monitor that reports brightness is asked for its power mode (MCCS VCP code D6) at
+/// every read, and before that for its brightness once its last answer to that is <see cref="BrightnessEvery"/> old, each
+/// request <see cref="RequestGap"/> after it answered the one before. GetMonitorCapabilities, GetMonitorBrightness and
+/// GetVCPFeatureAndVCPFeatureReply for code D6 alone are the only requests a monitor is sent, all three of them Get
+/// requests, one read at a time. A display none of whose monitors has a request due isn't opened, and every handle a read
+/// opens is destroyed before it returns.
 ///
 /// A monitor that says it has no brightness isn't asked its power mode either. No capability flag covers power mode, so
-/// supporting brightness, the standard's most basic control, is the only sign a monitor answers the standard's requests
+/// supporting brightness, the standard's commonest control, is the only sign a monitor answers the standard's requests
 /// properly; without it the request would go to a monitor nothing has vouched for, and the user's Count tick decides for it
-/// instead. A monitor that answers its other requests in a read but fails its power-mode request is taken not to support
-/// power mode, and isn't asked it again until a display change or a resume.
+/// instead. A monitor that answers what it supports or its brightness in a read but fails its power-mode request is taken
+/// not to support power mode, and isn't asked it again until a display change or a resume. One that fails its power-mode
+/// request when that is all it is asked in a read has answered nothing, so it has failed as a whole, as below.
 ///
 /// How long a monitor that fails a call is left alone depends on whether it has given a brightness this session. One that
 /// hasn't is left alone for the rest of the session, as its firmware may be one the requests upset. One that has given a
 /// brightness has shown they don't, and most often fails for a reason Windows doesn't announce - it was switched off at
 /// its own button, set to another input, or is still waking - so it is left alone only for a while: the next read asks it
 /// again, each failure in a row after that doubles the wait, up to <see cref="LongestWait"/>, and answering its brightness
-/// request ends it.
+/// or its power-mode request ends it.
 ///
 /// A display change (a monitor plugged in or out, or display settings changed) or a resume from sleep ends all of this:
-/// either forgets everything every monitor has answered, whether it supports power mode included, and every failure,
-/// because a monitor commonly fails, or answers wrongly, while it is waking up or while it is being plugged in. Only which
-/// monitors have given a brightness is kept, as neither event changes a monitor's firmware. <see cref="Dispose"/> must be
-/// called once the reader is no longer wanted: the events it listens for come from the static <see cref="SystemEvents"/>
-/// class, which would otherwise keep the reader alive for as long as the process runs.
+/// either forgets everything every monitor has answered, whether it supports power mode and when it last gave its
+/// brightness included, and every failure, because a monitor commonly fails, or answers wrongly, while it is waking up or
+/// while it is being plugged in. Only which monitors have given a brightness is kept, as neither event changes a monitor's
+/// firmware. <see cref="Dispose"/> must be called once the reader is no longer wanted: the events it listens for come from
+/// the static <see cref="SystemEvents"/> class, which would otherwise keep the reader alive for as long as the process
+/// runs.
 /// </summary>
 internal sealed class DdcBrightness : IBrightnessReader, IDisposable
 {
@@ -59,6 +63,11 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// finish one request isn't sent the next at once.</summary>
     internal static readonly TimeSpan RequestGap = TimeSpan.FromMilliseconds(50);
 
+    /// <summary>How old a monitor's last answer to its brightness request must be before a read asks for its brightness
+    /// again: five reads. Its power mode is asked at every read, so that a monitor switched off, if it still answers, is
+    /// noticed within a minute.</summary>
+    internal static readonly TimeSpan BrightnessEvery = TimeSpan.FromMinutes(5);
+
     /// <summary>How long a monitor that has given a brightness is left alone after it first fails: one read, so the next
     /// scheduled read asks it again.</summary>
     internal static readonly TimeSpan FirstWait = BrightnessReporter.ReadEvery;
@@ -70,9 +79,10 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// <summary>How a monitor's device interface path begins; Contracts' MonitorKeys reads the rest.</summary>
     private const string DisplayPath = @"\\?\DISPLAY#";
 
-    /// <summary>How early a read may start and still end a wait: half a read. Reads are scheduled a read apart, but one
-    /// that starts a moment late and the next, which starts on time, are a little less than that apart, and the read due
-    /// when a wait ends should still ask.</summary>
+    /// <summary>How early a read may start and still end a wait, or find a brightness due: half a read. Reads are scheduled
+    /// a read apart, but one that starts a moment late and the next, which starts on time, are a little less than that
+    /// apart, and the read due when a wait ends, or when a brightness is <see cref="BrightnessEvery"/> old, should still
+    /// ask.</summary>
     private static readonly TimeSpan Leeway = BrightnessReporter.ReadEvery / 2;
 
     private readonly IMonitorCalls _windows;
@@ -85,7 +95,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     private readonly Lock _gate = new();
 
     /// <summary>Monitors that said they support brightness, so are read without asking again what they support. Cleared,
-    /// with the next four, by a display change or a resume.</summary>
+    /// with the next five, by a display change or a resume.</summary>
     private readonly HashSet<string> _readable = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Monitors that said they don't support brightness: never asked anything again until cleared.</summary>
@@ -95,17 +105,22 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// to support power mode: never asked it again until cleared.</summary>
     private readonly HashSet<string> _noPowerMode = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>The <see cref="TimeProvider.GetTimestamp"/> at which each monitor last answered its brightness request, which
+    /// decides when its brightness is next due. An answer without a range counts, so a monitor that gives one isn't asked
+    /// for its brightness at every read.</summary>
+    private readonly Dictionary<string, long> _brightnessAt = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Monitors that failed a call without having given a brightness this session: left alone until
     /// cleared.</summary>
     private readonly HashSet<string> _failed = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Monitors that have given a brightness and failed since, each with how long it is left alone and the
-    /// <see cref="TimeProvider.GetTimestamp"/> of its last failure. Answering its brightness request takes a monitor off,
-    /// and so does clearing.</summary>
+    /// <see cref="TimeProvider.GetTimestamp"/> of its last failure. Answering its brightness or its power-mode request takes
+    /// a monitor off, and so does clearing.</summary>
     private readonly Dictionary<string, (TimeSpan Wait, long At)> _waiting = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Monitors that have given a brightness this session, which decides how a failure is taken; never cleared.
-    /// Every one of these six collections is keyed by device path and holds at most one entry per monitor Windows has
+    /// Every one of these seven collections is keyed by device path and holds at most one entry per monitor Windows has
     /// ever reported this run, so together they are bounded by the physical monitors the PC has shown - a handful at
     /// most - never by how long the App runs or how often it reads.</summary>
     private readonly HashSet<string> _answered = new(StringComparer.OrdinalIgnoreCase);
@@ -211,8 +226,16 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         }
     }
 
+    /// <summary>Whether the monitor may be asked anything now, and has a request due: what it supports, when that isn't
+    /// known, its brightness, when that is due, or its power mode, unless it has been taken not to support that.</summary>
     private bool Askable(string path)
-        => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_unsupported.Contains(path) && !_failed.Contains(path) && !Waiting(path);
+        => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_unsupported.Contains(path) && !_failed.Contains(path) && !Waiting(path)
+           && (!_readable.Contains(path) || BrightnessDue(path) || !_noPowerMode.Contains(path));
+
+    /// <summary>Whether the monitor's brightness is to be asked: it hasn't answered its brightness request since the App
+    /// started or the reader last forgot, or its last answer is <see cref="BrightnessEvery"/> old.</summary>
+    private bool BrightnessDue(string path)
+        => !_brightnessAt.TryGetValue(path, out var at) || _clock.GetElapsedTime(at) >= BrightnessEvery - Leeway;
 
     /// <summary>Whether the monitor has given a brightness, failed since, and is still being left alone for it.</summary>
     private bool Waiting(string path)
@@ -221,18 +244,20 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// <summary>
     /// Whether each physical monitor is the attached monitor at the same place in its list. Windows documents neither
     /// order, though in practice they agree, so the counts must match and so must each pair's descriptions. Otherwise
-    /// the handles can't be told apart, and none is asked rather than one monitor's brightness being reported under
-    /// another's name. Nothing was asked of the monitors, so none is left alone for it: the next read looks again.
+    /// the handles can't be told apart, and none is asked rather than one monitor's answers being reported under another's
+    /// name. Nothing was asked of the monitors, so none is left alone for it: the next read looks again.
     /// </summary>
     private static bool Matched(List<AttachedMonitor> attached, IReadOnlyList<PhysicalMonitor> physical)
         => attached.Count == physical.Count
            && attached.Zip(physical).All(pair => string.Equals(pair.First.Description, pair.Second.Description, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>What the monitor answers, first asking what it supports if that hasn't been remembered yet: its brightness,
-    /// then its power mode, unless it has been taken not to support that. Null when it gives neither.</summary>
+    /// when that is due, then its power mode, unless it has been taken not to support that. Null when it gives
+    /// neither.</summary>
     private DdcReading? Ask(IntPtr monitor, string path)
     {
-        double? brightness;
+        var answered = false;   // whether the monitor has answered a request in this read
+        double? brightness = null;
         try
         {
             if (!_readable.Contains(path))
@@ -245,12 +270,18 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
                     return null;
                 }
                 _readable.Add(path);
-                _pause(RequestGap);
+                answered = true;
             }
-            if (_windows.Brightness(monitor) is not { } setting) return Failed(path);
-            _waiting.Remove(path);   // it answered, so its failures in a row are over
-            brightness = Normalise(setting.Minimum, setting.Current, setting.Maximum);
-            if (brightness is not null) _answered.Add(path);
+            if (BrightnessDue(path))
+            {
+                if (answered) _pause(RequestGap);
+                if (_windows.Brightness(monitor) is not { } setting) return Failed(path);
+                _waiting.Remove(path);   // it answered, so its failures in a row are over
+                _brightnessAt[path] = _clock.GetTimestamp();
+                brightness = Normalise(setting.Minimum, setting.Current, setting.Maximum);
+                if (brightness is not null) _answered.Add(path);
+                answered = true;
+            }
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -259,8 +290,13 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         MonitorPowerState? power = null;
         if (!_noPowerMode.Contains(path))
         {
-            _pause(RequestGap);
-            if (PowerMode(monitor) is { } mode) power = PowerState(mode);
+            if (answered) _pause(RequestGap);
+            if (PowerMode(monitor) is { } mode)
+            {
+                _waiting.Remove(path);   // it answered, so its failures in a row are over
+                power = PowerState(mode);
+            }
+            else if (!answered) return Failed(path);   // the only request it was sent in this read, so it has failed as a whole
             else _noPowerMode.Add(path);   // it has just answered the others, so it doesn't support this one
         }
         return brightness is null && power is null ? null : new DdcReading(path, brightness, power);
@@ -328,6 +364,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         _readable.Clear();
         _unsupported.Clear();
         _noPowerMode.Clear();
+        _brightnessAt.Clear();
         _failed.Clear();
         _waiting.Clear();
     }

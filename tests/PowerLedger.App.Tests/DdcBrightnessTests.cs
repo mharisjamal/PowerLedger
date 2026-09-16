@@ -82,11 +82,52 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var dell = new FakeMonitor(Dell);
         var reader = Reader(new FakeDisplay(dell));
 
-        for (var read = 0; read < 3; read++) reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+        for (var read = 0; read < 3; read++)
+        {
+            reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+            _clock.Advance(DdcBrightness.BrightnessEvery);
+        }
 
         dell.CapabilityCalls.ShouldBe(1);
         dell.BrightnessCalls.ShouldBe(3);
         dell.PowerModeCalls.ShouldBe(3);
+    }
+
+    [Fact]
+    public void A_monitor_is_asked_its_power_mode_at_every_read_and_its_brightness_every_five_minutes()
+    {
+        var dell = new FakeMonitor(Dell);
+        var reader = Reader(new FakeDisplay(dell));
+
+        var brightnessAt = new List<int>();   // the minutes at which the monitor gave its brightness
+        for (var minute = 0; minute <= 15; minute++)
+        {
+            var reading = reader.Read().ShouldHaveSingleItem();
+            reading.Power.ShouldBe(MonitorPowerState.On);
+            if (reading.Brightness is not null) brightnessAt.Add(minute);
+            _clock.Advance(BrightnessReporter.ReadEvery);
+        }
+
+        brightnessAt.ShouldBe([0, 5, 10, 15]);
+        dell.PowerModeCalls.ShouldBe(16);
+        dell.BrightnessCalls.ShouldBe(4);
+        dell.CapabilityCalls.ShouldBe(1);
+        BrightnessReporter.ReadEvery.ShouldBe(TimeSpan.FromMinutes(1));
+        DdcBrightness.BrightnessEvery.ShouldBe(TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public void The_read_due_when_a_brightness_is_five_minutes_old_asks_for_it_even_when_it_starts_a_moment_early()
+    {
+        // Reads are scheduled a minute apart, but the one that was given the brightness may have started a moment late.
+        var dell = new FakeMonitor(Dell);
+        var reader = Reader(new FakeDisplay(dell));
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+
+        _clock.Advance(BrightnessReporter.ReadEvery * 4 + TimeSpan.FromSeconds(20));
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);   // four minutes on, even a little late, isn't five
+        _clock.Advance(BrightnessReporter.ReadEvery - TimeSpan.FromSeconds(23));
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);   // five minutes on, less a moment
     }
 
     [Theory]
@@ -134,21 +175,25 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     public void A_monitor_that_answers_its_other_requests_but_not_its_power_mode_is_taken_not_to_support_it(string failure)
     {
         var dell = Failing(new FakeMonitor(Dell), failure);
-        var reader = Reader(new FakeDisplay(dell));
+        var display = new FakeDisplay(dell);
+        var reader = Reader(display);
 
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, null)]);
 
         // It had only just answered, so it hasn't gone quiet: however long the App runs, and even if it would answer now,
         // only a display change or a resume makes the request worth sending again.
         Answering(dell);
-        for (var read = 0; read < 20; read++)
+        for (var minute = 1; minute <= 20; minute++)
         {
             _clock.Advance(BrightnessReporter.ReadEvery);
-            reader.Read().ShouldBe([new DdcReading(Dell, 0.6, null)]);
+            var readings = reader.Read();
+            if (minute % 5 == 0) readings.ShouldBe([new DdcReading(Dell, 0.6, null)]);   // its brightness is due
+            else readings.ShouldBeEmpty();   // nothing is due, so nothing is asked
         }
 
         dell.PowerModeCalls.ShouldBe(1);
-        dell.BrightnessCalls.ShouldBe(21);   // its brightness is still read
+        dell.BrightnessCalls.ShouldBe(5);   // its brightness is still read, every five minutes
+        display.Opens.ShouldBe(5);   // and between those reads its display isn't opened
         _windows.OpenHandles.ShouldBe(0);
     }
 
@@ -160,11 +205,13 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var dell = Failing(new FakeMonitor(Dell), "power mode fails");
         var reader = Reader(new FakeDisplay(dell));
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, null)]);
-        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, null)]);
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBeEmpty();   // its brightness isn't due, and its power mode isn't asked
 
         Answering(dell);
         if (displayChange) _events.RaiseDisplaySettingsChanged();
         else _events.RaisePowerModeChanged(PowerModes.Resume);
+        _clock.Advance(BrightnessReporter.ReadEvery);
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
 
         dell.PowerModeCalls.ShouldBe(2);
@@ -178,8 +225,13 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var reader = Reader(new FakeDisplay(dell));
 
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, null)]);
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBeEmpty();   // still no state, and its brightness isn't due
         dell.PowerMode = 4;
-        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.Off)]);
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.Off)]);
+
+        dell.PowerModeCalls.ShouldBe(3);
     }
 
     [Theory]
@@ -219,15 +271,38 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
 
         Failing(dell, failure);
+        _clock.Advance(DdcBrightness.BrightnessEvery);   // its brightness is due
+        reader.Read().ShouldBeEmpty();   // and it fails, so its power mode isn't asked after it
+
+        Answering(dell);   // switched back on
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);   // its brightness is still due
+
+        dell.CapabilityCalls.ShouldBe(1);   // what it supports is still known, so only its brightness is asked again
+        dell.BrightnessCalls.ShouldBe(3);
+        dell.PowerModeCalls.ShouldBe(2);
+    }
+
+    [Theory]
+    [InlineData("power mode fails")]
+    [InlineData("power mode throws")]
+    public void A_monitor_that_has_given_a_brightness_and_then_fails_the_only_request_of_a_read_is_asked_again_at_the_next_read(string failure)
+    {
+        // Between its brightness reads, a monitor is asked only its power mode. Failing that, it has answered nothing, so it
+        // has failed as a whole, like a monitor switched off, rather than shown it doesn't support the request.
+        var dell = new FakeMonitor(Dell);
+        var reader = Reader(new FakeDisplay(dell));
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+
+        Failing(dell, failure);
         _clock.Advance(BrightnessReporter.ReadEvery);
         reader.Read().ShouldBeEmpty();
 
         Answering(dell);   // switched back on
         _clock.Advance(BrightnessReporter.ReadEvery);
-        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);
 
-        dell.CapabilityCalls.ShouldBe(1);   // what it supports is still known, so only its brightness is asked again
-        dell.BrightnessCalls.ShouldBe(3);
+        dell.PowerModeCalls.ShouldBe(3);
     }
 
     [Fact]
@@ -238,19 +313,21 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var reader = Reader(display);
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
         var start = _clock.GetUtcNow();
-        dell.Brightness = null;   // switched off at its own button, and left off
+        Silent(dell);   // switched off at its own button, and left off
 
         var asked = new List<int>();   // the minutes after that first read at which the monitor is asked
-        for (var read = 0; read < 60; read++)   // five hours of reads
+        for (var read = 0; read < 300; read++)   // five hours of reads
         {
             _clock.Advance(BrightnessReporter.ReadEvery);
-            var calls = dell.BrightnessCalls;
+            var calls = dell.Calls;
             reader.Read().ShouldBeEmpty();
-            if (dell.BrightnessCalls > calls) asked.Add((int)(_clock.GetUtcNow() - start).TotalMinutes);
+            if (dell.Calls > calls) asked.Add((int)(_clock.GetUtcNow() - start).TotalMinutes);
         }
 
-        // Asked at the next read, then left alone for 10, 20 and 40 minutes, then for an hour at a time.
-        asked.ShouldBe([5, 10, 20, 40, 80, 140, 200, 260]);
+        // Asked at the next read and the one after, then left alone for 2, 4, 8, 16 and 32 minutes, then for an hour at a
+        // time: its power mode at first, and its brightness once that is due.
+        asked.ShouldBe([1, 2, 4, 8, 16, 32, 64, 124, 184, 244]);
+        dell.Calls.ShouldBe(3 + asked.Count);   // each time, one request, which fails, and nothing after it
         display.Opens.ShouldBe(1 + asked.Count);   // while its only monitor is left alone, a display isn't opened
         DdcBrightness.FirstWait.ShouldBe(BrightnessReporter.ReadEvery);
         DdcBrightness.LongestWait.ShouldBe(TimeSpan.FromHours(1));
@@ -263,16 +340,16 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var reader = Reader(new FakeDisplay(dell));
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
 
-        dell.Brightness = null;
+        Silent(dell);
         _clock.Advance(BrightnessReporter.ReadEvery);
         reader.Read().ShouldBeEmpty();   // left alone for a read
         _clock.Advance(BrightnessReporter.ReadEvery);
         reader.Read().ShouldBeEmpty();   // and now for two
         Answering(dell);
         _clock.Advance(BrightnessReporter.ReadEvery * 2);
-        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);   // its power mode is an answer too
 
-        dell.Brightness = null;
+        Silent(dell);
         _clock.Advance(BrightnessReporter.ReadEvery);
         reader.Read().ShouldBeEmpty();   // the first failure in a new run, so left alone for a read, not four
         Answering(dell);
@@ -283,19 +360,19 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     [Fact]
     public void The_read_that_ends_a_wait_asks_the_monitor_even_when_it_starts_a_moment_early()
     {
-        // Reads are scheduled five minutes apart, but one that starts a moment late and the next, which starts on time,
-        // are a little less than that apart.
+        // Reads are scheduled a minute apart, but one that starts a moment late and the next, which starts on time, are a
+        // little less than that apart.
         var dell = new FakeMonitor(Dell);
         var reader = Reader(new FakeDisplay(dell));
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
 
-        dell.Brightness = null;
+        Silent(dell);
         _clock.Advance(BrightnessReporter.ReadEvery + TimeSpan.FromSeconds(3));
         reader.Read().ShouldBeEmpty();
 
         Answering(dell);
         _clock.Advance(BrightnessReporter.ReadEvery - TimeSpan.FromSeconds(3));
-        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);
     }
 
     [Theory]
@@ -306,7 +383,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var dell = new FakeMonitor(Dell);
         var reader = Reader(new FakeDisplay(dell));
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
-        dell.Brightness = null;
+        Silent(dell);
         _clock.Advance(BrightnessReporter.ReadEvery);
         reader.Read().ShouldBeEmpty();
         _clock.Advance(BrightnessReporter.ReadEvery);
@@ -319,6 +396,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
 
         dell.CapabilityCalls.ShouldBe(2);   // asked afresh, what it supports first
+        dell.BrightnessCalls.ShouldBe(2);   // and its brightness, though its last is only three minutes old
     }
 
     [Theory]
@@ -350,9 +428,10 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var reader = Reader(new FakeDisplay(dell));
         reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);   // a power state isn't a brightness
 
-        dell.Brightness = null;
+        Silent(dell);
         _clock.Advance(BrightnessReporter.ReadEvery);
         reader.Read().ShouldBeEmpty();
+        var asked = dell.Calls;
 
         Answering(dell);
         for (var read = 0; read < 3; read++)
@@ -361,7 +440,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
             reader.Read().ShouldBeEmpty();
         }
 
-        dell.BrightnessCalls.ShouldBe(2);
+        dell.Calls.ShouldBe(asked);
     }
 
     [Theory]
@@ -456,7 +535,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
 
         var (readings, letGo) = await read;
         letGo.ShouldBeTrue();
-        readings.ShouldBe([new DdcReading(Lg, 0.6, MonitorPowerState.On)]);   // the change came after the Dell's turn in that read
+        readings.ShouldBe([new DdcReading(Lg, null, MonitorPowerState.On)]);   // the change came after the Dell's turn in that read
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On), new DdcReading(Lg, 0.6, MonitorPowerState.On)]);
         dell.CapabilityCalls.ShouldBe(2);
     }
@@ -478,7 +557,8 @@ public class DdcBrightnessTests(ITestOutputHelper output)
 
         var (readings, letGo) = await read;
         letGo.ShouldBeTrue();
-        readings.ShouldBe([new DdcReading(Lg, 0.6, MonitorPowerState.On), new DdcReading(Dell, 0.6, MonitorPowerState.On)]);   // the Dell's turn came after the resume
+        // The Dell's turn came after the resume.
+        readings.ShouldBe([new DdcReading(Lg, null, MonitorPowerState.On), new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
         dell.CapabilityCalls.ShouldBe(2);
     }
 
@@ -490,13 +570,15 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var reader = Reader(laptop, new FakeDisplay(new FakeMonitor(Dell)));
 
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
-        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);
 
         panel.CapabilityCalls.ShouldBe(1);
         panel.BrightnessCalls.ShouldBe(0);
         laptop.Opens.ShouldBe(1);
 
-        reader.Read().ShouldBe([new DdcReading(Dell, 0.6, MonitorPowerState.On)]);
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);
         panel.CapabilityCalls.ShouldBe(1);
         laptop.Opens.ShouldBe(1);
     }
@@ -507,12 +589,16 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var reader = Reader(new FakeDisplay(new FakeMonitor(Dell)));
 
         reader.Read();
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read();
+        _clock.Advance(DdcBrightness.BrightnessEvery - BrightnessReporter.ReadEvery);
         reader.Read();
 
         DdcBrightness.RequestGap.ShouldBe(TimeSpan.FromMilliseconds(50));
         _windows.Log.ShouldBe(
         [
             "capabilities " + Dell, "pause 50 ms", "brightness " + Dell, "pause 50 ms", "power mode " + Dell,
+            "power mode " + Dell,   // a read's only request follows no answer, so nothing waits before it
             "brightness " + Dell, "pause 50 ms", "power mode " + Dell,
         ]);
     }
@@ -536,20 +622,24 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         var reader = Reader(display);
 
         reader.Read().ShouldBe([new DdcReading(Lg, 0.6, MonitorPowerState.On)]);
-        reader.Read().ShouldBe([new DdcReading(Lg, 0.6, MonitorPowerState.On)]);
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBe([new DdcReading(Lg, null, MonitorPowerState.On)]);
 
         display.Opens.ShouldBe(2);
         dell.CapabilityCalls.ShouldBe(1);
     }
 
     [Fact]
-    public void A_monitor_that_reports_no_range_gives_no_brightness_and_is_read_again_next_time()
+    public void A_monitor_that_reports_no_range_gives_no_brightness_and_is_asked_again_when_its_brightness_is_next_due()
     {
         var dell = new FakeMonitor(Dell) { Brightness = (50, 50, 50) };
         var reader = Reader(new FakeDisplay(dell));
 
         reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);
         dell.Brightness = (0, 70, 100);
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        reader.Read().ShouldBe([new DdcReading(Dell, null, MonitorPowerState.On)]);   // it answered, so it isn't asked again at once
+        _clock.Advance(DdcBrightness.BrightnessEvery - BrightnessReporter.ReadEvery);
         reader.Read().ShouldBe([new DdcReading(Dell, 0.7, MonitorPowerState.On)]);
     }
 
@@ -694,7 +784,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     {
         using var reader = new DdcBrightness();
 
-        var readings = reader.Read().Concat(reader.Read()).ToList();   // the second read asks only the monitors that answered the first
+        var readings = reader.Read().Concat(reader.Read()).ToList();   // the second asks those that answered the first only their power modes
 
         foreach (var reading in readings) output.WriteLine($"{reading.DevicePath}: brightness {reading.Brightness:0.###}, power {reading.Power}");
         output.WriteLine($"{readings.Count} reading(s) in two reads");
@@ -748,8 +838,8 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     }
 
     /// <summary>Starts a read on another thread, as the App reads off its UI thread, and returns once the read is inside
-    /// <paramref name="slow"/>'s brightness request, where it stays until <paramref name="answer"/> is set. The task gives
-    /// the readings, and whether the monitor was let go that way rather than giving up after <see cref="Timeout"/>.</summary>
+    /// <paramref name="slow"/>'s first request, where it stays until <paramref name="answer"/> is set. The task gives the
+    /// readings, and whether the monitor was let go that way rather than giving up after <see cref="Timeout"/>.</summary>
     private static Task<(IReadOnlyList<DdcReading> Readings, bool LetGo)> ReadHeldBy(FakeMonitor slow, DdcBrightness reader, ManualResetEventSlim answer)
     {
         using var asked = new ManualResetEventSlim();
@@ -780,6 +870,14 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         monitor.PowerModeThrows = null;
     }
 
+    /// <summary>The monitor answers nothing, as many do once switched off at their own button.</summary>
+    private static void Silent(FakeMonitor monitor)
+    {
+        monitor.Capabilities = null;
+        monitor.Brightness = null;
+        monitor.PowerMode = null;
+    }
+
     /// <summary>One monitor as a test sets it up, counting what it is asked.</summary>
     private sealed class FakeMonitor(string path, string description = "Generic PnP Monitor")
     {
@@ -805,7 +903,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
 
         public Exception? PowerModeThrows { get; set; }
 
-        /// <summary>Runs inside each brightness request, before the monitor answers, so a test can hold a read there.</summary>
+        /// <summary>Runs inside each request the monitor is sent, before it answers, so a test can hold a read there.</summary>
         public Action? WhileAsked { get; set; }
 
         public int CapabilityCalls { get; set; }
@@ -883,6 +981,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
             var fake = _open[monitor];
             fake.CapabilityCalls++;
             Log.Add("capabilities " + fake.Path);
+            fake.WhileAsked?.Invoke();
             return fake.CapabilitiesThrows is { } error ? throw error : fake.Capabilities;
         }
 
@@ -900,6 +999,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
             var fake = _open[monitor];
             fake.PowerModeCalls++;
             Log.Add("power mode " + fake.Path);
+            fake.WhileAsked?.Invoke();
             return fake.PowerModeThrows is { } error ? throw error : fake.PowerMode;
         }
 

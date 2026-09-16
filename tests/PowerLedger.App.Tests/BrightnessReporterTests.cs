@@ -26,7 +26,7 @@ public sealed class BrightnessReporterTests : IDisposable
     private static MonitorPowerReading Reported(MonitorStatus monitor, MonitorPowerState state) => new() { Instance = monitor.Instance, State = state };
 
     [Fact]
-    public void The_monitors_are_read_a_minute_after_start_and_every_five_minutes_after()
+    public void The_monitors_are_read_a_minute_after_start_and_every_minute_after()
     {
         _reporter.Start();
 
@@ -43,7 +43,7 @@ public sealed class BrightnessReporterTests : IDisposable
         _link.BrightnessReports.Count.ShouldBe(2);
 
         BrightnessReporter.FirstRead.ShouldBe(TimeSpan.FromMinutes(1));
-        BrightnessReporter.ReadEvery.ShouldBe(TimeSpan.FromMinutes(5));
+        BrightnessReporter.ReadEvery.ShouldBe(TimeSpan.FromMinutes(1));
     }
 
     [Fact]
