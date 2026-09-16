@@ -26,14 +26,19 @@ public class MonitorInventoryTests
     /// <summary>Text as WMI gives it: a character code each, padded with zeros to the array's fixed length.</summary>
     private static ushort[] Codes(string text) => [.. text.Select(c => (ushort)c), .. new ushort[16 - text.Length]];
 
-    private static IReadOnlyList<MonitorFacts> From(params Display[] displays) => Inventory(unanswered: null, displays).ShouldNotBeNull();
+    private static IReadOnlyList<MonitorFacts> From(params Display[] displays) => From(sharedKeys: [], displays);
+
+    /// <summary>The inventory of the displays, given the serial keys monitors were found sharing before.</summary>
+    private static IReadOnlyList<MonitorFacts> From(HashSet<string> sharedKeys, params Display[] displays)
+        => Inventory(unanswered: null, sharedKeys, displays).ShouldNotBeNull();
 
     /// <summary>The inventory of the displays when WMI answers for every class but <paramref name="unanswered"/>.</summary>
-    private static IReadOnlyList<MonitorFacts>? Inventory(string? unanswered, params Display[] displays) => MonitorInventory.From(
+    private static IReadOnlyList<MonitorFacts>? Inventory(string? unanswered, HashSet<string> sharedKeys, params Display[] displays) => MonitorInventory.From(
         unanswered == "WmiMonitorID" ? null : [.. displays.Select(d => (d.Instance, Codes(d.Maker), Codes(d.Product), Codes(d.Serial), Codes(d.Name)))],
         unanswered == "WmiMonitorConnectionParams" ? null : displays.Where(d => d.Connection is not null).ToDictionary(d => d.Instance, d => d.Connection!.Value),
         unanswered == "WmiMonitorBasicDisplayParams" ? null : [.. displays.Select(d => (d.Instance, d.Active, d.WidthCm, d.HeightCm))],
-        unanswered == "WmiMonitorListedSupportedSourceModes" ? null : displays.Where(d => d.Mode is not null).ToDictionary(d => d.Instance, d => d.Mode!.Value));
+        unanswered == "WmiMonitorListedSupportedSourceModes" ? null : displays.Where(d => d.Mode is not null).ToDictionary(d => d.Instance, d => d.Mode!.Value),
+        sharedKeys);
 
     [Theory]
     [InlineData(0x80000000u)]   // internal
@@ -86,13 +91,13 @@ public class MonitorInventoryTests
     [InlineData("WmiMonitorConnectionParams")]
     [InlineData("WmiMonitorBasicDisplayParams")]
     public void When_a_class_that_says_which_monitors_are_attached_does_not_answer_there_is_no_answer_rather_than_no_monitors(string unanswered)
-        => Inventory(unanswered, Dell, Lg).ShouldBeNull();
+        => Inventory(unanswered, sharedKeys: [], Dell, Lg).ShouldBeNull();
 
     [Fact]
     public void When_only_the_native_modes_do_not_answer_the_monitors_come_back_without_a_resolution()
     {
         // Some drivers never answer for them, and they give nothing but the resolution.
-        var monitors = Inventory(unanswered: "WmiMonitorListedSupportedSourceModes", Dell, Lg).ShouldNotBeNull();
+        var monitors = Inventory(unanswered: "WmiMonitorListedSupportedSourceModes", sharedKeys: [], Dell, Lg).ShouldNotBeNull();
 
         monitors.Select(m => m.Name).ShouldBe(["DELL U2723QE", "LG HDR 4K"]);
         monitors.ShouldAllBe(m => m.Width == 0 && m.Height == 0);
@@ -105,16 +110,22 @@ public class MonitorInventoryTests
             [(@"DISPLAY\DELA0B1\5&2f5a1b&0&UID4353_0", Codes("DEL"), Codes("A0B1"), Codes("7MKZG34"), Codes("DELL U2723QE"))],
             new Dictionary<string, uint> { [@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353"] = DisplayPort },
             [(@"display\dela0b1\5&2f5a1b&0&uid4353_0", true, 60, 34)],
-            new Dictionary<string, (int Width, int Height)> { [@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353_0"] = (3840, 2160) });
+            new Dictionary<string, (int Width, int Height)> { [@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353_0"] = (3840, 2160) },
+            sharedKeys: []);
 
         monitors.ShouldNotBeNull().ShouldHaveSingleItem().Width.ShouldBe(3840);
     }
 
     [Theory]
     [InlineData("7MKZG34", "DELA0B1-7MKZG34")]
+    [InlineData("1234", "DELA0B1-1234")]                               // the shortest that tells a monitor apart
     [InlineData("", @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")]
     [InlineData("0", @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")]           // a panel with no serial number, as Windows words it
     [InlineData("00000000", @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")]
+    [InlineData("1", @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")]           // what some makers give every unit
+    [InlineData("123", @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")]
+    [InlineData("0000", @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")]
+    [InlineData("1111111", @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")]
     public void A_monitor_is_known_by_its_serial_when_it_has_one_and_by_its_instance_otherwise(string serial, string key)
         => From(Dell with { Serial = serial }).ShouldHaveSingleItem().Key.ShouldBe(key);
 
@@ -128,6 +139,21 @@ public class MonitorInventoryTests
 
         From(left, right, third).Select(m => m.Key)
             .ShouldBe([@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4355", "DELA0B1-7MKZG34"]);
+    }
+
+    [Fact]
+    public void Monitors_once_found_sharing_a_serial_stay_known_by_their_instances_after_one_is_unplugged()
+    {
+        // Otherwise a user who unticks one of two twins and then unplugs the other would find the one left counted again:
+        // alone, it would take the serial's key, not the instance its choice was saved under.
+        HashSet<string> sharedKeys = [];
+        var left = Dell with { Serial = "16843009" };
+        var right = left with { Instance = @"DISPLAY\DELA0B1\5&2f5a1b&0&UID4355_0" };
+        var third = Dell with { Instance = @"DISPLAY\DELA0B1\5&2f5a1b&0&UID4356_0" };     // a serial of its own
+        From(sharedKeys, left, right);
+
+        From(sharedKeys, left).ShouldHaveSingleItem().Key.ShouldBe(@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353");
+        From(sharedKeys, right, third).Select(m => m.Key).ShouldBe([@"DISPLAY\DELA0B1\5&2F5A1B&0&UID4355", "DELA0B1-7MKZG34"]);
     }
 
     [Theory]

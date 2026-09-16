@@ -7,7 +7,8 @@ namespace PowerLedger.Sensors;
 /// <param name="Instance">Windows' device instance in the form <c>MonitorKeys.FromInstanceName</c> gives, e.g.
 /// <c>DISPLAY\DELA0B1\5&amp;2F5A1B&amp;0&amp;UID4353</c>.</param>
 /// <param name="Key">What the user's choices for this monitor are kept under: maker, product code and serial number when
-/// the serial number is meaningful, otherwise <paramref name="Instance"/>.</param>
+/// the serial number tells the monitor apart, otherwise <paramref name="Instance"/> (see
+/// <c>MonitorInventory.From</c>).</param>
 /// <param name="Maker">The maker's PNP id, e.g. "DEL".</param>
 /// <param name="ProductCode">The maker's product code, e.g. "A0B1".</param>
 /// <param name="Name">The name the monitor gives itself, e.g. "DELL U2723QE"; empty when it gives none.</param>
@@ -46,6 +47,15 @@ public static class MonitorInventory
     /// <summary>The smallest diagonal an external monitor is believed to give. Some monitors put their aspect ratio (16 by 9)
     /// or nonsense where EDID's size belongs, and a size that small would only mislead the catalogue and the estimate.</summary>
     private const double SmallestExternalInches = 10;
+
+    /// <summary>The fewest characters a serial number that tells a monitor apart is believed to have. Makers that give their
+    /// monitors none, or give every unit the same, write "0", "1" or the like.</summary>
+    private const int ShortestSerial = 4;
+
+    /// <summary>Every serial key two attached monitors have been found sharing since the service started (see
+    /// <see cref="From"/>). Sensor sets are built afresh after a resume or a read that hung, so it is kept here, where it
+    /// lasts as long as the service does.</summary>
+    private static readonly HashSet<string> SharedKeys = new(StringComparer.Ordinal);
 
     /// <summary>The active external monitors, read from WMI, or null when WMI didn't say which are attached (see
     /// <see cref="From"/>). Never throws.</summary>
@@ -107,10 +117,12 @@ public static class MonitorInventory
             return byInstance;
         });
 
-        return From(ids, connections, sizes, nativeModes);
+        return From(ids, connections, sizes, nativeModes, SharedKeys);
     }
 
     /// <summary>The same, from rows already read, with null for a class WMI didn't answer — the part tests drive.</summary>
+    /// <param name="sharedKeys">The serial keys two attached monitors were found sharing before, which this adds to. It is
+    /// locked while in use, because a sensor set that was abandoned may still be reading.</param>
     /// <returns>Null when WmiMonitorID, WmiMonitorConnectionParams or WmiMonitorBasicDisplayParams didn't answer, because
     /// without any one of them an attached monitor would be left out as if it were unplugged. The native modes give only the
     /// resolutions, and some drivers never answer for them, so without them the monitors come back at 0 by 0.</returns>
@@ -118,7 +130,8 @@ public static class MonitorInventory
         IReadOnlyList<(string Instance, ushort[] Maker, ushort[] Product, ushort[] Serial, ushort[] Name)>? ids,
         IReadOnlyDictionary<string, uint>? connections,
         IReadOnlyList<(string Instance, bool Active, double WidthCm, double HeightCm)>? sizes,
-        IReadOnlyDictionary<string, (int Width, int Height)>? nativeModes)
+        IReadOnlyDictionary<string, (int Width, int Height)>? nativeModes,
+        HashSet<string> sharedKeys)
     {
         if (ids is null || connections is null || sizes is null) return null;
         var connectionOf = ByInstance(connections.Select(pair => (pair.Key, pair.Value)));
@@ -140,8 +153,11 @@ public static class MonitorInventory
             var (width, height) = modeOf.GetValueOrDefault(instance);
             monitors.Add(new MonitorFacts(
                 instance,
-                // An empty or all-zero serial number is a monitor saying it has none.
-                serialNumber.Any(digit => digit != '0') ? $"{makerId}{productCode}-{serialNumber}" : instance,
+                // A serial number of fewer than four characters, or of one character repeated, as "0", "0000" and "1111111"
+                // are, is a monitor saying it has none, or one its maker gives every unit.
+                serialNumber.Length >= ShortestSerial && serialNumber.Any(character => character != serialNumber[0])
+                    ? $"{makerId}{productCode}-{serialNumber}"
+                    : instance,
                 makerId,
                 productCode,
                 Text(name),
@@ -151,9 +167,16 @@ public static class MonitorInventory
         }
 
         // Some makers give every unit the same serial number. One that two attached monitors share tells neither apart,
-        // and a shared key would merge their settings, so they are known by their instances instead.
-        var shared = monitors.GroupBy(monitor => monitor.Key).Where(group => group.Count() > 1).Select(group => group.Key).ToHashSet();
-        return [.. monitors.Select(monitor => shared.Contains(monitor.Key) ? monitor with { Key = monitor.Instance } : monitor)];
+        // and a shared key would merge their settings, so they are known by their instances instead. They stay so for as
+        // long as the service runs, because a twin left on its own once the other is unplugged would otherwise take the
+        // shared key, and the choice saved under its instance would no longer apply. Only what this run has seen is known:
+        // after a restart with one twin attached, nothing says it has a twin, so it is known by the shared key until the
+        // other is attached again.
+        lock (sharedKeys)
+        {
+            sharedKeys.UnionWith(monitors.GroupBy(monitor => monitor.Key).Where(group => group.Count() > 1).Select(group => group.Key));
+            return [.. monitors.Select(monitor => sharedKeys.Contains(monitor.Key) ? monitor with { Key = monitor.Instance } : monitor)];
+        }
     }
 
     /// <summary>A diagonal from EDID's whole centimetres, snapped to the nearest common panel size within 0.5".</summary>
