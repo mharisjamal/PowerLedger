@@ -198,6 +198,10 @@ public class MonitorCatalogueTests
         // The 27HC5R is the 27HC5UR's 1080p sibling.
         Shipped.Find("AOP", "27HC5R", 27, 1920, 1080).ShouldNotBeNull().ModelNumber.ShouldBe("27CL1_a");
         Shipped.Find("AOP", "27HC5R", 27, 0, 0).ShouldNotBeNull().ModelNumber.ShouldBe("27CL1_a");
+
+        // LG lists its 3840 × 2160 27BQ65UB-* at 2160 × 3840, the same resolution the other way round.
+        Shipped.Find("GSM", "27BQ65UB-B", 27, 3840, 2160).ShouldNotBeNull().ModelNumber.ShouldBe("27BQ65UB");
+        Shipped.Find("GSM", "27BQ65UB-B", 27, 2560, 1440).ShouldBeNull();
     }
 
     [Fact]
@@ -276,7 +280,9 @@ public class MonitorCatalogueTests
     [Fact]
     public void The_codes_asus_and_aopen_monitors_report_match_only_their_own_brand()
     {
-        // Most ASUS monitors report ACI, which ViewSonic's VX24*********** and VG24********** families took for any maker's.
+        // ASUS's older monitors report ACI. Taken for any maker's, it left "ASUS" in front of the VP228's name, and let
+        // ViewSonic's VX24*********** and VG24********** families take in the VX24A and the VG248.
+        Shipped.Find("ACI", "ASUS VP228", 21.5, 1920, 1080).ShouldNotBeNull().ModelName.ShouldBe("VP228QG");
         Shipped.Find("ACI", "VX24A", 24, 2560, 1440).ShouldBeNull();
         Shipped.Find("ACI", "VG248", 24, 1920, 1080).ShouldBeNull();
 
