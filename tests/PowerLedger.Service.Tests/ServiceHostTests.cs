@@ -1,5 +1,4 @@
 using System.IO.Pipes;
-using Microsoft.Data.Sqlite;
 using PowerLedger.Contracts;
 using PowerLedger.Storage;
 using Shouldly;
@@ -50,7 +49,6 @@ public class ServiceHostTests
             new SessionRepository(database).List(DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow.AddHours(1))
                 .Single().EndReason.ShouldBe(SessionReason.ServiceStop);
         }
-        SqliteConnection.ClearAllPools();
         try
         {
             Directory.Delete(folder, recursive: true);

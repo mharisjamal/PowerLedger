@@ -41,6 +41,21 @@ public sealed class DatabaseOpenerTests : IDisposable
     }
 
     [Fact]
+    public void Setting_a_damaged_database_aside_leaves_alone_a_connection_to_another_database_that_is_being_opened()
+    {
+        using var other = new TestDatabase();
+        using var connection = other.Db.Open();
+        File.WriteAllBytes(DbPath, Enumerable.Repeat((byte)0x5A, 8192).ToArray());
+
+        using (MidOpen.Hold(connection))
+        {
+            DatabaseOpener.Open(DbPath, Now).Database.Dispose();
+        }
+
+        new SqliteCommand("SELECT 1", connection).ExecuteScalar().ShouldBe(1L);
+    }
+
+    [Fact]
     public void Setting_aside_moves_the_write_ahead_log_and_shared_memory_with_the_database()
     {
         var suffixes = new[] { "", "-wal", "-shm" };
@@ -56,7 +71,6 @@ public sealed class DatabaseOpenerTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         try
         {
             Directory.Delete(_folder, recursive: true);

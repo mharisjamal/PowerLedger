@@ -26,7 +26,9 @@ internal static class DatabaseOpener
         {
         }
 
-        SqliteConnection.ClearAllPools();
+        // Closes what the failed open left pooled on this file, so it can be moved, and nothing else: clearing every pool would
+        // also close a connection that another thread is opening to another database.
+        new SqliteDatabase(path).Dispose();
         var aside = SetAside(path, "corrupt", now);
         return (SqliteDatabase.OpenAndMigrate(path), $"The database was damaged. It was set aside as {Path.GetFileName(aside)} and a new one started.");
     }
