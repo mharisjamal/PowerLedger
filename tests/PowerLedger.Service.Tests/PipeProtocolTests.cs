@@ -166,7 +166,22 @@ public class PipeProtocolTests
             .ShouldNotBeNull();
         settings.Profile.Monitors.ShouldBeEmpty();
         settings.Profile.ExternalMonitors.ShouldBe(2);
+        settings.Profile.CountMonitorsByDefault.ShouldBeTrue();
         settings.Validate().ShouldBeNull();
+    }
+
+    [Fact]
+    public void Settings_stored_before_monitors_could_be_left_out_by_default_count_them_and_leaving_them_out_survives_the_wire_and_the_store()
+    {
+        var stored = PipeProtocol.DeserializeSettings("""{"profile":{"chassis":1,"monitors":[{"key":"DELA0B1-4C4A3833","counted":false}]}}""")
+            .ShouldNotBeNull();
+        stored.Profile.CountMonitorsByDefault.ShouldBeTrue();
+        stored.Profile.Monitors.ShouldBe([new MonitorChoice { Key = "DELA0B1-4C4A3833", Counted = false }]);
+
+        var leftOut = ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { CountMonitorsByDefault = false } };
+        PipeProtocol.DeserializeSettings(PipeProtocol.SerializeSettings(leftOut)).ShouldNotBeNull().Profile.CountMonitorsByDefault.ShouldBeFalse();
+        PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(new SettingsReply(18, leftOut))))
+            .ShouldBeOfType<SettingsReply>().Settings.ShouldBe(leftOut);
     }
 
     [Fact]

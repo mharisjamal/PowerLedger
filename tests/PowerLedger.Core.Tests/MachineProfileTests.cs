@@ -62,6 +62,19 @@ public class MachineProfileTests
     }
 
     [Fact]
+    public void Profiles_that_differ_only_in_whether_monitors_count_by_default_are_not_equal()
+    {
+        var choice = new MonitorChoice { Key = "DELA0B1-4C4A3833", Watts = 30 };
+        var leftOut = MachineProfile.DefaultLaptop with { Monitors = [choice], CountMonitorsByDefault = false };
+        var counted = MachineProfile.DefaultLaptop with { Monitors = [choice with { }] };
+
+        leftOut.ShouldNotBe(counted);
+        (leftOut == counted).ShouldBeFalse();
+        leftOut.ShouldBe(counted with { CountMonitorsByDefault = false });
+        MachineProfile.DefaultLaptop.CountMonitorsByDefault.ShouldBeTrue();
+    }
+
+    [Fact]
     public void Every_member_takes_part_in_equality()
     {
         foreach (var property in typeof(MachineProfile).GetProperties(BindingFlags.Public | BindingFlags.Instance))
