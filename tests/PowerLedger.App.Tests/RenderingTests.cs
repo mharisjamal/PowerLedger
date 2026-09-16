@@ -69,6 +69,9 @@ public class RenderingTests
 
     private const string DesktopMonitorsNote = "Untick a monitor to leave it out.";
 
+    /// <summary>The preference that stops every request sent to the monitors, both of which it names.</summary>
+    private const string MonitorsTick = "Read monitors' brightness and whether they're on (read-only)";
+
     [Fact]
     public void The_window_draws_every_screen_in_both_themes()
     {
@@ -193,8 +196,8 @@ public class RenderingTests
             (string Name, ServiceForm Form, FrameworkElement View, string After)[] screens =
             [
                 ("settings", settings.Service, new SettingsView { DataContext = settings },
-                    " PowerLedger reads whether each monitor is on; where it can't tell, unticking a monitor while it's off keeps it out."
-                    + " Clear a monitor's watts to go back to PowerLedger's own figure."),
+                    " PowerLedger reads whether each monitor is on, if allowed under Preferences; where it can't tell, unticking a monitor"
+                    + " while it's off keeps it out. Clear a monitor's watts to go back to PowerLedger's own figure."),
                 ("wizard", wizard.Machine, new WizardView { DataContext = wizard }, " The rest of the machine, memory and drives among them, is in Settings."),
             ];
             foreach (var (name, form, view, after) in screens)
@@ -322,6 +325,34 @@ public class RenderingTests
 
             static void PressEnter(TextBox box)
                 => box.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(box), 0, Key.Enter) { RoutedEvent = Keyboard.KeyDownEvent });
+        });
+
+    [Fact]
+    public void Settings_names_both_readings_its_monitor_tick_stops_and_the_tick_is_the_preference()
+        => OnUi(() =>
+        {
+            UseTheme(Theme.Dark);
+            var settings = SettingsScreen();
+            var view = new SettingsView { DataContext = settings };
+            var window = new Window
+            {
+                Content = view, Width = 1180, Height = 900, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                ShowInTaskbar = false, ShowActivated = false,
+            };
+            window.Show();
+            try
+            {
+                Pump(TimeSpan.FromMilliseconds(300));
+                var tick = Find<CheckBox>(view, box => Equals(box.Content, MonitorsTick)).ShouldNotBeNull();
+                tick.IsChecked.ShouldBe(true);
+
+                tick.IsChecked = false;
+                settings.ReadMonitorBrightness.ShouldBeFalse();
+            }
+            finally
+            {
+                window.Close();
+            }
         });
 
     [Fact]
