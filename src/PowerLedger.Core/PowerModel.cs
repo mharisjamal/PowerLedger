@@ -51,7 +51,8 @@ public sealed class PowerModel
     /// them. The Service feeds <c>Components.Cpu</c>, <c>Gpu</c> and <c>Display</c> back into the calibration learner, and
     /// with the display what the monitors running off the PC drew, since a battery rate holds that too. It takes that
     /// figure from here, the one the reading used, rather than asking the monitors again, which detection may have changed
-    /// in between.
+    /// in between. The split is no part of the <see cref="Components"/>, which are stored and piped part for part:
+    /// <c>Components.Monitors</c> holds both kinds together.
     /// </summary>
     /// <param name="monitors">What the <see cref="IMonitorDraw"/> said, asked once for this reading.</param>
     public Reading Evaluate(Sample s, out MonitorWatts monitors)

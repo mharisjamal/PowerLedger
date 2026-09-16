@@ -13,6 +13,8 @@ public interface IMonitorDraw
 /// which the PC's own supply or battery delivers.</param>
 public readonly record struct MonitorWatts(double OwnPlug, double FromPc)
 {
+    /// <summary>Watts for every monitor that counts, wherever it draws from: what a reading's <c>Components.Monitors</c>
+    /// holds.</summary>
     public double Total => OwnPlug + FromPc;
 }
 

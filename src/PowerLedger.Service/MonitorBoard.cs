@@ -29,11 +29,12 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     private Figured[] _monitors = [];
     private Dictionary<string, MonitorChoice> _choices = new(StringComparer.Ordinal);
 
-    /// <summary>What a monitor the user hasn't chosen for takes from the profile: whether it counts, and whether the PC is a
-    /// laptop, which a monitor small enough is taken to run off. Until the settings are chosen, a laptop's that counts its
-    /// monitors, as the default settings are.</summary>
+    /// <summary>Whether a monitor the user hasn't chosen for counts, as the profile says. Until the board is given settings,
+    /// it goes by the default ones, which count every monitor.</summary>
     private bool _countedByDefault = true;
 
+    /// <summary>Whether the profile is a laptop's, which a monitor small enough is taken to run off when the user hasn't said.
+    /// Until the board is given settings, it goes by the default ones, which are a laptop's.</summary>
     private bool _onLaptop = true;
 
     /// <summary>What WMI found. Figures are worked out only for monitors that are new or changed, and outside the lock.</summary>
