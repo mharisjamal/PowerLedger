@@ -10,6 +10,9 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     private const string Lg = @"\\?\DISPLAY#GSM5B09#5&2f5a1b&0&UID4354#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}";
     private const string Panel = @"\\?\DISPLAY#BOE0A1C#4&1a2b3c4d&0&UID8388688#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}";
 
+    /// <summary>How long a monitor a test holds waits to be let go before it gives up and answers anyway.</summary>
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
     private readonly FakeWindows _windows = new();
     private readonly FakeSystemEvents _events = new();
 
@@ -185,6 +188,49 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         _events.RaisePowerModeChanged(PowerModes.Resume);
         reader.Read().ShouldBeEmpty();
         dell.CapabilityCalls.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_display_change_while_a_read_waits_on_a_monitor_returns_at_once_and_the_next_read_asks_afresh()
+    {
+        var dell = Failing(new FakeMonitor(Dell), "capabilities fail");
+        var lg = new FakeMonitor(Lg);
+        var reader = Reader(new FakeDisplay(dell), new FakeDisplay(lg));
+        reader.Read().ShouldBe([new DdcReading(Lg, 0.6)]);   // the Dell is left alone from here on
+        Answering(dell);
+
+        using var answer = new ManualResetEventSlim();
+        var read = ReadHeldBy(lg, reader, answer);
+        // SystemEvents raises the event on the thread that subscribed, which in the App is the UI thread; here it is this
+        // one. A reset that waited for the read would still be waiting when the monitor gave up.
+        _events.RaiseDisplaySettingsChanged();
+        answer.Set();
+
+        var (readings, letGo) = await read;
+        letGo.ShouldBeTrue();
+        readings.ShouldBe([new DdcReading(Lg, 0.6)]);   // the change came after the Dell's turn in that read
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6), new DdcReading(Lg, 0.6)]);
+        dell.CapabilityCalls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_resume_while_a_read_waits_on_a_monitor_returns_at_once_and_is_seen_before_the_next_monitor_is_asked()
+    {
+        var lg = new FakeMonitor(Lg);
+        var dell = Failing(new FakeMonitor(Dell), "capabilities fail");
+        var reader = Reader(new FakeDisplay(lg), new FakeDisplay(dell));
+        reader.Read().ShouldBe([new DdcReading(Lg, 0.6)]);
+        Answering(dell);
+
+        using var answer = new ManualResetEventSlim();
+        var read = ReadHeldBy(lg, reader, answer);
+        _events.RaisePowerModeChanged(PowerModes.Resume);
+        answer.Set();
+
+        var (readings, letGo) = await read;
+        letGo.ShouldBeTrue();
+        readings.ShouldBe([new DdcReading(Lg, 0.6), new DdcReading(Dell, 0.6)]);   // the Dell's turn came after the resume
+        dell.CapabilityCalls.ShouldBe(2);
     }
 
     [Fact]
@@ -421,6 +467,28 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         return monitor;
     }
 
+    /// <summary>Starts a read on another thread, as the App reads off its UI thread, and returns once the read is inside
+    /// <paramref name="slow"/>'s brightness request, where it stays until <paramref name="answer"/> is set. The task gives
+    /// the readings, and whether the monitor was let go that way rather than giving up after <see cref="Timeout"/>.</summary>
+    private static Task<(IReadOnlyList<DdcReading> Readings, bool LetGo)> ReadHeldBy(FakeMonitor slow, DdcBrightness reader, ManualResetEventSlim answer)
+    {
+        using var asked = new ManualResetEventSlim();
+        var letGo = false;
+        slow.WhileAsked = () =>
+        {
+            slow.WhileAsked = null;   // only this read is held
+            asked.Set();
+            letGo = answer.Wait(Timeout);
+        };
+        var read = Task.Run(() =>
+        {
+            var readings = reader.Read();
+            return (readings, letGo);
+        });
+        asked.Wait(Timeout).ShouldBeTrue();
+        return read;
+    }
+
     /// <summary>The monitor answers every call again, as a monitor that was asleep does once it wakes.</summary>
     private static void Answering(FakeMonitor monitor)
     {
@@ -448,6 +516,9 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         public Exception? CapabilitiesThrows { get; set; }
 
         public Exception? BrightnessThrows { get; set; }
+
+        /// <summary>Runs inside each brightness request, before the monitor answers, so a test can hold a read there.</summary>
+        public Action? WhileAsked { get; set; }
 
         public int CapabilityCalls { get; set; }
 
@@ -530,6 +601,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
             var fake = _open[monitor];
             fake.BrightnessCalls++;
             Log.Add("brightness " + fake.Path);
+            fake.WhileAsked?.Invoke();
             return fake.BrightnessThrows is { } error ? throw error : fake.Brightness;
         }
 

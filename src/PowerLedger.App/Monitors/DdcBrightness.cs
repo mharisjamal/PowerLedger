@@ -43,6 +43,9 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     private readonly IMonitorCalls _windows;
     private readonly Action<TimeSpan> _pause;
     private readonly ISystemEvents _events;
+
+    /// <summary>Held for the whole of a read, so reads run one at a time. A display change or a resume never takes it
+    /// (<see cref="Reset"/>).</summary>
     private readonly Lock _gate = new();
 
     /// <summary>Monitors that said they support brightness, so are read without asking again what they support. Cleared,
@@ -57,6 +60,9 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// the physical monitors the PC has shown - a handful at most - never by how long the App runs or how often it
     /// reads.</summary>
     private readonly HashSet<string> _failed = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>1 once a display change or a resume has happened that no read has acted on yet.</summary>
+    private int _resetDue;
 
     public DdcBrightness()
         : this(new WindowsMonitorCalls(), Thread.Sleep, new WindowsSystemEvents())
@@ -124,6 +130,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     private void ReadDisplay(IntPtr display, List<DdcReading> readings)
     {
         var attached = _windows.Attached(display).Where(monitor => monitor.Active).ToList();
+        ForgetIfReset();
         if (!attached.Exists(monitor => Askable(monitor.DevicePath))) return;   // nothing to ask, so no handles to open
         if (_windows.Open(display) is not { } physical) return;
         try
@@ -131,6 +138,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
             if (!Matched(attached, physical)) return;
             for (var index = 0; index < physical.Count; index++)
             {
+                ForgetIfReset();   // a display change or a resume while the monitor before was being asked
                 var path = attached[index].DevicePath;
                 if (Askable(path) && Ask(physical[index].Handle, path) is { } brightness) readings.Add(new DdcReading(path, brightness));
             }
@@ -200,18 +208,24 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         if (e.Mode == PowerModes.Resume) Reset();
     }
 
-    /// <summary>Forgets what every monitor has answered, so the next read asks each afresh, capabilities first.
-    /// SystemEvents raises both events this reader listens for on a thread of its own - never the UI thread, and not
-    /// necessarily whatever thread is running <see cref="Read"/> - so this takes the same lock <see cref="Read"/>
-    /// does.</summary>
-    private void Reset()
+    /// <summary>Makes the reader forget what every monitor has answered, so each is asked afresh, capabilities first.
+    /// SystemEvents raises a handler through the synchronization context of the thread that added it, and the App creates
+    /// this reader on its UI thread, so this runs on the UI thread, perhaps while a read has held <see cref="_gate"/> for
+    /// seconds, waiting on a slow monitor. It must not wait for that read, so it only marks the reset as due, and the
+    /// reader forgets before it next looks at a monitor: the next one in the read already running, or the first in the
+    /// next read (<see cref="ForgetIfReset"/>).</summary>
+    private void Reset() => Volatile.Write(ref _resetDue, 1);
+
+    /// <summary>Forgets what every monitor has answered if a display change or a resume has happened since this last
+    /// looked. Called with <see cref="_gate"/> held, before a display's monitors are looked at and before each one is
+    /// asked. A reset that arrives just after this looks is still due at the next look, so none is lost, and whatever a
+    /// monitor answered in between is forgotten then.</summary>
+    private void ForgetIfReset()
     {
-        lock (_gate)
-        {
-            _readable.Clear();
-            _unsupported.Clear();
-            _failed.Clear();
-        }
+        if (Interlocked.Exchange(ref _resetDue, 0) == 0) return;
+        _readable.Clear();
+        _unsupported.Clear();
+        _failed.Clear();
     }
 }
 
