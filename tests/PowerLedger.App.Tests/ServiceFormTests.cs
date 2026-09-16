@@ -496,6 +496,20 @@ public class ServiceFormTests
         _link.Writes.ShouldBeEmpty();
     }
 
+    [Theory]
+    [InlineData(23.8, 1920, 1080, "estimated from its size — correct it if you know better")]
+    [InlineData(0, 1920, 1080, "estimated — correct it if you know better")]   // without a size, the median of all monitors
+    [InlineData(23.8, 0, 0, "estimated — correct it if you know better")]      // and without a resolution
+    [InlineData(23.8, 1920, 0, "estimated — correct it if you know better")]
+    public void An_estimate_says_it_came_from_the_monitors_size_only_when_the_service_had_one(double inches, int width, int height, string source)
+    {
+        var form = Form();
+
+        form.ShowMonitors([Statuses.Aoc with { Inches = inches, Width = width, Height = height }]);
+
+        form.Monitors.Single().Source.ShouldBe(source);
+    }
+
     [Fact]
     public void Monitors_are_listed_once_each_and_without_size_or_resolution_when_the_service_has_none()
     {

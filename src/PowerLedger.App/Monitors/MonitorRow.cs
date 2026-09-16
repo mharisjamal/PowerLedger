@@ -69,7 +69,7 @@ internal sealed class MonitorRow : ObservableObject
     public string Size { get => _size; private set => SetProperty(ref _size, value); }
 
     /// <summary>Where the figure came from: "measured for this model", "estimated from its size — correct it if you know
-    /// better", or "typed".</summary>
+    /// better" or, for a monitor without its size or resolution, "estimated — correct it if you know better", or "typed".</summary>
     public string Source { get => _source; private set => SetProperty(ref _source, value); }
 
     /// <summary>"brightness 60%, read from the monitor", or "brightness unknown, assumed 75%"; for a typed figure, which no
@@ -135,11 +135,15 @@ internal sealed class MonitorRow : ObservableObject
         Size = SizeOf(monitor);
         if (monitor.Source != MonitorSource.Typed && double.IsFinite(monitor.OnWatts) && monitor.OnWatts >= 0) _own = monitor.OnWatts;
         // A typed figure is the user's own; otherwise the service's word for where its figure came from. A service that
-        // reports a typed figure the choice doesn't hold hasn't caught up with a save yet, so nothing is claimed for it.
+        // reports a typed figure the choice doesn't hold hasn't caught up with a save yet, so nothing is claimed for it. A
+        // monitor that doesn't give both its size and its resolution is estimated as the median of all monitors, not from
+        // its size.
         Source = _typed is not null ? "typed" : monitor.Source switch
         {
             MonitorSource.Model => "measured for this model",
-            MonitorSource.Estimate => "estimated from its size — correct it if you know better",
+            MonitorSource.Estimate when double.IsFinite(monitor.Inches) && monitor is { Inches: > 0, Width: > 0, Height: > 0 }
+                => "estimated from its size — correct it if you know better",
+            MonitorSource.Estimate => "estimated — correct it if you know better",
             _ => "",
         };
         // A figure the service reports as typed is taken as it is, so no brightness is assumed for it.
