@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 
 namespace PowerLedger.App;
 
@@ -15,21 +16,22 @@ internal interface IBrightnessReader
 /// <summary>
 /// DDC/CI brightness (spec §5), read-only and careful, because Microsoft warns many monitors implement the commands badly:
 /// each physical monitor is asked for its capabilities once, and read only if it reports brightness support, 50 ms after
-/// it answered; a monitor that says it has no brightness is not asked again while the App runs; a monitor that fails any
-/// call is left alone for an hour, since it may only have been asleep, and then asked afresh; nothing is ever written.
-/// GetMonitorCapabilities and GetMonitorBrightness are the only requests a monitor is sent, one read at a time, and every
-/// handle a read opens is destroyed before it returns.
+/// it answered; a monitor that says it has no brightness, or that fails any call, is then left alone for the rest of the
+/// session - never asked either request again; nothing is ever written. GetMonitorCapabilities and GetMonitorBrightness
+/// are the only requests a monitor is sent, one read at a time, and every handle a read opens is destroyed before it
+/// returns.
+///
+/// The one exception is a display change (a monitor plugged in or out, or display settings changed) or a resume from
+/// sleep: either forgets everything every monitor has answered, because a monitor commonly fails, or answers wrongly,
+/// while it is waking up or while it is being plugged in. <see cref="Dispose"/> must be called once the reader is no
+/// longer wanted: the events it listens for come from the static <see cref="SystemEvents"/> class, which would otherwise
+/// keep the reader alive for as long as the process runs.
 /// </summary>
-/// <param name="pause">Waits on the reading thread; <see cref="Thread.Sleep(TimeSpan)"/> outside tests.</param>
-internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, Action<TimeSpan> pause) : IBrightnessReader
+internal sealed class DdcBrightness : IBrightnessReader, IDisposable
 {
     /// <summary>MC_CAPS_BRIGHTNESS: the monitor supports GetMonitorBrightness. "GetMonitorCapabilities function
     /// (highlevelmonitorconfigurationapi.h)" names the flag; the value is the Windows SDK header's.</summary>
     internal const uint BrightnessCapability = 0x2;
-
-    /// <summary>How long a monitor that failed a call is left alone. A monitor asleep or switched off at its own button
-    /// fails like one that never answers, so the failure is forgotten after this and the monitor asked again.</summary>
-    internal static readonly TimeSpan RetryAfter = TimeSpan.FromHours(1);
 
     /// <summary>The wait between a monitor's answer about what it supports and the request for its brightness, so that a
     /// monitor slow to finish one request isn't sent the next at once.</summary>
@@ -38,28 +40,43 @@ internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, A
     /// <summary>How a monitor's device interface path begins; Contracts' MonitorKeys reads the rest.</summary>
     private const string DisplayPath = @"\\?\DISPLAY#";
 
+    private readonly IMonitorCalls _windows;
+    private readonly Action<TimeSpan> _pause;
+    private readonly ISystemEvents _events;
     private readonly Lock _gate = new();
 
-    /// <summary>Monitors that said they support brightness, so are read without being asked again.</summary>
+    /// <summary>Monitors that said they support brightness, so are read without asking again what they support. Cleared,
+    /// with the two sets below, by a display change or a resume.</summary>
     private readonly HashSet<string> _readable = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Monitors that said they don't support brightness: never asked anything again.</summary>
+    /// <summary>Monitors that said they don't support brightness: never asked anything again until cleared.</summary>
     private readonly HashSet<string> _unsupported = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Monitors that failed a call, with when: left alone until <see cref="RetryAfter"/> has passed.</summary>
-    private readonly Dictionary<string, DateTimeOffset> _failed = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Monitors that failed a call: left alone until cleared. Every one of these three sets is keyed by device
+    /// path and gains at most one entry per monitor Windows has ever reported this run, so together they are bounded by
+    /// the physical monitors the PC has shown - a handful at most - never by how long the App runs or how often it
+    /// reads.</summary>
+    private readonly HashSet<string> _failed = new(StringComparer.OrdinalIgnoreCase);
 
     public DdcBrightness()
-        : this(new WindowsMonitorCalls(), TimeProvider.System, Thread.Sleep)
+        : this(new WindowsMonitorCalls(), Thread.Sleep, new WindowsSystemEvents())
     {
+    }
+
+    /// <param name="pause">Waits on the reading thread; <see cref="Thread.Sleep(TimeSpan)"/> outside tests.</param>
+    public DdcBrightness(IMonitorCalls windows, Action<TimeSpan> pause, ISystemEvents events)
+    {
+        _windows = windows;
+        _pause = pause;
+        _events = events;
+        _events.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        _events.PowerModeChanged += OnPowerModeChanged;
     }
 
     public IReadOnlyList<DdcReading> Read()
     {
         lock (_gate)
         {
-            var now = clock.GetUtcNow();
-            foreach (var (path, _) in _failed.Where(failure => now - failure.Value >= RetryAfter).ToList()) _failed.Remove(path);
             var readings = new List<DdcReading>();
             foreach (var display in Displays())
             {
@@ -83,11 +100,20 @@ internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, A
     internal static double? Normalise(uint minimum, uint current, uint maximum)
         => maximum > minimum ? Math.Clamp(((double)current - minimum) / ((double)maximum - minimum), 0, 1) : null;
 
+    /// <summary>Unsubscribes from the events this reader listens for. <see cref="SystemEvents"/>' handlers are static, so
+    /// without this the reader would stay referenced, and so alive, for as long as the process runs, however long ago
+    /// the App stopped wanting it.</summary>
+    public void Dispose()
+    {
+        _events.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        _events.PowerModeChanged -= OnPowerModeChanged;
+    }
+
     private IReadOnlyList<IntPtr> Displays()
     {
         try
         {
-            return windows.Displays();
+            return _windows.Displays();
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -97,9 +123,9 @@ internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, A
 
     private void ReadDisplay(IntPtr display, List<DdcReading> readings)
     {
-        var attached = windows.Attached(display).Where(monitor => monitor.Active).ToList();
+        var attached = _windows.Attached(display).Where(monitor => monitor.Active).ToList();
         if (!attached.Exists(monitor => Askable(monitor.DevicePath))) return;   // nothing to ask, so no handles to open
-        if (windows.Open(display) is not { } physical) return;
+        if (_windows.Open(display) is not { } physical) return;
         try
         {
             if (!Matched(attached, physical)) return;
@@ -111,12 +137,12 @@ internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, A
         }
         finally
         {
-            windows.Close(physical);
+            _windows.Close(physical);
         }
     }
 
     private bool Askable(string path)
-        => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_unsupported.Contains(path) && !_failed.ContainsKey(path);
+        => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_unsupported.Contains(path) && !_failed.Contains(path);
 
     /// <summary>
     /// Whether each physical monitor is the attached monitor at the same place in its list. Windows documents neither
@@ -128,7 +154,7 @@ internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, A
         => attached.Count == physical.Count
            && attached.Zip(physical).All(pair => string.Equals(pair.First.Description, pair.Second.Description, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The monitor's brightness, first asking what it supports if it hasn't been asked since it last failed.</summary>
+    /// <summary>The monitor's brightness, first asking what it supports if that hasn't been remembered yet.</summary>
     private double? Ask(IntPtr monitor, string path)
     {
         try
@@ -136,16 +162,16 @@ internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, A
             if (!_readable.Contains(path))
             {
                 // A monitor without DDC/CI, such as a laptop's own panel, fails here, as expected.
-                if (windows.Capabilities(monitor) is not { } capabilities) return Failed(path);
+                if (_windows.Capabilities(monitor) is not { } capabilities) return Failed(path);
                 if ((capabilities & BrightnessCapability) == 0)
                 {
                     _unsupported.Add(path);
                     return null;
                 }
                 _readable.Add(path);
-                pause(RequestGap);
+                _pause(RequestGap);
             }
-            return windows.Brightness(monitor) is { } setting ? Normalise(setting.Minimum, setting.Current, setting.Maximum) : Failed(path);
+            return _windows.Brightness(monitor) is { } setting ? Normalise(setting.Minimum, setting.Current, setting.Maximum) : Failed(path);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -153,12 +179,39 @@ internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, A
         }
     }
 
-    /// <summary>Asks the monitor nothing for <see cref="RetryAfter"/>, and then what it supports before anything else.</summary>
+    /// <summary>Asks the monitor nothing again for the rest of the session, until a display change or a resume clears it
+    /// (<see cref="Reset"/>).</summary>
     private double? Failed(string path)
     {
         _readable.Remove(path);
-        _failed[path] = clock.GetUtcNow();
+        _failed.Add(path);
         return null;
+    }
+
+    /// <summary>A display change: SystemEvents.DisplaySettingsChanged, raised as much for a monitor plugged in or out as
+    /// for a resolution or arrangement change - there's no way to tell those apart, so any of them clears every
+    /// monitor's answer.</summary>
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => Reset();
+
+    /// <summary>SystemEvents.PowerModeChanged also fires for a suspend and for a status change (such as a battery
+    /// warning); only a resume is a reason a monitor might be worth asking again.</summary>
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume) Reset();
+    }
+
+    /// <summary>Forgets what every monitor has answered, so the next read asks each afresh, capabilities first.
+    /// SystemEvents raises both events this reader listens for on a thread of its own - never the UI thread, and not
+    /// necessarily whatever thread is running <see cref="Read"/> - so this takes the same lock <see cref="Read"/>
+    /// does.</summary>
+    private void Reset()
+    {
+        lock (_gate)
+        {
+            _readable.Clear();
+            _unsupported.Clear();
+            _failed.Clear();
+        }
     }
 }
 
@@ -195,6 +248,18 @@ internal interface IMonitorCalls
 
     /// <summary>DestroyPhysicalMonitors, for a list <see cref="Open"/> returned.</summary>
     void Close(IReadOnlyList<PhysicalMonitor> monitors);
+}
+
+/// <summary>The two system events that clear what <see cref="DdcBrightness"/> has learned about every monitor, behind an
+/// interface so a test can raise them without real hardware or a real display change. <see cref="WindowsSystemEvents"/>
+/// wires this to the static <see cref="SystemEvents"/> class.</summary>
+internal interface ISystemEvents
+{
+    /// <summary>SystemEvents.DisplaySettingsChanged: a monitor plugged in or out, or display settings changed.</summary>
+    event EventHandler? DisplaySettingsChanged;
+
+    /// <summary>SystemEvents.PowerModeChanged: the system suspended, resumed, or its status changed.</summary>
+    event PowerModeChangedEventHandler? PowerModeChanged;
 }
 
 /// <summary>The calls as Windows answers them, through User32 and Dxva2. Nothing here writes to a monitor.</summary>
@@ -350,5 +415,24 @@ internal sealed class WindowsMonitorCalls : IMonitorCalls
         [DllImport("dxva2.dll", SetLastError = true), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetMonitorBrightness(IntPtr physicalMonitor, out uint minimum, out uint current, out uint maximum);
+    }
+}
+
+/// <summary>Forwards to the static <see cref="SystemEvents"/> class. Its handlers are static and, unlike an ordinary
+/// event source, keep whatever subscribes to them alive until it unsubscribes or the process ends, so
+/// <see cref="DdcBrightness.Dispose"/> removes its handlers through this rather than only dropping the App's own
+/// reference to the reader.</summary>
+internal sealed class WindowsSystemEvents : ISystemEvents
+{
+    public event EventHandler? DisplaySettingsChanged
+    {
+        add => SystemEvents.DisplaySettingsChanged += value;
+        remove => SystemEvents.DisplaySettingsChanged -= value;
+    }
+
+    public event PowerModeChangedEventHandler? PowerModeChanged
+    {
+        add => SystemEvents.PowerModeChanged += value;
+        remove => SystemEvents.PowerModeChanged -= value;
     }
 }

@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Time.Testing;
+using Microsoft.Win32;
 using Shouldly;
 using Xunit.Abstractions;
 
@@ -11,12 +11,12 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     private const string Panel = @"\\?\DISPLAY#BOE0A1C#4&1a2b3c4d&0&UID8388688#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}";
 
     private readonly FakeWindows _windows = new();
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 9, 16, 9, 0, 0, TimeSpan.Zero));
+    private readonly FakeSystemEvents _events = new();
 
     private DdcBrightness Reader(params FakeDisplay[] displays)
     {
         _windows.Screens.AddRange(displays);
-        return new DdcBrightness(_windows, _clock, gap => _windows.Log.Add($"pause {gap.TotalMilliseconds:0} ms"));
+        return new DdcBrightness(_windows, gap => _windows.Log.Add($"pause {gap.TotalMilliseconds:0} ms"), _events);
     }
 
     [Theory]
@@ -65,8 +65,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
 
         reader.Read().ShouldBeEmpty();
         reader.Read().ShouldBeEmpty();
-        _clock.Advance(TimeSpan.FromDays(1));   // an answer isn't a failure, so no time makes it worth asking again
-        reader.Read().ShouldBeEmpty();
+        reader.Read().ShouldBeEmpty();   // an answer isn't a failure, and no event fired, so nothing makes it worth asking again
 
         dell.CapabilityCalls.ShouldBe(1);
         dell.BrightnessCalls.ShouldBe(0);
@@ -74,47 +73,122 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     }
 
     [Theory]
+    [InlineData(0x0u)]
+    [InlineData(0x4u)]
+    public void A_capabilities_answer_of_no_brightness_is_remembered_until_an_event_clears_it(uint capabilities)
+    {
+        var dell = new FakeMonitor(Dell) { Capabilities = capabilities };
+        var reader = Reader(new FakeDisplay(dell));
+
+        reader.Read().ShouldBeEmpty();
+        dell.CapabilityCalls.ShouldBe(1);
+
+        dell.Capabilities = 0x2 | 0x4;   // even if the monitor would now answer differently
+        reader.Read().ShouldBeEmpty();   // the old answer stands, so it isn't asked to find out
+        dell.CapabilityCalls.ShouldBe(1);
+
+        _events.RaiseDisplaySettingsChanged();
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6)]);
+        dell.CapabilityCalls.ShouldBe(2);
+    }
+
+    [Theory]
     [InlineData("capabilities fail")]
     [InlineData("capabilities throw")]
     [InlineData("brightness fails")]
     [InlineData("brightness throws")]
-    public void A_monitor_that_fails_any_call_is_left_alone_for_an_hour_then_asked_afresh(string failure)
+    public void A_monitor_that_fails_any_call_is_not_asked_again_while_the_app_runs(string failure)
     {
         var dell = Failing(new FakeMonitor(Dell), failure);
         var reader = Reader(new FakeDisplay(dell), new FakeDisplay(new FakeMonitor(Lg)));
 
         reader.Read().ShouldBe([new DdcReading(Lg, 0.6)]);
         var asked = dell.Calls;
-        var askedWhatItSupports = dell.CapabilityCalls;
-        _clock.Advance(DdcBrightness.RetryAfter - TimeSpan.FromSeconds(1));
-        reader.Read().ShouldBe([new DdcReading(Lg, 0.6)]);
-
         asked.ShouldBeGreaterThan(0);
-        dell.Calls.ShouldBe(asked);
 
-        Answering(dell);   // it was only asleep
-        _clock.Advance(TimeSpan.FromSeconds(1));
-        reader.Read().ShouldBe([new DdcReading(Dell, 0.6), new DdcReading(Lg, 0.6)]);
+        // Many more reads stand in for the App running a long time: DdcBrightness keeps no clock, so nothing about
+        // elapsed time can make it ask this monitor again - only a display change or a resume can.
+        for (var read = 0; read < 20; read++) reader.Read().ShouldBe([new DdcReading(Lg, 0.6)]);
+
+        dell.Calls.ShouldBe(asked);
+    }
+
+    [Theory]
+    [InlineData(true)]     // a display change: a monitor plugged in or out, or display settings changed
+    [InlineData(false)]    // a resume from sleep
+    public void A_display_change_or_a_resume_clears_a_failure_and_the_monitor_is_asked_again(bool displayChange)
+    {
+        var dell = Failing(new FakeMonitor(Dell), "capabilities fail");
+        var reader = Reader(new FakeDisplay(dell));
+
+        reader.Read().ShouldBeEmpty();
+        var askedWhatItSupports = dell.CapabilityCalls;
+
+        Answering(dell);   // it was only asleep, or only just plugged back in
+        if (displayChange) _events.RaiseDisplaySettingsChanged();
+        else _events.RaisePowerModeChanged(PowerModes.Resume);
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6)]);
+
         dell.CapabilityCalls.ShouldBe(askedWhatItSupports + 1);
     }
 
+    [Theory]
+    [InlineData(PowerModes.Suspend)]
+    [InlineData(PowerModes.StatusChange)]
+    public void A_power_mode_change_that_isnt_a_resume_does_not_clear_a_failure(PowerModes mode)
+    {
+        var dell = Failing(new FakeMonitor(Dell), "capabilities fail");
+        var reader = Reader(new FakeDisplay(dell));
+
+        reader.Read().ShouldBeEmpty();
+        Answering(dell);
+        _events.RaisePowerModeChanged(mode);
+        reader.Read().ShouldBeEmpty();
+
+        dell.CapabilityCalls.ShouldBe(1);
+    }
+
     [Fact]
-    public void A_monitor_that_fails_again_after_its_hour_is_left_alone_for_another()
+    public void A_monitor_that_fails_again_after_being_cleared_is_left_alone_until_the_next_event()
     {
         var dell = new FakeMonitor(Dell) { Capabilities = null };
         var reader = Reader(new FakeDisplay(dell));
 
         reader.Read().ShouldBeEmpty();
-        _clock.Advance(DdcBrightness.RetryAfter);
-        reader.Read().ShouldBeEmpty();
-        _clock.Advance(DdcBrightness.RetryAfter - TimeSpan.FromSeconds(1));
-        reader.Read().ShouldBeEmpty();
+        _events.RaiseDisplaySettingsChanged();
+        reader.Read().ShouldBeEmpty();   // asked again, but still fails
 
         dell.CapabilityCalls.ShouldBe(2);
+
+        reader.Read().ShouldBeEmpty();   // not asked a third time without another event
+        dell.CapabilityCalls.ShouldBe(2);
+
+        Answering(dell);
+        _events.RaisePowerModeChanged(PowerModes.Resume);
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6)]);
+        dell.CapabilityCalls.ShouldBe(3);
     }
 
     [Fact]
-    public void A_laptop_panel_without_DDC_CI_fails_quietly_and_its_display_isnt_opened_again_within_the_hour()
+    public void Disposing_unsubscribes_from_the_events()
+    {
+        var dell = Failing(new FakeMonitor(Dell), "capabilities fail");
+        var reader = Reader(new FakeDisplay(dell));
+        reader.Read().ShouldBeEmpty();
+        _events.HasSubscribers.ShouldBeTrue();
+
+        reader.Dispose();
+        _events.HasSubscribers.ShouldBeFalse();
+
+        Answering(dell);
+        _events.RaiseDisplaySettingsChanged();     // nothing is listening any more
+        _events.RaisePowerModeChanged(PowerModes.Resume);
+        reader.Read().ShouldBeEmpty();
+        dell.CapabilityCalls.ShouldBe(1);
+    }
+
+    [Fact]
+    public void A_laptop_panel_without_DDC_CI_fails_quietly_and_its_display_isnt_opened_again_while_the_app_runs()
     {
         var panel = new FakeMonitor(Panel) { Capabilities = null };
         var laptop = new FakeDisplay(panel);
@@ -127,10 +201,9 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         panel.BrightnessCalls.ShouldBe(0);
         laptop.Opens.ShouldBe(1);
 
-        _clock.Advance(DdcBrightness.RetryAfter);
         reader.Read().ShouldBe([new DdcReading(Dell, 0.6)]);
-        panel.CapabilityCalls.ShouldBe(2);
-        laptop.Opens.ShouldBe(2);
+        panel.CapabilityCalls.ShouldBe(1);
+        laptop.Opens.ShouldBe(1);
     }
 
     [Fact]
@@ -295,7 +368,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     [Trait("Category", "Hardware")]
     public void This_machines_monitors_are_read_without_throwing_and_every_brightness_is_between_0_and_1()
     {
-        var reader = new DdcBrightness();
+        using var reader = new DdcBrightness();
 
         var readings = reader.Read().Concat(reader.Read()).ToList();   // the second read asks only the monitors that answered the first
 
@@ -467,5 +540,19 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         }
 
         private FakeDisplay Screen(IntPtr display) => Screens[(int)display - 1];
+    }
+
+    /// <summary>The two system events DdcBrightness listens for, raised here instead of by real hardware or Windows.</summary>
+    private sealed class FakeSystemEvents : ISystemEvents
+    {
+        public event EventHandler? DisplaySettingsChanged;
+
+        public event PowerModeChangedEventHandler? PowerModeChanged;
+
+        public bool HasSubscribers => DisplaySettingsChanged is not null || PowerModeChanged is not null;
+
+        public void RaiseDisplaySettingsChanged() => DisplaySettingsChanged?.Invoke(this, EventArgs.Empty);
+
+        public void RaisePowerModeChanged(PowerModes mode) => PowerModeChanged?.Invoke(this, new PowerModeChangedEventArgs(mode));
     }
 }
