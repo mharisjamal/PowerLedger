@@ -38,7 +38,8 @@ internal sealed class MonitorRow : ObservableObject
     /// <summary>Whether the user has ticked or unticked <see cref="Counted"/>, so neither a default nor a choice moves it.</summary>
     private bool _countedTicked;
 
-    /// <summary>Whether the user has ticked or unticked <see cref="OwnPlug"/>, so neither a default nor a choice moves it.</summary>
+    /// <summary>Whether the user has ticked or unticked <see cref="OwnPlug"/>, so neither a default nor a choice moves it, and
+    /// a desktop keeps showing its box.</summary>
     private bool _ownPlugTicked;
 
     private string _name = "";
@@ -107,8 +108,14 @@ internal sealed class MonitorRow : ObservableObject
             if (!SetProperty(ref _ownPlug, value)) return;
             _ownPlugTicked = true;
             OnPropertyChanged(nameof(Counted));
+            OnPropertyChanged(nameof(ShowsPlug));
         }
     }
+
+    /// <summary>Whether a desktop, which doesn't ask, still shows the "has its own plug" box: for a monitor held to run off the
+    /// PC, so that can be undone, and once the user has ticked or unticked it since the row was listed, so it doesn't go from
+    /// under the pointer. A laptop always shows it.</summary>
+    public bool ShowsPlug => !OwnPlug || _ownPlugTicked;
 
     /// <summary>Whether the service counts the monitor when the user hasn't said, as it last said.</summary>
     internal bool CountedByDefault { get; private set; }
@@ -186,7 +193,11 @@ internal sealed class MonitorRow : ObservableObject
         _filled = Fill();
         if (untouched) Watts = _filled;
         if (!_countedTicked) SetProperty(ref _counted, _choice?.Counted ?? CountedByDefault, nameof(Counted));
-        if (!_ownPlugTicked && SetProperty(ref _ownPlug, _choice?.OwnPlug ?? _ownPlugByDefault, nameof(OwnPlug))) OnPropertyChanged(nameof(Counted));
+        if (!_ownPlugTicked && SetProperty(ref _ownPlug, _choice?.OwnPlug ?? _ownPlugByDefault, nameof(OwnPlug)))
+        {
+            OnPropertyChanged(nameof(Counted));
+            OnPropertyChanged(nameof(ShowsPlug));
+        }
     }
 
     private string Fill() => _choice?.Watts is { } typed ? Figure(typed) : _own is { } own ? Figure(own) : "";

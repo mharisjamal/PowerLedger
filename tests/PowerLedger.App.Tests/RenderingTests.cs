@@ -151,7 +151,7 @@ public class RenderingTests
                             Find<TextBox>(row, box => AutomationProperties.GetName(box) == $"Watts for {monitor.Name}").ShouldNotBeNull(name).IsVisible.ShouldBeTrue(name);
                             // A row keeps its boxes and where its figure came from inside the page, however many boxes it shows.
                             var plug = Find<CheckBox>(row, box => AutomationProperties.GetName(box) == $"{monitor.Name} has its own plug").ShouldNotBeNull(name);
-                            plug.IsVisible.ShouldBe(!form.IsDesktop || !monitor.OwnPlug, name);
+                            plug.IsVisible.ShouldBe(!form.IsDesktop || monitor.ShowsPlug, name);
                             var source = Find<TextBlock>(row, text => text.Text == monitor.Source).ShouldNotBeNull(name);
                             foreach (var part in plug.IsVisible ? new FrameworkElement[] { plug, source } : [source])
                             {
@@ -229,6 +229,15 @@ public class RenderingTests
                         (alwaysCounts.IsEnabled, alwaysCounts.IsChecked).ShouldBe((false, (bool?)true), what);
                         alwaysCounts.ToolTip.ShouldBe("Runs off this PC, so it counts as part of what the PC draws", what);
                         ToolTipService.GetShowOnDisabled(alwaysCounts).ShouldBeTrue(what);
+                    }
+
+                    // Ticked on a desktop, the box stays under the pointer, so it can be unticked again.
+                    var plug = Box(runsOff, $"{runsOff.Name} has its own plug");
+                    foreach (var ticked in new[] { true, false })
+                    {
+                        plug.IsChecked = ticked;
+                        Pump(TimeSpan.FromMilliseconds(300));
+                        (runsOff.OwnPlug, plug.IsVisible).ShouldBe((ticked, true), $"{name} on a desktop, ticked: {ticked}");
                     }
 
                     CheckBox Box(MonitorRow monitor, string label)

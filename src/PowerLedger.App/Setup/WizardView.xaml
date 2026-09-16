@@ -38,11 +38,11 @@
             </Style.Triggers>
         </Style>
         <!-- A monitor's "has its own plug", asked only on a laptop. A desktop still shows it for a monitor held to run off the PC,
-             so that can be undone. -->
+             so that can be undone, and once it has been ticked or unticked, so it doesn't go from under the pointer. -->
         <Style x:Key="Plug" TargetType="CheckBox" BasedOn="{StaticResource Tick}">
             <Setter Property="Visibility" Value="{Binding DataContext.IsDesktop, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource HiddenWhen}}" />
             <Style.Triggers>
-                <DataTrigger Binding="{Binding OwnPlug}" Value="False">
+                <DataTrigger Binding="{Binding ShowsPlug}" Value="True">
                     <Setter Property="Visibility" Value="Visible" />
                 </DataTrigger>
             </Style.Triggers>

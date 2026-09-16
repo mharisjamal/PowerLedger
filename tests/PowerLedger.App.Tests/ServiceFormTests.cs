@@ -452,6 +452,32 @@ public class ServiceFormTests
     }
 
     [Fact]
+    public void A_desktop_shows_the_plug_box_of_a_monitor_held_to_run_off_it_and_keeps_one_the_user_has_ticked()
+    {
+        // A desktop doesn't ask whether a monitor has a plug of its own, but shows the box of one held to run off the PC, so that
+        // can be undone. A box the user ticks stays, or it would go from under the pointer and couldn't be unticked. A laptop
+        // shows every box.
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultDesktop with { Monitors = [new MonitorChoice { Key = Statuses.Aoc.Key, OwnPlug = false }] },
+        });
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc with { OwnPlug = false }]);
+        var (dell, aoc) = (form.Monitors[0], form.Monitors[1]);
+        (dell.ShowsPlug, aoc.ShowsPlug).ShouldBe((false, true));
+        var changed = new List<string?>();
+        dell.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        aoc.OwnPlug = true;
+        dell.OwnPlug = false;
+        dell.OwnPlug = true;
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc with { OwnPlug = false }]);
+
+        (dell.ShowsPlug, aoc.ShowsPlug).ShouldBe((true, true));
+        changed.ShouldContain(nameof(MonitorRow.ShowsPlug));
+    }
+
+    [Fact]
     public async Task Whether_a_monitor_that_runs_off_the_pc_counts_saves_nothing()
     {
         // Where the settings from before monitors left monitors out, a portable monitor still counts, and a choice that says
