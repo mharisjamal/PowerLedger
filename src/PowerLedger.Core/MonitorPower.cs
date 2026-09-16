@@ -40,7 +40,10 @@ public static class MonitorPower
 {
     public const double FixedShare = 0.45;
     public const double ListedBrightness = 0.75;
-    public const double DefaultSleepW = 0.2;
+
+    /// <summary>What a monitor draws asleep when the list gives no figure for it: the median <c>sleep_w</c> of the shipped
+    /// table, 0.23 W over its 1,580 monitors, all of which give one.</summary>
+    public const double DefaultSleepW = 0.23;
 
     /// <summary>What a monitor draws switched off when the list gives no figure for it: the median <c>off_w</c> of the
     /// shipped table, 0.16 W over the 1,572 of its 1,580 monitors that give one.</summary>

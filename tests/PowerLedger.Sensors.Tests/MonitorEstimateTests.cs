@@ -84,7 +84,7 @@ public class MonitorEstimateTests
         var (on, sleep, off) = For(49, 3840, 1080);
         on.ShouldBe(MonitorEstimate.Formula(49, 3840, 1080));
         on.ShouldBe(34.2152, 0.0001);
-        sleep.ShouldBe(0.2);
+        sleep.ShouldBe(0.23);
         off.ShouldBe(0.16);
     }
 
@@ -122,14 +122,14 @@ public class MonitorEstimateTests
     [Fact]
     public void A_screen_bigger_than_any_monitor_is_estimated_from_the_formula()
         // A 65-inch television used as a monitor would otherwise take the 49-inch super-ultrawides' median, 48 W.
-        => For(65, 3840, 2160).ShouldBe((MonitorEstimate.Formula(65, 3840, 2160), 0.2, 0.16));
+        => For(65, 3840, 2160).ShouldBe((MonitorEstimate.Formula(65, 3840, 2160), 0.23, 0.16));
 
     [Fact]
     public void With_too_few_monitors_for_a_median_one_that_does_not_give_its_size_is_taken_for_the_commonest()
     {
         var (on, sleep, off) = MonitorEstimate.For(0, 0, 0, Televisions);
         on.ShouldBe(MonitorEstimate.Formula(23.8, 1920, 1080));
-        sleep.ShouldBe(0.2);
+        sleep.ShouldBe(0.23);
         off.ShouldBe(0.16);
     }
 }

@@ -406,24 +406,29 @@ public class MonitorCatalogueTests
         Shipped.Monitors.Single(monitor => monitor.Brand == "ASUS" && monitor.ModelNumber == "MS27UC").MaxNits.ShouldBeNull();
 
         var monitor = Parse(Header, "ASUS,MS27UC,MS27UC,MS27*****|MS27UCE,27,3840,2160,IPS LCD,24.87,,0.09,,,2024-07-17").Monitors.Single();
-        monitor.SleepW.ShouldBe(0.2);
+        monitor.SleepW.ShouldBe(MonitorPower.DefaultSleepW);
         monitor.OffW.ShouldBe(0.09);
         monitor.MaxNits.ShouldBeNull();
     }
 
     [Fact]
-    public void A_missing_off_figure_is_the_median_of_the_ones_the_shipped_table_gives()
+    public void A_missing_sleep_or_off_figure_is_the_median_of_the_ones_the_shipped_table_gives()
     {
         // The table as its fields are written, before a missing figure is filled in.
         using var table = new StreamReader(typeof(MonitorCatalogue).Assembly
             .GetManifestResourceStream("PowerLedger.Sensors.Monitors.energy-star-monitors.csv").ShouldNotBeNull());
         var records = MonitorCatalogue.Records(table).Select(record => record.Fields).ToList();
-        var offW = records[0].IndexOf("off_w");
-        var given = records.Skip(1).Select(fields => fields[offW]).Where(field => field.Length > 0)
-            .Select(field => double.Parse(field, CultureInfo.InvariantCulture)).ToList();
+        double MedianOf(string column)
+        {
+            var index = records[0].IndexOf(column);
+            var given = records.Skip(1).Select(fields => fields[index]).Where(field => field.Length > 0)
+                .Select(field => double.Parse(field, CultureInfo.InvariantCulture)).ToList();
+            given.Count.ShouldBeGreaterThan(1000);
+            return Math.Round(MonitorCatalogue.Median(given), 2);
+        }
 
-        given.Count.ShouldBeGreaterThan(1000);
-        Math.Round(MonitorCatalogue.Median(given), 2).ShouldBe(MonitorPower.DefaultOffW);
+        MedianOf("sleep_w").ShouldBe(MonitorPower.DefaultSleepW);
+        MedianOf("off_w").ShouldBe(MonitorPower.DefaultOffW);
 
         // Jetwing's listing gives no off figure.
         Parse(Header, Jetwing).Monitors.Single().OffW.ShouldBe(MonitorPower.DefaultOffW);
