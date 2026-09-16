@@ -98,16 +98,18 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Brightness_and_power_states_reach_the_service()
+    public async Task Brightness_power_states_and_display_settings_reach_the_service()
     {
         MonitorBrightness[] monitors = [new() { Instance = Statuses.Dell.Instance, Brightness = 0.6 }, new() { Instance = Statuses.Aoc.Instance, Brightness = 0.35 }];
         MonitorPowerReading[] power = [new() { Instance = Statuses.Dell.Instance, State = MonitorPowerState.On }, new() { Instance = Statuses.Aoc.Instance, State = MonitorPowerState.Off }];
+        MonitorDisplayReading[] displays = [new() { Instance = Statuses.Dell.Instance, RefreshHz = 143.998, Hdr = true }, new() { Instance = Statuses.Aoc.Instance, RefreshHz = 60 }];
 
-        (await _link.ReportBrightnessAsync(monitors, power)).ShouldBe(WriteResult.Done);
+        (await _link.ReportBrightnessAsync(monitors, power, displays)).ShouldBe(WriteResult.Done);
 
         var report = _service.Requests.OfType<ReportBrightnessRequest>().Single();
         report.Monitors.ShouldBe(monitors);
         report.Power.ShouldNotBeNull().ShouldBe(power);
+        report.Displays.ShouldNotBeNull().ShouldBe(displays);
     }
 
     [Fact]
@@ -130,7 +132,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         await WaitFor.True(() => checkedLink.IsConnected);
 
         (await checkedLink.SetTariffAsync(0.2m, "EUR", null)).Problem.ShouldBe(RefuseAll.Reason);
-        (await checkedLink.ReportBrightnessAsync([new MonitorBrightness { Instance = Statuses.Dell.Instance, Brightness = 0.6 }], [])).Problem.ShouldBe(RefuseAll.Reason);
+        (await checkedLink.ReportBrightnessAsync([new MonitorBrightness { Instance = Statuses.Dell.Instance, Brightness = 0.6 }], [], [])).Problem.ShouldBe(RefuseAll.Reason);
         service.Requests.OfType<SetTariffRequest>().ShouldBeEmpty();
         service.Requests.OfType<ReportBrightnessRequest>().ShouldBeEmpty();
     }

@@ -36,7 +36,7 @@ internal sealed class BrightnessReporter(IServiceLink link, IBrightnessReader re
             var status = await link.GetStatusAsync().ConfigureAwait(false);
             if (status?.Monitors is not { Count: > 0 } listed || status.Last is { DisplayOn: false }) return;
             var (brightness, power) = Listed(reader.Read(), listed);
-            if (brightness.Count > 0 || power.Count > 0) await link.ReportBrightnessAsync(brightness, power).ConfigureAwait(false);
+            if (brightness.Count > 0 || power.Count > 0) await link.ReportBrightnessAsync(brightness, power, []).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {

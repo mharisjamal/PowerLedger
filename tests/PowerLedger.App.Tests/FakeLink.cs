@@ -51,18 +51,21 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<WriteResult> ResetCalibrationAsync(CancellationToken cancel = default) => Write("reset");
 
-    /// <summary>Every brightness report the App sent, in order, with the brightnesses and the power states it carried. They
-    /// are kept apart from <see cref="Writes"/>, being reports rather than changes the user asked for.</summary>
-    public List<(IReadOnlyList<MonitorBrightness> Monitors, IReadOnlyList<MonitorPowerReading> Power)> BrightnessReports { get; } = [];
+    /// <summary>Every brightness report the App sent, in order, with the brightnesses, the power states and the display
+    /// settings it carried. They are kept apart from <see cref="Writes"/>, being reports rather than changes the user asked
+    /// for.</summary>
+    public List<(IReadOnlyList<MonitorBrightness> Monitors, IReadOnlyList<MonitorPowerReading> Power, IReadOnlyList<MonitorDisplayReading> Displays)> BrightnessReports { get; } = [];
 
     /// <summary>When set, a brightness report fails with this.</summary>
     public Exception? ReportThrows { get; set; }
 
-    public Task<WriteResult> ReportBrightnessAsync(IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading> power, CancellationToken cancel = default)
+    public Task<WriteResult> ReportBrightnessAsync(
+        IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading> power, IReadOnlyList<MonitorDisplayReading> displays,
+        CancellationToken cancel = default)
     {
         if (ReportThrows is { } error) return Task.FromException<WriteResult>(error);
         if (!IsConnected) return Task.FromResult(WriteResult.NotConnected);
-        BrightnessReports.Add((monitors, power));
+        BrightnessReports.Add((monitors, power, displays));
         return Task.FromResult(Answer);
     }
 
