@@ -66,7 +66,8 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         }
     }
 
-    /// <summary>What every counted monitor draws: with the display on, its figure at its brightness; asleep, its sleep figure.</summary>
+    /// <summary>What every counted monitor draws: with the display on, a figure the user typed as it is, or PowerLedger's
+    /// own at the monitor's brightness; asleep, its sleep figure.</summary>
     public double Watts(bool displayOn)
     {
         var now = clock.GetTimestamp();
@@ -105,6 +106,10 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         var onW = choice?.Watts ?? monitor.OnW;
         var counted = choice?.Counted ?? true;
         double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, now) ? reading.Brightness : null;
+        // A figure the user typed is what the monitor draws as they use it, so it is taken as it is, and the brightness is
+        // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
+        // list's test brightness, so it is scaled to the monitor's.
+        var onNow = choice?.Watts ?? MonitorPower.At(monitor.OnW, brightness);
         return new MonitorStatus
         {
             Key = facts.Key,
@@ -118,7 +123,7 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             Source = choice?.Watts is null ? monitor.Source : MonitorSource.Typed,
             Counted = counted,
             Brightness = brightness,
-            WattsNow = !counted ? 0 : displayOn ? MonitorPower.At(onW, brightness) : monitor.SleepW,
+            WattsNow = !counted ? 0 : displayOn ? onNow : monitor.SleepW,
         };
     }
 

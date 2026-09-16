@@ -130,13 +130,47 @@ public class MonitorBoardTests
     }
 
     [Fact]
-    public void A_typed_figure_is_scaled_by_the_brightness_too()
+    public void A_typed_figure_is_taken_as_it_is_whatever_the_brightness()
     {
         _board.Detected([Dell]);
-        _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 40 }]);
-        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0 }]);
+        _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 30 }]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.2 }]);
 
-        _board.Watts(displayOn: true).ShouldBe(MonitorPower.At(40, 0), 1e-9);
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        monitor.Source.ShouldBe(MonitorSource.Typed);
+        monitor.OnWatts.ShouldBe(30);
+        monitor.Brightness.ShouldBe(0.2);   // still reported, for the user to see
+        monitor.WattsNow.ShouldBe(30);
+        _board.Watts(displayOn: true).ShouldBe(30);
+    }
+
+    [Fact]
+    public void With_the_display_off_a_monitor_with_a_typed_figure_draws_its_sleep_figure()
+    {
+        _board.Detected([Dell]);
+        _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 30 }]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.2 }]);
+
+        _board.Status(displayOn: false).ShouldHaveSingleItem().WattsNow.ShouldBe(0.74);
+        _board.Watts(displayOn: false).ShouldBe(0.74, 1e-9);
+    }
+
+    [Fact]
+    public void A_listed_figure_beside_a_typed_one_is_still_scaled_by_the_same_brightness()
+    {
+        _board.Detected([Dell, Unnamed]);
+        _board.Choose([new MonitorChoice { Key = Unnamed.Key, Watts = 30 }]);
+        _board.Report(
+        [
+            new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.2 },
+            new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.2 },
+        ]);
+
+        var status = _board.Status(displayOn: true);
+        status.Select(m => m.Source).ShouldBe([MonitorSource.Model, MonitorSource.Typed]);
+        status[0].WattsNow.ShouldBe(MonitorPower.At(28.32, 0.2), 1e-9);
+        status[1].WattsNow.ShouldBe(30);
+        _board.Watts(displayOn: true).ShouldBe(MonitorPower.At(28.32, 0.2) + 30, 1e-9);
     }
 
     [Fact]

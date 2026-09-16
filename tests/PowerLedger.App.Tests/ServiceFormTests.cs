@@ -96,6 +96,25 @@ public class ServiceFormTests
     }
 
     [Fact]
+    public void A_monitor_at_a_typed_figure_shows_its_brightness_without_assuming_one()
+    {
+        // The service takes a typed figure as it is, so no brightness is assumed for it; one that was read is still shown.
+        var form = Form();
+
+        form.ShowMonitors(
+        [
+            Statuses.Dell with { OnWatts = 30, Source = MonitorSource.Typed, WattsNow = 30 },
+            Statuses.Aoc with { OnWatts = 30, Source = MonitorSource.Typed, WattsNow = 30 },
+        ]);
+
+        form.Monitors.Select(m => (m.Brightness, m.Now)).ShouldBe(
+        [
+            ("brightness 60%, read from the monitor", "30.0 W now"),
+            ("brightness unknown", "30.0 W now"),
+        ]);
+    }
+
+    [Fact]
     public void A_refresh_keeps_what_the_user_typed_and_ticked_and_shows_what_the_service_says_now()
     {
         var form = Form();

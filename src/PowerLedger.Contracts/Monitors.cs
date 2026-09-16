@@ -42,7 +42,8 @@ public sealed record MonitorStatus
 
     public int Height { get; init; }
 
-    /// <summary>On-mode watts at the list's test brightness, before this monitor's own brightness.</summary>
+    /// <summary>On-mode watts: PowerLedger's own figure at the list's test brightness, before this monitor's own brightness,
+    /// or the figure the user typed, which is taken as it is.</summary>
     public double OnWatts { get; init; }
 
     public double SleepWatts { get; init; }
