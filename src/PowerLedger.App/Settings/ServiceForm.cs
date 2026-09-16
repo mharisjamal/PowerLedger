@@ -51,7 +51,7 @@ internal sealed class ServiceForm : ObservableObject
     private string? _message;
 
     /// <summary>The form is changing what it shows itself, as it loads the settings, follows the service's word for the
-    /// monitors or takes the settings a save read again, so nothing it changes is taken for the user's change.</summary>
+    /// monitors or takes the settings a save read again or sent, so nothing it changes is taken for the user's change.</summary>
     private bool _quiet;
 
     /// <summary>A save the form started by itself is on its way.</summary>
@@ -71,8 +71,8 @@ internal sealed class ServiceForm : ObservableObject
         _save = new RelayCommand(() => _ = SaveAsync(), () => IsLoaded);
     }
 
-    /// <summary>Raised on the UI thread once the service has taken the settings.</summary>
-    public event Action? Saved;
+    /// <summary>Raised on the UI thread once the service has taken the settings, with the settings it took.</summary>
+    public event Action<ServiceSettings>? Saved;
 
     /// <summary>The service has sent its settings, so the form holds real values.</summary>
     public bool IsLoaded
@@ -169,9 +169,9 @@ internal sealed class ServiceForm : ObservableObject
     });
 
     /// <summary>Lists the external monitors in the service's status, once each and in its order, with the user's choice for
-    /// each from the settings last loaded, or read again by a save. A monitor already listed keeps its row, and with it what
-    /// the user typed and ticked, so a status read while a figure is being typed takes nothing away; a monitor unplugged
-    /// goes.</summary>
+    /// each from the settings last loaded, or read again or sent by a save. A monitor already listed keeps its row, and with
+    /// it what the user typed and ticked, so a status read while a figure is being typed takes nothing away; a monitor
+    /// unplugged goes.</summary>
     public void ShowMonitors(IReadOnlyList<MonitorStatus> monitors)
     {
         var listed = monitors.OfType<MonitorStatus>().DistinctBy(monitor => monitor.Key).ToList();
@@ -200,7 +200,8 @@ internal sealed class ServiceForm : ObservableObject
     }
 
     /// <summary>Sends the settings typed, and says whether the service took them. When the settings loaded are behind the
-    /// service's, its settings are read again first, and nothing is sent without them.</summary>
+    /// service's, its settings are read again first, and nothing is sent without them. Settings the service took are the
+    /// ones the form holds from then on.</summary>
     public async Task<bool> SaveAsync()
     {
         if (Read(out var problem) is not { } settings)
@@ -221,7 +222,9 @@ internal sealed class ServiceForm : ObservableObject
         _threads.Post(() =>
         {
             Message = result.Succeeded ? "Saved." : result.Problem;
-            if (result.Succeeded) Saved?.Invoke();
+            if (!result.Succeeded) return;
+            TakeSaved(settings);
+            Saved?.Invoke(settings);
         });
         return result.Succeeded;
     }
@@ -295,6 +298,30 @@ internal sealed class ServiceForm : ObservableObject
         if (Read(out var problem) is { } settings) return settings;
         Message = problem;
         return null;
+    }
+
+    /// <summary>
+    /// The service took <paramref name="settings"/>, so the form holds them from now on as it would once loaded, without
+    /// filling anything shown again: a monitor's choice is weighed against them, and a save reads the service's settings again
+    /// only while they are behind. Each monitor listed takes its choice sent, which says what its boxes showed when the
+    /// settings were read, so a box the user hasn't touched keeps what it shows. A figure the user has typed since stays in
+    /// its box, as does a box they have ticked, for the save that follows. Call on the UI thread.
+    /// </summary>
+    private void TakeSaved(ServiceSettings settings)
+    {
+        _profile = settings.Profile;
+        _choices = settings.Profile.Monitors;
+        Quietly(() =>
+        {
+            foreach (var row in Monitors)
+            {
+                // A row fills a box it takes as untouched, one that shows what it last filled, but the user may have typed that
+                // figure back since the settings were read.
+                var watts = row.Watts;
+                row.Take(ChoiceFor(row.Key), _profile.CountMonitorsByDefault);
+                row.Watts = watts;
+            }
+        });
     }
 
     /// <summary>The choice the settings last taken hold for the monitor, or null.</summary>

@@ -262,6 +262,82 @@ public class ServiceFormTests
         _link.Writes.Count.ShouldBe(1);
     }
 
+    [Fact]
+    public void A_choice_saved_for_a_monitor_is_kept_once_the_monitor_is_unplugged_and_shown_when_it_is_plugged_in_again()
+    {
+        // Nothing fills the form again after a save, so the choices it sent are the ones it keeps for monitors not attached.
+        var form = SavingItself();
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        form.Monitors[1].Counted = false;
+        form.ShowMonitors([Statuses.Dell]);
+
+        form.FanCount = "2";
+
+        _link.Writes.Count.ShouldBe(2);
+        ((ServiceSettings)_link.Writes[1]).Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false }]);
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc]);
+        form.Monitors[1].Counted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_save_takes_the_settings_it_sent_as_the_services_so_the_next_save_has_nothing_to_read_again()
+    {
+        // The settings loaded still hold a monitor count from before monitors were detected, so the first save reads the
+        // service's settings again before it sends. What it sends clears the count, and the service holds that from then on,
+        // so the next save has nothing to catch up with, and doesn't wait on a read the service may not answer.
+        var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 2, Monitors = [] };
+        _link.Settings = ServiceSettings.Default with { Profile = old };
+        var form = new ServiceForm(_link, UiThreads.Inline, English, savesItself: true);
+        form.Load(_link.Settings);
+        form.ShowMonitors([Statuses.Dell]);
+
+        form.IdleMinutes = "10";
+        _link.Settings = null;
+        form.FanCount = "2";
+
+        _link.Writes.Cast<ServiceSettings>().Select(sent => (sent.Profile.ExternalMonitors, sent.IdleThresholdSeconds, sent.Profile.FanCount))
+            .ShouldBe([(0, 600, 1), (0, 600, 2)]);
+        form.Message.ShouldBe("Saved.");
+    }
+
+    [Fact]
+    public void After_a_save_that_corrected_the_chassis_the_next_save_still_says_each_plug()
+    {
+        // The form isn't filled again after a save but takes what it sent as the service's settings, while the status is still
+        // from the service's last reading, which took each plug for the chassis before. Weighed against those plugs alone, the
+        // plugs said would say nothing, and the portable monitor shown with a plug of its own would be taken to run off the laptop.
+        var form = new ServiceForm(_link, UiThreads.Inline, English, savesItself: true);
+        form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop });
+        form.ShowMonitors([Statuses.Dell, Statuses.Portable with { OwnPlug = true, OwnPlugByDefault = true }]);
+
+        form.Chassis = ChassisKind.Laptop;
+        form.FanCount = "2";
+
+        _link.Writes.Count.ShouldBe(2);
+        ((ServiceSettings)_link.Writes[1]).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, OwnPlug = true },
+            new MonitorChoice { Key = Statuses.Portable.Key, OwnPlug = true },
+        ]);
+    }
+
+    [Fact]
+    public void A_figure_put_back_while_a_save_is_on_its_way_stays_in_its_box_and_is_sent_after_it()
+    {
+        var answers = new Queue<Action>();
+        var form = SavingItself(answers);
+        form.ShowMonitors([Statuses.Dell]);
+        var dell = form.Monitors.Single();
+
+        dell.Watts = "22";
+        dell.Watts = "26.9";   // PowerLedger's own figure again, while the save of 22 is on its way
+        Answer(answers);
+
+        dell.Watts.ShouldBe("26.9");
+        _link.Writes.Cast<ServiceSettings>().Select(sent => sent.Profile.Monitors.Count).ShouldBe([1, 0]);
+        dell.Source.ShouldBe("measured for this model");
+    }
+
     [Theory]
     [InlineData(false)]   // no status read yet
     [InlineData(true)]    // a status that lists none

@@ -230,7 +230,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>The service took the settings: fill the form with what it now holds, while the screen shows.</summary>
-    private void ReadSaved()
+    private void ReadSaved(ServiceSettings saved)
     {
         if (_timer is not null) _threads.Background(() => _ = ReadAllAsync(refill: true));
     }
