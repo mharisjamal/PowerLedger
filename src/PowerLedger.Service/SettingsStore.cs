@@ -38,28 +38,25 @@ internal static class ProfilePolicy
         return ((stored ?? ServiceSettings.Default) with { Profile = facts.ToProfile(basis) }, true);
     }
 
-    /// <summary>Whether the profile holds monitor settings from before monitors were detected (Plan J) that no monitor has
-    /// taken over yet: a count of monitors or the choice to count them, and no choice for any one monitor.</summary>
+    /// <summary>Whether the profile holds monitor settings from before monitors were detected (Plan J) that haven't been
+    /// carried over yet: a count of monitors or the choice to count them, and no choice for any one monitor.</summary>
     public static bool HasMonitorsToCarryOver(MachineProfile profile)
         => profile.Monitors.Count == 0 && (profile.IncludeMonitors || profile.ExternalMonitors > 0);
 
     /// <summary>
-    /// The old monitor settings carried over to the monitors now detected. Monitors the user counted stay counted, at the
-    /// figure they typed, or at each monitor's own figure when theirs was the old default; monitors the user had but didn't
-    /// count stay uncounted. The old count and choice are cleared, so this happens once.
+    /// The old monitor settings carried over. Whether the user counted monitors becomes whether a monitor they haven't
+    /// chosen for counts, so a monitor attached later is counted or left out as the ones attached now are. Only a figure
+    /// typed for the monitors the user counted needs a choice: the monitors detected now are given it, and one attached
+    /// later counts at its own figure, as every monitor does when the old figure was the default. The old count and choice
+    /// are cleared, so this happens once.
     /// </summary>
     /// <param name="detected">The keys of the external monitors attached.</param>
     public static MachineProfile CarryOverMonitors(MachineProfile profile, IEnumerable<string> detected) => profile with
     {
-        Monitors =
-        [
-            .. detected.Distinct(StringComparer.Ordinal).Select(key => new MonitorChoice
-            {
-                Key = key,
-                Counted = profile.IncludeMonitors,
-                Watts = profile.IncludeMonitors && profile.MonitorWatts != OldDefaultMonitorWatts ? profile.MonitorWatts : null,
-            }),
-        ],
+        Monitors = profile.IncludeMonitors && profile.MonitorWatts != OldDefaultMonitorWatts
+            ? [.. detected.Distinct(StringComparer.Ordinal).Select(key => new MonitorChoice { Key = key, Watts = profile.MonitorWatts })]
+            : [],
+        CountMonitorsByDefault = profile.IncludeMonitors,
         ExternalMonitors = 0,
         IncludeMonitors = false,
     };

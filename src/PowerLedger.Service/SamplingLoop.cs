@@ -289,9 +289,10 @@ internal sealed class SamplingLoop : BackgroundService
             _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame, monitors));
 
     /// <summary>
-    /// Carries the monitor settings from before monitors were detected over to the monitors now attached, and saves them
-    /// (Plan J). Tried at the first tick that finds a monitor, once a run: settings that could not be saved still hold the
-    /// old count, so the next start tries again.
+    /// Carries the monitor settings from before monitors were detected over, and saves them (Plan J): whether a monitor the
+    /// user hasn't chosen for counts, and a figure the user typed, which the monitors now attached are given. Tried at the
+    /// first tick that finds a monitor, once a run: settings that could not be saved still hold the old count, so the next
+    /// start tries again.
     /// </summary>
     private void CarryOverMonitors(IReadOnlyList<MonitorStatus> attached)
     {
@@ -313,7 +314,9 @@ internal sealed class SamplingLoop : BackgroundService
             return;
         }
         Use(settings);
-        _log.LogInformation("The old monitor settings were carried over to {Count} detected monitors", attached.Count);
+        _log.LogInformation(
+            "The old monitor settings were carried over: monitors {Counting} unless the user chooses otherwise, and {Typed} of the {Count} detected monitors take the figure typed for them",
+            settings.Profile.CountMonitorsByDefault ? "count" : "are left out", settings.Profile.Monitors.Count, attached.Count);
     }
 
     /// <summary>

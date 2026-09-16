@@ -84,16 +84,22 @@ public class SettingsTests
             new MonitorChoice { Key = DellKey, Counted = true, Watts = 30 },
             new MonitorChoice { Key = LgKey, Counted = true, Watts = 30 },
         ]);
+        carried.CountMonitorsByDefault.ShouldBeTrue();
         carried.ShouldBe(old with { ExternalMonitors = 0, IncludeMonitors = false, Monitors = carried.Monitors });
         ProfilePolicy.HasMonitorsToCarryOver(carried).ShouldBeFalse();
     }
 
     [Fact]
-    public void Monitors_counted_at_the_old_default_figure_take_the_figure_worked_out_for_each()
+    public void Monitors_counted_at_the_old_default_figure_need_no_choice_to_count_at_the_figure_worked_out_for_each()
     {
         var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 1, IncludeMonitors = true, MonitorWatts = 25 };
 
-        ProfilePolicy.CarryOverMonitors(old, [DellKey]).Monitors.ShouldBe([new MonitorChoice { Key = DellKey, Counted = true, Watts = null }]);
+        var carried = ProfilePolicy.CarryOverMonitors(old, [DellKey]);
+
+        carried.Monitors.ShouldBeEmpty();
+        carried.CountMonitorsByDefault.ShouldBeTrue();
+        carried.ShouldBe(old with { ExternalMonitors = 0, IncludeMonitors = false, Monitors = [] });
+        ProfilePolicy.HasMonitorsToCarryOver(carried).ShouldBeFalse();
     }
 
     [Fact]
@@ -102,20 +108,26 @@ public class SettingsTests
         var old = MachineProfile.DefaultLaptop with { ExternalMonitors = 0, IncludeMonitors = true, MonitorWatts = 18 };
         ProfilePolicy.HasMonitorsToCarryOver(old).ShouldBeTrue();
 
-        ProfilePolicy.CarryOverMonitors(old, [DellKey]).Monitors.ShouldBe([new MonitorChoice { Key = DellKey, Counted = true, Watts = 18 }]);
+        var carried = ProfilePolicy.CarryOverMonitors(old, [DellKey]);
+
+        carried.Monitors.ShouldBe([new MonitorChoice { Key = DellKey, Counted = true, Watts = 18 }]);
+        carried.CountMonitorsByDefault.ShouldBeTrue();
     }
 
     [Fact]
-    public void Monitors_the_user_had_but_did_not_count_are_carried_over_not_counted()
+    public void Monitors_the_user_had_but_did_not_count_leave_out_every_monitor_by_default_without_a_choice_for_any()
     {
         var old = MachineProfile.DefaultDesktop with { ExternalMonitors = 2, IncludeMonitors = false, MonitorWatts = 30 };
         ProfilePolicy.HasMonitorsToCarryOver(old).ShouldBeTrue();
 
-        var carried = ProfilePolicy.CarryOverMonitors(old, [DellKey, LgKey]);
+        var carried = ProfilePolicy.CarryOverMonitors(old, [DellKey]);
 
-        carried.Monitors.ShouldBe([new MonitorChoice { Key = DellKey, Counted = false }, new MonitorChoice { Key = LgKey, Counted = false }]);
-        carried.ExternalMonitors.ShouldBe(0);
-        carried.IncludeMonitors.ShouldBeFalse();
+        // Not a choice for the monitor attached now, which a monitor attached later would lack, but the default for all.
+        carried.Monitors.ShouldBeEmpty();
+        carried.CountMonitorsByDefault.ShouldBeFalse();
+        carried.ShouldBe(old with { ExternalMonitors = 0, IncludeMonitors = false, CountMonitorsByDefault = false, Monitors = [] });
+        ProfilePolicy.CarryOverMonitors(old, [DellKey, LgKey]).ShouldBe(carried);
+        ProfilePolicy.HasMonitorsToCarryOver(carried).ShouldBeFalse();
     }
 
     [Fact]

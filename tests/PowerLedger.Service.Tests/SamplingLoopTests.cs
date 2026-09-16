@@ -268,24 +268,35 @@ public class SamplingLoopTests
     }
 
     [Fact]
-    public async Task Monitors_old_settings_had_but_did_not_count_stay_uncounted()
+    public async Task Monitors_old_settings_had_but_did_not_count_stay_uncounted_and_so_does_one_attached_later()
     {
         using var t = new TestDatabase();
         var store = new SettingsStore(new SettingsRepository(t.Db));
         store.Save(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { ExternalMonitors = 2 } });
         store.SaveProfileHash(Facts.Laptop().Hash);
         await using var loop = new Harness(t);
-        loop.Monitors.Detected([MonitorBoardTests.Dell]);
+        loop.Monitors.Detected([MonitorBoardTests.Dell]);                  // the other monitor is switched off
         await loop.StartAsync();
 
         await loop.Ticks(2);
 
         var profile = store.Load().ShouldNotBeNull().Profile;
-        profile.Monitors.ShouldBe([new MonitorChoice { Key = MonitorBoardTests.Dell.Key, Counted = false }]);
+        profile.Monitors.ShouldBeEmpty();
+        profile.CountMonitorsByDefault.ShouldBeFalse();
         profile.ExternalMonitors.ShouldBe(0);
         var status = loop.Board.Status.ShouldNotBeNull();
         status.Monitors.ShouldNotBeNull().ShouldHaveSingleItem().Counted.ShouldBeFalse();
         status.Last.ShouldNotBeNull().Components.Monitors.ShouldBe(0);
+
+        // Switched on later, the other monitor is left out as the old settings left it.
+        loop.Monitors.Detected([MonitorBoardTests.Dell, MonitorBoardTests.Unnamed]);
+        await loop.Ticks(1);
+
+        status = loop.Board.Status.ShouldNotBeNull();
+        status.Monitors.ShouldNotBeNull().Select(m => m.Counted).ShouldBe([false, false]);
+        status.Last.ShouldNotBeNull().Components.Monitors.ShouldBe(0);
+        status.Last.TotalW.ShouldBe(20, 1e-9);
+        store.Load().ShouldNotBeNull().Profile.ShouldBe(profile);
     }
 
     [Fact]
