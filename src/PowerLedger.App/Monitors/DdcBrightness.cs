@@ -1,24 +1,35 @@
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
+using PowerLedger.Contracts;
 
 namespace PowerLedger.App;
 
-/// <summary>A brightness read from one monitor, with the device path Windows names it by.</summary>
-internal sealed record DdcReading(string DevicePath, double Brightness);
+/// <summary>What one monitor answered in a read, under the device path Windows names it by: its brightness, when it gave one,
+/// and its power state, when its power mode is one. It has at least one of the two.</summary>
+internal sealed record DdcReading(string DevicePath, double? Brightness, MonitorPowerState? Power);
 
 internal interface IBrightnessReader
 {
-    /// <summary>Every monitor that answered. Slow (about 40 ms a monitor, more the first time, when each is asked what it
-    /// supports): call it off the UI thread.</summary>
+    /// <summary>Every monitor that answered, with its brightness and whether it is on. Slow (about 40 ms a request, with 50 ms
+    /// between one monitor's requests, and more the first time, when each is asked what it supports): call it off the UI
+    /// thread.</summary>
     IReadOnlyList<DdcReading> Read();
 }
 
 /// <summary>
-/// DDC/CI brightness (spec §5), read-only and careful, because Microsoft warns many monitors implement the commands badly:
-/// each physical monitor is asked for its capabilities once, and read only if it reports brightness support, 50 ms after
-/// it answered; a monitor that says it has no brightness is then left alone for the rest of the session - never asked
-/// either request again; nothing is ever written. GetMonitorCapabilities and GetMonitorBrightness are the only requests a
-/// monitor is sent, one read at a time, and every handle a read opens is destroyed before it returns.
+/// DDC/CI brightness and power mode (spec §5), read-only and careful, because Microsoft warns many monitors implement the
+/// commands badly: each physical monitor is asked for its capabilities once, and read only if it reports brightness
+/// support; a monitor that says it has no brightness is then left alone for the rest of the session - never asked anything
+/// again; nothing is ever written. A monitor that reports brightness is asked for its brightness, then for its power mode
+/// (MCCS VCP code D6), each request <see cref="RequestGap"/> after it answered the one before. GetMonitorCapabilities,
+/// GetMonitorBrightness and GetVCPFeatureAndVCPFeatureReply for code D6 alone are the only requests a monitor is sent, all
+/// three of them Get requests, one read at a time, and every handle a read opens is destroyed before it returns.
+///
+/// A monitor that says it has no brightness isn't asked its power mode either. No capability flag covers power mode, so
+/// supporting brightness, the standard's most basic control, is the only sign a monitor answers the standard's requests
+/// properly; without it the request would go to a monitor nothing has vouched for, and the user's Count tick decides for it
+/// instead. A monitor that answers its other requests in a read but fails its power-mode request is taken not to support
+/// power mode, and isn't asked it again until a display change or a resume.
 ///
 /// How long a monitor that fails a call is left alone depends on whether it has given a brightness this session. One that
 /// hasn't is left alone for the rest of the session, as its firmware may be one the requests upset. One that has given a
@@ -28,11 +39,11 @@ internal interface IBrightnessReader
 /// request ends it.
 ///
 /// A display change (a monitor plugged in or out, or display settings changed) or a resume from sleep ends all of this:
-/// either forgets everything every monitor has answered, and every failure, because a monitor commonly fails, or answers
-/// wrongly, while it is waking up or while it is being plugged in. Only which monitors have given a brightness is kept, as
-/// neither event changes a monitor's firmware. <see cref="Dispose"/> must be called once the reader is no longer wanted:
-/// the events it listens for come from the static <see cref="SystemEvents"/> class, which would otherwise keep the reader
-/// alive for as long as the process runs.
+/// either forgets everything every monitor has answered, whether it supports power mode included, and every failure,
+/// because a monitor commonly fails, or answers wrongly, while it is waking up or while it is being plugged in. Only which
+/// monitors have given a brightness is kept, as neither event changes a monitor's firmware. <see cref="Dispose"/> must be
+/// called once the reader is no longer wanted: the events it listens for come from the static <see cref="SystemEvents"/>
+/// class, which would otherwise keep the reader alive for as long as the process runs.
 /// </summary>
 internal sealed class DdcBrightness : IBrightnessReader, IDisposable
 {
@@ -40,8 +51,12 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// (highlevelmonitorconfigurationapi.h)" names the flag; the value is the Windows SDK header's.</summary>
     internal const uint BrightnessCapability = 0x2;
 
-    /// <summary>The wait between a monitor's answer about what it supports and the request for its brightness, so that a
-    /// monitor slow to finish one request isn't sent the next at once.</summary>
+    /// <summary>VCP code D6, Power Mode, in VESA's Monitor Control Command Set: the only code a monitor is ever asked for with
+    /// GetVCPFeatureAndVCPFeatureReply.</summary>
+    internal const byte PowerModeCode = 0xD6;
+
+    /// <summary>The wait between a monitor's answer to one request and the next request it is sent, so that a monitor slow to
+    /// finish one request isn't sent the next at once.</summary>
     internal static readonly TimeSpan RequestGap = TimeSpan.FromMilliseconds(50);
 
     /// <summary>How long a monitor that has given a brightness is left alone after it first fails: one read, so the next
@@ -70,11 +85,15 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     private readonly Lock _gate = new();
 
     /// <summary>Monitors that said they support brightness, so are read without asking again what they support. Cleared,
-    /// with the next three, by a display change or a resume.</summary>
+    /// with the next four, by a display change or a resume.</summary>
     private readonly HashSet<string> _readable = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Monitors that said they don't support brightness: never asked anything again until cleared.</summary>
     private readonly HashSet<string> _unsupported = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Monitors that answered their other requests in a read but failed their power-mode request, so are taken not
+    /// to support power mode: never asked it again until cleared.</summary>
+    private readonly HashSet<string> _noPowerMode = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Monitors that failed a call without having given a brightness this session: left alone until
     /// cleared.</summary>
@@ -86,7 +105,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     private readonly Dictionary<string, (TimeSpan Wait, long At)> _waiting = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Monitors that have given a brightness this session, which decides how a failure is taken; never cleared.
-    /// Every one of these five collections is keyed by device path and holds at most one entry per monitor Windows has
+    /// Every one of these six collections is keyed by device path and holds at most one entry per monitor Windows has
     /// ever reported this run, so together they are bounded by the physical monitors the PC has shown - a handful at
     /// most - never by how long the App runs or how often it reads.</summary>
     private readonly HashSet<string> _answered = new(StringComparer.OrdinalIgnoreCase);
@@ -137,6 +156,18 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     internal static double? Normalise(uint minimum, uint current, uint maximum)
         => maximum > minimum ? Math.Clamp(((double)current - minimum) / ((double)maximum - minimum), 0, 1) : null;
 
+    /// <summary>What a monitor's power mode, the value of VCP code D6, says about whether it is on, or null for a value the
+    /// standard doesn't define. The Monitor Control Command Set defines 1 as on, 2 as standby and 3 as suspend, both taken as
+    /// standby here, 4 as off, and 5 as switched off the way the monitor's own power button does it. A reply carries the value
+    /// in two bytes, and one with anything in the upper byte is none of these, so it is no state rather than a guess.</summary>
+    internal static MonitorPowerState? PowerState(uint mode) => mode switch
+    {
+        1 => MonitorPowerState.On,
+        2 or 3 => MonitorPowerState.Standby,
+        4 or 5 => MonitorPowerState.Off,
+        _ => null,
+    };
+
     /// <summary>Unsubscribes from the events this reader listens for. <see cref="SystemEvents"/>' handlers are static, so
     /// without this the reader would stay referenced, and so alive, for as long as the process runs, however long ago
     /// the App stopped wanting it.</summary>
@@ -171,7 +202,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
             {
                 ForgetIfReset();   // a display change or a resume while the monitor before was being asked
                 var path = attached[index].DevicePath;
-                if (Askable(path) && Ask(physical[index].Handle, path) is { } brightness) readings.Add(new DdcReading(path, brightness));
+                if (Askable(path) && Ask(physical[index].Handle, path) is { } reading) readings.Add(reading);
             }
         }
         finally
@@ -197,9 +228,11 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         => attached.Count == physical.Count
            && attached.Zip(physical).All(pair => string.Equals(pair.First.Description, pair.Second.Description, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The monitor's brightness, first asking what it supports if that hasn't been remembered yet.</summary>
-    private double? Ask(IntPtr monitor, string path)
+    /// <summary>What the monitor answers, first asking what it supports if that hasn't been remembered yet: its brightness,
+    /// then its power mode, unless it has been taken not to support that. Null when it gives neither.</summary>
+    private DdcReading? Ask(IntPtr monitor, string path)
     {
+        double? brightness;
         try
         {
             if (!_readable.Contains(path))
@@ -216,13 +249,33 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
             }
             if (_windows.Brightness(monitor) is not { } setting) return Failed(path);
             _waiting.Remove(path);   // it answered, so its failures in a row are over
-            if (Normalise(setting.Minimum, setting.Current, setting.Maximum) is not { } brightness) return null;
-            _answered.Add(path);
-            return brightness;
+            brightness = Normalise(setting.Minimum, setting.Current, setting.Maximum);
+            if (brightness is not null) _answered.Add(path);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
             return Failed(path);   // a call that throws has failed like any other
+        }
+        MonitorPowerState? power = null;
+        if (!_noPowerMode.Contains(path))
+        {
+            _pause(RequestGap);
+            if (PowerMode(monitor) is { } mode) power = PowerState(mode);
+            else _noPowerMode.Add(path);   // it has just answered the others, so it doesn't support this one
+        }
+        return brightness is null && power is null ? null : new DdcReading(path, brightness, power);
+    }
+
+    /// <summary>The monitor's power mode, or null when the request failed: one that throws has failed like any other.</summary>
+    private uint? PowerMode(IntPtr monitor)
+    {
+        try
+        {
+            return _windows.PowerMode(monitor);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return null;
         }
     }
 
@@ -230,7 +283,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
     /// failure in a row, and for twice as long as the time before after each one that follows, up to
     /// <see cref="LongestWait"/>. Any other monitor is asked nothing again for the rest of the session, until a display
     /// change or a resume clears it (<see cref="Reset"/>).</summary>
-    private double? Failed(string path)
+    private DdcReading? Failed(string path)
     {
         if (_answered.Contains(path))
         {
@@ -274,6 +327,7 @@ internal sealed class DdcBrightness : IBrightnessReader, IDisposable
         if (Interlocked.Exchange(ref _resetDue, 0) == 0) return;
         _readable.Clear();
         _unsupported.Clear();
+        _noPowerMode.Clear();
         _failed.Clear();
         _waiting.Clear();
     }
@@ -309,6 +363,10 @@ internal interface IMonitorCalls
 
     /// <summary>GetMonitorBrightness' minimum, current and maximum, or null when the monitor didn't answer.</summary>
     (uint Minimum, uint Current, uint Maximum)? Brightness(IntPtr monitor);
+
+    /// <summary>GetVCPFeatureAndVCPFeatureReply's current value for <see cref="DdcBrightness.PowerModeCode"/>, the monitor's
+    /// power mode, or null when the monitor didn't answer. No other code is ever asked for.</summary>
+    uint? PowerMode(IntPtr monitor);
 
     /// <summary>DestroyPhysicalMonitors, for a list <see cref="Open"/> returned.</summary>
     void Close(IReadOnlyList<PhysicalMonitor> monitors);
@@ -371,6 +429,9 @@ internal sealed class WindowsMonitorCalls : IMonitorCalls
 
     public (uint Minimum, uint Current, uint Maximum)? Brightness(IntPtr monitor)
         => Native.GetMonitorBrightness(monitor, out var minimum, out var current, out var maximum) ? (minimum, current, maximum) : null;
+
+    public uint? PowerMode(IntPtr monitor)
+        => Native.GetVCPFeatureAndVCPFeatureReply(monitor, DdcBrightness.PowerModeCode, out _, out var current, out _) ? current : null;
 
     public void Close(IReadOnlyList<PhysicalMonitor> monitors)
     {
@@ -458,7 +519,8 @@ internal sealed class WindowsMonitorCalls : IMonitorCalls
         // Dxva2's functions return _BOOL, which physicalmonitorenumerationapi.h defines as BOOL. The pages are
         // "GetNumberOfPhysicalMonitorsFromHMONITOR function", "GetPhysicalMonitorsFromHMONITOR function" and
         // "DestroyPhysicalMonitors function" (physicalmonitorenumerationapi.h), "GetMonitorCapabilities function" and
-        // "GetMonitorBrightness function" (highlevelmonitorconfigurationapi.h).
+        // "GetMonitorBrightness function" (highlevelmonitorconfigurationapi.h), and "GetVCPFeatureAndVCPFeatureReply
+        // function" (lowlevelmonitorconfigurationapi.h).
 
         [DllImport("dxva2.dll", SetLastError = true), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -479,6 +541,12 @@ internal sealed class WindowsMonitorCalls : IMonitorCalls
         [DllImport("dxva2.dll", SetLastError = true), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetMonitorBrightness(IntPtr physicalMonitor, out uint minimum, out uint current, out uint maximum);
+
+        /// <summary>The VCP code is a BYTE. The code type it gives back is an MC_VCP_CODE_TYPE, an enumeration, so four bytes,
+        /// like the current and maximum values, which are DWORDs.</summary>
+        [DllImport("dxva2.dll", SetLastError = true), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetVCPFeatureAndVCPFeatureReply(IntPtr physicalMonitor, byte code, out uint codeType, out uint current, out uint maximum);
     }
 }
 

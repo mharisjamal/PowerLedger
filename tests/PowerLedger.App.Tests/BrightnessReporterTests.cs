@@ -47,7 +47,7 @@ public sealed class BrightnessReporterTests : IDisposable
     [Fact]
     public async Task Each_reading_is_reported_under_the_instance_the_service_names_the_monitor_by()
     {
-        _reader.Readings = [new DdcReading(Statuses.DellPath, 0.6), new DdcReading(Statuses.AocPath, 0.35)];
+        _reader.Readings = [new DdcReading(Statuses.DellPath, 0.6, MonitorPowerState.On), new DdcReading(Statuses.AocPath, 0.35, MonitorPowerState.On)];
 
         await _reporter.ReportAsync();
 
@@ -60,9 +60,9 @@ public sealed class BrightnessReporterTests : IDisposable
         _link.Status = Statuses.WithMonitors(Statuses.Dell);
         _reader.Readings =
         [
-            new DdcReading(Statuses.AocPath, 0.35),                                                     // attached, but not listed yet
-            new DdcReading(@"MONITOR\DELA0B1\{4d36e96e-e325-11ce-bfc1-08002be10318}\0001", 0.5),       // not a display's path
-            new DdcReading(Statuses.DellPath, 0.6),
+            new DdcReading(Statuses.AocPath, 0.35, MonitorPowerState.On),                                                     // attached, but not listed yet
+            new DdcReading(@"MONITOR\DELA0B1\{4d36e96e-e325-11ce-bfc1-08002be10318}\0001", 0.5, MonitorPowerState.On),       // not a display's path
+            new DdcReading(Statuses.DellPath, 0.6, MonitorPowerState.On),
         ];
 
         await _reporter.ReportAsync();
@@ -198,7 +198,7 @@ public sealed class BrightnessReporterTests : IDisposable
     /// <summary>Monitors as a test sets them up, counting the reads.</summary>
     private sealed class FakeReader : IBrightnessReader
     {
-        public IReadOnlyList<DdcReading> Readings { get; set; } = [new DdcReading(Statuses.DellPath, 0.6)];
+        public IReadOnlyList<DdcReading> Readings { get; set; } = [new DdcReading(Statuses.DellPath, 0.6, MonitorPowerState.On)];
 
         public Exception? Throws { get; set; }
 

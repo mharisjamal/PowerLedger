@@ -58,8 +58,9 @@ internal sealed class BrightnessReporter(IServiceLink link, IBrightnessReader re
         foreach (var reading in readings)
         {
             if (reported.Count == ServiceSettings.MaxMonitors) break;   // the most the service takes in one report
+            if (reading.Brightness is not { } brightness) continue;
             if (MonitorKeys.FromDevicePath(reading.DevicePath) is not { } key || !instances.Remove(key, out var instance)) continue;
-            reported.Add(new MonitorBrightness { Instance = instance, Brightness = reading.Brightness });
+            reported.Add(new MonitorBrightness { Instance = instance, Brightness = brightness });
         }
         return reported;
     }
