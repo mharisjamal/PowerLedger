@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="tdp-table.json" />
+    <EmbeddedResource Include="..\..\assets\monitors\energy-star-monitors.csv" Link="Monitors\energy-star-monitors.csv"
+                      LogicalName="PowerLedger.Sensors.Monitors.energy-star-monitors.csv" />
   </ItemGroup>
 
   <ItemGroup>
