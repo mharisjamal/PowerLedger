@@ -59,7 +59,7 @@ public class NowViewModelTests
         _link.Connect(true);
         _link.Push(Frames.At(Now));
 
-        model.Live.Budget[2].Detail.ShouldBe("15.3 in · brightness 60% · plus 2 monitors");
+        model.Live.Budget[2].Detail.ShouldBe("15.3 in · brightness 60% · plus 2 monitors, estimated");
 
         _link.Status = Statuses.WithMonitors(Statuses.Dell);
         _clock.Advance(NowViewModel.StatusEvery);
@@ -71,6 +71,30 @@ public class NowViewModelTests
     }
 
     [Fact]
+    public void The_display_row_says_how_the_monitors_counted_were_figured_by_the_least_sure_of_them()
+    {
+        var unread = Statuses.Dell with { Key = "DELA0B1-2", Brightness = null };
+        var typed = Statuses.Aoc with { Key = "AOC2402-2", OnWatts = 17, Source = MonitorSource.Typed, WattsNow = 17 };
+        _history.Snapshot = Snapshots.Typical(Now);
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+
+        string With(params MonitorStatus[] monitors)
+        {
+            _link.Status = Statuses.WithMonitors(monitors);
+            _clock.Advance(NowViewModel.StatusEvery);
+            return model.Live.Budget[2].Detail;
+        }
+
+        With(unread, Statuses.Aoc).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, estimated");
+        With(Statuses.Dell, unread).ShouldBe("15.3 in · brightness 60% · plus 2 monitors, brightness assumed");
+        With(Statuses.Dell, typed).ShouldBe("15.3 in · brightness 60% · plus 2 monitors");   // a typed figure takes no brightness
+        With(unread, Statuses.Aoc with { Counted = false }).ShouldBe("15.3 in · brightness 60% · plus 1 monitor, brightness assumed");
+    }
+
+    [Fact]
     public async Task A_display_band_with_no_panel_to_speak_of_says_what_it_counts()
     {
         _link.Status = Statuses.WithMonitors();
@@ -79,7 +103,7 @@ public class NowViewModelTests
         model.RefreshHistory();
         _link.Connect(true);
         _link.Push(Frames.At(Now) with { Brightness = null });
-        model.Live.Budget[2].Detail.ShouldBe("2 monitors");
+        model.Live.Budget[2].Detail.ShouldBe("2 monitors, estimated");
 
         _link.Status = Statuses.Running();
         await model.PollAsync();

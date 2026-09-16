@@ -33,6 +33,11 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     private HistorySnapshot? _snapshot;
     private ServiceSettings? _settings;
     private int _monitors;
+
+    /// <summary>How the figures of the monitors counted were got, by the least sure of them: "estimated", "brightness
+    /// assumed", or null when each was measured for its model at a brightness read from it, or typed.</summary>
+    private string? _monitorFigures;
+
     private ReadingFrame? _last;
     private double _livePeak;
     private DateOnly _liveDay;
@@ -252,7 +257,12 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     {
         if (settings is not null) _settings = settings;
         if (status is null) return;
-        _monitors = status.Monitors?.Count(monitor => monitor is { Counted: true }) ?? 0;
+        var counted = status.Monitors?.Where(monitor => monitor is { Counted: true }).ToList() ?? [];
+        _monitors = counted.Count;
+        _monitorFigures = counted.Exists(monitor => monitor.Source == MonitorSource.Estimate) ? "estimated"
+            : counted.Exists(monitor => monitor.Source == MonitorSource.Model && !(monitor.Brightness is { } brightness && double.IsFinite(brightness)))
+                ? "brightness assumed"
+                : null;
         var desktop = _settings?.Profile.Chassis == ChassisKind.Desktop;
         IsSensorless = !Supported(status, "energy-meter") && (desktop || !Supported(status, "battery"));
         var interval = _settings?.SampleIntervalSeconds ?? 1;
@@ -333,14 +343,14 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>The display band: the built-in panel, as big and bright as it is, plus the external monitors the service
-    /// counts (Plan J).</summary>
+    /// counts (Plan J), and how the least sure of their figures was got: "plus 2 monitors, estimated".</summary>
     private string DisplayDetail(MachineNames? machine, ReadingFrame frame)
     {
         if (!frame.DisplayOn) return "display off";
         var size = machine is { DisplayDiagonalInches: > 0 } ? machine.DisplayDiagonalInches.ToString("0.#", _culture) + " in" : null;
         var brightness = frame.Brightness is { } b ? "brightness " + Format.Percent(b, _culture) : null;
         var panel = Join(size, brightness);
-        var monitors = _monitors == 1 ? "1 monitor" : $"{_monitors.ToString(_culture)} monitors";
+        var monitors = (_monitors == 1 ? "1 monitor" : $"{_monitors.ToString(_culture)} monitors") + (_monitorFigures is { } figures ? ", " + figures : "");
         return (panel.Length > 0, _monitors > 0) switch
         {
             (true, true) => $"{panel} · plus {monitors}",
