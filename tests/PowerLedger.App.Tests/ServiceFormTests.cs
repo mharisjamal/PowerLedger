@@ -291,6 +291,65 @@ public class ServiceFormTests
     }
 
     [Fact]
+    public void A_monitor_that_runs_off_the_pc_always_counts_and_what_was_ticked_for_it_comes_back_once_it_has_a_plug_of_its_own()
+    {
+        // Its draw is part of what the PC draws, so the service counts it whatever its choice says, and its box shows it
+        // ticked; the view doesn't let it be unticked.
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultLaptop with { Monitors = [new MonitorChoice { Key = Statuses.Portable.Key, Counted = false }] },
+        });
+        form.ShowMonitors([Statuses.Portable, Statuses.Dell with { CountedByDefault = false, Counted = false }]);
+        var (portable, dell) = (form.Monitors[0], form.Monitors[1]);
+        var changed = new List<string?>();
+        dell.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        portable.Counted.ShouldBeTrue();
+        dell.OwnPlug = false;   // it runs off the laptop after all
+        dell.Counted.ShouldBeTrue();
+        changed.ShouldContain(nameof(MonitorRow.Counted));
+        dell.Counted = false;
+        dell.Counted.ShouldBeTrue();
+
+        dell.OwnPlug = true;
+        portable.OwnPlug = true;
+        (dell.Counted, portable.Counted).ShouldBe((false, false));   // as the service left the Dell, and as the choice left the portable one
+    }
+
+    [Fact]
+    public async Task Whether_a_monitor_that_runs_off_the_pc_counts_saves_nothing()
+    {
+        // Where the settings from before monitors left monitors out, a portable monitor still counts, and a choice that says
+        // only that it doesn't goes. A monitor said to run off the laptop saves only that, and counts.
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultLaptop with
+            {
+                CountMonitorsByDefault = false, Monitors = [new MonitorChoice { Key = Statuses.Portable.Key, Counted = false }],
+            },
+        });
+        form.ShowMonitors(
+        [
+            Statuses.Portable with { CountedByDefault = false },
+            Statuses.Dell with { CountedByDefault = false, Counted = false },
+            Statuses.Aoc with { CountedByDefault = false, Counted = false },
+        ]);
+        form.Monitors[1].OwnPlug = false;
+        form.Monitors[2].Counted = true;
+        form.Monitors[2].OwnPlug = false;
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, OwnPlug = false },
+            new MonitorChoice { Key = Statuses.Aoc.Key, OwnPlug = false },
+        ]);
+    }
+
+    [Fact]
     public async Task A_plug_other_than_the_one_the_service_takes_saves_a_choice_that_says_so()
     {
         var form = Form();

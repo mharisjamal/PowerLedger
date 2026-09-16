@@ -236,8 +236,9 @@ internal sealed class ServiceForm : ObservableObject
     /// loaded for monitors not attached now, in the order loaded, as many as fit within <see cref="ServiceSettings.MaxMonitors"/>.
     /// A monitor taken as the service would take it, at PowerLedger's own figure, needs none. A listed monitor's choice is
     /// weighed against what the service said of that monitor; one loaded for a monitor not attached now, against the profile
-    /// the settings came with. Each save puts the monitors attached first, so the choices loaded run from the monitor seen
-    /// most recently, and those dropped are for the monitors unseen longest.
+    /// the settings came with, and, unless it says the monitor runs off the PC, as for a monitor with a plug of its own, since
+    /// only the service can guess the plug of a monitor it doesn't see. Each save puts the monitors attached first, so the
+    /// choices loaded run from the monitor seen most recently, and those dropped are for the monitors unseen longest.
     /// </summary>
     private bool Choices(out IReadOnlyList<MonitorChoice> choices, ref string? problem)
     {
@@ -247,19 +248,21 @@ internal sealed class ServiceForm : ObservableObject
         {
             if (!Optional(row.Watts, $"the watts for {row.Name}", out var watts, ref problem)) return false;
             var choice = row.Choice(watts);
-            if (SaysSomething(choice, row.CountedByDefault)) listed.Add(choice);
+            if (SaysSomething(choice, row.CountedByDefault, row.OwnPlug)) listed.Add(choice);
         }
         var unplugged = _choices.Where(choice =>
-            choice is not null && SaysSomething(choice, _profile.CountMonitorsByDefault) && !Monitors.Any(row => row.Key == choice.Key));
+            choice is not null && SaysSomething(choice, _profile.CountMonitorsByDefault, choice.OwnPlug ?? true)
+            && !Monitors.Any(row => row.Key == choice.Key));
         choices = [.. listed, .. unplugged.Take(ServiceSettings.MaxMonitors - listed.Count)];
         return true;
     }
 
-    /// <summary>Whether a choice says what PowerLedger wouldn't assume of a monitor without one: that it counts where
-    /// monitors don't by default, or doesn't where they do, that it has a figure typed for it, or that its plug isn't the one
-    /// the service takes it to have, which is the only plug a choice holds.</summary>
-    private static bool SaysSomething(MonitorChoice choice, bool countedByDefault)
-        => choice.Counted != countedByDefault || choice.Watts is not null || choice.OwnPlug is not null;
+    /// <summary>Whether a choice says what PowerLedger wouldn't assume of a monitor without one: that its plug isn't the one
+    /// the service takes it to have, which is the only plug a choice holds, that it has a figure typed for it, or, for a
+    /// monitor with a plug of its own, that it counts where monitors don't by default or doesn't where they do. A monitor
+    /// that runs off the PC always counts, so whether it counts says nothing.</summary>
+    private static bool SaysSomething(MonitorChoice choice, bool countedByDefault, bool ownPlug)
+        => choice.OwnPlug is not null || choice.Watts is not null || (ownPlug && choice.Counted != countedByDefault);
 
     private bool Int(string text, string what, out int value, ref string? problem)
     {
