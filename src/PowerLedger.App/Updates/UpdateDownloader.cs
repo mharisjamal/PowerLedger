@@ -134,6 +134,6 @@ internal sealed partial class UpdateDownloader(HttpClient http, string folder, T
         }
     }
 
-    [GeneratedRegex("^PowerLedger-([0-9]{1,5}\\.[0-9]{1,5}\\.[0-9]{1,5})-setup\\.(exe|log)$")]
+    [GeneratedRegex("^PowerLedger-([0-9]{1,5}\\.[0-9]{1,5}\\.[0-9]{1,5})-setup(?:-x64|-arm64)?\\.(exe|log)$")]
     private static partial Regex Kept();
 }

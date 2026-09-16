@@ -209,6 +209,7 @@ internal sealed class Updater : ObservableObject, IDisposable
     {
         if (_stage != UpdateStage.Available || _release is not { } release) return;
         _wanted = release.Name;
+        Status = $"Downloading {release.Name}…";   // said here too, so the press is answered even if a check is already running
         _threads.Background(() => _ = CheckAsync());
     }
 
@@ -277,7 +278,8 @@ internal sealed class Updater : ObservableObject, IDisposable
     /// <summary>A newer release, found while somebody is paying for every byte: the card offers it rather than taking it.</summary>
     private void Waiting(Release release)
     {
-        if (_stage is UpdateStage.Installing or UpdateStage.Ready) return;
+        // A download already checked stays: an update that is ready, or one whose setup didn't run, costs nothing to keep.
+        if (_stage is UpdateStage.Installing or UpdateStage.Ready || (_stage == UpdateStage.Failed && _installer is not null)) return;
         _release = release;
         _installer = null;
         Status = $"PowerLedger {release.Name} is available · {Megabytes(release)} · waiting for a connection that isn't metered";

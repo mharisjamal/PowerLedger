@@ -69,7 +69,7 @@ Invoke-Native 'gh release create' { gh @create } | Out-Host
 # after the upload, so it can take a few seconds to appear.
 foreach ($attempt in 1..20) {
     $listed = (Invoke-Native 'gh release view' { gh release view $tag --repo $Repo --json assets } | ConvertFrom-Json).assets
-    if (@($listed | Where-Object { -not $_.digest }).Count -eq 0) { break }
+    if (@($shas.Keys | Where-Object { -not ($listed | Where-Object name -eq $_).digest }).Count -eq 0) { break }
     Start-Sleep -Seconds 3
 }
 foreach ($name in $shas.Keys) {

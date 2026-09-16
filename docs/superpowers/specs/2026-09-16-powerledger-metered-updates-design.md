@@ -18,9 +18,10 @@ PowerLedger is used on laptops on phone hotspots; today an update quietly pulls 
 ## How it works
 
 1. **The check still runs** on any connection: it is a couple of kilobytes of JSON.
-2. **Metered connections.** `INetworkCostManager` (the network list COM interface Windows has had since 7) gives the
-   current connection's cost. Anything but "unrestricted" counts as metered: fixed allowances, variable rates, roaming,
-   over or near the data limit. A cost that can't be read counts as unrestricted, which is today's behaviour.
+2. **Metered connections.** `INetworkCostManager`, the network list's COM interface, gives the current connection's
+   cost. It is there on Windows 8 and later but not on Windows Server, so a machine without it counts as unmetered.
+   Anything but "unrestricted" counts as metered: fixed allowances, variable rates, roaming, over or near the data
+   limit. A cost that can't be read counts as unrestricted, which is today's behaviour.
 3. **Found while metered.** No download. The card says "PowerLedger X.Y.Z is available · 56 MB" with **Download**, and
    Settings says it is waiting for a connection that isn't metered. Download takes it there and then, over the metered
    connection, because the user asked. The tray still announces each version once.

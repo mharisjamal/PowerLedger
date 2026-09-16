@@ -29,7 +29,9 @@ jobs:
 
       - name: Installer
         shell: pwsh
-        run: ./installer/build.ps1 -For both,x64,arm64 -TestVariants
+        run: |
+          ./installer/build.ps1 -TestVariants
+          ./installer/build.ps1 -SkipPublish -Fast -For x64,arm64
 
       # The installer and its upgrade build, kept under installer/output so test/ stays a subfolder; the Arm64 job
       # installs them.
