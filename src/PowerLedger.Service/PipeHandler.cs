@@ -48,7 +48,7 @@ internal sealed partial class PipeHandler(
                 return new OkReply(request.Id);
             case ReportBrightnessRequest request:
                 if (request.Validate() is { } invalid) return new ErrorReply(request.Id, invalid);
-                monitors.Report(request.Monitors);
+                monitors.Report(request.Monitors, request.Power);
                 return new OkReply(request.Id);
             case PipeRequest request:
                 return new ErrorReply(request.Id, "The service does not handle that request.");

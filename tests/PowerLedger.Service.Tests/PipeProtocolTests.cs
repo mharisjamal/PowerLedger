@@ -107,12 +107,34 @@ public class PipeProtocolTests
         [
             new MonitorBrightness { Instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", Brightness = 0.6 },
             new MonitorBrightness { Instance = @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", Brightness = 0 },
+        ],
+        [
+            new MonitorPowerReading { Instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", State = MonitorPowerState.On },
+            new MonitorPowerReading { Instance = @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", State = MonitorPowerState.Off },
         ]);
         Text(report).ShouldStartWith("""{"type":"reportBrightness","monitors":[{"instance":""");
         Text(report).ShouldContain("\"brightness\":0.6},{\"instance\":");
+        Text(report).ShouldContain("\"power\":[{\"instance\":");
+        Text(report).ShouldContain("\"state\":1},{\"instance\":");
         var back = PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(report))).ShouldBeOfType<ReportBrightnessRequest>();
         back.Id.ShouldBe(14);
         back.Monitors.ShouldBe(report.Monitors);
+        back.Power.ShouldNotBeNull().ShouldBe(report.Power!);
+    }
+
+    [Fact]
+    public void A_brightness_report_from_an_app_that_reads_no_power_states_arrives_without_them()
+    {
+        var older = PipeProtocol.Deserialize(Encoding.UTF8.GetBytes(
+                """{"type":"reportBrightness","monitors":[{"instance":"DISPLAY\\DELA0B1\\5&2F5A1B&0&UID4353","brightness":0.6}],"id":15}"""))
+            .ShouldBeOfType<ReportBrightnessRequest>();
+        older.Id.ShouldBe(15);
+        older.Monitors.ShouldBe([Reading(brightness: 0.6)]);
+        older.Power.ShouldBeNull();
+        older.Validate().ShouldBeNull();
+
+        var sent = new ReportBrightnessRequest(16, [Reading()]);
+        PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(sent))).ShouldBeOfType<ReportBrightnessRequest>().Power.ShouldBeNull();
     }
 
     [Fact]
@@ -137,11 +159,36 @@ public class PipeProtocolTests
     }
 
     [Fact]
+    public void A_report_s_power_states_within_their_limits_are_accepted_and_outside_them_refused()
+    {
+        Report([], Said(MonitorPowerState.On), Said(MonitorPowerState.Standby), Said(MonitorPowerState.Off)).Validate().ShouldBeNull();
+        Report([], Said(instance: new string('I', 260))).Validate().ShouldBeNull();
+        Report([], [.. Enumerable.Range(0, 16).Select(i => Said(instance: $"I{i}"))]).Validate().ShouldBeNull();
+
+        Report([], [.. Enumerable.Range(0, 17).Select(i => Said(instance: $"I{i}"))]).Validate().ShouldBe("At most 16 monitors can report a power state.");
+        foreach (var state in new[] { MonitorPowerState.Unknown, (MonitorPowerState)4, (MonitorPowerState)(-1) })
+            Report([], Said(state)).Validate().ShouldBe("A monitor's power state must be on, standby or off.");
+        Report([], Said(instance: "")).Validate().ShouldNotBeNull();
+        Report([], Said(instance: new string('I', 261))).Validate().ShouldNotBeNull();
+        Report([], Said(instance: null!)).Validate().ShouldNotBeNull();
+        Report([], [null!]).Validate().ShouldNotBeNull();
+    }
+
+    [Fact]
     public void Monitor_sources_keep_their_numbers_because_they_travel_as_numbers()
     {
         ((int)MonitorSource.Model).ShouldBe(0);
         ((int)MonitorSource.Estimate).ShouldBe(1);
         ((int)MonitorSource.Typed).ShouldBe(2);
+    }
+
+    [Fact]
+    public void Monitor_power_states_keep_their_numbers_because_they_travel_as_numbers()
+    {
+        ((int)MonitorPowerState.Unknown).ShouldBe(0);
+        ((int)MonitorPowerState.On).ShouldBe(1);
+        ((int)MonitorPowerState.Standby).ShouldBe(2);
+        ((int)MonitorPowerState.Off).ShouldBe(3);
     }
 
     [Fact]
@@ -227,8 +274,13 @@ public class PipeProtocolTests
 
     private static ReportBrightnessRequest Report(params MonitorBrightness[] readings) => new(17, readings);
 
+    private static ReportBrightnessRequest Report(MonitorBrightness[] readings, params MonitorPowerReading[] power) => new(17, readings, power);
+
     private static MonitorBrightness Reading(string instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", double brightness = 0.5)
         => new() { Instance = instance, Brightness = brightness };
+
+    private static MonitorPowerReading Said(MonitorPowerState state = MonitorPowerState.On, string instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353")
+        => new() { Instance = instance, State = state };
 
     private static string Text(PipeMessage message) => Encoding.UTF8.GetString(PipeProtocol.Serialize(message));
 
