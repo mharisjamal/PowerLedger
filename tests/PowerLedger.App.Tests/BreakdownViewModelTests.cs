@@ -16,41 +16,44 @@ public class BreakdownViewModelTests
     private BreakdownViewModel Model(UiThreads? threads = null) => new(_link, _history, threads ?? UiThreads.Inline, _clock, TimeZoneInfo.Utc, English);
 
     [Theory]
-    [InlineData(2, "Display is the built-in panel plus 2 monitors.")]
-    [InlineData(1, "Display is the built-in panel plus 1 monitor.")]
-    [InlineData(0, "Display is the built-in panel.")]
-    public void The_footnote_says_how_many_monitors_the_display_band_counts(int counted, string display)
+    [InlineData(ChassisKind.Laptop, 15.6, "Display is the built-in panel and any external monitors counted at the time.")]
+    [InlineData(ChassisKind.Laptop, 0, "Display is the built-in panel and any external monitors counted at the time.")]    // a panel of a size not known
+    [InlineData(ChassisKind.Desktop, 23.8, "Display is the built-in panel and any external monitors counted at the time.")] // an all-in-one
+    [InlineData(ChassisKind.Desktop, 0, "Display is the external monitors counted at the time.")]
+    public void The_footnote_says_what_the_display_band_holds_over_any_range_on_this_machine(ChassisKind chassis, double panelInches, string display)
     {
-        MonitorStatus[] monitors = [Statuses.Dell with { Counted = counted > 0 }, Statuses.Aoc with { Counted = counted > 1 }];
-        _link.Status = Statuses.Running() with { Monitors = monitors };
+        // A range can reach back before a monitor was plugged in or ticked, so the footnote names none of those counted now.
+        _link.Status = Statuses.WithMonitors();
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Chassis = chassis, DisplayDiagonalInches = panelInches } };
         _link.Connect(true);
         var model = Model();
+        model.Range.Choice = RangeChoice.SevenDays;
         model.Show();
 
         model.Footnote.ShouldBe(display + " W is the average while the machine was on; Wh is the energy in each bucket.");
     }
 
     [Fact]
-    public void Without_the_services_word_on_monitors_the_footnote_doesnt_guess()
+    public void Without_the_services_settings_the_footnote_doesnt_guess_whether_there_is_a_built_in_panel()
     {
         var model = Model();
         model.Show();
 
-        model.Footnote.ShouldStartWith("Display is the built-in panel plus any monitors PowerLedger counts.");
+        model.Footnote.ShouldStartWith("Display is the built-in panel, if there is one, and any external monitors counted at the time.");
     }
 
     [Fact]
-    public void Monitors_plugged_in_reach_the_footnote_with_the_next_read()
+    public void A_machine_corrected_in_settings_reaches_the_footnote_with_the_next_read()
     {
         _link.Connect(true);
         var model = Model();
         model.Show();
-        model.Footnote.ShouldStartWith("Display is the built-in panel.");
+        model.Footnote.ShouldStartWith("Display is the built-in panel and any external monitors counted at the time.");
 
-        _link.Status = Statuses.WithMonitors();
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
         _clock.Advance(BreakdownViewModel.RefreshEvery);
 
-        model.Footnote.ShouldStartWith("Display is the built-in panel plus 2 monitors.");
+        model.Footnote.ShouldStartWith("Display is the external monitors counted at the time.");
     }
 
     [Fact]

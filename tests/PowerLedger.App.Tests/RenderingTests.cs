@@ -388,10 +388,11 @@ public class RenderingTests
         return model;
     }
 
-    /// <summary>The same machine's last seven days: asleep overnight, working days, quiet evenings; two monitors counted now.</summary>
+    /// <summary>The same machine's last seven days: asleep overnight, working days, quiet evenings; a laptop, so its display
+    /// band holds its panel.</summary>
     private static BreakdownViewModel BreakdownScreen()
     {
-        var link = new FakeLink { Status = Statuses.WithMonitors() };
+        var link = new FakeLink();
         link.Connect(true);
         var history = new FakeRangeHistory { Answer = range => Reports.Typical(range) with { Series = Week(range) } };
         var model = new BreakdownViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English);

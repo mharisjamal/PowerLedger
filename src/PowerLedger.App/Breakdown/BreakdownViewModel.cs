@@ -8,8 +8,8 @@ namespace PowerLedger.App;
 /// <summary>
 /// The Breakdown screen (spec §9): power by component over a range, as a stacked chart in watts or watt-hours and as each
 /// band's energy and share, with a footnote that says what the display band holds. It reads when shown, when the range
-/// changes and every minute while shown, off the UI thread, the monitors the service counts included; switching the unit
-/// redraws from the last read.
+/// changes and every minute while shown, off the UI thread, the service's settings included, which say whether the machine
+/// has a built-in panel; switching the unit redraws from the last read.
 /// </summary>
 internal sealed class BreakdownViewModel : ObservableObject, IDisposable
 {
@@ -85,7 +85,7 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
 
     public bool HasMessage => Message is not null;
 
-    /// <summary>What the display band holds, with the monitors the service counts now, and what the units mean.</summary>
+    /// <summary>What the display band holds, over any range and on this machine, and what the units mean.</summary>
     public string Footnote { get => _footnote; private set => SetProperty(ref _footnote, value); }
 
     /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
@@ -115,16 +115,17 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
         Hide();
     }
 
-    /// <summary>"Display is the built-in panel plus 2 monitors." When the service hasn't said which monitors it counts, the
-    /// footnote doesn't guess.</summary>
-    private string FootnoteFor(ServiceStatus? status)
+    /// <summary>What the display band holds over any range: the built-in panel, on a machine with one, and the external
+    /// monitors counted at the time, which need not be those counted now. A laptop always has a panel, of a size it may not
+    /// know; a desktop has one only when it gives the size, as an all-in-one does, which is how the model counts a panel.
+    /// Without the service's settings the footnote doesn't guess whether there is one.</summary>
+    private static string FootnoteFor(ServiceSettings? settings)
     {
-        var display = status?.Monitors?.Count(monitor => monitor is { Counted: true }) switch
+        var display = settings?.Profile switch
         {
-            null => "Display is the built-in panel plus any monitors PowerLedger counts.",
-            0 => "Display is the built-in panel.",
-            1 => "Display is the built-in panel plus 1 monitor.",
-            { } counted => $"Display is the built-in panel plus {counted.ToString(_culture)} monitors.",
+            null => "Display is the built-in panel, if there is one, and any external monitors counted at the time.",
+            { Chassis: ChassisKind.Laptop } or { DisplayDiagonalInches: > 0 } => "Display is the built-in panel and any external monitors counted at the time.",
+            _ => "Display is the external monitors counted at the time.",
         };
         return display + Units;
     }
@@ -132,13 +133,13 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     private async Task ReadAsync(int read, DateRange range)
     {
         var report = _history.Read(range, _zone);
-        var status = await _link.GetStatusAsync().ConfigureAwait(false);
+        var settings = await _link.GetSettingsAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
             if (read != _reads) return;
             _range = range;
             _report = report;
-            Footnote = FootnoteFor(status);
+            Footnote = FootnoteFor(settings);
             Rebuild();
         });
     }
