@@ -16,6 +16,10 @@ namespace PowerLedger.App;
 /// </summary>
 internal sealed class MonitorRow : ObservableObject
 {
+    /// <summary>The least that a refresh rate above 60 Hz adds which the row, and the Now screen, speak of: what shows as
+    /// 0.1 W. Windows drives some 60 Hz modes a hair faster, which adds less, and that is taken as nothing.</summary>
+    internal const double LeastRefreshWatts = 0.05;
+
     private readonly CultureInfo _culture;
 
     /// <summary>The user's choice for the monitor in the settings the form last took, or null for none.</summary>
@@ -70,7 +74,8 @@ internal sealed class MonitorRow : ObservableObject
     /// <summary>"DELL U2723QE".</summary>
     public string Name { get => _name; private set => SetProperty(ref _name, value); }
 
-    /// <summary>"27 in · 3840 × 2160", or as much of it as the monitor reported.</summary>
+    /// <summary>"27 in · 2560 × 1440 · 165 Hz", or as much of it as is known: the size and resolution the monitor reported, and
+    /// the refresh rate Windows drives it at, to a hundredth of a hertz, as in "59.94 Hz".</summary>
     public string Size { get => _size; private set => SetProperty(ref _size, value); }
 
     /// <summary>Where the figure came from: "measured for this model", "estimated from its size — correct it if you know
@@ -82,8 +87,9 @@ internal sealed class MonitorRow : ObservableObject
     public string Brightness { get => _brightness; private set => SetProperty(ref _brightness, value); }
 
     /// <summary>Whether the monitor is on, as it said, and what the service counts it as drawing now: "on · 24.3 W now",
-    /// "standby · 0.3 W now", "off · 0.2 W now" or, where PowerLedger can't tell, "can't tell if it's on · 24.3 W now". One
-    /// that isn't counted is "not counted", or "off · not counted" when it said.</summary>
+    /// "standby · 0.3 W now", "off · 0.2 W now" or, where PowerLedger can't tell, "can't tell if it's on · 24.3 W now". What a
+    /// refresh rate above 60 Hz adds is said with it: "on · 26.6 W now, incl. 2.3 W for 165 Hz". One that isn't counted is
+    /// "not counted", or "off · not counted" when it said.</summary>
     public string Now { get => _now; private set => SetProperty(ref _now, value); }
 
     /// <summary>Raised once <see cref="Watts"/>, <see cref="Counted"/> or <see cref="OwnPlug"/> is set to a new value and the
@@ -210,6 +216,11 @@ internal sealed class MonitorRow : ObservableObject
             _ => monitor.Counted ? "can't tell if it's on" : null,
         };
         var now = monitor.Counted ? $"{Format.Watts(monitor.WattsNow, _culture)} W now" : "not counted";
+        // The service adds for the refresh rate only while a counted monitor draws its figure on, so it is said with that.
+        if (monitor.Counted && monitor.RefreshWatts >= LeastRefreshWatts && Hertz(monitor.RefreshHz) is { } hertz)
+        {
+            now += $", incl. {Format.Watts(monitor.RefreshWatts, _culture)} W for {hertz}";
+        }
         Now = state is null ? now : $"{state} · {now}";
     }
 
@@ -236,6 +247,11 @@ internal sealed class MonitorRow : ObservableObject
     {
         var inches = double.IsFinite(monitor.Inches) && monitor.Inches > 0 ? monitor.Inches.ToString("0.#", _culture) + " in" : null;
         var pixels = monitor is { Width: > 0, Height: > 0 } ? $"{monitor.Width.ToString(_culture)} × {monitor.Height.ToString(_culture)}" : null;
-        return string.Join(" · ", new[] { inches, pixels }.OfType<string>());
+        return string.Join(" · ", new[] { inches, pixels, Hertz(monitor.RefreshHz) }.OfType<string>());
     }
+
+    /// <summary>A refresh rate to a hundredth of a hertz, as Windows gives a fraction of one: "165 Hz", "59.94 Hz"; null when
+    /// unknown.</summary>
+    private string? Hertz(double? refreshHz)
+        => refreshHz is { } hz && double.IsFinite(hz) && hz > 0 ? hz.ToString("0.##", _culture) + " Hz" : null;
 }
