@@ -205,12 +205,9 @@ public class MonitorCatalogueTests
     }
 
     [Fact]
-    public void A_series_word_left_out_or_a_name_cut_short_also_needs_a_listing_at_the_monitors_resolution()
-    {
-        // MSI lists the PRO MP243X at 1920 × 1080 only, and ASUS the VG27AQML1A at 2560 × 1440 only.
-        Shipped.Find("MSI", "MSI MP243X", 24, 2560, 1440).ShouldBeNull();
-        Shipped.Find("AUS", "ASUS VG27AQML", 27, 3840, 2160).ShouldBeNull();
-    }
+    public void A_name_cut_short_also_needs_a_listing_at_the_monitors_resolution()
+        // ASUS lists the VG27AQML1A at 2560 × 1440 only.
+        => Shipped.Find("AUS", "ASUS VG27AQML", 27, 3840, 2160).ShouldBeNull();
 
     [Fact]
     public void An_exact_name_keeps_its_listing_whatever_resolution_the_monitor_gives()
@@ -221,6 +218,16 @@ public class MonitorCatalogueTests
         dell.ModelNumber.ShouldBe("U4025QWt");
         dell.OnW.ShouldBe(44.72);
         Shipped.Find("PHL", "329P1", 31.5, 3840, 2160).ShouldNotBeNull().ModelName.ShouldBe("329P1RN");
+    }
+
+    [Fact]
+    public void A_series_word_left_out_keeps_its_listing_whatever_resolution_the_monitor_gives()
+    {
+        // EIZO lists the EV2456 as the 1920 × 1200 FlexScan EV2456, and real EDIDs of it give 1920 × 1080. It is the
+        // model all the same, and the estimate for 1920 × 1080 would be further off.
+        var eizo = Shipped.Find("ENC", "EV2456", 24, 1920, 1080).ShouldNotBeNull();
+        eizo.ModelName.ShouldBe("FlexScan EV2456");
+        eizo.OnW.ShouldBe(14.72);
     }
 
     [Fact]

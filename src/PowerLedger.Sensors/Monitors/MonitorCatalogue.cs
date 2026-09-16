@@ -41,19 +41,21 @@ public sealed record CatalogueMonitor(string Brand, string ModelNumber, string M
 /// </para>
 /// <para>
 /// A match must agree with the monitor's size to within an inch, which stops vague names matching the wrong panel; for a
-/// monitor that doesn't give its size, the listings its name matches must agree on one among themselves. A match by
-/// anything but an exact name must also be listed at the monitor's resolution, either way round, when the monitor gives
-/// one, which stops a family taking in a sibling of another resolution: ViewSonic's 1080p VX2418 lists VX24***********,
-/// which would otherwise take in the 4K VX2478-4K-HD.
+/// monitor that doesn't give its size, the listings its name matches must agree on one among themselves. A placeholder or
+/// a name cut short must also be listed at the monitor's resolution, either way round, when the monitor gives one, which
+/// stops a family taking in a sibling of another resolution: ViewSonic's 1080p VX2418 lists VX24***********, which would
+/// otherwise take in the 4K VX2478-4K-HD. Over linuxhw's collection of real EDIDs, each of the 113 such matches that
+/// disagreed with its listing's resolution was another model.
 /// </para>
 /// <para>
-/// An exact name keeps its listing whatever resolution the monitor gives. Over linuxhw's collection of real EDIDs, 42 of
-/// 1,412 exact matches disagreed with their listing's resolution, and 37 of them, of 17 models, were the listed model all
-/// the same. Most of those give a mode other than their panel's, as Dell's 5120 × 2160 U4025QW gives 2560 × 1080 and its
-/// 8K UP3218K 3840 × 2160, and the list has Philips' 329P1 at 3840 × 2169; an estimate from the resolution they give would
-/// be off the listing by a third at the median. The other five, of two models, matched another model's listing: ASUS's
-/// 4K PA328Q names itself PA328, the list's model number for its 1440p PA328CGV, and Acer's 1366 × 768 V206HQLB is taken
-/// for its 1600 × 900 V206HQL b, because names are compared in upper case.
+/// An exact name, or a model named without the series word the list puts before it, keeps its listing whatever resolution
+/// the monitor gives. Over the same EDIDs, 55 of 1,610 such matches disagreed with their listing's resolution, and 50 of
+/// them, of 20 models, were the listed model all the same. Most of those give a mode other than their panel's, as Dell's
+/// 5120 × 2160 U4025QW gives 2560 × 1080, its 8K UP3218K 3840 × 2160 and EIZO's 1920 × 1200 FlexScan EV2456
+/// 1920 × 1080, and the list has Philips' 329P1 at 3840 × 2169; an estimate from the resolution they give would be off the
+/// listing by over a quarter at the median. The other five, of two models, are left matching another model's listing:
+/// ASUS's 4K PA328Q names itself PA328, the list's model number for its 1440p PA328CGV, and Acer's 1366 × 768 V206HQLB is
+/// taken for its 1600 × 900 V206HQL b, because names are compared in upper case.
 /// </para>
 /// <para>
 /// Of the listings that match, those with the monitor's resolution, either way round, win; then a whole name over a
@@ -83,7 +85,8 @@ public sealed class MonitorCatalogue
 
     private const string Placeholders = "*#?";
 
-    /// <summary>How closely a whole identifier matches. A placeholder match ranks by the length of what comes before it.</summary>
+    /// <summary>How closely a whole identifier, or the last word of one, matches. A placeholder match ranks by the length
+    /// of what comes before it.</summary>
     private const int Whole = int.MaxValue;
 
     private static readonly Lazy<MonitorCatalogue> Loaded = new(Load, isThreadSafe: true);
@@ -204,7 +207,7 @@ public sealed class MonitorCatalogue
         var matches = Matches(key, cut: name.Trim().Length == EdidNameLength)
             .Where(match => brand is null ? match.Exact : _monitors[match.Listing].Brand.Equals(brand, StringComparison.OrdinalIgnoreCase))
             .Where(match => !sized || Math.Abs(_monitors[match.Listing].Inches - inches) <= SizeTolerance)
-            .Where(match => match.Exact || !resolved || HasResolution(_monitors[match.Listing], width, height))
+            .Where(match => match.Closeness == Whole || !resolved || HasResolution(_monitors[match.Listing], width, height))
             .OrderBy(match => match.Listing)
             .ToList();
         if (matches.Count == 0) return null;
