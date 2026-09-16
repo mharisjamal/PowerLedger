@@ -1,4 +1,5 @@
 using System.Management;
+using PowerLedger.Contracts;
 
 namespace PowerLedger.Sensors;
 
@@ -117,7 +118,7 @@ public static class MonitorInventory
         var monitors = new List<MonitorFacts>();
         foreach (var (instanceName, maker, product, serial, name) in ids)
         {
-            var instance = InstanceKey(instanceName);
+            var instance = MonitorKeys.FromInstanceName(instanceName);
             if (!sizeOf.TryGetValue(instance, out var size) || !size.Active) continue;
             // A monitor without a known connection could be the built-in panel, so only a known external one counts.
             if (!connectionOf.TryGetValue(instance, out var connection) || HardwareInventory.BuiltInConnections.Contains(connection)) continue;
@@ -155,22 +156,12 @@ public static class MonitorInventory
         return Math.Abs(nearest - inches) <= SnapInches ? nearest : Math.Round(inches, 1);
     }
 
-    /// <summary>WMI's instance name as <c>MonitorKeys.FromInstanceName</c> gives it: the <c>_0</c> suffix dropped, in upper
-    /// case. A copy of that method until Plan J's shared types are merged, when it should be replaced by a call to it.</summary>
-    private static string InstanceKey(string instanceName)
-    {
-        var text = instanceName.Trim();
-        var underscore = text.LastIndexOf('_');
-        if (underscore > 0 && text[(underscore + 1)..].All(char.IsAsciiDigit)) text = text[..underscore];
-        return text.ToUpperInvariant();
-    }
-
-    /// <summary>Rows keyed by their instance as <see cref="InstanceKey"/> gives it, so the classes join whatever their case
+    /// <summary>Rows keyed by their instance as <see cref="MonitorKeys.FromInstanceName"/> gives it, so the classes join whatever their case
     /// or suffix. The first row for an instance wins.</summary>
     private static Dictionary<string, T> ByInstance<T>(IEnumerable<(string Instance, T Value)> rows)
     {
         var byInstance = new Dictionary<string, T>();
-        foreach (var (instance, value) in rows) byInstance.TryAdd(InstanceKey(instance), value);
+        foreach (var (instance, value) in rows) byInstance.TryAdd(MonitorKeys.FromInstanceName(instance), value);
         return byInstance;
     }
 

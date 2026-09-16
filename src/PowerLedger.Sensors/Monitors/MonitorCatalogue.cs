@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text;
+using PowerLedger.Core;
 
 namespace PowerLedger.Sensors;
 
@@ -37,10 +38,6 @@ public sealed record CatalogueMonitor(string Brand, string ModelNumber, string M
 /// </summary>
 public sealed class MonitorCatalogue
 {
-    /// <summary>Sleep watts where a listing gives none: the certified median, rounded. It stands in for Core's
-    /// MonitorPower.DefaultSleepW, which has the same figure, until that is here to use.</summary>
-    internal const double DefaultSleepW = 0.2;
-
     private const string ResourceName = "PowerLedger.Sensors.Monitors.energy-star-monitors.csv";
 
     /// <summary>Room for the rounding in sizes such as 23.8, so that 24.8 is still within an inch of it.</summary>
@@ -138,7 +135,7 @@ public sealed class MonitorCatalogue
             var monitor = new CatalogueMonitor(
                 fields[brand], fields[modelNumber], fields[modelName],
                 Number(inches), Pixels(width), Pixels(height), fields[panel],
-                Number(onW), fields[sleepW].Length == 0 ? DefaultSleepW : Number(sleepW), nits > 0 ? nits : null);
+                Number(onW), fields[sleepW].Length == 0 ? MonitorPower.DefaultSleepW : Number(sleepW), nits > 0 ? nits : null);
             listings.Add((monitor, fields[alternatives].Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
         }
         return new MonitorCatalogue(listings);

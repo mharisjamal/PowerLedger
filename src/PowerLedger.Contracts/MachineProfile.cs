@@ -58,7 +58,6 @@ public sealed record MachineProfile
         Chassis = ChassisKind.Desktop,
         RamSticks = 2,
         FanCount = 3,
-        ExternalMonitors = 1,
         DisplayDiagonalInches = 0,
     };
 

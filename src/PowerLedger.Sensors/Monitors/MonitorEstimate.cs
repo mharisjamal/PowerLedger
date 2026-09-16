@@ -1,3 +1,5 @@
+using PowerLedger.Core;
+
 namespace PowerLedger.Sensors;
 
 /// <summary>
@@ -45,7 +47,7 @@ public static class MonitorEstimate
     internal static (double OnW, double SleepW) For(double inches, int width, int height, IEnumerable<CatalogueMonitor> certified)
     {
         var known = double.IsFinite(inches) && inches > 0 && width > 0 && height > 0;
-        if (known && inches > LargestMonitor) return (Formula(inches, width, height), MonitorCatalogue.DefaultSleepW);
+        if (known && inches > LargestMonitor) return (Formula(inches, width, height), MonitorPower.DefaultSleepW);
 
         var alike = certified.Where(monitor => monitor.Inches <= LargestMonitor).ToList();
         if (known)
@@ -59,8 +61,8 @@ public static class MonitorEstimate
             return (MonitorCatalogue.Median(alike.Select(monitor => monitor.OnW)), MonitorCatalogue.Median(alike.Select(monitor => monitor.SleepW)));
         }
         return known
-            ? (Formula(inches, width, height), MonitorCatalogue.DefaultSleepW)
-            : (Formula(CommonestInches, CommonestWidth, CommonestHeight), MonitorCatalogue.DefaultSleepW);
+            ? (Formula(inches, width, height), MonitorPower.DefaultSleepW)
+            : (Formula(CommonestInches, CommonestWidth, CommonestHeight), MonitorPower.DefaultSleepW);
     }
 
     /// <summary>
