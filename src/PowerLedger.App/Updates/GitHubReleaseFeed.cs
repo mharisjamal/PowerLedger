@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -19,8 +20,9 @@ internal interface IReleaseFeed
 
 /// <summary>
 /// PowerLedger's latest release on GitHub (spec §13); GitHub leaves out drafts and pre-releases. A release is trusted only
-/// when its tag is vX.Y.Z and it carries PowerLedger-X.Y.Z-setup.exe under the repository's own download address, with a
-/// plausible size and the SHA-256 GitHub computed for it. Anything else is refused rather than guessed at.
+/// when its tag is vX.Y.Z and it carries an installer for this PC — the build for its architecture, or else
+/// PowerLedger-X.Y.Z-setup.exe, which holds every build — under the repository's own download address, with a plausible
+/// size and the SHA-256 GitHub computed for it. Anything else is refused rather than guessed at.
 /// </summary>
 internal sealed partial class GitHubReleaseFeed(HttpClient http, Uri latest, string downloads, TimeSpan? timeout = null) : IReleaseFeed
 {
@@ -67,8 +69,9 @@ internal sealed partial class GitHubReleaseFeed(HttpClient http, Uri latest, str
     }
 
     /// <summary>The release GitHub describes, or null for a draft or a pre-release; refuses one it can't trust.
-    /// <paramref name="downloads"/> is where installers must be.</summary>
-    internal static Release? Parse(byte[] json, string downloads)
+    /// <paramref name="downloads"/> is where installers must be, and <paramref name="architecture"/> which build this PC
+    /// wants.</summary>
+    internal static Release? Parse(byte[] json, string downloads, Architecture? architecture = null)
     {
         GitHubRelease release;
         try
@@ -83,8 +86,10 @@ internal sealed partial class GitHubReleaseFeed(HttpClient http, Uri latest, str
         var tag = Tag().Match(release.TagName ?? "");
         if (!tag.Success) throw new UpdateException($"The latest release's tag, {release.TagName}, isn't a version PowerLedger knows.");
         var version = new Version(Number(tag.Groups[1]), Number(tag.Groups[2]), Number(tag.Groups[3]));
-        var name = $"PowerLedger-{version.ToString(3)}-setup.exe";
-        var asset = release.Assets?.FirstOrDefault(a => a.Name == name) ?? throw new UpdateException($"Release {version.ToString(3)} has no {name}.");
+        var wanted = InstallerNames(version, architecture ?? RuntimeInformation.OSArchitecture);
+        var asset = wanted.Select(name => release.Assets?.FirstOrDefault(a => a.Name == name)).FirstOrDefault(found => found is not null)
+            ?? throw new UpdateException($"Release {version.ToString(3)} has no installer for this PC.");
+        var name = asset.Name!;
         if (!Uri.TryCreate(asset.BrowserDownloadUrl, UriKind.Absolute, out var installer)
             || !installer.AbsoluteUri.StartsWith(downloads, StringComparison.Ordinal))
             throw new UpdateException($"{name} isn't where PowerLedger's releases are kept.");
@@ -95,6 +100,19 @@ internal sealed partial class GitHubReleaseFeed(HttpClient http, Uri latest, str
             ? html
             : PageOf(version);
         return new Release(version, page, installer, name, asset.Size, Convert.FromHexString(digest.Groups[1].Value));
+    }
+
+    /// <summary>The installers a release may carry, best first: the one built for this PC, then the one with every build.</summary>
+    internal static IReadOnlyList<string> InstallerNames(Version version, Architecture architecture)
+    {
+        var number = version.ToString(3);
+        var universal = $"PowerLedger-{number}-setup.exe";
+        return architecture switch
+        {
+            Architecture.X64 => [$"PowerLedger-{number}-setup-x64.exe", universal],
+            Architecture.Arm64 => [$"PowerLedger-{number}-setup-arm64.exe", universal],
+            _ => [universal],
+        };
     }
 
     /// <summary>The answer's bytes, refusing more than a release could need.</summary>
