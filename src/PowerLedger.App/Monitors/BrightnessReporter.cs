@@ -16,9 +16,6 @@ internal sealed class BrightnessReporter(IServiceLink link, IBrightnessReader re
     public static readonly TimeSpan FirstRead = TimeSpan.FromMinutes(1);
     public static readonly TimeSpan ReadEvery = TimeSpan.FromMinutes(5);
 
-    /// <summary>The most monitors the service takes in one report (ReportBrightnessRequest.Validate).</summary>
-    private const int MostMonitors = 16;
-
     private ITimer? _timer;
     private int _reporting;
 
@@ -60,7 +57,7 @@ internal sealed class BrightnessReporter(IServiceLink link, IBrightnessReader re
         var reported = new List<MonitorBrightness>();
         foreach (var reading in readings)
         {
-            if (reported.Count == MostMonitors) break;
+            if (reported.Count == ServiceSettings.MaxMonitors) break;   // the most the service takes in one report
             if (MonitorKeys.FromDevicePath(reading.DevicePath) is not { } key || !instances.Remove(key, out var instance)) continue;
             reported.Add(new MonitorBrightness { Instance = instance, Brightness = reading.Brightness });
         }
