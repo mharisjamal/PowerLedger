@@ -128,4 +128,16 @@ public class MonitorInventoryTests
     [InlineData(79, 0)]     // EDID's aspect ratio in place of a size, here 16:9
     public void A_monitor_that_gives_no_size_has_no_diagonal(double widthCm, double heightCm)
         => MonitorInventory.Diagonal(widthCm, heightCm).ShouldBe(0);
+
+    [Theory]
+    [InlineData(16, 9)]     // the aspect ratio written where the size belongs
+    [InlineData(4, 3)]
+    [InlineData(1, 1)]
+    [InlineData(22, 12)]    // 9.9 inches
+    public void An_external_monitor_that_gives_a_size_under_ten_inches_is_taken_to_give_none(double widthCm, double heightCm)
+        => From(Dell with { WidthCm = widthCm, HeightCm = heightCm }).ShouldHaveSingleItem().Inches.ShouldBe(0);
+
+    [Fact]
+    public void An_external_monitor_of_ten_inches_keeps_its_size()
+        => From(Dell with { WidthCm = 22, HeightCm = 13 }).ShouldHaveSingleItem().Inches.ShouldBe(10.1);
 }

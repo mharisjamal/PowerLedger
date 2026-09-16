@@ -12,7 +12,7 @@ namespace PowerLedger.Sensors;
 /// <param name="ProductCode">The maker's product code, e.g. "A0B1".</param>
 /// <param name="Name">The name the monitor gives itself, e.g. "DELL U2723QE"; empty when it gives none.</param>
 /// <param name="Inches">The diagonal, snapped to a common size (see <see cref="MonitorInventory.Diagonal"/>); 0 when the
-/// monitor gives no size.</param>
+/// monitor gives no size, or one under ten inches, which is an aspect ratio or nonsense.</param>
 /// <param name="Width">The native resolution: the mode the monitor prefers, or 0 by 0 when it lists none.</param>
 public sealed record MonitorFacts(
     string Instance,
@@ -41,6 +41,10 @@ public static class MonitorInventory
 
     /// <summary>How far a diagonal may be from a common size and still be taken for it.</summary>
     private const double SnapInches = 0.5;
+
+    /// <summary>The smallest diagonal an external monitor is believed to give. Some monitors put their aspect ratio (16 by 9)
+    /// or nonsense where EDID's size belongs, and a size that small would only mislead the catalogue and the estimate.</summary>
+    private const double SmallestExternalInches = 10;
 
     /// <summary>The active external monitors, read from WMI. Never throws; a failed class reads as nothing.</summary>
     public static IReadOnlyList<MonitorFacts> Read()
@@ -126,6 +130,7 @@ public static class MonitorInventory
             var makerId = Text(maker);
             var productCode = Text(product);
             var serialNumber = Text(serial);
+            var inches = Diagonal(size.WidthCm, size.HeightCm);
             var (width, height) = modeOf.GetValueOrDefault(instance);
             monitors.Add(new MonitorFacts(
                 instance,
@@ -134,7 +139,7 @@ public static class MonitorInventory
                 makerId,
                 productCode,
                 Text(name),
-                Diagonal(size.WidthCm, size.HeightCm),
+                inches < SmallestExternalInches ? 0 : inches,
                 width,
                 height));
         }
