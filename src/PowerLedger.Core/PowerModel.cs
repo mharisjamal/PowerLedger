@@ -43,14 +43,23 @@ public sealed class PowerModel
     /// <summary>
     /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; in measured mode <c>Unattributed</c> may go
     /// negative when the parts over-report, which is the honest sensor-disagreement signal.
-    /// The Service feeds <c>Components.Cpu</c>, <c>Gpu</c> and <c>Display</c> back into the calibration learner.
     /// </summary>
-    public Reading Evaluate(Sample s)
+    public Reading Evaluate(Sample s) => Evaluate(s, out _);
+
+    /// <summary>
+    /// Evaluates one tick, as <see cref="Evaluate(Sample)"/> does, and gives what the monitors drew as this reading counts
+    /// them. The Service feeds <c>Components.Cpu</c>, <c>Gpu</c> and <c>Display</c> back into the calibration learner, and
+    /// with the display what the monitors running off the PC drew, since a battery rate holds that too. It takes that
+    /// figure from here, the one the reading used, rather than asking the monitors again, which detection may have changed
+    /// in between.
+    /// </summary>
+    /// <param name="monitors">What the <see cref="IMonitorDraw"/> said, asked once for this reading.</param>
+    public Reading Evaluate(Sample s, out MonitorWatts monitors)
     {
         var cpu = CpuWatts(s);
         var gpu = GpuWatts(s);
         var display = DisplayModel.PanelWatts(_profile, s.Brightness, s.DisplayOn);
-        var monitors = _monitors.Watts(s.DisplayOn);
+        monitors = _monitors.Watts(s.DisplayOn);
         var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds;
         var isLaptop = _profile.Chassis == ChassisKind.Laptop;
 
@@ -68,7 +77,8 @@ public sealed class PowerModel
         Quality quality;
         if (isLaptop && Finite(_baselines.GetBaseline(CalibrationBuckets.For(s.Brightness, s.DisplayOn))) is { } learned)
         {
-            // The learned baseline was observed on battery, so it already contains any extras drawing from the battery.
+            // The learned baseline was observed on battery, so it already contains any extras drawing from the battery. It
+            // doesn't contain the monitors running off the laptop, which the learner is given with the display.
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
                 Monitors: monitors.Total, PsuLoss: 0, Unattributed: learned);

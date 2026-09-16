@@ -38,6 +38,8 @@ public sealed class CalibrationLearner : IBaselineProvider
 
     /// <summary>Feed one tick. Ignored unless the sample has a usable discharge rate (see <see cref="Sample.HasDischargeRate"/>),
     /// is not suspect, and the parts are finite. The caller must also skip the 3 s after an AC transition.</summary>
+    /// <param name="displayW">What the display draws from the battery: the built-in panel, and any monitor running off the
+    /// laptop, which is no part of the rest of the laptop.</param>
     public void Observe(Sample s, double cpuW, double gpuW, double displayW)
     {
         if (s.Suspect || !s.HasDischargeRate || s.BatteryRateW is not { } measured) return;

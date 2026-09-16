@@ -170,6 +170,35 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task A_monitor_running_off_the_laptop_is_in_its_battery_rate_and_is_kept_out_of_what_the_learner_learns()
+    {
+        using var t = new TestDatabase();
+        new SettingsStore(new SettingsRepository(t.Db)).Save(ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultLaptop with { Monitors = [new MonitorChoice { Key = MonitorBoardTests.Portable.Key, Watts = 6 }] },
+        });
+        await using var loop = new Harness(t);
+        loop.Monitors.Detected([MonitorBoardTests.Portable]);
+        await loop.StartAsync();
+        await loop.Ticks(3);
+        await loop.StopAsync();
+
+        // The battery's 20 W less the processor's 8 W, the 15.3-inch panel's 3.75 W at half brightness, and the monitor's 6 W.
+        var status = loop.Board.Status.ShouldNotBeNull();
+        status.Monitors.ShouldNotBeNull().ShouldHaveSingleItem().OwnPlug.ShouldBeFalse();
+        var last = status.Last.ShouldNotBeNull();
+        last.TotalW.ShouldBe(20, 1e-9);
+        last.Components.Monitors.ShouldBe(6, 1e-9);
+        last.Components.Unattributed.ShouldBe(20 - 8 - 3.75 - 6, 1e-9);
+
+        var learned = new CalibrationLearner();
+        learned.Import(new CalibrationRepository(t.Db).Load(Facts.Laptop().Hash));
+        var bucket = learned.Export().Buckets.ShouldHaveSingleItem();
+        bucket.Samples.ShouldBe(3);
+        bucket.BaselineW.ShouldBe(20 - 8 - 3.75 - 6, 1e-9);
+    }
+
+    [Fact]
     public async Task The_users_monitor_choices_reach_the_board_from_the_stored_settings_and_from_new_ones()
     {
         using var t = new TestDatabase();

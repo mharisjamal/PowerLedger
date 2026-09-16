@@ -128,6 +128,22 @@ public class PowerModelTests
     }
 
     [Fact]
+    public void The_monitors_are_asked_once_and_the_caller_is_given_what_the_reading_counted_them_at()
+    {
+        var monitors = new RisingDraw();
+        var r = Laptop(monitors: monitors).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true), out var counted);
+
+        monitors.Calls.ShouldBe(1);
+        counted.ShouldBe(new MonitorWatts(OwnPlug: 25, FromPc: 6.2));
+        r.Components.Monitors.ShouldBe(counted.Total, 1e-9);
+        r.Components.Unattributed.ShouldBe(34.2 - 14.6 - 4.1 - 4.2 - counted.FromPc, 1e-9);
+        r.TotalW.ShouldBe(34.2 + counted.OwnPlug, 1e-9);
+
+        Laptop().Evaluate(TestData.Laptop(), out var none);
+        none.ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
+    }
+
+    [Fact]
     public void On_ac_without_calibration_the_laptop_uses_the_default_baseline_and_adapter_efficiency()
     {
         var r = Laptop().Evaluate(TestData.Laptop());
@@ -321,5 +337,17 @@ public class PowerModelTests
     private sealed class FixedDraw(MonitorWatts on, MonitorWatts off = default) : IMonitorDraw
     {
         public MonitorWatts Watts(bool displayOn) => displayOn ? on : off;
+    }
+
+    /// <summary>Draws more each time it is asked, as the monitors would seem to if detection changed them between two asks.</summary>
+    private sealed class RisingDraw : IMonitorDraw
+    {
+        public int Calls { get; private set; }
+
+        public MonitorWatts Watts(bool displayOn)
+        {
+            Calls++;
+            return new MonitorWatts(OwnPlug: 25 * Calls, FromPc: 6.2 * Calls);
+        }
     }
 }
