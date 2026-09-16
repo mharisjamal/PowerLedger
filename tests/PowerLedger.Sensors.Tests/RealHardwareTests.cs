@@ -82,6 +82,25 @@ public class RealHardwareTests
     }
 
     [Fact]
+    public void The_monitor_inventory_answers_with_only_the_external_monitors()
+    {
+        var monitors = Should.NotThrow(() => MonitorInventory.Read());
+
+        // Windows' own word on which displays are built in: none of them may come back. The development laptop has only
+        // its own panel, so there its list is empty.
+        var builtIn = Wmi.Read(@"\\.\root\wmi", "SELECT InstanceName, VideoOutputTechnology FROM WmiMonitorConnectionParams", rows => rows
+            .Where(row => row["VideoOutputTechnology"] is uint connection && HardwareInventory.BuiltInConnections.Contains(connection))
+            .Select(row => row["InstanceName"] as string ?? "")
+            .ToList());
+        foreach (var monitor in monitors)
+        {
+            builtIn.ShouldNotContain(instance => instance.StartsWith(monitor.Instance, StringComparison.OrdinalIgnoreCase));
+            monitor.Key.ShouldNotBeNullOrWhiteSpace();
+        }
+        monitors.Select(m => m.Key).ShouldBeUnique();
+    }
+
+    [Fact]
     public void The_display_query_answers_on_its_first_tick()
     {
         var draft = new SampleDraft();

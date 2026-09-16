@@ -98,7 +98,8 @@ public class HardwareInventoryTests
         };
         (string, double, double)[] sizes = [(@"DISPLAY\DEL41A8\1", 60, 34), (@"DISPLAY\AUO4199\2", 34, 19)];
 
-        HardwareInventory.BuiltInDiagonal(connections, sizes).ShouldBe(15.3);
+        // A 15.6-inch panel, which its whole centimetres alone would put at 15.3.
+        HardwareInventory.BuiltInDiagonal(connections, sizes).ShouldBe(15.6);
     }
 
     [Fact]

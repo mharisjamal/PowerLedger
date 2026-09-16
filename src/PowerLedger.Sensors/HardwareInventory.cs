@@ -23,7 +23,7 @@ public static class HardwareInventory
 
     /// <summary>D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY values for a panel built into the machine: LVDS, embedded
     /// DisplayPort, embedded UDI and the generic "internal".</summary>
-    private static readonly HashSet<uint> BuiltInConnections = [6, 11, 13, 0x80000000];
+    internal static readonly HashSet<uint> BuiltInConnections = [6, 11, 13, 0x80000000];
 
     /// <summary>A known enclosure type settles it: a portable one is a laptop, and any other is a desktop even when a
     /// battery shows, because the battery on a desktop is a UPS whose drain covers everything plugged into it. Only an
@@ -54,8 +54,9 @@ public static class HardwareInventory
         return (solid, spinning);
     }
 
-    /// <summary>The built-in panel's diagonal in inches, or 0 when no built-in panel shows. The panel is found by how
-    /// it is connected, never by where Windows lists it, so a docked laptop reports its own panel, not the desk monitor.</summary>
+    /// <summary>The built-in panel's diagonal in inches, snapped to a common size as <see cref="MonitorInventory.Diagonal"/>
+    /// does, or 0 when no built-in panel shows. The panel is found by how it is connected, never by where Windows lists it,
+    /// so a docked laptop reports its own panel, not the desk monitor.</summary>
     /// <param name="connections">Connection type by monitor instance name.</param>
     /// <param name="sizes">Maximum image size in centimetres by monitor instance name.</param>
     public static double BuiltInDiagonal(
@@ -65,7 +66,7 @@ public static class HardwareInventory
         {
             if (width <= 0 || height <= 0) continue;
             if (!connections.TryGetValue(instance, out var connection) || !BuiltInConnections.Contains(connection)) continue;
-            return Math.Round(Math.Sqrt(width * width + height * height) / 2.54, 1);
+            return MonitorInventory.Diagonal(width, height);
         }
         return 0;
     }
