@@ -62,6 +62,16 @@ public class ReportDataTests
     }
 
     [Fact]
+    public void The_quality_legend_says_what_each_quality_is_and_where_the_monitors_watts_come_from()
+    {
+        // The Report screen and the PDF both show it. A monitor's watts come from its own figure whatever the quality, but
+        // aren't always added: one running off the laptop is already in the battery's report.
+        ReportData.QualityLegend.ShouldBe(
+            "Measured: Windows' battery report. Calibrated: a model with a baseline learned on battery, ±10%. Estimated: the model alone, ±20%. "
+            + "External monitors' watts come from their own figures in every mode.");
+    }
+
+    [Fact]
     public void A_tariff_that_began_inside_the_range_says_from_when()
     {
         var range = Ranges.ThisMonth(Now, Utc, English);

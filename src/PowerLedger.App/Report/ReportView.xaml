@@ -121,8 +121,7 @@
                         <Border Style="{StaticResource LedgerHead}"><TextBlock Style="{StaticResource Text.Eyebrow}" Text="DATA QUALITY" /></Border>
                         <local:QualityBar Margin="0,14,0,8" Mix="{Binding Data.Quality}" />
                         <TextBlock Style="{StaticResource Text.Secondary}" FontSize="12.5" Text="{Binding Data.QualityText}" />
-                        <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,6,0,0"
-                                   Text="Measured: Windows' battery report. Calibrated: a model with a baseline learned on battery, ±10%. Estimated: the model alone, ±20%." />
+                        <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,6,0,0" Text="{x:Static local:ReportData.QualityLegend}" />
                     </StackPanel>
                 </Grid>
 

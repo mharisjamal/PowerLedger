@@ -186,8 +186,7 @@ internal static class ReportDocument
                     });
                 }
                 quality.Item().Text(data.QualityText).FontColor(Ink2);
-                quality.Item().PaddingTop(4).Text("Measured: Windows' battery report. Calibrated: a model with a baseline learned on battery, ±10%. Estimated: the model alone, ±20%.")
-                    .FontSize(7.5f).FontColor(Ink3);
+                quality.Item().PaddingTop(4).Text(ReportData.QualityLegend).FontSize(7.5f).FontColor(Ink3);
             });
         });
     }

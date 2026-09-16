@@ -26,6 +26,13 @@ internal sealed record ReportData(
     IReadOnlyList<PartRow> Parts, IReadOnlyList<ReportLine> Equivalents,
     QualityMix Quality, string QualityText, IReadOnlyList<DayBar> Days)
 {
+    /// <summary>What each quality means, under the quality bar on the Report screen and in the PDF. The external monitors'
+    /// watts come from their own figures whatever the quality, but aren't always added to it: a monitor running off a laptop
+    /// is already in the battery's report, and its figure only splits it off.</summary>
+    public const string QualityLegend =
+        "Measured: Windows' battery report. Calibrated: a model with a baseline learned on battery, ±10%. Estimated: the model alone, ±20%. "
+        + "External monitors' watts come from their own figures in every mode.";
+
     public static ReportData Empty { get; } = new(
         "", "", false, Format.Missing, Format.Missing, "", Format.Missing, "", Format.Missing, Format.Missing, "",
         Format.Missing, Format.Missing, Format.Missing, Format.Missing, Format.Missing, Format.Missing, "", "",
