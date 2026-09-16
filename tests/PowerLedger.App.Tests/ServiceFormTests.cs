@@ -522,6 +522,33 @@ public class ServiceFormTests
     }
 
     [Fact]
+    public async Task A_save_before_the_status_catches_up_with_a_corrected_chassis_keeps_each_plug_said_until_it_is_changed()
+    {
+        // Settings fills the form again once the service takes a save, but the service's status is from its last reading, which
+        // took each plug for the chassis before. Saved again then, the plugs said must stay said: weighed against those plugs,
+        // they would say nothing, and the portable monitor shown with a plug of its own would be taken to run off the laptop.
+        MonitorStatus[] onDesktop = [Statuses.Dell, Statuses.Portable with { OwnPlug = true, OwnPlugByDefault = true }];
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop });
+        form.ShowMonitors(onDesktop);
+        form.Chassis = ChassisKind.Laptop;
+        (await form.SaveAsync()).ShouldBeTrue();
+        var corrected = (ServiceSettings)_link.Writes.Single();
+
+        form.Load(corrected);
+        form.ShowMonitors(onDesktop);
+        form.FanCount = "2";
+        (await form.SaveAsync()).ShouldBeTrue();
+        ((ServiceSettings)_link.Writes[1]).Profile.Monitors.ShouldBe(corrected.Profile.Monitors);
+
+        // Once the status catches up, a plug changed to the one the service would take goes back to its guess.
+        form.ShowMonitors([Statuses.Dell, Statuses.Portable with { OwnPlug = true }]);
+        form.Monitors[1].OwnPlug = false;
+        (await form.SaveAsync()).ShouldBeTrue();
+        ((ServiceSettings)_link.Writes[2]).Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Dell.Key, OwnPlug = true }]);
+    }
+
+    [Fact]
     public async Task A_refresh_keeps_what_the_user_ticked_and_a_box_they_havent_ticked_follows_what_the_service_would_take()
     {
         var form = Form();

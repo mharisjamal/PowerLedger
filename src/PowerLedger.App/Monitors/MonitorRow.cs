@@ -137,8 +137,10 @@ internal sealed class MonitorRow : ObservableObject
 
     /// <summary>The choice to save, given the watts the form read from <see cref="Watts"/>: a figure counts as typed only
     /// when it isn't PowerLedger's own figure as the row shows it, the plug is said when it isn't the one the service takes
-    /// the monitor to have or when <paramref name="sayPlug"/>, and whether it counts is as the row shows it, which for a
-    /// monitor running off this PC is always so.</summary>
+    /// the monitor to have, when the choice already says it, or when <paramref name="sayPlug"/>, and whether it counts is as
+    /// the row shows it, which for a monitor running off this PC is always so. A plug the choice says stays said while it is
+    /// unchanged, because the service's status is from its last reading, which may have taken the plug for the chassis before
+    /// the save that said it.</summary>
     /// <param name="sayPlug">Say the plug whichever it is, as when the chassis changes, for which the service would take the
     /// monitor's plug afresh.</param>
     internal MonitorChoice Choice(double? watts, bool sayPlug) => new()
@@ -146,7 +148,7 @@ internal sealed class MonitorRow : ObservableObject
         Key = Key,
         Counted = Counted,
         Watts = watts is { } figure && !(_own is { } own && figure == double.Parse(Figure(own), NumberStyles.AllowDecimalPoint, _culture)) ? figure : null,
-        OwnPlug = sayPlug || OwnPlug != _ownPlugByDefault ? OwnPlug : null,
+        OwnPlug = sayPlug || OwnPlug != _ownPlugByDefault || OwnPlug == _choice?.OwnPlug ? OwnPlug : null,
     };
 
     private void Show(MonitorStatus monitor)
