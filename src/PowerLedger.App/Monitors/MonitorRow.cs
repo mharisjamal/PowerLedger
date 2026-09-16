@@ -8,9 +8,10 @@ namespace PowerLedger.App;
 /// <summary>
 /// One external monitor as the wizard and Settings list it (Plan J): what the service detected and worked out — the
 /// monitor's name, size and figure, where the figure came from, its brightness and what it draws now — with the user's
-/// choice, whether it counts and a figure of their own. A monitor without a choice counts, at PowerLedger's own figure. A
-/// figure the user typed is theirs until they clear it. The service's word is refreshed with its status; what the user
-/// typed or ticked never is, and a box they haven't touched follows the service's figure.
+/// choice: whether it counts, a figure of their own, and whether it has a plug of its own. A monitor without a choice
+/// counts, and has a plug of its own, as the service's defaults say, at PowerLedger's own figure. A figure the user typed
+/// is theirs until they clear it. The service's word is refreshed with its status; what the user
+/// typed or ticked never is, and a box they haven't touched follows the service's figure and defaults.
 /// </summary>
 internal sealed class MonitorRow : ObservableObject
 {
@@ -26,6 +27,15 @@ internal sealed class MonitorRow : ObservableObject
     /// <summary>What the row last put in <see cref="Watts"/>, to tell a box the user has typed in from one they haven't.</summary>
     private string _filled;
 
+    /// <summary>Whether the service takes the monitor to have a plug of its own when the user hasn't said, as it last said.</summary>
+    private bool _ownPlugByDefault;
+
+    /// <summary>Whether <see cref="Counted"/> is the user's, ticked by them or held by their choice, so no default moves it.</summary>
+    private bool _countedChosen;
+
+    /// <summary>Whether <see cref="OwnPlug"/> is the user's, ticked by them or held by their choice.</summary>
+    private bool _ownPlugChosen;
+
     private string _name = "";
     private string _size = "";
     private string _source = "";
@@ -33,13 +43,17 @@ internal sealed class MonitorRow : ObservableObject
     private string _now = "";
     private string _watts;
     private bool _counted;
+    private bool _ownPlug;
 
     public MonitorRow(MonitorStatus monitor, MonitorChoice? choice, CultureInfo culture)
     {
         _culture = culture;
         Key = monitor.Key;
         _typed = choice?.Watts;
-        _counted = choice?.Counted ?? true;
+        _counted = choice?.Counted ?? monitor.CountedByDefault;
+        _ownPlug = choice?.OwnPlug ?? monitor.OwnPlugByDefault;
+        _countedChosen = choice is not null;
+        _ownPlugChosen = choice?.OwnPlug is not null;
         Show(monitor);
         _filled = Fill();
         _watts = _filled;
@@ -68,28 +82,55 @@ internal sealed class MonitorRow : ObservableObject
     /// <summary>On-mode watts, as typed; blank for PowerLedger's own figure.</summary>
     public string Watts { get => _watts; set => SetProperty(ref _watts, value); }
 
-    public bool Counted { get => _counted; set => SetProperty(ref _counted, value); }
+    public bool Counted
+    {
+        get => _counted;
+        set
+        {
+            if (SetProperty(ref _counted, value)) _countedChosen = true;
+        }
+    }
 
-    /// <summary>What the service now says of the monitor. A figure the user has typed stays; one they haven't follows.</summary>
+    /// <summary>Whether the monitor has a plug of its own, drawing outside this PC, rather than running off it.</summary>
+    public bool OwnPlug
+    {
+        get => _ownPlug;
+        set
+        {
+            if (SetProperty(ref _ownPlug, value)) _ownPlugChosen = true;
+        }
+    }
+
+    /// <summary>Whether the service counts the monitor when the user hasn't said, as it last said.</summary>
+    internal bool CountedByDefault { get; private set; }
+
+    /// <summary>What the service now says of the monitor. A figure the user has typed stays, and so does a box they have
+    /// ticked; one they haven't follows.</summary>
     internal void Refresh(MonitorStatus monitor)
     {
         var untouched = Watts == _filled;
         Show(monitor);
         _filled = Fill();
         if (untouched) Watts = _filled;
+        if (!_countedChosen) SetProperty(ref _counted, CountedByDefault, nameof(Counted));
+        if (!_ownPlugChosen) SetProperty(ref _ownPlug, _ownPlugByDefault, nameof(OwnPlug));
     }
 
     /// <summary>The choice to save, given the watts the form read from <see cref="Watts"/>: a figure counts as typed only
-    /// when it isn't PowerLedger's own figure as the row shows it.</summary>
+    /// when it isn't PowerLedger's own figure as the row shows it, and the plug is said only when it isn't the one the
+    /// service takes the monitor to have.</summary>
     internal MonitorChoice Choice(double? watts) => new()
     {
         Key = Key,
         Counted = Counted,
         Watts = watts is { } figure && !(_own is { } own && figure == double.Parse(Figure(own), NumberStyles.AllowDecimalPoint, _culture)) ? figure : null,
+        OwnPlug = OwnPlug != _ownPlugByDefault ? OwnPlug : null,
     };
 
     private void Show(MonitorStatus monitor)
     {
+        CountedByDefault = monitor.CountedByDefault;
+        _ownPlugByDefault = monitor.OwnPlugByDefault;
         Name = string.IsNullOrWhiteSpace(monitor.Name) ? "External monitor" : monitor.Name.Trim();
         Size = SizeOf(monitor);
         if (monitor.Source != MonitorSource.Typed && double.IsFinite(monitor.OnWatts) && monitor.OnWatts >= 0) _own = monitor.OnWatts;

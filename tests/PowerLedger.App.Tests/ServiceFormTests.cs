@@ -235,9 +235,126 @@ public class ServiceFormTests
     }
 
     [Fact]
-    public async Task A_monitors_choice_is_saved_only_when_it_isnt_counted_or_has_a_figure_typed()
+    public void A_monitor_without_a_choice_is_counted_and_plugged_in_as_the_service_would_take_it()
     {
-        // A monitor with no choice counts, at PowerLedger's own figure, so a choice that says no more needs no entry.
+        // Settings from before monitors were detected may have left monitors out, and a small monitor on a laptop is taken
+        // for a portable one that runs off it.
+        var form = Form();
+
+        form.ShowMonitors([Statuses.Dell, Statuses.Aoc with { CountedByDefault = false, Counted = false }, Statuses.Portable]);
+
+        form.Monitors.Select(m => (m.Counted, m.OwnPlug)).ShouldBe([(true, true), (false, true), (true, false)]);
+    }
+
+    [Fact]
+    public void A_monitors_choice_wins_over_what_the_service_would_take()
+    {
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with
+        {
+            Profile = MachineProfile.DefaultLaptop with
+            {
+                Monitors =
+                [
+                    new MonitorChoice { Key = Statuses.Dell.Key, Counted = true, OwnPlug = false },
+                    new MonitorChoice { Key = Statuses.Portable.Key, Counted = false, OwnPlug = true },
+                ],
+            },
+        });
+
+        form.ShowMonitors([Statuses.Dell with { CountedByDefault = false, OwnPlug = false }, Statuses.Portable with { Counted = false, OwnPlug = true }]);
+
+        form.Monitors.Select(m => (m.Counted, m.OwnPlug)).ShouldBe([(true, false), (false, true)]);
+    }
+
+    [Fact]
+    public async Task A_monitor_counted_where_the_service_wouldnt_count_it_or_left_out_where_it_would_saves_a_choice()
+    {
+        var form = Form();
+        form.ShowMonitors(
+        [
+            Statuses.Dell,
+            Statuses.Aoc,
+            Statuses.Dell with { Key = "DELA0B1-2", CountedByDefault = false, Counted = false },
+            Statuses.Aoc with { Key = "AOC2402-2", CountedByDefault = false, Counted = false },
+        ]);
+        form.Monitors[1].Counted = false;
+        form.Monitors[3].Counted = true;
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Aoc.Key, Counted = false },
+            new MonitorChoice { Key = "AOC2402-2", Counted = true },
+        ]);
+    }
+
+    [Fact]
+    public async Task A_plug_other_than_the_one_the_service_takes_saves_a_choice_that_says_so()
+    {
+        var form = Form();
+        form.ShowMonitors([Statuses.Dell, Statuses.Portable, Statuses.Portable with { Key = "AUS1601-2" }]);
+        form.Monitors[0].OwnPlug = false;   // it runs off the laptop after all
+        form.Monitors[1].OwnPlug = true;    // a portable monitor with a plug of its own
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(
+        [
+            new MonitorChoice { Key = Statuses.Dell.Key, OwnPlug = false },
+            new MonitorChoice { Key = Statuses.Portable.Key, OwnPlug = true },
+        ]);
+    }
+
+    [Fact]
+    public async Task A_refresh_keeps_what_the_user_ticked_and_a_box_they_havent_ticked_follows_what_the_service_would_take()
+    {
+        var form = Form();
+        var other = Statuses.Portable with { Key = "AUS1601-2" };
+        form.ShowMonitors([Statuses.Portable, other]);
+        var (ticked, untouched) = (form.Monitors[0], form.Monitors[1]);
+        ticked.OwnPlug = true;
+        ticked.Counted = false;
+        ticked.Counted = true;   // and back again, which is still the user's
+
+        // Say the chassis was saved as a desktop elsewhere, and the service now leaves monitors out unless told.
+        form.ShowMonitors(
+        [
+            Statuses.Portable with { CountedByDefault = false, OwnPlugByDefault = true, OwnPlug = true },
+            other with { CountedByDefault = false, Counted = false, OwnPlugByDefault = true, OwnPlug = true },
+        ]);
+
+        (ticked.Counted, ticked.OwnPlug).ShouldBe((true, true));
+        (untouched.Counted, untouched.OwnPlug).ShouldBe((false, true));
+        (await form.SaveAsync()).ShouldBeTrue();
+        // Each choice says only what differs from what the service would take now.
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe([new MonitorChoice { Key = Statuses.Portable.Key, Counted = true }]);
+    }
+
+    [Fact]
+    public async Task Where_monitors_are_left_out_unless_chosen_a_choice_to_count_one_not_attached_now_is_kept_and_one_to_leave_it_out_goes()
+    {
+        MonitorChoice[] loaded =
+        [
+            new MonitorChoice { Key = "LEN66F2-V906LMHT", Counted = false },   // no more than monitors are left out by default
+            new MonitorChoice { Key = "SAM0F9E-HNTW700123" },
+        ];
+        var form = new ServiceForm(_link, UiThreads.Inline, English);
+        form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Monitors = loaded, CountMonitorsByDefault = false } });
+        form.ShowMonitors([Statuses.Dell with { CountedByDefault = false, Counted = false }]);
+
+        (await form.SaveAsync()).ShouldBeTrue();
+
+        var profile = ((ServiceSettings)_link.Writes.Single()).Profile;
+        profile.Monitors.ShouldBe([loaded[1]]);
+        profile.CountMonitorsByDefault.ShouldBeFalse();   // as the service sent it
+    }
+
+    [Fact]
+    public async Task A_monitors_choice_is_saved_when_it_is_left_out_or_has_a_figure_typed()
+    {
+        // A monitor with no choice counts by default, at PowerLedger's own figure, so a choice that says no more needs no entry.
         var form = Form();
         var third = Statuses.Aoc with { Key = "AOC2402-2" };
         form.ShowMonitors([Statuses.Dell, Statuses.Aoc, third]);
@@ -261,6 +378,7 @@ public class ServiceFormTests
             new MonitorChoice { Key = "LEN66F2-V906LMHT", Counted = false },
             new MonitorChoice { Key = "SAM0F9E-HNTW700123" },   // counted at its own figure, as carrying the old settings over can leave one
             new MonitorChoice { Key = "GSM5B09-104NTAB2C123", Watts = 41 },
+            new MonitorChoice { Key = Statuses.Portable.Key, OwnPlug = true },
         ];
         var form = new ServiceForm(_link, UiThreads.Inline, English);
         form.Load(ServiceSettings.Default with { Profile = MachineProfile.DefaultLaptop with { Monitors = loaded } });
@@ -268,7 +386,7 @@ public class ServiceFormTests
 
         (await form.SaveAsync()).ShouldBeTrue();
 
-        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe([loaded[0], loaded[2]]);
+        ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe([loaded[0], loaded[2], loaded[3]]);
     }
 
     [Fact]

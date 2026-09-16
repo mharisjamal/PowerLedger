@@ -34,6 +34,14 @@ internal static class Statuses
         Width = 1920, Height = 1080, OnWatts = 13.4, SleepWatts = 0.2, Source = MonitorSource.Estimate, Counted = true, WattsNow = 13.4,
     };
 
+    /// <summary>A portable monitor on a laptop, which the list doesn't know, taken to run off the laptop.</summary>
+    public static MonitorStatus Portable { get; } = new()
+    {
+        Key = "AUS1601-L9LMTF012345", Instance = @"DISPLAY\AUS1601\5&2F5A1B&0&UID4355", Name = "MB16AC", Inches = 15.6, Width = 1920,
+        Height = 1080, OnWatts = 7.5, SleepWatts = 0.2, Source = MonitorSource.Estimate, Counted = true, OwnPlug = false,
+        OwnPlugByDefault = false, WattsNow = 7.5,
+    };
+
     /// <summary>A service with <see cref="Dell"/> and <see cref="Aoc"/> attached.</summary>
     public static ServiceStatus WithMonitors(params MonitorStatus[] monitors)
         => Running() with { Monitors = monitors.Length > 0 ? monitors : [Dell, Aoc] };
