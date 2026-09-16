@@ -34,9 +34,9 @@ internal enum UpdateStage
 /// the newest release: the check itself runs on any connection, being a couple of kilobytes, but a newer release is
 /// downloaded quietly only where nobody pays by the byte. On a metered connection the card offers it with Download
 /// instead, and taking it there is the user's own choice; otherwise the next check off that connection downloads it. Once
-/// it is checked, the card offers it, the tray announces it once per version and its menu offers it too. Installing starts setup, which closes the App and opens the new version. Old
-/// downloads are cleared when the App starts and at each check. The card and Settings' Updates row bind here, and
-/// everything they read changes on the UI thread.
+/// it is checked, the card offers it, the tray announces it once per version and its menu offers it too. Installing starts
+/// setup, which closes the App and opens the new version. Old downloads are cleared when the App starts and at each check.
+/// The card and Settings' Updates row bind here, and everything they read changes on the UI thread.
 /// </summary>
 internal sealed class Updater : ObservableObject, IDisposable
 {
