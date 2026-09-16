@@ -35,10 +35,10 @@ internal sealed record UiPreferences
     /// gives an init-only property missing from the file its type's default, false, where a setter is left alone.</summary>
     public bool CheckForUpdates { get; set; } = true;
 
-    /// <summary>Read each external monitor's brightness over its cable, read-only, every few minutes (Plan J). On until the
-    /// user unticks it; a ui.json from before it existed keeps it on. It has a setter rather than init for that: the JSON
-    /// source generator gives an init-only property missing from the file its type's default, false, where a setter is
-    /// left alone.</summary>
+    /// <summary>Read each external monitor over its cable, read-only, each minute, asking its brightness every five minutes,
+    /// with the refresh rate and HDR state Windows drives it at (Plans J and K). On until the user unticks it; a ui.json
+    /// from before it existed keeps it on. It has a setter rather than init for that: the JSON source generator gives an
+    /// init-only property missing from the file its type's default, false, where a setter is left alone.</summary>
     public bool ReadMonitorBrightness { get; set; } = true;
 
     /// <summary>The newest version the tray has announced, so each version is announced once.</summary>
