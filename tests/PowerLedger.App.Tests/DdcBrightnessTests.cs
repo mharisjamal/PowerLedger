@@ -216,9 +216,10 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     [Fact]
     public async Task A_resume_while_a_read_waits_on_a_monitor_returns_at_once_and_is_seen_before_the_next_monitor_is_asked()
     {
+        // Two monitors showing one picture share a display, so the Dell is asked with the handles the LG's read opened.
         var lg = new FakeMonitor(Lg);
         var dell = Failing(new FakeMonitor(Dell), "capabilities fail");
-        var reader = Reader(new FakeDisplay(lg), new FakeDisplay(dell));
+        var reader = Reader(new FakeDisplay(lg, dell));
         reader.Read().ShouldBe([new DdcReading(Lg, 0.6)]);
         Answering(dell);
 
