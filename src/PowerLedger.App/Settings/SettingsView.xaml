@@ -224,7 +224,9 @@
             </StackPanel>
             <TextBlock Style="{StaticResource Text.Body}" Text="{Binding ServiceState}" />
             <TextBlock Style="{StaticResource Text.Secondary}" Margin="0,4,0,0" Text="{Binding Database, StringFormat=Database {0}}" />
-            <TextBlock Style="{StaticResource Text.Secondary}" Margin="0,4,0,8" TextWrapping="Wrap" Text="No driver: readings come from interfaces Windows already provides." />
+            <TextBlock Style="{StaticResource Text.Secondary}" Margin="0,4,0,0" TextWrapping="Wrap" Text="No driver: readings come from interfaces Windows already provides." />
+            <TextBlock Style="{StaticResource Text.Secondary}" Margin="0,4,0,8" TextWrapping="Wrap"
+                       Text="Monitor figures come from the ENERGY STAR Certified Displays list (US EPA, public domain). PowerLedger isn't endorsed by ENERGY STAR." />
             <ItemsControl ItemsSource="{Binding Sources}" Focusable="False">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type local:SourceLine}">
