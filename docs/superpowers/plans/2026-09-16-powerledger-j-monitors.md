@@ -556,18 +556,18 @@ a migration that happens only once.
 
 ## Results
 
-2026-09-16. Built by waves of parallel agents, each in a worktree of its own, as the Execution table sets out: the data
-agent first, then agents A to D at once, then E and F from the merged first wave. The lead merged each branch onto
+2026-09-16–17. Built by waves of parallel agents, each in a worktree of its own, as the Execution table sets out: the
+data agent first, then agents A to D at once, then E and F from the merged first wave. The lead merged each branch onto
 `plan-j/monitors` as it finished. The fixes went the same way: agents of their own for the decisions at merge, then five
-at once for the review's findings. The branch holds 59 commits at `2406638`.
+at once for the first review's findings and three at once for the second's. The branch holds 72 commits at `8704cd6`.
 
 **Verified**
 
-- `dotnet build -c Release`: 0 warnings. Every test outside `Hardware` and `Installed`, run at `2406638`: 1,286 pass
-  (Core 134, Storage 49, Sensors 390, Service 204, App 509 with the UI renders).
+- `dotnet build -c Release`: 0 warnings. Every test outside `Hardware` and `Installed`, run at `8704cd6`: 1,334 pass
+  (Core 134, Storage 49, Sensors 412, Service 204, App 535 with the UI renders).
 - The estimate, with each of the table's 1,576 monitors up to 57" estimated from all the others: within 9.04% of what it
   measured for half of them and within 25.6% for nine in ten; `MonitorEstimateTests` holds 12% and 35%.
-- The catalogue before and after the review's fixes, run over the 33,385 named monitors with a size in linuxhw's
+- The catalogue before and after the first review's fixes, run over the 33,385 named monitors with a size in linuxhw's
   DigitalDisplay collection of real EDIDs: model matches went from 2,501 to 2,301, and matches whose resolution
   disagrees with their listing's from 190 to 55, all of them exact names or series words. 213 monitors went to the
   estimate, and 13 found a listing they hadn't. `MonitorCatalogue.cs` and `MonitorMakers.cs` note the limits left as
@@ -577,11 +577,14 @@ at once for the review's findings. The branch holds 59 commits at `2406638`.
   `List<T>.Add` sets the count before it stores the item. Run back to back for 60 seconds while the App tests ran, it
   failed 1,057 times in 68,107 runs; with every read of the list copied under the lock, the same loop under the same
   load failed in none of 55,382.
+- WMI on the development laptop refuses `WmiMonitorAnalogVideoInputParams`, a monitor class it has no instances of, with
+  "Not supported", and a class that doesn't exist with "Invalid class": the two refusals now read as no monitors. The
+  refusal with every monitor unplugged couldn't be seen there, since the laptop's own panel is always attached.
 <!-- lead: installers at full compression: universal, x64 and Arm64 sizes -->
 <!-- lead: Windows Sandbox, end to end: N of N, and what the run covered -->
 <!-- lead: CI run and both jobs' results, and the release link -->
 
-**Review** (whole branch): 8 findings, none critical, 5 important and 3 minor, all fixed.
+**First review** (whole branch): 8 findings, none critical, 5 important and 3 minor, all fixed.
 
 - **Important.** An abandoned sensor set could hand the board a stale list after its replacement had handed over the
   monitors attached, leaving them uncounted, and a WMI class that failed read as no monitors: each set's token is now
@@ -604,22 +607,60 @@ at once for the review's findings. The branch holds 59 commits at `2406638`.
   characters, or of one character repeated, keys a monitor by its instance, and monitors whose serial key was found
   shared stay keyed by instance while the service runs.
 - **Minor.** A monitor that failed a brightness read was asked again after an hour: it is left alone until a display
-  change or a resume.
+  change or a resume, a rule the second review kept only for a monitor that hasn't given a brightness.
+
+**Second review** (whole branch): 5 findings, 2 important, 1 between minor and important, and 2 minor, all fixed.
+
+- **Important.** A desktop's last monitor went on counting once unplugged: with no display left, WMI refuses the monitor
+  classes with "Not supported" rather than list none, and that read as WMI failing to answer, so the board kept the
+  monitor. `Wmi.MeansNoInstances` now takes "Not supported" and "Invalid class" as no instances, so the display query
+  still answers and the inventory finds no monitors, and the board empties at the next display query, within a minute;
+  any other refusal still keeps the list.
+- **Important.** One failed read left a monitor at the assumed 75% brightness until a display change or a resume, and a
+  monitor switched off at its own button raises neither: on a desktop left awake with its monitor off for the evening,
+  the figure ran about 40% over for a monitor really at 30%. A monitor that has given a brightness is now asked again at
+  the next read after a failure, the wait doubles with each failure in a row up to an hour, and any reply ends the run;
+  one that never has keeps the old rule, and a reset keeps which monitors have answered.
+- **Between minor and important.** Settings or the wizard, loaded before the service carried the old monitor settings
+  over, saved them back whole: a monitor the service had left out counted from then on, and a figure typed before was
+  dropped. A save now reads the service's settings again when those loaded are behind, and takes from them what the form
+  doesn't show, keeping what the user typed and ticked; a save that changes the chassis says each listed monitor's plug,
+  and a plug the settings already say is kept while the row shows it unchanged.
+- **Minor.** A display change or a resume made the App's UI thread wait for a brightness read under way, 1.7 s in the
+  review's measurement, since SystemEvents raises them on the UI thread, where the reader subscribed: each now only
+  marks a reset, which the read carries out before the next monitor.
+- **Minor.** On a desktop, ticking "has its own plug" took the box from under the pointer, so it couldn't be unticked
+  until the page was read again: `MonitorRow.ShowsPlug` keeps a box on screen once the user has ticked or unticked it.
 
 **Decided at merge** (the design's section of that name): a figure the user typed is used as typed, never scaled by
 brightness; a monitor's choice is saved only when it differs from the service's defaults or holds a typed figure, so the
 choices for monitors unplugged no longer pile up until the limit of 16 refuses every save, and the ones kept run from
 the most recently seen; saving a form that lists monitors clears the old count and the choice to count monitors. The
-review's fixes added the rest of that section: the plug, the default carried over, the resolution a family needs, the
-list a stale read can't wipe, the badge left to the PC's own reading, and a failed monitor left alone for the session.
+first review's fixes added the plug, the default carried over, the resolution a family needs, the list a stale read
+can't wipe and the badge left to the PC's own reading; the second's, the classes with no instances read as no monitors,
+how long a monitor that failed is left alone, and saves that never undo the carry-over.
+
+**Settled along the way**: a monitor running off the PC always counts, whatever its choice says, since what it draws is
+inside what the PC draws, so its Count it box stays ticked and the learner always takes its figure out (`f9a8757`,
+`7e8ce08`); and a match by a series word keeps its listing at any resolution, as an exact name's does, since the
+series-word matches that disagreed on resolution were the listed model giving another mode (`5de1afe`).
 
 **Deviations from the plan's code**: the model asks the monitors for `MonitorWatts`, split between those with a plug of
 their own and those running off the PC, not one figure, and `MonitorBoard.Choose` takes the whole profile, for its
 default for counting and its chassis; `MonitorChoice` gains `OwnPlug`, `MonitorStatus` the plug and both defaults, and
 `MachineProfile` `CountMonitorsByDefault`, which the carry-over (Task 10) sets instead of writing a choice for each
-monitor; `MonitorInventory.Read` gives null when WMI doesn't say which monitors are attached, and keeps the serial keys
-found shared and the resolutions read; the sensor worker builds each set with a cancellation token; the estimate has a
-16-inch size class for portable monitors; a maker code without a brand matches exact names only, where Task 4 let it
-match any brand, and a family or a name cut short needs the monitor's resolution; the DDC/CI reader, first built to try
-a failed monitor again after an hour, leaves it alone as Task 7 asked, until a display change or a resume; and one
-constant, `ServiceSettings.MaxMonitors`, bounds both the choices and a brightness report.
+monitor; `MonitorInventory.Read` gives null when WMI doesn't say which monitors are attached and none when WMI refuses
+the classes as having no instances, where Task 6 read any failed class as nothing, and it keeps the serial keys found
+shared and the resolutions read; the sensor worker builds each set with a cancellation token; the estimate has a 16-inch
+size class for portable monitors; a maker code without a brand matches exact names only, where Task 4 let it match any
+brand, and a family or a name cut short needs the monitor's resolution; the DDC/CI reader, first built to try a failed
+monitor again after an hour, leaves one that hasn't given a brightness alone as Task 7 asked, until a display change or
+a resume, asks one that has again after a wait that doubles up to an hour, measured with a `TimeProvider`, and on either
+event only marks a reset; `ServiceForm.SaveAsync` reads the service's settings again when those loaded are behind, and
+`MonitorRow` gains `Take` and `ShowsPlug` for it and the desktop's plug box; and one constant,
+`ServiceSettings.MaxMonitors`, bounds both the choices and a brightness report.
+
+**Not covered**: no real external monitor was tried end to end, because the Sandbox runs had none and the development
+laptop's only screen is its built-in panel, so DDC/CI hasn't met a real monitor either. The Arm64 build hasn't been
+tried on a real Arm PC. A monitor switched off at its own button while the PC stays awake may still count as on, if
+Windows keeps listing it.
