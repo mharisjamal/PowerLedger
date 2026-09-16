@@ -80,8 +80,10 @@ commits at `d95c4f9`.
   idle threshold typed as 10 minutes was saved by itself once its box was left (300 s to 600 s), there was no Save
   settings button, and the value was still there after leaving Settings and coming back; a fresh 0.4.1 install's wizard
   never asked about monitors. Sandbox has no external monitor, so power states, refresh and HDR weren't met there.
-<!-- lead: CI run and both jobs' results -->
-<!-- lead: release link -->
+- CI run 35162910694, both jobs green: every test outside Hardware, UI and Installed passed (Core 156, Storage 49,
+  Sensors 417, Service 229, App 653), and the installer test passed 62 of 62 checks on the x64 and on the Arm64 runner.
+- Released: <https://github.com/mharisjamal/PowerLedger/releases/tag/v0.4.1>, three assets, each digest checked by
+  `release.ps1` against the file built from the tagged commit.
 
 **Deviations from the design**: a monitor whose power-mode request fails is taken not to support power mode only after
 three failed requests in a row, each in a read in which its brightness answered, where the design took one; its
