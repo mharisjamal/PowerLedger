@@ -1,0 +1,130 @@
+using PowerLedger.Contracts;
+using PowerLedger.Core;
+using PowerLedger.Sensors;
+
+namespace PowerLedger.Service;
+
+/// <summary>
+/// The external monitors the service knows (Plan J): what WMI detected, each one's figure from the catalogue, the estimate
+/// or the user, the user's choices, and the brightness the App last reported. Detection writes from the sensor thread, the
+/// App's reports from the pipe's, and the choices from the loop, which also reads the board every tick for the model and
+/// for the status. So every member takes the one lock, and nothing outside the board is called while it is held.
+/// </summary>
+internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider clock) : IMonitorDraw
+{
+    /// <summary>The App reports every five minutes, so a brightness older than this is from an App that stopped reporting
+    /// or a monitor that stopped answering, and counts as unknown.</summary>
+    public static readonly TimeSpan BrightnessStale = TimeSpan.FromMinutes(15);
+
+    private readonly Lock _gate = new();
+
+    /// <summary>The last reading for each monitor by instance, kept while it is fresh even if the monitor goes missing from
+    /// a detection for a moment, as monitors do while they wake.</summary>
+    private readonly Dictionary<string, (double Brightness, long At)> _brightness = new(StringComparer.OrdinalIgnoreCase);
+
+    private Figured[] _monitors = [];
+    private Dictionary<string, MonitorChoice> _choices = new(StringComparer.Ordinal);
+
+    /// <summary>What WMI found. Figures are worked out only for monitors that are new or changed, and outside the lock.</summary>
+    public void Detected(IReadOnlyList<MonitorFacts> monitors)
+    {
+        Figured[] known;
+        lock (_gate) known = _monitors;
+        Figured[] figured = [.. monitors.Select(facts => Array.Find(known, monitor => monitor.Facts == facts) ?? Figure(facts))];
+        var now = clock.GetTimestamp();
+        lock (_gate)
+        {
+            _monitors = figured;
+            foreach (var instance in _brightness.Where(reading => IsStale(reading.Value.At, now)).Select(reading => reading.Key).ToList())
+            {
+                _brightness.Remove(instance);
+            }
+        }
+    }
+
+    /// <summary>The user's choices from the settings, replacing the ones before.</summary>
+    public void Choose(IReadOnlyList<MonitorChoice> choices)
+    {
+        var byKey = new Dictionary<string, MonitorChoice>(StringComparer.Ordinal);
+        foreach (var choice in choices) byKey[choice.Key] = choice;
+        lock (_gate) _choices = byKey;
+    }
+
+    /// <summary>The App's report; a brightness older than <see cref="BrightnessStale"/> counts as unknown. Only a monitor
+    /// that is attached is remembered, so a client can't fill the service's memory with instances it made up.</summary>
+    public void Report(IReadOnlyList<MonitorBrightness> readings)
+    {
+        var now = clock.GetTimestamp();
+        lock (_gate)
+        {
+            foreach (var reading in readings)
+            {
+                if (!double.IsFinite(reading.Brightness)) continue;
+                var monitor = Array.Find(_monitors, m => m.Facts.Instance.Equals(reading.Instance, StringComparison.OrdinalIgnoreCase));
+                if (monitor is not null) _brightness[monitor.Facts.Instance] = (Math.Clamp(reading.Brightness, 0, 1), now);
+            }
+        }
+    }
+
+    /// <summary>What every counted monitor draws: with the display on, its figure at its brightness; asleep, its sleep figure.</summary>
+    public double Watts(bool displayOn)
+    {
+        var now = clock.GetTimestamp();
+        lock (_gate)
+        {
+            var watts = 0.0;
+            foreach (var monitor in _monitors) watts += Describe(monitor, displayOn, now).WattsNow;
+            return watts;
+        }
+    }
+
+    /// <summary>Each monitor as the App shows it, in the order detection gave them; empty when there are none.</summary>
+    public IReadOnlyList<MonitorStatus> Status(bool displayOn)
+    {
+        var now = clock.GetTimestamp();
+        lock (_gate) return [.. _monitors.Select(monitor => Describe(monitor, displayOn, now))];
+    }
+
+    /// <summary>The list's figure for this model or, for a model it doesn't know, the estimate from its size and resolution.</summary>
+    private Figured Figure(MonitorFacts facts)
+    {
+        var name = facts.Name.Length > 0 ? facts.Name : $"{facts.Maker} {facts.ProductCode}".Trim();
+        if (catalogue.Find(facts.Maker, facts.Name, facts.Inches, facts.Width, facts.Height) is { } listed)
+        {
+            return new Figured(facts, name, listed.OnW, listed.SleepW, MonitorSource.Model);
+        }
+        var (onW, sleepW) = MonitorEstimate.For(facts.Inches, facts.Width, facts.Height, catalogue);
+        return new Figured(facts, name, onW, sleepW, MonitorSource.Estimate);
+    }
+
+    /// <summary>One monitor as it stands at <paramref name="now"/>. Called with the lock held.</summary>
+    private MonitorStatus Describe(Figured monitor, bool displayOn, long now)
+    {
+        var facts = monitor.Facts;
+        var choice = _choices.GetValueOrDefault(facts.Key);
+        var onW = choice?.Watts ?? monitor.OnW;
+        var counted = choice?.Counted ?? true;
+        double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, now) ? reading.Brightness : null;
+        return new MonitorStatus
+        {
+            Key = facts.Key,
+            Instance = facts.Instance,
+            Name = monitor.Name,
+            Inches = facts.Inches,
+            Width = facts.Width,
+            Height = facts.Height,
+            OnWatts = onW,
+            SleepWatts = monitor.SleepW,
+            Source = choice?.Watts is null ? monitor.Source : MonitorSource.Typed,
+            Counted = counted,
+            Brightness = brightness,
+            WattsNow = !counted ? 0 : displayOn ? MonitorPower.At(onW, brightness) : monitor.SleepW,
+        };
+    }
+
+    private bool IsStale(long at, long now) => clock.GetElapsedTime(at, now) > BrightnessStale;
+
+    /// <param name="Name">The name the monitor gives, or its maker and product code when it gives none.</param>
+    /// <param name="Source">Where <paramref name="OnW"/> came from: the list or the estimate, never the user.</param>
+    private sealed record Figured(MonitorFacts Facts, string Name, double OnW, double SleepW, MonitorSource Source);
+}

@@ -1,0 +1,224 @@
+using Microsoft.Extensions.Time.Testing;
+using PowerLedger.Contracts;
+using PowerLedger.Core;
+using PowerLedger.Sensors;
+using Shouldly;
+
+namespace PowerLedger.Service.Tests;
+
+public class MonitorBoardTests
+{
+    /// <summary>Real listings from the shipped table: the Dell, and three 27-inch 1080p monitors for the estimate's median of
+    /// 14.41 W on and 0.13 W asleep.</summary>
+    internal static readonly MonitorCatalogue Catalogue = MonitorCatalogue.Parse(new StringReader("""
+        brand,model_number,model_name,alternatives,inches,width,height,panel,on_w,sleep_w,off_w,max_nits,hdr,certified
+        DELL,U2723QEt,U2723QE,U2723QX,27,3840,2160,IPS LCD,28.32,0.74,0.3,400,,2021-07-14
+        Acer,CB272,CB272,CB27******,27,1920,1080,IPS LCD,14.41,0.11,0.09,227.6,,2024-08-15
+        Acer,CB272,CB272_q,,27,1920,1080,IPS LCD,13.35,0.13,0.09,250,,2026-05-14
+        Acer,CB273,CB273_v,CB273***,27,1920,1080,IPS LCD,17.07,0.35,0.29,250,,2025-04-22
+        """));
+
+    internal static readonly MonitorFacts Dell = new(
+        @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353", "DELA0B1-7MKZG34", "DEL", "A0B1", "DELL U2723QE", 27, 3840, 2160);
+
+    /// <summary>A monitor that gives no name or serial number, and that the list doesn't know.</summary>
+    internal static readonly MonitorFacts Unnamed = new(
+        @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", @"DISPLAY\GSM5B08\7&1A2B&0&UID4354", "GSM", "5B08", "", 27, 1920, 1080);
+
+    private readonly FakeTimeProvider _clock = new();
+    private readonly MonitorBoard _board;
+
+    public MonitorBoardTests() => _board = new MonitorBoard(Catalogue, _clock);
+
+    [Fact]
+    public void With_no_monitors_the_list_is_empty_and_they_draw_nothing()
+    {
+        _board.Status(displayOn: true).ShouldBeEmpty();
+        _board.Watts(displayOn: true).ShouldBe(0);
+
+        _board.Detected([]);
+        _board.Status(displayOn: false).ShouldNotBeNull().ShouldBeEmpty();
+        _board.Watts(displayOn: false).ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_monitor_the_list_knows_counts_at_its_measured_figure()
+    {
+        _board.Detected([Dell]);
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        monitor.ShouldBe(new MonitorStatus
+        {
+            Key = "DELA0B1-7MKZG34",
+            Instance = @"DISPLAY\DELA0B1\5&2F5A1B&0&UID4353",
+            Name = "DELL U2723QE",
+            Inches = 27,
+            Width = 3840,
+            Height = 2160,
+            OnWatts = 28.32,
+            SleepWatts = 0.74,
+            Source = MonitorSource.Model,
+            Counted = true,
+            Brightness = null,
+            WattsNow = monitor.WattsNow,
+        });
+        monitor.WattsNow.ShouldBe(28.32, 1e-9);
+        _board.Watts(displayOn: true).ShouldBe(28.32, 1e-9);
+    }
+
+    [Fact]
+    public void A_monitor_the_list_does_not_know_is_estimated_from_its_size_and_named_by_its_maker_and_product_code()
+    {
+        _board.Detected([Unnamed]);
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        monitor.Name.ShouldBe("GSM 5B08");
+        monitor.Source.ShouldBe(MonitorSource.Estimate);
+        monitor.OnWatts.ShouldBe(14.41);
+        monitor.SleepWatts.ShouldBe(0.13);
+        monitor.Counted.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_monitor_the_user_does_not_count_draws_nothing_but_still_shows_its_figure()
+    {
+        _board.Detected([Dell, Unnamed]);
+        _board.Choose([new MonitorChoice { Key = Unnamed.Key, Counted = false }]);
+
+        var status = _board.Status(displayOn: true);
+        status.Select(m => m.Counted).ShouldBe([true, false]);
+        status[1].OnWatts.ShouldBe(14.41);
+        status[1].WattsNow.ShouldBe(0);
+        _board.Watts(displayOn: true).ShouldBe(28.32, 1e-9);
+        _board.Watts(displayOn: false).ShouldBe(0.74, 1e-9);
+    }
+
+    [Fact]
+    public void A_typed_figure_wins_and_the_sleep_figure_stays_the_one_worked_out()
+    {
+        _board.Detected([Dell]);
+        _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 40 }]);
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        monitor.Source.ShouldBe(MonitorSource.Typed);
+        monitor.OnWatts.ShouldBe(40);
+        monitor.SleepWatts.ShouldBe(0.74);
+        _board.Watts(displayOn: true).ShouldBe(40, 1e-9);
+
+        // New choices replace the old ones whole.
+        _board.Choose([]);
+        _board.Status(displayOn: true).ShouldHaveSingleItem().Source.ShouldBe(MonitorSource.Model);
+    }
+
+    [Fact]
+    public void A_reported_brightness_scales_the_draw_until_it_goes_stale()
+    {
+        _board.Detected([Dell]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 1 }]);
+
+        var bright = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        bright.Brightness.ShouldBe(1);
+        bright.OnWatts.ShouldBe(28.32);
+        bright.WattsNow.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
+        _board.Watts(displayOn: true).ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
+
+        _clock.Advance(MonitorBoard.BrightnessStale);
+        _board.Status(displayOn: true).ShouldHaveSingleItem().Brightness.ShouldBe(1);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _board.Status(displayOn: true).ShouldHaveSingleItem().Brightness.ShouldBeNull();
+        _board.Watts(displayOn: true).ShouldBe(28.32, 1e-9);
+    }
+
+    [Fact]
+    public void A_typed_figure_is_scaled_by_the_brightness_too()
+    {
+        _board.Detected([Dell]);
+        _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 40 }]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0 }]);
+
+        _board.Watts(displayOn: true).ShouldBe(MonitorPower.At(40, 0), 1e-9);
+    }
+
+    [Fact]
+    public void A_report_finds_its_monitor_by_instance_in_any_case_and_forgets_a_monitor_that_is_not_attached()
+    {
+        _board.Detected([Dell]);
+        _board.Report(
+        [
+            new MonitorBrightness { Instance = Dell.Instance.ToLowerInvariant(), Brightness = 0.2 },
+            new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.9 },
+        ]);
+
+        _board.Status(displayOn: true).ShouldHaveSingleItem().Brightness.ShouldBe(0.2);
+        _board.Detected([Dell, Unnamed]);
+        _board.Status(displayOn: true)[1].Brightness.ShouldBeNull();
+    }
+
+    [Fact]
+    public void With_the_display_off_a_counted_monitor_draws_its_sleep_figure_whatever_its_brightness()
+    {
+        _board.Detected([Dell, Unnamed]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 1 }]);
+
+        _board.Status(displayOn: false).Select(m => m.WattsNow).ShouldBe([0.74, 0.13]);
+        _board.Watts(displayOn: false).ShouldBe(0.87, 1e-9);
+    }
+
+    [Fact]
+    public void An_unplugged_monitor_disappears()
+    {
+        _board.Detected([Dell, Unnamed]);
+        _board.Detected([Dell]);
+
+        _board.Status(displayOn: true).ShouldHaveSingleItem().Key.ShouldBe(Dell.Key);
+        _board.Watts(displayOn: true).ShouldBe(28.32, 1e-9);
+    }
+
+    [Fact]
+    public void A_monitor_that_changes_is_worked_out_again_and_keeps_its_brightness()
+    {
+        _board.Detected([Unnamed]);
+        _board.Report([new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.5 }]);
+
+        // Now at 4K, where the list has too few 27-inch monitors for a median, so the formula gives its figure.
+        _board.Detected([Unnamed with { Width = 3840, Height = 2160 }]);
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        monitor.OnWatts.ShouldBe(MonitorEstimate.For(27, 3840, 2160, Catalogue).OnW);
+        monitor.OnWatts.ShouldNotBe(14.41);
+        monitor.Brightness.ShouldBe(0.5);
+    }
+
+    [Fact]
+    public void A_monitor_missing_from_one_detection_keeps_a_brightness_that_is_still_fresh()
+    {
+        _board.Detected([Dell]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.3 }]);
+        _board.Detected([]);
+        _board.Detected([Dell]);
+
+        _board.Status(displayOn: true).ShouldHaveSingleItem().Brightness.ShouldBe(0.3);
+    }
+
+    [Fact]
+    public async Task Detection_reports_choices_and_readers_may_all_come_from_different_threads_at_once()
+    {
+        _board.Detected([Dell]);
+        var until = Environment.TickCount64 + 200;
+        Task Repeat(Action action) => Task.Run(() =>
+        {
+            while (Environment.TickCount64 < until) action();
+        });
+
+        await Task.WhenAll(
+            Repeat(() =>
+            {
+                _board.Detected([Dell, Unnamed]);
+                _board.Detected([Dell]);
+            }),
+            Repeat(() => _board.Report([new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.5 }])),
+            Repeat(() => _board.Choose([new MonitorChoice { Key = Dell.Key, Watts = 30 }])),
+            Repeat(() => _board.Watts(displayOn: true).ShouldBeGreaterThan(0)),
+            Repeat(() => _board.Status(displayOn: false).ShouldNotBeEmpty()));
+    }
+}
