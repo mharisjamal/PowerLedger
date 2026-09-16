@@ -37,7 +37,9 @@ public sealed record CatalogueMonitor(string Brand, string ModelNumber, string M
 /// Only a whole identifier, with or without Dell's letter or Acer's suffix, is a model's exact name or number. The last
 /// word of one, a placeholder and a name cut short can each take in other models, so a monitor whose maker code has no
 /// brand here, and could be any maker's, matches exact names only; otherwise Vizio's VA220E would be taken for a ViewSonic
-/// of the VA22*********** family.
+/// of the VA22*********** family. A maker the list has but <see cref="MonitorMakers"/> doesn't is left to pay for that:
+/// ASRock's monitors report ASR, which isn't registered, so the PG27FF1A and its siblings miss the PG27FF******** family
+/// ASRock lists them under.
 /// </para>
 /// <para>
 /// A match must agree with the monitor's size to within an inch, which stops vague names matching the wrong panel; for a

@@ -25,6 +25,10 @@ public static class MonitorMakers
         ["GBT"] = "GIGABYTE",
         ["GSM"] = "LG",         // registered as Goldstar
         ["HEC"] = "Hisense",    // Hisense Electric
+
+        // Koorui's monitors report HKC too, but a code has one brand here, so they miss Koorui's listings: the 24N5CA,
+        // a name Koorui lists under its MB24N2F, falls to the estimate, and the MB24V13 it lists under its 24N1 is taken
+        // for HKC's MB24******** family instead.
         ["HKC"] = "HKC",
         ["HPN"] = "HP",         // HP Inc.
         ["HWP"] = "HP",         // Hewlett Packard
