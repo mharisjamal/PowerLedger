@@ -24,6 +24,23 @@ Readings say how they were known: *measured* on battery from Windows' battery re
 from a model with a baseline learned on battery (within about 10%), or *estimated* from load and the machine profile
 alone (within about 20%).
 
+## Monitors
+
+External monitors are detected: every minute the service asks Windows which are attached, with each one's maker, model,
+size and resolution. Each is counted at the figure the ENERGY STAR Certified Displays list gives its model or, for a
+model the list doesn't have, at an estimate from its size and resolution. Where a monitor allows it, the App reads its
+brightness over the display cable, read-only, and the figure follows it; a monitor it can't read is taken to be at 75%
+brightness. The setup wizard lists the monitors it found, and asks nothing about monitors on a laptop on its own screen.
+In Settings you can leave a monitor out, type a figure of your own, which is used as typed, or untick **Read brightness
+from monitors (read-only)**.
+
+The monitor figures come from the dataset
+[ENERGY STAR Certified Displays](https://data.energystar.gov/Active-Specifications/ENERGY-STAR-Certified-Displays/qbg3-d468),
+published by the US Environmental Protection Agency. It is a work of the US Government, in the public domain, published
+under the [EPA Data License](https://edg.epa.gov/EPA_Data_License.html). PowerLedger is not certified by, endorsed by or
+affiliated with ENERGY STAR or the EPA, and doesn't use the ENERGY STAR mark. The table ships inside PowerLedger, so
+nothing is fetched.
+
 ## Requirements
 
 Windows 10 1809 or later, or Windows 11, on x64 or Arm64. 32-bit (x86) Windows and Windows in S mode are not
@@ -149,3 +166,5 @@ can publish to the repository, or `GH_TOKEN` has to hold a token for one.
 - `docs/superpowers/plans/`: how it was built, plan by plan.
 - `assets/brand/`: the logo, a P on an amber tile whose bowl is a meter's dial and whose stem is a ledger's margin.
   `make-brand.ps1` draws it and writes the Windows icon, the SVGs and PNGs, and the installer's images.
+- `assets/monitors/`: the table of certified monitors PowerLedger ships. `make-monitor-table.ps1` rebuilds it from the
+  public dataset, and its README says where it comes from and how it is cleaned.
