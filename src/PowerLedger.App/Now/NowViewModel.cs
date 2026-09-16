@@ -221,7 +221,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         Live = new LivePanel(
             frame.TotalW,
             $"Live · {Source(frame.Quality)} · {local.ToString("HH:mm:ss", _culture)}",
-            frame.Quality, Note(frame.Quality), spark,
+            frame.Quality, Note(frame), spark,
             MeterRange.For(Math.Max(peak, spark.Count > 0 ? spark.Max(s => s.Watts) : 0)),
             average, peak,
             [.. shares.Select(share => Row(share, frame))],
@@ -370,12 +370,22 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         return (mb < 10 ? mb.ToString("0.0", _culture) : mb.ToString("0", _culture)) + " MB";
     }
 
-    private string Note(Quality quality) => quality switch
+    /// <summary>Where the reading came from. The external monitors counted in it add their own figures in every mode: the
+    /// battery reports only this machine, and the model's margin covers only what it models, so neither is claimed for
+    /// them.</summary>
+    private string Note(ReadingFrame frame)
     {
-        Quality.Measured => $"Windows battery report · {(_settings?.SampleIntervalSeconds ?? 1).ToString(_culture)} s samples",
-        Quality.Calibrated => "Model with a baseline learned on battery · ±10%",
-        _ => "Model from the sensors and the machine profile · ±20%",
-    };
+        var samples = $"{(_settings?.SampleIntervalSeconds ?? 1).ToString(_culture)} s samples";
+        return (frame.Quality, frame.Components.Monitors > 0) switch
+        {
+            (Quality.Measured, false) => "Windows battery report · " + samples,
+            (Quality.Measured, true) => "Windows battery report, plus the monitors' own figures · " + samples,
+            (Quality.Calibrated, false) => "Model with a baseline learned on battery · ±10%",
+            (Quality.Calibrated, true) => "Model with a baseline learned on battery, ±10%, plus the monitors' own figures",
+            (_, false) => "Model from the sensors and the machine profile · ±20%",
+            (_, true) => "Model from the sensors and the machine profile, ±20%, plus the monitors' own figures",
+        };
+    }
 
     private static string Source(Quality quality) => quality switch
     {

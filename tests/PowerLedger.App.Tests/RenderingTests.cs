@@ -365,10 +365,12 @@ public class RenderingTests
         png.Save(file);
     }
 
-    /// <summary>A Tuesday afternoon eight days into September: asleep until 07:30, a working morning, an idle patch, a peak at 14:00.</summary>
+    /// <summary>A Tuesday afternoon eight days into September: asleep until 07:30, a working morning, an idle patch, a peak at
+    /// 14:00; and now, on battery, the two external monitors Settings lists, counted on top of the battery's report.</summary>
     private static NowViewModel NowScreen()
     {
-        var link = new FakeLink();
+        var link = new FakeLink { Status = Statuses.WithMonitors() };
+        var monitors = Statuses.Dell.WattsNow + Statuses.Aoc.WattsNow;
         var history = new FakeHistory();
         var model = new NowViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English,
             co2KgPerKwh: 0.38, startService: () => { });
@@ -381,7 +383,7 @@ public class RenderingTests
         {
             seed = (seed * 9301 + 49297) % 233280;
             watts = Math.Clamp(watts + (seed / 233280.0 - 0.5) * 3, 27, 41);
-            link.Push(Frames.At(Now.AddSeconds(-s), totalW: watts, cpu: watts * 0.43, gpu: watts * 0.12, display: 4.0));
+            link.Push(Frames.At(Now.AddSeconds(-s), totalW: watts + monitors, cpu: watts * 0.43, gpu: watts * 0.12, display: 4.0, monitors: monitors));
         }
         return model;
     }

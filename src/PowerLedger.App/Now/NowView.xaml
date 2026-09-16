@@ -27,10 +27,11 @@
                 <StackPanel Grid.Column="0">
                     <TextBlock Style="{StaticResource Text.Eyebrow}" Text="{Binding Live.Eyebrow, Converter={StaticResource Upper}}" />
                     <local:LiveReadout Value="{Binding Live.Watts}" Margin="0,6,0,10" HorizontalAlignment="Left" />
-                    <StackPanel Orientation="Horizontal">
+                    <!-- The note wraps beside the badge, so a long one stays in the card in a narrow window. -->
+                    <DockPanel>
                         <local:QualityBadge Quality="{Binding Live.Quality}" VerticalAlignment="Center" />
-                        <TextBlock Style="{StaticResource Text.Muted}" Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding Live.QualityNote}" />
-                    </StackPanel>
+                        <TextBlock Style="{StaticResource Text.Muted}" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" Text="{Binding Live.QualityNote}" />
+                    </DockPanel>
                     <local:MeterScale Margin="0,16,0,14" Range="{Binding Live.Meter}" Value="{Binding Live.Watts}"
                                       Average="{Binding Live.AverageW}" Peak="{Binding Live.PeakW}" />
                     <TextBlock Style="{StaticResource Text.Eyebrow}" Text="LAST 60 S" />
