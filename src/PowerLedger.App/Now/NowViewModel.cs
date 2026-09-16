@@ -370,16 +370,17 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         return (mb < 10 ? mb.ToString("0.0", _culture) : mb.ToString("0", _culture)) + " MB";
     }
 
-    /// <summary>Where the reading came from. The external monitors counted in it add their own figures in every mode: the
-    /// battery reports only this machine, and the model's margin covers only what it models, so neither is claimed for
-    /// them.</summary>
+    /// <summary>Where the reading came from. The external monitors counted in it come from their own figures in every mode,
+    /// and the model's margin covers only what it models, so the margin stays with the model. A measured reading is the
+    /// battery's report with the monitors' figures, not plus them: a monitor running off the laptop is already in the report,
+    /// and its figure only splits it off; only a monitor with a plug of its own is added.</summary>
     private string Note(ReadingFrame frame)
     {
         var samples = $"{(_settings?.SampleIntervalSeconds ?? 1).ToString(_culture)} s samples";
         return (frame.Quality, frame.Components.Monitors > 0) switch
         {
             (Quality.Measured, false) => "Windows battery report · " + samples,
-            (Quality.Measured, true) => "Windows battery report, plus the monitors' own figures · " + samples,
+            (Quality.Measured, true) => "Windows battery report, with the monitors' own figures · " + samples,
             (Quality.Calibrated, false) => "Model with a baseline learned on battery · ±10%",
             (Quality.Calibrated, true) => "Model with a baseline learned on battery, ±10%, plus the monitors' own figures",
             (_, false) => "Model from the sensors and the machine profile · ±20%",

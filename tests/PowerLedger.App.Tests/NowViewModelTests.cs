@@ -39,12 +39,13 @@ public class NowViewModelTests
     [InlineData(Quality.Measured, 0, "Windows battery report · 1 s samples")]
     [InlineData(Quality.Calibrated, 0, "Model with a baseline learned on battery · ±10%")]
     [InlineData(Quality.Estimated, 0, "Model from the sensors and the machine profile · ±20%")]
-    [InlineData(Quality.Measured, 37.7, "Windows battery report, plus the monitors' own figures · 1 s samples")]
+    [InlineData(Quality.Measured, 37.7, "Windows battery report, with the monitors' own figures · 1 s samples")]
     [InlineData(Quality.Calibrated, 37.7, "Model with a baseline learned on battery, ±10%, plus the monitors' own figures")]
     [InlineData(Quality.Estimated, 37.7, "Model from the sensors and the machine profile, ±20%, plus the monitors' own figures")]
     public void The_note_says_where_the_reading_came_from_and_that_monitors_in_it_came_from_their_own_figures(Quality quality, double monitors, string note)
     {
-        // The battery reports only this machine, and the model's margin covers only what it models.
+        // The model's margin covers only what it models. A measured reading isn't the battery's report plus the monitors: a
+        // monitor running off the laptop is already in the report, and its own figure only splits it off.
         var model = Model();
 
         _link.Push(Frames.At(Now, totalW: 34.2 + monitors, quality: quality, monitors: monitors));
