@@ -27,9 +27,9 @@ public sealed class DisplaySource : ISensorSource
     private volatile bool _refreshRequested;
 
     /// <param name="displayOn">The service supplies this from GUID_CONSOLE_DISPLAY_STATE; the preview passes true.</param>
-    /// <param name="monitorsDetected">Told which external monitors are attached, on the thread that reads this source: on the
-    /// first read, and then whenever the monitors found on a refresh differ from the ones it was last told of. Without it
-    /// the monitors are not read at all.</param>
+    /// <param name="monitorsDetected">Told which external monitors are attached, on the thread that reads this source: at the
+    /// first refresh WMI answers, and then whenever the monitors found on a refresh differ from the ones it was last told of.
+    /// Without it the monitors are not read at all.</param>
     public DisplaySource(Func<bool> displayOn, Action<IReadOnlyList<MonitorFacts>>? monitorsDetected = null)
         : this(QueryWmi, displayOn, monitors: MonitorInventory.Read, detected: monitorsDetected) { }
 
