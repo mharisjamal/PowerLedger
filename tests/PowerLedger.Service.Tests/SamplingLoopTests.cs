@@ -178,17 +178,18 @@ public class SamplingLoopTests
             Profile = MachineProfile.DefaultLaptop with { Monitors = [new MonitorChoice { Key = MonitorBoardTests.Portable.Key, Watts = 6 }] },
         });
         await using var loop = new Harness(t);
-        loop.Monitors.Detected([MonitorBoardTests.Portable]);
+        loop.Monitors.Detected([MonitorBoardTests.Dell, MonitorBoardTests.Portable]);
         await loop.StartAsync();
         await loop.Ticks(3);
         await loop.StopAsync();
 
-        // The battery's 20 W less the processor's 8 W, the 15.3-inch panel's 3.75 W at half brightness, and the monitor's 6 W.
+        // The battery's 20 W less the processor's 8 W, the 15.3-inch panel's 3.75 W at half brightness, and the portable
+        // monitor's 6 W. The Dell has a plug of its own, so its 28.32 W are added to the battery's and none of them is learned.
         var status = loop.Board.Status.ShouldNotBeNull();
-        status.Monitors.ShouldNotBeNull().ShouldHaveSingleItem().OwnPlug.ShouldBeFalse();
+        status.Monitors.ShouldNotBeNull().Select(m => m.OwnPlug).ShouldBe([true, false]);
         var last = status.Last.ShouldNotBeNull();
-        last.TotalW.ShouldBe(20, 1e-9);
-        last.Components.Monitors.ShouldBe(6, 1e-9);
+        last.TotalW.ShouldBe(20 + 28.32, 1e-9);
+        last.Components.Monitors.ShouldBe(28.32 + 6, 1e-9);
         last.Components.Unattributed.ShouldBe(20 - 8 - 3.75 - 6, 1e-9);
 
         var learned = new CalibrationLearner();
