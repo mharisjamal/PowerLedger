@@ -18,6 +18,9 @@ internal interface IUiSettings
 
     string? CheckForUpdates(bool enabled);
 
+    /// <summary>Whether the App reads the monitors' brightness; the next scheduled read follows it.</summary>
+    string? ReadMonitorBrightness(bool enabled);
+
     /// <summary>Remembers that the tray announced <paramref name="version"/>.</summary>
     string? Announced(string version);
 
@@ -67,6 +70,8 @@ internal sealed class AppPreferences(
     }
 
     public string? CheckForUpdates(bool enabled) => Save(Current with { CheckForUpdates = enabled });
+
+    public string? ReadMonitorBrightness(bool enabled) => Save(Current with { ReadMonitorBrightness = enabled });
 
     public string? Announced(string version) => Save(Current with { AnnouncedVersion = version });
 

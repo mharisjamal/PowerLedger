@@ -47,6 +47,10 @@ internal interface IServiceLink : IAsyncDisposable
 
     /// <summary>Forgets the learned baseline (spec §5).</summary>
     Task<WriteResult> ResetCalibrationAsync(CancellationToken cancel = default);
+
+    /// <summary>Tells the service the brightness its monitors answered with (Plan J), once the server has passed the check.
+    /// Only for a service whose status lists monitors: one from before them drops a connection that sends it this.</summary>
+    Task<WriteResult> ReportBrightnessAsync(IReadOnlyList<MonitorBrightness> monitors, CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -118,6 +122,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         => WriteAsync(new SetTariffRequest(NextId(), pricePerKwh, currency, effectiveFrom), cancel);
 
     public Task<WriteResult> ResetCalibrationAsync(CancellationToken cancel = default) => WriteAsync(new ResetCalibrationRequest(NextId()), cancel);
+
+    public Task<WriteResult> ReportBrightnessAsync(IReadOnlyList<MonitorBrightness> monitors, CancellationToken cancel = default)
+        => WriteAsync(new ReportBrightnessRequest(NextId(), monitors), cancel);
 
     public async ValueTask DisposeAsync()
     {

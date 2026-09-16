@@ -168,6 +168,10 @@
                 <TextBlock Style="{StaticResource Label}" Text="Start with Windows" />
                 <CheckBox Style="{StaticResource Tick}" Content="In the tray, when you sign in" IsChecked="{Binding StartWithWindows}" />
             </StackPanel>
+            <StackPanel Style="{StaticResource Row}">
+                <TextBlock Style="{StaticResource Label}" Text="Monitors" />
+                <CheckBox Style="{StaticResource Tick}" Content="Read brightness from monitors (read-only)" IsChecked="{Binding ReadMonitorBrightness}" />
+            </StackPanel>
             <TextBlock Style="{StaticResource Said}" Text="{Binding AppMessage}" Visibility="{Binding AppMessage, Converter={StaticResource VisibleWhenText}}" />
             <StackPanel Style="{StaticResource Row}">
                 <TextBlock Style="{StaticResource Label}" Text="Updates" />

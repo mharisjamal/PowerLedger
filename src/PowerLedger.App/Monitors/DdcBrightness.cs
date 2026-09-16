@@ -14,16 +14,26 @@ internal interface IBrightnessReader
 
 /// <summary>
 /// DDC/CI brightness (spec §5), read-only and careful, because Microsoft warns many monitors implement the commands badly:
-/// each physical monitor is asked for its capabilities once, and read only if it reports brightness support; a monitor
-/// that fails any call is not asked again while the App runs; nothing is ever written. GetMonitorCapabilities and
-/// GetMonitorBrightness are the only requests a monitor is sent, one read at a time, and every handle a read opens is
-/// destroyed before it returns.
+/// each physical monitor is asked for its capabilities once, and read only if it reports brightness support, 50 ms after
+/// it answered; a monitor that says it has no brightness is not asked again while the App runs; a monitor that fails any
+/// call is left alone for an hour, since it may only have been asleep, and then asked afresh; nothing is ever written.
+/// GetMonitorCapabilities and GetMonitorBrightness are the only requests a monitor is sent, one read at a time, and every
+/// handle a read opens is destroyed before it returns.
 /// </summary>
-internal sealed class DdcBrightness(IMonitorCalls windows) : IBrightnessReader
+/// <param name="pause">Waits on the reading thread; <see cref="Thread.Sleep(TimeSpan)"/> outside tests.</param>
+internal sealed class DdcBrightness(IMonitorCalls windows, TimeProvider clock, Action<TimeSpan> pause) : IBrightnessReader
 {
     /// <summary>MC_CAPS_BRIGHTNESS: the monitor supports GetMonitorBrightness. "GetMonitorCapabilities function
     /// (highlevelmonitorconfigurationapi.h)" names the flag; the value is the Windows SDK header's.</summary>
     internal const uint BrightnessCapability = 0x2;
+
+    /// <summary>How long a monitor that failed a call is left alone. A monitor asleep or switched off at its own button
+    /// fails like one that never answers, so the failure is forgotten after this and the monitor asked again.</summary>
+    internal static readonly TimeSpan RetryAfter = TimeSpan.FromHours(1);
+
+    /// <summary>The wait between a monitor's answer about what it supports and the request for its brightness, so that a
+    /// monitor slow to finish one request isn't sent the next at once.</summary>
+    internal static readonly TimeSpan RequestGap = TimeSpan.FromMilliseconds(50);
 
     /// <summary>How a monitor's device interface path begins; Contracts' MonitorKeys reads the rest.</summary>
     private const string DisplayPath = @"\\?\DISPLAY#";
@@ -33,11 +43,14 @@ internal sealed class DdcBrightness(IMonitorCalls windows) : IBrightnessReader
     /// <summary>Monitors that said they support brightness, so are read without being asked again.</summary>
     private readonly HashSet<string> _readable = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Monitors never asked anything again: they failed a call, or don't support brightness.</summary>
-    private readonly HashSet<string> _leftAlone = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Monitors that said they don't support brightness: never asked anything again.</summary>
+    private readonly HashSet<string> _unsupported = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Monitors that failed a call, with when: left alone until <see cref="RetryAfter"/> has passed.</summary>
+    private readonly Dictionary<string, DateTimeOffset> _failed = new(StringComparer.OrdinalIgnoreCase);
 
     public DdcBrightness()
-        : this(new WindowsMonitorCalls())
+        : this(new WindowsMonitorCalls(), TimeProvider.System, Thread.Sleep)
     {
     }
 
@@ -45,6 +58,8 @@ internal sealed class DdcBrightness(IMonitorCalls windows) : IBrightnessReader
     {
         lock (_gate)
         {
+            var now = clock.GetUtcNow();
+            foreach (var (path, _) in _failed.Where(failure => now - failure.Value >= RetryAfter).ToList()) _failed.Remove(path);
             var readings = new List<DdcReading>();
             foreach (var display in Displays())
             {
@@ -100,7 +115,8 @@ internal sealed class DdcBrightness(IMonitorCalls windows) : IBrightnessReader
         }
     }
 
-    private bool Askable(string path) => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_leftAlone.Contains(path);
+    private bool Askable(string path)
+        => path.StartsWith(DisplayPath, StringComparison.OrdinalIgnoreCase) && !_unsupported.Contains(path) && !_failed.ContainsKey(path);
 
     /// <summary>
     /// Whether each physical monitor is the attached monitor at the same place in its list. Windows documents neither
@@ -112,7 +128,7 @@ internal sealed class DdcBrightness(IMonitorCalls windows) : IBrightnessReader
         => attached.Count == physical.Count
            && attached.Zip(physical).All(pair => string.Equals(pair.First.Description, pair.Second.Description, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The monitor's brightness, first asking what it supports if it has never been asked.</summary>
+    /// <summary>The monitor's brightness, first asking what it supports if it hasn't been asked since it last failed.</summary>
     private double? Ask(IntPtr monitor, string path)
     {
         try
@@ -120,22 +136,28 @@ internal sealed class DdcBrightness(IMonitorCalls windows) : IBrightnessReader
             if (!_readable.Contains(path))
             {
                 // A monitor without DDC/CI, such as a laptop's own panel, fails here, as expected.
-                if (windows.Capabilities(monitor) is not { } capabilities || (capabilities & BrightnessCapability) == 0) return LeaveAlone(path);
+                if (windows.Capabilities(monitor) is not { } capabilities) return Failed(path);
+                if ((capabilities & BrightnessCapability) == 0)
+                {
+                    _unsupported.Add(path);
+                    return null;
+                }
                 _readable.Add(path);
+                pause(RequestGap);
             }
-            return windows.Brightness(monitor) is { } setting ? Normalise(setting.Minimum, setting.Current, setting.Maximum) : LeaveAlone(path);
+            return windows.Brightness(monitor) is { } setting ? Normalise(setting.Minimum, setting.Current, setting.Maximum) : Failed(path);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            return LeaveAlone(path);   // a call that throws has failed like any other
+            return Failed(path);   // a call that throws has failed like any other
         }
     }
 
-    /// <summary>Never asks the monitor anything again while the App runs.</summary>
-    private double? LeaveAlone(string path)
+    /// <summary>Asks the monitor nothing for <see cref="RetryAfter"/>, and then what it supports before anything else.</summary>
+    private double? Failed(string path)
     {
         _readable.Remove(path);
-        _leftAlone.Add(path);
+        _failed[path] = clock.GetUtcNow();
         return null;
     }
 }

@@ -104,6 +104,21 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void Reading_brightness_from_monitors_applies_when_ticked()
+    {
+        var model = Model();
+        var changed = new List<string?>();
+        model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        model.ReadMonitorBrightness.ShouldBeTrue();
+
+        model.ReadMonitorBrightness = false;
+
+        _ui.Changes.ShouldBe(new[] { "monitor brightness False" });
+        model.ReadMonitorBrightness.ShouldBeFalse();
+        changed.ShouldContain(nameof(SettingsViewModel.ReadMonitorBrightness));
+    }
+
+    [Fact]
     public async Task A_calibration_reset_asks_first()
     {
         _link.Connect(true);

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit.Abstractions;
 
@@ -10,11 +11,12 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     private const string Panel = @"\\?\DISPLAY#BOE0A1C#4&1a2b3c4d&0&UID8388688#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}";
 
     private readonly FakeWindows _windows = new();
+    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 9, 16, 9, 0, 0, TimeSpan.Zero));
 
     private DdcBrightness Reader(params FakeDisplay[] displays)
     {
         _windows.Screens.AddRange(displays);
-        return new DdcBrightness(_windows);
+        return new DdcBrightness(_windows, _clock, gap => _windows.Log.Add($"pause {gap.TotalMilliseconds:0} ms"));
     }
 
     [Theory]
@@ -63,9 +65,12 @@ public class DdcBrightnessTests(ITestOutputHelper output)
 
         reader.Read().ShouldBeEmpty();
         reader.Read().ShouldBeEmpty();
+        _clock.Advance(TimeSpan.FromDays(1));   // an answer isn't a failure, so no time makes it worth asking again
+        reader.Read().ShouldBeEmpty();
 
         dell.CapabilityCalls.ShouldBe(1);
         dell.BrightnessCalls.ShouldBe(0);
+        _windows.Log.ShouldBe(["capabilities " + Dell]);
     }
 
     [Theory]
@@ -73,21 +78,43 @@ public class DdcBrightnessTests(ITestOutputHelper output)
     [InlineData("capabilities throw")]
     [InlineData("brightness fails")]
     [InlineData("brightness throws")]
-    public void A_monitor_that_fails_any_call_is_never_asked_anything_again(string failure)
+    public void A_monitor_that_fails_any_call_is_left_alone_for_an_hour_then_asked_afresh(string failure)
     {
         var dell = Failing(new FakeMonitor(Dell), failure);
         var reader = Reader(new FakeDisplay(dell), new FakeDisplay(new FakeMonitor(Lg)));
 
         reader.Read().ShouldBe([new DdcReading(Lg, 0.6)]);
         var asked = dell.Calls;
+        var askedWhatItSupports = dell.CapabilityCalls;
+        _clock.Advance(DdcBrightness.RetryAfter - TimeSpan.FromSeconds(1));
         reader.Read().ShouldBe([new DdcReading(Lg, 0.6)]);
 
         asked.ShouldBeGreaterThan(0);
         dell.Calls.ShouldBe(asked);
+
+        Answering(dell);   // it was only asleep
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6), new DdcReading(Lg, 0.6)]);
+        dell.CapabilityCalls.ShouldBe(askedWhatItSupports + 1);
     }
 
     [Fact]
-    public void A_laptop_panel_without_DDC_CI_fails_quietly_once_and_its_display_isnt_opened_again()
+    public void A_monitor_that_fails_again_after_its_hour_is_left_alone_for_another()
+    {
+        var dell = new FakeMonitor(Dell) { Capabilities = null };
+        var reader = Reader(new FakeDisplay(dell));
+
+        reader.Read().ShouldBeEmpty();
+        _clock.Advance(DdcBrightness.RetryAfter);
+        reader.Read().ShouldBeEmpty();
+        _clock.Advance(DdcBrightness.RetryAfter - TimeSpan.FromSeconds(1));
+        reader.Read().ShouldBeEmpty();
+
+        dell.CapabilityCalls.ShouldBe(2);
+    }
+
+    [Fact]
+    public void A_laptop_panel_without_DDC_CI_fails_quietly_and_its_display_isnt_opened_again_within_the_hour()
     {
         var panel = new FakeMonitor(Panel) { Capabilities = null };
         var laptop = new FakeDisplay(panel);
@@ -99,6 +126,33 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         panel.CapabilityCalls.ShouldBe(1);
         panel.BrightnessCalls.ShouldBe(0);
         laptop.Opens.ShouldBe(1);
+
+        _clock.Advance(DdcBrightness.RetryAfter);
+        reader.Read().ShouldBe([new DdcReading(Dell, 0.6)]);
+        panel.CapabilityCalls.ShouldBe(2);
+        laptop.Opens.ShouldBe(2);
+    }
+
+    [Fact]
+    public void A_monitor_is_given_50_ms_between_saying_what_it_supports_and_being_read()
+    {
+        var reader = Reader(new FakeDisplay(new FakeMonitor(Dell)));
+
+        reader.Read();
+        reader.Read();
+
+        DdcBrightness.RequestGap.ShouldBe(TimeSpan.FromMilliseconds(50));
+        _windows.Log.ShouldBe(["capabilities " + Dell, "pause 50 ms", "brightness " + Dell, "brightness " + Dell]);
+    }
+
+    [Fact]
+    public void A_monitor_that_fails_to_say_what_it_supports_is_not_paused_for()
+    {
+        var reader = Reader(new FakeDisplay(new FakeMonitor(Dell) { Capabilities = null }));
+
+        reader.Read();
+
+        _windows.Log.ShouldBe(["capabilities " + Dell]);
     }
 
     [Fact]
@@ -294,6 +348,15 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         return monitor;
     }
 
+    /// <summary>The monitor answers every call again, as a monitor that was asleep does once it wakes.</summary>
+    private static void Answering(FakeMonitor monitor)
+    {
+        monitor.Capabilities = 0x2 | 0x4;
+        monitor.CapabilitiesThrows = null;
+        monitor.Brightness = (0, 60, 100);
+        monitor.BrightnessThrows = null;
+    }
+
     /// <summary>One monitor as a test sets it up, counting what it is asked.</summary>
     private sealed class FakeMonitor(string path, string description = "Generic PnP Monitor")
     {
@@ -352,6 +415,9 @@ public class DdcBrightnessTests(ITestOutputHelper output)
 
         public int OpenHandles => _open.Count;
 
+        /// <summary>What each monitor was asked, and the reader's pauses, in order.</summary>
+        public List<string> Log { get; } = [];
+
         public IReadOnlyList<IntPtr> Displays()
             => ListingThrows is { } error ? throw error : [.. Enumerable.Range(1, Screens.Count).Select(number => (IntPtr)number)];
 
@@ -382,6 +448,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         {
             var fake = _open[monitor];
             fake.CapabilityCalls++;
+            Log.Add("capabilities " + fake.Path);
             return fake.CapabilitiesThrows is { } error ? throw error : fake.Capabilities;
         }
 
@@ -389,6 +456,7 @@ public class DdcBrightnessTests(ITestOutputHelper output)
         {
             var fake = _open[monitor];
             fake.BrightnessCalls++;
+            Log.Add("brightness " + fake.Path);
             return fake.BrightnessThrows is { } error ? throw error : fake.Brightness;
         }
 

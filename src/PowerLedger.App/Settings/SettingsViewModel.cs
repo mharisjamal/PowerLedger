@@ -112,6 +112,18 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Applies at the next read of the monitors, within five minutes.</summary>
+    public bool ReadMonitorBrightness
+    {
+        get => _ui.Current.ReadMonitorBrightness;
+        set
+        {
+            if (value == _ui.Current.ReadMonitorBrightness) return;
+            AppMessage = _ui.ReadMonitorBrightness(value);
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>Why a preference didn't stick, or null.</summary>
     public string? AppMessage { get => _appMessage; private set => SetProperty(ref _appMessage, value); }
 

@@ -22,6 +22,7 @@ public partial class App : Application
     private SettingsViewModel? _settings;
     private WizardViewModel? _wizard;
     private MonthlyReports? _monthly;
+    private BrightnessReporter? _brightness;
     private Updater? _updates;
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
@@ -83,6 +84,8 @@ public partial class App : Application
                 var (title, text) = MonthlyReports.Toast(written);
                 _tray?.Notify(title, text, written[0].Path);
             }));
+        // One reader for the whole run: it remembers which monitors failed, and leaves them alone for a while.
+        _brightness = new BrightnessReporter(_link, new DdcBrightness(), _preferences, TimeProvider.System);
         _now.PropertyChanged += OnNowChanged;
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
         // The installer asks this before it replaces or removes the App (installer\PowerLedger.iss).
@@ -91,6 +94,7 @@ public partial class App : Application
         _link.Start();
         _now.Start();
         _monthly.Start();
+        _brightness.Start();
         _updates.Start();
         if (!options.StartInTray) ShowWindow();
     }
@@ -165,6 +169,7 @@ public partial class App : Application
                 _updates.Dispose();
             }
             _monthly?.Dispose();
+            _brightness?.Dispose();
             _window?.Close();
             _tray?.Dispose();
             if (_now is not null)

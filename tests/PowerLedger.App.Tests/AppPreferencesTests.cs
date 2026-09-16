@@ -92,6 +92,18 @@ public sealed class AppPreferencesTests : IDisposable
     }
 
     [Fact]
+    public void Reading_monitor_brightness_is_saved()
+    {
+        var preferences = Preferences();
+        preferences.Current.ReadMonitorBrightness.ShouldBeTrue();
+
+        preferences.ReadMonitorBrightness(false).ShouldBeNull();
+
+        preferences.Current.ReadMonitorBrightness.ShouldBeFalse();
+        Store.Load().ReadMonitorBrightness.ShouldBeFalse();
+    }
+
+    [Fact]
     public void The_update_preferences_are_saved()
     {
         var preferences = Preferences();

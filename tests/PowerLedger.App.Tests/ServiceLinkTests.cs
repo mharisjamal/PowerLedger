@@ -98,6 +98,16 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Brightness_reaches_the_service()
+    {
+        MonitorBrightness[] monitors = [new() { Instance = Statuses.Dell.Instance, Brightness = 0.6 }, new() { Instance = Statuses.Aoc.Instance, Brightness = 0.35 }];
+
+        (await _link.ReportBrightnessAsync(monitors)).ShouldBe(WriteResult.Done);
+
+        _service.Requests.OfType<ReportBrightnessRequest>().Single().Monitors.ShouldBe(monitors);
+    }
+
+    [Fact]
     public async Task A_refusal_comes_back_in_the_services_words()
     {
         _service.Refuse = "The idle threshold must be between 60 and 1800 seconds.";
@@ -117,7 +127,9 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         await WaitFor.True(() => checkedLink.IsConnected);
 
         (await checkedLink.SetTariffAsync(0.2m, "EUR", null)).Problem.ShouldBe(RefuseAll.Reason);
+        (await checkedLink.ReportBrightnessAsync([new MonitorBrightness { Instance = Statuses.Dell.Instance, Brightness = 0.6 }])).Problem.ShouldBe(RefuseAll.Reason);
         service.Requests.OfType<SetTariffRequest>().ShouldBeEmpty();
+        service.Requests.OfType<ReportBrightnessRequest>().ShouldBeEmpty();
     }
 
     [Fact]

@@ -78,6 +78,24 @@ public sealed class UiPreferencesTests : IDisposable
     }
 
     [Fact]
+    public void Reading_monitor_brightness_is_on_by_default_even_in_a_file_from_before_it_existed()
+    {
+        new UiPreferencesStore(File).Load().ReadMonitorBrightness.ShouldBeTrue();
+
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, """{ "Theme": "Dark", "FirstRunDone": true, "CheckForUpdates": false }""");
+        new UiPreferencesStore(File).Load().ReadMonitorBrightness.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Reading_monitor_brightness_turned_off_survives_a_save_and_a_load()
+    {
+        var store = new UiPreferencesStore(File);
+        store.Save(UiPreferences.Default with { ReadMonitorBrightness = false });
+        store.Load().ReadMonitorBrightness.ShouldBeFalse();
+    }
+
+    [Fact]
     public void The_update_bookkeeping_survives_a_save_and_a_load()
     {
         var store = new UiPreferencesStore(File);

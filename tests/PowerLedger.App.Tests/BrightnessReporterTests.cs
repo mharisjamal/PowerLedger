@@ -1,0 +1,213 @@
+using System.IO;
+using Microsoft.Extensions.Time.Testing;
+using PowerLedger.Contracts;
+using Shouldly;
+
+namespace PowerLedger.App.Tests;
+
+public sealed class BrightnessReporterTests : IDisposable
+{
+    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 9, 16, 9, 0, 0, TimeSpan.Zero));
+    private readonly FakeLink _link = new() { Status = Statuses.WithMonitors() };
+    private readonly FakeReader _reader = new();
+    private readonly FakeUiSettings _ui = new();
+    private readonly BrightnessReporter _reporter;
+
+    public BrightnessReporterTests()
+    {
+        _link.Connect(true);
+        _reporter = new BrightnessReporter(_link, _reader, _ui, _clock);
+    }
+
+    public void Dispose() => _reporter.Dispose();
+
+    private static MonitorBrightness Reported(MonitorStatus monitor, double brightness) => new() { Instance = monitor.Instance, Brightness = brightness };
+
+    [Fact]
+    public void The_monitors_are_read_a_minute_after_start_and_every_five_minutes_after()
+    {
+        _reporter.Start();
+
+        _clock.Advance(BrightnessReporter.FirstRead - TimeSpan.FromSeconds(1));
+        _reader.Reads.ShouldBe(0);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _reader.Reads.ShouldBe(1);
+        _link.BrightnessReports.Count.ShouldBe(1);
+
+        _clock.Advance(BrightnessReporter.ReadEvery - TimeSpan.FromSeconds(1));
+        _reader.Reads.ShouldBe(1);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _reader.Reads.ShouldBe(2);
+        _link.BrightnessReports.Count.ShouldBe(2);
+
+        BrightnessReporter.FirstRead.ShouldBe(TimeSpan.FromMinutes(1));
+        BrightnessReporter.ReadEvery.ShouldBe(TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public async Task Each_reading_is_reported_under_the_instance_the_service_names_the_monitor_by()
+    {
+        _reader.Readings = [new DdcReading(Statuses.DellPath, 0.6), new DdcReading(Statuses.AocPath, 0.35)];
+
+        await _reporter.ReportAsync();
+
+        _link.BrightnessReports.Single().ShouldBe([Reported(Statuses.Dell, 0.6), Reported(Statuses.Aoc, 0.35)]);
+    }
+
+    [Fact]
+    public async Task Only_the_monitors_the_service_lists_are_reported()
+    {
+        _link.Status = Statuses.WithMonitors(Statuses.Dell);
+        _reader.Readings =
+        [
+            new DdcReading(Statuses.AocPath, 0.35),                                                     // attached, but not listed yet
+            new DdcReading(@"MONITOR\DELA0B1\{4d36e96e-e325-11ce-bfc1-08002be10318}\0001", 0.5),       // not a display's path
+            new DdcReading(Statuses.DellPath, 0.6),
+        ];
+
+        await _reporter.ReportAsync();
+
+        _link.BrightnessReports.Single().ShouldBe([Reported(Statuses.Dell, 0.6)]);
+    }
+
+    [Fact]
+    public async Task A_service_from_before_monitors_is_sent_nothing_and_no_monitor_is_asked()
+    {
+        // It sends no list, and would drop a connection that sent it a message it doesn't know.
+        _link.Status = Statuses.Running() with { Monitors = null };
+
+        await _reporter.ReportAsync();
+
+        _reader.Reads.ShouldBe(0);
+        _link.BrightnessReports.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task With_no_external_monitors_no_monitor_is_asked()
+    {
+        _link.Status = Statuses.Running();
+
+        await _reporter.ReportAsync();
+
+        _reader.Reads.ShouldBe(0);
+        _link.BrightnessReports.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task While_the_displays_are_off_no_monitor_is_asked()
+    {
+        _link.Status = Statuses.WithMonitors() with { Last = Frames.At(_clock.GetUtcNow()) with { DisplayOn = false } };
+
+        await _reporter.ReportAsync();
+
+        _reader.Reads.ShouldBe(0);
+        _link.BrightnessReports.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task The_monitors_are_read_while_the_displays_are_on_or_before_the_first_reading()
+    {
+        _link.Status = Statuses.WithMonitors() with { Last = Frames.At(_clock.GetUtcNow()) };
+        await _reporter.ReportAsync();
+
+        _link.Status = Statuses.WithMonitors() with { Last = null };
+        await _reporter.ReportAsync();
+
+        _reader.Reads.ShouldBe(2);
+        _link.BrightnessReports.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void While_the_user_doesnt_allow_it_no_monitor_is_asked_and_the_service_is_sent_nothing()
+    {
+        _reporter.Start();
+        _ui.ReadMonitorBrightness(false);
+        var statusReads = _link.StatusReads;
+
+        _clock.Advance(BrightnessReporter.FirstRead + BrightnessReporter.ReadEvery);
+        _reader.Reads.ShouldBe(0);
+        _link.StatusReads.ShouldBe(statusReads);
+        _link.BrightnessReports.ShouldBeEmpty();
+
+        _ui.ReadMonitorBrightness(true);
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        _reader.Reads.ShouldBe(1);
+        _link.BrightnessReports.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Without_the_service_no_monitor_is_asked()
+    {
+        _link.Connect(false);
+
+        await _reporter.ReportAsync();
+
+        _reader.Reads.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task When_no_monitor_answers_nothing_is_sent()
+    {
+        _reader.Readings = [];
+
+        await _reporter.ReportAsync();
+
+        _link.BrightnessReports.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_report_that_fails_is_swallowed_and_the_next_one_still_goes()
+    {
+        _reporter.Start();
+        _link.ReportThrows = new IOException("The connection to the service closed.");
+
+        Should.NotThrow(() => _clock.Advance(BrightnessReporter.FirstRead));
+        _reader.Reads.ShouldBe(1);
+
+        _link.ReportThrows = null;
+        _link.Answer = WriteResult.NoAnswer;
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        _link.BrightnessReports.Count.ShouldBe(1);
+
+        _link.Answer = WriteResult.Done;
+        _clock.Advance(BrightnessReporter.ReadEvery);
+        _link.BrightnessReports.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_reader_that_throws_is_swallowed()
+    {
+        _reader.Throws = new InvalidOperationException("No desktop.");
+
+        await Should.NotThrowAsync(_reporter.ReportAsync);
+
+        _link.BrightnessReports.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Once_disposed_it_reads_no_more()
+    {
+        _reporter.Start();
+        _reporter.Dispose();
+
+        _clock.Advance(BrightnessReporter.FirstRead + BrightnessReporter.ReadEvery);
+
+        _reader.Reads.ShouldBe(0);
+    }
+
+    /// <summary>Monitors as a test sets them up, counting the reads.</summary>
+    private sealed class FakeReader : IBrightnessReader
+    {
+        public IReadOnlyList<DdcReading> Readings { get; set; } = [new DdcReading(Statuses.DellPath, 0.6)];
+
+        public Exception? Throws { get; set; }
+
+        public int Reads { get; private set; }
+
+        public IReadOnlyList<DdcReading> Read()
+        {
+            Reads++;
+            return Throws is { } error ? throw error : Readings;
+        }
+    }
+}

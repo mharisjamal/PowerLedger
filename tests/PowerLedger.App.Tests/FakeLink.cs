@@ -51,6 +51,21 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<WriteResult> ResetCalibrationAsync(CancellationToken cancel = default) => Write("reset");
 
+    /// <summary>Every brightness report the App sent, in order. They are kept apart from <see cref="Writes"/>, being
+    /// reports rather than changes the user asked for.</summary>
+    public List<IReadOnlyList<MonitorBrightness>> BrightnessReports { get; } = [];
+
+    /// <summary>When set, a brightness report fails with this.</summary>
+    public Exception? ReportThrows { get; set; }
+
+    public Task<WriteResult> ReportBrightnessAsync(IReadOnlyList<MonitorBrightness> monitors, CancellationToken cancel = default)
+    {
+        if (ReportThrows is { } error) return Task.FromException<WriteResult>(error);
+        if (!IsConnected) return Task.FromResult(WriteResult.NotConnected);
+        BrightnessReports.Add(monitors);
+        return Task.FromResult(Answer);
+    }
+
     private Task<WriteResult> Write(object change)
     {
         if (!IsConnected) return Task.FromResult(WriteResult.NotConnected);

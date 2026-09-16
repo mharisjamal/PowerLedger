@@ -38,6 +38,13 @@ internal sealed class FakeUiSettings : IUiSettings
         return null;
     }
 
+    public string? ReadMonitorBrightness(bool enabled)
+    {
+        Current = Current with { ReadMonitorBrightness = enabled };
+        Changes.Add($"monitor brightness {enabled}");
+        return null;
+    }
+
     public string? Announced(string version)
     {
         Current = Current with { AnnouncedVersion = version };
