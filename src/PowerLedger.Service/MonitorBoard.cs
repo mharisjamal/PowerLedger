@@ -5,16 +5,22 @@ using PowerLedger.Sensors;
 namespace PowerLedger.Service;
 
 /// <summary>
-/// The external monitors the service knows (Plan J): what WMI detected, each one's figure from the catalogue, the estimate
-/// or the user, the user's choices, and the brightness the App last reported. Detection writes from the sensor thread, the
-/// App's reports from the pipe's, and the choices from the loop, which also reads the board every tick for the model and
-/// for the status. So every member takes the one lock, and nothing outside the board is called while it is held.
+/// The external monitors the service knows (Plan J): what WMI detected, each one's figures from the catalogue, the estimate
+/// or the user, the user's choices, and the brightness and power state the App last reported. Detection writes from the
+/// sensor thread, the App's reports from the pipe's, and the choices from the loop, which also reads the board every tick
+/// for the model and for the status. So every member takes the one lock, and nothing outside the board is called while it
+/// is held.
 /// </summary>
 internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider clock) : IMonitorDraw
 {
-    /// <summary>The App reports every five minutes, so a brightness older than this is from an App that stopped reporting
-    /// or a monitor that stopped answering, and counts as unknown.</summary>
+    /// <summary>The App reads the brightness every five minutes, so a brightness older than this is from an App that stopped
+    /// reporting or a monitor that stopped answering, and counts as unknown.</summary>
     public static readonly TimeSpan BrightnessStale = TimeSpan.FromMinutes(15);
+
+    /// <summary>The App reads whether each monitor is on every minute while the displays are on, so a power state older than
+    /// this is from before the displays went off, from an App that stopped reporting or from a monitor that stopped
+    /// answering, and counts as unknown.</summary>
+    public static readonly TimeSpan PowerStale = TimeSpan.FromMinutes(3);
 
     /// <summary>The largest monitor taken, on a laptop, for a portable one running off it when the user hasn't said.
     /// Portable monitors come in 13 to 17.3 inches; a monitor that gives no size is taken to have a plug of its own.</summary>
@@ -25,6 +31,9 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     /// <summary>The last reading for each monitor by instance, kept while it is fresh even if the monitor goes missing from
     /// a detection for a moment, as monitors do while they wake.</summary>
     private readonly Dictionary<string, (double Brightness, long At)> _brightness = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The last power state for each monitor by instance, kept as its brightness is.</summary>
+    private readonly Dictionary<string, (MonitorPowerState State, long At)> _power = new(StringComparer.OrdinalIgnoreCase);
 
     private Figured[] _monitors = [];
     private Dictionary<string, MonitorChoice> _choices = new(StringComparer.Ordinal);
@@ -53,10 +62,8 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         {
             if (retired.IsCancellationRequested) return;
             _monitors = figured;
-            foreach (var instance in _brightness.Where(reading => IsStale(reading.Value.At, now)).Select(reading => reading.Key).ToList())
-            {
-                _brightness.Remove(instance);
-            }
+            DropStale(_brightness, BrightnessStale, now);
+            DropStale(_power, PowerStale, now);
         }
     }
 
@@ -75,9 +82,12 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         }
     }
 
-    /// <summary>The App's report; a brightness older than <see cref="BrightnessStale"/> counts as unknown. Only a monitor
-    /// that is attached is remembered, so a client can't fill the service's memory with instances it made up.</summary>
-    public void Report(IReadOnlyList<MonitorBrightness> readings)
+    /// <summary>The App's report; a brightness older than <see cref="BrightnessStale"/>, and a power state older than
+    /// <see cref="PowerStale"/>, counts as unknown. Only a monitor that is attached is remembered, so a client can't fill the
+    /// service's memory with instances it made up.</summary>
+    /// <param name="power">Whether each monitor is on, or null from an App that doesn't read it, which leaves the power
+    /// states as they were.</param>
+    public void Report(IReadOnlyList<MonitorBrightness> readings, IReadOnlyList<MonitorPowerReading>? power = null)
     {
         var now = clock.GetTimestamp();
         lock (_gate)
@@ -85,15 +95,22 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             foreach (var reading in readings)
             {
                 if (!double.IsFinite(reading.Brightness)) continue;
-                var monitor = Array.Find(_monitors, m => m.Facts.Instance.Equals(reading.Instance, StringComparison.OrdinalIgnoreCase));
+                var monitor = Attached(reading.Instance);
                 if (monitor is not null) _brightness[monitor.Facts.Instance] = (Math.Clamp(reading.Brightness, 0, 1), now);
+            }
+            foreach (var reading in power ?? [])
+            {
+                if (reading.State is not (MonitorPowerState.On or MonitorPowerState.Standby or MonitorPowerState.Off)) continue;
+                var monitor = Attached(reading.Instance);
+                if (monitor is not null) _power[monitor.Facts.Instance] = (reading.State, now);
             }
         }
     }
 
     /// <summary>What every counted monitor draws, split by whether it has a plug of its own or runs off the PC, which always
-    /// counts: with the display on, a figure the user typed as it is, or PowerLedger's own at the monitor's brightness;
-    /// asleep, its sleep figure.</summary>
+    /// counts. A monitor that says it is off draws its off figure, and one in standby its sleep figure. One that says it is
+    /// on, or hasn't said, draws as the displays are: with the display on, a figure the user typed as it is, or PowerLedger's
+    /// own at the monitor's brightness; asleep, its sleep figure.</summary>
     public MonitorWatts Watts(bool displayOn)
     {
         var now = clock.GetTimestamp();
@@ -118,17 +135,21 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         lock (_gate) return [.. _monitors.Select(monitor => Describe(monitor, displayOn, now))];
     }
 
-    /// <summary>The list's figure for this model or, for a model it doesn't know, the estimate from its size and resolution.</summary>
+    /// <summary>The list's figures for this model or, for a model it doesn't know, the estimate from its size and resolution.</summary>
     private Figured Figure(MonitorFacts facts)
     {
         var name = facts.Name.Length > 0 ? facts.Name : $"{facts.Maker} {facts.ProductCode}".Trim();
         if (catalogue.Find(facts.Maker, facts.Name, facts.Inches, facts.Width, facts.Height) is { } listed)
         {
-            return new Figured(facts, name, listed.OnW, listed.SleepW, MonitorSource.Model);
+            return new Figured(facts, name, listed.OnW, listed.SleepW, listed.OffW, MonitorSource.Model);
         }
-        var (onW, sleepW, _) = MonitorEstimate.For(facts.Inches, facts.Width, facts.Height, catalogue);
-        return new Figured(facts, name, onW, sleepW, MonitorSource.Estimate);
+        var (onW, sleepW, offW) = MonitorEstimate.For(facts.Inches, facts.Width, facts.Height, catalogue);
+        return new Figured(facts, name, onW, sleepW, offW, MonitorSource.Estimate);
     }
+
+    /// <summary>The attached monitor with this instance, in any case, or null. Called with the lock held.</summary>
+    private Figured? Attached(string instance)
+        => Array.Find(_monitors, monitor => monitor.Facts.Instance.Equals(instance, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>One monitor as it stands at <paramref name="now"/>. Called with the lock held.</summary>
     private MonitorStatus Describe(Figured monitor, bool displayOn, long now)
@@ -143,7 +164,12 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         // What a monitor running off the PC draws is inside what the PC itself draws, so leaving it out would mean nothing,
         // and it always counts. Only a monitor with a plug of its own counts as the user chose, or as the profile says.
         var counted = !ownPlug || (choice?.Counted ?? _countedByDefault);
-        double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, now) ? reading.Brightness : null;
+        double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, now, BrightnessStale)
+            ? reading.Brightness
+            : null;
+        var state = _power.TryGetValue(facts.Instance, out var said) && !IsStale(said.At, now, PowerStale)
+            ? said.State
+            : MonitorPowerState.Unknown;
         // A figure the user typed is what the monitor draws as they use it, so it is taken as it is, and the brightness is
         // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
         // list's test brightness, so it is scaled to the monitor's.
@@ -158,19 +184,38 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             Height = facts.Height,
             OnWatts = onW,
             SleepWatts = monitor.SleepW,
+            OffWatts = monitor.OffW,
+            PowerState = state,
             Source = choice?.Watts is null ? monitor.Source : MonitorSource.Typed,
             Counted = counted,
             CountedByDefault = _countedByDefault,
             OwnPlug = ownPlug,
             OwnPlugByDefault = ownPlugByDefault,
             Brightness = brightness,
-            WattsNow = !counted ? 0 : displayOn ? onNow : monitor.SleepW,
+            // A monitor that says it is off draws its off figure, and one in standby its sleep figure, whatever the displays
+            // are doing and whatever the user typed, which is what it draws when on. One that says it is on, or hasn't said,
+            // draws as the displays are.
+            WattsNow = !counted ? 0 : state switch
+            {
+                MonitorPowerState.Off => monitor.OffW,
+                MonitorPowerState.Standby => monitor.SleepW,
+                _ => displayOn ? onNow : monitor.SleepW,
+            },
         };
     }
 
-    private bool IsStale(long at, long now) => clock.GetElapsedTime(at, now) > BrightnessStale;
+    /// <summary>Drops the readings older than <paramref name="stale"/>. Called with the lock held.</summary>
+    private void DropStale<T>(Dictionary<string, (T Reading, long At)> readings, TimeSpan stale, long now)
+    {
+        foreach (var instance in readings.Where(reading => IsStale(reading.Value.At, now, stale)).Select(reading => reading.Key).ToList())
+        {
+            readings.Remove(instance);
+        }
+    }
+
+    private bool IsStale(long at, long now, TimeSpan stale) => clock.GetElapsedTime(at, now) > stale;
 
     /// <param name="Name">The name the monitor gives, or its maker and product code when it gives none.</param>
     /// <param name="Source">Where <paramref name="OnW"/> came from: the list or the estimate, never the user.</param>
-    private sealed record Figured(MonitorFacts Facts, string Name, double OnW, double SleepW, MonitorSource Source);
+    private sealed record Figured(MonitorFacts Facts, string Name, double OnW, double SleepW, double OffW, MonitorSource Source);
 }

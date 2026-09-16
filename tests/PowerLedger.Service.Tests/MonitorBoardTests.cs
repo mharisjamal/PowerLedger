@@ -9,7 +9,7 @@ namespace PowerLedger.Service.Tests;
 public class MonitorBoardTests
 {
     /// <summary>Real listings from the shipped table: the Dell, and three 27-inch 1080p monitors for the estimate's median of
-    /// 14.41 W on and 0.13 W asleep.</summary>
+    /// 14.41 W on, 0.13 W asleep and 0.09 W off.</summary>
     internal static readonly MonitorCatalogue Catalogue = MonitorCatalogue.Parse(new StringReader("""
         brand,model_number,model_name,alternatives,inches,width,height,panel,on_w,sleep_w,off_w,max_nits,hdr,certified
         DELL,U2723QEt,U2723QE,U2723QX,27,3840,2160,IPS LCD,28.32,0.74,0.3,400,,2021-07-14
@@ -39,6 +39,9 @@ public class MonitorBoardTests
 
     private static MachineProfile Desktop(params MonitorChoice[] choices) => MachineProfile.DefaultDesktop with { Monitors = choices };
 
+    /// <summary>What the App read from a monitor about whether it is on.</summary>
+    private static MonitorPowerReading Said(MonitorFacts monitor, MonitorPowerState state) => new() { Instance = monitor.Instance, State = state };
+
     [Fact]
     public void With_no_monitors_the_list_is_empty_and_they_draw_nothing()
     {
@@ -66,6 +69,8 @@ public class MonitorBoardTests
             Height = 2160,
             OnWatts = 28.32,
             SleepWatts = 0.74,
+            OffWatts = 0.3,
+            PowerState = MonitorPowerState.Unknown,
             Source = MonitorSource.Model,
             Counted = true,
             CountedByDefault = true,
@@ -89,6 +94,7 @@ public class MonitorBoardTests
         monitor.Source.ShouldBe(MonitorSource.Estimate);
         monitor.OnWatts.ShouldBe(14.41);
         monitor.SleepWatts.ShouldBe(0.13);
+        monitor.OffWatts.ShouldBe(0.09);
         monitor.Counted.ShouldBeTrue();
     }
 
@@ -164,6 +170,8 @@ public class MonitorBoardTests
             Height = 1080,
             OnWatts = estimate.OnW,
             SleepWatts = estimate.SleepW,
+            OffWatts = estimate.OffW,
+            PowerState = MonitorPowerState.Unknown,
             Source = MonitorSource.Estimate,
             Counted = true,
             CountedByDefault = true,
@@ -358,6 +366,151 @@ public class MonitorBoardTests
     }
 
     [Fact]
+    public void A_monitor_that_says_it_is_off_draws_its_off_figure_and_one_in_standby_its_sleep_figure_whatever_the_displays_do()
+    {
+        _board.Detected([Dell]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 1 }], [Said(Dell, MonitorPowerState.Off)]);
+
+        var off = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (off.PowerState, off.OffWatts, off.WattsNow).ShouldBe((MonitorPowerState.Off, 0.3, 0.3));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0.3, FromPc: 0));
+        _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0.3, FromPc: 0));
+
+        _board.Report([], [Said(Dell, MonitorPowerState.Standby)]);
+        var standby = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (standby.PowerState, standby.WattsNow).ShouldBe((MonitorPowerState.Standby, 0.74));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0.74, FromPc: 0));
+        _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0.74, FromPc: 0));
+
+        // On, it draws as a monitor that hasn't said: its figure at its brightness while the displays are on, and its sleep
+        // figure while they are off.
+        _board.Report([], [Said(Dell, MonitorPowerState.On)]);
+        var on = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        on.PowerState.ShouldBe(MonitorPowerState.On);
+        on.WattsNow.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
+        _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0.74, FromPc: 0));
+    }
+
+    [Fact]
+    public void A_power_state_goes_stale_after_three_minutes_and_the_monitor_then_draws_as_one_that_has_not_said()
+    {
+        _board.Detected([Dell]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 1 }], [Said(Dell, MonitorPowerState.Off)]);
+
+        MonitorBoard.PowerStale.ShouldBe(TimeSpan.FromMinutes(3));
+        _clock.Advance(MonitorBoard.PowerStale);
+        _board.Status(displayOn: true).ShouldHaveSingleItem().PowerState.ShouldBe(MonitorPowerState.Off);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(0.3);
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        var stale = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        stale.PowerState.ShouldBe(MonitorPowerState.Unknown);
+        stale.Brightness.ShouldBe(1);   // a brightness stays fresh for longer
+        stale.WattsNow.ShouldBe(MonitorPower.At(28.32, 1), 1e-9);
+        _board.Watts(displayOn: false).OwnPlug.ShouldBe(0.74);
+
+        // A new report counts again, after a detection has dropped the stale one.
+        _board.Detected([Dell]);
+        _board.Report([], [Said(Dell, MonitorPowerState.Off)]);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(0.3);
+    }
+
+    [Fact]
+    public void A_monitor_with_a_typed_figure_that_says_it_is_off_or_in_standby_draws_its_off_or_sleep_figure()
+    {
+        _board.Detected([Dell]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Watts = 30 }));
+
+        _board.Report([], [Said(Dell, MonitorPowerState.Off)]);
+        var off = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (off.Source, off.OnWatts, off.OffWatts, off.WattsNow).ShouldBe((MonitorSource.Typed, 30.0, 0.3, 0.3));
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(0.3);
+
+        _board.Report([], [Said(Dell, MonitorPowerState.Standby)]);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(0.74);
+
+        _board.Report([], [Said(Dell, MonitorPowerState.On)]);
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(30);
+    }
+
+    [Theory]
+    [InlineData(MonitorPowerState.On)]
+    [InlineData(MonitorPowerState.Standby)]
+    [InlineData(MonitorPowerState.Off)]
+    public void A_monitor_the_user_does_not_count_draws_nothing_whatever_it_says_and_still_shows_what_it_said(MonitorPowerState state)
+    {
+        _board.Detected([Dell]);
+        _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Counted = false }));
+        _board.Report([], [Said(Dell, state)]);
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        (monitor.Counted, monitor.PowerState, monitor.OffWatts, monitor.WattsNow).ShouldBe((false, state, 0.3, 0.0));
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
+        _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0, FromPc: 0));
+    }
+
+    [Fact]
+    public void Monitors_that_say_they_are_off_or_in_standby_keep_the_split_between_their_own_plugs_and_the_pc()
+    {
+        _board.Detected([Dell, Portable]);
+        _board.Choose(Laptop());
+        var estimate = MonitorEstimate.For(15.6, 1920, 1080, Catalogue);
+
+        _board.Report([], [Said(Dell, MonitorPowerState.Off), Said(Portable, MonitorPowerState.Standby)]);
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0.3, FromPc: estimate.SleepW));
+
+        _board.Report([], [Said(Dell, MonitorPowerState.Standby), Said(Portable, MonitorPowerState.Off)]);
+        _board.Watts(displayOn: true).ShouldBe(new MonitorWatts(OwnPlug: 0.74, FromPc: estimate.OffW));
+        _board.Watts(displayOn: false).ShouldBe(new MonitorWatts(OwnPlug: 0.74, FromPc: estimate.OffW));
+        _board.Status(displayOn: true).Select(m => (m.OwnPlug, m.PowerState, m.OffWatts))
+            .ShouldBe([(true, MonitorPowerState.Standby, 0.3), (false, MonitorPowerState.Off, estimate.OffW)]);
+    }
+
+    [Fact]
+    public void A_power_state_finds_its_monitor_by_instance_in_any_case_and_one_for_a_monitor_that_is_not_attached_is_forgotten()
+    {
+        _board.Detected([Dell]);
+        _board.Report([],
+        [
+            new MonitorPowerReading { Instance = Dell.Instance.ToLowerInvariant(), State = MonitorPowerState.Standby },
+            Said(Unnamed, MonitorPowerState.Off),
+        ]);
+
+        _board.Status(displayOn: true).ShouldHaveSingleItem().PowerState.ShouldBe(MonitorPowerState.Standby);
+        _board.Detected([Dell, Unnamed]);
+        var unnamed = _board.Status(displayOn: true)[1];
+        unnamed.PowerState.ShouldBe(MonitorPowerState.Unknown);
+        unnamed.WattsNow.ShouldBe(14.41, 1e-9);
+    }
+
+    [Fact]
+    public void A_report_without_power_states_leaves_them_as_they_were_and_a_reading_that_is_no_state_is_ignored()
+    {
+        _board.Detected([Dell]);
+        _board.Report([], [Said(Dell, MonitorPowerState.Off)]);
+
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.5 }]);
+        _board.Report([], [Said(Dell, MonitorPowerState.Unknown), Said(Dell, (MonitorPowerState)7)]);
+
+        var monitor = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        monitor.Brightness.ShouldBe(0.5);
+        monitor.PowerState.ShouldBe(MonitorPowerState.Off);
+        monitor.WattsNow.ShouldBe(0.3);
+    }
+
+    [Fact]
+    public void A_monitor_missing_from_one_detection_keeps_a_power_state_that_is_still_fresh()
+    {
+        _board.Detected([Dell]);
+        _board.Report([], [Said(Dell, MonitorPowerState.Off)]);
+        _board.Detected([]);
+        _board.Detected([Dell]);
+
+        _board.Status(displayOn: true).ShouldHaveSingleItem().PowerState.ShouldBe(MonitorPowerState.Off);
+    }
+
+    [Fact]
     public void An_unplugged_monitor_disappears()
     {
         _board.Detected([Dell, Unnamed]);
@@ -451,7 +604,9 @@ public class MonitorBoardTests
                 _board.Detected([Dell, Unnamed]);
                 _board.Detected([Dell]);
             }),
-            Repeat(() => _board.Report([new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.5 }])),
+            Repeat(() => _board.Report(
+                [new MonitorBrightness { Instance = Unnamed.Instance, Brightness = 0.5 }],
+                [Said(Dell, MonitorPowerState.Standby), Said(Unnamed, MonitorPowerState.Off)])),
             Repeat(() =>
             {
                 _board.Choose(Laptop(new MonitorChoice { Key = Dell.Key, Watts = 30 }));
