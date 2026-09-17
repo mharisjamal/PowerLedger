@@ -15,11 +15,15 @@ internal static class DevicePowerState
     private static readonly DevPropKey PowerData = new() { FormatId = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), PropertyId = 32 };
 
     /// <summary>The Plug and Play instance id of the first NVIDIA display adapter, or null when there is none.</summary>
-    public static string? FindNvidiaGpu() => Wmi.ReadOr(@"\\.\root\cimv2", "SELECT PNPDeviceID FROM Win32_VideoController", rows =>
+    public static string? FindNvidiaGpu() => FindDisplayAdapter(@"PCI\VEN_10DE");
+
+    /// <summary>The Plug and Play instance id of the first display adapter whose id starts with the given text, such as
+    /// "PCI\VEN_8086&amp;DEV_56A0" for an Arc A770, or null when this machine has none.</summary>
+    public static string? FindDisplayAdapter(string idPrefix) => Wmi.ReadOr(@"\\.\root\cimv2", "SELECT PNPDeviceID FROM Win32_VideoController", rows =>
     {
         foreach (var row in rows)
         {
-            if (row["PNPDeviceID"] is string id && id.StartsWith(@"PCI\VEN_10DE", StringComparison.OrdinalIgnoreCase)) return id;
+            if (row["PNPDeviceID"] is string id && id.StartsWith(idPrefix, StringComparison.OrdinalIgnoreCase)) return id;
         }
         return null;
     }, null);

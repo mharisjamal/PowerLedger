@@ -40,7 +40,7 @@ public sealed class MachineSensors : IDisposable
         List<ISensorSource> sources =
         [
             new EnergyMeterSource(),
-            .. Graphics(new NvidiaSource(), static () => new GpuLoadSource()),
+            .. Graphics(new NvidiaSource(), static () => new ArcSource(), static () => new GpuLoadSource()),
             new BatterySource(),
             new CpuLoadSource(),
             new ActivitySource(sessionLocked, userIdleSeconds),
@@ -49,10 +49,12 @@ public sealed class MachineSensors : IDisposable
         return new MachineSensors(new Sampler(sources), new SampleValidator(validatorOptions), display);
     }
 
-    /// <summary>NVIDIA's own library when it answers; otherwise Windows' GPU load counters, for an AMD or Intel card. The
-    /// second is only built when the first has nothing to say, so the two never both fill the discrete GPU's fields.</summary>
-    internal static IReadOnlyList<ISensorSource> Graphics(ISensorSource nvidia, Func<ISensorSource> amdOrIntel)
-        => nvidia.Supported ? [nvidia] : [nvidia, amdOrIntel()];
+    /// <summary>NVIDIA's own library when it answers, and nothing else: the others are only built when it has nothing to
+    /// say, so they never fill the discrete GPU's fields beside it. Otherwise Intel's Level Zero, which measures an Arc
+    /// card's watts, and then Windows' GPU load counters, which give an AMD or Intel card's load and never write watts,
+    /// so a measured card keeps its own figure.</summary>
+    internal static IReadOnlyList<ISensorSource> Graphics(ISensorSource nvidia, Func<ISensorSource> arc, Func<ISensorSource> amdOrIntel)
+        => nvidia.Supported ? [nvidia] : [nvidia, arc(), amdOrIntel()];
 
     /// <summary>One validated tick. Never throws.</summary>
     public Sample Read(DateTimeOffset timestamp, double deltaSeconds)
