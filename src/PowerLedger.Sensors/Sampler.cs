@@ -21,9 +21,9 @@ public sealed class Sampler : IDisposable
         _maxBackoffTicks = maxBackoffTicks;
     }
 
-    /// <summary>Per-source state for the status screen.</summary>
-    public IReadOnlyList<SourceHealth> Health =>
-        _entries.Select(e => new SourceHealth(e.Source.Name, e.Source.Supported, e.Source.Unavailable, e.Failures, e.SkipUntil, e.LastError)).ToList();
+    /// <summary>Per-source state for the status screen. Asking a source about itself reaches a library or a driver, so
+    /// one that throws there is reported as unsupported rather than taking the whole status screen with it.</summary>
+    public IReadOnlyList<SourceHealth> Health => _entries.Select(Describe).ToList();
 
     /// <summary>One tick. Never throws: a source's failure is recorded, not propagated.</summary>
     public Sample Read(DateTimeOffset timestamp, double deltaSeconds)
@@ -76,6 +76,20 @@ public sealed class Sampler : IDisposable
         finally
         {
             _entries.Clear();
+        }
+    }
+
+    private static SourceHealth Describe(Entry entry)
+    {
+        try
+        {
+            return new SourceHealth(
+                entry.Source.Name, entry.Source.Supported, entry.Source.Unavailable,
+                entry.Failures, entry.SkipUntil, entry.LastError);
+        }
+        catch (Exception error)
+        {
+            return new SourceHealth(entry.Source.Name, false, error.Message, entry.Failures, entry.SkipUntil, entry.LastError);
         }
     }
 

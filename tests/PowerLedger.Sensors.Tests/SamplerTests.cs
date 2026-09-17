@@ -130,8 +130,12 @@ public class SamplerTests
         var sample = Should.NotThrow(() => sampler.Read(T0, 1.0));
 
         sample.Brightness.ShouldBe(0.6);
-        bad.SupportedThrows = null;
-        sampler.Health.Single(h => h.Name == "bad").Failures.ShouldBe(1);
-        sampler.Health.Single(h => h.Name == "bad").LastError.ShouldBe("the library has gone");
+
+        // The status screen asks the same question, so it too is answered rather than thrown at.
+        var health = Should.NotThrow(() => sampler.Health).Single(h => h.Name == "bad");
+        health.Failures.ShouldBe(1);
+        health.LastError.ShouldBe("the library has gone");
+        health.Supported.ShouldBeFalse();
+        health.Unavailable.ShouldBe("the library has gone");
     }
 }

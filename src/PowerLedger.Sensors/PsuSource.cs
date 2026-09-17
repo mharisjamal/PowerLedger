@@ -276,15 +276,15 @@ public sealed class PsuSource : ISensorSource
         _note = note;
         var backoff = ReadEvery * Math.Pow(2, Math.Min(_failures - 1, 10));
         _nextReadAt = now + (backoff < LongestBackoff ? backoff : LongestBackoff);
-        if (_failures >= QuietBeforeLookingAgain && !StillListed()) Forget(now);
+        if (_device is not null && _failures >= QuietBeforeLookingAgain && !StillListed(_device)) Forget(now);
     }
 
     /// <summary>Whether Windows still lists the device this source opened.</summary>
-    private bool StillListed()
+    private bool StillListed(HidDevice device)
     {
         foreach (var listed in Listed())
         {
-            if (string.Equals(listed.Path, _device!.Path, StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(listed.Path, device.Path, StringComparison.OrdinalIgnoreCase)) return true;
         }
 
         return false;
