@@ -83,16 +83,28 @@ internal static class ServiceHost
         return builder.Build();
     }
 
+    /// <summary>
+    /// The owner's tick for reading a power supply over USB, as the loop last put it in force. The sensor thread asks it
+    /// before every read, and the loop replaces its settings whenever the App applies new ones, so the answer comes from
+    /// the status board, which is written for any thread to read. Until the loop has published any settings, and once
+    /// this sensor set has been retired, nothing at all is sent to the device.
+    /// </summary>
+    internal static Func<bool> PowerSupplySwitch(StatusBoard board, CancellationToken retired)
+        => () => !retired.IsCancellationRequested && board.Settings?.Profile.ReadPowerSupply == true;
+
     private static LoopEnvironment LoopEnvironmentFor(IServiceProvider provider, bool asService)
     {
         var signals = provider.GetRequiredService<ServiceSignals>();
         var shutdown = provider.GetRequiredService<ShutdownSignal>();
         var monitors = provider.GetRequiredService<MonitorBoard>();
+        var board = provider.GetRequiredService<StatusBoard>();
         // In session 0 input is invisible, so idle time comes from the App; a console run reads its own session.
         Func<double?>? idle = asService ? signals.UserIdleSeconds : null;
         return new LoopEnvironment(
             Sensors: retired => new MachineSensorSet(MachineSensors.Create(
-                () => signals.DisplayOn, () => signals.SessionLocked, idle, monitorsDetected: found => monitors.Detected(found, retired))),
+                () => signals.DisplayOn, () => signals.SessionLocked, idle,
+                monitorsDetected: found => monitors.Detected(found, retired),
+                readPowerSupply: PowerSupplySwitch(board, retired))),
             Inventory: HardwareInventory.Detect,
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
             SystemShuttingDown: () => shutdown.SystemShuttingDown,
