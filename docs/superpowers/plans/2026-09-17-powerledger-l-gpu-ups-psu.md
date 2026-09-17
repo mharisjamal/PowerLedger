@@ -4,7 +4,7 @@
 AMD's own libraries, an Intel Arc card through Level Zero Sysman, a UPS on USB through the HID power device class, and a
 Corsair, NZXT or Thermaltake power supply through the DC output it reports. A graphics reading that covers only the chip
 or the package counts the rest of the card, and where a UPS or a power supply covers this PC the total comes from it and
-the App says so.
+the App says so. Version 0.5.0.
 
 **Architecture:** Four sensor sources in `PowerLedger.Sensors` — `AmdSource` (ADLX, else ADL2's PMLog), `ArcSource`
 (Level Zero Sysman energy counters), `UpsSource` (HID feature reports) and `PsuSource` (per-family read commands over
@@ -49,18 +49,19 @@ The five worked at once, each in a worktree of its own, and the lead merged each
 model and the screens first, then Arc, the power supply, the UPS and AMD. Two commits followed the last merge: the
 Windows HID calls the UPS and the power supply both make are declared once, with the overlapped reads and writes only a
 power supply needs above them, and the assembled sensor set's health is asked with an expression a query can read, now
-that three libraries may fill a card's watts. `main` holds Plan L's 14 commits, from `e135dfa` to `b6e4df1`.
+that three libraries may fill a card's watts. A whole-branch review followed, and its fixes are on `main` too: Plan L is
+37 commits, from `e135dfa` to `9689e52`.
 
 ## Results
 
-2026-09-17. Built by five parallel agents in one phase, each in a worktree of its own, on the fields the lead had given
-the sample, the frame, the status and the profile first. Nothing is released yet: the version at `b6e4df1` is still
-0.4.1.
+2026-09-17, with the review's fixes on 2026-09-18. Built by five parallel agents in one phase, each in a worktree of its
+own, on the fields the lead had given the sample, the frame, the status and the profile first, and then reviewed as a
+whole branch. The version is now 0.5.0.
 
 **Verified**
 
-- `dotnet build -c Release`: 0 warnings. Every test outside `Hardware` and `Installed`, run at `b6e4df1`: 1,701 pass
-  (Core 181, Storage 49, Sensors 534, Service 243, App 694 with the UI renders).
+- `dotnet build -c Release`: 0 warnings. Every test outside `Hardware` and `Installed`, run at `9689e52`: 1,792 pass
+  (Core 222, Storage 49, Sensors 571, Service 245, App 705 with the UI renders).
 - The 15 Hardware tests in Sensors pass on the development laptop: its HID collections open and their descriptors parse,
   the UPS source and the power supply source each read the machine without throwing and find neither device, the two
   sources see the same devices because one layer lists them, the AMD source says "no AMD driver installed", and the Arc
@@ -73,20 +74,58 @@ the sample, the frame, the status and the profile first. Nothing is released yet
   plugs of their own added, one said to power this PC and its monitors gives it whole, a total from the load of the
   rated volt-amperes is Estimated where the other two ways are Measured, a laptop running on its own battery reads
   neither device, a UPS said to power this PC wins over the power supply and one that powers more leaves the total to
-  it, a power supply's DC output over its efficiency gives the total, the rest band closes the components to the total
-  and goes negative where the parts come to more, and a chip or package reading counts at 1.15 while a modelled one
-  never does.
+  it, a supply's own wall figure is the total undivided and is taken before a DC output, a DC output is divided by the
+  tier's curve at the load carried on a desktop and by the adapter's efficiency on a laptop, nought watts from either
+  device leaves the total to the model, the rest band closes the components to the total and goes negative where the
+  parts come to more, and a chip or package reading counts at 1.15 while a modelled one never does. `PsuEfficiency` has
+  its own tests: the flat figures unchanged, a Gold unit within a point of its certified 20, 50 and 100% points, every
+  tier at its best at half load, and the rating read from names like `RM1000i` and "Toughpower DPS G 750W".
 - Nothing is said to a power supply until the loop has put settings in force, the owner's tick is asked afresh before
   every read, and a sensor set that has been retired says nothing more to the device.
-<!-- lead: review: findings, and the fix for each -->
+
+**Review**: 15 findings, 5 high and 10 medium or minor, all fixed.
+
+- Corsair's own total was read as a DC output and divided by an efficiency, overstating the wall figure; it is read as
+  the AC the unit draws, taken as it is, under a `TotalSource.PowerSupplyWall` of its own.
+- A DC output was divided by the tier's half-load figure, which no supply makes at a low load; it is read off the tier's
+  curve at the load it carries, against the rating in its model name, so a Bronze desktop reading 20 W of a 1,000 W
+  supply now reports 31.4 W at the wall where it reported 23.5 W — an idling desktop reads about a third higher.
+- A laptop read by a power supply was divided by a desktop supply's tier; it uses its adapter's efficiency.
+- Nought watts from a UPS or a supply was taken as a reading and wiped out the machine's whole draw; only watts above
+  zero count, and the total falls through to the next mode.
+- Nothing bounded either device's watts, so a misread unit exponent could bank hours of energy in a second; a UPS is
+  believed up to 5 kW and a supply up to 2 kW, and a figure past that is dropped with the tick marked suspect.
+- A sensor set whose first source threw as it closed leaked the rest; every source is closed in turn, and a source that
+  throws when asked whether it is supported costs only its own fields.
+- A power supply's overlapped transfer could hold a sensor thread for the life of the process; a transfer is waited on
+  for 500 ms and its cancel for 750 ms, and a buffer Windows may still be writing into is abandoned rather than freed.
+- A Thermaltake reply was taken from whatever arrived first, so a supply one reply behind could pair one register's
+  number with another's; a reply must now echo the register it answers.
+- A reader that never let go of a lost ADLX session turned every later reader away for good; a lost session waits five
+  minutes and its stragglers are then written off, so the watts come back without a service restart.
+- A UPS that kept going wrong enumerated every HID device on the machine every five seconds; a failure now waits twice
+  as long as the one before it, up to a minute.
+- A supply the machine no longer had was kept, so no other could be opened; it is let go of, and another put in
+  afterwards is found and read.
+- An Arc card could overwrite the watts AMD's library had already measured, and a graphics source that would not be
+  built left the ones before it open; Arc fills the watts only where nothing else has, and what was built is closed.
+- The status screen showed raw source names and called a supported source with nothing to show "working"; the sources
+  are named in plain words and read "note" with what the source says of itself.
+- The report legend counted every UPS reading as measured, and a desktop was called always estimated although a UPS or a
+  supply measures it; the legend excepts a UPS that only gives its load as a share of its rated VA, and Now's status
+  bar, Settings' calibration line and the wizard's Readings step now say what measures the desktop and name it.
+- The claim that a UPS stays read-only because its collection is opened with no access was wrong about the reason; what
+  keeps it read-only is that no call which writes exists on that path, while the zero-access open is what lets Windows
+  share the collection beside its own driver.
+
 <!-- lead: installers at full compression: universal, x64 and Arm64 sizes -->
 <!-- lead: Windows Sandbox, end to end: N of N, and what the run covered -->
 <!-- lead: CI run and both jobs' results -->
 <!-- lead: release link -->
 
-**Deviations from the design**: the design divides a power supply's DC output by its efficiency at that load, from its
-80 PLUS tier's curve; the model divides by the one figure the tier gives (`PsuEfficiency.For`), the same number the AC
-model has always used, so the load is not taken into account. ADL2 is taken not only where ADLX is missing but also
+**Deviations from the design**: the design has been brought in line where the review changed the answer — Corsair's own
+total is the wall draw and a DC output is read off the tier's curve — so what remains is smaller. ADL2 is taken not only
+where ADLX is missing but also
 where ADLX is installed and would not start or would not list the machine's cards, and a library that would not start is
 opened again a minute later rather than settled, because ADLX answers nobody in session 0 until a user logs on. Not in
 the design: where several UPSes are attached only the first is read and the status says so; a UPS that stops answering
@@ -101,4 +140,8 @@ ADLX, ADL and Level Zero answer from the service in session 0 is untested; where
 load estimate as before. A UPS reports its load in whole percents, so a total taken from the load moves in steps of 1%
 of the rating, 5 to 9 W on a consumer unit, and the UPS's own overhead is not counted. Corsair's AXi, which needs a
 vendor driver, and ASUS's ROG Thor, whose protocol is not published, are not read. The 1.15 factor rests on published
-measurements of two cards, not on a card measured here.
+measurements of two cards, not on a card measured here. Reading Corsair's own total as the wall draw is reasoned, not
+measured: a figure above the sum of the unit's own rails can only be an input figure, and the conclusive check, that
+figure against the rails read one by one, needs a write to the page register that PowerLedger's rules turn down. If it
+is the DC output after all, the wall figure is low by the supply's losses rather than high by them, which is the way
+round that cannot quietly overstate what a wall meter will show.
