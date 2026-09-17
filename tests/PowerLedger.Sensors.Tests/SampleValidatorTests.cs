@@ -10,11 +10,12 @@ public class SampleValidatorTests
 
     private static Sample Raw(
         double? cpu = 15, double? gpu = 5, double? battery = null, bool onBattery = false,
-        double cpuLoad = 0.3, double? brightness = 0.6, int second = 0, double? ups = null, double? psu = null)
+        double cpuLoad = 0.3, double? brightness = 0.6, int second = 0, double? ups = null, double? psu = null,
+        double? wall = null)
         => new(T0.AddSeconds(second), 1.0, cpu, null, cpuLoad, gpu, 0.2, DGpuPresent: true,
                battery, onBattery, brightness, DisplayOn: true, MonitorCount: 1,
                UserIdleSeconds: 0, SessionLocked: false, Suspect: false,
-               UpsOutputW: ups, PsuOutputW: psu);
+               UpsOutputW: ups, PsuOutputW: psu, PsuWallW: wall);
 
     [Fact]
     public void A_plain_reading_passes_through_untouched()
@@ -197,6 +198,21 @@ public class SampleValidatorTests
         validator.SuspectCount.ShouldBe(1);
     }
 
+    [Theory]
+    [InlineData(2001.0)]
+    [InlineData(-1.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void A_wall_reading_outside_the_same_range_is_dropped_and_the_tick_marked_suspect(double watts)
+    {
+        // What a supply says it draws from the wall is the total on its own, so it needs the ceiling most of all.
+        var validator = new SampleValidator();
+        var checked_ = validator.Validate(Raw(wall: watts));
+        checked_.PsuWallW.ShouldBeNull();
+        checked_.Suspect.ShouldBeTrue();
+        validator.SuspectCount.ShouldBe(1);
+    }
+
     [Fact]
     public void A_ups_and_a_power_supply_are_believed_up_to_their_ceilings_and_a_zero_is_left_to_the_model()
     {
@@ -205,11 +221,13 @@ public class SampleValidatorTests
         ceiling.UpsOutputW.ShouldBe(5000);
         ceiling.PsuOutputW.ShouldBe(2000);
         ceiling.Suspect.ShouldBeFalse();
+        validator.Validate(Raw(wall: 2000, second: 1)).PsuWallW.ShouldBe(2000);
 
         // Nought watts is in range here: refusing to make it the whole total is the model's job, not the validator's.
-        var zero = validator.Validate(Raw(ups: 0, psu: 0, second: 1));
+        var zero = validator.Validate(Raw(ups: 0, psu: 0, wall: 0, second: 2));
         zero.UpsOutputW.ShouldBe(0);
         zero.PsuOutputW.ShouldBe(0);
+        zero.PsuWallW.ShouldBe(0);
         zero.Suspect.ShouldBeFalse();
         validator.SuspectCount.ShouldBe(0);
     }
@@ -218,12 +236,13 @@ public class SampleValidatorTests
     public void A_whole_machine_reading_is_never_spike_filtered_because_a_jump_to_load_is_real()
     {
         var validator = new SampleValidator();
-        for (var i = 0; i < 30; i++) validator.Validate(Raw(ups: 40, psu: 30, second: i));
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(ups: 40, psu: 30, wall: 35, second: i));
 
-        var load = validator.Validate(Raw(ups: 400, psu: 300, second: 30));
+        var load = validator.Validate(Raw(ups: 400, psu: 300, wall: 350, second: 30));
 
         load.UpsOutputW.ShouldBe(400);
         load.PsuOutputW.ShouldBe(300);
+        load.PsuWallW.ShouldBe(350);
         load.Suspect.ShouldBeFalse();
     }
 
@@ -245,14 +264,16 @@ public class SampleValidatorTests
         strict.Validate(Raw(gpu: 15, second: 3)).DGpuW.ShouldBe(5);
 
         var bounded = new SampleValidator(new ValidatorOptions(UpsMaxW: 100, PsuMaxW: 50));
-        var over = bounded.Validate(Raw(ups: 101, psu: 51));
+        var over = bounded.Validate(Raw(ups: 101, psu: 51, wall: 51));
         over.UpsOutputW.ShouldBeNull();
         over.PsuOutputW.ShouldBeNull();
+        over.PsuWallW.ShouldBeNull();
         over.Suspect.ShouldBeTrue();
 
-        var under = bounded.Validate(Raw(ups: 100, psu: 50, second: 1));
+        var under = bounded.Validate(Raw(ups: 100, psu: 50, wall: 50, second: 1));
         under.UpsOutputW.ShouldBe(100);
         under.PsuOutputW.ShouldBe(50);
+        under.PsuWallW.ShouldBe(50);
         under.Suspect.ShouldBeFalse();
     }
 }

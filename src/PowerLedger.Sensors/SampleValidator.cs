@@ -55,6 +55,7 @@ public sealed class SampleValidator
         // are range-checked like the rest and, like the CPU's, never spike-filtered: a jump from idle to load is a fact.
         var ups = InRange(raw.UpsOutputW, _options.UpsMaxW, ref suspect);
         var psu = InRange(raw.PsuOutputW, _options.PsuMaxW, ref suspect);
+        var wall = InRange(raw.PsuWallW, _options.PsuMaxW, ref suspect);
 
         var brightness = Fraction(raw.Brightness, ref suspect);
         var load = Fraction(raw.CpuLoad, ref suspect) ?? 0;
@@ -72,6 +73,7 @@ public sealed class SampleValidator
             DGpuLoad = gpuLoad,
             UpsOutputW = ups,
             PsuOutputW = psu,
+            PsuWallW = wall,
             Suspect = suspect,
         };
     }
