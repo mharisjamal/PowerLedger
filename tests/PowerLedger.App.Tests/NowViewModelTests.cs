@@ -439,7 +439,7 @@ public class NowViewModelTests
         _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
         var model = Model();
         _link.Connect(true);
-        model.Status.Calibration.ShouldBe("Desktop · always estimated");
+        model.Status.Calibration.ShouldBe("Desktop · estimated");
     }
 
     [Fact]
@@ -452,7 +452,23 @@ public class NowViewModelTests
 
         _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
         _clock.Advance(NowViewModel.StatusEvery);
-        model.Status.Calibration.ShouldBe("Desktop · always estimated");
+        model.Status.Calibration.ShouldBe("Desktop · estimated");
+    }
+
+    [Fact]
+    public void A_desktop_whose_total_is_measured_from_a_ups_or_power_supply_is_not_called_estimated()
+    {
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
+        _link.Status = Statuses.Running() with { Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.Ups } };
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        model.Status.Calibration.ShouldBe("Desktop · measured");
+
+        // A UPS that only gives its load as a share of its rated VA is stored as Estimated, so it still reads so here.
+        _link.Status = Statuses.Running() with { Last = Frames.At(Now, quality: Quality.Estimated) with { Total = TotalSource.Ups } };
+        _clock.Advance(NowViewModel.StatusEvery);
+        model.Status.Calibration.ShouldBe("Desktop · estimated");
     }
 
     [Fact]

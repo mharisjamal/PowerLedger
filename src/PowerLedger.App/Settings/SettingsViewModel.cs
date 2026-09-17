@@ -278,8 +278,11 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         var c = status.Calibration;
         var learned = Format.Duration(c.BatterySamples * _sampleSeconds / 3600.0);
         // The battery on a desktop is a UPS, which powers more than the machine, so a desktop's readings never use it.
+        // A UPS or power supply reading is measured rather than estimated, so only "not used" always holds, not "estimated".
         Calibration = _chassis == ChassisKind.Desktop
-            ? "Not used on a desktop: its readings are always estimated."
+            ? status.Last?.Quality == Quality.Measured
+                ? "Not used on a desktop: a UPS or power supply measures its readings."
+                : "Not used on a desktop: it has no battery, so its readings are estimated."
             : c.TrustedBuckets > 0
                 ? $"Learned from {learned} on battery; {c.TrustedBuckets.ToString(_culture)} of {c.Buckets.ToString(_culture)} brightness levels trusted."
                 : $"Learning on battery: {learned} of {Format.Duration(c.SamplesNeeded * _sampleSeconds / 3600.0)} needed.";

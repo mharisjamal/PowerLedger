@@ -49,9 +49,26 @@ public class SettingsViewModelTests
         var model = Model();
         model.Show();
 
-        model.Calibration.ShouldBe("Not used on a desktop: its readings are always estimated.");
+        model.Calibration.ShouldBe("Not used on a desktop: it has no battery, so its readings are estimated.");
         _clock.Advance(SettingsViewModel.StatusEvery);
-        model.Calibration.ShouldBe("Not used on a desktop: its readings are always estimated.");
+        model.Calibration.ShouldBe("Not used on a desktop: it has no battery, so its readings are estimated.");
+    }
+
+    [Fact]
+    public void A_desktop_whose_total_is_measured_from_a_ups_or_power_supply_is_not_told_its_readings_are_estimated()
+    {
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
+        _link.Status = Statuses.Running() with { Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.PowerSupply } };
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.Calibration.ShouldBe("Not used on a desktop: a UPS or power supply measures its readings.");
+
+        // A UPS that only gives its load as a share of its rated VA is stored as Estimated, so it still reads so here.
+        _link.Status = Statuses.Running() with { Last = Frames.At(Now, quality: Quality.Estimated) with { Total = TotalSource.Ups } };
+        _clock.Advance(SettingsViewModel.StatusEvery);
+        model.Calibration.ShouldBe("Not used on a desktop: it has no battery, so its readings are estimated.");
     }
 
     [Fact]
@@ -256,7 +273,7 @@ public class SettingsViewModelTests
         model.Calibration.ShouldBe("Learning on battery: 30m of 1h 00m needed.");
 
         model.Service.Chassis = ChassisKind.Desktop;
-        model.Calibration.ShouldBe("Not used on a desktop: its readings are always estimated.");
+        model.Calibration.ShouldBe("Not used on a desktop: it has no battery, so its readings are estimated.");
     }
 
     [Fact]

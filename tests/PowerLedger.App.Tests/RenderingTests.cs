@@ -419,6 +419,99 @@ public class RenderingTests
                 => part.TranslatePoint(new Point(part.ActualWidth, 0), scroller).X.ShouldBeLessThanOrEqualTo(scroller.ViewportWidth + 0.5, what);
         });
 
+    /// <summary>The new sources (spec: GPU/UPS/PSU) are named in Settings, a UPS not yet found reads sensibly rather than
+    /// "working", and neither the Settings calibration line nor Now's status bar calls a desktop's readings estimated
+    /// when a UPS or power supply measures them.</summary>
+    [Fact]
+    public void A_desktop_with_a_measured_ups_or_power_supply_reading_is_named_and_worded_without_clipping()
+        => OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+
+                var settingsLink = new FakeLink
+                {
+                    Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop },
+                    Status = Statuses.Running() with
+                    {
+                        Sources =
+                        [
+                            new SourceStatus("arc-gpu", false, "no Intel Arc discrete GPU", 0, null),
+                            new SourceStatus("ups", true, "no UPS found on USB", 0, null),
+                            new SourceStatus("power-supply", true, null, 0, null),
+                        ],
+                        PowerDevices = [Statuses.Ups, Statuses.PowerSupply],   // so the "Power supply" placeholder label stays empty
+                        Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.PowerSupply },
+                    },
+                };
+                settingsLink.Connect(true);
+                var settings = new SettingsViewModel(settingsLink, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline,
+                    new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, "USD");
+                settings.Show();
+                var settingsView = new SettingsView { DataContext = settings };
+                var settingsWindow = new Window
+                {
+                    Content = settingsView, Width = 880, Height = 900, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                settingsWindow.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    var scroller = settingsView.Content.ShouldBeOfType<ScrollViewer>();
+                    string[] lines =
+                    [
+                        "Intel Arc graphics", "not on this machine", "no Intel Arc discrete GPU",
+                        "UPS", "note", "no UPS found on USB",
+                        "Power supply", "working",
+                        "Not used on a desktop: a UPS or power supply measures its readings.",
+                    ];
+                    foreach (var text in lines)
+                    {
+                        var line = Find<TextBlock>(settingsView, block => block.Text == text).ShouldNotBeNull($"{text} on {theme}");
+                        line.IsVisible.ShouldBeTrue($"{text} on {theme}");
+                        line.TranslatePoint(new Point(line.ActualWidth, 0), scroller).X.ShouldBeLessThanOrEqualTo(scroller.ViewportWidth + 0.5, $"{text} on {theme}");
+                    }
+                    Save(settingsWindow, 880, 900, $"desktop-sources-settings-{theme}.png");
+                }
+                finally
+                {
+                    settingsWindow.Close();
+                }
+
+                using var saver = new FakeSaver();
+                var nowLink = new FakeLink
+                {
+                    Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop },
+                    Status = Statuses.Running() with { Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.Ups } },
+                };
+                var now = new NowViewModel(nowLink, new FakeHistory(), UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English,
+                    co2KgPerKwh: 0.38, startService: () => { });
+                now.Start();
+                nowLink.Connect(true);
+                var shell = new ShellViewModel(now, BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.1.0");
+                shell.Page = Page.Now;
+                var nowWindow = new MainWindow
+                {
+                    DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                };
+                nowWindow.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(1200));
+                    var chip = Find<TextBlock>(nowWindow, t => t.Text == "Desktop · measured").ShouldNotBeNull($"now chip on {theme}");
+                    chip.IsVisible.ShouldBeTrue($"now chip on {theme}");
+                    chip.TranslatePoint(new Point(chip.ActualWidth, 0), nowWindow).X.ShouldBeLessThanOrEqualTo(nowWindow.ActualWidth + 0.5, $"now chip on {theme}");
+                    Save(nowWindow, (int)nowWindow.ActualWidth, (int)nowWindow.ActualHeight, $"desktop-now-{theme}.png");
+                }
+                finally
+                {
+                    nowWindow.Close();
+                }
+            }
+        });
+
     [Fact]
     public void The_update_card_draws_in_the_rail_in_both_themes()
     {
