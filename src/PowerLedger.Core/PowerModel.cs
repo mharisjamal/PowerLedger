@@ -5,15 +5,16 @@ namespace PowerLedger.Core;
 /// <summary>
 /// Turns one <see cref="Sample"/> into a <see cref="Reading"/> (spec §5).
 /// The total comes from the first of these that applies: a laptop's battery discharge rate while it runs on its battery;
-/// the output of a UPS the user says powers this PC, alone or with its monitors; a power supply's DC output over the
-/// efficiency of whatever feeds this machine, a desktop's supply or a laptop's adapter; and otherwise the model, which sums
-/// the parts with a learned (laptop) or default "rest of system" baseline and divides by that same efficiency. Each of the
-/// three measured totals counts only above zero, since a machine that runs draws something. A UPS or power supply total
-/// keeps the model's parts, and the rest is what the total leaves of them. The external monitors draw what the
-/// <see cref="IMonitorDraw"/> says (nothing, when the model is given none). A monitor with a plug of its own is added
-/// after the efficiency division, and on top of a measured rate or a power supply's reading; a UPS that powers the
-/// monitors too already holds it. One running off the PC, as a portable monitor on a laptop's USB-C port does, draws
-/// through the PC's supply or battery, so it goes inside the division and is already in every reading.
+/// the output of a UPS the user says powers this PC, alone or with its monitors; what a power supply says it draws from the
+/// wall, which is a total already, or else its DC output over the efficiency of whatever feeds this machine, a desktop's
+/// supply read at the load it is carrying or a laptop's adapter; and otherwise the model, which sums the parts with a
+/// learned (laptop) or default "rest of system" baseline and divides by that same efficiency. Each of the measured totals
+/// counts only above zero, since a machine that runs draws something. A UPS or power supply total keeps the model's
+/// parts, and the rest is what the total leaves of them. The external monitors draw what the <see cref="IMonitorDraw"/>
+/// says (nothing, when the model is given none). A monitor with a plug of its own is added after the efficiency
+/// division, and on top of a measured rate or a power supply's reading; a UPS that powers the monitors too already
+/// holds it. One running off the PC, as a portable monitor on a laptop's USB-C port does, draws through the PC's supply
+/// or battery, so it goes inside any division and is already in every reading.
 /// </summary>
 public sealed class PowerModel
 {
@@ -132,13 +133,23 @@ public sealed class PowerModel
             var upsQuality = s.UpsSource == UpsPowerSource.LoadOfRatedVoltAmps ? Quality.Estimated : Quality.Measured;
             return Build(s, total, upsQuality, WithRest(parts, total), userIdle, TotalSource.Ups);
         }
+        if (!onItsBattery && WallWatts(s) is { } wall)
+        {
+            // What the supply says it draws from the wall is the whole draw already, its own losses and all, so nothing is
+            // divided and no loss is worked out: what it holds of the supply's is no more knowable than the rest of it.
+            var wallTotal = wall + monitors.OwnPlug;
+            return Build(s, wallTotal, Quality.Measured, WithRest(parts with { PsuLoss = 0 }, wallTotal), userIdle, TotalSource.PowerSupply);
+        }
         if (!onItsBattery && PowerSupplyWatts(s) is { } output)
         {
-            // The power supply draws its DC output over its efficiency from the wall, and loses the difference. The
-            // efficiency is the one this machine is fed through, which on a laptop is its adapter's and not a supply tier.
-            var wall = output / efficiency;
-            var total = wall + monitors.OwnPlug;
-            return Build(s, total, Quality.Measured, WithRest(parts with { PsuLoss = wall - output }, total), userIdle, TotalSource.PowerSupply);
+            // The power supply draws its DC output over its efficiency from the wall, and loses the difference. A desktop's
+            // supply is read off its tier's curve at the load it is carrying, since one idling at a fraction of its rating
+            // is far below the figure its tier certifies; a laptop is fed by an adapter, whose efficiency this tick's own
+            // loss already used, and no supply tier describes it.
+            var supply = isLaptop ? efficiency : PsuEfficiency.For(_profile.PsuTier, output, s.PsuName);
+            var drawn = output / supply;
+            var total = drawn + monitors.OwnPlug;
+            return Build(s, total, Quality.Measured, WithRest(parts with { PsuLoss = drawn - output }, total), userIdle, TotalSource.PowerSupply);
         }
         return Build(s, beforePsu + psuLoss + monitors.OwnPlug, quality, parts, userIdle, TotalSource.Model);
     }
@@ -169,6 +180,12 @@ public sealed class PowerModel
     /// reading of a running machine's rails, for the same reason a UPS's is not.</summary>
     private double? PowerSupplyWatts(Sample s)
         => _profile.ReadPowerSupply && Finite(s.PsuOutputW) is { } watts && watts > 0 ? watts : null;
+
+    /// <summary>The wall watts a power supply gave, for the units that report what they draw rather than what their rails
+    /// put out (see <see cref="Sample.PsuWallW"/>), under the same rules as the DC figure. A supply reports one or the
+    /// other and never both; this one is taken first, because it is the machine's draw without an efficiency assumed.</summary>
+    private double? WallWatts(Sample s)
+        => _profile.ReadPowerSupply && Finite(s.PsuWallW) is { } watts && watts > 0 ? watts : null;
 
     private double CpuWatts(Sample s)
     {
