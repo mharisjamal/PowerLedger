@@ -136,6 +136,9 @@ internal sealed unsafe class FakeAdlx : IDisposable
 
     public AdlxLibrary Library => new(&Start, &Stop);
 
+    /// <summary>The same library on a clock the test drives, for the waits it keeps.</summary>
+    public AdlxLibrary LibraryOn(Func<TimeSpan> clock) => new(&Start, &Stop, clock);
+
     public void Dispose()
     {
         foreach (var handle in _handles) handle.Free();

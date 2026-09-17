@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using PowerLedger.Contracts;
 
@@ -271,9 +272,19 @@ internal sealed unsafe class Adlx : IAmdGpu
 /// ADLX is started and stopped for the whole process, not for each caller, so the readers share one session and the
 /// last one out stops it. A session the library has lost is never stopped while another reader still holds interfaces
 /// from it, because stopping it would leave those pointing at memory that is no longer theirs.
+///
+/// A reader that never lets go — one wedged inside the library, or dropped without being closed — would hold a lost
+/// session open for ever and turn every later reader away, so a lost session is only waited on for
+/// <see cref="OrphanGrace"/>. After that the readers still counted are written off and a new session is started
+/// beside them; ADLX is then never stopped again for the life of the process, since one of those readers may still
+/// be holding interfaces from the session before.
 /// </summary>
 internal sealed unsafe class AdlxLibrary
 {
+    /// <summary>How long a lost session waits for its last readers before they are taken to be gone for good. Long
+    /// enough that a reader merely busy is never written off, short enough that the watts come back on their own.</summary>
+    public static readonly TimeSpan OrphanGrace = TimeSpan.FromMinutes(5);
+
     /// <summary>ADLX_FULL_VERSION for SDK 2.0.0.125: the major, minor, release and build numbers packed into 16 bits
     /// each. ADLX keeps older callers working, and answers a caller that asks for more than the installed driver has
     /// with the part it does have.</summary>
@@ -288,15 +299,21 @@ internal sealed unsafe class AdlxLibrary
 
     private readonly delegate* unmanaged[Cdecl]<ulong, nint*, int> _initialize;
     private readonly delegate* unmanaged[Cdecl]<int> _terminate;
+    private readonly Func<TimeSpan> _clock;
     private readonly Lock _gate = new();
     private nint _system;
     private int _readers;
     private bool _lost;
+    private TimeSpan? _lostAt;
+    private bool _orphaned;
 
-    internal AdlxLibrary(delegate* unmanaged[Cdecl]<ulong, nint*, int> initialize, delegate* unmanaged[Cdecl]<int> terminate)
+    internal AdlxLibrary(
+        delegate* unmanaged[Cdecl]<ulong, nint*, int> initialize, delegate* unmanaged[Cdecl]<int> terminate,
+        Func<TimeSpan>? clock = null)
     {
         _initialize = initialize;
         _terminate = terminate;
+        _clock = clock ?? Elapsed();
     }
 
     /// <summary>The installed library, or null when this machine has no AMD driver or too old a one.</summary>
@@ -314,8 +331,9 @@ internal sealed unsafe class AdlxLibrary
                 return Ok;
             }
 
-            // A lost session still has readers holding its interfaces, so a new one has to wait for them to finish.
-            if (_readers > 0)
+            // A lost session still has readers holding its interfaces, so a new one has to wait for them to finish —
+            // but only for a while. One that is never coming back would otherwise settle nothing for ever.
+            if (_readers > 0 && !WrittenOff())
             {
                 system = 0;
                 return OrphanObjects;
@@ -328,22 +346,49 @@ internal sealed unsafe class AdlxLibrary
             _system = started;
             _readers = 1;
             _lost = false;
+            _lostAt = null;
             return Ok;
         }
     }
 
-    /// <summary>A reader that has let go of every interface it took. The last one out stops ADLX.</summary>
+    /// <summary>A reader that has let go of every interface it took. The last one out stops ADLX, unless readers of a
+    /// session before it have been written off, in which case one of them may still hold interfaces and the library is
+    /// left running.</summary>
     public void Leave(bool lost)
     {
         lock (_gate)
         {
             if (_readers == 0) return;
-            _lost |= lost;
+            if (lost && !_lost)
+            {
+                _lost = true;
+                _lostAt = _clock();
+            }
             if (--_readers > 0) return;
-            _terminate();
+            if (!_orphaned) _terminate();
             _system = 0;
             _lost = false;
+            _lostAt = null;
         }
+    }
+
+    /// <summary>Whether the readers a lost session is still waiting on have been waited for long enough to be taken as
+    /// gone. Writing them off leaves the library running for good, because they may still be holding its interfaces.</summary>
+    private bool WrittenOff()
+    {
+        _lostAt ??= _clock();
+        if (_clock() - _lostAt.Value < OrphanGrace) return false;
+        _orphaned = true;
+        _readers = 0;
+        _lost = false;
+        _lostAt = null;
+        return true;
+    }
+
+    private static Func<TimeSpan> Elapsed()
+    {
+        var clock = Stopwatch.StartNew();
+        return () => clock.Elapsed;
     }
 
     private static AdlxLibrary? Load()

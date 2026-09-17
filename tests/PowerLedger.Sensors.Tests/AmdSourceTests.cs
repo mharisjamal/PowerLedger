@@ -406,6 +406,62 @@ public unsafe class AmdSourceTests
     }
 
     [Fact]
+    public void A_reader_that_never_lets_go_is_written_off_so_the_watts_come_back_without_a_restart()
+    {
+        // A reader wedged inside the library, or dropped without being closed, never calls Leave. Its lost session
+        // would otherwise keep a count of one for ever and every later reader would be turned away for good: AMD's
+        // watts would not come back until the service was restarted.
+        var now = TimeSpan.Zero;
+        using var adlx = new FakeAdlx(new FakeAdlxGpu { MeasuresBoard = true });
+        var library = adlx.LibraryOn(() => now);
+        var stuck = Adlx.Open(library).Gpu.ShouldNotBeNull();
+        var second = Adlx.Open(library).Gpu.ShouldNotBeNull();
+
+        adlx.ReadResult = OrphanObjects;                    // the user logged off
+        second.Read().Lost.ShouldBeTrue();
+        second.Dispose();                                   // and this one let go; the stuck one never will
+
+        Adlx.Open(library).State.ShouldBe(AmdLibrary.WouldNotStart);
+
+        now += AdlxLibrary.OrphanGrace - TimeSpan.FromSeconds(1);
+        Adlx.Open(library).State.ShouldBe(AmdLibrary.WouldNotStart);
+
+        now += TimeSpan.FromSeconds(2);
+        var again = Adlx.Open(library).Gpu.ShouldNotBeNull();
+        adlx.Starts.ShouldBe(2);
+
+        // The written-off reader may still hold interfaces from the old session, so ADLX is never stopped again: a
+        // library left running for the life of the process beats one torn out from under a live pointer.
+        again.Dispose();
+        adlx.Stops.ShouldBe(0);
+
+        GC.KeepAlive(stuck);
+    }
+
+    [Fact]
+    public void The_wait_for_an_orphan_is_measured_from_the_moment_the_session_was_lost()
+    {
+        var now = TimeSpan.Zero;
+        using var adlx = new FakeAdlx(new FakeAdlxGpu { MeasuresBoard = true });
+        var library = adlx.LibraryOn(() => now);
+
+        // A whole grace period of ordinary reading is no reason to write the other reader off the moment it is needed.
+        var first = Adlx.Open(library).Gpu.ShouldNotBeNull();
+        now += AdlxLibrary.OrphanGrace * 2;
+        var second = Adlx.Open(library).Gpu.ShouldNotBeNull();
+        adlx.ReadResult = OrphanObjects;
+        second.Read().Lost.ShouldBeTrue();
+        second.Dispose();
+
+        Adlx.Open(library).State.ShouldBe(AmdLibrary.WouldNotStart);
+        adlx.Starts.ShouldBe(1);
+
+        // The reader that is still there lets go in good time, so nothing is written off and ADLX stops as it should.
+        first.Dispose();
+        adlx.Stops.ShouldBe(1);
+    }
+
+    [Fact]
     public void The_version_asked_for_is_the_published_one()
     {
         using var adlx = new FakeAdlx(new FakeAdlxGpu { MeasuresBoard = true });
