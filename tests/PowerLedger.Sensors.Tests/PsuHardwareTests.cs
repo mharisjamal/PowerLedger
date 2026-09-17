@@ -11,17 +11,29 @@ namespace PowerLedger.Sensors.Tests;
 public class PsuHardwareTests
 {
     [Fact]
+    public void The_ups_and_the_power_supply_see_the_same_devices_because_one_layer_lists_them()
+    {
+        // The UPS source lists collections to read their descriptors and this one to match ids against its table.
+        // Both ask the one native layer, so every device a power supply port finds is a collection the UPS's lists.
+        var interfaces = new WindowsHid().Interfaces().Select(path => path.Path).ToList();
+        var devices = new WindowsHidPort().Find(static (_, _) => true).Select(device => device.Path).ToList();
+
+        devices.ShouldNotBeEmpty();
+        devices.ShouldBeSubsetOf(interfaces);
+    }
+
+    [Fact]
     public void Windows_lists_its_hid_devices_and_says_which_of_them_are_power_supplies()
     {
-        var hid = new WindowsHid();
+        var hid = new WindowsHidPort();
 
         var all = hid.Find(static (_, _) => true);
         var supplies = hid.Find(PsuModels.Known);
 
-        // Any PC has a keyboard or a touchpad on HID, and each collection says how long its reports are.
+        // Any PC has a keyboard or a touchpad on HID, and each device says how long its reports are.
         all.ShouldNotBeEmpty();
-        all.ShouldAllBe(collection => collection.Path.Length > 0 && collection.InputReportLength >= 0);
-        supplies.ShouldAllBe(collection => PsuModels.Known(collection.VendorId, collection.ProductId));
+        all.ShouldAllBe(device => device.Path.Length > 0 && device.InputReportLength >= 0);
+        supplies.ShouldAllBe(device => PsuModels.Known(device.VendorId, device.ProductId));
         supplies.Count.ShouldBeLessThanOrEqualTo(all.Count);
     }
 
@@ -33,7 +45,7 @@ public class PsuHardwareTests
 
         Should.NotThrow(() => source.Contribute(draft));
 
-        if (new WindowsHid().Find(PsuModels.Known).Count == 0)
+        if (new WindowsHidPort().Find(PsuModels.Known).Count == 0)
         {
             // The development laptop: nothing to read, and the source says so rather than inventing a figure.
             draft.PsuOutputW.ShouldBeNull();

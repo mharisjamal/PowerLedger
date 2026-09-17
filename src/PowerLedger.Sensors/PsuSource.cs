@@ -37,7 +37,7 @@ public sealed class PsuSource : ISensorSource
     private readonly Action<TimeSpan> _pause;
     private readonly TimeSpan _lookUntil;
 
-    private HidCollection? _collection;
+    private HidDevice? _device;
     private PsuModel? _model;
     private PsuSession? _session;
     private string? _name;
@@ -52,7 +52,7 @@ public sealed class PsuSource : ISensorSource
     /// <param name="readPowerSupply">The owner's tick in Settings, read afresh every time: while it answers false
     /// nothing at all is sent to the device. Leave it null where there is nobody to ask, which reads no supply.</param>
     public PsuSource(Func<bool>? readPowerSupply = null)
-        : this(new WindowsHid(), readPowerSupply ?? (static () => false), RunningPrograms, Uptime, Thread.Sleep)
+        : this(new WindowsHidPort(), readPowerSupply ?? (static () => false), RunningPrograms, Uptime, Thread.Sleep)
     {
     }
 
@@ -73,11 +73,11 @@ public sealed class PsuSource : ISensorSource
     public string Name => "power-supply";
 
     /// <summary>True while a supply is there to read, and while there is still time for one to turn up.</summary>
-    public bool Supported => _collection is not null || _clock() < _lookUntil;
+    public bool Supported => _device is not null || _clock() < _lookUntil;
 
     /// <summary>Why there is no reading: no supply, one the owner has turned off, one left to its maker's program, or
     /// one that did not answer. Null while a supply is being read.</summary>
-    public string? Unavailable => _collection is null
+    public string? Unavailable => _device is null
         ? (_clock() < _lookUntil ? "looking for a power supply on USB" : PsuModels.NoneFound)
         : _note;
 
@@ -127,11 +127,11 @@ public sealed class PsuSource : ISensorSource
     private void Fill(SampleDraft draft)
     {
         var now = _clock();
-        if (_collection is null)
+        if (_device is null)
         {
             if (now < _nextLookAt || now >= _lookUntil) return;
             Look(now);
-            if (_collection is null) return;
+            if (_device is null) return;
         }
 
         try
@@ -177,18 +177,18 @@ public sealed class PsuSource : ISensorSource
     private void Look(TimeSpan now)
     {
         _nextLookAt = now + LookEvery;
-        foreach (var collection in Listed())
+        foreach (var listed in Listed())
         {
-            if (PsuModels.Find(collection.VendorId, collection.ProductId) is not { } model) continue;
-            if (collection.OutputReportLength < SmallestReport || collection.InputReportLength < SmallestReport) continue;
-            _collection = collection;
+            if (PsuModels.Find(listed.VendorId, listed.ProductId) is not { } model) continue;
+            if (listed.OutputReportLength < SmallestReport || listed.InputReportLength < SmallestReport) continue;
+            _device = listed;
             _model = model;
             _name = model.Name;
             return;
         }
     }
 
-    private IReadOnlyList<HidCollection> Listed()
+    private IReadOnlyList<HidDevice> Listed()
     {
         try
         {
@@ -226,8 +226,8 @@ public sealed class PsuSource : ISensorSource
 
     private PsuSession? Start()
     {
-        if (_hid.Open(_collection!) is not { } link) return null;
-        var wire = new PsuWire(link, _collection!.OutputReportLength, Rules(_model!.Family), _clock, _pause);
+        if (_hid.Open(_device!) is not { } link) return null;
+        var wire = new PsuWire(link, _device!.OutputReportLength, Rules(_model!.Family), _clock, _pause);
         return _model.Family switch
         {
             PsuFamily.Corsair => new CorsairSession(wire),

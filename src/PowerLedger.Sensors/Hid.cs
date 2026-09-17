@@ -149,49 +149,21 @@ internal interface IHidCollection : IDisposable
 }
 
 /// <summary>
-/// The Windows calls for reading HID feature reports: SetupAPI lists the collections and the HID parser reads them.
-/// Nothing here writes to a device. The only call that reaches a device at all is <c>HidD_GetFeature</c>, which asks
-/// it for a report, so PowerLedger can never change how a UPS behaves. Every method answers with null or nothing
-/// rather than throwing when Windows declines, so the source above can decide what a missing answer means.
+/// Reading HID feature reports, over the shared calls in <see cref="HidNative"/>: SetupAPI lists the collections and
+/// the HID parser reads them. Nothing here writes to a device. The only call that reaches a device at all is
+/// <c>HidD_GetFeature</c>, which asks it for a report, so PowerLedger can never change how a UPS behaves. A collection
+/// is opened with no access at all, which cannot write whatever this class asked. Every method answers with null or
+/// nothing rather than throwing when Windows declines, so the source above can decide what a missing answer means.
 /// </summary>
 internal sealed class WindowsHid : IHid
 {
-    private const uint DigcfPresent = 0x02;
-    private const uint DigcfDeviceInterface = 0x10;
-    private const uint FileShareRead = 0x01;
-    private const uint FileShareWrite = 0x02;
-    private const uint OpenExisting = 3;
-
-    /// <summary>GUID_DEVINTERFACE_HID, the interface every HID collection publishes.</summary>
-    private static readonly Guid HidInterface = new(0x4d1e55b2, 0xf16f, 0x11cf, 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30);
-
-    public IReadOnlyList<HidPath> Interfaces()
-    {
-        var guid = HidInterface;
-        var set = SetupDiGetClassDevsW(ref guid, IntPtr.Zero, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
-        if (set == new IntPtr(-1)) return [];
-
-        var found = new List<HidPath>();
-        try
-        {
-            var element = new DeviceInterfaceData { Size = (uint)Marshal.SizeOf<DeviceInterfaceData>() };
-            for (uint index = 0; SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref guid, index, ref element); index++)
-            {
-                if (PathOf(set, ref element) is { } path) found.Add(path);
-            }
-        }
-        finally
-        {
-            SetupDiDestroyDeviceInfoList(set);
-        }
-        return found;
-    }
+    public IReadOnlyList<HidPath> Interfaces() => HidNative.Interfaces();
 
     public IHidCollection? Open(HidPath path)
     {
         // Zero access asks only to read reports, which Windows allows beside its own UPS battery driver; a handle
         // that asked to read or write would be refused on the collections Windows keeps for itself.
-        var handle = CreateFileW(path.Path, 0, FileShareRead | FileShareWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+        var handle = HidNative.Open(path.Path, access: 0, flags: 0);
         if (handle.IsInvalid)
         {
             handle.Dispose();
@@ -203,46 +175,14 @@ internal sealed class WindowsHid : IHid
         return collection;
     }
 
-    private static HidPath? PathOf(IntPtr set, ref DeviceInterfaceData element)
-    {
-        SetupDiGetDeviceInterfaceDetailSize(set, ref element, IntPtr.Zero, 0, out var size, IntPtr.Zero);
-        if (size is 0 or > 4096) return null;
-
-        var buffer = Marshal.AllocHGlobal((int)size);
-        try
-        {
-            // SP_DEVICE_INTERFACE_DETAIL_DATA_W is a size followed by the path; the size is 8 where a pointer is 8.
-            Marshal.WriteInt32(buffer, IntPtr.Size == 8 ? 8 : 6);
-            var info = new DevInfoData { Size = (uint)Marshal.SizeOf<DevInfoData>() };
-            if (!SetupDiGetDeviceInterfaceDetailW(set, ref element, buffer, size, out _, ref info)) return null;
-            return Marshal.PtrToStringUni(buffer + 4) is { Length: > 0 } path
-                ? new HidPath(path, DeviceOf(info.DevInst) ?? path)
-                : null;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
-    }
-
-    /// <summary>The device the collection hangs off, which its sibling collections share; null when Windows won't say.</summary>
-    private static string? DeviceOf(uint node)
-    {
-        if (CM_Get_Parent(out var parent, node, 0) != 0) return null;
-        var buffer = new char[200];                     // MAX_DEVICE_ID_LEN
-        if (CM_Get_Device_IDW(parent, buffer, (uint)buffer.Length, 0) != 0) return null;
-        var end = Array.IndexOf(buffer, '\0');
-        return new string(buffer, 0, end < 0 ? buffer.Length : end);
-    }
-
     /// <summary>One collection Windows has opened, with its descriptor read once and kept.</summary>
     private sealed class Collection : IHidCollection
     {
         private const int FeatureReports = 2;           // HidP_Feature
-        private const int Success = 0x00110000;         // HIDP_STATUS_SUCCESS
+        private const int Success = HidNative.Success;  // HIDP_STATUS_SUCCESS
 
         private readonly SafeFileHandle _handle;
-        private readonly Caps _caps;
+        private readonly HidNative.Caps _caps;
         private IntPtr _preparsed;
         private IReadOnlyList<HidCollection>? _collections;
         private IReadOnlyList<HidValue>? _values;
@@ -250,7 +190,7 @@ internal sealed class WindowsHid : IHid
         private string? _product;
         private bool _named;
 
-        private Collection(SafeFileHandle handle, IntPtr preparsed, Caps caps, string device)
+        private Collection(SafeFileHandle handle, IntPtr preparsed, HidNative.Caps caps, string device)
         {
             _handle = handle;
             _preparsed = preparsed;
@@ -288,10 +228,10 @@ internal sealed class WindowsHid : IHid
 
         public static Collection? From(SafeFileHandle handle, string device)
         {
-            if (!HidD_GetPreparsedData(handle, out var preparsed) || preparsed == IntPtr.Zero) return null;
-            if (HidP_GetCaps(preparsed, out var caps) != Success)
+            if (!HidNative.HidD_GetPreparsedData(handle, out var preparsed) || preparsed == IntPtr.Zero) return null;
+            if (HidNative.HidP_GetCaps(preparsed, out var caps) != Success)
             {
-                HidD_FreePreparsedData(preparsed);
+                HidNative.HidD_FreePreparsedData(preparsed);
                 return null;
             }
             return new Collection(handle, preparsed, caps, device);
@@ -304,18 +244,18 @@ internal sealed class WindowsHid : IHid
 
             var report = new byte[length];
             report[0] = reportId;
-            return HidD_GetFeature(_handle, report, length) ? report : null;
+            return HidNative.HidD_GetFeature(_handle, report, length) ? report : null;
         }
 
         public uint? Raw(HidValue value, byte[] report)
-            => HidP_GetUsageValue(FeatureReports, value.UsagePage, value.Collection, value.Usage, out var raw,
+            => HidNative.HidP_GetUsageValue(FeatureReports, value.UsagePage, value.Collection, value.Usage, out var raw,
                 _preparsed, report, (uint)report.Length) == Success ? raw : null;
 
         public void Dispose()
         {
             if (_preparsed != IntPtr.Zero)
             {
-                HidD_FreePreparsedData(_preparsed);
+                HidNative.HidD_FreePreparsedData(_preparsed);
                 _preparsed = IntPtr.Zero;
             }
             _handle.Dispose();
@@ -326,8 +266,8 @@ internal sealed class WindowsHid : IHid
             var count = (uint)_caps.NumberLinkCollectionNodes;
             if (count == 0) return [];
 
-            var nodes = new LinkCollectionNode[count];
-            if (HidP_GetLinkCollectionNodes(nodes, ref count, _preparsed) != Success) return [];
+            var nodes = new HidNative.LinkCollectionNode[count];
+            if (HidNative.HidP_GetLinkCollectionNodes(nodes, ref count, _preparsed) != Success) return [];
 
             var collections = new List<HidCollection>((int)count);
             for (var i = 0; i < count; i++)
@@ -342,8 +282,8 @@ internal sealed class WindowsHid : IHid
             var count = _caps.NumberFeatureValueCaps;
             if (count == 0) return [];
 
-            var caps = new ValueCaps[count];
-            if (HidP_GetValueCaps(FeatureReports, caps, ref count, _preparsed) != Success) return [];
+            var caps = new HidNative.ValueCaps[count];
+            if (HidNative.HidP_GetValueCaps(FeatureReports, caps, ref count, _preparsed) != Success) return [];
 
             var values = new List<HidValue>(count);
             for (var i = 0; i < count; i++)
@@ -381,8 +321,8 @@ internal sealed class WindowsHid : IHid
         {
             if (_named) return;
             _named = true;
-            _manufacturer = Text(HidD_GetManufacturerString);
-            _product = Text(HidD_GetProductString);
+            _manufacturer = Text(HidNative.HidD_GetManufacturerString);
+            _product = Text(HidNative.HidD_GetProductString);
         }
 
         private string? Text(Func<SafeFileHandle, byte[], uint, bool> read)
@@ -393,6 +333,122 @@ internal sealed class WindowsHid : IHid
             var end = text.IndexOf('\0', StringComparison.Ordinal);
             return end < 0 ? text : text[..end];
         }
+    }
+}
+
+/// <summary>
+/// The Windows HID calls both power-device sources need, declared once so the two cannot drift apart over what Windows
+/// was asked. SetupAPI lists the collections, hid.dll says what each one is and how long its reports are, and the file
+/// calls carry the reports themselves. Nothing here says anything to a device of its own accord: the caller decides
+/// what, if anything, goes out, and each source's own rules decide what it is allowed to send. Every call answers with
+/// null, nothing or an invalid handle rather than throwing when Windows declines.
+/// </summary>
+internal static class HidNative
+{
+    /// <summary>HIDP_STATUS_SUCCESS, which a HidP call answers with when it worked.</summary>
+    public const int Success = 0x00110000;
+
+    public const uint GenericRead = 0x80000000;
+
+    public const uint GenericWrite = 0x40000000;
+
+    /// <summary>FILE_FLAG_OVERLAPPED: reads and writes that can be waited on for a while and then called off.</summary>
+    public const uint Overlapped = 0x40000000;
+
+    /// <summary>ERROR_IO_PENDING, which says an overlapped transfer has started rather than failed.</summary>
+    public const int IoPending = 997;
+
+    private const uint DigcfPresent = 0x02;
+    private const uint DigcfDeviceInterface = 0x10;
+    private const uint FileShareRead = 0x01;
+    private const uint FileShareWrite = 0x02;
+    private const uint OpenExisting = 3;
+
+    /// <summary>GUID_DEVINTERFACE_HID, the interface every HID collection publishes.</summary>
+    private static readonly Guid HidInterface = new(0x4d1e55b2, 0xf16f, 0x11cf, 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30);
+
+    /// <summary>Every HID collection attached, with the device each one hangs off.</summary>
+    public static IReadOnlyList<HidPath> Interfaces()
+    {
+        var guid = HidInterface;
+        var set = SetupDiGetClassDevsW(ref guid, IntPtr.Zero, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
+        if (set == new IntPtr(-1)) return [];
+
+        var found = new List<HidPath>();
+        try
+        {
+            var element = new DeviceInterfaceData { Size = (uint)Marshal.SizeOf<DeviceInterfaceData>() };
+            for (uint index = 0; SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref guid, index, ref element); index++)
+            {
+                if (PathOf(set, ref element) is { } path) found.Add(path);
+            }
+        }
+        finally
+        {
+            SetupDiDestroyDeviceInfoList(set);
+        }
+        return found;
+    }
+
+    /// <summary>Opens a collection, shared with whatever else has it open. Zero access asks only to read reports, which
+    /// Windows allows on collections it keeps for itself; read and write access is for a device that answers commands.
+    /// The handle is invalid when Windows refuses, and is the caller's to dispose either way.</summary>
+    public static SafeFileHandle Open(string path, uint access, uint flags)
+        => CreateFileW(path, access, FileShareRead | FileShareWrite, IntPtr.Zero, OpenExisting, flags, IntPtr.Zero);
+
+    /// <summary>The vendor and product ids of the device an open collection belongs to; null when Windows won't say.
+    /// Windows answers from what it already knows, so asking costs the device nothing.</summary>
+    public static (ushort VendorId, ushort ProductId)? Ids(SafeFileHandle handle)
+    {
+        var attributes = new DeviceAttributes { Size = (uint)Marshal.SizeOf<DeviceAttributes>() };
+        return HidD_GetAttributes(handle, ref attributes) ? (attributes.VendorId, attributes.ProductId) : null;
+    }
+
+    /// <summary>What an open collection's descriptor says, the parsed descriptor being freed again; null when Windows
+    /// will not parse it. A caller that needs the descriptor itself keeps its own, as the UPS's collection does.</summary>
+    public static Caps? Capabilities(SafeFileHandle handle)
+    {
+        if (!HidD_GetPreparsedData(handle, out var preparsed) || preparsed == IntPtr.Zero) return null;
+        try
+        {
+            return HidP_GetCaps(preparsed, out var caps) == Success ? caps : null;
+        }
+        finally
+        {
+            HidD_FreePreparsedData(preparsed);
+        }
+    }
+
+    private static HidPath? PathOf(IntPtr set, ref DeviceInterfaceData element)
+    {
+        SetupDiGetDeviceInterfaceDetailSize(set, ref element, IntPtr.Zero, 0, out var size, IntPtr.Zero);
+        if (size is 0 or > 4096) return null;
+
+        var buffer = Marshal.AllocHGlobal((int)size);
+        try
+        {
+            // SP_DEVICE_INTERFACE_DETAIL_DATA_W is a size followed by the path; the size is 8 where a pointer is 8.
+            Marshal.WriteInt32(buffer, IntPtr.Size == 8 ? 8 : 6);
+            var info = new DevInfoData { Size = (uint)Marshal.SizeOf<DevInfoData>() };
+            if (!SetupDiGetDeviceInterfaceDetailW(set, ref element, buffer, size, out _, ref info)) return null;
+            return Marshal.PtrToStringUni(buffer + 4) is { Length: > 0 } path
+                ? new HidPath(path, DeviceOf(info.DevInst) ?? path)
+                : null;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    /// <summary>The device the collection hangs off, which its sibling collections share; null when Windows won't say.</summary>
+    private static string? DeviceOf(uint node)
+    {
+        if (CM_Get_Parent(out var parent, node, 0) != 0) return null;
+        var buffer = new char[200];                     // MAX_DEVICE_ID_LEN
+        if (CM_Get_Device_IDW(parent, buffer, (uint)buffer.Length, 0) != 0) return null;
+        var end = Array.IndexOf(buffer, '\0');
+        return new string(buffer, 0, end < 0 ? buffer.Length : end);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -413,12 +469,25 @@ internal sealed class WindowsHid : IHid
         public UIntPtr Reserved;
     }
 
-    /// <summary>HIDP_CAPS; only the counts and the top-level usage are read.</summary>
+    /// <summary>HIDD_ATTRIBUTES: which device the collection belongs to.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DeviceAttributes
+    {
+        public uint Size;
+        public ushort VendorId;
+        public ushort ProductId;
+        public ushort Version;
+    }
+
+    /// <summary>HIDP_CAPS; only the top-level usage, the report lengths and the counts are read. A report length counts
+    /// the report ID byte Windows puts first, so a device with 64-byte reports and no report ids shows 65.</summary>
     [StructLayout(LayoutKind.Explicit, Size = 64)]
-    private struct Caps
+    public struct Caps
     {
         [FieldOffset(0)] public ushort Usage;
         [FieldOffset(2)] public ushort UsagePage;
+        [FieldOffset(4)] public ushort InputReportByteLength;
+        [FieldOffset(6)] public ushort OutputReportByteLength;
         [FieldOffset(8)] public ushort FeatureReportByteLength;
         [FieldOffset(44)] public ushort NumberLinkCollectionNodes;
         [FieldOffset(60)] public ushort NumberFeatureValueCaps;
@@ -426,7 +495,7 @@ internal sealed class WindowsHid : IHid
 
     /// <summary>HIDP_VALUE_CAPS, whose last sixteen bytes are a union of the range and the single-usage forms.</summary>
     [StructLayout(LayoutKind.Explicit, Size = 72)]
-    private struct ValueCaps
+    public struct ValueCaps
     {
         [FieldOffset(0)] public ushort UsagePage;
         [FieldOffset(2)] public byte ReportId;
@@ -447,7 +516,7 @@ internal sealed class WindowsHid : IHid
 
     /// <summary>HIDP_LINK_COLLECTION_NODE; <see cref="Bits"/> holds the collection type in its lowest byte.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    private struct LinkCollectionNode
+    public struct LinkCollectionNode
     {
         public ushort LinkUsage;
         public ushort LinkUsagePage;
@@ -495,45 +564,76 @@ internal sealed class WindowsHid : IHid
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ReadFile(SafeFileHandle file, IntPtr buffer, int count, IntPtr read, IntPtr overlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool WriteFile(SafeFileHandle file, IntPtr buffer, int count, IntPtr written, IntPtr overlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetOverlappedResult(SafeFileHandle file, IntPtr overlapped, out int moved, [MarshalAs(UnmanagedType.Bool)] bool wait);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CancelIoEx(SafeFileHandle file, IntPtr overlapped);
+
     // The HidD routines answer with a BOOLEAN, one byte, not the four-byte BOOL the marshaller assumes by default.
     [DllImport("hid.dll", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.U1)]
-    private static extern bool HidD_GetPreparsedData(SafeFileHandle handle, out IntPtr preparsed);
-
-    [DllImport("hid.dll")]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    private static extern bool HidD_FreePreparsedData(IntPtr preparsed);
+    private static extern bool HidD_GetAttributes(SafeFileHandle handle, ref DeviceAttributes attributes);
 
     [DllImport("hid.dll", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.U1)]
-    private static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] report, uint length);
+    public static extern bool HidD_GetPreparsedData(SafeFileHandle handle, out IntPtr preparsed);
+
+    [DllImport("hid.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool HidD_FreePreparsedData(IntPtr preparsed);
+
+    /// <summary>Drops the input reports already waiting on a handle, so the next report read answers what is sent next.</summary>
+    [DllImport("hid.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool HidD_FlushQueue(SafeFileHandle handle);
 
     [DllImport("hid.dll", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.U1)]
-    private static extern bool HidD_GetManufacturerString(SafeFileHandle handle, byte[] buffer, uint length);
+    public static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] report, uint length);
 
     [DllImport("hid.dll", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.U1)]
-    private static extern bool HidD_GetProductString(SafeFileHandle handle, byte[] buffer, uint length);
+    public static extern bool HidD_GetManufacturerString(SafeFileHandle handle, byte[] buffer, uint length);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool HidD_GetProductString(SafeFileHandle handle, byte[] buffer, uint length);
 
     [DllImport("hid.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern int HidP_GetCaps(IntPtr preparsed, out Caps caps);
+    public static extern int HidP_GetCaps(IntPtr preparsed, out Caps caps);
 
     [DllImport("hid.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern int HidP_GetValueCaps(int reportType, [Out] ValueCaps[] caps, ref ushort length, IntPtr preparsed);
+    public static extern int HidP_GetValueCaps(int reportType, [Out] ValueCaps[] caps, ref ushort length, IntPtr preparsed);
 
     [DllImport("hid.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern int HidP_GetLinkCollectionNodes([Out] LinkCollectionNode[] nodes, ref uint length, IntPtr preparsed);
+    public static extern int HidP_GetLinkCollectionNodes([Out] LinkCollectionNode[] nodes, ref uint length, IntPtr preparsed);
 
     [DllImport("hid.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern int HidP_GetUsageValue(int reportType, ushort usagePage, ushort collection, ushort usage, out uint value, IntPtr preparsed, byte[] report, uint reportLength);
+    public static extern int HidP_GetUsageValue(int reportType, ushort usagePage, ushort collection, ushort usage, out uint value, IntPtr preparsed, byte[] report, uint reportLength);
 }

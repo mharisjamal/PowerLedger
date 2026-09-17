@@ -3,8 +3,8 @@ using PowerLedger.Sensors;
 namespace PowerLedger.Sensors.Tests;
 
 /// <summary>
-/// A HID collection under the test's control, with a device behind it. Every report written to it is kept, so a test can
-/// say exactly what went on the wire, and the device answers as the real protocol does.
+/// A HID device under the test's control. Every report written to it is kept, so a test can say exactly what went on
+/// the wire, and the device answers as the real protocol does.
 /// </summary>
 internal sealed class FakeHidDevice
 {
@@ -14,12 +14,13 @@ internal sealed class FakeHidDevice
     public FakeHidDevice(ushort vendorId, ushort productId, Func<byte[], byte[]?> answer, string? path = null)
     {
         _answer = answer;
-        Collection = new HidCollection(
+        Listing = new HidDevice(
             path ?? $@"\\?\hid#vid_{vendorId:x4}&pid_{productId:x4}", vendorId, productId,
             InputReportLength: 65, OutputReportLength: 65);
     }
 
-    public HidCollection Collection { get; }
+    /// <summary>The device as Windows would list it.</summary>
+    public HidDevice Listing { get; }
 
     /// <summary>Whether Windows lists it, so a test can have it turn up late or not at all.</summary>
     public bool Present { get; set; } = true;
@@ -87,22 +88,22 @@ internal sealed class FakeHidPort(params FakeHidDevice[] devices) : IHidPort
     /// <summary>Windows refusing the handle, as it does when another program has the device open for itself.</summary>
     public bool RefusesToOpen { get; set; }
 
-    public IReadOnlyList<HidCollection> Find(Func<ushort, ushort, bool> wanted)
+    public IReadOnlyList<HidDevice> Find(Func<ushort, ushort, bool> wanted)
     {
         Finds++;
         if (FindThrows is { } error) throw error;
         return devices
-            .Where(device => device.Present && wanted(device.Collection.VendorId, device.Collection.ProductId))
-            .Select(device => device.Collection)
+            .Where(fake => fake.Present && wanted(fake.Listing.VendorId, fake.Listing.ProductId))
+            .Select(fake => fake.Listing)
             .ToList();
     }
 
-    public IHidLink? Open(HidCollection collection)
+    public IHidLink? Open(HidDevice device)
     {
         Opens++;
         if (OpenThrows is { } error) throw error;
         if (RefusesToOpen) return null;
-        return devices.First(device => device.Collection.Path == collection.Path).Connect();
+        return devices.First(fake => fake.Listing.Path == device.Path).Connect();
     }
 }
 
