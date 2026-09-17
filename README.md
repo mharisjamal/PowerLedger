@@ -29,8 +29,11 @@ own driver library, and an Intel Arc card through the energy counter on the card
 package is measured, PowerLedger adds 15% for the card's memory, regulators and fans, and the Now screen says so. A UPS
 on USB is read through the HID power device interface Windows already uses for it, and its output becomes the whole
 figure once you say in Settings what the UPS powers. A Corsair HXi or RMi, NZXT E or Thermaltake DPS G power supply that
-reports over USB is read with read commands only, and its DC output, divided by the efficiency of its 80 PLUS tier,
-becomes the figure at the wall; PowerLedger gives way to iCUE, CAM or Thermaltake's app while one of them is running,
+reports over USB is read with read commands only. A Corsair reports what it draws from the wall, and that is taken as it
+is; the others report what their rails put out, which is divided by the supply's efficiency at the load it is carrying,
+read from its 80 PLUS tier and the rating in its model name. A supply idling at a fraction of what it is rated for is
+well short of the efficiency its tier certifies, so an idle desktop reads higher than a flat tier figure would say.
+PowerLedger gives way to iCUE, CAM or Thermaltake's app while one of them is running,
 since such a supply answers one program at a time, and a tick in Settings stops it reading the supply at all. None of
 this installs anything: it needs the graphics driver the card already has, or the device on a USB port. Nothing is ever
 written to a monitor, a UPS or a power supply.
