@@ -17,6 +17,16 @@ public class MachineSensorsTests
         names.ShouldContain("cpu-load");
         names.ShouldContain("activity");
         names.ShouldContain("display");
+        names.ShouldContain("power-supply");
+    }
+
+    [Fact]
+    public void Without_the_owners_tick_no_power_supply_is_read_at_all()
+    {
+        using var sensors = MachineSensors.Create(() => true, () => false);
+
+        // A set built without the tick has no way to know the owner's answer, so it leaves any supply alone.
+        sensors.Read(DateTimeOffset.UtcNow, 1.0).PsuOutputW.ShouldBeNull();
     }
 
     [Fact]

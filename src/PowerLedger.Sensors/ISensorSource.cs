@@ -12,7 +12,8 @@ public interface ISensorSource : IDisposable
     /// <summary>False when this machine cannot answer at all, so the sampler can skip it for good.</summary>
     bool Supported { get; }
 
-    /// <summary>Why the source is unsupported, for the status screen; null when it is supported.</summary>
+    /// <summary>Why the source is unsupported, for the status screen. A supported source may also use it to say why it
+    /// has nothing to report just now, as one that is leaving a device to another program does; null otherwise.</summary>
     string? Unavailable { get; }
 
     /// <summary>Fill this source's fields. Called once per tick.</summary>

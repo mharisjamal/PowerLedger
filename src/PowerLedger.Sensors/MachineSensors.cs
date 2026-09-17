@@ -31,10 +31,13 @@ public sealed class MachineSensors : IDisposable
     /// <param name="validatorOptions">Overrides for the plausible ranges and windows.</param>
     /// <param name="monitorsDetected">Told which external monitors are attached, from the thread that reads the set: once WMI
     /// first answers, and whenever they change (checked once a minute). Leave null to skip reading them.</param>
+    /// <param name="readPowerSupply">The owner's tick for reading a power supply over USB, asked afresh before every read.
+    /// Leave null where there is nobody to ask, which leaves any power supply alone altogether.</param>
     public static MachineSensors Create(
         Func<bool> displayOn, Func<bool> sessionLocked,
         Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null,
-        Action<IReadOnlyList<MonitorFacts>>? monitorsDetected = null)
+        Action<IReadOnlyList<MonitorFacts>>? monitorsDetected = null,
+        Func<bool>? readPowerSupply = null)
     {
         var display = new DisplaySource(displayOn, monitorsDetected);
         List<ISensorSource> sources =
@@ -42,6 +45,7 @@ public sealed class MachineSensors : IDisposable
             new EnergyMeterSource(),
             .. Graphics(new NvidiaSource(), static () => new ArcSource(), static () => new GpuLoadSource()),
             new BatterySource(),
+            new PsuSource(readPowerSupply),
             new CpuLoadSource(),
             new ActivitySource(sessionLocked, userIdleSeconds),
             display,
