@@ -57,10 +57,38 @@ public sealed class MachineSensors : IDisposable
     /// <summary>NVIDIA's own library when it answers, since it gives the watts and the load together; otherwise AMD's
     /// library and Intel's Level Zero, which measure a Radeon's or an Arc card's watts, and then Windows' GPU load
     /// counters, which give the load and never write watts, so a measured card keeps its own figure. Nothing after NVIDIA
-    /// is built while NVIDIA answers, so no two sources fill the same field and none wakes a switched-off card.</summary>
+    /// is built while NVIDIA answers, so no two sources fill the same field and none wakes a switched-off card.
+    /// A library that will not open partway through closes the ones already built: until the set is handed back there
+    /// is nobody else holding them, so anything dropped here keeps its card's interfaces for the life of the process.</summary>
     internal static IReadOnlyList<ISensorSource> Graphics(
         ISensorSource nvidia, Func<ISensorSource> amd, Func<ISensorSource> arc, Func<ISensorSource> load)
-        => nvidia.Supported ? [nvidia] : [nvidia, amd(), arc(), load()];
+    {
+        List<ISensorSource> built = [nvidia];
+        try
+        {
+            if (nvidia.Supported) return built;
+            built.Add(amd());
+            built.Add(arc());
+            built.Add(load());
+            return built;
+        }
+        catch (Exception)
+        {
+            foreach (var source in built)
+            {
+                try
+                {
+                    source.Dispose();
+                }
+                catch (Exception)
+                {
+                    // One that will not close must not hide the others, nor the trouble that brought us here.
+                }
+            }
+
+            throw;
+        }
+    }
 
     /// <summary>One validated tick. Never throws.</summary>
     public Sample Read(DateTimeOffset timestamp, double deltaSeconds)

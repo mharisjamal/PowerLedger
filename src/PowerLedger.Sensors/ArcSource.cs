@@ -75,6 +75,13 @@ public sealed class ArcSource : ISensorSource
     {
         if (!Supported) return;
         draft.DGpuPresent = true;
+
+        // A machine can have a discrete Radeon and a discrete Arc card at once, and the tick has one field between
+        // them for the card's watts. AMD's library is read before this one, so whatever it measured stands: writing
+        // over it would lose the Radeon's draw, and an Arc that Windows has switched off would replace it with a nought.
+        // Not asking Level Zero at all is also what keeps this from waking a card for a reading nobody will use.
+        if (draft.DGpuW is not null) return;
+
         draft.DGpuScope = _scope;
         try
         {

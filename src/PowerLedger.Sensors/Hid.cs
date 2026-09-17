@@ -151,9 +151,11 @@ internal interface IHidCollection : IDisposable
 /// <summary>
 /// Reading HID feature reports, over the shared calls in <see cref="HidNative"/>: SetupAPI lists the collections and
 /// the HID parser reads them. Nothing here writes to a device. The only call that reaches a device at all is
-/// <c>HidD_GetFeature</c>, which asks it for a report, so PowerLedger can never change how a UPS behaves. A collection
-/// is opened with no access at all, which cannot write whatever this class asked. Every method answers with null or
-/// nothing rather than throwing when Windows declines, so the source above can decide what a missing answer means.
+/// <c>HidD_GetFeature</c>, which asks it for a report, so PowerLedger can never change how a UPS behaves. What
+/// guarantees that is that no call which writes exists on this path, and nothing else: a collection is opened asking
+/// for no access at all, which is what lets Windows share it beside its own UPS driver rather than what would turn a
+/// write down. Every method answers with null or nothing rather than throwing when Windows declines, so the source
+/// above can decide what a missing answer means.
 /// </summary>
 internal sealed class WindowsHid : IHid
 {

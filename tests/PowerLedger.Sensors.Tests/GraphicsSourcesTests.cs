@@ -66,6 +66,68 @@ public class GraphicsSourcesTests
     }
 
     [Fact]
+    public void An_arc_card_leaves_the_watts_amds_library_already_measured()
+    {
+        // A machine with both a discrete Radeon and a discrete Arc has one field between them for the card's watts.
+        // AMD's library runs first, so Level Zero must not write over what it measured — and a sleeping Arc, which
+        // answers a flat nought, must not turn the Radeon's draw into nothing at all.
+        var sysman = new FakeSysman();
+        var arc = new SysmanDevice(SysmanDevice.GpuType, DiscreteGpu.IntelVendor, 0x56A0, CoreFlags: 0, ExtendedFlags: 0);
+        var card = sysman.Add(arc, PowerDomain.Card)[0];
+        using var asleep = new ArcSource(sysman, _ => static () => true);
+        using var awake = new ArcSource(sysman, _ => static () => false);
+
+        var sleeping = Radeons(214.5);
+        asleep.Contribute(sleeping);
+        sleeping.DGpuW.ShouldBe(214.5);
+        sleeping.DGpuScope.ShouldBe(GpuPowerScope.ChipOnly);
+        sleeping.DGpuPresent.ShouldBeTrue();
+
+        // Nor does an Arc that is awake and measuring watts of its own.
+        awake.Contribute(Radeons(214.5));
+        card.Draw(watts: 190, seconds: 1);
+        var reading = Radeons(214.5);
+        awake.Contribute(reading);
+
+        reading.DGpuW.ShouldBe(214.5);
+        reading.DGpuScope.ShouldBe(GpuPowerScope.ChipOnly);
+    }
+
+    [Fact]
+    public void An_arc_card_on_its_own_still_fills_the_watts()
+    {
+        var sysman = new FakeSysman();
+        var arc = new SysmanDevice(SysmanDevice.GpuType, DiscreteGpu.IntelVendor, 0x56A0, CoreFlags: 0, ExtendedFlags: 0);
+        var card = sysman.Add(arc, PowerDomain.Card)[0];
+        using var source = new ArcSource(sysman, _ => static () => false);
+
+        source.Contribute(new SampleDraft());
+        card.Draw(watts: 190, seconds: 1);
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+
+        draft.DGpuW.ShouldNotBeNull().ShouldBe(190, 1e-9);
+        draft.DGpuScope.ShouldBe(GpuPowerScope.Board);
+    }
+
+    [Fact]
+    public void A_graphics_source_that_will_not_be_built_does_not_leave_the_ones_before_it_open()
+    {
+        // Building the set is the one place these sources are held before anybody can close them: a factory that
+        // throws halfway through would otherwise leave AMD's library open and its card's interfaces taken.
+        var nvidia = new FakeSource("nvidia-gpu", _ => { }) { Supported = false, Unavailable = "no NVIDIA driver installed" };
+        var amd = new FakeSource("amd-gpu", _ => { });
+        var arc = new FakeSource("arc-gpu", _ => { });
+
+        Should.Throw<InvalidOperationException>(() => MachineSensors.Graphics(
+            nvidia, () => amd, () => arc, () => throw new InvalidOperationException("the counters would not open")));
+
+        nvidia.Disposed.ShouldBeTrue();
+        amd.Disposed.ShouldBeTrue();
+        arc.Disposed.ShouldBeTrue();
+    }
+
+    [Fact]
     public void The_assembled_set_never_has_two_sources_filling_the_discrete_gpu_watts()
     {
         using var sensors = MachineSensors.Create(() => true, () => false);
@@ -106,4 +168,8 @@ public class GraphicsSourcesTests
         draft.DGpuScope.ShouldBe(GpuPowerScope.ChipOnly);
         draft.DGpuLoad.ShouldBe(0.5);
     }
+
+    /// <summary>A tick in which AMD's library has already measured a discrete Radeon's chip.</summary>
+    private static SampleDraft Radeons(double watts)
+        => new() { DGpuPresent = true, DGpuW = watts, DGpuScope = GpuPowerScope.ChipOnly };
 }
