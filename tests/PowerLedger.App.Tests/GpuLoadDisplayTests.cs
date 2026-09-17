@@ -68,6 +68,7 @@ public class GpuLoadDisplayTests
             Sources =
             [
                 new SourceStatus("nvidia-gpu", false, "no NVIDIA driver installed", 0, null),
+                new SourceStatus("amd-gpu", false, "no AMD discrete GPU", 0, null),
                 new SourceStatus("gpu-load", true, null, 0, null),
             ],
         };
@@ -78,6 +79,7 @@ public class GpuLoadDisplayTests
         model.Sources.ShouldBe(
         [
             new SourceLine("NVIDIA graphics", "not on this machine", "no NVIDIA driver installed"),
+            new SourceLine("AMD graphics", "not on this machine", "no AMD discrete GPU"),
             new SourceLine("Graphics load", "working", ""),
         ]);
     }

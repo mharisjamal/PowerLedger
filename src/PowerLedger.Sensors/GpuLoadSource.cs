@@ -4,11 +4,12 @@ using System.Diagnostics;
 namespace PowerLedger.Sensors;
 
 /// <summary>
-/// Discrete GPU presence and load for an AMD or Intel card, which have no library like NVIDIA's. Windows' GPU Engine
-/// counters give the load and the power model turns it into watts with the card's rated power, so this card's watts are
-/// always estimated, never measured. The counters are read at most every <see cref="ReadEvery"/>, because a read walks
-/// every process on every engine, and the load is held in between. The machine's sensor set adds this source only when
-/// the NVIDIA source has nothing to say, since both fill the same fields.
+/// Discrete GPU presence and load for an AMD or Intel card. Windows' GPU Engine counters give the load, and the power
+/// model turns it into watts with the card's rated power wherever the card's own library has not measured them, as
+/// <see cref="AmdSource"/> does on the cards that can. This source fills no watts of its own, so a measured reading
+/// stands. The counters are read at most every <see cref="ReadEvery"/>, because a read walks every process on every
+/// engine, and the load is held in between. The machine's sensor set adds this source only when the NVIDIA source has
+/// nothing to say, since NVIDIA's own library already gives the load.
 /// </summary>
 public sealed class GpuLoadSource : ISensorSource
 {
@@ -66,7 +67,7 @@ public sealed class GpuLoadSource : ISensorSource
         }
         if (_card is null) return;
         draft.DGpuPresent = true;
-        draft.DGpuLoad = _load;
+        draft.DGpuLoad = _load;                 // and never the watts, which a vendor's library may already have measured
     }
 
     public void Dispose() => _dxgi?.Dispose();

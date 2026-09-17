@@ -298,6 +298,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             "battery" => "Battery",
             "cpu-load" => "Processor load",
             "nvidia-gpu" => "NVIDIA graphics",
+            "amd-gpu" => "AMD graphics",
             "gpu-load" => "Graphics load",
             "display" => "Display brightness",
             "activity" => "Display and lock state",

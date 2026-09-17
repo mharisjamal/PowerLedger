@@ -10,6 +10,38 @@ namespace PowerLedger.Sensors.Tests;
 public class GpuHardwareTests(ITestOutputHelper output)
 {
     [Fact]
+    public void An_amd_card_answers_or_is_honestly_absent()
+    {
+        var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var installed = File.Exists(Path.Combine(system32, "amdadlx64.dll")) || File.Exists(Path.Combine(system32, "atiadlxx.dll"));
+
+        using var source = new AmdSource();
+        if (!installed)
+        {
+            // No AMD driver on this machine, as on the development laptop: there is nothing to read and it says so.
+            source.Supported.ShouldBeFalse();
+            source.Unavailable.ShouldBe("no AMD driver installed");
+            return;
+        }
+
+        var draft = new SampleDraft();
+        Should.NotThrow(() => source.Contribute(draft));
+        if (!source.Supported)
+        {
+            // An AMD driver for graphics inside the processor, with no card beside them.
+            source.Unavailable.ShouldBe("no AMD discrete GPU");
+            return;
+        }
+
+        // A card that is switched off reads zero, and one with no power sensor reads nothing at all.
+        if (draft.DGpuW is { } watts)
+        {
+            draft.DGpuPresent.ShouldBeTrue();
+            watts.ShouldBeInRange(0, 700);
+        }
+    }
+
+    [Fact]
     public void Dxgi_lists_the_adapters_and_finds_no_amd_or_intel_card_on_the_development_laptop()
     {
         using var dxgi = new DxgiAdapters();
