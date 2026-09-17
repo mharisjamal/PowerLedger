@@ -101,6 +101,40 @@ public class PipeProtocolTests
     }
 
     [Fact]
+    public void A_status_carries_its_power_devices_and_a_frame_says_where_its_total_came_from_as_a_number()
+    {
+        var status = Status() with
+        {
+            Last = Frame() with { GpuScope = GpuPowerScope.ChipOnly, Total = TotalSource.Ups },
+            PowerDevices =
+            [
+                new PowerDeviceStatus(PowerDeviceKind.Ups, "APC Back-UPS ES 850G2", 142, "load of its rated watts"),
+                new PowerDeviceStatus(PowerDeviceKind.PowerSupply, "Corsair HX1000i", 312.5, "DC output, all rails"),
+            ],
+        };
+        var line = PipeProtocol.Serialize(new StatusReply(14, status));
+        var json = Encoding.UTF8.GetString(line);
+        json.ShouldContain("\"total\":2");
+        json.ShouldContain("\"gpuScope\":1");
+        json.ShouldContain("\"kind\":1");
+        var back = PipeProtocol.Deserialize(Trim(line)).ShouldBeOfType<StatusReply>().Status;
+        back.PowerDevices.ShouldNotBeNull().ShouldBe(status.PowerDevices!);
+        back.Last.ShouldBe(status.Last);
+        PipeProtocol.Serialize(new StatusReply(14, back)).ShouldBe(line);
+    }
+
+    [Fact]
+    public void A_frame_from_a_service_that_says_neither_reads_as_the_model_and_the_whole_card()
+    {
+        var older = JsonNode.Parse(Trim(PipeProtocol.Serialize(Frame())))!.AsObject();
+        older.Remove("total").ShouldBeTrue();
+        older.Remove("gpuScope").ShouldBeTrue();
+        var back = PipeProtocol.Deserialize(Encoding.UTF8.GetBytes(older.ToJsonString())).ShouldBeOfType<ReadingFrame>();
+        (back.Total, back.GpuScope).ShouldBe((TotalSource.Model, GpuPowerScope.Board));
+        back.TotalW.ShouldBe(20);
+    }
+
+    [Fact]
     public void A_brightness_report_survives_the_wire_under_its_own_kind()
     {
         var report = new ReportBrightnessRequest(14,

@@ -170,6 +170,33 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task The_status_lists_the_ups_the_latest_sample_read_and_once_it_is_said_to_power_this_pc_it_gives_the_total()
+    {
+        using var t = new TestDatabase();
+        var answers = 0;
+        await using var loop = new Harness(t, makeSet: _ => new FakeSensorSet((ts, delta) => Volatile.Read(ref answers) == 0
+            ? Samples.At(ts, delta)
+            : Samples.At(ts, delta) with { UpsOutputW = 142, UpsSource = UpsPowerSource.LoadOfRatedWatts, UpsName = "APC Back-UPS ES 850G2" }));
+        await loop.StartAsync();
+        await loop.Ticks(1);
+        loop.Board.Status.ShouldNotBeNull().PowerDevices.ShouldNotBeNull().ShouldBeEmpty();
+
+        Volatile.Write(ref answers, 1);                                    // the UPS is plugged in
+        await loop.Ticks(1);
+        var status = loop.Board.Status.ShouldNotBeNull();
+        status.PowerDevices.ShouldNotBeNull().ShouldHaveSingleItem()
+            .ShouldBe(new PowerDeviceStatus(PowerDeviceKind.Ups, "APC Back-UPS ES 850G2", 142, "load of its rated watts"));
+        status.Last.ShouldNotBeNull().Total.ShouldBe(TotalSource.Model);  // until the user says what it powers
+
+        var settings = loop.Board.Settings.ShouldNotBeNull();
+        await loop.Send(new ApplySettingsCommand(settings with { Profile = settings.Profile with { UpsLoad = UpsLoad.ThisPc } }));
+        await loop.Ticks(1);
+        var last = loop.Board.Status.ShouldNotBeNull().Last.ShouldNotBeNull();
+        (last.Total, last.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
+        last.TotalW.ShouldBe(142, 1e-9);
+    }
+
+    [Fact]
     public async Task A_monitor_running_off_the_laptop_is_in_its_battery_rate_and_is_kept_out_of_what_the_learner_learns()
     {
         using var t = new TestDatabase();

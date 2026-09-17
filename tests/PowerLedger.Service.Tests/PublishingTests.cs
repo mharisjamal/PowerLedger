@@ -22,6 +22,53 @@ public class PublishingTests
         frame.RestBandW.ShouldBe(14);
         frame.OnBattery.ShouldBeTrue();
         frame.Brightness.ShouldBe(0.5);
+        (frame.Total, frame.GpuScope).ShouldBe((TotalSource.Model, GpuPowerScope.Board));
+    }
+
+    [Theory]
+    [InlineData(TotalSource.Battery, GpuPowerScope.Board)]
+    [InlineData(TotalSource.Ups, GpuPowerScope.ChipOnly)]
+    [InlineData(TotalSource.PowerSupply, GpuPowerScope.Package)]
+    public void A_frame_says_where_its_total_came_from_and_what_the_gpu_reading_covered(TotalSource source, GpuPowerScope scope)
+    {
+        var reading = Readings.At(5) with { TotalSource = source, GpuScope = scope };
+        var frame = Frames.From(reading, Samples.At(reading.Timestamp));
+        (frame.Total, frame.GpuScope).ShouldBe((source, scope));
+    }
+
+    [Fact]
+    public void A_ups_and_a_power_supply_the_sample_read_are_listed_with_their_watts_and_how_they_were_found()
+    {
+        var sample = Samples.At(Samples.T0) with
+        {
+            UpsOutputW = 142, UpsSource = UpsPowerSource.LoadOfRatedWatts, UpsName = "APC Back-UPS ES 850G2",
+            PsuOutputW = 312.5, PsuName = "Corsair HX1000i",
+        };
+
+        Frames.PowerDevices(sample).ShouldBe(
+        [
+            new PowerDeviceStatus(PowerDeviceKind.Ups, "APC Back-UPS ES 850G2", 142, "load of its rated watts"),
+            new PowerDeviceStatus(PowerDeviceKind.PowerSupply, "Corsair HX1000i", 312.5, "DC output, all rails"),
+        ]);
+    }
+
+    [Theory]
+    [InlineData(UpsPowerSource.ActivePower, "real output power")]
+    [InlineData(UpsPowerSource.LoadOfRatedWatts, "load of its rated watts")]
+    [InlineData(UpsPowerSource.LoadOfRatedVoltAmps, "load of its rated VA, estimated")]
+    public void A_ups_says_how_its_watts_were_found(UpsPowerSource source, string how)
+        => Frames.PowerDevices(Samples.At(Samples.T0) with { UpsOutputW = 142, UpsSource = source, UpsName = "APC Back-UPS ES 850G2" })
+            .ShouldHaveSingleItem().How.ShouldBe(how);
+
+    [Fact]
+    public void A_device_that_gave_no_watts_yet_is_listed_without_them_and_nothing_detected_lists_nothing()
+    {
+        Frames.PowerDevices(Samples.At(Samples.T0)).ShouldBeEmpty();
+        Frames.PowerDevices(Samples.At(Samples.T0) with { UpsName = " APC Back-UPS ES 850G2 ", UpsOutputW = double.NaN, PsuName = "Corsair HX1000i" }).ShouldBe(
+        [
+            new PowerDeviceStatus(PowerDeviceKind.Ups, "APC Back-UPS ES 850G2", null, ""),
+            new PowerDeviceStatus(PowerDeviceKind.PowerSupply, "Corsair HX1000i", null, ""),
+        ]);
     }
 
     [Fact]

@@ -287,7 +287,8 @@ internal sealed class SamplingLoop : BackgroundService
     private void Publish(TickResult result, ReadingFrame frame, long ticks, IReadOnlyList<MonitorStatus> monitors)
         => _board.Publish(new ServiceStatus(
             Version, _startedAt, ticks, [.. result.Health.Select(Frames.From)], result.SuspectCount, _worker.Abandoned,
-            _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame, monitors));
+            _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame, monitors,
+            Frames.PowerDevices(result.Sample)));
 
     /// <summary>
     /// Carries the monitor settings from before monitors were detected over, and saves them (Plan J): whether a monitor the
