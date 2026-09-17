@@ -45,6 +45,7 @@ public sealed class MachineSensors : IDisposable
             new EnergyMeterSource(),
             .. Graphics(new NvidiaSource(), static () => new ArcSource(), static () => new GpuLoadSource()),
             new BatterySource(),
+            new UpsSource(),
             new PsuSource(readPowerSupply),
             new CpuLoadSource(),
             new ActivitySource(sessionLocked, userIdleSeconds),

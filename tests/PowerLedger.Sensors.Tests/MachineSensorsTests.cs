@@ -14,6 +14,7 @@ public class MachineSensorsTests
         names.ShouldContain("energy-meter");
         names.ShouldContain("nvidia-gpu");
         names.ShouldContain("battery");
+        names.ShouldContain("ups");
         names.ShouldContain("cpu-load");
         names.ShouldContain("activity");
         names.ShouldContain("display");
