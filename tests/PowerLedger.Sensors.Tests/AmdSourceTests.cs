@@ -118,6 +118,33 @@ public unsafe class AmdSourceTests
     }
 
     [Fact]
+    public void Where_adlx_will_not_have_this_driver_the_older_library_answers()
+    {
+        // ADLX declines drivers older than itself, and those drivers are exactly the ones ADL was left in for.
+        using var adlx = new FakeAdlx(new FakeAdlxGpu { MeasuresBoard = true }) { StartResult = BadVersion };
+        using var adl = new FakeAdl(new FakeAdlAdapter { BoardWatts = 173 });
+        using var source = From(adlx, adl);
+
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+
+        draft.DGpuW.ShouldBe(173);
+    }
+
+    [Fact]
+    public void While_adlx_is_silent_the_older_librarys_empty_answer_settles_nothing()
+    {
+        // ADL in session 0 has been seen to list no adapters at all, which says nothing about a machine whose ADLX has
+        // not started yet, so the source stays alive to ask again.
+        using var adlx = new FakeAdlx(new FakeAdlxGpu { MeasuresBoard = true }) { StartResult = BadVersion };
+        using var adl = new FakeAdl();
+        using var source = From(adlx, adl);
+
+        source.Supported.ShouldBeTrue();
+        source.Unavailable.ShouldBeNull();
+    }
+
+    [Fact]
     public void The_older_library_reads_the_chip_where_the_card_reports_no_board_power()
     {
         using var adl = new FakeAdl(new FakeAdlAdapter { ChipWatts = 150 });
