@@ -45,4 +45,14 @@ internal static class Statuses
     /// <summary>A service with <see cref="Dell"/> and <see cref="Aoc"/> attached.</summary>
     public static ServiceStatus WithMonitors(params MonitorStatus[] monitors)
         => Running() with { Monitors = monitors.Length > 0 ? monitors : [Dell, Aoc] };
+
+    /// <summary>A UPS on USB whose watts come from its load percentage of its rated watts.</summary>
+    public static PowerDeviceStatus Ups { get; } = new(PowerDeviceKind.Ups, "APC Back-UPS ES 850G2", 142, "load of its rated watts");
+
+    /// <summary>A power supply that reports its DC output on USB.</summary>
+    public static PowerDeviceStatus PowerSupply { get; } = new(PowerDeviceKind.PowerSupply, "Corsair HX1000i", 312.4, "DC output, all rails");
+
+    /// <summary>A service reading <see cref="Ups"/> and <see cref="PowerSupply"/>, with the usual monitors attached.</summary>
+    public static ServiceStatus WithPowerDevices(params PowerDeviceStatus[] devices)
+        => WithMonitors() with { PowerDevices = devices.Length > 0 ? devices : [Ups, PowerSupply] };
 }

@@ -53,6 +53,56 @@ public class NowViewModelTests
         model.Live.QualityNote.ShouldBe(note);
     }
 
+    [Theory]
+    [InlineData(TotalSource.Ups, Quality.Measured, 0, "Live · UPS output · 14:32:07", "UPS output reading · 1 s samples")]
+    [InlineData(TotalSource.Ups, Quality.Estimated, 37.7, "Live · UPS output · 14:32:07", "UPS output reading · 1 s samples")]
+    [InlineData(TotalSource.PowerSupply, Quality.Measured, 37.7, "Live · power supply reading · 14:32:07",
+        "Power supply's own reading, with its efficiency · 1 s samples")]
+    [InlineData(TotalSource.Battery, Quality.Measured, 0, "Live · battery discharge · 14:32:07", "Windows battery report · 1 s samples")]
+    public void A_total_from_a_ups_or_a_power_supply_says_which_it_came_from(
+        TotalSource total, Quality quality, double monitors, string eyebrow, string note)
+    {
+        var model = Model();
+
+        _link.Push(Frames.At(Now, totalW: 34.2 + monitors, quality: quality, monitors: monitors) with { Total = total });
+
+        model.Live.Eyebrow.ShouldBe(eyebrow);
+        model.Live.QualityNote.ShouldBe(note);
+    }
+
+    [Theory]
+    [InlineData(GpuPowerScope.Board, "GeForce MX330 · 31% load · measured")]
+    [InlineData(GpuPowerScope.ChipOnly, "GeForce MX330 · 31% load · chip measured, rest of card estimated")]
+    [InlineData(GpuPowerScope.Package, "GeForce MX330 · 31% load · package measured, rest of card estimated")]
+    public void The_gpu_row_says_what_a_measured_figure_covered(GpuPowerScope scope, string detail)
+    {
+        var model = Model();
+        _history.Snapshot = Snapshots.Typical(Now);
+        model.RefreshHistory();
+
+        _link.Push(Frames.At(Now, gpuMeasured: true) with { GpuScope = scope });
+        model.Live.Budget[1].Detail.ShouldBe(detail);
+
+        // Nothing was measured, so the scope says nothing of a figure the model worked out from the load.
+        _link.Push(Frames.At(Now) with { GpuScope = scope });
+        model.Live.Budget[1].Detail.ShouldBe("GeForce MX330 · 31% load · modelled");
+    }
+
+    [Fact]
+    public void A_machine_whose_total_comes_from_a_ups_or_a_power_supply_is_not_without_power_sensors()
+    {
+        _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };
+        _link.Status = Statuses.Running(energyMeter: false) with { Last = Frames.At(Now) with { Total = TotalSource.Ups } };
+        var model = Model();
+        model.Start();
+        _link.Connect(true);
+        model.IsSensorless.ShouldBeFalse();
+
+        _link.Status = Statuses.Running(energyMeter: false) with { Last = Frames.At(Now) };   // the user said the UPS powers more
+        _clock.Advance(NowViewModel.StatusEvery);
+        model.IsSensorless.ShouldBeTrue();
+    }
+
     [Fact]
     public void Budget_rows_say_what_each_part_is_and_how_it_was_known()
     {

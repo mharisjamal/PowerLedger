@@ -228,7 +228,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var shares = Budget.Of(frame);
         Live = new LivePanel(
             frame.TotalW,
-            $"Live · {Source(frame.Quality)} · {local.ToString("HH:mm:ss", _culture)}",
+            $"Live · {Source(frame)} · {local.ToString("HH:mm:ss", _culture)}",
             frame.Quality, Note(frame), spark,
             MeterRange.For(Math.Max(peak, spark.Count > 0 ? spark.Max(s => s.Watts) : 0)),
             average, peak,
@@ -282,7 +282,9 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
                 ? "brightness assumed"
                 : counted.Exists(monitor => monitor.RefreshWatts >= MonitorRow.LeastRefreshWatts) ? "estimated" : null;
         var desktop = _settings?.Profile.Chassis == ChassisKind.Desktop;
-        IsSensorless = !Supported(status, "energy-meter") && (desktop || !Supported(status, "battery"));
+        // A UPS or a power supply that gives the total is a power sensor, whatever the machine's own rails report.
+        IsSensorless = !Supported(status, "energy-meter") && (desktop || !Supported(status, "battery"))
+                       && status.Last?.Total is not (TotalSource.Ups or TotalSource.PowerSupply);
         var interval = _settings?.SampleIntervalSeconds ?? 1;
         var learned = Format.Duration(status.Calibration.BatterySamples * interval / 3600.0);
         var needed = Format.Duration(status.Calibration.SamplesNeeded * interval / 3600.0);
@@ -357,7 +359,15 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var name = ShortName(gpu);
         if (frame.GpuMeasured && frame.Components.Gpu <= 0 && (frame.GpuLoad ?? 0) <= 0) return Join(name, "switched off");
         if (!frame.GpuMeasured && frame.GpuLoad is null && frame.Components.Gpu <= 0) return "no discrete GPU the service can read";
-        return Join(name, Load(frame.GpuLoad), frame.GpuMeasured ? "measured" : "modelled");
+        // A chip or package figure leaves out the card's memory regulators, its regulator losses and its fans, which the
+        // model adds (spec §3).
+        var how = !frame.GpuMeasured ? "modelled" : frame.GpuScope switch
+        {
+            GpuPowerScope.ChipOnly => "chip measured, rest of card estimated",
+            GpuPowerScope.Package => "package measured, rest of card estimated",
+            _ => "measured",
+        };
+        return Join(name, Load(frame.GpuLoad), how);
     }
 
     /// <summary>The display band: the built-in panel, as big and bright as it is, plus the external monitors the service
@@ -404,13 +414,17 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         return (mb < 10 ? mb.ToString("0.0", _culture) : mb.ToString("0", _culture)) + " MB";
     }
 
-    /// <summary>Where the reading came from. The external monitors counted in it come from their own figures in every mode,
-    /// and the model's margin covers only what it models, so the margin stays with the model. A measured reading is the
-    /// battery's report with the monitors' figures, not plus them: a monitor running off the laptop is already in the report,
-    /// and its figure only splits it off; only a monitor with a plug of its own is added.</summary>
+    /// <summary>Where the reading came from. A UPS reading covers what the user said it powers, and a power supply's own
+    /// reading is its DC output with its efficiency allowed for, so neither ends in what the monitors add. The external
+    /// monitors counted in a modelled or battery reading come from their own figures in every mode, and the model's margin
+    /// covers only what it models, so the margin stays with the model. A measured reading is the battery's report with the
+    /// monitors' figures, not plus them: a monitor running off the laptop is already in the report, and its figure only splits
+    /// it off; only a monitor with a plug of its own is added.</summary>
     private string Note(ReadingFrame frame)
     {
         var samples = $"{(_settings?.SampleIntervalSeconds ?? 1).ToString(_culture)} s samples";
+        if (frame.Total == TotalSource.Ups) return "UPS output reading · " + samples;
+        if (frame.Total == TotalSource.PowerSupply) return "Power supply's own reading, with its efficiency · " + samples;
         return (frame.Quality, frame.Components.Monitors > 0) switch
         {
             (Quality.Measured, false) => "Windows battery report · " + samples,
@@ -422,11 +436,18 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         };
     }
 
-    private static string Source(Quality quality) => quality switch
+    /// <summary>What gave the total, over the eyebrow. A frame from a service from before the sources says the model, and
+    /// its quality still tells a battery reading from a modelled one.</summary>
+    private static string Source(ReadingFrame frame) => frame.Total switch
     {
-        Quality.Measured => "battery discharge",
-        Quality.Calibrated => "calibrated model",
-        _ => "estimate",
+        TotalSource.Ups => "UPS output",
+        TotalSource.PowerSupply => "power supply reading",
+        _ => frame.Quality switch
+        {
+            Quality.Measured => "battery discharge",
+            Quality.Calibrated => "calibrated model",
+            _ => "estimate",
+        },
     };
 
     private static string Remainder(Quality quality) => quality switch

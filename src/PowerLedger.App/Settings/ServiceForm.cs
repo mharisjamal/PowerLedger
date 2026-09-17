@@ -17,7 +17,9 @@ namespace PowerLedger.App;
 /// carries them over to the monitors it finds; once the form lists one, the choices it shows replace them. The old figure,
 /// which no longer reaches the model, always goes back as it came. When the settings loaded are behind the service's, as
 /// they are once it has carried the old monitor settings over, a save reads them again and takes from them what the form
-/// doesn't show, so it never puts back what was carried over; what the user typed and ticked stays. A form that saves itself,
+/// doesn't show, so it never puts back what was carried over; what the user typed and ticked stays. The UPSes and power
+/// supplies the service reads are listed as it says, with what the user says a UPS powers and whether a power supply is read.
+/// A form that saves itself,
 /// as Settings' does, sends the settings whenever the user changes a value, one save at a time, while what the form fills in
 /// itself, from the service's settings or its status, sends nothing. The wizard's form saves when asked.
 /// </summary>
@@ -46,6 +48,10 @@ internal sealed class ServiceForm : ObservableObject
     private string _rawHours = "";
     private string _historyYears = "";
     private string? _message;
+    private UpsLoad _upsLoad = MachineProfile.DefaultLaptop.UpsLoad;
+    private bool _readPowerSupply = MachineProfile.DefaultLaptop.ReadPowerSupply;
+    private IReadOnlyList<string> _upses = [];
+    private IReadOnlyList<string> _powerSupplies = [];
 
     /// <summary>The form is changing what it shows itself, as it loads the settings, follows the service's word for the
     /// monitors or takes the settings a save read again or sent, so nothing it changes is taken for the user's change.</summary>
@@ -108,6 +114,55 @@ internal sealed class ServiceForm : ObservableObject
     /// <summary>The monitor rows show only when there are monitors to list.</summary>
     public bool HasMonitors => Monitors.Count > 0;
 
+    /// <summary>Each UPS the service reads, in a line: "UPS · APC Back-UPS ES 850G2 · 142 W (load of its rated watts)".</summary>
+    public IReadOnlyList<string> Upses
+    {
+        get => _upses;
+        private set
+        {
+            if (SetProperty(ref _upses, value)) OnPropertyChanged(nameof(HasUps));
+        }
+    }
+
+    /// <summary>Each power supply the service reads, in a line: "Power supply · Corsair HX1000i · 312 W (DC output, all
+    /// rails)".</summary>
+    public IReadOnlyList<string> PowerSupplies
+    {
+        get => _powerSupplies;
+        private set
+        {
+            if (!SetProperty(ref _powerSupplies, value)) return;
+            OnPropertyChanged(nameof(HasPowerSupply));
+            OnPropertyChanged(nameof(AsksToReadPowerSupply));
+        }
+    }
+
+    /// <summary>What a UPS powers is asked only where there is one.</summary>
+    public bool HasUps => Upses.Count > 0;
+
+    public bool HasPowerSupply => PowerSupplies.Count > 0;
+
+    /// <summary>Whether the "Read this power supply" tick shows: while a power supply is listed, and while reading one is off,
+    /// since the service then leaves it to its maker's program and may stop naming it, and the tick could never be ticked
+    /// again.</summary>
+    public bool AsksToReadPowerSupply => HasPowerSupply || !ReadPowerSupply;
+
+    /// <summary>What the user says a UPS on USB powers. Its reading stands for this PC only once they say this PC, alone or
+    /// with its monitors.</summary>
+    public UpsLoad UpsLoad { get => _upsLoad; set => Change(ref _upsLoad, value); }
+
+    /// <summary>Whether a power supply that reports over USB is read.</summary>
+    public bool ReadPowerSupply
+    {
+        get => _readPowerSupply;
+        set
+        {
+            if (!SetProperty(ref _readPowerSupply, value)) return;
+            OnPropertyChanged(nameof(AsksToReadPowerSupply));
+            OnChanged();
+        }
+    }
+
     public string ExtrasWatts { get => _extrasWatts; set => Change(ref _extrasWatts, value); }
 
     /// <summary>The processor's rated watts; blank uses the bundled table.</summary>
@@ -154,8 +209,19 @@ internal sealed class ServiceForm : ObservableObject
         SampleInterval = Whole(settings.SampleIntervalSeconds);
         RawHours = Whole(settings.RawRetentionHours);
         HistoryYears = Whole(settings.HistoryRetentionYears);
+        UpsLoad = p.UpsLoad;
+        ReadPowerSupply = p.ReadPowerSupply;
         IsLoaded = true;
     });
+
+    /// <summary>Lists the UPSes and power supplies in the service's status, each in a line of its own, in its order. Call on
+    /// the UI thread.</summary>
+    public void ShowPowerDevices(IReadOnlyList<PowerDeviceStatus> devices)
+    {
+        var listed = devices.OfType<PowerDeviceStatus>().ToList();
+        Upses = [.. listed.Where(device => device.Kind == PowerDeviceKind.Ups).Select(device => Line("UPS", device))];
+        PowerSupplies = [.. listed.Where(device => device.Kind == PowerDeviceKind.PowerSupply).Select(device => Line("Power supply", device))];
+    }
 
     /// <summary>Lists the external monitors in the service's status, once each and in its order, with the user's choice for
     /// each from the settings last loaded, or read again or sent by a save. A monitor already listed keeps its row, and with
@@ -249,6 +315,7 @@ internal sealed class ServiceForm : ObservableObject
                 FanCount = fans, DisplayDiagonalInches = panel, ExtrasWatts = extras, CpuTdpOverrideW = cpu, GpuTdpOverrideW = gpu,
                 Monitors = choices,
                 ExternalMonitors = HasMonitors ? 0 : _profile.ExternalMonitors, IncludeMonitors = !HasMonitors && _profile.IncludeMonitors,
+                UpsLoad = UpsLoad, ReadPowerSupply = ReadPowerSupply,
             },
             IdleThresholdSeconds = idle * 60,
             SampleIntervalSeconds = interval,
@@ -407,6 +474,18 @@ internal sealed class ServiceForm : ObservableObject
     /// whether it counts says nothing.</summary>
     private static bool SaysSomething(MonitorChoice choice, bool countedByDefault, bool ownPlug)
         => choice.OwnPlug is not null || choice.Watts is not null || (ownPlug && choice.Counted != countedByDefault);
+
+    /// <summary>A power device in a line: "UPS · APC Back-UPS ES 850G2 · 142 W (load of its rated watts)", with whatever the
+    /// service hasn't said left out, and "not read yet" for a device it has found but not read.</summary>
+    private string Line(string kind, PowerDeviceStatus device)
+    {
+        var name = device.Name?.Trim();
+        var how = device.How?.Trim();
+        var watts = device.Watts is { } value && double.IsFinite(value)
+            ? Format.WholeWatts(value, _culture) + " W" + (string.IsNullOrEmpty(how) ? "" : $" ({how})")
+            : "not read yet";
+        return string.Join(" · ", new[] { kind, string.IsNullOrEmpty(name) ? null : name, watts }.OfType<string>());
+    }
 
     private bool Int(string text, string what, out int value, ref string? problem)
     {

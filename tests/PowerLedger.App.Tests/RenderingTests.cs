@@ -356,6 +356,70 @@ public class RenderingTests
         });
 
     [Fact]
+    public void Settings_lists_the_ups_and_the_power_supply_asks_what_the_ups_powers_and_offers_to_stop_reading_the_supply()
+        => OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                var settings = SettingsScreen(link);
+                settings.Show();
+                var view = new SettingsView { DataContext = settings };
+                var window = new Window
+                {
+                    Content = view, Width = 880, Height = 900, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    // As narrow as the window gets, so nothing here runs past the page.
+                    var scroller = view.Content.ShouldBeOfType<ScrollViewer>();
+                    string[] lines =
+                    [
+                        "UPS · APC Back-UPS ES 850G2 · 142 W (load of its rated watts)",
+                        "Power supply · Corsair HX1000i · 312 W (DC output, all rails)",
+                        "What does it power?",
+                    ];
+                    foreach (var text in lines)
+                    {
+                        var line = Find<TextBlock>(view, block => block.Text == text).ShouldNotBeNull($"{text} on {theme}");
+                        line.IsVisible.ShouldBeTrue($"{text} on {theme}");
+                        Inside(line, scroller, $"{text} on {theme}");
+                    }
+
+                    // Nothing is chosen until the user says what the UPS powers.
+                    var choices = new[] { "This PC", "This PC and its monitors", "More" }
+                        .Select(content => Find<RadioButton>(view, button => Equals(button.Content, content)).ShouldNotBeNull($"{content} on {theme}"))
+                        .ToList();
+                    choices.ShouldAllBe(button => button.IsChecked == false);
+                    Inside(choices[^1], scroller, $"what the UPS powers on {theme}");
+
+                    choices[1].IsChecked = true;
+                    settings.Service.UpsLoad.ShouldBe(UpsLoad.ThisPcAndMonitors);
+                    ((ServiceSettings)link.Writes[^1]).Profile.UpsLoad.ShouldBe(UpsLoad.ThisPcAndMonitors);
+
+                    var tick = Find<CheckBox>(view, box => Equals(box.Content, "Read this power supply")).ShouldNotBeNull(theme.ToString());
+                    (tick.IsVisible, tick.IsChecked).ShouldBe((true, (bool?)true), theme.ToString());
+                    Inside(tick, scroller, $"the power supply tick on {theme}");
+
+                    tick.IsChecked = false;
+                    ((ServiceSettings)link.Writes[^1]).Profile.ReadPowerSupply.ShouldBeFalse();
+                    link.Writes.Count.ShouldBe(2);
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+
+            static void Inside(FrameworkElement part, ScrollViewer scroller, string what)
+                => part.TranslatePoint(new Point(part.ActualWidth, 0), scroller).X.ShouldBeLessThanOrEqualTo(scroller.ViewportWidth + 0.5, what);
+        });
+
+    [Fact]
     public void The_update_card_draws_in_the_rail_in_both_themes()
     {
         Directory.CreateDirectory(Folder);
@@ -621,13 +685,14 @@ public class RenderingTests
             TimeZoneInfo.Utc, English, 0.38);
     }
 
-    /// <summary>Settings against a running service, with a tariff, this laptop's detection and two external monitors: one in
+    /// <summary>Settings against a running service, with a tariff, this laptop's detection, two external monitors — one in
     /// Energy Star's list whose brightness was read, on a plug of its own, and a portable one estimated from its size whose
-    /// brightness wasn't, running off the laptop. The service is <paramref name="link"/> when it is given.</summary>
+    /// brightness wasn't, running off the laptop — and a UPS and a power supply read over USB. The service is
+    /// <paramref name="link"/> when it is given.</summary>
     private static SettingsViewModel SettingsScreen(FakeLink? link = null)
     {
         link ??= new FakeLink();
-        link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable);
+        link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) with { PowerDevices = [Statuses.Ups, Statuses.PowerSupply] };
         link.Connect(true);
         return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");

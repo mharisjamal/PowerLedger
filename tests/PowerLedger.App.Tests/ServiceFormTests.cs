@@ -47,6 +47,60 @@ public class ServiceFormTests
         form.SampleInterval.ShouldBe("1");
         form.RawHours.ShouldBe("48");
         form.HistoryYears.ShouldBe("2");
+        form.UpsLoad.ShouldBe(UpsLoad.NotSaid);
+        form.ReadPowerSupply.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Each_ups_and_power_supply_the_service_reads_is_listed_with_its_watts_and_how_they_were_found()
+    {
+        var form = SavingItself();
+
+        form.ShowPowerDevices([Statuses.Ups, Statuses.PowerSupply]);
+
+        form.Upses.ShouldBe(["UPS · APC Back-UPS ES 850G2 · 142 W (load of its rated watts)"]);
+        form.PowerSupplies.ShouldBe(["Power supply · Corsair HX1000i · 312 W (DC output, all rails)"]);
+        (form.HasUps, form.HasPowerSupply, form.AsksToReadPowerSupply).ShouldBe((true, true, true));
+        _link.Writes.ShouldBeEmpty();                                 // the form filled itself; the user changed nothing
+    }
+
+    [Fact]
+    public void A_device_read_no_watts_yet_or_named_by_nothing_is_listed_with_what_is_known_of_it()
+    {
+        var form = Form();
+
+        form.ShowPowerDevices([Statuses.Ups with { Watts = null, How = "" }, Statuses.PowerSupply with { Name = "" }]);
+
+        form.Upses.ShouldBe(["UPS · APC Back-UPS ES 850G2 · not read yet"]);
+        form.PowerSupplies.ShouldBe(["Power supply · 312 W (DC output, all rails)"]);
+    }
+
+    [Fact]
+    public void Nothing_detected_is_listed_as_nothing_and_asks_nothing()
+    {
+        var form = Form();
+        form.ShowPowerDevices([Statuses.Ups, Statuses.PowerSupply]);
+
+        form.ShowPowerDevices([]);
+
+        form.Upses.ShouldBeEmpty();
+        form.PowerSupplies.ShouldBeEmpty();
+        (form.HasUps, form.HasPowerSupply, form.AsksToReadPowerSupply).ShouldBe((false, false, false));
+    }
+
+    [Fact]
+    public void The_power_supply_tick_stays_while_reading_one_is_off_so_it_can_be_turned_on_again()
+    {
+        // Reading it off, the service leaves the power supply to its maker's program, and may stop naming it. The tick has to
+        // stay, or it could never be ticked again.
+        var form = SavingItself();
+        form.ShowPowerDevices([Statuses.PowerSupply]);
+
+        form.ReadPowerSupply = false;
+        form.ShowPowerDevices([]);
+
+        (form.HasPowerSupply, form.AsksToReadPowerSupply).ShouldBe((false, true));
+        ((ServiceSettings)_link.Writes.Single()).Profile.ReadPowerSupply.ShouldBeFalse();
     }
 
     [Fact]
@@ -68,6 +122,8 @@ public class ServiceFormTests
         form.SampleInterval = "2";
         form.RawHours = "72";
         form.HistoryYears = "5";
+        form.UpsLoad = UpsLoad.ThisPcAndMonitors;
+        form.ReadPowerSupply = false;
 
         (await form.SaveAsync()).ShouldBeTrue();
 
@@ -76,6 +132,7 @@ public class ServiceFormTests
         {
             Chassis = ChassisKind.Desktop, PsuTier = PsuTier.Gold, RamSticks = 4, RamIsDdr5 = true, SsdCount = 2, HddCount = 1,
             FanCount = 5, DisplayDiagonalInches = 0, ExtrasWatts = 12.5, CpuTdpOverrideW = 125, GpuTdpOverrideW = null,
+            UpsLoad = UpsLoad.ThisPcAndMonitors, ReadPowerSupply = false,
         });
         (sent.IdleThresholdSeconds, sent.SampleIntervalSeconds, sent.RawRetentionHours, sent.HistoryRetentionYears).ShouldBe((600, 2, 72, 5));
         form.Message.ShouldBe("Saved.");
@@ -86,6 +143,8 @@ public class ServiceFormTests
     [InlineData(nameof(ServiceForm.Chassis), ChassisKind.Desktop)]
     [InlineData(nameof(ServiceForm.PsuTier), PsuTier.Gold)]
     [InlineData(nameof(ServiceForm.SampleInterval), "3")]
+    [InlineData(nameof(ServiceForm.UpsLoad), UpsLoad.ThisPc)]
+    [InlineData(nameof(ServiceForm.ReadPowerSupply), false)]
     public void A_form_that_saves_itself_sends_a_tick_or_a_segmented_choice_at_once_and_once(string field, object chosen)
     {
         var form = SavingItself();

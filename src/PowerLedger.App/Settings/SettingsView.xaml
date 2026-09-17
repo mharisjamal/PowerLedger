@@ -167,6 +167,48 @@
                     <TextBlock Style="{StaticResource Label}" Text="External monitors" />
                     <TextBlock Style="{StaticResource Text.Muted}" VerticalAlignment="Center" Text="none detected" />
                 </StackPanel>
+                <!-- Each UPS the service reads over USB, and what the user says it powers, which decides whether its reading
+                     stands for this PC. Nothing shows while none is detected. -->
+                <ItemsControl ItemsSource="{Binding Upses}" Focusable="False" Visibility="{Binding HasUps, Converter={StaticResource VisibleWhen}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" Margin="0,5" Text="{Binding}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <StackPanel Style="{StaticResource Row}" Visibility="{Binding HasUps, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Style="{StaticResource Label}" Text="What does it power?" />
+                    <RadioButton Style="{StaticResource Choice}" Content="This PC"
+                                 IsChecked="{Binding UpsLoad, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:UpsLoad.ThisPc}}" />
+                    <RadioButton Style="{StaticResource Choice}" Content="This PC and its monitors"
+                                 IsChecked="{Binding UpsLoad, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:UpsLoad.ThisPcAndMonitors}}" />
+                    <RadioButton Style="{StaticResource Choice}" Content="More"
+                                 IsChecked="{Binding UpsLoad, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:UpsLoad.More}}" />
+                </StackPanel>
+                <!-- Each power supply the service reads over USB, with the tick that stops it. The tick stays while reading is
+                     off, when the service leaves the supply to its maker's program and may stop naming it. -->
+                <ItemsControl ItemsSource="{Binding PowerSupplies}" Focusable="False" Visibility="{Binding HasPowerSupply, Converter={StaticResource VisibleWhen}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" Margin="0,5" Text="{Binding}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <StackPanel Style="{StaticResource Row}" Visibility="{Binding AsksToReadPowerSupply, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock>
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Label}">
+                                <Setter Property="Text" Value="" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasPowerSupply}" Value="False">
+                                        <Setter Property="Text" Value="Power supply" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <CheckBox Style="{StaticResource Tick}" Content="Read this power supply" IsChecked="{Binding ReadPowerSupply}" />
+                </StackPanel>
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Extras such as lights and pumps, W" />
                     <TextBox Style="{StaticResource Field}" Width="56" Text="{Binding ExtrasWatts, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Extras in watts" />

@@ -310,6 +310,45 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void Showing_it_lists_the_ups_and_the_power_supply_the_service_reads_and_what_is_said_of_them_saves_itself()
+    {
+        _link.Status = Statuses.WithPowerDevices();
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.Service.Upses.ShouldBe(["UPS · APC Back-UPS ES 850G2 · 142 W (load of its rated watts)"]);
+        model.Service.PowerSupplies.ShouldBe(["Power supply · Corsair HX1000i · 312 W (DC output, all rails)"]);
+        (model.Service.UpsLoad, model.Service.ReadPowerSupply).ShouldBe((UpsLoad.NotSaid, true));
+        _link.Writes.ShouldBeEmpty();
+
+        model.Service.UpsLoad = UpsLoad.ThisPcAndMonitors;
+        model.Service.ReadPowerSupply = false;
+
+        var sent = _link.Writes.Cast<ServiceSettings>().ToList();
+        sent.Count.ShouldBe(2);
+        sent[0].Profile.UpsLoad.ShouldBe(UpsLoad.ThisPcAndMonitors);
+        (sent[1].Profile.UpsLoad, sent[1].Profile.ReadPowerSupply).ShouldBe((UpsLoad.ThisPcAndMonitors, false));
+        model.Service.Message.ShouldBe("Saved.");
+    }
+
+    [Fact]
+    public void A_ups_plugged_in_while_settings_shows_appears_within_ten_seconds_and_a_service_from_before_them_lists_none()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+        (model.Service.HasUps, model.Service.HasPowerSupply).ShouldBe((false, false));
+
+        _link.Status = Statuses.WithPowerDevices(Statuses.Ups);
+        _clock.Advance(SettingsViewModel.StatusEvery);
+
+        model.Service.Upses.ShouldHaveSingleItem().ShouldBe("UPS · APC Back-UPS ES 850G2 · 142 W (load of its rated watts)");
+        model.Service.HasPowerSupply.ShouldBeFalse();
+        _link.Writes.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_service_from_before_monitors_lists_none_and_its_settings_still_save()
     {
         _link.Status = Statuses.Running() with { Monitors = null };
