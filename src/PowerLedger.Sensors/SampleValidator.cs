@@ -8,7 +8,9 @@ namespace PowerLedger.Sensors;
 /// real change of level rather than rejected forever. The seconds after an AC change are flagged so the calibration
 /// learner skips them while the quality label switches at once.
 /// CPU watts come from the energy meter as averages of real energy over the tick, so they are range-checked but never
-/// spike-filtered: a jump from idle to turbo is a fact, not a glitch. Single-threaded: the sampling loop owns it.
+/// spike-filtered: a jump from idle to turbo is a fact, not a glitch. The watts a UPS or a power supply reports are
+/// treated the same way, and are the readings a ceiling matters most for, since the model takes one of them as the whole
+/// machine's total. Single-threaded: the sampling loop owns it.
 /// </summary>
 public sealed class SampleValidator
 {
@@ -48,6 +50,12 @@ public sealed class SampleValidator
         var battery = Check(raw.BatteryRateW, _options.BatteryMaxW, _battery, spikeFilter: true, ref suspect);
         var igpu = InRange(raw.IGpuW, _options.CpuMaxW, ref suspect);
 
+        // A UPS or a power supply gives the whole machine's draw, and the model takes it as the total, so a misread unit
+        // exponent that turns 250 W into 25 kW would bank 6.94 Wh in one second as a measured, unsuspected reading. They
+        // are range-checked like the rest and, like the CPU's, never spike-filtered: a jump from idle to load is a fact.
+        var ups = InRange(raw.UpsOutputW, _options.UpsMaxW, ref suspect);
+        var psu = InRange(raw.PsuOutputW, _options.PsuMaxW, ref suspect);
+
         var brightness = Fraction(raw.Brightness, ref suspect);
         var load = Fraction(raw.CpuLoad, ref suspect) ?? 0;
         var gpuLoad = Fraction(raw.DGpuLoad, ref suspect);
@@ -62,6 +70,8 @@ public sealed class SampleValidator
             Brightness = brightness,
             CpuLoad = load,
             DGpuLoad = gpuLoad,
+            UpsOutputW = ups,
+            PsuOutputW = psu,
             Suspect = suspect,
         };
     }

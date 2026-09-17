@@ -10,10 +10,11 @@ public class SampleValidatorTests
 
     private static Sample Raw(
         double? cpu = 15, double? gpu = 5, double? battery = null, bool onBattery = false,
-        double cpuLoad = 0.3, double? brightness = 0.6, int second = 0)
+        double cpuLoad = 0.3, double? brightness = 0.6, int second = 0, double? ups = null, double? psu = null)
         => new(T0.AddSeconds(second), 1.0, cpu, null, cpuLoad, gpu, 0.2, DGpuPresent: true,
                battery, onBattery, brightness, DisplayOn: true, MonitorCount: 1,
-               UserIdleSeconds: 0, SessionLocked: false, Suspect: false);
+               UserIdleSeconds: 0, SessionLocked: false, Suspect: false,
+               UpsOutputW: ups, PsuOutputW: psu);
 
     [Fact]
     public void A_plain_reading_passes_through_untouched()
@@ -167,6 +168,65 @@ public class SampleValidatorTests
         nonsense.CpuLoad.ShouldBe(0);
     }
 
+    [Theory]
+    [InlineData(5001.0)]
+    [InlineData(-1.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void A_ups_reading_outside_its_range_is_dropped_and_the_tick_marked_suspect(double watts)
+    {
+        // A unit exponent read one place out turns 250 W into 25 kW, which banks 6.94 Wh in a single second.
+        var validator = new SampleValidator();
+        var checked_ = validator.Validate(Raw(ups: watts));
+        checked_.UpsOutputW.ShouldBeNull();
+        checked_.Suspect.ShouldBeTrue();
+        validator.SuspectCount.ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData(2001.0)]
+    [InlineData(-1.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void A_power_supply_reading_outside_its_range_is_dropped_and_the_tick_marked_suspect(double watts)
+    {
+        var validator = new SampleValidator();
+        var checked_ = validator.Validate(Raw(psu: watts));
+        checked_.PsuOutputW.ShouldBeNull();
+        checked_.Suspect.ShouldBeTrue();
+        validator.SuspectCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void A_ups_and_a_power_supply_are_believed_up_to_their_ceilings_and_a_zero_is_left_to_the_model()
+    {
+        var validator = new SampleValidator();
+        var ceiling = validator.Validate(Raw(ups: 5000, psu: 2000));
+        ceiling.UpsOutputW.ShouldBe(5000);
+        ceiling.PsuOutputW.ShouldBe(2000);
+        ceiling.Suspect.ShouldBeFalse();
+
+        // Nought watts is in range here: refusing to make it the whole total is the model's job, not the validator's.
+        var zero = validator.Validate(Raw(ups: 0, psu: 0, second: 1));
+        zero.UpsOutputW.ShouldBe(0);
+        zero.PsuOutputW.ShouldBe(0);
+        zero.Suspect.ShouldBeFalse();
+        validator.SuspectCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_whole_machine_reading_is_never_spike_filtered_because_a_jump_to_load_is_real()
+    {
+        var validator = new SampleValidator();
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(ups: 40, psu: 30, second: i));
+
+        var load = validator.Validate(Raw(ups: 400, psu: 300, second: 30));
+
+        load.UpsOutputW.ShouldBe(400);
+        load.PsuOutputW.ShouldBe(300);
+        load.Suspect.ShouldBeFalse();
+    }
+
     [Fact]
     public void A_non_finite_integrated_graphics_reading_is_dropped()
     {
@@ -183,5 +243,16 @@ public class SampleValidatorTests
         strict.Validate(Raw(cpu: 25)).CpuPackageW.ShouldBeNull();
         for (var i = 0; i < 3; i++) strict.Validate(Raw(gpu: 5, second: i));
         strict.Validate(Raw(gpu: 15, second: 3)).DGpuW.ShouldBe(5);
+
+        var bounded = new SampleValidator(new ValidatorOptions(UpsMaxW: 100, PsuMaxW: 50));
+        var over = bounded.Validate(Raw(ups: 101, psu: 51));
+        over.UpsOutputW.ShouldBeNull();
+        over.PsuOutputW.ShouldBeNull();
+        over.Suspect.ShouldBeTrue();
+
+        var under = bounded.Validate(Raw(ups: 100, psu: 50, second: 1));
+        under.UpsOutputW.ShouldBe(100);
+        under.PsuOutputW.ShouldBe(50);
+        under.Suspect.ShouldBeFalse();
     }
 }
