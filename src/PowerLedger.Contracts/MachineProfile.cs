@@ -57,6 +57,14 @@ public sealed record MachineProfile
     /// monitor first seen later is left out as they were.</summary>
     public bool CountMonitorsByDefault { get; init; } = true;
 
+    /// <summary>What the outlets of a UPS read over USB power. Its reading stands for this PC only once the user has said
+    /// it powers this PC, or this PC and its monitors.</summary>
+    public UpsLoad UpsLoad { get; init; } = UpsLoad.NotSaid;
+
+    /// <summary>Whether a power supply that reports over USB is read. On by default; off leaves the device to its maker's
+    /// program alone.</summary>
+    public bool ReadPowerSupply { get; init; } = true;
+
     public static MachineProfile DefaultLaptop { get; } = new();
 
     public static MachineProfile DefaultDesktop { get; } = new()
@@ -79,9 +87,9 @@ public sealed record MachineProfile
 
     /// <summary>Every member but <see cref="Monitors"/>. A member added to the profile must be added here, and a test
     /// fails until it is.</summary>
-    private (ChassisKind, int, bool, int, int, int, PsuTier, double, int, bool, double, double, double?, double?, bool) Members() =>
+    private (ChassisKind, int, bool, int, int, int, PsuTier, double, int, bool, double, double, double?, double?, bool, UpsLoad, bool) Members() =>
         (Chassis, RamSticks, RamIsDdr5, SsdCount, HddCount, FanCount, PsuTier, ExtrasWatts, ExternalMonitors, IncludeMonitors,
-            MonitorWatts, DisplayDiagonalInches, CpuTdpOverrideW, GpuTdpOverrideW, CountMonitorsByDefault);
+            MonitorWatts, DisplayDiagonalInches, CpuTdpOverrideW, GpuTdpOverrideW, CountMonitorsByDefault, UpsLoad, ReadPowerSupply);
 
     private static bool SameChoices(IReadOnlyList<MonitorChoice>? a, IReadOnlyList<MonitorChoice>? b) =>
         ReferenceEquals(a, b) || (a is not null && b is not null && a.SequenceEqual(b));

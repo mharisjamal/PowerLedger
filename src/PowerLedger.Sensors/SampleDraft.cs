@@ -1,3 +1,4 @@
+using PowerLedger.Contracts;
 using PowerLedger.Core;
 
 namespace PowerLedger.Sensors;
@@ -25,6 +26,15 @@ public sealed class SampleDraft
     public double UserIdleSeconds { get; set; }
     public bool SessionLocked { get; set; }
 
+    /// <summary>What <see cref="DGpuW"/> covers when a vendor library measured it.</summary>
+    public GpuPowerScope DGpuScope { get; set; } = GpuPowerScope.Board;
+
+    public double? UpsOutputW { get; set; }
+    public UpsPowerSource UpsSource { get; set; }
+    public string? UpsName { get; set; }
+    public double? PsuOutputW { get; set; }
+    public string? PsuName { get; set; }
+
     /// <summary>Freezes the draft. Suspect is always false here; only the validator sets it.</summary>
     public Sample ToSample(DateTimeOffset timestamp, double deltaSeconds) => new(
         timestamp, deltaSeconds,
@@ -32,5 +42,6 @@ public sealed class SampleDraft
         DGpuW, DGpuLoad, DGpuPresent,
         BatteryRateW, OnBattery,
         Brightness, DisplayOn, MonitorCount,
-        UserIdleSeconds, SessionLocked, Suspect: false);
+        UserIdleSeconds, SessionLocked, Suspect: false,
+        DGpuScope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName);
 }

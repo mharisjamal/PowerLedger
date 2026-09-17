@@ -12,11 +12,14 @@ public sealed record ComponentWatts(
 /// <param name="CpuMeasured">The processor's watts came from its energy meter this tick, not the load model.</param>
 /// <param name="GpuMeasured">The discrete GPU's watts were reported this tick (0 W for a card Windows has switched off);
 /// false means the load model, or no card the service can read.</param>
+/// <param name="GpuScope">What a measured GPU figure covers; a chip or package reading has the rest of the card estimated.</param>
+/// <param name="Total">Where the total came from. Both came later: a frame without them is from an older service.</param>
 public sealed record ReadingFrame(
     DateTimeOffset Timestamp, double DeltaSeconds, double TotalW, Quality Quality, ComponentWatts Components,
     bool CpuMeasured, bool GpuMeasured,
     bool OnBattery, bool DisplayOn, bool UserIdle, bool SessionLocked,
-    double CpuLoad, double? GpuLoad, double? Brightness, bool Suspect) : PipeMessage
+    double CpuLoad, double? GpuLoad, double? Brightness, bool Suspect,
+    GpuPowerScope GpuScope = GpuPowerScope.Board, TotalSource Total = TotalSource.Model) : PipeMessage
 {
     /// <summary>The display band: the internal panel plus the external monitors counted (spec §6).</summary>
     [JsonIgnore]

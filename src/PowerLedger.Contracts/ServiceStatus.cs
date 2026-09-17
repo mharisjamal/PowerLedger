@@ -14,12 +14,14 @@ namespace PowerLedger.Contracts;
 /// <param name="DatabaseNotice">Null normally; set when a damaged or untrusted database was set aside at start.</param>
 /// <param name="Last">The most recent reading, or null before the first.</param>
 /// <param name="Monitors">The external monitors the service knows; null from an older service, which doesn't send them.</param>
+/// <param name="PowerDevices">The UPSes and power supplies the service reads over USB; null from an older service.</param>
 public sealed record ServiceStatus(
     string Version, DateTimeOffset StartedAt, long Ticks,
     IReadOnlyList<SourceStatus> Sources, int SuspectTicks, int SensorRestarts,
     CalibrationStatus Calibration, string InventoryHash, long DatabaseBytes,
     string? WriteProblem, string? DatabaseNotice, ReadingFrame? Last,
-    IReadOnlyList<MonitorStatus>? Monitors = null);
+    IReadOnlyList<MonitorStatus>? Monitors = null,
+    IReadOnlyList<PowerDeviceStatus>? PowerDevices = null);
 
 /// <param name="Name">The source's name, e.g. "battery".</param>
 /// <param name="Supported">False when this machine cannot answer at all.</param>

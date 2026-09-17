@@ -55,6 +55,7 @@ public sealed record ServiceSettings
     {
         if (!Enum.IsDefined(p.Chassis)) return "The chassis is not one PowerLedger knows.";
         if (!Enum.IsDefined(p.PsuTier)) return "The power supply rating is not one PowerLedger knows.";
+        if (!Enum.IsDefined(p.UpsLoad)) return "What the UPS powers is not an answer PowerLedger knows.";
         if (p.RamSticks is < 1 or > 32) return "Memory must be between 1 and 32 sticks.";
         if (p.SsdCount is < 0 or > 32 || p.HddCount is < 0 or > 32) return "Drive counts must be between 0 and 32.";
         if (p.FanCount is < 0 or > 32) return "The fan count must be between 0 and 32.";
