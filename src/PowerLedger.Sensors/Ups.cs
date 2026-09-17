@@ -109,7 +109,7 @@ internal sealed class Ups : IDisposable
     {
         if (round.Value(_activePower) is { } active && Sane(active)) return (active, UpsPowerSource.ActivePower);
 
-        // A load of zero is a reading, not a missing one: it means the outlets draw less than one percent of the rating.
+        // A load of zero is read like any other; the nought watts it makes are what Sane then turns down.
         if (round.Value(_percentLoad) is not { } percent || percent < 0 || percent > MaxPercent) return (null, UpsPowerSource.None);
         var load = percent / 100;
 
@@ -127,7 +127,10 @@ internal sealed class Ups : IDisposable
     private static double? Rating(Round round, Field? field)
         => round.Value(field) is { } rating && rating > 0 && rating <= MaxWatts ? rating : null;
 
-    private static bool Sane(double watts) => double.IsFinite(watts) && watts >= 0 && watts <= MaxWatts;
+    /// <summary>Watts that can be believed: finite, above zero, and no more than a UPS could deliver. The outlets of a UPS
+    /// holding a running PC never draw nothing, so nought watts is a load below the first percent of the rating or a sensor
+    /// that has died, and the model would otherwise take it as the machine's whole total.</summary>
+    private static bool Sane(double watts) => double.IsFinite(watts) && watts > 0 && watts <= MaxWatts;
 
     /// <summary>The field for a usage, from the best place any of the device's collections has it in.</summary>
     private static Field? Choose(IReadOnlyList<IHidCollection> collections, ushort usage, ushort[] places)

@@ -74,9 +74,10 @@ public class UpsSourceTests
     }
 
     [Fact]
-    public void A_load_of_nothing_is_a_reading_of_no_watts_rather_than_no_reading()
+    public void A_load_of_nothing_is_no_reading_at_all_because_a_machine_that_runs_draws_something()
     {
-        // Load comes in whole percents, so a PC drawing less than one percent of the rating reads as zero.
+        // Load comes in whole percents, so a PC drawing less than one percent of the rating reads as zero, and so does a
+        // sensor that has died. Nought watts is not what the outlets draw, and as a total it would wipe out the machine.
         var ups = Attach();
         var output = ups.Holder(Pdc.Output);
         ups.Field(Pdc.PercentLoad, 0, report: 5, holder: output);
@@ -85,7 +86,24 @@ public class UpsSourceTests
         using var source = Source();
         var draft = Tick(source);
 
-        draft.UpsOutputW.ShouldBe(0);
+        draft.UpsOutputW.ShouldBeNull();
+        draft.UpsSource.ShouldBe(UpsPowerSource.None);
+        draft.UpsName.ShouldBe("CPS CP1500PFCLCD");
+    }
+
+    [Fact]
+    public void An_output_power_of_nought_is_passed_over_for_the_load_of_the_rating()
+    {
+        var ups = Attach();
+        var output = ups.Holder(Pdc.Output);
+        ups.Field(Pdc.ActivePower, 0, report: 4, holder: output, units: Pdc.Watt, unitsExp: 7);
+        ups.Field(Pdc.PercentLoad, 27, report: 5, holder: output);
+        ups.Field(Pdc.ConfigActivePower, 520, report: 6, holder: output, units: Pdc.Watt, unitsExp: 7);
+
+        using var source = Source();
+        var draft = Tick(source);
+
+        draft.UpsOutputW.ShouldNotBeNull().ShouldBe(140.4, 1e-9);
         draft.UpsSource.ShouldBe(UpsPowerSource.LoadOfRatedWatts);
     }
 
