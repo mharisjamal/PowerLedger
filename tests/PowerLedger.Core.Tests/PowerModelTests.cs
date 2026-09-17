@@ -417,12 +417,32 @@ public class PowerModelTests
     [InlineData(UpsLoad.ThisPc, null, UpsPowerSource.ActivePower)]
     [InlineData(UpsLoad.ThisPcAndMonitors, double.NaN, UpsPowerSource.ActivePower)]
     [InlineData(UpsLoad.ThisPcAndMonitors, -5.0, UpsPowerSource.ActivePower)]
+    [InlineData(UpsLoad.ThisPc, 0.0, UpsPowerSource.ActivePower)]
     public void A_ups_is_not_used_until_the_user_says_it_powers_this_pc_alone_or_with_its_monitors_and_it_gives_watts(
         UpsLoad load, double? watts, UpsPowerSource source)
     {
         var r = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = load }).Evaluate(WithUps(DesktopTick(), watts, source));
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
         r.TotalW.ShouldBe(192 / 0.85, 1e-9);
+    }
+
+    [Fact]
+    public void A_ups_answering_no_watts_at_all_leaves_the_total_to_the_model_and_the_first_watt_above_zero_takes_it()
+    {
+        // A load comes in whole percents, so a PC drawing less than one percent of a 520 VA rating, about 2.6 W, reads as
+        // zero, and so does a sensor that has died. Taken as the total it would turn this 225.9 W desktop into 0 W,
+        // measured and unsuspected, with a rest of minus 225.9 W.
+        var profile = MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc };
+        var zero = Desktop(profile: profile).Evaluate(WithUps(DesktopTick(), 0));
+        (zero.TotalSource, zero.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        zero.TotalW.ShouldBe(192 / 0.85, 1e-9);
+        zero.Components.Unattributed.ShouldBe(0);
+        zero.Components.Sum.ShouldBe(zero.TotalW, 1e-9);
+
+        var barely = Desktop(profile: profile).Evaluate(WithUps(DesktopTick(), 0.5));
+        (barely.TotalSource, barely.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
+        barely.TotalW.ShouldBe(0.5, 1e-9);
+        barely.Components.Sum.ShouldBe(barely.TotalW, 1e-9);
     }
 
     [Fact]
@@ -488,11 +508,55 @@ public class PowerModelTests
     [InlineData(true, null)]
     [InlineData(true, double.PositiveInfinity)]
     [InlineData(true, -1.0)]
+    [InlineData(true, 0.0)]
     public void A_power_supply_is_not_used_while_reading_it_is_off_or_when_it_gives_no_watts(bool read, double? watts)
     {
         var r = Desktop(profile: MachineProfile.DefaultDesktop with { ReadPowerSupply = read }).Evaluate(WithPsu(DesktopTick(), watts));
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
         r.TotalW.ShouldBe(192 / 0.85, 1e-9);
+    }
+
+    [Fact]
+    public void A_power_supply_answering_no_watts_leaves_the_total_to_the_model_and_the_first_watt_above_zero_takes_it()
+    {
+        // A running machine draws something, so nought watts is a sensor that has died rather than a reading of the rails.
+        var zero = Desktop().Evaluate(WithPsu(DesktopTick(), 0));
+        (zero.TotalSource, zero.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        zero.TotalW.ShouldBe(192 / 0.85, 1e-9);
+        zero.Components.Sum.ShouldBe(zero.TotalW, 1e-9);
+
+        var barely = Desktop().Evaluate(WithPsu(DesktopTick(), 0.5));
+        (barely.TotalSource, barely.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
+        barely.TotalW.ShouldBe(0.5 / 0.85, 1e-9);
+        barely.Components.Sum.ShouldBe(barely.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_laptop_read_by_a_power_supply_divides_by_its_adapter_efficiency_rather_than_a_desktop_supply_tier()
+    {
+        // The 80 PLUS tier in the profile describes a desktop's supply; a laptop is fed by an adapter, and the same tick's
+        // adapter loss is worked out with the adapter's efficiency, so the total has to use it too.
+        MachineProfile.DefaultLaptop.PsuTier.ShouldBe(PsuTier.Bronze);
+        var r = Laptop().Evaluate(WithPsu(TestData.Laptop(), 45));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
+        r.TotalW.ShouldBe(45 / 0.90, 1e-9);
+        r.Components.PsuLoss.ShouldBe(45 / 0.90 - 45, 1e-9);
+        r.Components.Unattributed.ShouldBe(45 - (14.6 + 4.1 + 4.2), 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+
+        var stingy = Laptop(options: new PowerModelOptions(LaptopAdapterEfficiency: 0.80)).Evaluate(WithPsu(TestData.Laptop(), 45));
+        stingy.TotalW.ShouldBe(45 / 0.80, 1e-9);
+        stingy.Components.Sum.ShouldBe(stingy.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_desktop_read_by_a_power_supply_still_divides_by_the_tier_of_its_own_supply()
+    {
+        var titanium = MachineProfile.DefaultDesktop with { PsuTier = PsuTier.Titanium };
+        var r = Desktop(profile: titanium, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 0))).Evaluate(WithPsu(DesktopTick(), 300));
+        r.TotalW.ShouldBe(300 / 0.94 + 25, 1e-9);
+        r.Components.PsuLoss.ShouldBe(300 / 0.94 - 300, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
     [Fact]

@@ -5,14 +5,15 @@ namespace PowerLedger.Core;
 /// <summary>
 /// Turns one <see cref="Sample"/> into a <see cref="Reading"/> (spec §5).
 /// The total comes from the first of these that applies: a laptop's battery discharge rate while it runs on its battery;
-/// the output of a UPS the user says powers this PC, alone or with its monitors; a power supply's DC output over its
-/// efficiency; and otherwise the model, which sums the parts with a learned (laptop) or default "rest of system" baseline
-/// and divides by supply efficiency. A UPS or power supply total keeps the model's parts, and the rest is what the total
-/// leaves of them. The external monitors draw what the <see cref="IMonitorDraw"/> says (nothing, when the model is given
-/// none). A monitor with a plug of its own is added after the efficiency division, and on top of a measured rate or a power
-/// supply's reading; a UPS that powers the monitors too already holds it. One running off the PC, as a portable monitor on a
-/// laptop's USB-C port does, draws through the PC's supply or battery, so it goes inside the division and is already in
-/// every reading.
+/// the output of a UPS the user says powers this PC, alone or with its monitors; a power supply's DC output over the
+/// efficiency of whatever feeds this machine, a desktop's supply or a laptop's adapter; and otherwise the model, which sums
+/// the parts with a learned (laptop) or default "rest of system" baseline and divides by that same efficiency. Each of the
+/// three measured totals counts only above zero, since a machine that runs draws something. A UPS or power supply total
+/// keeps the model's parts, and the rest is what the total leaves of them. The external monitors draw what the
+/// <see cref="IMonitorDraw"/> says (nothing, when the model is given none). A monitor with a plug of its own is added
+/// after the efficiency division, and on top of a measured rate or a power supply's reading; a UPS that powers the
+/// monitors too already holds it. One running off the PC, as a portable monitor on a laptop's USB-C port does, draws
+/// through the PC's supply or battery, so it goes inside the division and is already in every reading.
 /// </summary>
 public sealed class PowerModel
 {
@@ -133,8 +134,9 @@ public sealed class PowerModel
         }
         if (!onItsBattery && PowerSupplyWatts(s) is { } output)
         {
-            // The power supply draws its DC output over its efficiency from the wall, and loses the difference.
-            var wall = output / PsuEfficiency.For(_profile.PsuTier);
+            // The power supply draws its DC output over its efficiency from the wall, and loses the difference. The
+            // efficiency is the one this machine is fed through, which on a laptop is its adapter's and not a supply tier.
+            var wall = output / efficiency;
             var total = wall + monitors.OwnPlug;
             return Build(s, total, Quality.Measured, WithRest(parts with { PsuLoss = wall - output }, total), userIdle, TotalSource.PowerSupply);
         }
@@ -153,16 +155,20 @@ public sealed class PowerModel
     private static Components WithRest(Components parts, double total) => parts with { Unattributed = total - (parts.Sum - parts.Unattributed) };
 
     /// <summary>The watts a UPS gave, when the user has said it powers this PC, alone or with its monitors; otherwise null,
-    /// since a UPS that powers more, or may, doesn't stand for this PC.</summary>
+    /// since a UPS that powers more, or may, doesn't stand for this PC. Only watts above zero are a reading, as a discharge
+    /// rate is (see <see cref="Sample.HasDischargeRate"/>): a machine that runs draws something, so nought watts is a load
+    /// below the first percent of the rating or a sensor that has died, and taking it as the total would wipe out the draw
+    /// of the whole machine.</summary>
     private double? UpsWatts(Sample s)
         => (_profile.UpsLoad is UpsLoad.ThisPc or UpsLoad.ThisPcAndMonitors) && s.UpsSource != UpsPowerSource.None
-           && Finite(s.UpsOutputW) is { } watts && watts >= 0
+           && Finite(s.UpsOutputW) is { } watts && watts > 0
             ? watts
             : null;
 
-    /// <summary>The DC output watts a power supply gave, unless the user has turned reading it off.</summary>
+    /// <summary>The DC output watts a power supply gave, unless the user has turned reading it off. Nought watts is no
+    /// reading of a running machine's rails, for the same reason a UPS's is not.</summary>
     private double? PowerSupplyWatts(Sample s)
-        => _profile.ReadPowerSupply && Finite(s.PsuOutputW) is { } watts && watts >= 0 ? watts : null;
+        => _profile.ReadPowerSupply && Finite(s.PsuOutputW) is { } watts && watts > 0 ? watts : null;
 
     private double CpuWatts(Sample s)
     {
