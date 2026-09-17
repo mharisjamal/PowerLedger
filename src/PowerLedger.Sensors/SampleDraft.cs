@@ -33,6 +33,11 @@ public sealed class SampleDraft
     public UpsPowerSource UpsSource { get; set; }
     public string? UpsName { get; set; }
     public double? PsuOutputW { get; set; }
+
+    /// <summary>What the supply says it draws from the wall, for the units that report that instead of their DC
+    /// output. It is wall power already and is never divided by an efficiency.</summary>
+    public double? PsuWallW { get; set; }
+
     public string? PsuName { get; set; }
 
     /// <summary>Freezes the draft. Suspect is always false here; only the validator sets it.</summary>
@@ -43,5 +48,5 @@ public sealed class SampleDraft
         BatteryRateW, OnBattery,
         Brightness, DisplayOn, MonitorCount,
         UserIdleSeconds, SessionLocked, Suspect: false,
-        DGpuScope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName);
+        DGpuScope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName, PsuWallW);
 }

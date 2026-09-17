@@ -215,7 +215,9 @@ internal static class FakePsus
 
     /// <summary>A Thermaltake DPS G: a read of [0x31][register] whose value comes back in the fourth and fifth bytes. The
     /// volts are encoded with a mantissa above 1023, which only a decode that reads the mantissa unsigned gets right.</summary>
-    public static FakeHidDevice Dpsg(double[] volts, double[] amps)
+    /// <param name="answersRegister">The register the supply echoes, whatever it was asked: a supply one reply behind,
+    /// or one answering another program, sends a report for a register nobody here asked for.</param>
+    public static FakeHidDevice Dpsg(double[] volts, double[] amps, byte? answersRegister = null)
         => new(ThermaltakeVendor, 0x2329, report =>
         {
             var reply = new byte[65];
@@ -228,7 +230,7 @@ internal static class FakePsus
             }
 
             if (report[1] != 0x31) return reply;
-            var register = report[2];
+            var register = answersRegister ?? report[2];
             byte[]? value = register switch
             {
                 >= 0x34 and <= 0x36 => Linear11(volts[register - 0x34], -7),

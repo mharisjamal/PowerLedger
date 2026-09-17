@@ -3,7 +3,8 @@ using System.Diagnostics;
 namespace PowerLedger.Sensors;
 
 /// <summary>
-/// The DC output a power supply reports over USB (spec §5). Three makers' supplies answer over HID: Corsair's HXi and
+/// What a power supply reports over USB (spec §5): the DC its rails put out, or, for a Corsair, what it draws from the
+/// wall — two different figures, which go to two different fields. Three makers' supplies answer over HID: Corsair's HXi and
 /// RMi, NZXT's E series and Thermaltake's DPS G. One is read at most every two seconds, with read commands only, and
 /// only while the owner leaves the tick on and the maker's own program is not running: such a supply answers one
 /// program at a time, and PowerLedger gives way to iCUE, CAM or Thermaltake's app rather than spoiling both readings.
@@ -44,6 +45,7 @@ public sealed class PsuSource : ISensorSource
     private string? _note;
     private string? _heldBy;
     private double _watts;
+    private PsuWatts _covers;
     private TimeSpan? _readAt;
     private TimeSpan _nextReadAt;
     private TimeSpan _nextLookAt;
@@ -136,7 +138,13 @@ public sealed class PsuSource : ISensorSource
 
         try
         {
-            draft.PsuOutputW = Reading(now);
+            // A supply that gives its DC output and one that gives what it draws from the wall are two different
+            // figures, and the second is a total in its own right, so they never share a field.
+            if (Reading(now) is { } watts)
+            {
+                if (_covers == PsuWatts.AcInput) draft.PsuWallW = watts;
+                else draft.PsuOutputW = watts;
+            }
         }
         finally
         {
@@ -219,6 +227,7 @@ public sealed class PsuSource : ISensorSource
         }
 
         _watts = value;
+        _covers = _session.Covers;
         _readAt = now;
         _failures = 0;
         _note = null;

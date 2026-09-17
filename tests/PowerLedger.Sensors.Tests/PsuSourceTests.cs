@@ -18,7 +18,7 @@ public class PsuSourceTests
 
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
         draft.PsuName.ShouldBe("Corsair RM1000i");
         source.Supported.ShouldBeTrue();
         source.Unavailable.ShouldBeNull();
@@ -60,7 +60,7 @@ public class PsuSourceTests
         var draft = new SampleDraft();
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class PsuSourceTests
 
         device.Written.Count.ShouldBe(written);
         device.Closes.ShouldBe(1);                       // the handle is given up, so the maker's program has it to itself
-        draft.PsuOutputW.ShouldBeNull();
+        draft.PsuWallW.ShouldBeNull();
         draft.PsuName.ShouldBe("Corsair RM1000i");
         source.Unavailable.ShouldBe("reading the Corsair RM1000i is turned off");
     }
@@ -113,7 +113,7 @@ public class PsuSourceTests
         source.Contribute(draft);
 
         device.Written.ShouldBeEmpty();
-        draft.PsuOutputW.ShouldBeNull();
+        draft.PsuWallW.ShouldBeNull();
         draft.PsuName.ShouldBe("Corsair RM1000i");
         source.Unavailable.ShouldBe("the Corsair RM1000i is left to iCUE, which is running");
 
@@ -122,7 +122,7 @@ public class PsuSourceTests
         draft = new SampleDraft();
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
         source.Unavailable.ShouldBeNull();
     }
 
@@ -136,7 +136,7 @@ public class PsuSourceTests
 
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class PsuSourceTests
         source.Contribute(draft);
 
         device.Written.Count.ShouldBe(written);
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
 
         now += TimeSpan.FromSeconds(1);
         source.Contribute(new SampleDraft());
@@ -173,13 +173,13 @@ public class PsuSourceTests
         now += TimeSpan.FromSeconds(9);
         var draft = new SampleDraft();
         source.Contribute(draft);
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
 
         now += TimeSpan.FromSeconds(2);
         draft = new SampleDraft();
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBeNull();
+        draft.PsuWallW.ShouldBeNull();
         draft.PsuName.ShouldBe("Corsair RM1000i");
         source.Unavailable.ShouldBe("the Corsair RM1000i did not answer");
     }
@@ -228,13 +228,13 @@ public class PsuSourceTests
         now += TimeSpan.FromSeconds(4);
         var draft = new SampleDraft();
         source.Contribute(draft);
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
 
         now += TimeSpan.FromSeconds(2);
         draft = new SampleDraft();
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
         source.Unavailable.ShouldBeNull();
     }
 
@@ -248,7 +248,7 @@ public class PsuSourceTests
 
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBeNull();
+        draft.PsuWallW.ShouldBeNull();
         draft.PsuName.ShouldBe("Corsair RM1000i");
         source.Unavailable.ShouldBe("the Corsair RM1000i would not open");
     }
@@ -268,7 +268,7 @@ public class PsuSourceTests
         var source = new PsuSource(
             new FakeHidPort(FakeThatThrowsOnRead()), static () => true, static () => [], static () => TimeSpan.Zero);
         source.Contribute(draft);
-        draft.PsuOutputW.ShouldBeNull();
+        draft.PsuWallW.ShouldBeNull();
         source.Unavailable.ShouldNotBeNull();
         Should.NotThrow(source.Dispose);
         Should.NotThrow(source.Dispose);
@@ -284,7 +284,7 @@ public class PsuSourceTests
 
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBeNull();
+        draft.PsuWallW.ShouldBeNull();
         device.Written.Count.ShouldBe(1);                // it gave up after the write was refused
     }
 

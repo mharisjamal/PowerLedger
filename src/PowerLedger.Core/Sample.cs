@@ -15,7 +15,11 @@ namespace PowerLedger.Core;
 /// <param name="UpsSource">How <paramref name="UpsOutputW"/> was found.</param>
 /// <param name="UpsName">The UPS's name, for the status screen.</param>
 /// <param name="PsuOutputW">The DC output watts a power supply reports over USB, all rails; null when there is none, it
-/// didn't answer, or reading it is turned off.</param>
+/// didn't answer, reading it is turned off, or it reports what it draws from the wall instead. The wall figure is this
+/// over the supply's efficiency.</param>
+/// <param name="PsuWallW">The AC watts a power supply reports it is drawing from the wall, for the units that report
+/// that rather than their DC output; null otherwise. This is wall power already: it is the total, like a UPS's
+/// reading, and must never be divided by an efficiency. At most one of this and <paramref name="PsuOutputW"/> is set.</param>
 /// <param name="PsuName">The power supply's name, for the status screen.</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
@@ -39,7 +43,8 @@ public sealed record Sample(
     UpsPowerSource UpsSource = UpsPowerSource.None,
     string? UpsName = null,
     double? PsuOutputW = null,
-    string? PsuName = null)
+    string? PsuName = null,
+    double? PsuWallW = null)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>

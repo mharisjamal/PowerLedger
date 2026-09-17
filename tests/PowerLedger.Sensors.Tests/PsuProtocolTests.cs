@@ -47,12 +47,33 @@ public class PsuProtocolTests
     }
 
     [Fact]
+    public void A_corsairs_total_is_what_it_draws_from_the_wall_and_is_never_divided_by_an_efficiency()
+    {
+        // 0xEE is the one whole-unit figure an HXi or RMi gives, and it reads above the sum of its own rails by about
+        // a Gold unit's losses, so it is the AC the supply draws and not the DC its rails put out. Dividing it by an
+        // efficiency, as a DC output is divided, would put the wall figure some 11% over what the meter sees.
+        var corsair = OneRead(FakePsus.Corsair(watts: 140));
+
+        corsair.PsuWallW.ShouldBe(140);
+        corsair.PsuOutputW.ShouldBeNull();
+
+        // The other two makers' supplies are read rail by rail, so theirs really is the DC output.
+        var nzxt = OneRead(FakePsus.Nzxt(watts: [92, 0, 12, 0.5, 0.25], volts: [12, 12, 12, 5, 3.25], amps: [7.75, 0, 1, 0.125, 0.0625]));
+        nzxt.PsuOutputW.ShouldBe(104.75);
+        nzxt.PsuWallW.ShouldBeNull();
+
+        var thermaltake = OneRead(FakePsus.Dpsg(volts: [12, 5, 3.25], amps: [7.75, 1.5, 0.5]));
+        thermaltake.PsuOutputW.ShouldBe(102.125);
+        thermaltake.PsuWallW.ShouldBeNull();
+    }
+
+    [Fact]
     public void A_corsair_supply_is_greeted_first_and_then_asked_for_its_total_and_its_name()
     {
         var device = FakePsus.Corsair(watts: 140);
         var draft = OneRead(device);
 
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
         draft.PsuName.ShouldBe("Corsair RM1000i");
         device.Written.Count.ShouldBe(3);
         device.Written[0].ShouldBe(Report(0xFE, 0x03, 0x00));    // the handshake the Linux driver sends before it reads
@@ -72,7 +93,7 @@ public class PsuProtocolTests
         var draft = new SampleDraft();
         source.Contribute(draft);
 
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
         device.Written.Count.ShouldBe(4);
         device.Written[3].ShouldBe(Report(0x03, 0xEE, 0x00));
     }
@@ -97,7 +118,7 @@ public class PsuProtocolTests
 
         var draft = OneRead(device);
 
-        draft.PsuOutputW.ShouldBe(140);
+        draft.PsuWallW.ShouldBe(140);
         draft.PsuName.ShouldBe("Corsair RM1000i");
     }
 
@@ -196,6 +217,42 @@ public class PsuProtocolTests
     }
 
     [Fact]
+    public void A_thermaltake_reply_for_another_register_is_no_answer_at_all()
+    {
+        // 0x34 is the 12 V rail's volts and 0x36 the 3.3 V rail's. A supply that answers 0x36 to every question would,
+        // if its register went unchecked, pair 3.3 V with the 12 V rail's amps and give a plausible, wrong wattage.
+        var device = FakePsus.Dpsg(volts: [12, 5, 3.25], amps: [7.75, 1.5, 0.5], answersRegister: 0x36);
+
+        var draft = OneRead(device);
+
+        draft.PsuOutputW.ShouldBeNull();
+        draft.PsuName.ShouldBe("Thermaltake Toughpower DPS G");
+    }
+
+    [Fact]
+    public void A_thermaltake_reply_one_behind_is_passed_over_and_the_right_one_used()
+    {
+        // The supply sends the previous register's answer before the one it was asked for, as a device still answering
+        // another program does. Only the reply carrying the register asked for counts.
+        var device = FakePsus.Dpsg(volts: [12, 5, 3.25], amps: [7.75, 1.5, 0.5]);
+        device.Noise = report => Report(0x31, (byte)(report[2] == 0x34 ? 0x39 : 0x34), 0x00, 0xCE);
+
+        var draft = OneRead(device);
+
+        draft.PsuOutputW.ShouldBe(102.125);
+    }
+
+    [Fact]
+    public void A_thermaltake_that_will_not_say_which_register_it_is_answering_says_nothing()
+    {
+        // The model query is checked the same way, so a supply that never echoes it is not taken to have been greeted.
+        var device = FakePsus.Dpsg(volts: [12, 5, 3.25], amps: [7.75, 1.5, 0.5], answersRegister: 0x36);
+
+        OneRead(device).PsuOutputW.ShouldBeNull();
+        device.Written[0].ShouldBe(Report(0xFE, 0x31));
+    }
+
+    [Fact]
     public void Only_the_reports_the_rules_allow_are_ever_written()
     {
         var corsair = FakePsus.Corsair(140);
@@ -257,8 +314,8 @@ public class PsuProtocolTests
         using var wire = new PsuWire(device.Connect(), 65, CorsairSession.Allows, static () => TimeSpan.Zero, static _ => { });
         wire.Begin(TimeSpan.MaxValue);
 
-        wire.Ask([0x03, 0x3B, 0x00]).ShouldBeNull();
-        wire.Ask([0x02, 0x00, 0x01]).ShouldBeNull();
+        wire.Ask([0x03, 0x3B, 0x00], static _ => true).ShouldBeNull();
+        wire.Ask([0x02, 0x00, 0x01], static _ => true).ShouldBeNull();
 
         device.Written.ShouldBeEmpty();
     }

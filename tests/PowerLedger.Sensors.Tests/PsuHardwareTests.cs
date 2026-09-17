@@ -49,12 +49,16 @@ public class PsuHardwareTests
         {
             // The development laptop: nothing to read, and the source says so rather than inventing a figure.
             draft.PsuOutputW.ShouldBeNull();
+            draft.PsuWallW.ShouldBeNull();
             draft.PsuName.ShouldBeNull();
             source.Unavailable.ShouldNotBeNull();
         }
         else
         {
+            // A supply that answered gave one figure or the other, never both: a Corsair says what it draws from the
+            // wall and the other two makers' units the DC their rails put out.
             draft.PsuName.ShouldNotBeNull();
+            (draft.PsuOutputW is null || draft.PsuWallW is null).ShouldBeTrue();
         }
     }
 }

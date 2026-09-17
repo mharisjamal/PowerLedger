@@ -156,11 +156,10 @@ internal sealed class PsuWire(IHidLink link, int reportLength, Func<byte[], bool
     /// <summary>Leaves the device the time its bridge needs between commands.</summary>
     public void Wait(TimeSpan delay) => pause(delay);
 
-    /// <summary>Sends a command and returns the first report that comes back; null when none does.</summary>
-    public byte[]? Ask(byte[] command) => Ask(command, static _ => true);
-
     /// <summary>Sends a command and returns the first report <paramref name="isReply"/> accepts, passing over anything
-    /// else the device has to say; null when no reply comes before the timeout.</summary>
+    /// else the device has to say; null when no reply comes before the timeout. There is no overload that takes the
+    /// first report to arrive: a supply one reply behind, or one still answering its maker's program, would otherwise
+    /// pair one register's number with another's and give a wattage that is plausible and wrong.</summary>
     public byte[]? Ask(byte[] command, Func<byte[], bool> isReply)
     {
         if (_broken) return null;
@@ -198,6 +197,16 @@ internal sealed class PsuWire(IHidLink link, int reportLength, Func<byte[], bool
     }
 }
 
+/// <summary>What a power supply's own figure for its whole self covers.</summary>
+internal enum PsuWatts
+{
+    /// <summary>The DC its rails put out. The wall draw is this over the supply's efficiency.</summary>
+    DcOutput,
+
+    /// <summary>The AC it draws from the wall, which already holds the supply's own losses and is divided by nothing.</summary>
+    AcInput,
+}
+
 /// <summary>One power supply that is open, for as long as reading it keeps going well.</summary>
 internal abstract class PsuSession(PsuWire wire) : IDisposable
 {
@@ -209,7 +218,11 @@ internal abstract class PsuSession(PsuWire wire) : IDisposable
     /// <summary>The name the device gave, once it has given one; null while only its model's name is known.</summary>
     public string? Name { get; protected set; }
 
-    /// <summary>The total DC output in watts, all rails; null when the supply didn't answer as its protocol says.</summary>
+    /// <summary>What <see cref="ReadWatts"/> answers with. Summing rails gives the DC output; a supply's own figure for
+    /// the whole unit need not, and Corsair's is what it draws from the wall.</summary>
+    public virtual PsuWatts Covers => PsuWatts.DcOutput;
+
+    /// <summary>The supply's watts, as many as its protocol gives; null when it didn't answer as that protocol says.</summary>
     public double? ReadWatts(TimeSpan deadline)
     {
         Wire.Begin(deadline);
@@ -224,9 +237,9 @@ internal abstract class PsuSession(PsuWire wire) : IDisposable
 /// <summary>
 /// Corsair HXi and RMi. A command is a 64-byte output report of [length][command][parameter] and the reply starts with
 /// the first two echoed back (the Linux corsair-psu driver, and liquidctl's notes on the same supplies). Three commands
-/// are ever sent: the 0xFE handshake the driver sends before it reads anything, the total output watts, and the product
-/// name. Nothing that writes to the supply — a rail to select, a fan to set, a protection mode to change — is in the
-/// rules below, so no mistake here can send one.
+/// are ever sent: the 0xFE handshake the driver sends before it reads anything, the supply's own total in watts, and
+/// the product name. Nothing that writes to the supply — a rail to select, a fan to set, a protection mode to change —
+/// is in the rules below, so no mistake here can send one.
 /// </summary>
 internal sealed class CorsairSession(PsuWire wire) : PsuSession(wire)
 {
@@ -236,6 +249,27 @@ internal sealed class CorsairSession(PsuWire wire) : PsuSession(wire)
 
     private bool _greeted;
     private bool _named;
+
+    /// <summary>
+    /// 0xEE is read here as the AC the supply draws from the wall, not as the DC its rails put out, so nothing divides
+    /// it by an efficiency. The evidence, since the two drivers PowerLedger's notes come from disagree — liquidctl
+    /// calls it "total power output" and the Linux corsair-psu driver only "total watts":
+    ///
+    /// <list type="bullet">
+    /// <item>It reads above the sum of the supply's own rail watts, by about the losses of the tier these units are
+    /// built to. A figure for the DC output would have to equal that sum; only the input can sit above it.</item>
+    /// <item>These units measure their AC input volts and amps as well (0x88 and 0x89), which is what a supply needs
+    /// to work out the input power, and what lets iCUE and HWiNFO show an efficiency for them at all.</item>
+    /// <item>PMBus has a per-rail READ_POUT and no command for a whole unit's input, so a maker who wanted the input
+    /// over one command would have to add one of its own, as 0xEE is.</item>
+    /// </list>
+    ///
+    /// The one conclusive check — 0xEE against the sum of the rails read one by one — cannot be made from here: a rail
+    /// is chosen by writing the supply's page register, which these rules turn down, and PowerLedger writes to no
+    /// supply. If the reading is really the DC output after all, the wall figure is low by the losses instead of high
+    /// by them; treating it as the input is the way round that cannot quietly overstate what the meter will show.
+    /// </summary>
+    public override PsuWatts Covers => PsuWatts.AcInput;
 
     /// <summary>The only reports this protocol may put on the wire.</summary>
     public static bool Allows(byte[] report)
@@ -250,6 +284,7 @@ internal sealed class CorsairSession(PsuWire wire) : PsuSession(wire)
             _greeted = true;
         }
 
+        // The supply's own total, which is what it draws from the wall: see the note on Covers above.
         var total = Reply(AskTotalWatts);
 
         // The name is asked for once a session and after the watts, so a supply that will not say keeps its model's
@@ -357,7 +392,10 @@ internal sealed class NzxtSession(PsuWire wire) : PsuSession(wire)
         for (var attempt = 0; attempt < Attempts; attempt++)
         {
             Wire.Wait(Between);
-            if (Wire.Ask([Start, 0, (byte)(length + 2), 4, 0x60, PagedRead, 2, rail, command]) is not { } reply) return null;
+
+            // Whatever comes back is taken here and judged below, because the bridge's "I was busy" report is not a
+            // reply and has to be counted as one of the three attempts rather than waited past.
+            if (Wire.Ask([Start, 0, (byte)(length + 2), 4, 0x60, PagedRead, 2, rail, command], static _ => true) is not { } reply) return null;
             if (reply.Length >= 4 + length && reply[1] == Answer && reply[2] == length + 2 && reply[3] == length)
             {
                 return reply[4..(4 + length)];
@@ -398,7 +436,7 @@ internal sealed class DpsgSession(PsuWire wire) : PsuSession(wire)
         // TTController asks the supply for its model before it reads anything, so PowerLedger opens the same way.
         if (!_greeted)
         {
-            if (Wire.Ask(Hello) is null) return null;
+            if (Reply(Hello[0], Hello[1]) is null) return null;
             _greeted = true;
         }
 
@@ -413,7 +451,13 @@ internal sealed class DpsgSession(PsuWire wire) : PsuSession(wire)
     }
 
     private double? Value(byte register)
-        => Wire.Ask([ReadRegister, register]) is { Length: >= 5 } reply ? PsuMath.Linear11Unsigned(reply[3], reply[4]) : null;
+        => Reply(ReadRegister, register) is { } reply ? PsuMath.Linear11Unsigned(reply[3], reply[4]) : null;
+
+    /// <summary>The reply to one read: the report that says which register it carries, and says the one that was asked
+    /// for. The supply echoes the command and the register back, as Corsair echoes its command and NZXT its lengths,
+    /// so a report that is one behind, or meant for another program, is passed over instead of decoded as this one.</summary>
+    private byte[]? Reply(byte command, byte register)
+        => Wire.Ask([command, register], reply => reply.Length >= 5 && reply[1] == command && reply[2] == register);
 }
 
 /// <summary>
