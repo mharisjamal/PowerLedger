@@ -9,6 +9,8 @@ namespace PowerLedger.Sensors;
 /// package domain otherwise, which leaves the memory, regulators and fans for the model to estimate.
 /// Graphics built into the processor are skipped, because the processor's own package reading already counts them.
 /// The card's load is not read here: Windows' GPU load counters give it, and they never write watts.
+/// While Windows has the card switched off, as a switchable-graphics laptop does almost all the time, it draws next to
+/// nothing and Level Zero is not asked at all, since reading the counter could wake it.
 /// Never throws. A library that is missing, a driver that fails and a card that has gone all leave the watts to the
 /// model's load estimate instead, since a source that threw every tick would only be backed off and retried.
 /// </summary>
@@ -145,6 +147,15 @@ public sealed class ArcSource : ISensorSource
     /// <summary>The watts the card drew since the last reading, or null when this tick cannot say.</summary>
     private double? Watts()
     {
+        if (_poweredOff())
+        {
+            // A card Windows has switched off draws next to nothing, and asking Level Zero for its counter could wake
+            // it, which on a switchable-graphics laptop would cost far more than the reading is worth. The last reading
+            // goes with it: one taken before the card slept says nothing about an interval that ends after it woke.
+            _previous = null;
+            return 0;
+        }
+
         if (_sysman.GetEnergyCounter(_domain, out var now) != Success) return Stopped();
 
         if (_previous is not { } before || now.Microjoules < before.Microjoules || now.Microseconds < before.Microseconds)
@@ -163,8 +174,8 @@ public sealed class ArcSource : ISensorSource
         return (now.Microjoules - before.Microjoules) / (double)(now.Microseconds - before.Microseconds);
     }
 
-    /// <summary>Nothing, for a card that is on and did not answer; 0 W for one Windows has switched off, as a
-    /// switchable-graphics laptop keeps its card almost all the time.</summary>
+    /// <summary>Nothing, for a card that is on and did not answer; 0 W for one Windows now says it has switched off,
+    /// which is a card that went to sleep during the tick.</summary>
     private double? Stopped() => _poweredOff() ? 0 : null;
 
     /// <param name="Device">The card Level Zero found, which names it to Windows by its PCI ids.</param>

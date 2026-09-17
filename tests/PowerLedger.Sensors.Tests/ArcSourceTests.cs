@@ -150,11 +150,26 @@ public class ArcSourceTests
     }
 
     [Fact]
-    public void A_counter_that_stands_still_reads_zero_only_while_windows_has_the_card_switched_off()
+    public void A_counter_that_stands_still_while_the_card_is_on_says_nothing_about_its_draw()
     {
         var card = _sysman.Add(ArcA770, PowerDomain.Card)[0];
         card.Microjoules = 900_000_000;
         card.Microseconds = 10_000_000;
+        using var source = Open();
+
+        Tick(source);
+        Tick(source).DGpuW.ShouldBeNull();           // the driver has taken no new reading, which is not a reading of nothing
+
+        card.Draw(watts: 35, seconds: 3);
+        Tick(source).DGpuW.ShouldNotBeNull().ShouldBe(35, 1e-9);
+    }
+
+    [Fact]
+    public void A_card_windows_has_switched_off_draws_nothing_and_level_zero_is_never_asked()
+    {
+        // Reading a sleeping card's counter could wake it, which on a switchable-graphics laptop would cost far more
+        // battery than the reading is worth. Windows answers in microseconds and never wakes it.
+        var card = _sysman.Add(ArcA770, PowerDomain.Card)[0];
         SysmanDevice? lookedUp = null;
         using var source = new ArcSource(_sysman, device =>
         {
@@ -164,16 +179,23 @@ public class ArcSourceTests
         lookedUp.ShouldBe(ArcA770);
 
         Tick(source);
-        Tick(source).DGpuW.ShouldBeNull();          // no new reading from a card that is on says nothing about its draw
+        card.Draw(watts: 40, seconds: 1);
+        Tick(source).DGpuW.ShouldNotBeNull().ShouldBe(40, 1e-9);
+        card.Reads.ShouldBe(2);
 
         _switchedOff = true;
-        var off = Tick(source);
-        off.DGpuPresent.ShouldBeTrue();
-        off.DGpuW.ShouldBe(0);
+        var asleep = Tick(source);
+        asleep.DGpuPresent.ShouldBeTrue();
+        asleep.DGpuScope.ShouldBe(GpuPowerScope.Board);
+        asleep.DGpuW.ShouldBe(0);
+        card.Reads.ShouldBe(2);
 
+        // Waking it starts a new interval: the reading from before it slept says nothing about one that ends after it woke.
         _switchedOff = false;
-        card.Draw(watts: 35, seconds: 3);
-        Tick(source).DGpuW.ShouldNotBeNull().ShouldBe(35, 1e-9);
+        card.Draw(watts: 55, seconds: 2);
+        Tick(source).DGpuW.ShouldBeNull();
+        card.Draw(watts: 55, seconds: 1);
+        Tick(source).DGpuW.ShouldNotBeNull().ShouldBe(55, 1e-9);
     }
 
     [Fact]
@@ -250,15 +272,20 @@ public class ArcSourceTests
     }
 
     [Fact]
-    public void A_card_windows_has_switched_off_reads_zero_when_its_counter_cannot_be_read_either()
+    public void A_card_that_went_to_sleep_during_the_tick_reads_zero_rather_than_nothing()
     {
+        // Windows said the card was on when the tick began, so Level Zero was asked and would not read a sleeping
+        // card's counter. Asking Windows again explains why, and a card it has switched off draws nothing.
         var card = _sysman.Add(ArcA770, PowerDomain.Card)[0];
         card.EnergyResult = FakeSysman.Unsupported;
-        using var source = Open();
+        var answers = new Queue<bool>([false, true]);
+        using var source = new ArcSource(_sysman, _ => answers.Dequeue);
 
-        Tick(source).DGpuW.ShouldBeNull();
-        _switchedOff = true;
-        Tick(source).DGpuW.ShouldBe(0);
+        var draft = Tick(source);
+        draft.DGpuPresent.ShouldBeTrue();
+        draft.DGpuW.ShouldBe(0);
+        card.Reads.ShouldBe(1);
+        answers.ShouldBeEmpty();
 
         using var broken = new ArcSource(_sysman, _ => () => throw new InvalidOperationException("no answer"));
         Should.NotThrow(() => Tick(broken)).DGpuW.ShouldBeNull();
