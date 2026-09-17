@@ -118,10 +118,18 @@ whole branch. The version is now 0.5.0.
   keeps it read-only is that no call which writes exists on that path, while the zero-access open is what lets Windows
   share the collection beside its own driver.
 
-<!-- lead: installers at full compression: universal, x64 and Arm64 sizes -->
-<!-- lead: Windows Sandbox, end to end: N of N, and what the run covered -->
-<!-- lead: CI run and both jobs' results -->
-<!-- lead: release link -->
+- Installers at full compression: universal **96.2 MB**, x64 **56.9 MB**, Arm64 **50.2 MB**.
+- **Windows Sandbox, end to end, 61 of 61**: 0.3.0 updated itself to 0.5.0 through the App's own updater, the old
+  monitor settings stayed waiting for a monitor, Settings saved a typed value by itself, the service logged no error and
+  the App still answered six minutes on, then a silent uninstall and a fresh 0.5.0 install whose wizard asked nothing
+  about monitors. Sandbox has no external monitor, no UPS, no USB power supply and no discrete card, so the new readers
+  reported themselves absent, which is what the run proves about them.
+  A first run failed 25 of 61 because the stand-in release feed's script had gone missing from the results folder, so no
+  update was offered; the script was rewritten, checked against the built installers, and the run repeated.
+- CI run 35271630847, both jobs green: every test outside Hardware, UI and Installed passed (Core 222, Storage 49,
+  Sensors 571, Service 245, App 678), and the installer test passed 62 of 62 checks on the x64 and on the Arm64 runner.
+- Released: <https://github.com/mharisjamal/PowerLedger/releases/tag/v0.5.0>, three assets, each digest checked by
+  `release.ps1` against the file built from the tagged commit.
 
 **Deviations from the design**: the design has been brought in line where the review changed the answer — Corsair's own
 total is the wall draw and a DC output is read off the tier's curve — so what remains is smaller. ADL2 is taken not only
