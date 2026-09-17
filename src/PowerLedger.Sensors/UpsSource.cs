@@ -27,6 +27,9 @@ public sealed class UpsSource : ISensorSource
     /// <summary>How often the HID collections are looked through while no UPS is open.</summary>
     public static readonly TimeSpan LookAgainEvery = TimeSpan.FromMinutes(1);
 
+    /// <summary>The longest a UPS that keeps going wrong is left alone before it is tried again.</summary>
+    public static readonly TimeSpan LongestBackoff = TimeSpan.FromMinutes(1);
+
     private const string NothingFound = "no UPS found on USB";
 
     private readonly IHid _hid;
@@ -39,6 +42,8 @@ public sealed class UpsSource : ISensorSource
     private TimeSpan _readAt;
     private double? _watts;
     private UpsPowerSource _source;
+    private int _failures;
+    private TimeSpan _now;
 
     /// <summary>Reads the machine's real HID devices.</summary>
     public UpsSource() : this(new WindowsHid(), Elapsed())
@@ -67,16 +72,17 @@ public sealed class UpsSource : ISensorSource
     {
         try
         {
-            var now = _clock();
-            if (!_attempted || now >= _nextAttemptAt) Attempt(now);
-            Fill(draft, now);
+            _now = _clock();
+            if (!_attempted || _now >= _nextAttemptAt) Attempt(_now);
+            Fill(draft, _now);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
             // A UPS must never cost the tick its other readings, so whatever went wrong is only recorded. Closing the
-            // UPS means the next attempt starts over, with a fresh handle on whatever is still attached.
-            Unavailable = $"reading a UPS over USB failed: {error.Message}";
-            Close();
+            // UPS means the next attempt starts over, with a fresh handle on whatever is still attached — and each
+            // attempt goes through every HID device on the machine, so one that keeps going wrong is left longer and
+            // longer alone rather than costing that every five seconds for as long as it stays unhappy.
+            Stumble($"reading a UPS over USB failed: {error.Message}");
         }
     }
 
@@ -115,7 +121,20 @@ public sealed class UpsSource : ISensorSource
         _readAt = now;
         _watts = read.Watts;
         _source = read.Watts is null ? UpsPowerSource.None : read.Source;
+        _failures = 0;
         Unavailable = Note();
+    }
+
+    /// <summary>A round that went wrong: the UPS is let go of and looked for again, and each failure in a row waits
+    /// twice as long as the one before, so a UPS that keeps going wrong cannot cost an enumeration of every HID device
+    /// on the machine every five seconds. This is <see cref="PsuSource"/>'s rule, for the same reason.</summary>
+    private void Stumble(string note)
+    {
+        Unavailable = note;
+        _failures++;
+        var backoff = ReadEvery * Math.Pow(2, Math.Min(_failures - 1, 10));
+        _nextAttemptAt = _now + (backoff < LongestBackoff ? backoff : LongestBackoff);
+        Close();
     }
 
     private void Fill(SampleDraft draft, TimeSpan now)

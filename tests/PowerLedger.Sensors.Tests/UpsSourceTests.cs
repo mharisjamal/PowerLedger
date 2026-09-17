@@ -397,6 +397,59 @@ public class UpsSourceTests
     }
 
     [Fact]
+    public void A_ups_that_keeps_going_wrong_is_tried_less_and_less_often_rather_than_every_five_seconds()
+    {
+        var ups = ActivePowerUps();
+        ups.ReadThrows = new IOException("the device is not ready");
+        using var source = Source();
+
+        Tick(source);
+        _hid.Looks.ShouldBe(1);
+
+        // Reading throws on every attempt, so the only question is how often the source goes through every HID device
+        // on the machine again. Unchecked that was every five seconds, for as long as the UPS stayed unhappy.
+        var lookedAt = new List<int>();
+        for (var second = 1; second <= 120; second++)
+        {
+            var before = _hid.Looks;
+            _now = TimeSpan.FromSeconds(second);
+            Tick(source);
+            if (_hid.Looks > before) lookedAt.Add(second);
+        }
+
+        lookedAt.ShouldBe([5, 15, 35, 75]);                  // five seconds, then ten, then twenty, then forty
+        source.Unavailable.ShouldNotBeNull().ShouldContain("the device is not ready");
+    }
+
+    [Fact]
+    public void A_ups_that_comes_right_again_is_read_at_the_ordinary_rate_from_then_on()
+    {
+        var ups = ActivePowerUps();
+        ups.ReadThrows = new IOException("the device is not ready");
+        using var source = Source();
+
+        Tick(source);
+        _now = TimeSpan.FromSeconds(5);
+        Tick(source);                                        // a second failure, so the wait has doubled to ten
+
+        ups.ReadThrows = null;
+        _now = TimeSpan.FromSeconds(15);
+        Tick(source).UpsOutputW.ShouldBe(137);
+        source.Unavailable.ShouldBeNull();
+
+        // The failures are forgotten, so the next hiccup waits five seconds again and not twenty.
+        ups.ReadThrows = new IOException("the device is not ready");
+        _now = TimeSpan.FromSeconds(20);
+        Tick(source);
+        var looks = _hid.Looks;
+
+        _now = TimeSpan.FromSeconds(25);
+        Tick(source);
+
+        _hid.Looks.ShouldBe(looks + 1);
+    }
+
+    [Fact]
     public void The_source_is_named_for_the_status_screen_and_is_never_skipped_for_good()
     {
         using var source = Source();

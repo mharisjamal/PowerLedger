@@ -25,8 +25,16 @@ public sealed class PsuSource : ISensorSource
 
     private static readonly TimeSpan LookEvery = TimeSpan.FromSeconds(10);
 
+    /// <summary>How often a machine that has had a supply is looked at again once that supply has gone. A supply is
+    /// only ever changed with the case open and the machine off, so once a minute is soon enough.</summary>
+    private static readonly TimeSpan LookAgainEvery = TimeSpan.FromSeconds(60);
+
     /// <summary>The longest a supply that will not answer is left alone before it is tried again.</summary>
     private static readonly TimeSpan LongestBackoff = TimeSpan.FromSeconds(60);
+
+    /// <summary>How many failures in a row before the device is looked for among the ones Windows lists. One is a
+    /// hiccup, and a supply is left open through those; this many is one that may not be there at all.</summary>
+    private const int QuietBeforeLookingAgain = 2;
 
     /// <summary>The shortest reports any of the three protocols can work with, report ID and all.</summary>
     private const int SmallestReport = 10;
@@ -50,6 +58,7 @@ public sealed class PsuSource : ISensorSource
     private TimeSpan _nextReadAt;
     private TimeSpan _nextLookAt;
     private int _failures;
+    private bool _everFound;
 
     /// <param name="readPowerSupply">The owner's tick in Settings, read afresh every time: while it answers false
     /// nothing at all is sent to the device. Leave it null where there is nobody to ask, which reads no supply.</param>
@@ -74,13 +83,14 @@ public sealed class PsuSource : ISensorSource
 
     public string Name => "power-supply";
 
-    /// <summary>True while a supply is there to read, and while there is still time for one to turn up.</summary>
-    public bool Supported => _device is not null || _clock() < _lookUntil;
+    /// <summary>True while a supply is there to read, while there is still time for one to turn up, and for good on a
+    /// machine that has had one: a supply that has been taken out may be put back, or another put in its place.</summary>
+    public bool Supported => _device is not null || _everFound || _clock() < _lookUntil;
 
     /// <summary>Why there is no reading: no supply, one the owner has turned off, one left to its maker's program, or
     /// one that did not answer. Null while a supply is being read.</summary>
     public string? Unavailable => _device is null
-        ? (_clock() < _lookUntil ? "looking for a power supply on USB" : PsuModels.NoneFound)
+        ? (!_everFound && _clock() < _lookUntil ? "looking for a power supply on USB" : PsuModels.NoneFound)
         : _note;
 
     public void Contribute(SampleDraft draft)
@@ -89,9 +99,10 @@ public sealed class PsuSource : ISensorSource
         {
             Fill(draft);
         }
-        catch (Exception error)
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             // A sensor is never allowed to spoil a tick: the supply's fields stay as they are and the status says why.
+            // A machine that has run out of memory is not a supply that went wrong, and is left to the host.
             Stumble(_clock(), error.Message);
         }
     }
@@ -102,7 +113,7 @@ public sealed class PsuSource : ISensorSource
         {
             Close();
         }
-        catch (Exception)
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             // A device that will not close is Windows' business; it must not take the tick or the process down.
         }
@@ -131,7 +142,9 @@ public sealed class PsuSource : ISensorSource
         var now = _clock();
         if (_device is null)
         {
-            if (now < _nextLookAt || now >= _lookUntil) return;
+            // A machine that has had a supply is looked at again for as long as it runs; one that never had is given
+            // the minute Windows takes to finish enumerating USB and then left alone.
+            if (now < _nextLookAt || (!_everFound && now >= _lookUntil)) return;
             Look(now);
             if (_device is null) return;
         }
@@ -184,7 +197,7 @@ public sealed class PsuSource : ISensorSource
     /// reading a second would be a total of something other than this machine.</summary>
     private void Look(TimeSpan now)
     {
-        _nextLookAt = now + LookEvery;
+        _nextLookAt = now + (_everFound ? LookAgainEvery : LookEvery);
         foreach (var listed in Listed())
         {
             if (PsuModels.Find(listed.VendorId, listed.ProductId) is not { } model) continue;
@@ -192,6 +205,7 @@ public sealed class PsuSource : ISensorSource
             _device = listed;
             _model = model;
             _name = model.Name;
+            _everFound = true;
             return;
         }
     }
@@ -202,7 +216,7 @@ public sealed class PsuSource : ISensorSource
         {
             return _hid.Find(PsuModels.Known);
         }
-        catch (Exception)
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             // Windows not listing its devices is not this machine saying it has no supply: it is looked for again.
             return [];
@@ -253,7 +267,8 @@ public sealed class PsuSource : ISensorSource
     };
 
     /// <summary>A read that came to nothing: the device is given up and tried again later, less and less often, so a
-    /// supply that has stopped answering cannot cost a timeout on every other tick.</summary>
+    /// supply that has stopped answering cannot cost a timeout on every other tick. A supply that has gone quiet for
+    /// several tries in a row is also looked for among the devices Windows lists, and let go of when it is not there.</summary>
     private void Stumble(TimeSpan now, string note)
     {
         Close();
@@ -261,6 +276,33 @@ public sealed class PsuSource : ISensorSource
         _note = note;
         var backoff = ReadEvery * Math.Pow(2, Math.Min(_failures - 1, 10));
         _nextReadAt = now + (backoff < LongestBackoff ? backoff : LongestBackoff);
+        if (_failures >= QuietBeforeLookingAgain && !StillListed()) Forget(now);
+    }
+
+    /// <summary>Whether Windows still lists the device this source opened.</summary>
+    private bool StillListed()
+    {
+        foreach (var listed in Listed())
+        {
+            if (string.Equals(listed.Path, _device!.Path, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Lets go of a supply that is not there any more, so Settings stops naming one the machine no longer
+    /// has, and so a different one put in its place is opened rather than passed over for ever.</summary>
+    private void Forget(TimeSpan now)
+    {
+        _device = null;
+        _model = null;
+        _name = null;
+        _note = null;
+        _heldBy = null;
+        _readAt = null;
+        _failures = 0;
+        _nextReadAt = now;
+        _nextLookAt = now;
     }
 
     private void Close()

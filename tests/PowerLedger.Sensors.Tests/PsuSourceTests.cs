@@ -289,6 +289,70 @@ public class PsuSourceTests
     }
 
     [Fact]
+    public void A_supply_that_has_been_unplugged_is_let_go_of_and_stops_being_named()
+    {
+        var now = TimeSpan.Zero;
+        var device = FakePsus.Corsair(watts: 140);
+        using var source = new PsuSource(new FakeHidPort(device), static () => true, static () => [], () => now);
+
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+        draft.PsuName.ShouldBe("Corsair RM1000i");
+
+        // The case is opened and the supply taken out: Windows stops listing it and it answers nothing.
+        device.Present = false;
+        device.Deaf = true;
+        draft = Ticks(source, at => now = at, from: 2, to: 120);
+
+        draft.PsuName.ShouldBeNull();
+        draft.PsuWallW.ShouldBeNull();
+        source.Unavailable.ShouldBe(PsuModels.NoneFound);
+    }
+
+    [Fact]
+    public void A_different_supply_put_in_afterwards_is_found_and_read()
+    {
+        var now = TimeSpan.Zero;
+        var corsair = FakePsus.Corsair(watts: 140);
+        var nzxt = FakePsus.Nzxt(
+            watts: [92, 0, 12, 0.5, 0.25], volts: [12, 12, 12, 5, 3.25], amps: [7.75, 0, 1, 0.125, 0.0625]);
+        nzxt.Present = false;
+        using var source = new PsuSource(new FakeHidPort(corsair, nzxt), static () => true, static () => [], () => now);
+
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+        draft.PsuWallW.ShouldBe(140);
+
+        corsair.Present = false;
+        corsair.Deaf = true;
+        nzxt.Present = true;
+        draft = Ticks(source, at => now = at, from: 2, to: 300, until: d => d.PsuName == "NZXT E500");
+
+        draft.PsuName.ShouldBe("NZXT E500");
+        draft.PsuOutputW.ShouldBe(104.75);
+        draft.PsuWallW.ShouldBeNull();
+        source.Supported.ShouldBeTrue();
+        source.Unavailable.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_supply_that_is_merely_quiet_is_kept_because_windows_still_lists_it()
+    {
+        // Silence on its own is no reason to let a supply go: it may be busy, or its bridge may be resetting. Only a
+        // supply Windows has stopped listing has really been taken out.
+        var now = TimeSpan.Zero;
+        var device = FakePsus.Corsair(watts: 140);
+        using var source = new PsuSource(new FakeHidPort(device), static () => true, static () => [], () => now);
+        source.Contribute(new SampleDraft());
+
+        device.Deaf = true;
+        var draft = Ticks(source, at => now = at, from: 2, to: 300);
+
+        draft.PsuName.ShouldBe("Corsair RM1000i");
+        source.Unavailable.ShouldBe("the Corsair RM1000i did not answer");
+    }
+
+    [Fact]
     public void Disposing_the_source_closes_the_device()
     {
         var device = FakePsus.Corsair(watts: 140);
@@ -299,6 +363,23 @@ public class PsuSourceTests
 
         device.Opens.ShouldBe(1);
         device.Closes.ShouldBe(1);
+    }
+
+    /// <summary>One tick a second from <paramref name="from"/> to <paramref name="to"/>, stopping as soon as
+    /// <paramref name="until"/> is happy; the last draft filled.</summary>
+    private static SampleDraft Ticks(
+        PsuSource source, Action<TimeSpan> clock, int from, int to, Func<SampleDraft, bool>? until = null)
+    {
+        var draft = new SampleDraft();
+        for (var second = from; second <= to; second++)
+        {
+            clock(TimeSpan.FromSeconds(second));
+            draft = new SampleDraft();
+            source.Contribute(draft);
+            if (until?.Invoke(draft) == true) break;
+        }
+
+        return draft;
     }
 
     private static FakeHidDevice FakeThatThrowsOnRead()
