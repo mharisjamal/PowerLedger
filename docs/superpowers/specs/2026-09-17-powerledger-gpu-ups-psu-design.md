@@ -47,20 +47,26 @@ and the App says "chip measured, rest of card estimated".
 
 ## 5. Power supplies over USB
 
-- **Corsair HXi and RMi** (HID 1B1C): read total DC output (command 0xEE, PMBus LINEAR11), with read commands only.
+- **Corsair HXi and RMi** (HID 1B1C): read the unit's own total (command 0xEE, PMBus LINEAR11), with read commands only.
+  That total is the AC it draws from the wall, not the DC its rails put out: it reads above the sum of the unit's own rails
+  by about its tier's losses, the unit measures its input volts and amps (0x88, 0x89), and PMBus has a per-rail output
+  command but none for a whole unit's input. It is therefore taken as the total undivided.
 - **NZXT E500/E650/E850** (HID 7793): sum the per-rail outputs.
 - **Thermaltake DPS G** (HID 264A:2329): sum volts × amps per rail.
 - **Not supported:** Corsair AXi (needs a vendor driver) and ASUS ROG Thor (no protocol known).
 - **Other programs.** Such a device answers one program at a time, so it is skipped while iCUE, CAM or Thermaltake's app
   is running.
-- **Wall power** is the DC output ÷ the power supply's efficiency at that load (its 80 PLUS tier's curve). The App says
-  "measured output, wall power estimated from efficiency".
+- **Wall power,** for a supply that reports its rails, is the DC output ÷ its efficiency at that load: its 80 PLUS tier's
+  curve, read at the load the supply is carrying against the rating its model name gives, and the tier's flat half-load
+  figure where the name says none. A laptop read this way uses its adapter's efficiency, since no supply tier describes an
+  adapter. The App says "Power supply's DC output, with its efficiency", and "Power supply's own wall reading" for a unit
+  that reports what it draws.
 - **Settings** has a tick to stop reading it (on by default).
 
 ## 6. What the user sees
 
-- **Now screen.** The live note says where the total came from (UPS, power supply, battery or model), and the GPU row says
-  chip or package measured, rest estimated.
+- **Now screen.** The live note says where the total came from (UPS, a power supply's own wall reading, a power supply's DC
+  output with its efficiency, the battery or the model), and the GPU row says chip or package measured, rest estimated.
 - **Settings.** Detected UPSes and power supplies are listed with their watts. A UPS asks what it powers, and a power supply
   has its tick. Both save by themselves.
 - **Quality.** A UPS total (ActivePower or load of rated watts) and a power supply total count as Measured; the load of rated
@@ -70,5 +76,10 @@ and the App says "chip measured, rest of card estimated".
 
 - None of AMD, Intel Arc, UPS or power supply reading has met real hardware; tests use fakes, plus Hardware tests that run
   where the DLL or device exists.
+- Reading Corsair's 0xEE as the wall draw is reasoned, not measured. The conclusive check, 0xEE against the rails read one
+  by one, needs a write to the page register, which these rules turn down. If it is the DC output after all, the wall figure
+  is low by the supply's losses rather than high by them.
+- A reading of nought watts from a UPS or a supply is taken as no reading, and both figures have plausible ceilings in the
+  validator (UPS 5 kW, supply 2 kW); past those the report has been misread rather than the outlets loaded.
 - Whether ADLX, ADL and Level Zero answer from the service in session 0 is untested. Where they don't, the reading falls back
   to the load estimate, as today.
