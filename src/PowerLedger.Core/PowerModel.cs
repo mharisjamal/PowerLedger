@@ -128,8 +128,8 @@ public sealed class PowerModel
             // A UPS that powers this PC alone leaves out the monitors with plugs of their own; one that powers the monitors too
             // already holds them. A load of the rated volt-amperes assumes a power factor, so a total from it is an estimate.
             var total = _profile.UpsLoad == UpsLoad.ThisPc ? ups + monitors.OwnPlug : ups;
-            var measuredQuality = s.UpsSource == UpsPowerSource.LoadOfRatedVoltAmps ? Quality.Estimated : Quality.Measured;
-            return Build(s, total, measuredQuality, WithRest(parts, total), userIdle, TotalSource.Ups);
+            var upsQuality = s.UpsSource == UpsPowerSource.LoadOfRatedVoltAmps ? Quality.Estimated : Quality.Measured;
+            return Build(s, total, upsQuality, WithRest(parts, total), userIdle, TotalSource.Ups);
         }
         if (!onItsBattery && PowerSupplyWatts(s) is { } output)
         {
