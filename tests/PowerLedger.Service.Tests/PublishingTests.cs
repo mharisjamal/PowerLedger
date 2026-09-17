@@ -52,6 +52,27 @@ public class PublishingTests
         ]);
     }
 
+    [Fact]
+    public void A_supply_that_reports_what_it_draws_from_the_wall_is_listed_as_the_wall_power_it_is()
+    {
+        // The two figures are not the same thing: one is the whole draw and the other is the rails before the losses.
+        var sample = Samples.At(Samples.T0) with { PsuWallW = 312.5, PsuName = "Corsair HX1000i" };
+
+        Frames.PowerDevices(sample).ShouldBe(
+        [
+            new PowerDeviceStatus(PowerDeviceKind.PowerSupply, "Corsair HX1000i", 312.5, "wall power, as the supply reports it"),
+        ]);
+    }
+
+    [Fact]
+    public void A_supply_that_gave_a_wall_figure_no_one_can_show_is_listed_without_watts()
+    {
+        Frames.PowerDevices(Samples.At(Samples.T0) with { PsuWallW = double.NaN, PsuName = "Corsair HX1000i" }).ShouldBe(
+        [
+            new PowerDeviceStatus(PowerDeviceKind.PowerSupply, "Corsair HX1000i", null, ""),
+        ]);
+    }
+
     [Theory]
     [InlineData(UpsPowerSource.ActivePower, "real output power")]
     [InlineData(UpsPowerSource.LoadOfRatedWatts, "load of its rated watts")]

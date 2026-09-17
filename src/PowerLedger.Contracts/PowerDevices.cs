@@ -27,7 +27,7 @@ public enum TotalSource
     /// <summary>The output a UPS reports, for what the user says it powers.</summary>
     Ups = 2,
 
-    /// <summary>The DC output a power supply reports, with its efficiency allowed for.</summary>
+    /// <summary>What a power supply reports: the wall power it draws, or its DC output with its efficiency allowed for.</summary>
     PowerSupply = 3,
 }
 

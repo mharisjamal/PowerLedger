@@ -35,9 +35,14 @@ internal static class Frames
             };
             devices.Add(Device(PowerDeviceKind.Ups, s.UpsName, s.UpsOutputW, how));
         }
-        if (!string.IsNullOrWhiteSpace(s.PsuName) || Watts(s.PsuOutputW) is not null)
+        if (!string.IsNullOrWhiteSpace(s.PsuName) || Watts(s.PsuOutputW) is not null || Watts(s.PsuWallW) is not null)
         {
-            devices.Add(Device(PowerDeviceKind.PowerSupply, s.PsuName, s.PsuOutputW, "DC output, all rails"));
+            // A supply reports what it draws from the wall or what its rails put out, never both, and the screen has to
+            // say which: one is the machine's whole draw and the other is that draw before the supply's own losses.
+            var (watts, how) = Watts(s.PsuWallW) is { } wall
+                ? (wall, "wall power, as the supply reports it")
+                : (s.PsuOutputW, "DC output, all rails");
+            devices.Add(Device(PowerDeviceKind.PowerSupply, s.PsuName, watts, how));
         }
         return devices;
     }
