@@ -512,6 +512,57 @@ public class RenderingTests
             }
         });
 
+    /// <summary>Plan L follow-up: the wizard's Readings step names the UPS or power supply giving a desktop's total and
+    /// calls it measured, instead of the old blanket "estimated" claim, and the new sentence fits the page.</summary>
+    [Fact]
+    public void The_wizards_readings_step_says_a_desktop_measured_by_its_ups_by_name_without_clipping()
+        => OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink
+                {
+                    Status = Statuses.WithMonitors() with
+                    {
+                        Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.Ups },
+                        PowerDevices = [Statuses.Ups],
+                    },
+                };
+                link.Connect(true);
+                var wizard = new WizardViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline,
+                    new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, "USD");
+                wizard.Start();
+                wizard.Next.Execute(null);
+                wizard.Step.ShouldBe(SetupStep.Machine);
+                wizard.Machine.Chassis = ChassisKind.Desktop;
+                wizard.Next.Execute(null);
+                wizard.Step.ShouldBe(SetupStep.Readings);
+
+                var view = new WizardView { DataContext = wizard };
+                var window = new Window
+                {
+                    Content = view, Width = 880, Height = 900, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    var scroller = view.Content.ShouldBeOfType<ScrollViewer>();
+                    var line = Find<TextBlock>(view, block => block.Text == "This machine reads its APC Back-UPS ES 850G2 over USB, so its readings are measured.")
+                        .ShouldNotBeNull(theme.ToString());
+                    line.IsVisible.ShouldBeTrue(theme.ToString());
+                    line.TranslatePoint(new Point(line.ActualWidth, 0), scroller).X.ShouldBeLessThanOrEqualTo(scroller.ViewportWidth + 0.5, theme.ToString());
+                    Save(window, 880, 900, $"wizard-readings-ups-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+
     [Fact]
     public void The_update_card_draws_in_the_rail_in_both_themes()
     {

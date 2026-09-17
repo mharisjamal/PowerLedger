@@ -165,6 +165,71 @@ public class WizardViewModelTests
             .ShouldBe(WizardViewModel.ReadingsFor(Statuses.Running(energyMeter: true, battery: false), ChassisKind.Laptop));
 
     [Fact]
+    public void A_desktop_measured_by_a_power_supply_is_told_so_by_its_name()
+    {
+        var status = Statuses.Running() with
+        {
+            Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.PowerSupply },
+            PowerDevices = [Statuses.PowerSupply],
+        };
+        WizardViewModel.ReadingsFor(status, ChassisKind.Desktop)
+            .ShouldBe("This machine reads its Corsair HX1000i over USB, so its readings are measured.");
+    }
+
+    [Fact]
+    public void A_desktop_measured_by_a_ups_is_told_so_by_its_name()
+    {
+        var status = Statuses.Running() with
+        {
+            Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.Ups },
+            PowerDevices = [Statuses.Ups],
+        };
+        WizardViewModel.ReadingsFor(status, ChassisKind.Desktop)
+            .ShouldBe("This machine reads its APC Back-UPS ES 850G2 over USB, so its readings are measured.");
+    }
+
+    [Fact]
+    public void A_ups_giving_only_its_load_of_rated_va_is_told_estimated_not_measured()
+    {
+        var status = Statuses.Running() with
+        {
+            Last = Frames.At(Now, quality: Quality.Estimated) with { Total = TotalSource.Ups },
+            PowerDevices = [Statuses.Ups],
+        };
+        WizardViewModel.ReadingsFor(status, ChassisKind.Desktop)
+            .ShouldBe("This machine reads its APC Back-UPS ES 850G2 over USB. "
+                      + "A UPS that only gives its load as a share of its rated VA is estimated, not measured.");
+    }
+
+    [Fact]
+    public void A_measured_ups_or_power_supply_with_no_matching_device_listed_still_says_which_kind()
+    {
+        // An older service, or PowerDevices not (yet) naming the one giving the total: say the kind, not "working".
+        var noDevices = Statuses.Running() with { Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.Ups } };
+        WizardViewModel.ReadingsFor(noDevices, ChassisKind.Desktop)
+            .ShouldBe("This machine reads its UPS over USB, so its readings are measured.");
+
+        var wrongKindListed = Statuses.Running() with
+        {
+            Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.Ups },
+            PowerDevices = [Statuses.PowerSupply],
+        };
+        WizardViewModel.ReadingsFor(wrongKindListed, ChassisKind.Desktop)
+            .ShouldBe("This machine reads its UPS over USB, so its readings are measured.");
+    }
+
+    [Fact]
+    public void A_laptop_keeps_its_own_wording_even_when_its_total_is_measured_from_a_ups()
+    {
+        // Plan L: a laptop off its own battery never takes a UPS or supply as its total, but one on the mains might: the
+        // wizard still speaks only of the laptop's battery, unchanged, since that is what the user is asking about there.
+        var status = Statuses.Running() with { Last = Frames.At(Now, quality: Quality.Measured) with { Total = TotalSource.Ups } };
+        WizardViewModel.ReadingsFor(status, ChassisKind.Laptop)
+            .ShouldBe("This machine has a battery and a processor energy meter. "
+                      + "On battery its readings are measured; plugged in, they are calibrated once the model has learned from battery time, and estimated until then.");
+    }
+
+    [Fact]
     public async Task The_readings_follow_the_chassis_chosen_on_the_machine_step()
     {
         _link.Connect(true);

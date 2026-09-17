@@ -130,11 +130,23 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>What this machine's readings will be, from the service's sources and the chassis in the machine profile.
-    /// Only a laptop's readings come from its battery: the battery on a desktop is a UPS, which powers more than the
-    /// machine, so a desktop is never told its readings are measured.</summary>
+    /// Only a laptop's readings come from its own battery: the battery a desktop shows is a UPS, which powers more than
+    /// the machine, so that battery is never the reason a desktop's readings are measured. A UPS or power supply read
+    /// directly over USB is different: when one gives the machine's total (spec: Plan L), its reading is measured unless
+    /// the UPS itself gives only its load as a share of its rated VA. A laptop keeps its own story regardless, since one
+    /// running off its battery never takes either as its total, and the wizard is asked about the laptop, not the mains.</summary>
     internal static string ReadingsFor(ServiceStatus? status, ChassisKind chassis)
     {
         if (status is null) return "The service isn't running yet. Once it is, each reading on the Now screen shows its quality.";
+        if (chassis != ChassisKind.Laptop && status.Last is { Total: TotalSource.Ups or TotalSource.PowerSupply } last)
+        {
+            var kind = last.Total == TotalSource.Ups ? PowerDeviceKind.Ups : PowerDeviceKind.PowerSupply;
+            var name = status.PowerDevices?.FirstOrDefault(d => d.Kind == kind)?.Name ?? (kind == PowerDeviceKind.Ups ? "UPS" : "power supply");
+            return last.Quality == Quality.Measured
+                ? $"This machine reads its {name} over USB, so its readings are measured."
+                : $"This machine reads its {name} over USB. "
+                  + "A UPS that only gives its load as a share of its rated VA is estimated, not measured.";
+        }
         bool Has(string name) => status.Sources.Any(s => s.Name == name && s.Supported);
         const string battery = "On battery its readings are measured; plugged in, they are calibrated once the model has learned from battery time, and estimated until then.";
         const string processor = "This machine reports its processor's energy, so the processor is measured; the rest is estimated from the machine profile";
