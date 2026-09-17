@@ -74,7 +74,7 @@ public class GraphicsSourcesTests
         health.Count(h => h.Name is "nvidia-gpu" or "amd-gpu" or "arc-gpu" && h.Supported).ShouldBeLessThanOrEqualTo(1);
         if (health.Single(h => h.Name == "nvidia-gpu").Supported)
         {
-            health.ShouldNotContain(h => h.Name is "amd-gpu" or "arc-gpu" or "gpu-load");
+            health.ShouldNotContain(h => h.Name == "amd-gpu" || h.Name == "arc-gpu" || h.Name == "gpu-load");
         }
         else
         {
