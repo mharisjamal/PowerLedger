@@ -55,6 +55,30 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void About_names_the_arc_gpu_ups_and_power_supply_sources_and_says_when_the_ups_has_found_nothing()
+    {
+        _link.Status = Statuses.Running() with
+        {
+            Sources =
+            [
+                new SourceStatus("arc-gpu", false, "no Intel Arc discrete GPU", 0, null),
+                new SourceStatus("ups", true, "no UPS found on USB", 0, null),
+                new SourceStatus("power-supply", true, null, 0, null),
+            ],
+        };
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.Sources.ShouldBe(
+        [
+            new SourceLine("Intel Arc graphics", "not on this machine", "no Intel Arc discrete GPU"),
+            new SourceLine("UPS", "note", "no UPS found on USB"),
+            new SourceLine("Power supply", "working", ""),
+        ]);
+    }
+
+    [Fact]
     public void Without_the_service_the_apps_own_preferences_still_work()
     {
         var model = Model();

@@ -69,6 +69,7 @@ public class GpuLoadDisplayTests
             [
                 new SourceStatus("nvidia-gpu", false, "no NVIDIA driver installed", 0, null),
                 new SourceStatus("amd-gpu", false, "no AMD discrete GPU", 0, null),
+                new SourceStatus("arc-gpu", false, "no Intel Arc discrete GPU", 0, null),
                 new SourceStatus("gpu-load", true, null, 0, null),
             ],
         };
@@ -80,6 +81,7 @@ public class GpuLoadDisplayTests
         [
             new SourceLine("NVIDIA graphics", "not on this machine", "no NVIDIA driver installed"),
             new SourceLine("AMD graphics", "not on this machine", "no AMD discrete GPU"),
+            new SourceLine("Intel Arc graphics", "not on this machine", "no Intel Arc discrete GPU"),
             new SourceLine("Graphics load", "working", ""),
         ]);
     }

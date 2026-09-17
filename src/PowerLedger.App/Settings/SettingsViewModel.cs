@@ -299,14 +299,19 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             "cpu-load" => "Processor load",
             "nvidia-gpu" => "NVIDIA graphics",
             "amd-gpu" => "AMD graphics",
+            "arc-gpu" => "Intel Arc graphics",
             "gpu-load" => "Graphics load",
             "display" => "Display brightness",
             "activity" => "Display and lock state",
+            "ups" => "UPS",
+            "power-supply" => "Power supply",
             _ => source.Name,
         };
         if (!source.Supported) return new SourceLine(name, "not on this machine", source.Unavailable ?? "");
-        return source.Failures > 0
-            ? new SourceLine(name, $"failing ({source.Failures})", source.LastError ?? "")
+        if (source.Failures > 0) return new SourceLine(name, $"failing ({source.Failures})", source.LastError ?? "");
+        // Supported, but nothing to show yet: a UPS not yet found on USB says so here rather than passing for "working".
+        return !string.IsNullOrEmpty(source.Unavailable)
+            ? new SourceLine(name, "note", source.Unavailable)
             : new SourceLine(name, "working", "");
     }
 }
