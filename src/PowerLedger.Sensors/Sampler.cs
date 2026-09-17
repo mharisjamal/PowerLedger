@@ -32,9 +32,12 @@ public sealed class Sampler : IDisposable
         var draft = new SampleDraft();
         foreach (var entry in _entries)
         {
-            if (!entry.Source.Supported || _tick < entry.SkipUntil) continue;
+            if (_tick < entry.SkipUntil) continue;
             try
             {
+                // Asking a source whether it is supported reaches a library or a driver too, so it is asked in here
+                // with the reading: one that throws is a source that failed, not a tick that failed.
+                if (!entry.Source.Supported) continue;
                 entry.Source.Contribute(draft);
                 entry.Backoff = 0;
                 entry.SkipUntil = 0;
@@ -51,10 +54,29 @@ public sealed class Sampler : IDisposable
         return draft.ToSample(timestamp, deltaSeconds);
     }
 
+    /// <summary>Lets go of every source. Each is closed behind a guard of its own and the set is emptied whatever
+    /// happens, because one source that will not close would otherwise leave every source after it open for the life
+    /// of the process: a UPS's HID handles and preparsed blocks, and a power supply's read and write handle.</summary>
     public void Dispose()
     {
-        foreach (var entry in _entries) entry.Source.Dispose();
-        _entries.Clear();
+        try
+        {
+            foreach (var entry in _entries)
+            {
+                try
+                {
+                    entry.Source.Dispose();
+                }
+                catch (Exception)
+                {
+                    // A source that will not close is the operating system's business, not the other sources'.
+                }
+            }
+        }
+        finally
+        {
+            _entries.Clear();
+        }
     }
 
     private sealed class Entry(ISensorSource source)

@@ -100,4 +100,38 @@ public class SamplerTests
         one.Disposed.ShouldBeTrue();
         two.Disposed.ShouldBeTrue();
     }
+
+    [Fact]
+    public void One_source_that_will_not_close_still_lets_go_of_all_the_others_and_of_the_set()
+    {
+        // A source whose Dispose throws is the case that leaks a UPS's handles and a supply's for the life of the
+        // process: everything listed after it would never be closed and the set would never be let go of.
+        var first = new FakeSource("first", _ => { });
+        var awkward = new FakeSource("awkward", _ => { }) { DisposeThrows = new InvalidOperationException("the card is gone") };
+        var last = new FakeSource("last", _ => { });
+        var sampler = new Sampler([first, awkward, last]);
+
+        Should.NotThrow(sampler.Dispose);
+
+        first.Disposed.ShouldBeTrue();
+        awkward.Disposed.ShouldBeTrue();
+        last.Disposed.ShouldBeTrue();
+        sampler.Health.ShouldBeEmpty();
+        Should.NotThrow(sampler.Dispose);
+    }
+
+    [Fact]
+    public void A_source_that_throws_when_it_is_asked_whether_it_is_supported_costs_only_its_own_fields()
+    {
+        var bad = new FakeSource("bad", _ => { }) { SupportedThrows = new InvalidOperationException("the library has gone") };
+        var good = new FakeSource("good", d => d.Brightness = 0.6);
+        using var sampler = new Sampler([bad, good]);
+
+        var sample = Should.NotThrow(() => sampler.Read(T0, 1.0));
+
+        sample.Brightness.ShouldBe(0.6);
+        bad.SupportedThrows = null;
+        sampler.Health.Single(h => h.Name == "bad").Failures.ShouldBe(1);
+        sampler.Health.Single(h => h.Name == "bad").LastError.ShouldBe("the library has gone");
+    }
 }
