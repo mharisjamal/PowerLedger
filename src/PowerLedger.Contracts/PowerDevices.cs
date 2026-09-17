@@ -27,8 +27,11 @@ public enum TotalSource
     /// <summary>The output a UPS reports, for what the user says it powers.</summary>
     Ups = 2,
 
-    /// <summary>What a power supply reports: the wall power it draws, or its DC output with its efficiency allowed for.</summary>
+    /// <summary>A power supply's DC output, with its efficiency at that load allowed for.</summary>
     PowerSupply = 3,
+
+    /// <summary>The wall power a power supply reports it is drawing, taken as it is.</summary>
+    PowerSupplyWall = 4,
 }
 
 /// <summary>What the outlets of a UPS attached over USB power, as the user says. Stored as an integer: append new members,

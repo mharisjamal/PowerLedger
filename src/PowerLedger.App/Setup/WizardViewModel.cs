@@ -138,7 +138,7 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
     internal static string ReadingsFor(ServiceStatus? status, ChassisKind chassis)
     {
         if (status is null) return "The service isn't running yet. Once it is, each reading on the Now screen shows its quality.";
-        if (chassis != ChassisKind.Laptop && status.Last is { Total: TotalSource.Ups or TotalSource.PowerSupply } last)
+        if (chassis != ChassisKind.Laptop && status.Last is { Total: TotalSource.Ups or TotalSource.PowerSupply or TotalSource.PowerSupplyWall } last)
         {
             var kind = last.Total == TotalSource.Ups ? PowerDeviceKind.Ups : PowerDeviceKind.PowerSupply;
             var name = status.PowerDevices?.FirstOrDefault(d => d.Kind == kind)?.Name ?? (kind == PowerDeviceKind.Ups ? "UPS" : "power supply");

@@ -284,7 +284,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var desktop = _settings?.Profile.Chassis == ChassisKind.Desktop;
         // A UPS or a power supply that gives the total is a power sensor, whatever the machine's own rails report.
         IsSensorless = !Supported(status, "energy-meter") && (desktop || !Supported(status, "battery"))
-                       && status.Last?.Total is not (TotalSource.Ups or TotalSource.PowerSupply);
+                       && status.Last?.Total is not (TotalSource.Ups or TotalSource.PowerSupply or TotalSource.PowerSupplyWall);
         var interval = _settings?.SampleIntervalSeconds ?? 1;
         var learned = Format.Duration(status.Calibration.BatterySamples * interval / 3600.0);
         var needed = Format.Duration(status.Calibration.SamplesNeeded * interval / 3600.0);
@@ -425,7 +425,8 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     {
         var samples = $"{(_settings?.SampleIntervalSeconds ?? 1).ToString(_culture)} s samples";
         if (frame.Total == TotalSource.Ups) return "UPS output reading · " + samples;
-        if (frame.Total == TotalSource.PowerSupply) return "Power supply's own reading, with its efficiency · " + samples;
+        if (frame.Total == TotalSource.PowerSupplyWall) return "Power supply's own wall reading · " + samples;
+        if (frame.Total == TotalSource.PowerSupply) return "Power supply's DC output, with its efficiency · " + samples;
         return (frame.Quality, frame.Components.Monitors > 0) switch
         {
             (Quality.Measured, false) => "Windows battery report · " + samples,
@@ -442,7 +443,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     private static string Source(ReadingFrame frame) => frame.Total switch
     {
         TotalSource.Ups => "UPS output",
-        TotalSource.PowerSupply => "power supply reading",
+        TotalSource.PowerSupply or TotalSource.PowerSupplyWall => "power supply reading",
         _ => frame.Quality switch
         {
             Quality.Measured => "battery discharge",

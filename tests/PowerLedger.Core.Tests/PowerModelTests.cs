@@ -535,7 +535,7 @@ public class PowerModelTests
     public void A_supply_that_reports_what_it_draws_from_the_wall_is_the_total_and_is_divided_by_nothing()
     {
         var r = Desktop(monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 7))).Evaluate(WithWall(DesktopTick(), 300));
-        (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerSupplyWall, Quality.Measured));
         r.TotalW.ShouldBe(300 + 25, 1e-9);
         r.Components.PsuLoss.ShouldBe(0);            // the supply's own loss is already inside what it draws from the wall
         (r.Components.Cpu, r.Components.Gpu, r.Components.Ram, r.Components.Storage, r.Components.Board).ShouldBe((50.0, 120.0, 5.0, 2.0, 15.0));
@@ -548,7 +548,7 @@ public class PowerModelTests
     public void A_wall_reading_is_no_more_divided_on_a_laptop_than_on_a_desktop()
     {
         var r = Laptop().Evaluate(WithWall(TestData.Laptop(), 45));
-        (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerSupplyWall, Quality.Measured));
         r.TotalW.ShouldBe(45, 1e-9);
         r.Components.PsuLoss.ShouldBe(0);
         r.Components.Unattributed.ShouldBe(45 - (14.6 + 4.1 + 4.2), 1e-9);
@@ -574,7 +574,7 @@ public class PowerModelTests
         // A supply reports one figure or the other and never both; the wall one wins because it assumes no efficiency.
         var both = WithWall(WithPsu(DesktopTick(), 200), 260);
         var supply = Desktop().Evaluate(both);
-        supply.TotalSource.ShouldBe(TotalSource.PowerSupply);
+        supply.TotalSource.ShouldBe(TotalSource.PowerSupplyWall);
         supply.TotalW.ShouldBe(260, 1e-9);
         supply.Components.Sum.ShouldBe(supply.TotalW, 1e-9);
 

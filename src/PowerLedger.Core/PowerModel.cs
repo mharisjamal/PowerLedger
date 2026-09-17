@@ -138,7 +138,7 @@ public sealed class PowerModel
             // What the supply says it draws from the wall is the whole draw already, its own losses and all, so nothing is
             // divided and no loss is worked out: what it holds of the supply's is no more knowable than the rest of it.
             var wallTotal = wall + monitors.OwnPlug;
-            return Build(s, wallTotal, Quality.Measured, WithRest(parts with { PsuLoss = 0 }, wallTotal), userIdle, TotalSource.PowerSupply);
+            return Build(s, wallTotal, Quality.Measured, WithRest(parts with { PsuLoss = 0 }, wallTotal), userIdle, TotalSource.PowerSupplyWall);
         }
         if (!onItsBattery && PowerSupplyWatts(s) is { } output)
         {

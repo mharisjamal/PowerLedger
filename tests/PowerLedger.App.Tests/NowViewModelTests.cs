@@ -57,7 +57,9 @@ public class NowViewModelTests
     [InlineData(TotalSource.Ups, Quality.Measured, 0, "Live · UPS output · 14:32:07", "UPS output reading · 1 s samples")]
     [InlineData(TotalSource.Ups, Quality.Estimated, 37.7, "Live · UPS output · 14:32:07", "UPS output reading · 1 s samples")]
     [InlineData(TotalSource.PowerSupply, Quality.Measured, 37.7, "Live · power supply reading · 14:32:07",
-        "Power supply's own reading, with its efficiency · 1 s samples")]
+        "Power supply's DC output, with its efficiency · 1 s samples")]
+    [InlineData(TotalSource.PowerSupplyWall, Quality.Measured, 37.7, "Live · power supply reading · 14:32:07",
+        "Power supply's own wall reading · 1 s samples")]
     [InlineData(TotalSource.Battery, Quality.Measured, 0, "Live · battery discharge · 14:32:07", "Windows battery report · 1 s samples")]
     public void A_total_from_a_ups_or_a_power_supply_says_which_it_came_from(
         TotalSource total, Quality quality, double monitors, string eyebrow, string note)
