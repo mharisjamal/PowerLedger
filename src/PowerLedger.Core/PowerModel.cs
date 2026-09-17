@@ -4,12 +4,15 @@ namespace PowerLedger.Core;
 
 /// <summary>
 /// Turns one <see cref="Sample"/> into a <see cref="Reading"/> (spec §5).
-/// On a laptop the battery discharge rate is the truth when available; otherwise the parts are summed
-/// with a learned (laptop) or default "rest of system" baseline and divided by supply efficiency.
-/// Desktops are always estimated. The external monitors draw what the <see cref="IMonitorDraw"/> says (nothing, when the
-/// model is given none). A monitor with a plug of its own is added after the efficiency division, and on top of a measured
-/// rate; one running off the PC, as a portable monitor on a laptop's USB-C port does, draws through the PC's supply or
-/// battery, so it goes inside the division and is already in a measured rate.
+/// The total comes from the first of these that applies: a laptop's battery discharge rate while it runs on its battery;
+/// the output of a UPS the user says powers this PC, alone or with its monitors; a power supply's DC output over its
+/// efficiency; and otherwise the model, which sums the parts with a learned (laptop) or default "rest of system" baseline
+/// and divides by supply efficiency. A UPS or power supply total keeps the model's parts, and the rest is what the total
+/// leaves of them. The external monitors draw what the <see cref="IMonitorDraw"/> says (nothing, when the model is given
+/// none). A monitor with a plug of its own is added after the efficiency division, and on top of a measured rate or a power
+/// supply's reading; a UPS that powers the monitors too already holds it. One running off the PC, as a portable monitor on a
+/// laptop's USB-C port does, draws through the PC's supply or battery, so it goes inside the division and is already in
+/// every reading.
 /// </summary>
 public sealed class PowerModel
 {
@@ -24,6 +27,13 @@ public sealed class PowerModel
     public const double CpuIdleLaptopW = 2;
     public const double CpuIdleDesktopW = 8;
     public const double GpuIdleW = 3;
+
+    /// <summary>
+    /// What a discrete GPU's chip or package reading is multiplied by to count the whole card (spec §3). Such a reading
+    /// leaves out the card's memory regulators, voltage regulator losses and fans, and measured cards drew 12–25% more than
+    /// their chip figure: an RX 5700 XT reporting 180 W drew 202 W, and an RX 6800 XT reporting 255 W about 300 W.
+    /// </summary>
+    public const double RestOfCardFactor = 1.15;
 
     private readonly MachineProfile _profile;
     private readonly HardwareFacts _facts;
@@ -41,8 +51,9 @@ public sealed class PowerModel
     }
 
     /// <summary>
-    /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; in measured mode <c>Unattributed</c> may go
-    /// negative when the parts over-report, which is the honest sensor-disagreement signal.
+    /// Evaluates one tick. <c>Components.Sum</c> always equals <c>TotalW</c>; when a battery, UPS or power supply reading
+    /// gives the total, <c>Unattributed</c> may go negative when the parts over-report, which is the honest
+    /// sensor-disagreement signal.
     /// </summary>
     public Reading Evaluate(Sample s) => Evaluate(s, out _);
 
@@ -71,7 +82,7 @@ public sealed class PowerModel
             var measuredParts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
                 Monitors: monitors.Total, PsuLoss: 0, Unattributed: measured - cpu - gpu - display - monitors.FromPc);
-            return Build(s, measured + monitors.OwnPlug, Quality.Measured, measuredParts, userIdle);
+            return Build(s, measured + monitors.OwnPlug, Quality.Measured, measuredParts, userIdle, TotalSource.Battery);
         }
 
         Components parts;
@@ -108,17 +119,50 @@ public sealed class PowerModel
             ? (s.OnBattery ? 1.0 : _options.LaptopAdapterEfficiency)
             : PsuEfficiency.For(_profile.PsuTier);
         var psuLoss = beforePsu / efficiency - beforePsu;
-        var total = beforePsu + psuLoss + monitors.OwnPlug;
-        return Build(s, total, quality, parts with { PsuLoss = psuLoss }, userIdle);
+        parts = parts with { PsuLoss = psuLoss };
+
+        // A laptop running on its battery draws through neither a UPS nor a power supply, whatever they read.
+        var onItsBattery = isLaptop && s.OnBattery;
+        if (!onItsBattery && UpsWatts(s) is { } ups)
+        {
+            // A UPS that powers this PC alone leaves out the monitors with plugs of their own; one that powers the monitors too
+            // already holds them. A load of the rated volt-amperes assumes a power factor, so a total from it is an estimate.
+            var total = _profile.UpsLoad == UpsLoad.ThisPc ? ups + monitors.OwnPlug : ups;
+            var measuredQuality = s.UpsSource == UpsPowerSource.LoadOfRatedVoltAmps ? Quality.Estimated : Quality.Measured;
+            return Build(s, total, measuredQuality, WithRest(parts, total), userIdle, TotalSource.Ups);
+        }
+        if (!onItsBattery && PowerSupplyWatts(s) is { } output)
+        {
+            // The power supply draws its DC output over its efficiency from the wall, and loses the difference.
+            var wall = output / PsuEfficiency.For(_profile.PsuTier);
+            var total = wall + monitors.OwnPlug;
+            return Build(s, total, Quality.Measured, WithRest(parts with { PsuLoss = wall - output }, total), userIdle, TotalSource.PowerSupply);
+        }
+        return Build(s, beforePsu + psuLoss + monitors.OwnPlug, quality, parts, userIdle, TotalSource.Model);
     }
 
     /// <summary>A reading is never non-finite: a bad profile or option value yields a zeroed, suspect reading rather than poisoning storage.</summary>
-    private static Reading Build(Sample s, double total, Quality quality, Components parts, bool userIdle)
+    private static Reading Build(Sample s, double total, Quality quality, Components parts, bool userIdle, TotalSource source)
         => double.IsFinite(total) && double.IsFinite(parts.Sum)
             ? new Reading(s.Timestamp, s.DeltaSeconds, total, quality, parts, s.OnBattery, s.DisplayOn, userIdle,
-                          s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, s.Suspect)
+                          s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, s.Suspect, source, s.DGpuScope)
             : new Reading(s.Timestamp, s.DeltaSeconds, 0, quality, Components.Zero, s.OnBattery, s.DisplayOn, userIdle,
-                          s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, Suspect: true);
+                          s.SessionLocked, s.CpuLoad, s.DGpuLoad, s.Brightness, Suspect: true, source, s.DGpuScope);
+
+    /// <summary>The parts with what <paramref name="total"/> leaves of the others as the rest, so that they sum to it.</summary>
+    private static Components WithRest(Components parts, double total) => parts with { Unattributed = total - (parts.Sum - parts.Unattributed) };
+
+    /// <summary>The watts a UPS gave, when the user has said it powers this PC, alone or with its monitors; otherwise null,
+    /// since a UPS that powers more, or may, doesn't stand for this PC.</summary>
+    private double? UpsWatts(Sample s)
+        => (_profile.UpsLoad is UpsLoad.ThisPc or UpsLoad.ThisPcAndMonitors) && s.UpsSource != UpsPowerSource.None
+           && Finite(s.UpsOutputW) is { } watts && watts >= 0
+            ? watts
+            : null;
+
+    /// <summary>The DC output watts a power supply gave, unless the user has turned reading it off.</summary>
+    private double? PowerSupplyWatts(Sample s)
+        => _profile.ReadPowerSupply && Finite(s.PsuOutputW) is { } watts && watts >= 0 ? watts : null;
 
     private double CpuWatts(Sample s)
     {
@@ -131,7 +175,10 @@ public sealed class PowerModel
     private double GpuWatts(Sample s)
     {
         if (!s.DGpuPresent) return 0;
-        if (Finite(s.DGpuW) is { } w) return Math.Max(0, w);
+        if (Finite(s.DGpuW) is { } w)
+        {
+            return Math.Max(0, w) * (s.DGpuScope is GpuPowerScope.ChipOnly or GpuPowerScope.Package ? RestOfCardFactor : 1);
+        }
         var tdp = Math.Max(GpuIdleW + 1, _profile.GpuTdpOverrideW ?? _facts.GpuTdpW);
         return GpuIdleW + (tdp - GpuIdleW) * Load(s.DGpuLoad ?? 0);
     }

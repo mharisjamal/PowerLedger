@@ -1,8 +1,9 @@
 namespace PowerLedger.Core;
 
 /// <summary>Watts attributed to each part of the machine for one tick.</summary>
-/// <param name="Unattributed">Watts not itemised elsewhere: the measured remainder (battery mode), the learned baseline (calibrated mode),
-/// or the default laptop baseline (estimated laptop). 0 for estimated desktops, whose parts are itemised.
+/// <param name="Unattributed">Watts not itemised elsewhere: the measured remainder (battery mode), what a UPS or power supply
+/// total leaves of the modelled parts, the learned baseline (calibrated mode), or the default laptop baseline (estimated
+/// laptop). 0 for estimated desktops, whose parts are itemised.
 /// Narrower than EnergySlice.RestWh, which is the whole non-CPU/GPU/display energy band.</param>
 public sealed record Components(
     double Cpu, double Gpu, double Display, double Ram, double Storage,

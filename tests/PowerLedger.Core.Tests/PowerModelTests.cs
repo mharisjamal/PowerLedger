@@ -334,6 +334,189 @@ public class PowerModelTests
         Laptop(monitors: new FixedDraw(new(OwnPlug: 0, FromPc: double.NaN))).Evaluate(TestData.Laptop()).Suspect.ShouldBeTrue();
     }
 
+    [Fact]
+    public void A_chip_or_package_gpu_reading_counts_the_rest_of_the_card_at_fifteen_percent_more()
+    {
+        PowerModel.RestOfCardFactor.ShouldBe(1.15);
+        Desktop().Evaluate(DesktopTick() with { DGpuScope = GpuPowerScope.Package }).Components.Gpu.ShouldBe(120 * 1.15, 1e-9);
+        Desktop().Evaluate(DesktopTick() with { DGpuScope = GpuPowerScope.Board }).Components.Gpu.ShouldBe(120, 1e-9);
+
+        var chip = Desktop().Evaluate(DesktopTick() with { DGpuScope = GpuPowerScope.ChipOnly });
+        chip.GpuScope.ShouldBe(GpuPowerScope.ChipOnly);
+        chip.Components.Gpu.ShouldBe(120 * 1.15, 1e-9);
+        chip.TotalW.ShouldBe((50 + 138 + 5 + 2 + 15) / 0.85, 1e-9);
+        chip.Components.Sum.ShouldBe(chip.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_gpu_the_model_estimates_from_its_load_is_not_scaled_whatever_its_scope()
+        => Laptop().Evaluate(TestData.Laptop(gpu: null, gpuLoad: 0.4) with { DGpuScope = GpuPowerScope.ChipOnly })
+            .Components.Gpu.ShouldBe(3 + (25 - 3) * 0.4, 1e-9);
+
+    [Fact]
+    public void Each_reading_says_where_its_total_came_from()
+    {
+        Laptop().Evaluate(TestData.Laptop(battery: 34.2, onBattery: true)).TotalSource.ShouldBe(TotalSource.Battery);
+        Laptop(baseline: 9.0).Evaluate(TestData.Laptop()).TotalSource.ShouldBe(TotalSource.Model);
+        Laptop().Evaluate(TestData.Laptop()).TotalSource.ShouldBe(TotalSource.Model);
+        Desktop().Evaluate(DesktopTick()).TotalSource.ShouldBe(TotalSource.Model);
+    }
+
+    [Fact]
+    public void A_ups_said_to_power_this_pc_gives_the_total_and_the_monitors_with_plugs_of_their_own_are_added()
+    {
+        var profile = MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc };
+        var r = Desktop(profile: profile, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 7))).Evaluate(WithUps(DesktopTick(), 250));
+        var throughSupply = 50 + 120 + 5 + 2 + 15 + 7.0;
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
+        r.TotalW.ShouldBe(250 + 25, 1e-9);
+        (r.Components.Cpu, r.Components.Gpu, r.Components.Ram, r.Components.Storage, r.Components.Board).ShouldBe((50.0, 120.0, 5.0, 2.0, 15.0));
+        r.Components.Monitors.ShouldBe(25 + 7, 1e-9);
+        r.Components.PsuLoss.ShouldBe(throughSupply / 0.85 - throughSupply, 1e-9);
+        r.Components.Unattributed.ShouldBe(250 - throughSupply / 0.85, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_ups_said_to_power_this_pc_and_its_monitors_is_the_total_with_every_monitor_inside_it()
+    {
+        var profile = MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPcAndMonitors };
+        var r = Desktop(profile: profile, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 7))).Evaluate(WithUps(DesktopTick(), 250));
+        var throughSupply = 50 + 120 + 5 + 2 + 15 + 7.0;
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
+        r.TotalW.ShouldBe(250, 1e-9);
+        r.Components.Monitors.ShouldBe(25 + 7, 1e-9);
+        r.Components.Unattributed.ShouldBe(250 - throughSupply / 0.85 - 25, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void Parts_that_come_to_more_than_a_ups_reading_give_a_negative_rest_and_keep_sum_equal_to_total()
+    {
+        var r = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc }).Evaluate(WithUps(DesktopTick(), 180));
+        r.TotalW.ShouldBe(180, 1e-9);
+        r.Components.Unattributed.ShouldBe(180 - 192 / 0.85, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Theory]
+    [InlineData(UpsPowerSource.ActivePower, Quality.Measured)]
+    [InlineData(UpsPowerSource.LoadOfRatedWatts, Quality.Measured)]
+    [InlineData(UpsPowerSource.LoadOfRatedVoltAmps, Quality.Estimated)]
+    public void A_ups_total_is_measured_unless_it_came_from_the_load_of_its_rated_volt_amperes(UpsPowerSource source, Quality quality)
+    {
+        var r = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc }).Evaluate(WithUps(DesktopTick(), 250, source));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Ups, quality));
+        r.TotalW.ShouldBe(250, 1e-9);
+    }
+
+    [Theory]
+    [InlineData(UpsLoad.NotSaid, 250.0, UpsPowerSource.ActivePower)]
+    [InlineData(UpsLoad.More, 250.0, UpsPowerSource.ActivePower)]
+    [InlineData(UpsLoad.ThisPc, 250.0, UpsPowerSource.None)]
+    [InlineData(UpsLoad.ThisPc, null, UpsPowerSource.ActivePower)]
+    [InlineData(UpsLoad.ThisPcAndMonitors, double.NaN, UpsPowerSource.ActivePower)]
+    [InlineData(UpsLoad.ThisPcAndMonitors, -5.0, UpsPowerSource.ActivePower)]
+    public void A_ups_is_not_used_until_the_user_says_it_powers_this_pc_alone_or_with_its_monitors_and_it_gives_watts(
+        UpsLoad load, double? watts, UpsPowerSource source)
+    {
+        var r = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = load }).Evaluate(WithUps(DesktopTick(), watts, source));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        r.TotalW.ShouldBe(192 / 0.85, 1e-9);
+    }
+
+    [Fact]
+    public void On_battery_a_laptops_discharge_rate_wins_over_a_ups()
+    {
+        var profile = MachineProfile.DefaultLaptop with { UpsLoad = UpsLoad.ThisPc };
+        var r = Laptop(profile: profile).Evaluate(WithPsu(WithUps(TestData.Laptop(battery: 34.2, onBattery: true), 60), 50));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Battery, Quality.Measured));
+        r.TotalW.ShouldBe(34.2, 1e-9);
+    }
+
+    [Fact]
+    public void A_laptop_running_on_its_own_battery_is_not_read_by_a_ups_or_a_power_supply()
+    {
+        // Unplugged, the laptop draws from its battery alone. Without a discharge rate, as just after it's unplugged, the
+        // model estimates it.
+        var profile = MachineProfile.DefaultLaptop with { UpsLoad = UpsLoad.ThisPc };
+        var r = Laptop(profile: profile).Evaluate(WithPsu(WithUps(TestData.Laptop(battery: null, onBattery: true), 3), 3));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        r.TotalW.ShouldBe(14.6 + 4.1 + 4.2 + 5.0, 1e-9);
+    }
+
+    [Fact]
+    public void A_desktop_its_ups_keeps_running_through_a_power_cut_still_takes_the_ups_reading()
+    {
+        // Windows shows a UPS on USB as the desktop's battery, and says the desktop runs on it while the mains are out.
+        var profile = MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc };
+        var r = Desktop(profile: profile).Evaluate(WithUps(TestData.Laptop(cpu: 50, gpu: 120, brightness: null, battery: 240, onBattery: true), 250));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
+        r.TotalW.ShouldBe(250, 1e-9);
+    }
+
+    [Fact]
+    public void On_ac_a_laptop_on_a_ups_keeps_its_modelled_parts_and_adapter_loss_and_the_rest_is_what_the_ups_reading_leaves()
+    {
+        var profile = MachineProfile.DefaultLaptop with { UpsLoad = UpsLoad.ThisPc };
+        var r = Laptop(baseline: 9.0, profile: profile, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 6.2))).Evaluate(WithUps(TestData.Laptop(), 40));
+        var throughAdapter = 14.6 + 4.1 + 4.2 + 6.2 + 9.0;
+        var adapterLoss = throughAdapter / 0.9 - throughAdapter;
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
+        r.TotalW.ShouldBe(40 + 25, 1e-9);
+        r.Components.PsuLoss.ShouldBe(adapterLoss, 1e-9);
+        r.Components.Unattributed.ShouldBe(40 - (14.6 + 4.1 + 4.2 + 6.2) - adapterLoss, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_power_supply_gives_the_total_as_its_dc_output_over_its_efficiency_and_the_monitors_with_plugs_of_their_own_are_added()
+    {
+        var profile = MachineProfile.DefaultDesktop with { PsuTier = PsuTier.Gold };
+        var r = Desktop(profile: profile, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 7))).Evaluate(WithPsu(DesktopTick(), 300));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
+        r.TotalW.ShouldBe(300 / 0.90 + 25, 1e-9);
+        (r.Components.Cpu, r.Components.Gpu, r.Components.Ram, r.Components.Storage, r.Components.Board).ShouldBe((50.0, 120.0, 5.0, 2.0, 15.0));
+        r.Components.Monitors.ShouldBe(25 + 7, 1e-9);
+        r.Components.PsuLoss.ShouldBe(300 / 0.90 - 300, 1e-9);
+        r.Components.Unattributed.ShouldBe(300 - (50 + 120 + 5 + 2 + 15 + 7), 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Theory]
+    [InlineData(false, 300.0)]
+    [InlineData(true, null)]
+    [InlineData(true, double.PositiveInfinity)]
+    [InlineData(true, -1.0)]
+    public void A_power_supply_is_not_used_while_reading_it_is_off_or_when_it_gives_no_watts(bool read, double? watts)
+    {
+        var r = Desktop(profile: MachineProfile.DefaultDesktop with { ReadPowerSupply = read }).Evaluate(WithPsu(DesktopTick(), watts));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        r.TotalW.ShouldBe(192 / 0.85, 1e-9);
+    }
+
+    [Fact]
+    public void A_ups_said_to_power_this_pc_wins_over_the_power_supply_and_one_that_powers_more_leaves_the_total_to_it()
+    {
+        var both = WithPsu(WithUps(DesktopTick(), 250), 200);
+        var ups = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc }).Evaluate(both);
+        ups.TotalSource.ShouldBe(TotalSource.Ups);
+        ups.TotalW.ShouldBe(250, 1e-9);
+
+        var more = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.More }).Evaluate(both);
+        more.TotalSource.ShouldBe(TotalSource.PowerSupply);
+        more.TotalW.ShouldBe(200 / 0.85, 1e-9);
+    }
+
+    /// <summary>A desktop tick: the CPU drawing 50 W and the GPU 120 W, with no built-in panel. The default desktop adds 5 W
+    /// of memory, 2 W of storage and 15 W of board and fans, so 192 W go through its Bronze supply.</summary>
+    private static Sample DesktopTick() => TestData.Laptop(cpu: 50, gpu: 120, brightness: null);
+
+    private static Sample WithUps(Sample s, double? watts, UpsPowerSource source = UpsPowerSource.ActivePower)
+        => s with { UpsOutputW = watts, UpsSource = source, UpsName = "APC Back-UPS ES 850G2" };
+
+    private static Sample WithPsu(Sample s, double? watts) => s with { PsuOutputW = watts, PsuName = "Corsair HX1000i" };
+
     private sealed class FixedDraw(MonitorWatts on, MonitorWatts off = default) : IMonitorDraw
     {
         public MonitorWatts Watts(bool displayOn) => displayOn ? on : off;
