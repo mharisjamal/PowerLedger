@@ -45,4 +45,7 @@ internal static class Format
     /// <summary>A scale label, or a value read against the scale, with the decimals its step needs: "40", "2.5", "0.25".</summary>
     public static string Scale(double value, double step, CultureInfo culture)
         => double.IsFinite(value) ? Math.Max(0, value).ToString(step >= 1 ? "0" : step >= 0.1 ? "0.0" : "0.00", culture) : Missing;
+
+    /// <summary>A size on disk or as sent, rounded up so a non-empty file never reads "0 KB": "41 KB".</summary>
+    public static string Kb(long bytes, CultureInfo culture) => $"{Math.Ceiling(Math.Max(0, bytes) / 1024.0).ToString("N0", culture)} KB";
 }

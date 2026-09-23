@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -30,6 +31,8 @@ public partial class App : Application
     private TrayIcon? _tray;
     private MainWindow? _window;
     private UiThreads? _threads;
+    private CultureInfo? _culture;
+    private string? _sentFolder;
     private ConsentGate? _consentGate;
     private bool _exiting;
 
@@ -49,6 +52,8 @@ public partial class App : Application
         var preferences = store.Load();
         var zone = TimeZoneInfo.Local;
         var culture = CultureInfo.CurrentCulture;
+        _culture = culture;
+        _sentFolder = Path.Combine(options.DataFolder, "Sent");
         var version = Version();
         _theme = new ThemeManager(this, preferences.Theme);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
@@ -80,7 +85,7 @@ public partial class App : Application
         _updates.PropertyChanged += OnUpdatesChanged;
         _settings = new SettingsViewModel(
             _link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates,
-            openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
+            openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
@@ -168,6 +173,14 @@ public partial class App : Application
     {
         if (_window is null) return;
         new PayloadWindow(path) { Owner = _window }.Show();
+    }
+
+    /// <summary>"What's been sent…" in Settings → Privacy (data-sharing design §2).</summary>
+    private void OpenSentWindow()
+    {
+        if (_window is null || _link is null || _threads is null || _culture is null || _sentFolder is null) return;
+        var model = new SentViewModel(_link, _threads, _sentFolder, _culture, OpenPayload);
+        new SentWindow(model) { Owner = _window }.Show();
     }
 
     /// <summary>Windows is signing out or shutting down: let the window close instead of hiding it.</summary>

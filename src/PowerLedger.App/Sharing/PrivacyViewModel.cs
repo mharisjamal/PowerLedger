@@ -172,10 +172,8 @@ internal sealed class PrivacyViewModel : ObservableObject
         var basis = !consent.Answered ? "You haven't chosen yet."
             : !consent.AllowsAny ? "Nothing is sent."
             : sharing.Problem is { } problem ? sharing.Rejected ? $"Rejected by the server: {problem}" : $"Couldn't send: {problem}. Will try again."
-            : sharing.LastSentAt is { } at ? $"Last sent {TimeZoneInfo.ConvertTime(at, zone).ToString("d MMM yyyy", culture)} · {Kb(sharing.LastSentBytes ?? 0, culture)}"
+            : sharing.LastSentAt is { } at ? $"Last sent {TimeZoneInfo.ConvertTime(at, zone).ToString("d MMM yyyy", culture)} · {Format.Kb(sharing.LastSentBytes ?? 0, culture)}"
             : "Nothing sent yet.";
         return sharing.DaysWaiting > 0 ? $"{basis} · {sharing.DaysWaiting.ToString(culture)} days waiting" : basis;
     }
-
-    private static string Kb(long bytes, CultureInfo culture) => $"{Math.Ceiling(bytes / 1024.0).ToString("N0", culture)} KB";
 }
