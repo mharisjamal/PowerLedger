@@ -93,7 +93,7 @@ public partial class App : Application
             openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
         _settings.Privacy.Applied += consent => _usage?.ConsentChanged(consent);   // data-sharing design §3: known to usage counting at once
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
-        _consentGate = new ConsentGate(_link, threads, OpenConsentDialog);
+        _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
         _shell = new ShellViewModel(_now, _breakdown, _report, _settings, _wizard, version, _updates);
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
