@@ -61,8 +61,19 @@ internal sealed class FakeUiSettings : IUiSettings
 
     public string? FinishFirstRun()
     {
-        Current = Current with { FirstRunDone = true };
+        Current = Current with { FirstRunDone = true, FirstRunAt = Current.FirstRunAt ?? Now() };
         Changes.Add("first run done");
         return null;
     }
+
+    public string? EnsureFirstRunAt()
+    {
+        if (!Current.FirstRunDone || Current.FirstRunAt is not null) return null;
+        Current = Current with { FirstRunAt = Now() };
+        Changes.Add("first run backfilled");
+        return null;
+    }
+
+    /// <summary>Tests can set this to control what a first run is stamped with; UtcNow otherwise.</summary>
+    public Func<DateTimeOffset> Now { get; set; } = () => DateTimeOffset.UtcNow;
 }

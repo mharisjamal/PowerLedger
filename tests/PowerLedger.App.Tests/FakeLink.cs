@@ -30,10 +30,13 @@ internal sealed class FakeLink : IServiceLink
     /// <summary>How many times the App asked for the status.</summary>
     public int StatusReads { get; private set; }
 
+    /// <summary>When set, a status read completes only once the test resolves this, to test what happens meanwhile.</summary>
+    public TaskCompletionSource<ServiceStatus?>? StatusGate { get; set; }
+
     public Task<ServiceStatus?> GetStatusAsync(CancellationToken cancel = default)
     {
         StatusReads++;
-        return Task.FromResult(IsConnected ? Status : null);
+        return StatusGate?.Task ?? Task.FromResult(IsConnected ? Status : null);
     }
 
     public Task<ServiceSettings?> GetSettingsAsync(CancellationToken cancel = default) => Task.FromResult(IsConnected ? Settings : null);

@@ -30,6 +30,10 @@ internal sealed record UiPreferences
     /// <summary>The first-run wizard was finished once; it shows until then (spec §9).</summary>
     public bool FirstRunDone { get; init; }
 
+    /// <summary>When the wizard finished (data-sharing design §3), for usage's "days since you started". Backfilled once
+    /// for an install that already had <see cref="FirstRunDone"/> before this field existed.</summary>
+    public DateTimeOffset? FirstRunAt { get; init; }
+
     /// <summary>Look for new versions every few hours and download them quietly (spec §13). On until the user unticks it;
     /// a ui.json from before it existed keeps it on. It has a setter rather than init for that: the JSON source generator
     /// gives an init-only property missing from the file its type's default, false, where a setter is left alone.</summary>
