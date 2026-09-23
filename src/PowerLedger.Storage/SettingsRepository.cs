@@ -24,6 +24,16 @@ public sealed class SettingsRepository(SqliteDatabase db)
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Removes one key; a key that isn't there is no error.</summary>
+    public void Remove(string key)
+    {
+        using var c = db.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "DELETE FROM settings WHERE key = $key";
+        Rows.Add(cmd, "$key", key);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>Every setting as a key/value map.</summary>
     public Dictionary<string, string> All()
     {

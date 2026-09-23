@@ -66,6 +66,10 @@ public class SmallRepositoriesTests
         repo.Get("tariff.currency").ShouldBe("EUR");
         repo.Set("idle.threshold", "300");
         repo.All().ShouldBe(new Dictionary<string, string> { ["tariff.currency"] = "EUR", ["idle.threshold"] = "300" });
+        repo.Remove("tariff.currency");
+        repo.Remove("never.set");
+        repo.Get("tariff.currency").ShouldBeNull();
+        repo.All().ShouldBe(new Dictionary<string, string> { ["idle.threshold"] = "300" });
     }
 
     [Fact]
