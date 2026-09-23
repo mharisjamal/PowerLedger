@@ -56,9 +56,10 @@ public sealed class MigrationTests : IDisposable
         Scalar(backup, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'outbox_minutes'").ShouldBe(0);
     }
 
+    /// <summary>Each test disposes its own database, which closes only that database's pooled connections: clearing every
+    /// pool could close a connection a test running alongside is opening.</summary>
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         foreach (var file in new[] { _path, _path + "-wal", _path + "-shm", _path + ".bak" })
         {
             try
