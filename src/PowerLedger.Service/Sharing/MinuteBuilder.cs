@@ -53,7 +53,7 @@ internal static class MinuteBuilder
 
         var start = DateTimeOffset.FromUnixTimeMilliseconds(startMs);
         var day = LocalDays.Of(start, zone);
-        var index = (int)((start - LocalDays.Start(day, zone)).Ticks / TimeSpan.TicksPerMinute);
+        var index = (int)((start - LocalDays.Origin(day, zone)).Ticks / TimeSpan.TicksPerMinute);
         var s = sums.Seconds;
         return new MinuteRow(
             startMs, LocalDays.Text(day), index,

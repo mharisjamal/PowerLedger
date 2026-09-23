@@ -2,6 +2,7 @@ using FsCheck.Xunit;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
 using PowerLedger.Service.Sharing;
+using PowerLedger.Storage;
 using Shouldly;
 
 namespace PowerLedger.Service.Tests;
@@ -12,6 +13,10 @@ public class MinuteBuilderTests
     /// <summary>London, whose clocks change in March and October; Windows knows it by its own name.</summary>
     internal static readonly TimeZoneInfo London =
         TimeZoneInfo.TryFindSystemTimeZoneById("GMT Standard Time", out var windows) ? windows : TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+
+    /// <summary>Santiago, whose clocks go forward at midnight, so a day can have no 00:00.</summary>
+    private static readonly TimeZoneInfo Santiago =
+        TimeZoneInfo.TryFindSystemTimeZoneById("Pacific SA Standard Time", out var windows) ? windows : TimeZoneInfo.FindSystemTimeZoneById("America/Santiago");
 
     /// <summary>12:00 in London, in summer time, on a minute boundary.</summary>
     private static readonly DateTimeOffset Noon = new(2026, 9, 12, 11, 0, 0, TimeSpan.Zero);
@@ -64,6 +69,7 @@ public class MinuteBuilderTests
         {
             ("2026-10-25", 0), ("2026-10-25", 90), ("2026-10-25", 150), ("2026-10-25", 180), ("2026-10-25", 1499),
         });
+        minutes.ShouldAllBe(m => Decoded(m, London) == m.StartMs);
     }
 
     [Fact]
@@ -82,6 +88,27 @@ public class MinuteBuilderTests
         {
             ("2026-03-29", 59), ("2026-03-29", 60), ("2026-03-29", 1379), ("2026-03-30", 0),
         });
+        minutes.ShouldAllBe(m => Decoded(m, London) == m.StartMs);
+    }
+
+    [Fact]
+    public void On_a_day_whose_midnight_a_clock_change_skips_a_minute_counts_from_midnight_at_the_days_offset()
+    {
+        // 6 September 2026: Santiago's clocks go from 00:00 at UTC-4 straight to 01:00 at UTC-3, so the day starts at
+        // 01:00 and its offset is UTC-3's. Counted from its midnight at that offset, its first minute is 60, not 0.
+        var day = new DateOnly(2026, 9, 6);
+        Santiago.IsInvalidTime(day.ToDateTime(TimeOnly.MinValue)).ShouldBeTrue();
+
+        var minutes = MinuteBuilder.Build(
+        [
+            Row(new DateTimeOffset(2026, 9, 6, 3, 59, 30, TimeSpan.Zero)),       // 23:59:30 on the 5th, UTC-4
+            Row(new DateTimeOffset(2026, 9, 6, 4, 0, 30, TimeSpan.Zero)),        // 01:00:30 at UTC-3, the day's first minute
+            Row(new DateTimeOffset(2026, 9, 7, 2, 59, 30, TimeSpan.Zero)),       // 23:59:30 at UTC-3, its last
+        ], Santiago);
+
+        minutes.Select(m => (m.Day, m.Minute)).ShouldBe(new[] { ("2026-09-05", 1439), ("2026-09-06", 60), ("2026-09-06", 1439) });
+        LocalDays.UtcOffsetMinutes(day, Santiago).ShouldBe(-180);
+        minutes.ShouldAllBe(m => Decoded(m, Santiago) == m.StartMs);
     }
 
     [Fact]
@@ -182,6 +209,15 @@ public class MinuteBuilderTests
         // Two passes over the same minute of wall-clock time hold 121.2 seconds of readings; the server takes at most 120.
         var rows = Enumerable.Range(0, 120).Select(i => Row(Noon.AddMilliseconds(i * 500), delta: 1.01)).ToList();
         MinuteBuilder.Build(rows, London).ShouldBeEmpty();
+    }
+
+    /// <summary>The minute's UTC start as a reader of the report works it out: its day's midnight, less the day's offset in
+    /// the header, plus its index.</summary>
+    private static long Decoded(MinuteRow minute, TimeZoneInfo zone)
+    {
+        var day = LocalDays.Parse(minute.Day);
+        var midnight = new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        return (midnight - TimeSpan.FromMinutes(LocalDays.UtcOffsetMinutes(day, zone)) + TimeSpan.FromMinutes(minute.Minute)).ToUnixTimeMilliseconds();
     }
 
     /// <summary>An estimated reading ending at <paramref name="at"/>, its watts split over the parts with the rest unattributed.</summary>
