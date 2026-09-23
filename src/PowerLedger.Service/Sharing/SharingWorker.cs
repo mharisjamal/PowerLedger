@@ -414,9 +414,12 @@ internal sealed class SharingWorker : BackgroundService
     /// <summary>
     /// Builds the minutes from the readings since the last run, or since the user said yes, up to two minutes ago, an hour
     /// at a time. A run that finds the readings gone, because the service was off longer than they are kept, builds nothing.
+    /// Nothing is built while the loop's writes are failing: it holds the readings it couldn't write and writes them later,
+    /// and minutes built past them now would leave them out for good.
     /// </summary>
     private void Collect(DateTimeOffset now, StoredConsent stored)
     {
+        if (_board.Status?.WriteProblem is not null) return;
         var cutoff = (Rollups.Floor(now, Minute) - CollectionLag).ToUnixTimeMilliseconds();
         var from = Math.Max(_store.CollectedTo ?? stored.AtMs, (now - TimeSpan.FromDays(KeepDays + 1)).ToUnixTimeMilliseconds());
         while (from < cutoff)

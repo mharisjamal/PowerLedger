@@ -439,6 +439,25 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task While_the_loop_cant_write_its_readings_nothing_is_collected_so_the_ones_it_holds_are_once_written()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(10));                  // written before the disk filled up
+        _h.Board.Publish(SharingFakes.Status() with { WriteProblem = "Writes are failing (disk full); 600 readings are held in memory." });
+        _h.Clock.SetUtcNow(Local(24, 10, 20));
+        await _h.TickAsync();
+        _h.Outbox.MinuteDays().ShouldBeEmpty();
+
+        _h.Readings(Local(24, 10, 10), TimeSpan.FromMinutes(10));              // the ones held, written once there was room
+        _h.Board.Publish(SharingFakes.Status());
+        _h.Clock.SetUtcNow(Local(24, 10, 25));
+        await _h.TickAsync();
+
+        _h.Outbox.Minutes("2026-09-24").Select(minute => minute.Minute).ShouldBe(Enumerable.Range(600, 20));
+    }
+
+    [Fact]
     public async Task A_day_whose_last_minutes_are_not_collected_yet_waits()
     {
         _h.Clock.SetUtcNow(Local(24, 23, 50));
