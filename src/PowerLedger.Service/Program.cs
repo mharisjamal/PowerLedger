@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using PowerLedger.Service.Sharing;
 using Serilog;
 
 namespace PowerLedger.Service;
@@ -20,6 +21,9 @@ internal static class Program
             return 1;
         }
 
+        // Crashes go to a file whatever the user chose; the sharing worker records or deletes each (data-sharing design §5).
+        var crashes = host.Services.GetRequiredService<ServicePaths>().Crashes;
+        ServiceCrashes.Catch(crashes);
         try
         {
             var loop = host.Services.GetRequiredService<SamplingLoop>();
@@ -28,6 +32,7 @@ internal static class Program
         }
         catch (Exception error)
         {
+            ServiceCrashes.TryWrite(crashes, error, DateTimeOffset.UtcNow, ServiceVersion.Short);
             Log.Fatal(error, "PowerLedger stopped on an error");
             Fatal($"PowerLedger stopped on an error: {error.Message}");
             return 1;

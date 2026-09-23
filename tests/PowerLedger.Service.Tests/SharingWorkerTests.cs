@@ -554,8 +554,7 @@ public sealed class SharingWorkerTests : IDisposable
 
         /// <summary>A crash file as the service writes one when it crashes.</summary>
         public void CrashFile(DateTimeOffset at, string message = "Boom.") =>
-            File.WriteAllText(Path.Combine(Crashes, $"service-{at.UtcTicks}.json"),
-                OutboxEvents.Write(new CrashReport(at, "service", "0.6.0", ["System.Exception"], message, "   at Y()")));
+            ServiceCrashes.TryWrite(Crashes, new InvalidOperationException(message), at, "0.6.0").ShouldNotBeNull();
 
         public void Dispose() => Database.Dispose();
     }
