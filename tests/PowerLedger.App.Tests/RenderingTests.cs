@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -597,6 +598,145 @@ public class RenderingTests
             }
         });
         new FileInfo(Path.Combine(Folder, "update-ready-Dark.png")).Length.ShouldBeGreaterThan(30_000);
+    }
+
+    /// <summary>Plan M: the consent dialog first shown and with detail open, Settings scrolled to Privacy with sharing under
+    /// way, and What's been sent listing two files with the newest selected.</summary>
+    [Fact]
+    public void The_consent_dialog_the_privacy_section_and_the_sent_list_draw_in_both_themes()
+    {
+        Directory.CreateDirectory(Folder);
+        var sentFolder = Path.Combine(Path.GetTempPath(), "powerledger-renders-sent-sample");
+        Directory.CreateDirectory(sentFolder);
+        File.WriteAllBytes(Path.Combine(sentFolder, "2026-09-07.json.gz"), new byte[8_192]);
+        File.WriteAllBytes(Path.Combine(sentFolder, "2026-09-06.json.gz"), new byte[9_400]);
+
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+
+                // 1. The consent dialog: as first shown, all off; then with Hardware and power + Share on and "What's sent" open.
+                var consentLink = new FakeLink();
+                consentLink.Connect(true);
+                var consentFirst = new ConsentViewModel(consentLink, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { });
+                var dialogFirst = new ConsentDialog(consentFirst)
+                {
+                    Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                dialogFirst.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<CheckBox>(dialogFirst, box => box.Content is TextBlock text && text.Text == "Share my detailed data")
+                        .ShouldNotBeNull(theme.ToString()).IsChecked.ShouldBe((bool?)false, theme.ToString());
+                    Save(dialogFirst, (int)dialogFirst.ActualWidth, (int)dialogFirst.ActualHeight, $"consent-first-{theme}.png");
+                }
+                finally
+                {
+                    dialogFirst.Close();
+                }
+
+                var consentOpen = new ConsentViewModel(consentLink, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { })
+                {
+                    Power = true, Share = true,
+                };
+                var dialogOpen = new ConsentDialog(consentOpen)
+                {
+                    Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                dialogOpen.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    foreach (var expander in AllOf<Expander>(dialogOpen)) expander.IsExpanded = true;
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<CheckBox>(dialogOpen, box => box.Content is TextBlock text && text.Text == "Share my detailed data")
+                        .ShouldNotBeNull(theme.ToString()).IsChecked.ShouldBe((bool?)true, theme.ToString());
+                    Save(dialogOpen, (int)dialogOpen.ActualWidth, (int)dialogOpen.ActualHeight, $"consent-open-{theme}.png");
+                }
+                finally
+                {
+                    dialogOpen.Close();
+                }
+
+                // 2. Settings, scrolled to Privacy: consent all on, an install id, and a status line with a last-sent size and days waiting.
+                var privacyLink = new FakeLink
+                {
+                    Status = Statuses.WithSharing(
+                        new Consent(ConsentText.Version, true, true, true, true), installId: "a83f1c6e-9b2d-4a71-8e4c-5f9a0d3b7c21",
+                        lastSentAt: Now.AddDays(-1), lastSentBytes: 41_000, daysWaiting: 2),
+                };
+                privacyLink.Connect(true);
+                var settings = new SettingsViewModel(privacyLink, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline,
+                    new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, "USD");
+                settings.Show();
+                var settingsView = new SettingsView { DataContext = settings };
+                var settingsWindow = new Window
+                {
+                    Content = settingsView, Width = 880, Height = 900, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                settingsWindow.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    settings.Privacy.Status.ShouldBe("Last sent 7 Sep 2026 · 41 KB · 2 days waiting", theme.ToString());
+                    var scroller = settingsView.Content.ShouldBeOfType<ScrollViewer>();
+                    var header = Find<TextBlock>(settingsView, text => text.Text == "PRIVACY").ShouldNotBeNull(theme.ToString());
+                    scroller.ScrollToVerticalOffset(Math.Max(0, header.TranslatePoint(default, scroller).Y - 12));
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Save(settingsWindow, 880, 900, $"settings-privacy-{theme}.png");
+                }
+                finally
+                {
+                    settingsWindow.Close();
+                }
+
+                // 3. What's been sent: two files from a folder fed straight to the view model, the newest selected.
+                var sentLink = new FakeLink();
+                sentLink.Connect(true);
+                var sentModel = new SentViewModel(sentLink, UiThreads.Inline, sentFolder, English, _ => { });
+                var sentWindow = new SentWindow(sentModel)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                };
+                sentWindow.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    sentModel.Rows.Count.ShouldBe(2, theme.ToString());
+                    var list = Find<ListBox>(sentWindow).ShouldNotBeNull(theme.ToString());
+                    // RowSelected (SentWindow.xaml.cs) opens the row's JSON and clears the selection at once; unhooked here,
+                    // without touching the window's own code, only so the screenshot can hold a selected row.
+                    var rowSelected = typeof(SentWindow).GetMethod("RowSelected", BindingFlags.NonPublic | BindingFlags.Instance)!;
+                    list.RemoveHandler(Selector.SelectionChangedEvent,
+                        (SelectionChangedEventHandler)Delegate.CreateDelegate(typeof(SelectionChangedEventHandler), sentWindow, rowSelected));
+                    list.SelectedIndex = 0;
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    list.SelectedIndex.ShouldBe(0, theme.ToString());
+                    Save(sentWindow, (int)sentWindow.ActualWidth, (int)sentWindow.ActualHeight, $"sent-{theme}.png");
+                }
+                finally
+                {
+                    sentWindow.Close();
+                }
+            }
+        });
+
+        static IEnumerable<T> AllOf<T>(DependencyObject root)
+            where T : DependencyObject
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            {
+                var child = VisualTreeHelper.GetChild(root, i);
+                if (child is T match) yield return match;
+                foreach (var deeper in AllOf<T>(child)) yield return deeper;
+            }
+        }
     }
 
     /// <summary>0.3.0 downloaded and waiting, on 0.2.0.</summary>
