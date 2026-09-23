@@ -28,6 +28,8 @@ public partial class App : Application
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
     private MainWindow? _window;
+    private UiThreads? _threads;
+    private ConsentGate? _consentGate;
     private bool _exiting;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -52,6 +54,7 @@ public partial class App : Application
         IServerCheck check = options.PipeName == PipeProtocol.PipeName ? InstalledServiceCheck.FromServiceManager() : new TrustAnyServer();
         _link = new PipeServiceLink(options.PipeName, new LastInputIdleSource(), TimeProvider.System, check);
         var threads = new UiThreads(action => Dispatcher.InvokeAsync(action), action => Task.Run(action));
+        _threads = threads;
         var history = new HistoryReader(_database);
         var sleep = new SleepSettings();
         byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, culture);
@@ -76,6 +79,8 @@ public partial class App : Application
         _updates.PropertyChanged += OnUpdatesChanged;
         _settings = new SettingsViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates);
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
+        _consentGate = new ConsentGate(_link, threads, OpenConsentDialog);
+        _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
         _shell = new ShellViewModel(_now, _breakdown, _report, _settings, _wizard, version, _updates);
         _tray = new TrayIcon(ShowWindow, ExitUi, autostart);
         _monthly = new MonthlyReports(
@@ -143,6 +148,23 @@ public partial class App : Application
         _window.Show();
         if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
         _window.Activate();
+        // spec §2: an existing install is asked the first time the main window opens; a new install waits for the wizard.
+        if (_preferences is { Current.FirstRunDone: true }) _consentGate?.CheckOnce();
+    }
+
+    /// <summary>Opens the consent dialog, modal and owned by the main window (data-sharing design §2).</summary>
+    private void OpenConsentDialog(Consent current)
+    {
+        if (_window is null || _link is null || _threads is null) return;
+        var model = new ConsentViewModel(_link, _threads, current, OpenPage, OpenPayload);
+        new ConsentDialog(model) { Owner = _window }.ShowDialog();
+    }
+
+    /// <summary>Opens one payload file, owned by the main window: "See what would be sent" and each row of "What's been sent".</summary>
+    private void OpenPayload(string path)
+    {
+        if (_window is null) return;
+        new PayloadWindow(path) { Owner = _window }.Show();
     }
 
     /// <summary>Windows is signing out or shutting down: let the window close instead of hiding it.</summary>
