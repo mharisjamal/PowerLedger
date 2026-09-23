@@ -75,6 +75,7 @@ public partial class App : Application
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _preferences.ApplyFirstRunDefaults();
+        _preferences.EnsureFirstRunAt();   // data-sharing design §3: backfills an install from before this field existed
         var http = UpdateHttp.Create(version);
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
