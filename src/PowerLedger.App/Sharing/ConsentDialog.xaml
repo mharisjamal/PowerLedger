@@ -36,6 +36,7 @@
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
         <StackPanel Margin="28,24,28,20">
+            <TextBlock Style="{StaticResource Prose}" FontSize="16" Margin="0,0,0,12" Text="Help make PowerLedger better" />
             <TextBlock Style="{StaticResource Prose}"
                        Text="PowerLedger works fully without sending anything. If you agree, it sends what you choose below to PowerLedger's server once a day. Nothing is sent until you choose, and you can change your mind at any time in Settings → Privacy." />
 
