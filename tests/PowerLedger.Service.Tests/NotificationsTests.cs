@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -61,6 +62,35 @@ public class NotificationsTests
     }
 
     [Fact]
+    public void A_resume_the_loop_fails_is_looked_at_so_it_is_never_taken_for_a_crash()
+    {
+        // A failed task nobody looked at is recorded as a service crash (ServiceCrashes); the loop logs a failed resume and
+        // carries on, so it is no crash.
+        var unobserved = new List<Exception>();
+        void Seen(object? sender, UnobservedTaskExceptionEventArgs args)
+        {
+            lock (unobserved) unobserved.AddRange(args.Exception.InnerExceptions);
+        }
+
+        TaskScheduler.UnobservedTaskException += Seen;
+        try
+        {
+            var marker = FailAResume();
+            for (var pass = 0; pass < 3; pass++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+
+            lock (unobserved) unobserved.ShouldNotContain(error => error.Message == marker);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= Seen;
+        }
+    }
+
+    [Fact]
     public void Session_lock_and_unlock_reach_the_signals()
     {
         var signals = new ServiceSignals(TimeProvider.System);
@@ -70,6 +100,21 @@ public class NotificationsTests
         signals.SessionLocked.ShouldBeTrue();
         PowerLedgerServiceLifetime.Apply(SessionChangeReason.SessionUnlock, signals);
         signals.SessionLocked.ShouldBeFalse();
+    }
+
+    /// <summary>Wakes the loop and fails the resume, as the loop does one it couldn't carry out, leaving nothing that holds the
+    /// task, so the collector can find it.</summary>
+    /// <returns>The failure's message.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static string FailAResume()
+    {
+        var commands = new LoopCommands();
+        var notifications = new PowerNotifications(commands, new ServiceSignals(TimeProvider.System), NullLogger<PowerNotifications>.Instance);
+        notifications.OnSuspendResume(IntPtr.Zero, PbtApmResumeAutomatic, IntPtr.Zero);
+        commands.Reader.TryRead(out var resume).ShouldBeTrue();
+        var marker = $"The sensors could not be rebuilt ({Guid.NewGuid():N}).";
+        resume.Fail(new InvalidOperationException(marker));
+        return marker;
     }
 
     [Fact]

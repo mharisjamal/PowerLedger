@@ -77,7 +77,11 @@ internal sealed class PowerNotifications : IHostedService
                 }
                 break;
             case PbtApmResumeAutomatic:
-                _ = _commands.SendAsync(new ResumeCommand());
+                // Nobody waits for the loop to wake, but a resume it couldn't carry out is looked at here: a failed task
+                // left unlooked-at would be recorded as a service crash, and the service carries on.
+                _ = _commands.SendAsync(new ResumeCommand()).ContinueWith(
+                    failed => _log.LogWarning(failed.Exception?.InnerException, "Waking up after sleep failed"),
+                    CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 break;
         }
         return 0;
