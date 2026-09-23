@@ -443,6 +443,32 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task The_status_says_what_the_user_chose_and_how_sending_is_going()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.TickAsync();
+        _h.Board.Status.ShouldNotBeNull().Sharing.ShouldBe(new SharingStatus(Consent.Unanswered, null, null, null, null, false, 0));
+
+        await _h.Consent(true, false, true);
+        var consented = _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull();
+        (consented.Consent, consented.InstallId, consented.LastSentAt, consented.Problem, consented.DaysWaiting)
+            .ShouldBe((new Consent(ConsentText.Version, true, false, true, false), _h.Store.InstallId, null, null, 0));
+
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(5));
+        _h.Client.Answer = call => call.Kind == "report" ? new SendOutcome.Unreachable("no network") : new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(25, 1, 1));
+        await _h.TickAsync();
+        var failing = _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull();
+        (failing.Problem, failing.Rejected, failing.DaysWaiting, failing.LastSentAt).ShouldBe(("no network", false, 1, null));
+
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        (await _h.Run(new SendNowCommand(2))).Ok.ShouldBeTrue();
+        var sent = _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull();
+        (sent.LastSentAt, sent.LastSentBytes, sent.Problem, sent.DaysWaiting)
+            .ShouldBe((Local(25, 1, 1), new FileInfo(Path.Combine(_h.Sent, "2026-09-24.json.gz")).Length, null, 0));
+    }
+
+    [Fact]
     public async Task Running_it_ticks_at_start_and_answers_commands()
     {
         _h.Clock.SetUtcNow(Local(24, 10));

@@ -107,6 +107,26 @@ public sealed class PipeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task The_status_carries_how_sharing_stands_as_the_worker_last_published_it()
+    {
+        var status = new ServiceStatus("0.6.0", Now, 5, [], 0, 0, new CalibrationStatus(0, 0, 0, 0), "", 0, null, null, null);
+        var sharing = new SharingStatus(new Consent(ConsentText.Version, true, true, false, false), SharingFakes.InstallId, Now, 41_000, null, false, 2);
+
+        _board.Publish(sharing);
+        (await Send(new GetStatusRequest(46))).ShouldBe(new ErrorReply(46, PipeHandler.Starting));   // the loop hasn't published yet
+
+        _board.Publish(status);
+        (await Send(new GetStatusRequest(47))).ShouldBeOfType<StatusReply>().Status.Sharing.ShouldBe(sharing);
+
+        var later = sharing with { DaysWaiting = 0, LastSentAt = Now.AddDays(1) };
+        _board.Publish(later);
+        (await Send(new GetStatusRequest(48))).ShouldBeOfType<StatusReply>().Status.Sharing.ShouldBe(later);
+        _board.Publish(status with { Ticks = 6 });
+        var reply = (await Send(new GetStatusRequest(49))).ShouldBeOfType<StatusReply>();
+        (reply.Status.Ticks, reply.Status.Sharing).ShouldBe((6L, later));
+    }
+
+    [Fact]
     public async Task While_the_service_stops_sharing_requests_are_answered_no()
     {
         _sharing.Close();

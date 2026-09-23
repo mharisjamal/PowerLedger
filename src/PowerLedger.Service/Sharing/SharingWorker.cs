@@ -124,8 +124,20 @@ internal sealed class SharingWorker : BackgroundService
         }
     }
 
-    /// <summary>The five-minute run (data-sharing design §4).</summary>
+    /// <summary>The five-minute run (data-sharing design §4), then how sharing stands published for the status.</summary>
     internal async Task TickAsync(CancellationToken stop)
+    {
+        try
+        {
+            await RunAsync(stop).ConfigureAwait(false);
+        }
+        finally
+        {
+            Publish();
+        }
+    }
+
+    private async Task RunAsync(CancellationToken stop)
     {
         var now = _clock.GetUtcNow();
         var stored = _store.StoredConsent;
@@ -196,6 +208,30 @@ internal sealed class SharingWorker : BackgroundService
             _log.LogError(error, "{Command} failed", command.GetType().Name);
             command.Answer(false, $"That didn't work: {error.Message}");
         }
+        finally
+        {
+            Publish();
+        }
+    }
+
+    /// <summary>How sharing stands, for Settings → Privacy: the consent, the ID, the last upload, the last problem and the
+    /// complete days waiting.</summary>
+    private void Publish()
+    {
+        try
+        {
+            var now = _clock.GetUtcNow();
+            var consent = _store.Consent;
+            var last = _store.LastSent;
+            var problem = _store.Problem;
+            _board.Publish(new SharingStatus(
+                consent, _store.InstallId, last is null ? null : DateTimeOffset.FromUnixTimeMilliseconds(last.AtMs), last?.Bytes,
+                problem?.Text, problem?.Rejected ?? false, consent.AllowsAny ? CompleteDays(now, consent).Count : 0));
+        }
+        catch (Exception error) when (error is Microsoft.Data.Sqlite.SqliteException or IOException)
+        {
+            _log.LogWarning(error, "How sharing stands could not be read for the status");
+        }
     }
 
     private async Task TickSafelyAsync(CancellationToken stop)
@@ -253,6 +289,7 @@ internal sealed class SharingWorker : BackgroundService
         _log.LogInformation(
             "Data sharing set: diagnostics {Diagnostics}, usage {Usage}, power {Power}, share {Share}",
             consent.Diagnostics, consent.Usage, consent.Power, consent.Share);
+        Publish();                                                            // the status shows it before the App hears back
         command.Answer(true, "Your choices are saved.");
 
         await PostPendingConsentAsync(now, stop, fromApp: true).ConfigureAwait(false);   // at once; a failure is tried again later
