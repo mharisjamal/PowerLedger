@@ -103,7 +103,7 @@ internal static partial class ReportBuilder
         var machine = new ProfileDto(
             Math.Clamp(profile.RamSticks, 0, 64), profile.RamIsDdr5, Math.Clamp(profile.SsdCount, 0, 64), Math.Clamp(profile.HddCount, 0, 64),
             Math.Clamp(profile.FanCount, 0, 64), Watts(profile.ExtrasWatts, 0, 5000) ?? 0, Watts(profile.DisplayDiagonalInches, 1, 150));
-        var tariff = inputs.Tariff is { PricePerKwh: >= 0 and <= 100 } rate && Currency().IsMatch(rate.Currency ?? "")
+        var tariff = inputs.Tariff is { PricePerKwh: >= 0 and <= MaxPricePerKwh } rate && Currency().IsMatch(rate.Currency ?? "")
             ? new TariffDto(rate.PricePerKwh, rate.Currency!)
             : null;
         return new HardwareDto(
@@ -131,8 +131,14 @@ internal static partial class ReportBuilder
     }
 
     /// <summary>The minutes as columns: watts and seconds to a tenth, loads and brightness to a thousandth.</summary>
-    private static MinutesDto Minutes(IReadOnlyList<MinuteRow> minutes)
+    /// <summary>The highest price per kWh the pipe accepts and the schema takes, with room for currencies of small units.</summary>
+    private const decimal MaxPricePerKwh = 1_000_000m;
+
+    private static MinutesDto Minutes(IReadOnlyList<MinuteRow> all)
     {
+        // A minute the server would refuse would take the whole day with it, so one with a figure past its ranges (a
+        // monitor's typed figure absurdly high, say) is left out instead.
+        var minutes = all.Where(WithinServerRanges).ToList();
         double[] Tenths(Func<MinuteRow, double> column) => [.. minutes.Select(minute => Round(column(minute), 1))];
         double[] Thousandths(Func<MinuteRow, double> column) => [.. minutes.Select(minute => Round(column(minute), 3))];
         double?[] Optional(Func<MinuteRow, double?> column) =>
@@ -147,6 +153,22 @@ internal static partial class ReportBuilder
             Tenths(m => m.MeasuredS), Tenths(m => m.CalibratedS), Tenths(m => m.EstimatedS),
             [.. minutes.Select(minute => minute.Samples)], [.. minutes.Select(minute => minute.TotalSource)],
             [.. minutes.Select(minute => minute.GpuScope)], [.. minutes.Select(minute => minute.MeasuredMask)]);
+    }
+
+    /// <summary>True when every figure of the minute is inside the ranges the server checks (server/src/minutes.ts).</summary>
+    private static bool WithinServerRanges(MinuteRow m)
+    {
+        static bool In(double value, double low, double high) => double.IsFinite(value) && value >= low && value <= high;
+        static bool Share(double? value) => value is null || In(value.Value, 0, 1);
+        return m.Minute is >= 0 and <= 1499
+            && new[] { m.AvgW, m.MaxW, m.CpuW, m.GpuW, m.DisplayW, m.RamW, m.StorageW, m.BoardW, m.ExtrasW, m.MonitorsW, m.PsuLossW }
+                .All(watts => In(watts, 0, 5000))
+            && In(m.UnattributedW, -5000, 5000)
+            && In(m.CpuLoad, 0, 1) && Share(m.GpuLoad) && Share(m.Brightness)
+            && new[] { m.DisplayOnS, m.IdleS, m.LockedS, m.BatteryS, m.MeasuredS, m.CalibratedS, m.EstimatedS }
+                .All(seconds => In(seconds, 0, 120))
+            && m.Samples is >= 0 and <= 100_000 && m.TotalSource is >= 0 and <= 4 && m.GpuScope is >= 0 and <= 2
+            && m.MeasuredMask is >= 0 and <= 7;
     }
 
     /// <summary>The graphics card's maker, from the words in its name.</summary>

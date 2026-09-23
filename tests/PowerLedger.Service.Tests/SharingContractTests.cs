@@ -9,28 +9,21 @@ namespace PowerLedger.Service.Tests;
 /// count rules, and the report schema the Worker shares, checked against the fixtures the Worker's own tests use.</summary>
 public class SharingContractTests
 {
-    private static readonly string Contract = Path.Combine(AppContext.BaseDirectory, "Contract");
-
-    // Built once: the schema's $id registers it, and a second build of the same $id is refused.
-    private static readonly Lazy<JsonSchema> Schema = new(() => JsonSchema.FromFile(Path.Combine(Contract, "report-v1.schema.json")));
-
     public static TheoryData<string> Named(string prefix)
     {
         var names = new TheoryData<string>();
-        foreach (var file in Directory.GetFiles(Path.Combine(Contract, "fixtures"), prefix + "*.json").Order())
+        foreach (var file in Directory.GetFiles(Path.Combine(ReportSchema.Contract, "fixtures"), prefix + "*.json").Order())
             names.Add(Path.GetFileName(file));
         return names;
     }
 
     private static EvaluationResults Evaluate(string fixture)
     {
-        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(Contract, "fixtures", fixture)));
-        return Schema.Value.Evaluate(document.RootElement, new EvaluationOptions { OutputFormat = OutputFormat.List });
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(ReportSchema.Contract, "fixtures", fixture)));
+        return ReportSchema.Evaluate(document.RootElement);
     }
 
-    private static string Problems(EvaluationResults results) =>
-        string.Join("; ", (results.Details ?? []).Where(detail => detail.Errors is { Count: > 0 })
-            .SelectMany(detail => detail.Errors!.Select(error => $"{detail.InstanceLocation}: {error.Value}")));
+    private static string Problems(EvaluationResults results) => ReportSchema.Problems(results);
 
     [Theory]
     [MemberData(nameof(Named), "valid-")]

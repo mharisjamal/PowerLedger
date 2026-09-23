@@ -128,7 +128,7 @@ public class ReportTests
     }
 
     [Fact]
-    public void Without_a_ups_the_ups_is_null_and_a_price_the_schema_cannot_take_goes_as_no_tariff()
+    public void Without_a_ups_the_ups_is_null_and_a_price_in_a_currency_of_small_units_is_sent()
     {
         var inputs = SharingFakes.Inputs() with
         {
@@ -140,8 +140,28 @@ public class ReportTests
 
         hardware.Ups.ShouldBeNull();
         hardware.Psu.ShouldBe(new PsuDto("gold", null, null));
-        hardware.Tariff.ShouldBeNull();
+        hardware.Tariff.ShouldBe(new TariffDto(1500m, "IDR"));
         ReportSchema.Problems(ReportJson.Write(ReportBuilder.Build(inputs))).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_price_past_what_the_pipe_accepts_goes_as_no_tariff()
+    {
+        var inputs = SharingFakes.Inputs() with { Tariff = new Tariff(SharingFakes.At, 2_000_000m, "IDR") };
+
+        ReportBuilder.Build(inputs).Power.ShouldNotBeNull().Hardware.ShouldNotBeNull().Tariff.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_minute_with_a_figure_the_server_would_refuse_is_left_out_so_the_day_still_goes()
+    {
+        var absurd = SharingFakes.Minute(1) with { MonitorsW = 9000, AvgW = 9100, MaxW = 9100 };
+        var inputs = SharingFakes.Inputs() with { Minutes = [SharingFakes.Minute(0), absurd, SharingFakes.Minute(2)] };
+
+        var report = ReportBuilder.Build(inputs);
+
+        report.Power.ShouldNotBeNull().Minutes.T.ShouldBe([0, 2]);
+        ReportSchema.Problems(ReportJson.Write(report)).ShouldBeNull();
     }
 
     [Theory]
