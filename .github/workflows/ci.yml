@@ -75,3 +75,23 @@ jobs:
         with:
           name: installer-test-results-arm64
           path: installer/output/test-results/
+
+  # The data-sharing Worker: nothing here needs the Windows jobs' build, so it runs on its own.
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install
+        working-directory: server
+        run: npm ci
+
+      - name: Test
+        working-directory: server
+        run: npm test
