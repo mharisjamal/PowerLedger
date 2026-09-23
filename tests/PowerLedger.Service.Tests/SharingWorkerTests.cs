@@ -108,6 +108,22 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task Send_now_the_next_day_sends_the_minutes_read_since_the_answer_with_no_tick_between()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(3));
+
+        _h.Clock.SetUtcNow(Local(25, 10, 5));                                // the Sandbox moves its clock on a day
+        var reply = await _h.Run(new SendNowCommand(1));
+
+        (reply.Ok, reply.Message).ShouldBe((true, "Sent 1 day."));
+        var report = _h.Client.Reports.ShouldHaveSingleItem();
+        report.Day.ShouldBe("2026-09-24");
+        report.Power.ShouldNotBeNull().Minutes.T.ShouldBe([600, 601, 602]);
+    }
+
+    [Fact]
     public async Task A_missed_night_is_caught_up_at_the_next_tick()
     {
         _h.Clock.SetUtcNow(Local(24, 10));
