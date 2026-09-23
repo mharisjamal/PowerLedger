@@ -10,7 +10,8 @@ namespace PowerLedger.Service;
 /// Answers pipe requests (spec §8). Everything a client sends is range-checked here, and nothing it can say names a
 /// file or runs a command (spec §11). Anything that changes what the loop is doing goes to the loop as a command, and
 /// the reply waits until the loop has done it. Data sharing's requests go to the sharing worker the same way, except the
-/// App's usage counts and crashes: those are acknowledged once queued, so a slow upload never makes the App send them twice.
+/// App's usage counts and crashes: those are acknowledged once queued, so the App never sends them twice. A sharing request
+/// the App is told got no answer in time is never carried out.
 /// </summary>
 internal sealed partial class PipeHandler(
     LoopCommands commands, StatusBoard board, MonitorBoard monitors, ServiceSignals signals, TariffRepository tariffs, TimeProvider clock,
@@ -95,7 +96,11 @@ internal sealed partial class PipeHandler(
         }
     }
 
-    /// <summary>Hands the request to the sharing worker and answers with what it did, or says it didn't answer in time.</summary>
+    /// <summary>
+    /// Hands the request to the sharing worker and answers with what it did, or says it didn't answer in time. That is said
+    /// only of a request the worker hadn't taken, which it then never carries out. One it took just before the limit is
+    /// waited for: the worker answers within <see cref="SharingWorker.AppWait"/> of the request being queued.
+    /// </summary>
     private async Task<PipeMessage> ShareAsync(SharingCommand command, CancellationToken cancel)
     {
         sharing.TryQueue(command);                                  // one it can't take is answered no at once
@@ -105,8 +110,14 @@ internal sealed partial class PipeHandler(
         }
         catch (TimeoutException)
         {
-            return new ErrorReply(command.Id, NoAnswer);
+            if (command.TryGiveUp(NoAnswer)) return new ErrorReply(command.Id, NoAnswer);
         }
+        catch (OperationCanceledException)
+        {
+            command.TryGiveUp(SharingCommands.Stopping);           // nobody is left to hear the answer
+            throw;
+        }
+        return await command.Reply.WaitAsync(cancel).ConfigureAwait(false);
     }
 
     /// <summary>Hands the request to the sharing worker and acknowledges it at once.</summary>

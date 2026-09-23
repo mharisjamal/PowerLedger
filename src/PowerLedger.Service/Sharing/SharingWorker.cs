@@ -23,14 +23,18 @@ internal sealed record SharingEnvironment(string Sent, string Crashes, Func<Scru
 /// since the last run into the outbox while Hardware and power is on, records the sources' failures and the service's
 /// crashes while Crash and sensor reports is on, drops days too old to send, posts a consent change the server hasn't
 /// heard, and sends each complete day once the schedule says so. Between runs it carries out the App's requests, one at a
-/// time, so nothing else touches the outbox or the sharing state and neither needs a lock. Nothing is kept or sent before
-/// the user answers, or while every switch is off.
+/// time, so nothing else touches the outbox or the sharing state and neither needs a lock. A request the App waits on
+/// doesn't wait for a run: the run gives way to it where nothing is half-done, cancelling a request to the server under
+/// way, and starts again once the App has its answer. So the App is answered within <see cref="AppWait"/> of asking, and a
+/// switch turned off is off before the next day is built. Nothing is kept or sent before the user answers, or while every
+/// switch is off.
 /// </summary>
 internal sealed class SharingWorker : BackgroundService
 {
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(5);
 
-    /// <summary>How long a request the App is waiting on may take, so the pipe answers inside the App's own time limit.</summary>
+    /// <summary>How long after the pipe queued it a request the App waits on is answered, whatever came before it, so the
+    /// pipe answers inside its own time limit.</summary>
     public static readonly TimeSpan AppWait = TimeSpan.FromSeconds(8);
 
     public const int MaxDaysPerRun = 7;
@@ -40,6 +44,8 @@ internal sealed class SharingWorker : BackgroundService
     internal const string PreviewFile = "preview.json";
 
     private const long HourMs = 3_600_000;
+    private const string NotInTime = "the server didn't answer in time";
+    private const string NoTimeLeft = "the service was busy with another request";
     private static readonly TimeSpan Minute = TimeSpan.FromMinutes(1);
 
     /// <summary>How far behind now the minutes are built: readings reach the database at each minute boundary.</summary>
@@ -61,6 +67,9 @@ internal sealed class SharingWorker : BackgroundService
 
     /// <summary>Each source's failure count at the last look, so only new failures are added to the day.</summary>
     private readonly Dictionary<string, int> _failures = new(StringComparer.Ordinal);
+
+    /// <summary>True when the last run, or a consent change's post, gave way to the App: it starts again once the inbox is empty.</summary>
+    private bool _resume;
 
     public SharingWorker(
         SqliteDatabase database, StatusBoard board, SharingCommands commands, ISharingClient client, SharingEnvironment environment,
@@ -95,24 +104,25 @@ internal sealed class SharingWorker : BackgroundService
             {
                 tick ??= timer.WaitForNextTickAsync(stop).AsTask();
                 inbox ??= _commands.Reader.WaitToReadAsync(stop).AsTask();
-                await Task.WhenAny(tick, inbox).ConfigureAwait(false);
+                if (!_resume) await Task.WhenAny(tick, inbox).ConfigureAwait(false);   // a run that gave way goes on at once
 
                 if (inbox.IsCompleted)
                 {
                     if (!await inbox.ConfigureAwait(false)) break;
                     inbox = null;
-                    while (!stop.IsCancellationRequested && _commands.Reader.TryRead(out var command))
+                    while (!stop.IsCancellationRequested && _commands.TryTake(out var command))
                     {
                         await HandleSafelyAsync(command, stop).ConfigureAwait(false);
                     }
+                    continue;                                                          // what came in meanwhile goes first
                 }
 
                 if (tick.IsCompleted)
                 {
                     if (!await tick.ConfigureAwait(false)) break;
                     tick = null;
-                    await TickSafelyAsync(stop).ConfigureAwait(false);
                 }
+                await TickSafelyAsync(stop).ConfigureAwait(false);                     // the tick's, or the one that gave way
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
@@ -125,13 +135,19 @@ internal sealed class SharingWorker : BackgroundService
     }
 
     /// <summary>The five-minute run (data-sharing design §4), with how sharing stands published for the status before it
-    /// starts, as its requests can take minutes, and again once it is done.</summary>
+    /// starts, as its requests can take minutes, and again once it is done. A run that gives way to the App starts again
+    /// once the App has its answer.</summary>
     internal async Task TickAsync(CancellationToken stop)
     {
+        _resume = false;
         Publish();
         try
         {
             await RunAsync(stop).ConfigureAwait(false);
+        }
+        catch (GiveWay)
+        {
+            _resume = true;
         }
         finally
         {
@@ -139,6 +155,8 @@ internal sealed class SharingWorker : BackgroundService
         }
     }
 
+    /// <summary>The run's steps. Each is whole before a later one can give way to the App, so a run that starts again loses
+    /// nothing: the failures counted and the crashes read are recorded first.</summary>
     private async Task RunAsync(CancellationToken stop)
     {
         var now = _clock.GetUtcNow();
@@ -149,11 +167,10 @@ internal sealed class SharingWorker : BackgroundService
         {
             _outbox.Clear();
             DeleteCrashFiles();
-            await PostPendingConsentAsync(now, stop, fromApp: false).ConfigureAwait(false);
+            await PostPendingConsentAsync(now, atOnce: false, stop).ConfigureAwait(false);
             return;
         }
 
-        if (consent.Power) Collect(now, stored);
         if (consent.Diagnostics)
         {
             RecordFailures(now, failures);
@@ -163,19 +180,22 @@ internal sealed class SharingWorker : BackgroundService
         {
             DeleteCrashFiles();
         }
+        if (consent.Power) Collect(now, stored, giveWay: true);
         DropOldDays(now);
-        if (!await PostPendingConsentAsync(now, stop, fromApp: false).ConfigureAwait(false)) return;
+        if (!await PostPendingConsentAsync(now, atOnce: false, stop).ConfigureAwait(false)) return;
 
         if (LoopHasPublished
             && SendSchedule.Due(now, Zone, _store.SendMinute, _store.LastRun, _store.Backoff, CompleteDays(now, consent).Count > 0))
         {
-            await SendAsync(now, consent, fromApp: false, stop).ConfigureAwait(false);
+            await SendAsync(now, answerBy: default, stop).ConfigureAwait(false);
         }
     }
 
-    /// <summary>Carries out one of the App's requests and answers it.</summary>
+    /// <summary>Carries out one of the App's requests and answers it, unless the pipe has given up on it: the App was then told
+    /// the service didn't answer in time, and it is left undone.</summary>
     internal async Task HandleAsync(SharingCommand command, CancellationToken stop)
     {
+        if (!command.TryTake()) return;
         try
         {
             switch (command)
@@ -309,7 +329,14 @@ internal sealed class SharingWorker : BackgroundService
         Publish();                                                            // the status shows it before the App hears back
         command.Answer(true, "Your choices are saved.");
 
-        await PostPendingConsentAsync(now, stop, fromApp: true).ConfigureAwait(false);   // at once; a failure is tried again later
+        try
+        {
+            await PostPendingConsentAsync(now, atOnce: true, stop).ConfigureAwait(false);   // a failure is tried again later
+        }
+        catch (GiveWay)
+        {
+            _resume = true;                                                   // posted after the App's next request
+        }
     }
 
     private void RecordUsage(ReportUsageCommand command)
@@ -379,13 +406,14 @@ internal sealed class SharingWorker : BackgroundService
             return;
         }
         var now = _clock.GetUtcNow();
-        if (stored.Consent.Power) Collect(now, stored);
+        if (stored.Consent.Power) Collect(now, stored, giveWay: false);
         if (CompleteDays(now, stored.Consent).Count == 0)
         {
             command.Answer(true, "Nothing is waiting to be sent.");
             return;
         }
-        var (ok, message) = (await SendAsync(now, stored.Consent, fromApp: true, stop).ConfigureAwait(false)).Reply;
+        using var answerBy = AnswerBy(command);
+        var (ok, message) = (await SendAsync(now, answerBy.Token, stop).ConfigureAwait(false)).Reply;
         command.Answer(ok, message);
     }
 
@@ -398,8 +426,8 @@ internal sealed class SharingWorker : BackgroundService
             command.Answer(true, "Nothing had been sent from this PC, and every switch is now off.");
             return;
         }
-        using var deadline = new CancellationTokenSource(AppWait, _clock);
-        var outcome = await CallAsync(cancel => _client.DeleteAsync(id, key, cancel), stop, deadline.Token).ConfigureAwait(false);
+        using var answerBy = AnswerBy(command);
+        var outcome = await CallAsync(cancel => _client.DeleteAsync(id, key, cancel), stop, answerBy.Token).ConfigureAwait(false);
         if (outcome is SendOutcome.Accepted or SendOutcome.Gone)
         {
             _log.LogInformation("The server deleted this install's data; forgetting it");
@@ -418,13 +446,15 @@ internal sealed class SharingWorker : BackgroundService
     /// Nothing is built while the loop's writes are failing: it holds the readings it couldn't write and writes them later,
     /// and minutes built past them now would leave them out for good.
     /// </summary>
-    private void Collect(DateTimeOffset now, StoredConsent stored)
+    /// <param name="giveWay">For the five-minute run: it gives way to a request the App waits on between hours.</param>
+    private void Collect(DateTimeOffset now, StoredConsent stored, bool giveWay)
     {
         if (_board.Status?.WriteProblem is not null) return;
         var cutoff = (Rollups.Floor(now, Minute) - CollectionLag).ToUnixTimeMilliseconds();
         var from = Math.Max(_store.CollectedTo ?? stored.AtMs, (now - TimeSpan.FromDays(KeepDays + 1)).ToUnixTimeMilliseconds());
         while (from < cutoff)
         {
+            if (giveWay && _commands.AppWaiting) throw new GiveWay();
             var to = Math.Min(cutoff, ((from / HourMs) + 1) * HourMs);
             var minutes = MinuteBuilder.Build(_raw.ReadRange(from, to), Zone, GapThreshold);
             if (minutes.Count > 0) _outbox.InsertMinutes(minutes);
@@ -507,10 +537,11 @@ internal sealed class SharingWorker : BackgroundService
         }
     }
 
-    /// <summary>Posts a consent change the server hasn't heard. The App waiting on it gets it tried at once; otherwise it
-    /// waits out a back-off of its own, since the server counts every request against the install's daily limit.</summary>
+    /// <summary>Posts a consent change the server hasn't heard: at once when the user has just made it, otherwise once a
+    /// back-off of its own has passed, since the server counts every request against the install's daily limit. The App
+    /// has had its answer by then, so the post gives way to its next request (<see cref="GiveWay"/>).</summary>
     /// <returns>False when the server has deleted this install, which is then forgotten.</returns>
-    private async Task<bool> PostPendingConsentAsync(DateTimeOffset now, CancellationToken stop, bool fromApp)
+    private async Task<bool> PostPendingConsentAsync(DateTimeOffset now, bool atOnce, CancellationToken stop)
     {
         if (!_store.ConsentPending) return true;
         if (_store.InstallId is not { } id || _store.Key is not { } key)
@@ -518,12 +549,10 @@ internal sealed class SharingWorker : BackgroundService
             Posted();
             return true;
         }
-        if (!fromApp && _store.ConsentBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return true;
+        if (!atOnce && _store.ConsentBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return true;
 
-        using var deadline = fromApp ? new CancellationTokenSource(AppWait, _clock) : null;
         var consent = _store.Consent;
-        var outcome = await CallAsync(cancel => _client.SendConsentAsync(id, key, consent, cancel), stop, deadline?.Token ?? default)
-            .ConfigureAwait(false);
+        var outcome = await OwnCallAsync(cancel => _client.SendConsentAsync(id, key, consent, cancel), stop).ConfigureAwait(false);
         switch (outcome)
         {
             case SendOutcome.Accepted:
@@ -551,54 +580,79 @@ internal sealed class SharingWorker : BackgroundService
         _store.ConsentBackoff = null;
     }
 
-    /// <summary>Sends the complete days waiting, oldest first and at most <see cref="MaxDaysPerRun"/>, each with the sections
-    /// switched on now, and the hardware when it changed since it last went.</summary>
-    private async Task<RunResult> SendAsync(DateTimeOffset now, Consent consent, bool fromApp, CancellationToken stop)
+    /// <summary>
+    /// Sends the complete days waiting, oldest first and at most <see cref="MaxDaysPerRun"/>, each with the sections switched
+    /// on as it is built, and the hardware when it changed since it last went. Before each day it makes way for a request
+    /// the App waits on, so a switch the App turns off is off for every day not yet under way: the five-minute run gives way
+    /// and starts again once the App has its answer, and Send now stops, saying what went.
+    /// </summary>
+    /// <param name="answerBy">Send now's time limit; none for the five-minute run, whose requests give way to the App instead.</param>
+    private async Task<RunResult> SendAsync(DateTimeOffset now, CancellationToken answerBy, CancellationToken stop)
     {
+        var forApp = answerBy.CanBeCanceled;
+        var lastRun = _store.LastRun;
         _store.LastRun = now.ToUnixTimeMilliseconds();
         var (id, key) = _store.Identity();
-        using var deadline = fromApp ? new CancellationTokenSource(AppWait, _clock) : null;
         var result = new RunResult();
-        foreach (var day in CompleteDays(now, consent).Take(MaxDaysPerRun))
+        try
         {
-            if (deadline?.IsCancellationRequested == true) break;                // the rest go at the next chance
-            var inputs = Inputs(day, consent, id, consent.Power ? _outbox.Minutes(day) : [], OutboxEvents.Read(_outbox, day), withHardware: false, now);
-            var hash = consent.Power ? ReportJson.Hash(ReportBuilder.Hardware(inputs)) : null;
-            var report = ReportBuilder.Build(inputs with { WithHardware = hash is not null && hash != _store.HardwareHash });
-            if (report is { Diagnostics: null, Usage: null, Power: null })
+            for (var days = 0; days < MaxDaysPerRun; days++)
             {
-                _outbox.DeleteDay(day);                                            // nothing the switches allow is left in it
-                continue;
-            }
+                if (_commands.AppWaiting)
+                {
+                    if (!forApp) throw new GiveWay();
+                    break;                                                              // the rest go at the next chance
+                }
+                if (answerBy.IsCancellationRequested) break;
+                var consent = _store.Consent;
+                if (!consent.AllowsAny || CompleteDays(now, consent) is not [var day, ..]) break;
 
-            var body = SharingClient.Gzip(ReportJson.Write(report));
-            var outcome = await CallAsync(cancel => _client.SendReportAsync(body, key, cancel), stop, deadline?.Token ?? default).ConfigureAwait(false);
-            switch (outcome)
-            {
-                case SendOutcome.Accepted:
-                    Accepted(day, body, report.Power?.Hardware is null ? null : hash, now);
-                    result.Sent++;
-                    break;
-                case SendOutcome.Rejected rejected:
-                    _log.LogWarning("The server rejected {Day}: {Reason}", day, rejected.Text);
-                    _outbox.DeleteDay(day);
-                    Close(day);
-                    _store.Problem = new SendProblem(rejected.Text, Rejected: true);
-                    result.Rejected = rejected.Text;
-                    break;
-                case SendOutcome.Gone:
-                    _log.LogInformation("The server has deleted this install; forgetting it");
-                    Forget(now);
-                    result.Gone = true;
-                    return result;
-                default:
-                    var reason = outcome.Reason ?? "the server didn't take it";
-                    _log.LogInformation("Sending {Day} failed ({Reason}); trying again later", day, reason);
-                    _store.Problem = new SendProblem(reason, Rejected: false);
-                    _store.Backoff = SendSchedule.After(_store.Backoff, now);
-                    result.Failed = reason;
-                    return result;
+                var inputs = Inputs(day, consent, id, consent.Power ? _outbox.Minutes(day) : [], OutboxEvents.Read(_outbox, day), withHardware: false, now);
+                var hash = consent.Power ? ReportJson.Hash(ReportBuilder.Hardware(inputs)) : null;
+                var report = ReportBuilder.Build(inputs with { WithHardware = hash is not null && hash != _store.HardwareHash });
+                if (report is { Diagnostics: null, Usage: null, Power: null })
+                {
+                    _outbox.DeleteDay(day);                                            // nothing the switches allow is left in it
+                    continue;
+                }
+
+                var body = SharingClient.Gzip(ReportJson.Write(report));
+                Task<SendOutcome> Send(CancellationToken cancel) => _client.SendReportAsync(body, key, cancel);
+                var outcome = forApp
+                    ? await CallAsync(Send, stop, answerBy).ConfigureAwait(false)
+                    : await OwnCallAsync(Send, stop).ConfigureAwait(false);
+                switch (outcome)
+                {
+                    case SendOutcome.Accepted:
+                        Accepted(day, body, report.Power?.Hardware is null ? null : hash, now);
+                        result.Sent++;
+                        break;
+                    case SendOutcome.Rejected rejected:
+                        _log.LogWarning("The server rejected {Day}: {Reason}", day, rejected.Text);
+                        _outbox.DeleteDay(day);
+                        Close(day);
+                        _store.Problem = new SendProblem(rejected.Text, Rejected: true);
+                        result.Rejected = rejected.Text;
+                        break;
+                    case SendOutcome.Gone:
+                        _log.LogInformation("The server has deleted this install; forgetting it");
+                        Forget(now);
+                        result.Gone = true;
+                        return result;
+                    default:
+                        var reason = outcome.Reason ?? "the server didn't take it";
+                        _log.LogInformation("Sending {Day} failed ({Reason}); trying again later", day, reason);
+                        _store.Problem = new SendProblem(reason, Rejected: false);
+                        _store.Backoff = SendSchedule.After(_store.Backoff, now);
+                        result.Failed = reason;
+                        return result;
+                }
             }
+        }
+        catch (GiveWay)
+        {
+            _store.LastRun = lastRun;                                                   // not a run: it starts again
+            throw;
         }
         return result;
     }
@@ -679,11 +733,12 @@ internal sealed class SharingWorker : BackgroundService
             _board.Status, _board.Facts, _board.Settings ?? ServiceSettings.Default, _tariffs.Schedule().At(now), _board.DiscreteGpu,
             withHardware, _environment.Names());
 
-    /// <summary>Makes a request; one run against <paramref name="deadline"/> that passes it counts as no answer.</summary>
+    /// <summary>Makes a request for one the App waits on. One that doesn't answer before <paramref name="deadline"/> counts as
+    /// no answer, and so does one there is no time left to make, which isn't made.</summary>
     private static async Task<SendOutcome> CallAsync(
         Func<CancellationToken, Task<SendOutcome>> request, CancellationToken stop, CancellationToken deadline)
     {
-        if (!deadline.CanBeCanceled) return await request(stop).ConfigureAwait(false);
+        if (deadline.IsCancellationRequested) return new SendOutcome.Unreachable(NoTimeLeft);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, deadline);
         try
         {
@@ -691,8 +746,36 @@ internal sealed class SharingWorker : BackgroundService
         }
         catch (OperationCanceledException) when (!stop.IsCancellationRequested)
         {
-            return new SendOutcome.Unreachable("the server didn't answer in time");
+            return new SendOutcome.Unreachable(NotInTime);
         }
+    }
+
+    /// <summary>Makes a request of the worker's own, which gives way to the App: a request the App waits on, queued before
+    /// or while it is made, cancels it, and the work stops there (<see cref="GiveWay"/>).</summary>
+    private async Task<SendOutcome> OwnCallAsync(Func<CancellationToken, Task<SendOutcome>> request, CancellationToken stop)
+    {
+        var attention = _commands.Attention;
+        if (attention.IsCancellationRequested) throw new GiveWay();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, attention);
+        try
+        {
+            return await request(linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!stop.IsCancellationRequested && attention.IsCancellationRequested)
+        {
+            throw new GiveWay();
+        }
+    }
+
+    /// <summary>When a request the App waits on must be answered: <see cref="AppWait"/> after it was queued, however long
+    /// those before it took, so the pipe has the answer inside its own limit.</summary>
+    private CancellationTokenSource AnswerBy(SharingCommand command)
+    {
+        var waited = command.QueuedAt is { } queued ? _clock.GetUtcNow() - queued : TimeSpan.Zero;
+        if (waited < AppWait) return new CancellationTokenSource(waited > TimeSpan.Zero ? AppWait - waited : AppWait, _clock);
+        var spent = new CancellationTokenSource();
+        spent.Cancel();
+        return spent;
     }
 
     private string Today(DateTimeOffset now) => LocalDays.Text(LocalDays.Of(now, Zone));
@@ -718,6 +801,10 @@ internal sealed class SharingWorker : BackgroundService
 
     private static bool TryParse(string day, out DateOnly date) =>
         DateOnly.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+
+    /// <summary>Thrown out of the worker's own work, where nothing is half-done, once a request the App waits on is queued:
+    /// the work stops, the App is answered, and the work starts again.</summary>
+    private sealed class GiveWay() : Exception("A request the App waits on comes first.");
 
     /// <summary>What a run did, for the App's Send now.</summary>
     private sealed class RunResult

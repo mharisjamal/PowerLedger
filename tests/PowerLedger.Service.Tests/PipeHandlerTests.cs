@@ -11,7 +11,7 @@ public sealed class PipeHandlerTests : IDisposable
     private static readonly DateTimeOffset Now = Samples.T0;
     private readonly TestDatabase _database = new();
     private readonly LoopCommands _commands = new();
-    private readonly SharingCommands _sharing = new();
+    private readonly SharingCommands _sharing;
     private readonly StatusBoard _board = new();
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly ServiceSignals _signals;
@@ -20,6 +20,7 @@ public sealed class PipeHandlerTests : IDisposable
 
     public PipeHandlerTests()
     {
+        _sharing = new SharingCommands(_clock);
         _signals = new ServiceSignals(_clock);
         _monitors = new MonitorBoard(MonitorBoardTests.Catalogue, _clock);
         _handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock, _sharing);
@@ -96,14 +97,43 @@ public sealed class PipeHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_worker_that_never_answers_gets_the_client_an_error_not_a_hang()
+    public async Task A_worker_that_never_answers_gets_the_client_an_error_not_a_hang_and_the_request_is_never_carried_out()
     {
-        var reply = Send(new SendNowRequest(43));
-        (await _sharing.Reader.ReadAsync()).ShouldBeOfType<SendNowCommand>();
+        var reply = Send(new SetConsentRequest(43, new Consent(ConsentText.Version, true, true, true, true)));
+        var queued = (await _sharing.Reader.ReadAsync()).ShouldBeOfType<SetConsentCommand>();
+        queued.QueuedAt.ShouldBe(Now);
 
         _clock.Advance(PipeHandler.LoopTimeout);
 
         (await reply).ShouldBe(new ErrorReply(43, PipeHandler.NoAnswer));
+        queued.TryTake().ShouldBeFalse();                                 // a worker that gets to it later leaves it undone
+    }
+
+    [Fact]
+    public async Task A_request_the_worker_took_just_before_the_time_limit_is_answered_with_what_it_did()
+    {
+        var reply = Send(new DeleteMyDataRequest(50));
+        var queued = (await _sharing.Reader.ReadAsync()).ShouldBeOfType<DeleteMyDataCommand>();
+        queued.TryTake().ShouldBeTrue();
+
+        _clock.Advance(PipeHandler.LoopTimeout);
+
+        reply.IsCompleted.ShouldBeFalse();                                // "didn't answer" would be wrong: it is being done
+        queued.Answer(true, "Your data has been deleted from the server.");
+        (await reply).ShouldBe(new SharingReply(50, true, "Your data has been deleted from the server."));
+    }
+
+    [Fact]
+    public async Task A_request_nobody_waits_for_any_more_is_never_carried_out()
+    {
+        using var stopping = new CancellationTokenSource();
+        var reply = _handler.HandleAsync(new SendNowRequest(51), "client-1", stopping.Token);
+        var queued = await _sharing.Reader.ReadAsync();
+
+        await stopping.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => reply);
+        queued.TryTake().ShouldBeFalse();
     }
 
     [Fact]
