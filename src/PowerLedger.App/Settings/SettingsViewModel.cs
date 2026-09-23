@@ -47,7 +47,8 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
 
     public SettingsViewModel(
         IServiceLink link, IMachineHistory history, IUiSettings ui, UiThreads threads, TimeProvider clock, TimeZoneInfo zone,
-        CultureInfo culture, string regionCurrency, Updater? updates = null)
+        CultureInfo culture, string regionCurrency, Updater? updates = null, Action? openSent = null, Action<Uri>? openBrowser = null,
+        Action<string>? copyToClipboard = null)
     {
         _link = link;
         _history = history;
@@ -59,6 +60,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         _co2 = ui.Current.Co2KgPerKwh.ToString("0.00", culture);
         Tariff = new TariffForm(link, threads, clock, zone, culture, regionCurrency);
         Service = new ServiceForm(link, threads, culture, savesItself: true);
+        Privacy = new PrivacyViewModel(link, threads, zone, culture, openSent ?? (() => { }), openBrowser ?? (_ => { }), copyToClipboard ?? (_ => { }));
         Tariff.Saved += ReadTariffs;
         Service.Saved += OnSaved;
         SaveCo2 = new RelayCommand(ApplyCo2);
@@ -79,6 +81,8 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public IReadOnlyList<string> TariffHistory { get => _tariffHistory; private set => SetProperty(ref _tariffHistory, value); }
 
     public ServiceForm Service { get; }
+
+    public PrivacyViewModel Privacy { get; }
 
     /// <summary>What the service detected, in one line.</summary>
     public string Detected { get => _detected; private set => SetProperty(ref _detected, value); }
@@ -265,6 +269,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
 
     private void ShowStatus(ServiceStatus? status)
     {
+        Privacy.Apply(status?.Sharing);
         if (status is null)
         {
             ServiceState = "The service isn't running.";

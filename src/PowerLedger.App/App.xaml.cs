@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using PowerLedger.Contracts;
 using PowerLedger.Storage;
@@ -77,7 +78,9 @@ public partial class App : Application
                 ShowWindow),
             OpenPage);
         _updates.PropertyChanged += OnUpdatesChanged;
-        _settings = new SettingsViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates);
+        _settings = new SettingsViewModel(
+            _link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates,
+            openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
@@ -240,6 +243,19 @@ public partial class App : Application
         catch (ArgumentException)
         {
             return "USD";
+        }
+    }
+
+    /// <summary>"Copy" on the install id; with no clipboard to take it, nothing happens.</summary>
+    private static void CopyToClipboard(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+        }
+        catch (ExternalException)
+        {
+            // Nothing to copy to here.
         }
     }
 

@@ -1,0 +1,181 @@
+using System.Globalization;
+using System.Windows.Input;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using PowerLedger.Contracts;
+
+namespace PowerLedger.App;
+
+/// <summary>
+/// Settings → Privacy (data-sharing design §2): the same four switches as the consent dialog, each sent to the service
+/// the moment it changes, with the install id and a status line that follows how sharing is going. It reads with the rest
+/// of Settings and follows its ten-second status refresh, without a refresh undoing a tick still on its way to the
+/// service. "Delete my data" asks first.
+/// </summary>
+internal sealed class PrivacyViewModel : ObservableObject
+{
+    private readonly IServiceLink _link;
+    private readonly UiThreads _threads;
+    private readonly TimeZoneInfo _zone;
+    private readonly CultureInfo _culture;
+    private readonly Action _openSent;
+    private readonly Action<Uri> _openBrowser;
+    private readonly Action<string> _copyToClipboard;
+    private int _inFlight;
+    private bool _diagnostics;
+    private bool _usage;
+    private bool _power;
+    private bool _share;
+    private string _installId = "None yet";
+    private string _status = "You haven't chosen yet.";
+    private string? _message;
+    private bool _confirmingDelete;
+
+    public PrivacyViewModel(
+        IServiceLink link, UiThreads threads, TimeZoneInfo zone, CultureInfo culture, Action openSent, Action<Uri> openBrowser,
+        Action<string> copyToClipboard)
+    {
+        _link = link;
+        _threads = threads;
+        _zone = zone;
+        _culture = culture;
+        _openSent = openSent;
+        _openBrowser = openBrowser;
+        _copyToClipboard = copyToClipboard;
+        OpenSent = new RelayCommand(() => _openSent());
+        OpenPrivacyPolicy = new RelayCommand(() => _openBrowser(ConsentViewModel.PrivacyPolicyUri));
+        CopyInstallId = new RelayCommand(() => _copyToClipboard(InstallId));
+        DeleteMyData = new RelayCommand(() => ConfirmingDelete = true);
+        CancelDelete = new RelayCommand(() => ConfirmingDelete = false);
+        ConfirmDelete = new RelayCommand(() => _ = ConfirmDeleteAsync());
+    }
+
+    public bool Diagnostics
+    {
+        get => _diagnostics;
+        set { if (value != _diagnostics) Change(value, _usage, _power, _share); }
+    }
+
+    public bool Usage
+    {
+        get => _usage;
+        set { if (value != _usage) Change(_diagnostics, value, _power, _share); }
+    }
+
+    /// <summary>Turning this off also turns <see cref="Share"/> off, in the same request (data-sharing design §1).</summary>
+    public bool Power
+    {
+        get => _power;
+        set { if (value != _power) Change(_diagnostics, _usage, value, value && _share); }
+    }
+
+    public bool Share
+    {
+        get => _share;
+        set { if (value != _share) Change(_diagnostics, _usage, _power, value); }
+    }
+
+    /// <summary>The random id uploads go under, for questions to the owner, or "None yet" before one exists.</summary>
+    public string InstallId { get => _installId; private set => SetProperty(ref _installId, value); }
+
+    /// <summary>How sharing stands, following <see cref="StatusLine"/>.</summary>
+    public string Status { get => _status; private set => SetProperty(ref _status, value); }
+
+    /// <summary>Why the last tick wasn't taken, or null.</summary>
+    public string? Message { get => _message; private set => SetProperty(ref _message, value); }
+
+    /// <summary>"Delete my data" was pressed once; it waits for Delete or Cancel.</summary>
+    public bool ConfirmingDelete { get => _confirmingDelete; private set => SetProperty(ref _confirmingDelete, value); }
+
+    public ICommand OpenSent { get; }
+
+    public ICommand OpenPrivacyPolicy { get; }
+
+    public ICommand CopyInstallId { get; }
+
+    public ICommand DeleteMyData { get; }
+
+    public ICommand CancelDelete { get; }
+
+    public ICommand ConfirmDelete { get; }
+
+    /// <summary>The ten-second status refresh: the switches, the id and the status line, unless a tick is still on its way
+    /// to the service. Call on the UI thread.</summary>
+    public void Apply(SharingStatus? sharing)
+    {
+        InstallId = sharing?.InstallId ?? "None yet";
+        Status = sharing is null ? "The service isn't running." : StatusLine(sharing, _zone, _culture);
+        if (_inFlight > 0 || sharing is null) return;
+        _diagnostics = sharing.Consent.Diagnostics;
+        _usage = sharing.Consent.Usage;
+        _power = sharing.Consent.Power;
+        _share = sharing.Consent.Share;
+        Refreshed();
+    }
+
+    /// <summary>Sets the switches at once, optimistically, and sends the whole consent; a refusal puts them back. Call on
+    /// the UI thread.</summary>
+    private void Change(bool diagnostics, bool usage, bool power, bool share)
+    {
+        var previous = new Consent(ConsentText.Version, _diagnostics, _usage, _power, _share);
+        _diagnostics = diagnostics;
+        _usage = usage;
+        _power = power;
+        _share = share;
+        Refreshed();
+        _ = ApplyAsync(new Consent(ConsentText.Version, diagnostics, usage, power, share), previous);
+    }
+
+    private async Task ApplyAsync(Consent next, Consent previous)
+    {
+        _inFlight++;
+        var result = await _link.SetConsentAsync(next).ConfigureAwait(false);
+        _threads.Post(() =>
+        {
+            _inFlight--;
+            if (!result.Ok)
+            {
+                _diagnostics = previous.Diagnostics;
+                _usage = previous.Usage;
+                _power = previous.Power;
+                _share = previous.Share;
+            }
+            Message = result.Ok ? null : result.Message;
+            Refreshed();
+        });
+    }
+
+    /// <summary>The second press of delete: sends it, and forgets nothing on a refusal. Call on the UI thread.</summary>
+    private async Task ConfirmDeleteAsync()
+    {
+        var result = await _link.DeleteMyDataAsync().ConfigureAwait(false);
+        _threads.Post(() =>
+        {
+            ConfirmingDelete = false;
+            Message = result.Message;
+        });
+    }
+
+    private void Refreshed()
+    {
+        OnPropertyChanged(nameof(Diagnostics));
+        OnPropertyChanged(nameof(Usage));
+        OnPropertyChanged(nameof(Power));
+        OnPropertyChanged(nameof(Share));
+    }
+
+    /// <summary>The Privacy section's status line (data-sharing design §2): unanswered, off, waiting for the first upload,
+    /// the last upload's time and size, or the last problem, with how many complete days still wait.</summary>
+    internal static string StatusLine(SharingStatus sharing, TimeZoneInfo zone, CultureInfo culture)
+    {
+        var consent = sharing.Consent;
+        var basis = !consent.Answered ? "You haven't chosen yet."
+            : !consent.AllowsAny ? "Nothing is sent."
+            : sharing.Problem is { } problem ? sharing.Rejected ? $"Rejected by the server: {problem}" : $"Couldn't send: {problem}. Will try again."
+            : sharing.LastSentAt is { } at ? $"Last sent {TimeZoneInfo.ConvertTime(at, zone).ToString("d MMM yyyy", culture)} · {Kb(sharing.LastSentBytes ?? 0, culture)}"
+            : "Nothing sent yet.";
+        return sharing.DaysWaiting > 0 ? $"{basis} · {sharing.DaysWaiting.ToString(culture)} days waiting" : basis;
+    }
+
+    private static string Kb(long bytes, CultureInfo culture) => $"{Math.Ceiling(bytes / 1024.0).ToString("N0", culture)} KB";
+}

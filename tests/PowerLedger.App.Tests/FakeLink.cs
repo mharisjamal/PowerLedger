@@ -87,6 +87,9 @@ internal sealed class FakeLink : IServiceLink
     /// <summary>What every sharing request comes back as.</summary>
     public SharingOutcome SharingAnswer { get; set; } = new(true, "Done.");
 
+    /// <summary>When set, a sharing request completes only once the test resolves this, to test what happens meanwhile.</summary>
+    public TaskCompletionSource<SharingOutcome>? SharingGate { get; set; }
+
     public Task<SharingOutcome> SetConsentAsync(Consent consent, CancellationToken cancel = default) => Sharing(consent);
 
     public Task<SharingOutcome> PreviewUploadAsync(CancellationToken cancel = default) => Sharing("preview");
@@ -99,7 +102,7 @@ internal sealed class FakeLink : IServiceLink
     {
         if (!IsConnected) return Task.FromResult(SharingOutcome.NotConnected);
         SharingRequests.Add(request);
-        return Task.FromResult(SharingAnswer);
+        return SharingGate?.Task ?? Task.FromResult(SharingAnswer);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
