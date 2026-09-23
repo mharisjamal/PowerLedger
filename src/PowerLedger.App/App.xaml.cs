@@ -259,6 +259,7 @@ public partial class App : Application
         _exiting = true;
         try
         {
+            _consentGate?.Dispose();   // data-sharing design §2: a run still awaiting the service's answer must not open a dialog now
             if (_usage is not null)
             {
                 await _usage.FlushOnExitAsync();   // data-sharing design §3: send what's held while the pipe still is
