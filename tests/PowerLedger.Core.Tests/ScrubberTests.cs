@@ -19,6 +19,48 @@ public class ScrubberTests
     [InlineData("Could not load file:///C:/Users/alice/x.dll", "Could not load file:///<path>")]
     public void AFilePathIsTakenOutWhole(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
 
+    [Theory]
+    [InlineData(@"Could not open 'D:\Backups\Storage\2025\Alice Smith tax return.pdf'.", "Could not open '<path>'.")]
+    [InlineData(@"Could not open 'C:\Users\alice\Work\R&D\Bob Jones review.docx'.", "Could not open '<path>'.")]
+    [InlineData(@"Failed at D:\Display\SW\USB\file.txt now", "Failed at <path>")]
+    public void AFolderNamedLikeADeviceDoesntCutAPathShort(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
+
+    [Theory]
+    [InlineData(@"Could not open '\\?\C:\Users\alice\OneDrive - Contoso Ltd\Clients\Acme Corp\secret.pdf'.", "Could not open '<path>'.")]
+    [InlineData(@"Could not open \\?\UNC\server\share\Alice\x.docx", "Could not open <path>")]
+    [InlineData(@"Could not open \\?\Volume{12345678-1234-1234-1234-123456789abc}\Alice\x.docx", "Could not open <path>")]
+    public void ALongPathIsTakenOutWhole(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
+
+    [Theory]
+    [InlineData(@"Could not find file 'C:\Users\o'brien\Documents\x.pdf'.", "Could not find file '<path>'.")]
+    [InlineData(@"Access to the path 'D:\Clients\Bob O'Neil\medical.pdf' is denied.", "Access to the path '<path>' is denied.")]
+    [InlineData(@"Could not find '\\fileserver\share\O'Hara\notes.docx'.", "Could not find '<path>'.")]
+    public void AQuotedPathRunsToItsClosingQuoteThroughAnyApostropheInIt(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
+
+    [Theory]
+    [InlineData("Could not find //fileserver/share/Alice/notes.docx", "Could not find <path>")]
+    [InlineData("Could not load file://server/share/Alice/x.pdf", "Could not load file://<path>")]
+    public void AShareWrittenWithForwardSlashesIsTakenOut(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
+
+    [Fact]
+    public void AUsersSecurityIdIsTakenOutAndAWellKnownOneKept() =>
+        Scrub(@"HKEY_USERS\S-1-5-21-3623811015-3361044348-30300820-1013\Software as S-1-5-18")
+            .ShouldBe(@"HKEY_USERS\<sid>\Software as S-1-5-18");
+
+    [Theory]
+    [InlineData("a#{")]
+    [InlineData(@"a\")]
+    [InlineData(@"'C:\")]
+    [InlineData(@"\\?\")]
+    [InlineData("a@b.")]
+    public void LongRepetitiveTextIsScrubbedQuickly(string unit)
+    {
+        var text = string.Concat(Enumerable.Repeat(unit, 12_000 / unit.Length));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Scrub(text);
+        clock.ElapsedMilliseconds.ShouldBeLessThan(200);
+    }
+
     [Fact]
     public void AStackFrameKeepsOnlyItsSourceFilesName() =>
         Scrub(@"   at PowerLedger.App.Now.NowViewModel.Refresh() in D:\PowerLedger\src\PowerLedger.App\Now\NowViewModel.cs:line 42")
