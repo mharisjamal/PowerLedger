@@ -87,19 +87,19 @@ upload. The App passes it what only the App knows over the pipe, as it does moni
 
 - **Three new columns on `samples_raw`**, `total_source`, `gpu_scope` and `measured_mask`, written with each reading so
   a minute can say what was measured. Rows from before hold 0 (model, nothing measured, board).
-- **Outbox.** Every hour, while `power` is on, the minutes completed since the last run (never before the consent moment)
-  are built from `samples_raw` into a table `outbox_minutes`; raw readings may be kept as little as 24 hours, so an hourly
-  build never finds them gone. Crashes and sensor failures while `diagnostics` is on, and the App's usage counts while
+- **Outbox.** Every five minutes, while `power` is on, the minutes completed since the last run (never before the
+  consent moment) are built from `samples_raw` into a table `outbox_minutes`; raw readings may be kept as little as 24
+  hours, so a build never finds them gone. Crashes and sensor failures while `diagnostics` is on, and the App's usage counts while
   `usage` is on, go into `outbox_events` by local day.
 - **Sending.** Once a day at a random minute between 00:10 and 05:59 local, chosen once per install, or at the first
-  hourly tick after it while the PC is on, each complete local day in the outbox is sent oldest first, at most 7 a run, as
+  five-minute tick after it while the PC is on, each complete local day in the outbox is sent oldest first, at most 7 a run, as
   one `POST /v1/report` per day: gzip JSON, at most 1 MB, `Authorization: Bearer <install key>`, user agent
   `PowerLedger/<version>`.
   - **200:** that day leaves the outbox, and a copy is kept in `%ProgramData%\PowerLedger\Sent\<day>.json.gz`, newest 30.
   - **400 or 413:** the day is dropped and the status line says the server rejected it, so a bad day can't block the rest.
   - **410:** the server has deleted this install. Every switch goes off, the outbox is emptied, the ID and key are
     forgotten.
-  - **403, 429, 5xx or no network:** kept, and tried again at the next hourly tick after 1, 2, 4, 8, 16 then 24 hours.
+  - **403, 429, 5xx or no network:** kept, and tried again after 1, 2, 4, 8, 16 then 24 hours.
     A day more than 14 days old is dropped unsent.
 - **Identity.** On the first switch turned on, the service makes an install ID (random GUID) and an install key (32
   random bytes, base64url), stored in its database. The key never crosses the pipe and is sent only to the server.
