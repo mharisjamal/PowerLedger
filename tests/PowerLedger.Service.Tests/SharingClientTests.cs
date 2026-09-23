@@ -62,6 +62,29 @@ public class SharingClientTests
     }
 
     [Fact]
+    public async Task An_error_answer_whose_body_stalls_is_read_no_longer_than_the_timeout()
+    {
+        // The timeout stops at the headers, so the body of an error answer is read under a limit of its own.
+        using var client = new SharingClient(
+            Endpoint, new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StreamContent(new StallingStream()) }),
+            timeout: TimeSpan.FromMilliseconds(100));
+
+        var sent = await client.SendReportAsync(SharingClient.Gzip("{}"u8.ToArray()), Key).WaitAsync(TimeSpan.FromSeconds(5));
+
+        sent.ShouldBeOfType<SendOutcome.Rejected>().Reason.ShouldBe("the server answered 400 Bad Request");
+    }
+
+    [Fact]
+    public async Task Stopping_the_service_while_an_error_answer_is_read_cancels_the_request()
+    {
+        using var client = new SharingClient(
+            Endpoint, new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StreamContent(new StallingStream()) }));
+        using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        await Should.ThrowAsync<OperationCanceledException>(() => client.SendReportAsync(SharingClient.Gzip("{}"u8.ToArray()), Key, stop.Token));
+    }
+
+    [Fact]
     public async Task Stopping_the_service_cancels_a_request_rather_than_calling_it_unreachable()
     {
         using var client = new SharingClient(Endpoint, new FakeHandler(async (_, cancel) =>
@@ -148,6 +171,45 @@ public class SharingClientTests
         using var unpacked = new MemoryStream();
         using (var gzip = new GZipStream(new MemoryStream(body), CompressionMode.Decompress)) gzip.CopyTo(unpacked);
         return unpacked.ToArray();
+    }
+
+    /// <summary>A body that never sends a byte, as a server that stalls after its headers.</summary>
+    private sealed class StallingStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     /// <summary>Answers each request as told, keeping what it was sent.</summary>

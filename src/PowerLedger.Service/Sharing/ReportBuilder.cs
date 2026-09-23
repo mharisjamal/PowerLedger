@@ -15,7 +15,14 @@ internal static partial class ReportBuilder
 {
     public const int SchemaVersion = 1;
     private const int MaxName = 200, MaxError = 2000, MaxSources = 32, MaxCrashes = 20, MaxMonitors = 16, MaxCount = 1_000_000;
-    private static readonly string[] GraphicsSources = ["nvidia-gpu", "amd-gpu", "arc-gpu"];
+
+    /// <summary>Each graphics source, with the maker of the cards it reads.</summary>
+    private static readonly Dictionary<string, string> GraphicsSources = new(StringComparer.Ordinal)
+    {
+        ["nvidia-gpu"] = "nvidia",
+        ["amd-gpu"] = "amd",
+        ["arc-gpu"] = "intel",
+    };
 
     /// <summary>The report: the diagnostics while that switch is on; the usage while it is on and the App sent counts for
     /// the day; the power while it is on and there are minutes or the parts go.</summary>
@@ -45,25 +52,29 @@ internal static partial class ReportBuilder
         return new DiagnosticsDto(sources, crashes);
     }
 
-    /// <summary>A source's state as the About page words it: not on this machine, failing, a note, or working.</summary>
+    /// <summary>A source's state as the About page words it: not on this machine, failing, a note, or working. It is failing,
+    /// with a last error, only from the failures counted into the day, which start when Crash and sensor reports was turned
+    /// on: the status's own count and error run from when the sensors were built, which can be before. Only a source the
+    /// machine has names the device it reads, and a graphics source only a card of its own maker.</summary>
     private static SourceDto Source(SourceStatus source, ReportInputs inputs)
     {
+        var day = inputs.Events.Sources.GetValueOrDefault(source.Name);
+        var failures = Math.Clamp(day?.Failures ?? 0, 0, MaxCount);
         var (state, detail) =
             !source.Supported ? ("notOnMachine", source.Unavailable)
-            : source.Failures > 0 ? ("failing", source.LastError)
+            : failures > 0 ? ("failing", null)
             : !string.IsNullOrEmpty(source.Unavailable) ? ("note", source.Unavailable)
             : ("working", null);
-        var day = inputs.Events.Sources.GetValueOrDefault(source.Name);
-        var device = source.Name switch
+        var device = !source.Supported ? null : source.Name switch
         {
-            _ when GraphicsSources.Contains(source.Name) => inputs.Facts?.GpuName,
+            _ when GraphicsSources.TryGetValue(source.Name, out var maker) =>
+                inputs.Facts?.GpuName is { } gpu && Vendor(gpu) == maker ? gpu : null,
             "ups" => DeviceName(inputs.Status, PowerDeviceKind.Ups),
             "power-supply" => DeviceName(inputs.Status, PowerDeviceKind.PowerSupply),
             _ => null,
         };
         return new SourceDto(
-            source.Name, state, Math.Clamp(day?.Failures ?? 0, 0, MaxCount),
-            Text(day?.LastError ?? detail, MaxError, inputs.Names), Text(device, MaxName, inputs.Names));
+            source.Name, state, failures, Text(day?.LastError ?? detail, MaxError, inputs.Names), Text(device, MaxName, inputs.Names));
     }
 
     private static CrashDto Crash(CrashReport crash, ScrubNames names) => new(
@@ -130,15 +141,20 @@ internal static partial class ReportBuilder
             });
     }
 
-    /// <summary>The minutes as columns: watts and seconds to a tenth, loads and brightness to a thousandth.</summary>
     /// <summary>The highest price per kWh the pipe accepts and the schema takes, with room for currencies of small units.</summary>
     private const decimal MaxPricePerKwh = 1_000_000m;
 
+    /// <summary>The minutes as columns: watts and seconds to a tenth, loads and brightness to a thousandth.</summary>
     private static MinutesDto Minutes(IReadOnlyList<MinuteRow> all)
     {
         // A minute the server would refuse would take the whole day with it, so one with a figure past its ranges (a
-        // monitor's typed figure absurdly high, say) is left out instead.
-        var minutes = all.Where(WithinServerRanges).ToList();
+        // monitor's typed figure absurdly high, say) is left out instead, and so is one whose index doesn't come after the
+        // last kept, as the server wants them rising: after the time zone changes, a day's minutes can repeat or fall back.
+        var minutes = new List<MinuteRow>(all.Count);
+        foreach (var minute in all.Where(WithinServerRanges))
+        {
+            if (minutes.Count == 0 || minute.Minute > minutes[^1].Minute) minutes.Add(minute);
+        }
         double[] Tenths(Func<MinuteRow, double> column) => [.. minutes.Select(minute => Round(column(minute), 1))];
         double[] Thousandths(Func<MinuteRow, double> column) => [.. minutes.Select(minute => Round(column(minute), 3))];
         double?[] Optional(Func<MinuteRow, double?> column) =>

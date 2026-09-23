@@ -1,6 +1,7 @@
 using System.Buffers.Text;
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization.Metadata;
 using PowerLedger.Contracts;
 using PowerLedger.Storage;
@@ -25,7 +26,8 @@ internal sealed record Backoff(int Failures, long NextMs);
 
 /// <summary>
 /// Sharing's state in the service's settings table (data-sharing design §4), outside the service settings, so a settings
-/// save can never overwrite it. The install key never leaves the service except to the server.
+/// save can never overwrite it. The install key never leaves the service except to the server, and is kept encrypted with
+/// DPAPI for the account the service runs as: every local user can read the database, but only LocalSystem can read the key.
 /// </summary>
 /// <param name="pickMinute">Chooses the send minute, once; by default at random from 10 to 359, 00:10 to 05:59.</param>
 internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickMinute = null)
@@ -40,6 +42,7 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     internal const string BackoffKey = "sharing.backoff";
     internal const string HardwareHashKey = "sharing.hardware-hash";
     internal const string ConsentPendingKey = "sharing.consent-pending";
+    internal const string ConsentBackoffKey = "sharing.consent-backoff";
     internal const string LastRunKey = "sharing.last-run";
     internal const string SentThroughKey = "sharing.sent-through";
 
@@ -48,7 +51,13 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
 
     /// <summary>What forgetting removes: everything the server knew this PC by and all progress. The send minute stays.</summary>
     private static readonly string[] Forgotten =
-        [IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, LastRunKey, SentThroughKey];
+    [
+        IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, ConsentBackoffKey, LastRunKey,
+        SentThroughKey,
+    ];
+
+    /// <summary>Mixed into the key's encryption, so no other program running as the same account reads it back by chance.</summary>
+    private static readonly byte[] KeyEntropy = "PowerLedger data sharing install key"u8.ToArray();
 
     private readonly Func<int> _pickMinute = pickMinute ?? (() => RandomNumberGenerator.GetInt32(FirstSendMinute, LastSendMinute + 1));
 
@@ -61,7 +70,9 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
 
     public string? InstallId => settings.Get(IdKey);
 
-    public string? Key => settings.Get(KeyKey);
+    /// <summary>The install key, or null when there is none or the one kept can't be decrypted by this account, as when the
+    /// database came from another PC; without its key an ID is no use, so the next <see cref="Identity"/> makes both anew.</summary>
+    public string? Key => Unprotect(settings.Get(KeyKey));
 
     /// <summary>The install's ID, a random GUID, and its key, 32 random bytes in base64url: made the first time a switch is
     /// turned on and kept until forgotten.</summary>
@@ -71,7 +82,7 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
         id = Guid.NewGuid().ToString("D");
         key = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
         settings.Set(IdKey, id);
-        settings.Set(KeyKey, key);
+        settings.Set(KeyKey, Protect(key));
         return (id, key);
     }
 
@@ -110,10 +121,19 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
         set => Write(ProblemKey, value, SharingJson.Default.SendProblem);
     }
 
+    /// <summary>The uploads' back-off.</summary>
     public Backoff? Backoff
     {
         get => Read(BackoffKey, SharingJson.Default.Backoff);
         set => Write(BackoffKey, value, SharingJson.Default.Backoff);
+    }
+
+    /// <summary>The back-off of a consent change the server hasn't heard, apart from the uploads', so neither pushes the
+    /// other's next try back.</summary>
+    public Backoff? ConsentBackoff
+    {
+        get => Read(ConsentBackoffKey, SharingJson.Default.Backoff);
+        set => Write(ConsentBackoffKey, value, SharingJson.Default.Backoff);
     }
 
     /// <summary>The hardware section last sent, as <see cref="ReportJson.Hash"/> gives it.</summary>
@@ -150,6 +170,22 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     {
         foreach (var key in Forgotten) settings.Remove(key);
         SaveConsent(new StoredConsent(new Consent(ConsentText.Version, false, false, false, false), nowMs));
+    }
+
+    private static string Protect(string key) =>
+        Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(key), KeyEntropy, DataProtectionScope.CurrentUser));
+
+    private static string? Unprotect(string? kept)
+    {
+        if (string.IsNullOrEmpty(kept)) return null;
+        try
+        {
+            return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(kept), KeyEntropy, DataProtectionScope.CurrentUser));
+        }
+        catch (Exception error) when (error is CryptographicException or FormatException)
+        {
+            return null;
+        }
     }
 
     private T? Read<T>(string key, JsonTypeInfo<T> type) where T : class => SharingJson.Read(settings.Get(key), type);

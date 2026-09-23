@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using PowerLedger.Contracts;
 using PowerLedger.Service.Sharing;
@@ -21,7 +23,7 @@ public sealed class SharingStoreTests : IDisposable
         store.Consent.ShouldBe(Consent.Unanswered);
         store.StoredConsent.ShouldBeNull();
         (store.InstallId, store.Key, store.CollectedTo, store.LastSent, store.Problem, store.Backoff).ShouldBe((null, null, null, null, null, null));
-        (store.HardwareHash, store.ConsentPending, store.LastRun, store.SentThrough).ShouldBe((null, false, null, null));
+        (store.HardwareHash, store.ConsentPending, store.ConsentBackoff, store.LastRun, store.SentThrough).ShouldBe((null, false, null, null, null));
     }
 
     [Fact]
@@ -36,6 +38,7 @@ public sealed class SharingStoreTests : IDisposable
         store.Backoff = new Backoff(3, 4_000);
         store.HardwareHash = "abc123";
         store.ConsentPending = true;
+        store.ConsentBackoff = new Backoff(2, 6_000);
         store.LastRun = 5_000;
         store.SentThrough = "2026-09-23";
 
@@ -46,12 +49,14 @@ public sealed class SharingStoreTests : IDisposable
         again.LastSent.ShouldBe(new LastSent(3_000, 41_234));
         again.Problem.ShouldBe(new SendProblem("The server said no.", true));
         again.Backoff.ShouldBe(new Backoff(3, 4_000));
+        again.ConsentBackoff.ShouldBe(new Backoff(2, 6_000));
         (again.HardwareHash, again.ConsentPending, again.LastRun, again.SentThrough).ShouldBe(("abc123", true, 5_000L, "2026-09-23"));
 
         again.Problem = null;
         again.Backoff = null;
         again.ConsentPending = false;
-        (Store().Problem, Store().Backoff, Store().ConsentPending).ShouldBe((null, null, false));
+        again.ConsentBackoff = null;
+        (Store().Problem, Store().Backoff, Store().ConsentPending, Store().ConsentBackoff).ShouldBe((null, null, false, null));
     }
 
     [Fact]
@@ -95,6 +100,34 @@ public sealed class SharingStoreTests : IDisposable
     }
 
     [Fact]
+    public void The_key_is_kept_encrypted_for_the_account_running_the_service_and_one_that_cannot_be_read_counts_as_none()
+    {
+        var settings = new SettingsRepository(_database.Db);
+        var (id, key) = Store().Identity();
+
+        var kept = settings.Get(SharingStore.KeyKey).ShouldNotBeNull();
+        kept.ShouldNotContain(key);
+        Store().Key.ShouldBe(key);
+
+        // Kept in the clear, damaged, or encrypted by another program as the same account: none, so the next consent
+        // makes a new ID and key.
+        foreach (var unreadable in new[]
+        {
+            key,
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(200)),
+            Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(key), null, DataProtectionScope.CurrentUser)),
+        })
+        {
+            settings.Set(SharingStore.IdKey, id);
+            settings.Set(SharingStore.KeyKey, unreadable);
+            Store().Key.ShouldBeNull();
+            var (newId, newKey) = Store().Identity();
+            (newId == id, newKey == key).ShouldBe((false, false));
+            (Store().InstallId, Store().Key).ShouldBe((newId, newKey));
+        }
+    }
+
+    [Fact]
     public void Forgetting_drops_the_id_the_key_and_every_state_and_turns_every_switch_off_but_keeps_the_send_minute()
     {
         var store = Store(() => 42);
@@ -107,6 +140,7 @@ public sealed class SharingStoreTests : IDisposable
         store.Backoff = new Backoff(1, 5);
         store.HardwareHash = "h";
         store.ConsentPending = true;
+        store.ConsentBackoff = new Backoff(1, 7);
         store.LastRun = 6;
         store.SentThrough = "2026-09-20";
 
@@ -116,7 +150,7 @@ public sealed class SharingStoreTests : IDisposable
         after.StoredConsent.ShouldBe(new StoredConsent(new Consent(ConsentText.Version, false, false, false, false), 99, null));
         after.Consent.Answered.ShouldBeTrue();
         (after.InstallId, after.Key, after.CollectedTo, after.LastSent, after.Problem, after.Backoff).ShouldBe((null, null, null, null, null, null));
-        (after.HardwareHash, after.ConsentPending, after.LastRun, after.SentThrough).ShouldBe((null, false, null, null));
+        (after.HardwareHash, after.ConsentPending, after.ConsentBackoff, after.LastRun, after.SentThrough).ShouldBe((null, false, null, null, null));
         after.SendMinute.ShouldBe(42);
     }
 

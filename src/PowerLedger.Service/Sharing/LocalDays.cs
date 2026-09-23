@@ -24,8 +24,17 @@ internal static class LocalDays
         return new DateTimeOffset(wall, offset);
     }
 
-    /// <summary>The day's UTC offset in minutes at its start, which with a minute's index gives back the minute's UTC time.</summary>
+    /// <summary>The day's UTC offset in minutes at its start, as the report's header gives it. With it a minute's index gives
+    /// back the minute's UTC time: the date's midnight, less the offset, plus the index (see <see cref="Origin"/>).</summary>
     public static int UtcOffsetMinutes(DateOnly day, TimeZoneInfo zone) => (int)zone.GetUtcOffset(Start(day, zone)).TotalMinutes;
+
+    /// <summary>
+    /// The instant a minute's index counts from: the day's midnight at <see cref="UtcOffsetMinutes"/>. That is the day's
+    /// <see cref="Start"/>, except on a day whose midnight a clock change skips, which starts later at the new offset, so
+    /// its first indexes go unused and each minute still decodes to its own time.
+    /// </summary>
+    public static DateTimeOffset Origin(DateOnly day, TimeZoneInfo zone) =>
+        new(day.ToDateTime(TimeOnly.MinValue), TimeSpan.FromMinutes(UtcOffsetMinutes(day, zone)));
 
     /// <summary><c>yyyy-MM-dd</c>, as the outbox and the server keep a day.</summary>
     public static string Text(DateOnly day) => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);

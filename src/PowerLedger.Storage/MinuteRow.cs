@@ -6,7 +6,8 @@ namespace PowerLedger.Storage;
 /// </summary>
 /// <param name="StartMs">The minute's start, UTC milliseconds.</param>
 /// <param name="Day">The local day the minute starts on, <c>yyyy-MM-dd</c>.</param>
-/// <param name="Minute">Minutes from the local day's start, 0–1499, so a 25-hour day fits.</param>
+/// <param name="Minute">Minutes from the local day's midnight at the offset the day starts with, 0–1499, so a 25-hour day fits;
+/// a day whose midnight a clock change skips starts after 0.</param>
 /// <param name="GpuLoad">Null when no reading in the minute had one; so is <paramref name="Brightness"/>.</param>
 /// <param name="Samples">How many readings went in.</param>
 /// <param name="TotalSource">Where the total came from for most of the minute, as <c>TotalSource</c>'s number.</param>

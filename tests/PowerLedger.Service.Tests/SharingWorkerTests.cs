@@ -45,6 +45,42 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task An_answer_to_an_older_wording_sends_nothing_and_a_new_answer_collects_from_its_own_moment()
+    {
+        // Every switch was turned on under the wording before this one; the ID, progress and a waiting day are from then.
+        var older = new Consent(ConsentText.Version - 1, true, true, true, true);
+        _h.Store.SaveConsent(new StoredConsent(older, Local(20, 10).ToUnixTimeMilliseconds(), Local(20, 10).ToUnixTimeMilliseconds()));
+        _h.Store.Identity();
+        _h.Store.CollectedTo = Local(23, 10).ToUnixTimeMilliseconds();
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-22")]);
+        _h.Outbox.AddEvent("2026-09-23", OutboxEvents.Usage, OutboxEvents.MergeUsage(null, Usage("2026-09-23")));
+        _h.CrashFile(Local(24, 9));
+        _h.Readings(Local(24, 9), TimeSpan.FromMinutes(30));
+
+        _h.Clock.SetUtcNow(Local(24, 9, 40));
+        await _h.TickAsync();
+        _h.Clock.SetUtcNow(Local(25, 1, 1));
+        await _h.TickAsync();
+        (await _h.Run(new SendNowCommand(1))).ShouldBe(new SharingReply(1, false, "Nothing is sent until you choose what to share."));
+        await _h.Run(new ReportUsageCommand(2, Usage("2026-09-25")));
+
+        _h.Client.Calls.ShouldBeEmpty();
+        _h.Outbox.Days().ShouldBeEmpty();
+        Directory.GetFiles(_h.Crashes).ShouldBeEmpty();
+        _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().DaysWaiting.ShouldBe(0);
+
+        _h.Clock.SetUtcNow(Local(25, 9, 15));
+        await _h.Consent(false, false, true);
+        _h.Store.CollectedTo.ShouldBe(Local(25, 9, 15).ToUnixTimeMilliseconds());
+        _h.Readings(Local(25, 9), TimeSpan.FromMinutes(30));                   // 09:00 to 09:30, half before the answer
+        _h.Clock.SetUtcNow(Local(25, 9, 40));
+        await _h.TickAsync();
+
+        _h.Outbox.MinuteDays().ShouldBe(new[] { "2026-09-25" });
+        _h.Outbox.Minutes("2026-09-25").Select(minute => minute.Minute).ShouldBe(Enumerable.Range(555, 15));
+    }
+
+    [Fact]
     public async Task Tonights_minute_sends_yesterday_from_the_moment_the_user_said_yes()
     {
         _h.Readings(Local(24, 9, 30), TimeSpan.FromMinutes(60));            // 09:30 to 10:30, half of it before the consent
@@ -249,6 +285,35 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_consent_change_waiting_to_be_posted_backs_off_on_its_own_so_the_reports_keep_their_steps()
+    {
+        var reports = new List<DateTimeOffset>();
+        var consents = new List<DateTimeOffset>();
+        _h.Client.Answer = call =>
+        {
+            (call.Kind == "report" ? reports : consents).Add(_h.Clock.GetUtcNow());
+            return new SendOutcome.Unreachable("no network");
+        };
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+
+        for (var now = Local(24, 1, 1); now < Local(24, 17); now = now.AddMinutes(5))
+        {
+            _h.Clock.SetUtcNow(now);
+            await _h.TickAsync();
+        }
+
+        reports.ShouldBe(new[] { Local(24, 1, 1), Local(24, 2, 1), Local(24, 4, 1), Local(24, 8, 1), Local(24, 16, 1) });
+        consents.ShouldBe(new[] { Local(24, 0, 30), Local(24, 1, 31), Local(24, 3, 31), Local(24, 7, 31), Local(24, 15, 31) });
+
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(25, 8, 1));
+        await _h.TickAsync();
+        (_h.Store.ConsentPending, _h.Store.ConsentBackoff, _h.Store.Backoff).ShouldBe((false, null, null));
+    }
+
+    [Fact]
     public async Task The_hardware_goes_with_the_first_upload_and_again_only_after_a_change()
     {
         _h.Clock.SetUtcNow(Local(24, 0, 30));
@@ -410,6 +475,25 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task While_the_loop_cant_write_its_readings_nothing_is_collected_so_the_ones_it_holds_are_once_written()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(10));                  // written before the disk filled up
+        _h.Board.Publish(SharingFakes.Status() with { WriteProblem = "Writes are failing (disk full); 600 readings are held in memory." });
+        _h.Clock.SetUtcNow(Local(24, 10, 20));
+        await _h.TickAsync();
+        _h.Outbox.MinuteDays().ShouldBeEmpty();
+
+        _h.Readings(Local(24, 10, 10), TimeSpan.FromMinutes(10));              // the ones held, written once there was room
+        _h.Board.Publish(SharingFakes.Status());
+        _h.Clock.SetUtcNow(Local(24, 10, 25));
+        await _h.TickAsync();
+
+        _h.Outbox.Minutes("2026-09-24").Select(minute => minute.Minute).ShouldBe(Enumerable.Range(600, 20));
+    }
+
+    [Fact]
     public async Task A_day_whose_last_minutes_are_not_collected_yet_waits()
     {
         _h.Clock.SetUtcNow(Local(24, 23, 50));
@@ -469,6 +553,250 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task How_sharing_stands_is_published_before_the_first_runs_requests_go()
+    {
+        // A consent change the server hasn't heard, so the first run starts with a request that takes its time.
+        _h.Clock.SetUtcNow(Local(24, 10));
+        var consent = new Consent(ConsentText.Version, true, false, false, false);
+        _h.Store.SaveConsent(new StoredConsent(consent, Local(24, 9).ToUnixTimeMilliseconds(), Local(24, 9).ToUnixTimeMilliseconds()));
+        _h.Store.Identity();
+        _h.Store.ConsentPending = true;
+        var calling = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource<SendOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _h.Client.AnswerAsync = (_, cancel) =>
+        {
+            calling.TrySetResult();
+            return answer.Task.WaitAsync(cancel);
+        };
+
+        await _h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await calling.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().Consent.ShouldBe(consent);
+        }
+        finally
+        {
+            answer.TrySetResult(new SendOutcome.Accepted());
+            await _h.Worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task A_state_that_cannot_be_published_neither_fails_a_request_nor_stops_the_worker()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        new SettingsRepository(_h.Database.Db).Set(SharingStore.LastSentKey, $"{{\"atMs\":{long.MaxValue},\"bytes\":1}}");
+
+        (await _h.Consent(true, false, false)).Ok.ShouldBeTrue();
+
+        await _h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            foreach (var id in new long[] { 2, 3 })
+            {
+                var preview = new PreviewCommand(id);
+                _h.Commands.TryQueue(preview).ShouldBeTrue();
+                (await preview.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+            }
+            _h.Worker.ExecuteTask.ShouldNotBeNull().IsCompleted.ShouldBeFalse();
+        }
+        finally
+        {
+            await _h.Worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task An_upload_under_way_gives_way_to_a_request_the_app_waits_on_and_goes_on_once_it_is_answered()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        var uploading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _h.Client.AnswerAsync = async (call, cancel) =>
+        {
+            if (call.Kind == "report" && uploading.TrySetResult()) await Task.Delay(Timeout.Infinite, cancel);   // the first takes for ever
+            return new SendOutcome.Accepted();
+        };
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+
+        await _h.Running(async () =>
+        {
+            await uploading.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var preview = new PreviewCommand(2);
+            _h.Commands.TryQueue(preview).ShouldBeTrue();
+
+            (await preview.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+            await WaitFor.True(_h.AllSent);
+        });
+
+        _h.Client.Reports.Select(report => report.Day).ShouldBe(new[] { "2026-09-23", "2026-09-23" });   // gave way, then went
+        (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
+    }
+
+    [Fact]
+    public async Task A_consent_change_being_posted_gives_way_to_the_apps_next_request_and_is_posted_after_it()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        var posting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _h.Client.AnswerAsync = async (call, cancel) =>
+        {
+            if (call.Kind == "consent" && posting.TrySetResult()) await Task.Delay(Timeout.Infinite, cancel);   // the first takes for ever
+            return new SendOutcome.Accepted();
+        };
+
+        await _h.Running(async () =>
+        {
+            var consent = new SetConsentCommand(1, new Consent(ConsentText.Version, true, false, false, false));
+            _h.Commands.TryQueue(consent).ShouldBeTrue();
+            (await consent.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+            await posting.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var preview = new PreviewCommand(2);
+            _h.Commands.TryQueue(preview).ShouldBeTrue();
+
+            (await preview.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+            await WaitFor.True(() => !_h.Store.ConsentPending);
+        });
+
+        _h.Client.Calls.Count(call => call.Kind == "consent").ShouldBe(2);
+        _h.Store.ConsentBackoff.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_switch_turned_off_during_an_upload_is_off_before_the_next_day_is_built()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(true, false, true);
+        foreach (var day in new[] { "2026-09-21", "2026-09-22", "2026-09-23" })
+        {
+            _h.Outbox.InsertMinutes([SharingFakes.Minute(600, day)]);
+            _h.Outbox.MergeEvent(day, OutboxEvents.Sources, json => OutboxEvents.MergeSources(json, new Dictionary<string, SourceDay> { ["battery"] = new(1, "No answer.") }));
+        }
+        var uploading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _h.Client.AnswerAsync = async (call, cancel) =>
+        {
+            if (call.Kind == "report" && uploading.TrySetResult()) await Task.Delay(TimeSpan.FromMilliseconds(300), cancel);
+            return new SendOutcome.Accepted();
+        };
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+
+        await _h.Running(async () =>
+        {
+            await uploading.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var withdraw = new SetConsentCommand(2, new Consent(ConsentText.Version, true, false, false, false));
+            _h.Commands.TryQueue(withdraw).ShouldBeTrue();
+
+            (await withdraw.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+            await WaitFor.True(_h.AllSent);
+        });
+
+        // Only the upload under way when Hardware and power went off carried its minutes.
+        _h.Client.Reports.First().Power.ShouldNotBeNull();
+        _h.Client.Reports.Skip(1).Select(report => (report.Day, report.Consent.Power, report.Power is null)).ShouldBe(new[]
+        {
+            ("2026-09-21", false, true), ("2026-09-22", false, true), ("2026-09-23", false, true),
+        });
+    }
+
+    [Fact]
+    public async Task Send_now_stops_before_the_next_day_when_the_app_turns_a_switch_off()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(false, true, true);
+        foreach (var day in new[] { "2026-09-21", "2026-09-22", "2026-09-23" }) _h.Outbox.InsertMinutes([SharingFakes.Minute(600, day)]);
+        var uploading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource<SendOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _h.Client.AnswerAsync = (call, cancel) =>
+        {
+            if (call.Kind != "report") return Task.FromResult<SendOutcome>(new SendOutcome.Accepted());
+            uploading.TrySetResult();
+            return answer.Task.WaitAsync(cancel);
+        };
+
+        await _h.Running(async () =>
+        {
+            var send = new SendNowCommand(2);
+            _h.Commands.TryQueue(send).ShouldBeTrue();
+            await uploading.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var withdraw = new SetConsentCommand(3, new Consent(ConsentText.Version, false, true, false, false));
+            _h.Commands.TryQueue(withdraw).ShouldBeTrue();
+            answer.SetResult(new SendOutcome.Accepted());                       // the day under way goes
+
+            (await send.Reply.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBe(new SharingReply(2, true, "Sent 1 day."));
+            (await withdraw.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+        });
+
+        _h.Client.Reports.Select(report => report.Day).ShouldBe(new[] { "2026-09-21" });
+        _h.Outbox.MinuteDays().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_request_the_pipe_gave_up_on_is_never_carried_out()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true);
+        var id = _h.Store.InstallId.ShouldNotBeNull();
+        var consent = new SetConsentCommand(2, new Consent(ConsentText.Version, false, false, false, false));
+        var delete = new DeleteMyDataCommand(3);
+
+        foreach (SharingCommand command in new SharingCommand[] { consent, delete })
+        {
+            _h.Commands.TryQueue(command).ShouldBeTrue();
+            command.TryGiveUp(PipeHandler.NoAnswer).ShouldBeTrue();           // as the pipe does at its time limit
+        }
+        await _h.Running(async () =>
+        {
+            var preview = new PreviewCommand(4);                                // queued after, so answered after
+            _h.Commands.TryQueue(preview).ShouldBeTrue();
+            (await preview.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+        });
+
+        (await consent.Reply).ShouldBe(new SharingReply(2, false, PipeHandler.NoAnswer));
+        (await delete.Reply).ShouldBe(new SharingReply(3, false, PipeHandler.NoAnswer));
+        _h.Store.Consent.ShouldBe(new Consent(ConsentText.Version, true, true, true, false));
+        _h.Store.InstallId.ShouldBe(id);
+        _h.Client.Calls.ShouldNotContain(call => call.Kind == "delete");
+    }
+
+    [Fact]
+    public async Task A_request_queued_behind_a_slow_one_has_its_answer_within_the_apps_wait_of_being_queued()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));                                  // before tonight's minute: the worker's own run sends nothing
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        var uploading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _h.Client.AnswerAsync = async (call, cancel) =>
+        {
+            if (call.Kind == "report")
+            {
+                uploading.TrySetResult();
+                await Task.Delay(Timeout.Infinite, cancel);
+            }
+            return new SendOutcome.Accepted();
+        };
+
+        await _h.Running(async () =>
+        {
+            var send = new SendNowCommand(2);
+            _h.Commands.TryQueue(send).ShouldBeTrue();
+            await uploading.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var delete = new DeleteMyDataCommand(3);
+            _h.Commands.TryQueue(delete).ShouldBeTrue();                       // while Send now's upload is under way
+
+            _h.Clock.Advance(SharingWorker.AppWait);                           // the upload takes all the time the App waits
+
+            (await send.Reply.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBe(
+                new SharingReply(2, false, "Couldn't send: the server didn't answer in time. Will try again."));
+            (await delete.Reply.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBe(
+                new SharingReply(3, false, "Couldn't delete your data: the service was busy with another request. Nothing was changed."));
+        });
+
+        _h.Client.Calls.ShouldNotContain(call => call.Kind == "delete");
+        _h.Store.InstallId.ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task Running_it_ticks_at_start_and_answers_commands()
     {
         _h.Clock.SetUtcNow(Local(24, 10));
@@ -505,6 +833,7 @@ public sealed class SharingWorkerTests : IDisposable
 
         public Harness()
         {
+            Commands = new SharingCommands(Clock);
             Clock.SetLocalTimeZone(Zone);
             Board.Publish(SharingFakes.Settings);
             Board.Publish(SharingFakes.Status());
@@ -523,7 +852,7 @@ public sealed class SharingWorkerTests : IDisposable
 
         public StatusBoard Board { get; } = new();
 
-        public SharingCommands Commands { get; } = new();
+        public SharingCommands Commands { get; }
 
         public FakeSharingClient Client { get; } = new();
 
@@ -538,6 +867,23 @@ public sealed class SharingWorkerTests : IDisposable
         public OutboxRepository Outbox => new(Database.Db);
 
         public Task TickAsync() => Worker.TickAsync(CancellationToken.None);
+
+        /// <summary>Starts the worker, which runs at once, lets <paramref name="test"/> talk to it through its inbox, and stops it.</summary>
+        public async Task Running(Func<Task> test)
+        {
+            await Worker.StartAsync(CancellationToken.None);
+            try
+            {
+                await test();
+            }
+            finally
+            {
+                await Worker.StopAsync(CancellationToken.None);
+            }
+        }
+
+        /// <summary>No day before today waits: the run has sent them all.</summary>
+        public bool AllSent() => Outbox.Days().All(day => string.CompareOrdinal(day, LocalDays.Text(LocalDays.Of(Clock.GetUtcNow(), Zone))) >= 0);
 
         public async Task<SharingReply> Run(SharingCommand command)
         {
@@ -563,25 +909,37 @@ public sealed class SharingWorkerTests : IDisposable
 /// <summary>A data server that answers as a test says, keeping every request.</summary>
 internal sealed class FakeSharingClient : ISharingClient
 {
-    public List<SharingCall> Calls { get; } = [];
+    private readonly List<SharingCall> _calls = [];
+
+    /// <summary>A copy of the requests so far, safe to read while the worker runs.</summary>
+    public List<SharingCall> Calls
+    {
+        get
+        {
+            lock (_calls) return [.. _calls];
+        }
+    }
 
     public Func<SharingCall, SendOutcome> Answer { get; set; } = _ => new SendOutcome.Accepted();
+
+    /// <summary>When set, answers in its own time instead of <see cref="Answer"/>, given the request's token.</summary>
+    public Func<SharingCall, CancellationToken, Task<SendOutcome>>? AnswerAsync { get; set; }
 
     public IEnumerable<ReportV1> Reports => Calls.Where(call => call.Report is not null).Select(call => call.Report!);
 
     public Task<SendOutcome> SendReportAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
-        Record(new SharingCall("report", key, null, null, ReportJson.Read(Gunzip(gzipBody)), gzipBody));
+        Record(new SharingCall("report", key, null, null, ReportJson.Read(Gunzip(gzipBody)), gzipBody), cancel);
 
     public Task<SendOutcome> SendConsentAsync(string installId, string key, Consent consent, CancellationToken cancel = default) =>
-        Record(new SharingCall("consent", key, installId, consent, null, []));
+        Record(new SharingCall("consent", key, installId, consent, null, []), cancel);
 
     public Task<SendOutcome> DeleteAsync(string installId, string key, CancellationToken cancel = default) =>
-        Record(new SharingCall("delete", key, installId, null, null, []));
+        Record(new SharingCall("delete", key, installId, null, null, []), cancel);
 
-    private Task<SendOutcome> Record(SharingCall call)
+    private Task<SendOutcome> Record(SharingCall call, CancellationToken cancel)
     {
-        Calls.Add(call);
-        return Task.FromResult(Answer(call));
+        lock (_calls) _calls.Add(call);
+        return AnswerAsync is { } later ? later(call, cancel) : Task.FromResult(Answer(call));
     }
 
     private static byte[] Gunzip(byte[] body)

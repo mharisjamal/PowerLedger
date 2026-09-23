@@ -42,8 +42,9 @@ internal interface ISharingClient
 
 /// <summary>
 /// The data server over HTTPS, through one <see cref="HttpClient"/> for the service's life: user agent
-/// <c>PowerLedger/X.Y.Z</c>, a 60-second timeout, and the install key as a bearer token. The service runs as LocalSystem,
-/// so requests go direct or through the machine's own proxy settings, never a user's.
+/// <c>PowerLedger/X.Y.Z</c>, a 60-second timeout for the answer's headers and again for an error answer's body, and the
+/// install key as a bearer token. The service runs as LocalSystem, so requests go direct or through the machine's own
+/// proxy settings, never a user's.
 /// </summary>
 internal sealed class SharingClient : ISharingClient, IDisposable
 {
@@ -102,7 +103,7 @@ internal sealed class SharingClient : ISharingClient, IDisposable
             var status = (int)response.StatusCode;
             if (status is >= 200 and < 300) return new SendOutcome.Accepted();
             if (response.StatusCode == HttpStatusCode.Gone) return new SendOutcome.Gone();
-            var reason = await ReasonAsync(response, cancel).ConfigureAwait(false);
+            var reason = await ReasonAsync(response, _http.Timeout, cancel).ConfigureAwait(false);
             return response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.RequestEntityTooLarge
                 ? new SendOutcome.Rejected(reason)
                 : new SendOutcome.Refused(reason);
@@ -117,18 +118,28 @@ internal sealed class SharingClient : ISharingClient, IDisposable
         }
     }
 
-    /// <summary>The server's own sentence from its <c>{"error": …}</c> answer, or what the status says when there is none.</summary>
-    private static async Task<string> ReasonAsync(HttpResponseMessage response, CancellationToken cancel)
+    /// <summary>The server's own sentence from its <c>{"error": …}</c> answer, or what the status says when there is none or
+    /// it doesn't come within <paramref name="timeout"/>: the client's timeout stops once the headers are in.</summary>
+    private static async Task<string> ReasonAsync(HttpResponseMessage response, TimeSpan timeout, CancellationToken cancel)
     {
         var fallback = $"the server answered {(int)response.StatusCode} {response.ReasonPhrase}".TrimEnd();
+        using var reading = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        reading.CancelAfter(timeout);
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(cancel).ConfigureAwait(false);
+            await using var stream = await response.Content.ReadAsStreamAsync(reading.Token).ConfigureAwait(false);
             var buffer = new byte[MaxErrorBytes];
             var read = 0;
-            while (read < buffer.Length && await stream.ReadAsync(buffer.AsMemory(read), cancel).ConfigureAwait(false) is > 0 and var count) read += count;
+            while (read < buffer.Length && await stream.ReadAsync(buffer.AsMemory(read), reading.Token).ConfigureAwait(false) is > 0 and var count)
+            {
+                read += count;
+            }
             var text = Encoding.UTF8.GetString(buffer, 0, read);
             return SharingJson.Read(text, SharingJson.Default.ErrorBody)?.Error is { Length: > 0 } error ? Sentence(error) : fallback;
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            return fallback;
         }
         catch (Exception error) when (error is IOException or HttpRequestException)
         {
