@@ -1,6 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
+using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
@@ -780,6 +783,39 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_run_that_gave_way_starts_again_only_once_the_request_it_gave_way_to_is_answered()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        WakeLate(_h.Commands, TimeSpan.FromMilliseconds(20));
+        var uploads = new SemaphoreSlim(0);
+        _h.Client.AnswerAsync = async (call, cancel) =>
+        {
+            if (call.Kind == "report")
+            {
+                uploads.Release();
+                await Task.Delay(Timeout.Infinite, cancel);                     // every upload takes until it gives way
+            }
+            return new SendOutcome.Accepted();
+        };
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+
+        await _h.Running(async () =>
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                (await uploads.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBeTrue();
+                var preview = new PreviewCommand(i);
+                _h.Commands.TryQueue(preview).ShouldBeTrue();
+                (await preview.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+            }
+        });
+
+        _h.RunsStartedWhileTheAppWaited.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task A_consent_change_being_posted_gives_way_to_the_apps_next_request_and_is_posted_after_it()
     {
         _h.Clock.SetUtcNow(Local(24, 10));
@@ -969,6 +1005,16 @@ public sealed class SharingWorkerTests : IDisposable
     private static CrashReport Crash(DateTimeOffset at) =>
         new(at, "app", "0.6.0", ["System.InvalidOperationException"], "Collection was modified.", "   at X()");
 
+    /// <summary>
+    /// Has the inbox say it holds a request only <paramref name="lag"/> after it does, as when the pool thread that says so
+    /// runs late on a busy PC. The inbox's channel is its own, so it is swapped in by reflection.
+    /// </summary>
+    private static void WakeLate(SharingCommands commands, TimeSpan lag)
+    {
+        var channel = typeof(SharingCommands).GetField("_channel", BindingFlags.NonPublic | BindingFlags.Instance).ShouldNotBeNull();
+        channel.SetValue(commands, new LateChannel((Channel<SharingCommand>)channel.GetValue(commands)!, lag));
+    }
+
     /// <summary>What the status says of a consent change the server can't be told of, as the key for <paramref name="id"/>
     /// can't be read.</summary>
     private static string Unheard(string id) =>
@@ -996,6 +1042,8 @@ public sealed class SharingWorkerTests : IDisposable
     {
         private static readonly TimeZoneInfo Zone = TimeZoneInfo.CreateCustomTimeZone("PL+2", TimeSpan.FromHours(2), "PL+2", "PL+2");
 
+        private int _runsStartedWhileTheAppWaited;
+
         public Harness()
         {
             Commands = new SharingCommands(Clock);
@@ -1006,8 +1054,7 @@ public sealed class SharingWorkerTests : IDisposable
             Board.PublishDiscreteGpu(true);
             Directory.CreateDirectory(Sent);
             Directory.CreateDirectory(Crashes);
-            var environment = new SharingEnvironment(Sent, Crashes, () => new ScrubNames("alice", "DESKTOP-TEST", "CONTOSO"), () => SharingFakes.Host,
-                () => SendMinute);
+            var environment = new SharingEnvironment(Sent, Crashes, Names, () => SharingFakes.Host, () => SendMinute);
             Worker = new SharingWorker(Database.Db, Board, Commands, Client, environment, Clock, NullLogger<SharingWorker>.Instance);
         }
 
@@ -1022,6 +1069,10 @@ public sealed class SharingWorkerTests : IDisposable
         public FakeSharingClient Client { get; } = new();
 
         public SharingWorker Worker { get; }
+
+        /// <summary>How many runs have started while a request the App waits on was queued: a run asks for the names to scrub
+        /// first thing. (A request's handling asks after taking it, and a run's upload before it goes.)</summary>
+        public int RunsStartedWhileTheAppWaited => Volatile.Read(ref _runsStartedWhileTheAppWaited);
 
         public string Sent => Path.Combine(Database.Folder, "Sent");
 
@@ -1066,6 +1117,12 @@ public sealed class SharingWorkerTests : IDisposable
         /// <summary>A crash file as the service writes one when it crashes.</summary>
         public void CrashFile(DateTimeOffset at, string message = "Boom.") =>
             ServiceCrashes.TryWrite(Crashes, new InvalidOperationException(message), at, "0.6.0").ShouldNotBeNull();
+
+        private ScrubNames Names()
+        {
+            if (Commands.AppWaiting) Interlocked.Increment(ref _runsStartedWhileTheAppWaited);
+            return new ScrubNames("alice", "DESKTOP-TEST", "CONTOSO");
+        }
 
         public void Dispose() => Database.Dispose();
     }
@@ -1117,3 +1174,25 @@ internal sealed class FakeSharingClient : ISharingClient
 
 /// <param name="Kind"><c>report</c>, <c>consent</c> or <c>delete</c>.</param>
 internal sealed record SharingCall(string Kind, string Key, string? InstallId, Consent? Consent, ReportV1? Report, byte[] Body);
+
+/// <summary>A channel whose reader says it has something to read only a set time after it has.</summary>
+internal sealed class LateChannel : Channel<SharingCommand>
+{
+    public LateChannel(Channel<SharingCommand> inner, TimeSpan lag)
+    {
+        Reader = new LateReader(inner.Reader, lag);
+        Writer = inner.Writer;
+    }
+
+    private sealed class LateReader(ChannelReader<SharingCommand> inner, TimeSpan lag) : ChannelReader<SharingCommand>
+    {
+        public override bool TryRead([MaybeNullWhen(false)] out SharingCommand item) => inner.TryRead(out item);
+
+        public override async ValueTask<bool> WaitToReadAsync(CancellationToken cancel = default)
+        {
+            var more = await inner.WaitToReadAsync(cancel).ConfigureAwait(false);
+            await Task.Delay(lag, cancel).ConfigureAwait(false);
+            return more;
+        }
+    }
+}

@@ -104,7 +104,10 @@ internal sealed class SharingWorker : BackgroundService
             {
                 tick ??= timer.WaitForNextTickAsync(stop).AsTask();
                 inbox ??= _commands.Reader.WaitToReadAsync(stop).AsTask();
-                if (!_resume) await Task.WhenAny(tick, inbox).ConfigureAwait(false);   // a run that gave way goes on at once
+                // A run that gave way goes on at once, but only after the request it gave way to: the inbox says it has one on
+                // a pool thread, maybe later, so it is waited for rather than looked at, or the run would give way over and over.
+                if (!_resume) await Task.WhenAny(tick, inbox).ConfigureAwait(false);
+                else if (_commands.AppWaiting) await Task.WhenAny(inbox).ConfigureAwait(false);
 
                 if (inbox.IsCompleted)
                 {
