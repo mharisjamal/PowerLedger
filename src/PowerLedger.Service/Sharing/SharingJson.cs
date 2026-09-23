@@ -14,6 +14,9 @@ namespace PowerLedger.Service.Sharing;
 [JsonSerializable(typeof(Dictionary<string, SourceDay>))]
 [JsonSerializable(typeof(CrashReport))]
 [JsonSerializable(typeof(UsageCounts))]
+[JsonSerializable(typeof(ConsentPost))]
+[JsonSerializable(typeof(DeletePost))]
+[JsonSerializable(typeof(ErrorBody))]
 internal sealed partial class SharingJson : JsonSerializerContext
 {
     /// <summary>The value, or null when the text is missing or isn't one: what can't be read counts as never kept.</summary>
