@@ -19,6 +19,15 @@ internal sealed record WriteResult(string? Problem)
     public bool Succeeded => Problem is null;
 }
 
+/// <summary>What a sharing request did, in words the App can show (data-sharing design §5): the same shape as
+/// <see cref="SharingReply"/> without its pipe id, plus what "not connected" and "no answer" say.</summary>
+internal sealed record SharingOutcome(bool Ok, string Message, string? Path = null)
+{
+    public static SharingOutcome NotConnected { get; } = new(false, "The service isn't running, so nothing was changed.");
+
+    public static SharingOutcome NoAnswer { get; } = new(false, "The service didn't answer, so the change may not have been made.");
+}
+
 /// <summary>What the App needs from the service (spec §8). Events are raised on a background thread; a handler must not
 /// throw and must hand its work to the UI thread itself.</summary>
 internal interface IServiceLink : IAsyncDisposable
@@ -54,6 +63,24 @@ internal interface IServiceLink : IAsyncDisposable
     Task<WriteResult> ReportBrightnessAsync(
         IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading> power, IReadOnlyList<MonitorDisplayReading> displays,
         CancellationToken cancel = default);
+
+    /// <summary>Records the user's answer to the consent dialog, or a change in Settings → Privacy (data-sharing design §1).</summary>
+    Task<SharingOutcome> SetConsentAsync(Consent consent, CancellationToken cancel = default);
+
+    /// <summary>The App's usage counts since the last report; ignored by the service while Usage is off.</summary>
+    Task<WriteResult> ReportUsageAsync(UsageCounts counts, CancellationToken cancel = default);
+
+    /// <summary>An App crash caught on an earlier run; ignored by the service while Crash and sensor reports is off.</summary>
+    Task<WriteResult> ReportCrashAsync(CrashReport crash, CancellationToken cancel = default);
+
+    /// <summary>Builds what the next upload would carry into a file and answers with its path.</summary>
+    Task<SharingOutcome> PreviewUploadAsync(CancellationToken cancel = default);
+
+    /// <summary>Sends every complete day waiting now, instead of at tonight's minute.</summary>
+    Task<SharingOutcome> SendNowAsync(CancellationToken cancel = default);
+
+    /// <summary>Asks the server to delete everything sent from this PC.</summary>
+    Task<SharingOutcome> DeleteMyDataAsync(CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -130,6 +157,24 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading> power, IReadOnlyList<MonitorDisplayReading> displays,
         CancellationToken cancel = default)
         => WriteAsync(new ReportBrightnessRequest(NextId(), monitors, power, displays), cancel);
+
+    public Task<SharingOutcome> SetConsentAsync(Consent consent, CancellationToken cancel = default)
+        => SharingAsync(new SetConsentRequest(NextId(), consent), cancel);
+
+    public Task<WriteResult> ReportUsageAsync(UsageCounts counts, CancellationToken cancel = default)
+        => WriteAsync(new ReportUsageRequest(NextId(), counts), cancel);
+
+    public Task<WriteResult> ReportCrashAsync(CrashReport crash, CancellationToken cancel = default)
+        => WriteAsync(new ReportCrashRequest(NextId(), crash), cancel);
+
+    public Task<SharingOutcome> PreviewUploadAsync(CancellationToken cancel = default)
+        => SharingAsync(new PreviewUploadRequest(NextId()), cancel);
+
+    public Task<SharingOutcome> SendNowAsync(CancellationToken cancel = default)
+        => SharingAsync(new SendNowRequest(NextId()), cancel);
+
+    public Task<SharingOutcome> DeleteMyDataAsync(CancellationToken cancel = default)
+        => SharingAsync(new DeleteMyDataRequest(NextId()), cancel);
 
     public async ValueTask DisposeAsync()
     {
@@ -220,6 +265,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
                 case SettingsReply reply:
                     Answer(reply.Id, reply);
                     break;
+                case SharingReply reply:
+                    Answer(reply.Id, reply);
+                    break;
                 case ErrorReply { Id: { } id } reply:
                     Answer(id, reply);
                     break;
@@ -262,6 +310,20 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
             OkReply => WriteResult.Done,
             ErrorReply error => new WriteResult(error.Message),
             _ => WriteResult.NoAnswer,
+        };
+    }
+
+    /// <summary>A sharing request: sent only while connected to a server that passed the check, and answered in words
+    /// (data-sharing design §5).</summary>
+    private async Task<SharingOutcome> SharingAsync(PipeRequest request, CancellationToken cancel)
+    {
+        if (_channel is null) return SharingOutcome.NotConnected;
+        if (_refusal is { } refusal) return new SharingOutcome(false, refusal);
+        return await SendAsync(request, cancel).ConfigureAwait(false) switch
+        {
+            SharingReply reply => new SharingOutcome(reply.Ok, reply.Message, reply.Path),
+            ErrorReply error => new SharingOutcome(false, error.Message),
+            _ => SharingOutcome.NoAnswer,
         };
     }
 

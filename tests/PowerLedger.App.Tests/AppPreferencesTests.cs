@@ -58,6 +58,41 @@ public sealed class AppPreferencesTests : IDisposable
 
         preferences.FinishFirstRun().ShouldBeNull();
         Store.Load().FirstRunDone.ShouldBeTrue();
+        Store.Load().FirstRunAt.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void Finishing_the_first_run_twice_keeps_its_first_time()
+    {
+        var preferences = Preferences();
+        preferences.FinishFirstRun();
+        var first = preferences.Current.FirstRunAt;
+
+        preferences.FinishFirstRun();
+
+        preferences.Current.FirstRunAt.ShouldBe(first);
+    }
+
+    [Fact]
+    public void An_existing_install_without_a_first_run_time_is_backfilled_once()
+    {
+        var preferences = new AppPreferences(
+            Store, UiPreferences.Default with { FirstRunDone = true }, _themes.Add, _factors.Add,
+            new StartWithWindows(@"C:\Program Files\PowerLedger\PowerLedger.exe", _runKey));
+
+        preferences.EnsureFirstRunAt().ShouldBeNull();
+
+        var stamped = preferences.Current.FirstRunAt.ShouldNotBeNull();
+        preferences.EnsureFirstRunAt();
+        preferences.Current.FirstRunAt.ShouldBe(stamped);   // not moved on a later call
+    }
+
+    [Fact]
+    public void A_fresh_install_is_not_backfilled_before_it_has_finished_setup()
+    {
+        var preferences = Preferences();
+        preferences.EnsureFirstRunAt();
+        preferences.Current.FirstRunAt.ShouldBeNull();
     }
 
     [Fact]

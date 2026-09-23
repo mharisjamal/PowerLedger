@@ -55,4 +55,10 @@ internal static class Statuses
     /// <summary>A service reading <see cref="Ups"/> and <see cref="PowerSupply"/>, with the usual monitors attached.</summary>
     public static ServiceStatus WithPowerDevices(params PowerDeviceStatus[] devices)
         => WithMonitors() with { PowerDevices = devices.Length > 0 ? devices : [Ups, PowerSupply] };
+
+    /// <summary>A service that has answered with a sharing status (data-sharing design §5).</summary>
+    public static ServiceStatus WithSharing(
+        Consent consent, string? installId = null, DateTimeOffset? lastSentAt = null, long? lastSentBytes = null,
+        string? problem = null, bool rejected = false, int daysWaiting = 0)
+        => Running() with { Sharing = new SharingStatus(consent, installId, lastSentAt, lastSentBytes, problem, rejected, daysWaiting) };
 }

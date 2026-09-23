@@ -142,6 +142,49 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     {
         await using var alone = new PipeServiceLink($"PowerLedger.nobody.{Guid.NewGuid():N}", new FixedIdle(0), _clock, new TrustAnyServer());
         (await alone.ResetCalibrationAsync()).ShouldBe(WriteResult.NotConnected);
+        (await alone.SetConsentAsync(Consent.Unanswered)).ShouldBe(SharingOutcome.NotConnected);
+    }
+
+    [Fact]
+    public async Task Consent_usage_and_crash_reports_reach_the_service()
+    {
+        var consent = new Consent(ConsentText.Version, true, true, true, true);
+        var counts = new UsageCounts("2026-09-24", 1, new Dictionary<string, int> { ["now"] = 2 }, new Dictionary<string, int>(), 0, 0, 3, "dark", "en-US");
+        var crash = new CrashReport(DateTimeOffset.UnixEpoch, "app", "0.6.0", ["System.Exception"], "boom", "at X").Trimmed();
+
+        (await _link.SetConsentAsync(consent)).ShouldBe(new SharingOutcome(true, "Saved."));
+        (await _link.ReportUsageAsync(counts)).ShouldBe(WriteResult.Done);
+        (await _link.ReportCrashAsync(crash)).ShouldBe(WriteResult.Done);
+
+        _service.Requests.OfType<SetConsentRequest>().Single().Consent.ShouldBe(consent);
+        var sent = _service.Requests.OfType<ReportUsageRequest>().Single().Counts;
+        (sent.Day, sent.AppOpens, sent.DaysSinceFirstRun, sent.Theme, sent.Language).ShouldBe((counts.Day, counts.AppOpens, counts.DaysSinceFirstRun, counts.Theme, counts.Language));
+        sent.Pages.ShouldBe(counts.Pages);
+        var gotCrash = _service.Requests.OfType<ReportCrashRequest>().Single().Crash;
+        (gotCrash.At, gotCrash.Component, gotCrash.Version, gotCrash.Message, gotCrash.Stack).ShouldBe((crash.At, crash.Component, crash.Version, crash.Message, crash.Stack));
+        gotCrash.Types.ShouldBe(crash.Types);
+    }
+
+    [Fact]
+    public async Task Preview_send_now_and_delete_reach_the_service_and_answer_in_words()
+    {
+        _service.PreviewPath = @"C:\ProgramData\PowerLedger\Sent\preview.json";
+
+        (await _link.PreviewUploadAsync()).ShouldBe(new SharingOutcome(true, "Written.", _service.PreviewPath));
+        (await _link.SendNowAsync()).ShouldBe(new SharingOutcome(true, "Sent."));
+        (await _link.DeleteMyDataAsync()).ShouldBe(new SharingOutcome(true, "Your data has been deleted from the server."));
+
+        _service.Requests.OfType<PreviewUploadRequest>().Count().ShouldBe(1);
+        _service.Requests.OfType<SendNowRequest>().Count().ShouldBe(1);
+        _service.Requests.OfType<DeleteMyDataRequest>().Count().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_sharing_refusal_comes_back_in_the_services_words()
+    {
+        _service.Refuse = "Sharing detailed data needs Hardware and power turned on.";
+        (await _link.SetConsentAsync(new Consent(ConsentText.Version, false, false, false, true)))
+            .ShouldBe(new SharingOutcome(false, "Sharing detailed data needs Hardware and power turned on."));
     }
 
     private sealed class RefuseAll : IServerCheck

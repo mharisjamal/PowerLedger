@@ -22,6 +22,9 @@ internal sealed class FakeService(string name) : IAsyncDisposable
     /// <summary>When set, the service refuses every change with this message, as it does a value out of range.</summary>
     public string? Refuse { get; set; }
 
+    /// <summary>The path a preview upload answers with.</summary>
+    public string PreviewPath { get; set; } = @"C:\ProgramData\PowerLedger\Sent\preview.json";
+
     public bool HasClient => _client is not null;
 
     public void Start()
@@ -94,7 +97,12 @@ internal sealed class FakeService(string name) : IAsyncDisposable
     {
         GetStatusRequest r => new StatusReply(r.Id, Status),
         GetSettingsRequest r => new SettingsReply(r.Id, ServiceSettings.Default),
-        SetSettingsRequest or SetTariffRequest or ResetCalibrationRequest when Refuse is { } refusal => new ErrorReply(request.Id, refusal),
+        SetSettingsRequest or SetTariffRequest or ResetCalibrationRequest or SetConsentRequest or PreviewUploadRequest or SendNowRequest
+            or DeleteMyDataRequest or ReportUsageRequest or ReportCrashRequest when Refuse is { } refusal => new ErrorReply(request.Id, refusal),
+        SetConsentRequest r => new SharingReply(r.Id, true, "Saved."),
+        PreviewUploadRequest r => new SharingReply(r.Id, true, "Written.", PreviewPath),
+        SendNowRequest r => new SharingReply(r.Id, true, "Sent."),
+        DeleteMyDataRequest r => new SharingReply(r.Id, true, "Your data has been deleted from the server."),
         _ => new OkReply(request.Id),
     };
 }

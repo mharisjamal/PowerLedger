@@ -28,6 +28,10 @@ internal interface IUiSettings
     string? Ran(string version);
 
     string? FinishFirstRun();
+
+    /// <summary>Stamps <see cref="UiPreferences.FirstRunAt"/> with now when the first run is done but nothing stamped it
+    /// yet: an install from before this field existed. Does nothing before the first run finishes, or once stamped.</summary>
+    string? EnsureFirstRunAt();
 }
 
 /// <summary>
@@ -77,7 +81,10 @@ internal sealed class AppPreferences(
 
     public string? Ran(string version) => Save(Current with { LastVersion = version });
 
-    public string? FinishFirstRun() => Save(Current with { FirstRunDone = true });
+    public string? FinishFirstRun() => Save(Current with { FirstRunDone = true, FirstRunAt = Current.FirstRunAt ?? DateTimeOffset.UtcNow });
+
+    public string? EnsureFirstRunAt()
+        => Current.FirstRunDone && Current.FirstRunAt is null ? Save(Current with { FirstRunAt = DateTimeOffset.UtcNow }) : null;
 
     /// <summary>Spec §9: starting with Windows is on by default. Until the first run is done the App turns it on as it
     /// starts, as the user who runs it (the installer can't: it runs as the elevating account); after that it is left

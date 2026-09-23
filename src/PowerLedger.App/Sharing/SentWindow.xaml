@@ -1,0 +1,40 @@
+<Window x:Class="PowerLedger.App.SentWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:PowerLedger.App"
+        Title="What's been sent" Width="520" Height="580"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource Brush.Panel}" Foreground="{DynamicResource Brush.Ink}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+    <DockPanel Margin="20">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,14">
+            <Button Style="{StaticResource Quiet}" Content="Send now" Command="{Binding SendNow}" />
+            <TextBlock Style="{StaticResource Text.Secondary}" Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding Message}"
+                       Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Text.Muted}" Text="{Binding Empty}"
+                   Visibility="{Binding Empty, Converter={StaticResource VisibleWhenText}}" />
+        <ListBox ItemsSource="{Binding Rows}" Background="Transparent" BorderThickness="0" SelectionChanged="RowSelected"
+                 Visibility="{Binding HasRows, Converter={StaticResource VisibleWhen}}">
+            <ListBox.ItemTemplate>
+                <DataTemplate DataType="{x:Type local:SentRow}">
+                    <Grid Margin="2,8" Cursor="Hand">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Day}" />
+                        <TextBlock Grid.Column="1" Style="{StaticResource Text.Muted}" Text="{Binding Size}" />
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Line}" />
+                    <Setter Property="BorderThickness" Value="0,0,0,1" />
+                </Style>
+            </ListBox.ItemContainerStyle>
+        </ListBox>
+    </DockPanel>
+</Window>
