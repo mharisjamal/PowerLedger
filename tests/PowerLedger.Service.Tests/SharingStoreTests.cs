@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using PowerLedger.Contracts;
 using PowerLedger.Service.Sharing;
@@ -92,6 +94,34 @@ public sealed class SharingStoreTests : IDisposable
         (Store().InstallId, Store().Key).ShouldBe((id, key));
         using var another = new TestDatabase();
         new SharingStore(new SettingsRepository(another.Db)).Identity().Id.ShouldNotBe(id);
+    }
+
+    [Fact]
+    public void The_key_is_kept_encrypted_for_the_account_running_the_service_and_one_that_cannot_be_read_counts_as_none()
+    {
+        var settings = new SettingsRepository(_database.Db);
+        var (id, key) = Store().Identity();
+
+        var kept = settings.Get(SharingStore.KeyKey).ShouldNotBeNull();
+        kept.ShouldNotContain(key);
+        Store().Key.ShouldBe(key);
+
+        // Kept in the clear, damaged, or encrypted by another program as the same account: none, so the next consent
+        // makes a new ID and key.
+        foreach (var unreadable in new[]
+        {
+            key,
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(200)),
+            Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(key), null, DataProtectionScope.CurrentUser)),
+        })
+        {
+            settings.Set(SharingStore.IdKey, id);
+            settings.Set(SharingStore.KeyKey, unreadable);
+            Store().Key.ShouldBeNull();
+            var (newId, newKey) = Store().Identity();
+            (newId == id, newKey == key).ShouldBe((false, false));
+            (Store().InstallId, Store().Key).ShouldBe((newId, newKey));
+        }
     }
 
     [Fact]
