@@ -23,6 +23,7 @@ internal sealed class SentViewModel : ObservableObject
     private IReadOnlyList<SentRow> _rows = [];
     private string? _empty;
     private string? _message;
+    private bool _busy;
 
     public SentViewModel(IServiceLink link, UiThreads threads, string folder, CultureInfo culture, Action<string> openPayload)
     {
@@ -31,7 +32,7 @@ internal sealed class SentViewModel : ObservableObject
         _folder = folder;
         _culture = culture;
         _openPayload = openPayload;
-        SendNow = new RelayCommand(() => _ = SendNowAsync());
+        SendNow = new RelayCommand(() => _ = SendNowAsync(), () => !Busy);
         Refresh();
     }
 
@@ -46,7 +47,11 @@ internal sealed class SentViewModel : ObservableObject
     /// <summary>What "Send now" came back as, or null.</summary>
     public string? Message { get => _message; private set => SetProperty(ref _message, value); }
 
-    public ICommand SendNow { get; }
+    /// <summary>The request is still on its way to the service (finding 6: sharing requests are serialised, so this can
+    /// take a few seconds); Send now refuses a second press meanwhile.</summary>
+    public bool Busy { get => _busy; private set => SetProperty(ref _busy, value); }
+
+    public IRelayCommand SendNow { get; }
 
     /// <summary>Opens a row's JSON. Call on the UI thread.</summary>
     public void Open(SentRow row) => _openPayload(row.Path);
@@ -62,9 +67,13 @@ internal sealed class SentViewModel : ObservableObject
     /// <summary>Asks the service to send every complete day waiting now, and reads the folder again. Call on the UI thread.</summary>
     internal async Task SendNowAsync()
     {
+        Busy = true;
+        SendNow.NotifyCanExecuteChanged();
         var result = await _link.SendNowAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
+            Busy = false;
+            SendNow.NotifyCanExecuteChanged();
             Message = result.Message;
             Refresh();
         });

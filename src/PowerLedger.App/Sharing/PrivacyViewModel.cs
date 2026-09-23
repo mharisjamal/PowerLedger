@@ -26,6 +26,7 @@ internal sealed class PrivacyViewModel : ObservableObject
     private bool _usage;
     private bool _power;
     private bool _share;
+    private bool _busy;
     private string _installId = "None yet";
     private string _status = "You haven't chosen yet.";
     private string? _message;
@@ -47,7 +48,7 @@ internal sealed class PrivacyViewModel : ObservableObject
         CopyInstallId = new RelayCommand(() => _copyToClipboard(InstallId));
         DeleteMyData = new RelayCommand(() => ConfirmingDelete = true);
         CancelDelete = new RelayCommand(() => ConfirmingDelete = false);
-        ConfirmDelete = new RelayCommand(() => _ = ConfirmDeleteAsync());
+        ConfirmDelete = new RelayCommand(() => _ = ConfirmDeleteAsync(), () => !Busy);
     }
 
     public bool Diagnostics
@@ -87,6 +88,10 @@ internal sealed class PrivacyViewModel : ObservableObject
     /// <summary>"Delete my data" was pressed once; it waits for Delete or Cancel.</summary>
     public bool ConfirmingDelete { get => _confirmingDelete; private set => SetProperty(ref _confirmingDelete, value); }
 
+    /// <summary>A tick or a delete is still on its way to the service (finding 6: sharing requests are serialised, so
+    /// this can take a few seconds); Delete refuses a second press meanwhile.</summary>
+    public bool Busy { get => _busy; private set => SetProperty(ref _busy, value); }
+
     /// <summary>A tick was sent and taken, carrying what it was (data-sharing design §3): lets the App's usage counter
     /// know the consent it just sent at once, rather than only at its next flush.</summary>
     public event Action<Consent>? Applied;
@@ -101,7 +106,7 @@ internal sealed class PrivacyViewModel : ObservableObject
 
     public ICommand CancelDelete { get; }
 
-    public ICommand ConfirmDelete { get; }
+    public IRelayCommand ConfirmDelete { get; }
 
     /// <summary>The ten-second status refresh: the switches, the id and the status line, unless a tick is still on its way
     /// to the service. Call on the UI thread.</summary>
@@ -136,10 +141,12 @@ internal sealed class PrivacyViewModel : ObservableObject
     private async Task ApplyAsync(Consent next, Consent previous)
     {
         _inFlight++;
+        UpdateBusy();
         var result = await _link.SetConsentAsync(next).ConfigureAwait(false);
         _threads.Post(() =>
         {
             _inFlight--;
+            UpdateBusy();
             if (!result.Ok)
             {
                 _diagnostics = previous.Diagnostics;
@@ -156,12 +163,23 @@ internal sealed class PrivacyViewModel : ObservableObject
     /// <summary>The second press of delete: sends it, and forgets nothing on a refusal. Call on the UI thread.</summary>
     private async Task ConfirmDeleteAsync()
     {
+        _inFlight++;
+        UpdateBusy();
         var result = await _link.DeleteMyDataAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
+            _inFlight--;
+            UpdateBusy();
             ConfirmingDelete = false;
             Message = result.Message;
         });
+    }
+
+    /// <summary>Refreshes <see cref="Busy"/> from <see cref="_inFlight"/> and lets Delete know. Call on the UI thread.</summary>
+    private void UpdateBusy()
+    {
+        Busy = _inFlight > 0;
+        ConfirmDelete.NotifyCanExecuteChanged();
     }
 
     private void Refreshed()

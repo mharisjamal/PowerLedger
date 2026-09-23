@@ -185,6 +185,28 @@ public class PrivacyViewModelTests
         _link.SharingRequests.ShouldBeEmpty();
     }
 
+    /// <summary>The service can take seconds over a delete (finding 6: sharing requests are serialised, so a second one
+    /// waits its turn); Delete must show that and refuse a second press meanwhile.</summary>
+    [Fact]
+    public async Task Confirm_delete_is_busy_while_on_its_way_to_the_service()
+    {
+        var gate = new TaskCompletionSource<SharingOutcome>();
+        _link.SharingGate = gate;
+        var model = Model();
+        model.Apply(Statuses.WithSharing(new Consent(ConsentText.Version, true, true, true, true)).Sharing);
+        model.DeleteMyData.Execute(null);
+
+        model.ConfirmDelete.Execute(null);
+
+        model.Busy.ShouldBeTrue();
+        model.ConfirmDelete.CanExecute(null).ShouldBeFalse();
+
+        gate.SetResult(new SharingOutcome(true, "Your data has been deleted from the server."));
+
+        await WaitFor.True(() => !model.Busy);
+        model.ConfirmDelete.CanExecute(null).ShouldBeTrue();
+    }
+
     [Fact]
     public void The_buttons_open_sent_the_browser_and_the_clipboard()
     {

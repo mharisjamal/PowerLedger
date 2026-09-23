@@ -163,4 +163,29 @@ public class ConsentViewModelTests
 
         _opened.ShouldBe(new[] { ConsentViewModel.PrivacyPolicyUri });
     }
+
+    /// <summary>The service can take seconds over a choice (finding 6: sharing requests are serialised, so a second one
+    /// waits its turn); the buttons that would start another must show that and refuse a second press meanwhile. The
+    /// completion is awaited in real time rather than assumed synchronous with <c>SetResult</c>, since a continuation is
+    /// not guaranteed to run inline on the thread that completed the gate.</summary>
+    [Fact]
+    public async Task The_buttons_are_busy_while_a_choice_is_still_on_its_way_to_the_service()
+    {
+        var gate = new TaskCompletionSource<SharingOutcome>();
+        _link.SharingGate = gate;
+        var model = Model();
+
+        model.Save.Execute(null);
+
+        model.Busy.ShouldBeTrue();
+        model.Save.CanExecute(null).ShouldBeFalse();
+        model.AllowAll.CanExecute(null).ShouldBeFalse();
+        model.AllowNone.CanExecute(null).ShouldBeFalse();
+        model.SeeWhatWouldBeSent.CanExecute(null).ShouldBeFalse();
+
+        gate.SetResult(new SharingOutcome(true, "Saved."));
+
+        await WaitFor.True(() => !model.Busy);
+        model.Save.CanExecute(null).ShouldBeTrue();
+    }
 }
