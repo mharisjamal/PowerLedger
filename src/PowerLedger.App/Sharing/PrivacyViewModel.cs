@@ -87,6 +87,10 @@ internal sealed class PrivacyViewModel : ObservableObject
     /// <summary>"Delete my data" was pressed once; it waits for Delete or Cancel.</summary>
     public bool ConfirmingDelete { get => _confirmingDelete; private set => SetProperty(ref _confirmingDelete, value); }
 
+    /// <summary>A tick was sent and taken, carrying what it was (data-sharing design §3): lets the App's usage counter
+    /// know the consent it just sent at once, rather than only at its next flush.</summary>
+    public event Action<Consent>? Applied;
+
     public ICommand OpenSent { get; }
 
     public ICommand OpenPrivacyPolicy { get; }
@@ -106,10 +110,13 @@ internal sealed class PrivacyViewModel : ObservableObject
         InstallId = sharing?.InstallId ?? "None yet";
         Status = sharing is null ? "The service isn't running." : StatusLine(sharing, _zone, _culture);
         if (_inFlight > 0 || sharing is null) return;
-        _diagnostics = sharing.Consent.Diagnostics;
-        _usage = sharing.Consent.Usage;
-        _power = sharing.Consent.Power;
-        _share = sharing.Consent.Share;
+        // an answer to an older wording of the choices counts for nothing (data-sharing design §1): showing it ticked
+        // would resend those old switches, under the new text, the moment any one of them is touched
+        var consent = sharing.Consent.Answered ? sharing.Consent : Consent.Unanswered;
+        _diagnostics = consent.Diagnostics;
+        _usage = consent.Usage;
+        _power = consent.Power;
+        _share = consent.Share;
         Refreshed();
     }
 
@@ -142,6 +149,7 @@ internal sealed class PrivacyViewModel : ObservableObject
             }
             Message = result.Ok ? null : result.Message;
             Refreshed();
+            if (result.Ok) Applied?.Invoke(next);
         });
     }
 

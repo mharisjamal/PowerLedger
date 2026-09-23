@@ -58,6 +58,23 @@ public class PrivacyViewModelTests
     }
 
     [Fact]
+    public void An_answer_to_an_older_wording_shows_as_all_off_and_a_tick_sends_fresh_not_the_old_switches()
+    {
+        // Consent.Answered is false for any version but the current one, whatever was ticked under that older wording.
+        var model = Model();
+        model.Apply(Statuses.WithSharing(new Consent(ConsentText.Version - 1, true, true, true, true)).Sharing);
+
+        model.Diagnostics.ShouldBeFalse();
+        model.Usage.ShouldBeFalse();
+        model.Power.ShouldBeFalse();
+        model.Share.ShouldBeFalse();
+
+        model.Diagnostics = true;
+
+        _link.SharingRequests.Single().ShouldBe(new Consent(ConsentText.Version, true, false, false, false));
+    }
+
+    [Fact]
     public void A_tick_sends_the_whole_consent_at_once()
     {
         var model = Model();
@@ -112,6 +129,33 @@ public class PrivacyViewModelTests
 
         gate.SetResult(new SharingOutcome(true, "Saved."));
         model.Diagnostics.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_successful_tick_reports_the_consent_that_was_applied()
+    {
+        var model = Model();
+        model.Apply(Statuses.WithSharing(Consent.Unanswered).Sharing);
+        Consent? applied = null;
+        model.Applied += c => applied = c;
+
+        model.Diagnostics = true;
+
+        applied.ShouldBe(new Consent(ConsentText.Version, true, false, false, false));
+    }
+
+    [Fact]
+    public void A_refusal_reports_nothing_applied()
+    {
+        _link.SharingAnswer = new SharingOutcome(false, "Sharing detailed data needs Hardware and power turned on.");
+        var model = Model();
+        model.Apply(Statuses.WithSharing(Consent.Unanswered).Sharing);
+        var applied = false;
+        model.Applied += _ => applied = true;
+
+        model.Share = true;   // needs Power too, so the service refuses it
+
+        applied.ShouldBeFalse();
     }
 
     [Fact]

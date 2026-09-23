@@ -7,7 +7,9 @@ namespace PowerLedger.App;
 /// The App's usage counts (data-sharing design §3): opens, pages, settings changed by name, reports exported and updates
 /// installed, flushed every 15 minutes, at local midnight and on exit while Usage is on. Counting itself is free; a flush
 /// sends what is held for the day it was counted on and clears only what it sent, so a count made while a flush is on its
-/// way to the service is never lost. While Usage is off, nothing is sent and whatever was held is dropped.
+/// way to the service is never lost. While Usage is off, nothing is sent and whatever was held is dropped; the same
+/// happens the moment Usage is found to have turned on from a known off, since what is held by then can't be told apart
+/// from what was counted before consent.
 /// </summary>
 internal sealed class UsageCounter : IDisposable
 {
@@ -22,6 +24,7 @@ internal sealed class UsageCounter : IDisposable
     private readonly Lock _gate = new();
     private ITimer? _periodic;
     private ITimer? _midnight;
+    private bool? _usageOn;   // the last consent this counter saw for Usage: null until Start, a flush or ConsentChanged first says
 
     private string _day;
     private int _appOpens;
@@ -41,11 +44,22 @@ internal sealed class UsageCounter : IDisposable
         _day = Today();
     }
 
-    /// <summary>Starts the 15-minute and local-midnight timers. Call once, on the UI thread.</summary>
+    /// <summary>Starts the 15-minute and local-midnight timers, and reads the current consent once so a flip to Usage on
+    /// while nothing has counted this session yet is still recognised as a change (data-sharing design §3). Call once, on
+    /// the UI thread.</summary>
     public void Start()
     {
         _periodic ??= _clock.CreateTimer(_ => _ = FlushAsync(), null, FlushEvery, FlushEvery);
         ScheduleMidnight();
+        _ = SeedAsync();
+    }
+
+    /// <summary>Tells the counter the consent an App action just took: the consent dialog's or Settings → Privacy's own
+    /// successful setConsent (data-sharing design §3), known at once rather than only at the next flush. Safe to call
+    /// from the UI thread.</summary>
+    public void ConsentChanged(Consent consent)
+    {
+        lock (_gate) Observe(consent.Usage);
     }
 
     public void CountAppOpen() => Change(() => _appOpens++);
@@ -76,14 +90,27 @@ internal sealed class UsageCounter : IDisposable
 
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         if (status?.Sharing is not { } sharing) return;   // the service is unreachable, or older and sends no Sharing status: try again later
-        if (!sharing.Consent.Usage)
+
+        bool sendable;
+        lock (_gate)
         {
-            lock (_gate) Reset();   // Usage is off: nothing is sent, and nothing already held is kept either
-            return;
+            // on, and not a fresh change from a known off: what is held can't be from before consent (a first-ever
+            // observation of on, with nothing known before it, is trusted, so an already-consented session sends normally)
+            sendable = sharing.Consent.Usage && _usageOn != false;
+            Observe(sharing.Consent.Usage);
         }
+        if (!sendable) return;   // off, or only just found on from a known off: this snapshot might hold counts from before consent
 
         var result = await _link.ReportUsageAsync(snapshot).ConfigureAwait(false);
         if (result.Succeeded) lock (_gate) Subtract(snapshot);
+    }
+
+    /// <summary>Reads the current consent once, without waiting for the first flush (data-sharing design §3). Errors are
+    /// swallowed the same way a flush's own status read would be: try again at the next flush.</summary>
+    private async Task SeedAsync()
+    {
+        var status = await _link.GetStatusAsync().ConfigureAwait(false);
+        if (status?.Sharing is { } sharing) lock (_gate) Observe(sharing.Consent.Usage);
     }
 
     private static void Bump(Dictionary<string, int> counts, string name) => counts[name] = counts.GetValueOrDefault(name) + 1;
@@ -127,6 +154,16 @@ internal sealed class UsageCounter : IDisposable
         _settings.Clear();
         _reportsExported = 0;
         _updatesInstalled = 0;
+    }
+
+    /// <summary>Updates the last consent this counter saw for Usage. Off, or only just turned on from a known off, drops
+    /// whatever is held: it cannot be told apart from what was counted before consent (data-sharing design §1). A first-
+    /// ever observation of on is trusted as is, so an App session that starts already consented sends normally. Call
+    /// under <see cref="_gate"/>.</summary>
+    private void Observe(bool usageOn)
+    {
+        if (!usageOn || _usageOn == false) Reset();
+        _usageOn = usageOn;
     }
 
     private string Today() => TimeZoneInfo.ConvertTime(_clock.GetUtcNow(), _zone).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);

@@ -13,13 +13,20 @@ public partial class PayloadWindow : Window
     {
         InitializeComponent();
         Title = Path.GetFileName(path);
+        Body.Text = SafeReadJson(path);
+    }
+
+    /// <summary>The JSON a payload file holds, or a readable message when it can't be read: truncated or otherwise
+    /// corrupt, not really gzip despite its name, not really JSON once decompressed, or simply gone or locked.</summary>
+    internal static string SafeReadJson(string path)
+    {
         try
         {
-            Body.Text = ReadJson(path);
+            return ReadJson(path);
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         {
-            Body.Text = "Couldn't read this file: " + error.Message;
+            return "Couldn't read this file: " + error.Message;
         }
     }
 

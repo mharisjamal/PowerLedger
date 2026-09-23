@@ -28,6 +28,19 @@ public class ConsentViewModelTests
     }
 
     [Fact]
+    public void An_answer_to_an_older_wording_of_the_choices_shows_as_all_off()
+    {
+        // Consent.Answered is false for any version but the current one, whatever was ticked under that older wording.
+        var model = Model(new Consent(ConsentText.Version - 1, true, true, true, true));
+
+        model.Diagnostics.ShouldBeFalse();
+        model.Usage.ShouldBeFalse();
+        model.Power.ShouldBeFalse();
+        model.Share.ShouldBeFalse();
+        model.CanShare.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Share_is_greyed_until_power_and_turning_power_off_clears_it()
     {
         var model = Model();
@@ -42,31 +55,33 @@ public class ConsentViewModelTests
     }
 
     [Fact]
-    public async Task Allow_all_sends_every_switch_on_at_the_current_version()
+    public void Allow_all_sends_every_switch_on_at_the_current_version()
     {
         var model = Model();
-        await model.SendAsync(new Consent(ConsentText.Version, true, true, true, true));
+
+        model.AllowAll.Execute(null);
 
         _link.SharingRequests.Single().ShouldBe(new Consent(ConsentText.Version, true, true, true, true));
     }
 
     [Fact]
-    public async Task Allow_none_sends_every_switch_off()
+    public void Allow_none_sends_every_switch_off()
     {
         var model = Model(new Consent(ConsentText.Version, true, true, true, true));
-        await model.SendAsync(new Consent(ConsentText.Version, false, false, false, false));
+
+        model.AllowNone.Execute(null);
 
         _link.SharingRequests.Single().ShouldBe(Consent.Unanswered with { Version = ConsentText.Version });
     }
 
     [Fact]
-    public async Task Save_sends_what_is_ticked()
+    public void Save_sends_what_is_ticked()
     {
         var model = Model();
         model.Diagnostics = true;
         model.Power = true;
 
-        await model.SendAsync(new Consent(ConsentText.Version, model.Diagnostics, model.Usage, model.Power, model.Share));
+        model.Save.Execute(null);
 
         _link.SharingRequests.Single().ShouldBe(new Consent(ConsentText.Version, true, false, true, false));
     }
@@ -95,6 +110,31 @@ public class ConsentViewModelTests
         await model.SendAsync(new Consent(ConsentText.Version, true, true, true, true));
 
         closed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Success_reports_the_consent_that_was_applied()
+    {
+        var model = Model();
+        Consent? applied = null;
+        model.Applied += c => applied = c;
+
+        await model.SendAsync(new Consent(ConsentText.Version, true, true, true, true));
+
+        applied.ShouldBe(new Consent(ConsentText.Version, true, true, true, true));
+    }
+
+    [Fact]
+    public async Task A_refusal_reports_nothing_applied()
+    {
+        _link.SharingAnswer = new SharingOutcome(false, "Sharing detailed data needs Hardware and power turned on.");
+        var model = Model();
+        var applied = false;
+        model.Applied += _ => applied = true;
+
+        await model.SendAsync(new Consent(ConsentText.Version, false, false, false, true));
+
+        applied.ShouldBeFalse();
     }
 
     [Fact]

@@ -83,4 +83,39 @@ public sealed class CrashCatcherTests : IDisposable
             File.Delete(blocker);
         }
     }
+
+    /// <summary>WPF re-raises an unhandled DispatcherUnhandledException through AppDomain.UnhandledException with the
+    /// same exception object as it ends the process, so Report, what every hooked event calls, must write it once.</summary>
+    [Fact]
+    public void Reporting_the_same_exception_object_twice_writes_it_once()
+    {
+        var error = new InvalidOperationException("boom");
+        var catcher = new CrashCatcher(_folder, "0.6.0", Names);
+
+        catcher.Report(error);
+        catcher.Report(error);
+
+        Directory.GetFiles(_folder, "app-*.json").ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void Reporting_two_different_exceptions_writes_both_even_with_the_same_message()
+    {
+        var catcher = new CrashCatcher(_folder, "0.6.0", Names);
+
+        catcher.Report(new InvalidOperationException("boom"));
+        catcher.Report(new InvalidOperationException("boom"));
+
+        Directory.GetFiles(_folder, "app-*.json").Length.ShouldBe(2);
+    }
+
+    /// <summary>TaskScheduler.UnobservedTaskException can run on the finalizer thread, where letting anything escape a
+    /// handler crashes the process outright, so Report must not let even an OutOfMemoryException out, unlike Write alone.</summary>
+    [Fact]
+    public void Reporting_never_throws_even_when_writing_throws_out_of_memory()
+    {
+        var catcher = new CrashCatcher(_folder, "0.6.0", Names, write: (_, _, _, _) => throw new OutOfMemoryException());
+
+        Should.NotThrow(() => catcher.Report(new Exception("boom")));
+    }
 }

@@ -32,10 +32,13 @@ internal sealed class ConsentViewModel : ObservableObject
         _threads = threads;
         _openBrowser = openBrowser;
         _openPayload = openPayload;
-        _diagnostics = current.Diagnostics;
-        _usage = current.Usage;
-        _power = current.Power;
-        _share = current.Share;
+        // an answer to an older wording of the choices counts for nothing (data-sharing design §1): pre-ticking it would
+        // let one Save re-consent everything it held under the new text
+        var starting = current.Answered ? current : Consent.Unanswered;
+        _diagnostics = starting.Diagnostics;
+        _usage = starting.Usage;
+        _power = starting.Power;
+        _share = starting.Share;
         AllowAll = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, true, true, true, true)));
         AllowNone = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, false, false, false, false)));
         Save = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, Diagnostics, Usage, Power, Share)));
@@ -45,6 +48,10 @@ internal sealed class ConsentViewModel : ObservableObject
 
     /// <summary>The choice was sent and taken: the dialog closes.</summary>
     public event Action? Closed;
+
+    /// <summary>The choice was sent and taken, carrying what it was (data-sharing design §3): lets the App's usage
+    /// counter know the consent it just sent at once, rather than only at its next flush.</summary>
+    public event Action<Consent>? Applied;
 
     public bool Diagnostics { get => _diagnostics; set => SetProperty(ref _diagnostics, value); }
 
@@ -86,7 +93,11 @@ internal sealed class ConsentViewModel : ObservableObject
         var result = await _link.SetConsentAsync(consent).ConfigureAwait(false);
         _threads.Post(() =>
         {
-            if (result.Ok) Closed?.Invoke();
+            if (result.Ok)
+            {
+                Applied?.Invoke(consent);
+                Closed?.Invoke();
+            }
             else Message = result.Message;
         });
     }

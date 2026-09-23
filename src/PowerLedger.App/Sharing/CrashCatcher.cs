@@ -14,17 +14,41 @@ namespace PowerLedger.App;
 /// and the server accept and scrubbed of names and paths before it ever reaches disk, since <see cref="CrashForwarder"/>
 /// later sends the file on as it is.
 /// </summary>
-internal sealed class CrashCatcher(string folder, string version, ScrubNames names)
+internal sealed class CrashCatcher(string folder, string version, ScrubNames names, Action<Exception, string, string, ScrubNames>? write = null)
 {
     private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    private readonly Action<Exception, string, string, ScrubNames> _write = write ?? Write;
+    private Exception? _lastReported;
 
     /// <summary>Hooks every source of an unhandled exception this process has. Call once, from OnStartup.</summary>
     public void Hook(Application app)
     {
-        app.DispatcherUnhandledException += (_, e) => Write(e.Exception, folder, version, names);
+        app.DispatcherUnhandledException += (_, e) => Report(e.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
-            Write(e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString() ?? "Unknown error."), folder, version, names);
-        TaskScheduler.UnobservedTaskException += (_, e) => Write(e.Exception, folder, version, names);
+            Report(e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString() ?? "Unknown error."));
+        TaskScheduler.UnobservedTaskException += (_, e) => Report(e.Exception);
+    }
+
+    /// <summary>What each hooked event calls: skips an exception object already reported this process, since WPF
+    /// re-raises an unhandled <see cref="Application.DispatcherUnhandledException"/> through
+    /// <see cref="AppDomain.UnhandledException"/> as it ends the process, which would otherwise write and forward the
+    /// same crash twice; then writes, catching everything, including <see cref="OutOfMemoryException"/> — unlike
+    /// <see cref="Write"/> alone, since this can run on the finalizer thread for
+    /// <see cref="TaskScheduler.UnobservedTaskException"/>, where letting anything escape crashes the process outright.
+    /// </summary>
+    internal void Report(Exception error)
+    {
+        if (ReferenceEquals(error, _lastReported)) return;
+        _lastReported = error;
+        try
+        {
+            _write(error, folder, version, names);
+        }
+        catch
+        {
+            // As above: must never throw out of a crash handler, not even to report a worse one.
+        }
     }
 
     /// <summary>Builds, trims and scrubs a crash report, then writes it to <paramref name="folder"/> as
