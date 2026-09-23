@@ -233,6 +233,7 @@ internal sealed class SamplingLoop : BackgroundService
             }
             _tickClock.Commit(now);
             var reading = _model!.Evaluate(result.Sample, out var monitorWatts);
+            reading = reading with { Measured = Frames.Measured(result.Sample, reading.TotalSource) };   // stored for data sharing
             var parts = reading.Components;
             // The battery delivers what the monitors running off the laptop draw, so they are taken out with the display, or
             // the learner would learn them into the rest of the laptop. The figure is the one the reading used.

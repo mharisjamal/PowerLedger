@@ -19,6 +19,14 @@ internal static class Frames
         r.OnBattery, r.DisplayOn, r.UserIdle, r.SessionLocked, r.CpuLoad, r.GpuLoad, r.Brightness, r.Suspect,
         GpuScope: r.GpuScope, Total: r.TotalSource);
 
+    /// <summary>What the sample measured of a reading whose total came from <paramref name="total"/>, as the frame says it:
+    /// the processor from its energy meter, the graphics card from its maker's library (only the NVIDIA, AMD and Intel Arc
+    /// sources report a card's watts), and the total from a device rather than the model.</summary>
+    public static MeasuredParts Measured(Sample s, TotalSource total) =>
+        (s.CpuPackageW is { } cpu && double.IsFinite(cpu) ? MeasuredParts.Cpu : MeasuredParts.None)
+        | (s.DGpuW is { } gpu && double.IsFinite(gpu) ? MeasuredParts.Gpu : MeasuredParts.None)
+        | (total != TotalSource.Model ? MeasuredParts.Total : MeasuredParts.None);
+
     /// <summary>The UPS and the power supply the sample read, for the status screen: each that gave a name or watts, with the
     /// watts and how they were found, or no watts and nothing said of them when it gave none that could be used.</summary>
     public static IReadOnlyList<PowerDeviceStatus> PowerDevices(Sample s)

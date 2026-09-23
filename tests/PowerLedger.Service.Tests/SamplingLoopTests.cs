@@ -197,6 +197,25 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task Each_reading_is_written_with_where_its_total_came_from_what_the_card_covered_and_what_was_measured()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t, makeSet: _ => new FakeSensorSet((ts, delta) =>
+            Samples.At(ts, delta, batteryW: 20) with { DGpuPresent = true, DGpuW = 6, DGpuScope = GpuPowerScope.ChipOnly }));
+        await loop.StartAsync();
+        await loop.Ticks(3);
+        await loop.StopAsync();
+
+        var rows = new RawSampleRepository(t.Db).ReadRange(Start.ToUnixTimeMilliseconds(), Start.AddMinutes(1).ToUnixTimeMilliseconds());
+        rows.Count.ShouldBe(3);
+        foreach (var row in rows)
+        {
+            (row.TotalSource, row.GpuScope, row.Measured)
+                .ShouldBe((TotalSource.Battery, GpuPowerScope.ChipOnly, MeasuredParts.Cpu | MeasuredParts.Gpu | MeasuredParts.Total));
+        }
+    }
+
+    [Fact]
     public async Task A_monitor_running_off_the_laptop_is_in_its_battery_rate_and_is_kept_out_of_what_the_learner_learns()
     {
         using var t = new TestDatabase();
