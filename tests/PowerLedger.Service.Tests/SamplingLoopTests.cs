@@ -197,6 +197,23 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task The_board_holds_the_detected_hardware_and_whether_the_last_reading_found_a_discrete_card()
+    {
+        using var t = new TestDatabase();
+        var present = false;
+        await using var loop = new Harness(t, makeSet: _ => new FakeSensorSet((ts, delta) =>
+            Samples.At(ts, delta, batteryW: 20) with { DGpuPresent = Volatile.Read(ref present) }));
+        await loop.StartAsync();
+        loop.Board.Facts.ShouldBe(Facts.Laptop());
+        await loop.Ticks(1);
+        loop.Board.DiscreteGpu.ShouldBeFalse();
+
+        Volatile.Write(ref present, true);
+        await loop.Ticks(1);
+        loop.Board.DiscreteGpu.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Each_reading_is_written_with_where_its_total_came_from_what_the_card_covered_and_what_was_measured()
     {
         using var t = new TestDatabase();

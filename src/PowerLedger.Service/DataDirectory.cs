@@ -32,6 +32,8 @@ internal static class DataDirectory
             folder.SetAccessControl(Security());
         }
         Directory.CreateDirectory(paths.Logs);
+        Directory.CreateDirectory(paths.Sent);             // both inherit the folder's ACL: users read what was sent
+        Directory.CreateDirectory(paths.Crashes);
         if (!enforce) return null;
 
         foreach (var suffix in new[] { "", "-wal", "-shm" })
