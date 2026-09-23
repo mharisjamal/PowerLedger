@@ -674,6 +674,47 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task Send_now_running_out_of_the_apps_time_is_no_fault_of_the_servers_so_it_is_no_problem_and_no_back_off()
+    {
+        _h.Clock.SetUtcNow(Local(24, 9));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        _h.Client.AnswerAsync = async (call, cancel) =>
+        {
+            if (call.Kind == "report") await Task.Delay(Timeout.Infinite, cancel);   // slower than the App waits
+            return new SendOutcome.Accepted();
+        };
+        var send = new SendNowCommand(2);
+        _h.Commands.TryQueue(send).ShouldBeTrue();
+
+        var handling = _h.TakeAndRunAsync();
+        _h.Clock.Advance(SharingWorker.AppWait);
+
+        (await send.Reply.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBe(
+            new SharingReply(2, false, "Couldn't send: the server didn't answer in time. Will try again."));
+        await handling;
+        (_h.Store.Problem, _h.Store.Backoff).ShouldBe((null, null));
+    }
+
+    [Fact]
+    public async Task Send_now_with_no_time_left_to_ask_the_server_leaves_the_upload_it_missed_due()
+    {
+        _h.Clock.SetUtcNow(Local(24, 9));                                     // the PC was off at tonight's minute
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        var send = new SendNowCommand(2);
+        _h.Commands.TryQueue(send).ShouldBeTrue();
+        _h.Clock.Advance(SharingWorker.AppWait);                              // all the App waits, behind another request
+
+        await _h.TakeAndRunAsync();
+
+        (await send.Reply).ShouldBe(new SharingReply(2, true, "Nothing went in time; the rest will go at the next chance."));
+        (_h.Client.Reports.Count(), _h.Store.LastRun, _h.Store.Problem, _h.Store.Backoff).ShouldBe((0, null, null, null));
+        await _h.TickAsync();
+        _h.Client.Reports.ShouldHaveSingleItem().Day.ShouldBe("2026-09-23");
+    }
+
+    [Fact]
     public async Task The_status_says_what_the_user_chose_and_how_sending_is_going()
     {
         _h.Clock.SetUtcNow(Local(24, 10));

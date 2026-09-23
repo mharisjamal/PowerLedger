@@ -645,7 +645,9 @@ internal sealed class SharingWorker : BackgroundService
     /// Sends the complete days waiting, oldest first and at most <see cref="MaxDaysPerRun"/>, each with the sections switched
     /// on as it is built, and the hardware when it changed since it last went. Before each day it makes way for a request
     /// the App waits on, so a switch the App turns off is off for every day not yet under way: the five-minute run gives way
-    /// and starts again once the App has its answer, and Send now stops, saying what went.
+    /// and starts again once the App has its answer, and Send now stops, saying what went. Send now running out of its own
+    /// time is no fault of the server's, so it is neither a problem nor a back-off, and a run that asked the server nothing
+    /// doesn't count as the night's.
     /// </summary>
     /// <param name="answerBy">Send now's time limit; none for the five-minute run, whose requests give way to the App instead.</param>
     private async Task<RunResult> SendAsync(DateTimeOffset now, CancellationToken answerBy, CancellationToken stop)
@@ -655,6 +657,7 @@ internal sealed class SharingWorker : BackgroundService
         _store.LastRun = now.ToUnixTimeMilliseconds();
         var (id, key) = Identity();
         var result = new RunResult();
+        var asked = false;
         try
         {
             for (var days = 0; days < MaxDaysPerRun; days++)
@@ -682,6 +685,7 @@ internal sealed class SharingWorker : BackgroundService
                 var outcome = forApp
                     ? await CallAsync(Send, stop, answerBy).ConfigureAwait(false)
                     : await OwnCallAsync(Send, stop).ConfigureAwait(false);
+                asked |= outcome is not OutOfTime { Asked: false };
                 switch (outcome)
                 {
                     case SendOutcome.Accepted:
@@ -700,6 +704,10 @@ internal sealed class SharingWorker : BackgroundService
                         Forget(now);
                         result.Gone = true;
                         return result;
+                    case OutOfTime late:
+                        _log.LogInformation("Sending {Day} ran out of the App's time ({Reason}); it goes at the next chance", day, late.Text);
+                        result.Failed = late.Text;
+                        return result;
                     default:
                         var reason = outcome.Reason ?? "the server didn't take it";
                         _log.LogInformation("Sending {Day} failed ({Reason}); trying again later", day, reason);
@@ -709,13 +717,17 @@ internal sealed class SharingWorker : BackgroundService
                         return result;
                 }
             }
+            return result;
         }
         catch (GiveWay)
         {
-            _store.LastRun = lastRun;                                                   // not a run: it starts again
+            asked = false;                                                              // not a run: it starts again
             throw;
         }
-        return result;
+        finally
+        {
+            if (!asked) _store.LastRun = lastRun;
+        }
     }
 
     /// <summary>The day leaves the outbox, and a copy of what went is kept for the user to see.</summary>
@@ -799,12 +811,12 @@ internal sealed class SharingWorker : BackgroundService
             withHardware, _environment.Names());
     }
 
-    /// <summary>Makes a request for one the App waits on. One that doesn't answer before <paramref name="deadline"/> counts as
-    /// no answer, and so does one there is no time left to make, which isn't made.</summary>
+    /// <summary>Makes a request for one the App waits on. One that doesn't answer before <paramref name="deadline"/> is
+    /// <see cref="OutOfTime"/>, and so is one there is no time left to make, which isn't made.</summary>
     private static async Task<SendOutcome> CallAsync(
         Func<CancellationToken, Task<SendOutcome>> request, CancellationToken stop, CancellationToken deadline)
     {
-        if (deadline.IsCancellationRequested) return new SendOutcome.Unreachable(NoTimeLeft);
+        if (deadline.IsCancellationRequested) return new OutOfTime(NoTimeLeft, Asked: false);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, deadline);
         try
         {
@@ -812,7 +824,7 @@ internal sealed class SharingWorker : BackgroundService
         }
         catch (OperationCanceledException) when (!stop.IsCancellationRequested)
         {
-            return new SendOutcome.Unreachable(NotInTime);
+            return new OutOfTime(NotInTime, Asked: true);
         }
     }
 
@@ -872,6 +884,10 @@ internal sealed class SharingWorker : BackgroundService
     /// <summary>Thrown out of the worker's own work, where nothing is half-done, once a request the App waits on is queued:
     /// the work stops, the App is answered, and the work starts again.</summary>
     private sealed class GiveWay() : Exception("A request the App waits on comes first.");
+
+    /// <summary>No answer inside the App's own time limit, which is no fault of the server's.</summary>
+    /// <param name="Asked">False when there was no time left to make the request at all.</param>
+    private sealed record OutOfTime(string Text, bool Asked) : SendOutcome(Text);
 
     /// <summary>What a run did, for the App's Send now.</summary>
     private sealed class RunResult
