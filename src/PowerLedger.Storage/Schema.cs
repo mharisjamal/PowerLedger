@@ -87,4 +87,33 @@ internal static class Schema
             value TEXT NOT NULL
         );
         """;
+
+    /// <summary>Opt-in data sharing (data-sharing design §4): what each reading measured, and the outbox of minutes and
+    /// events waiting to be sent. Readings from before read 0: the model, the whole card, nothing measured.</summary>
+    public const string V2 = """
+        ALTER TABLE samples_raw ADD COLUMN total_source  INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE samples_raw ADD COLUMN gpu_scope     INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE samples_raw ADD COLUMN measured_mask INTEGER NOT NULL DEFAULT 0;
+
+        CREATE TABLE outbox_minutes (
+            start_ms INTEGER PRIMARY KEY, day TEXT NOT NULL, minute INTEGER NOT NULL,
+            avg_w REAL NOT NULL, max_w REAL NOT NULL,
+            cpu_w REAL NOT NULL, gpu_w REAL NOT NULL, display_w REAL NOT NULL, ram_w REAL NOT NULL, storage_w REAL NOT NULL,
+            board_w REAL NOT NULL, extras_w REAL NOT NULL, monitors_w REAL NOT NULL, psu_loss_w REAL NOT NULL,
+            unattributed_w REAL NOT NULL,
+            cpu_load REAL NOT NULL, gpu_load REAL, brightness REAL,
+            display_on_s REAL NOT NULL, idle_s REAL NOT NULL, locked_s REAL NOT NULL, battery_s REAL NOT NULL,
+            measured_s REAL NOT NULL, calibrated_s REAL NOT NULL, estimated_s REAL NOT NULL,
+            samples INTEGER NOT NULL, total_source INTEGER NOT NULL, gpu_scope INTEGER NOT NULL, measured_mask INTEGER NOT NULL
+        );
+        CREATE INDEX outbox_minutes_day ON outbox_minutes(day);
+
+        CREATE TABLE outbox_events (
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            day  TEXT NOT NULL,
+            kind TEXT NOT NULL,         -- 'crash' (one row each), 'usage' and 'sources' (one row a day, merged)
+            json TEXT NOT NULL
+        );
+        CREATE INDEX outbox_events_day ON outbox_events(day, kind);
+        """;
 }

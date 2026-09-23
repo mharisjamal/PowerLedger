@@ -4,7 +4,7 @@ namespace PowerLedger.Storage;
 
 public static class Migrator
 {
-    private static readonly IReadOnlyList<(int Version, string Sql)> Migrations = [(1, Schema.V1)];
+    private static readonly IReadOnlyList<(int Version, string Sql)> Migrations = [(1, Schema.V1), (2, Schema.V2)];
 
     public static int LatestVersion => Migrations[^1].Version;
 
