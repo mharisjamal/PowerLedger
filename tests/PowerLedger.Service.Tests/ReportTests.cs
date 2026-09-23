@@ -201,7 +201,7 @@ public class ReportTests
         {
             new SourceDto("energy-meter", "working", 0, null, null),
             new SourceDto("nvidia-gpu", "working", 0, null, "NVIDIA GeForce RTX 4070"),
-            new SourceDto("amd-gpu", "notOnMachine", 0, "No AMD graphics driver is installed.", "NVIDIA GeForce RTX 4070"),
+            new SourceDto("amd-gpu", "notOnMachine", 0, "No AMD graphics driver is installed.", null),
             new SourceDto("battery", "failing", 5, "The battery didn't answer.", null),
             new SourceDto("power-supply", "note", 0, "No power supply found on USB.", "Corsair HX1000i"),
             new SourceDto("ups", "working", 0, null, "APC Back-UPS ES 850G2"),
@@ -209,6 +209,49 @@ public class ReportTests
         var crash = diagnostics.Crashes.ShouldHaveSingleItem();
         (crash.At, crash.Component, crash.Version, crash.Message).ShouldBe(("2026-09-24T10:00:00.000Z", "app", "0.6.0", "Collection was modified."));
         crash.Types.ShouldBe(new[] { "System.InvalidOperationException" });
+    }
+
+    [Fact]
+    public void A_source_is_failing_and_has_a_last_error_only_from_the_failures_counted_that_day()
+    {
+        // The battery failed before Crash and sensor reports was on, and hasn't since; the UPS failed today, and its count
+        // started again from zero when the sensors were rebuilt.
+        var inputs = SharingFakes.Inputs() with
+        {
+            Status = SharingFakes.Status(sources:
+            [
+                new SourceStatus("battery", true, null, 4, "Failed before the switch was on."),
+                new SourceStatus("ups", true, null, 0, null),
+            ]),
+            Events = SharingFakes.Events with { Sources = new Dictionary<string, SourceDay> { ["ups"] = new(2, "The UPS didn't answer.") } },
+        };
+
+        ReportBuilder.Build(inputs).Diagnostics.ShouldNotBeNull().Sources.ShouldBe(new[]
+        {
+            new SourceDto("battery", "working", 0, null, null),
+            new SourceDto("ups", "failing", 2, "The UPS didn't answer.", "APC Back-UPS ES 850G2"),
+        });
+    }
+
+    [Fact]
+    public void A_graphics_card_is_named_only_by_the_source_that_reads_it()
+    {
+        // A laptop whose AMD processor's graphics has its driver, beside the NVIDIA card the inventory names.
+        var inputs = SharingFakes.Inputs() with
+        {
+            Facts = SharingFakes.Facts with { GpuName = "NVIDIA GeForce RTX 4060 Laptop GPU" },
+            Status = SharingFakes.Status(sources:
+            [
+                new SourceStatus("nvidia-gpu", true, null, 0, null),
+                new SourceStatus("amd-gpu", true, null, 0, null),
+                new SourceStatus("arc-gpu", false, "No Intel Arc graphics.", 0, null),
+            ]),
+        };
+
+        ReportBuilder.Build(inputs).Diagnostics.ShouldNotBeNull().Sources.Select(source => (source.Id, source.Device)).ShouldBe(new[]
+        {
+            ("nvidia-gpu", (string?)"NVIDIA GeForce RTX 4060 Laptop GPU"), ("amd-gpu", null), ("arc-gpu", null),
+        });
     }
 
     [Fact]
