@@ -325,7 +325,11 @@ internal sealed class SharingWorker : BackgroundService
 
         var diagnosticsSince = consent.Diagnostics ? (was.Diagnostics ? before?.DiagnosticsSinceMs ?? nowMs : nowMs) : (long?)null;
         _store.SaveConsent(new StoredConsent(consent, nowMs, diagnosticsSince));
-        if (_store.InstallId is not null) _store.ConsentPending = true;
+        if (_store.InstallId is not null)
+        {
+            _store.ConsentPending = true;
+            _store.ConsentBackoff = null;                                     // a new change goes at once, whatever an older one left
+        }
         _log.LogInformation(
             "Data sharing set: diagnostics {Diagnostics}, usage {Usage}, power {Power}, share {Share}",
             consent.Diagnostics, consent.Usage, consent.Power, consent.Share);

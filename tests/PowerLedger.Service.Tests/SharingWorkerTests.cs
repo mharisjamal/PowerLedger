@@ -304,6 +304,31 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_new_consent_change_that_gave_way_is_posted_right_after_whatever_back_off_an_earlier_one_left()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        _h.Client.Answer = _ => new SendOutcome.Unreachable("no network");
+        await _h.Consent(true, false, false);
+        _h.Store.ConsentBackoff.ShouldNotBeNull();                            // not again for an hour
+
+        _h.Clock.SetUtcNow(Local(24, 10, 10));
+        _h.Client.AnswerAsync = async (_, cancel) =>
+        {
+            _h.Commands.TryQueue(new PreviewCommand(3)).ShouldBeTrue();       // the App's next request, while it is posted
+            await Task.Delay(Timeout.Infinite, cancel);
+            return new SendOutcome.Accepted();
+        };
+        await _h.Consent(true, true, false);
+        _h.Client.AnswerAsync = null;
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        await _h.TakeAndRunAsync();
+        await _h.TickAsync();                                                 // the run that starts again once it is answered
+
+        _h.Store.ConsentPending.ShouldBeFalse();
+        _h.Client.Calls.Last(call => call.Kind == "consent").Consent.ShouldBe(new Consent(ConsentText.Version, true, true, false, false));
+    }
+
+    [Fact]
     public async Task A_consent_change_waiting_to_be_posted_backs_off_on_its_own_so_the_reports_keep_their_steps()
     {
         var reports = new List<DateTimeOffset>();
