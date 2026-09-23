@@ -188,7 +188,7 @@ internal sealed class SharingWorker : BackgroundService
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
-            command.Fail(new InvalidOperationException("The service is stopping."));
+            command.Answer(false, SharingCommands.Stopping);
             throw;
         }
         catch (Exception error)

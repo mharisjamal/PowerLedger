@@ -4,7 +4,8 @@ using PowerLedger.Contracts;
 namespace PowerLedger.Service.Sharing;
 
 /// <summary>Something only the sharing worker may do, sent from the pipe. <see cref="Reply"/> completes once the worker has
-/// done it, with what to tell the App.</summary>
+/// done it, with what to tell the App. It never faults: a command the worker couldn't take is answered no, since nobody
+/// may be waiting on it, and a fault nobody saw would be caught as a crash.</summary>
 internal abstract class SharingCommand(long id)
 {
     private readonly TaskCompletionSource<SharingReply> _reply = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -14,9 +15,8 @@ internal abstract class SharingCommand(long id)
 
     public Task<SharingReply> Reply => _reply.Task;
 
+    /// <summary>Answers once; later answers are ignored.</summary>
     internal void Answer(bool ok, string message, string? path = null) => _reply.TrySetResult(new SharingReply(Id, ok, message, path));
-
-    internal void Fail(Exception error) => _reply.TrySetException(error);
 }
 
 /// <summary>The user's answer, from the dialog or Settings → Privacy.</summary>
@@ -59,20 +59,23 @@ internal sealed class SharingCommands
 
     public ChannelReader<SharingCommand> Reader => _channel.Reader;
 
+    internal const string Stopping = "The service is stopping.";
+    internal const string Busy = "The service is busy. Try again in a moment.";
+
     /// <summary>Queues the command for the worker.</summary>
-    /// <returns>False when the inbox is full or the service is stopping; the command has then failed.</returns>
+    /// <returns>False when the inbox is full or the service is stopping; the command has then been answered no.</returns>
     public bool TryQueue(SharingCommand command)
     {
         if (_channel.Writer.TryWrite(command)) return true;
-        command.Fail(new InvalidOperationException(_closed ? "The service is stopping." : "The service is busy. Try again in a moment."));
+        command.Answer(false, _closed ? Stopping : Busy);
         return false;
     }
 
-    /// <summary>Closes the inbox and fails whatever is still queued, so no request waits for ever.</summary>
+    /// <summary>Closes the inbox and answers whatever is still queued, so no request waits for ever.</summary>
     internal void Close()
     {
         _closed = true;
         _channel.Writer.TryComplete();
-        while (_channel.Reader.TryRead(out var command)) command.Fail(new InvalidOperationException("The service is stopping."));
+        while (_channel.Reader.TryRead(out var command)) command.Answer(false, Stopping);
     }
 }

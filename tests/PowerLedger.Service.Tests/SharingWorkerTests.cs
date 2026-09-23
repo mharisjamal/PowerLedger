@@ -461,7 +461,7 @@ public sealed class SharingWorkerTests : IDisposable
         }
         var late = new PreviewCommand(3);
         _h.Commands.TryQueue(late).ShouldBeFalse();
-        await Should.ThrowAsync<InvalidOperationException>(() => late.Reply);
+        (await late.Reply).ShouldBe(new SharingReply(3, false, "The service is stopping."));
     }
 
     public void Dispose() => _h.Dispose();
