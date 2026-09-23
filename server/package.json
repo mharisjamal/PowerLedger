@@ -1,0 +1,22 @@
+{
+  "name": "powerledger-data",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run && node --test tools/",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "types": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260923.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.137.0"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1"
+  }
+}
