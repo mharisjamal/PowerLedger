@@ -141,15 +141,20 @@ internal static partial class ReportBuilder
             });
     }
 
-    /// <summary>The minutes as columns: watts and seconds to a tenth, loads and brightness to a thousandth.</summary>
     /// <summary>The highest price per kWh the pipe accepts and the schema takes, with room for currencies of small units.</summary>
     private const decimal MaxPricePerKwh = 1_000_000m;
 
+    /// <summary>The minutes as columns: watts and seconds to a tenth, loads and brightness to a thousandth.</summary>
     private static MinutesDto Minutes(IReadOnlyList<MinuteRow> all)
     {
         // A minute the server would refuse would take the whole day with it, so one with a figure past its ranges (a
-        // monitor's typed figure absurdly high, say) is left out instead.
-        var minutes = all.Where(WithinServerRanges).ToList();
+        // monitor's typed figure absurdly high, say) is left out instead, and so is one whose index doesn't come after the
+        // last kept, as the server wants them rising: after the time zone changes, a day's minutes can repeat or fall back.
+        var minutes = new List<MinuteRow>(all.Count);
+        foreach (var minute in all.Where(WithinServerRanges))
+        {
+            if (minutes.Count == 0 || minute.Minute > minutes[^1].Minute) minutes.Add(minute);
+        }
         double[] Tenths(Func<MinuteRow, double> column) => [.. minutes.Select(minute => Round(column(minute), 1))];
         double[] Thousandths(Func<MinuteRow, double> column) => [.. minutes.Select(minute => Round(column(minute), 3))];
         double?[] Optional(Func<MinuteRow, double?> column) =>

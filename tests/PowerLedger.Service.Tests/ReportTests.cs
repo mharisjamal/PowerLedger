@@ -164,6 +164,23 @@ public class ReportTests
         ReportSchema.Problems(ReportJson.Write(report)).ShouldBeNull();
     }
 
+    [Fact]
+    public void A_minute_that_doesnt_come_after_the_last_one_kept_is_left_out_so_the_day_still_goes()
+    {
+        // Oldest first, as the outbox gives them: the time zone moved back an hour at 10:02, so the day's minutes run
+        // 600-602 then again from 542, and a minute the server would refuse comes before a good one of the same index.
+        int[] indexes = [600, 601, 602, 542, 543, 603, 603, 700, 650];
+        var minutes = indexes.Select((t, i) => SharingFakes.Minute(t) with { StartMs = SharingFakes.At.AddMinutes(i).ToUnixTimeMilliseconds() }).ToList();
+        minutes[5] = minutes[5] with { AvgW = 9100, MaxW = 9100 };
+        var inputs = SharingFakes.Inputs() with { Minutes = minutes };
+
+        var report = ReportBuilder.Build(inputs);
+
+        report.Power.ShouldNotBeNull().Minutes.T.ShouldBe([600, 601, 602, 603, 700]);
+        report.Power.Minutes.AvgW.ShouldAllBe(watts => watts == 142.3);
+        ReportSchema.Problems(ReportJson.Write(report)).ShouldBeNull();
+    }
+
     [Theory]
     [InlineData("NVIDIA GeForce RTX 4070", "nvidia")]
     [InlineData("AMD Radeon RX 7800 XT", "amd")]
