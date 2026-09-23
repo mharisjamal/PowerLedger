@@ -498,6 +498,61 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task How_sharing_stands_is_published_before_the_first_runs_requests_go()
+    {
+        // A consent change the server hasn't heard, so the first run starts with a request that takes its time.
+        _h.Clock.SetUtcNow(Local(24, 10));
+        var consent = new Consent(ConsentText.Version, true, false, false, false);
+        _h.Store.SaveConsent(new StoredConsent(consent, Local(24, 9).ToUnixTimeMilliseconds(), Local(24, 9).ToUnixTimeMilliseconds()));
+        _h.Store.Identity();
+        _h.Store.ConsentPending = true;
+        var calling = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource<SendOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _h.Client.AnswerAsync = (_, cancel) =>
+        {
+            calling.TrySetResult();
+            return answer.Task.WaitAsync(cancel);
+        };
+
+        await _h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await calling.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().Consent.ShouldBe(consent);
+        }
+        finally
+        {
+            answer.TrySetResult(new SendOutcome.Accepted());
+            await _h.Worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task A_state_that_cannot_be_published_neither_fails_a_request_nor_stops_the_worker()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        new SettingsRepository(_h.Database.Db).Set(SharingStore.LastSentKey, $"{{\"atMs\":{long.MaxValue},\"bytes\":1}}");
+
+        (await _h.Consent(true, false, false)).Ok.ShouldBeTrue();
+
+        await _h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            foreach (var id in new long[] { 2, 3 })
+            {
+                var preview = new PreviewCommand(id);
+                _h.Commands.TryQueue(preview).ShouldBeTrue();
+                (await preview.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+            }
+            _h.Worker.ExecuteTask.ShouldNotBeNull().IsCompleted.ShouldBeFalse();
+        }
+        finally
+        {
+            await _h.Worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task Running_it_ticks_at_start_and_answers_commands()
     {
         _h.Clock.SetUtcNow(Local(24, 10));
@@ -592,25 +647,37 @@ public sealed class SharingWorkerTests : IDisposable
 /// <summary>A data server that answers as a test says, keeping every request.</summary>
 internal sealed class FakeSharingClient : ISharingClient
 {
-    public List<SharingCall> Calls { get; } = [];
+    private readonly List<SharingCall> _calls = [];
+
+    /// <summary>A copy of the requests so far, safe to read while the worker runs.</summary>
+    public List<SharingCall> Calls
+    {
+        get
+        {
+            lock (_calls) return [.. _calls];
+        }
+    }
 
     public Func<SharingCall, SendOutcome> Answer { get; set; } = _ => new SendOutcome.Accepted();
+
+    /// <summary>When set, answers in its own time instead of <see cref="Answer"/>, given the request's token.</summary>
+    public Func<SharingCall, CancellationToken, Task<SendOutcome>>? AnswerAsync { get; set; }
 
     public IEnumerable<ReportV1> Reports => Calls.Where(call => call.Report is not null).Select(call => call.Report!);
 
     public Task<SendOutcome> SendReportAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
-        Record(new SharingCall("report", key, null, null, ReportJson.Read(Gunzip(gzipBody)), gzipBody));
+        Record(new SharingCall("report", key, null, null, ReportJson.Read(Gunzip(gzipBody)), gzipBody), cancel);
 
     public Task<SendOutcome> SendConsentAsync(string installId, string key, Consent consent, CancellationToken cancel = default) =>
-        Record(new SharingCall("consent", key, installId, consent, null, []));
+        Record(new SharingCall("consent", key, installId, consent, null, []), cancel);
 
     public Task<SendOutcome> DeleteAsync(string installId, string key, CancellationToken cancel = default) =>
-        Record(new SharingCall("delete", key, installId, null, null, []));
+        Record(new SharingCall("delete", key, installId, null, null, []), cancel);
 
-    private Task<SendOutcome> Record(SharingCall call)
+    private Task<SendOutcome> Record(SharingCall call, CancellationToken cancel)
     {
-        Calls.Add(call);
-        return Task.FromResult(Answer(call));
+        lock (_calls) _calls.Add(call);
+        return AnswerAsync is { } later ? later(call, cancel) : Task.FromResult(Answer(call));
     }
 
     private static byte[] Gunzip(byte[] body)

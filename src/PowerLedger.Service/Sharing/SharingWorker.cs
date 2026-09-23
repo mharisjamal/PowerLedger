@@ -103,7 +103,7 @@ internal sealed class SharingWorker : BackgroundService
                     inbox = null;
                     while (!stop.IsCancellationRequested && _commands.Reader.TryRead(out var command))
                     {
-                        await HandleAsync(command, stop).ConfigureAwait(false);
+                        await HandleSafelyAsync(command, stop).ConfigureAwait(false);
                     }
                 }
 
@@ -124,9 +124,11 @@ internal sealed class SharingWorker : BackgroundService
         }
     }
 
-    /// <summary>The five-minute run (data-sharing design §4), then how sharing stands published for the status.</summary>
+    /// <summary>The five-minute run (data-sharing design §4), with how sharing stands published for the status before it
+    /// starts, as its requests can take minutes, and again once it is done.</summary>
     internal async Task TickAsync(CancellationToken stop)
     {
+        Publish();
         try
         {
             await RunAsync(stop).ConfigureAwait(false);
@@ -215,7 +217,7 @@ internal sealed class SharingWorker : BackgroundService
     }
 
     /// <summary>How sharing stands, for Settings → Privacy: the consent, the ID, the last upload, the last problem and the
-    /// complete days waiting.</summary>
+    /// complete days waiting. It never throws: the status keeps what was last published, and a request or a run goes on.</summary>
     private void Publish()
     {
         try
@@ -228,7 +230,7 @@ internal sealed class SharingWorker : BackgroundService
                 consent, _store.InstallId, last is null ? null : DateTimeOffset.FromUnixTimeMilliseconds(last.AtMs), last?.Bytes,
                 problem?.Text, problem?.Rejected ?? false, consent.AllowsAny ? CompleteDays(now, consent).Count : 0));
         }
-        catch (Exception error) when (error is Microsoft.Data.Sqlite.SqliteException or IOException)
+        catch (Exception error) when (error is not OperationCanceledException)
         {
             _log.LogWarning(error, "How sharing stands could not be read for the status");
         }
@@ -243,6 +245,21 @@ internal sealed class SharingWorker : BackgroundService
         catch (Exception error) when (error is not OperationCanceledException || !stop.IsCancellationRequested)
         {
             _log.LogError(error, "Data sharing's five-minute run failed");
+        }
+    }
+
+    /// <summary>A request whatever happens, as the five-minute run is: anything thrown out of the worker would stop the whole
+    /// service.</summary>
+    private async Task HandleSafelyAsync(SharingCommand command, CancellationToken stop)
+    {
+        try
+        {
+            await HandleAsync(command, stop).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException || !stop.IsCancellationRequested)
+        {
+            _log.LogError(error, "{Command} failed", command.GetType().Name);
+            command.Answer(false, $"That didn't work: {error.Message}");
         }
     }
 
