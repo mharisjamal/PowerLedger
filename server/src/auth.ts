@@ -17,9 +17,8 @@ export function bearer(request: Request): string | null {
 }
 
 /** crypto.subtle.timingSafeEqual only promises constant time for equal-length inputs, so the
- * lengths are checked first (sha256hex always returns 64 hex characters, so this only differs
- * from that promise for malformed input). */
-function timingSafeEqualHex(a: string, b: string): boolean {
+ * lengths are checked first. Shared by the install key check here and the admin token check. */
+export function timingSafeEqualStrings(a: string, b: string): boolean {
   const aBytes = new TextEncoder().encode(a);
   const bBytes = new TextEncoder().encode(b);
   return aBytes.byteLength === bBytes.byteLength && crypto.subtle.timingSafeEqual(aBytes, bBytes);
@@ -52,7 +51,7 @@ export async function checkInstall(env: Cloudflare.Env, id: string, key: string)
     return "new";
   }
 
-  return timingSafeEqualHex(row.key_hash, hash) ? "ok" : "mismatch";
+  return timingSafeEqualStrings(row.key_hash, hash) ? "ok" : "mismatch";
 }
 
 /** Upserts today's (UTC) request count for `id` and returns the new total. Shared by /v1/report,

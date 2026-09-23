@@ -1,3 +1,4 @@
+import { handleAdmin } from "./admin";
 import { handleConsent, handleDelete } from "./install";
 import { handleReport } from "./report";
 
@@ -13,6 +14,9 @@ export default {
     }
     if (request.method === "POST" && url.pathname === "/v1/delete") {
       return handleDelete(request, env);
+    }
+    if (url.pathname.startsWith("/admin/")) {
+      return handleAdmin(request, env);
     }
 
     return Response.json({ error: "Not found." }, { status: 404 });
