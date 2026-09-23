@@ -1,6 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
+using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
@@ -301,6 +304,31 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_new_consent_change_that_gave_way_is_posted_right_after_whatever_back_off_an_earlier_one_left()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        _h.Client.Answer = _ => new SendOutcome.Unreachable("no network");
+        await _h.Consent(true, false, false);
+        _h.Store.ConsentBackoff.ShouldNotBeNull();                            // not again for an hour
+
+        _h.Clock.SetUtcNow(Local(24, 10, 10));
+        _h.Client.AnswerAsync = async (_, cancel) =>
+        {
+            _h.Commands.TryQueue(new PreviewCommand(3)).ShouldBeTrue();       // the App's next request, while it is posted
+            await Task.Delay(Timeout.Infinite, cancel);
+            return new SendOutcome.Accepted();
+        };
+        await _h.Consent(true, true, false);
+        _h.Client.AnswerAsync = null;
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        await _h.TakeAndRunAsync();
+        await _h.TickAsync();                                                 // the run that starts again once it is answered
+
+        _h.Store.ConsentPending.ShouldBeFalse();
+        _h.Client.Calls.Last(call => call.Kind == "consent").Consent.ShouldBe(new Consent(ConsentText.Version, true, true, false, false));
+    }
+
+    [Fact]
     public async Task A_consent_change_waiting_to_be_posted_backs_off_on_its_own_so_the_reports_keep_their_steps()
     {
         var reports = new List<DateTimeOffset>();
@@ -419,6 +447,74 @@ public sealed class SharingWorkerTests : IDisposable
         _h.Client.Calls.Where(call => call.Kind == "delete").ShouldBeEmpty();
         _h.Store.InstallId.ShouldBeNull();
         _h.Store.Consent.ShouldBe(new Consent(ConsentText.Version, false, false, false, false));
+    }
+
+    [Fact]
+    public async Task Delete_with_a_key_this_account_cannot_read_quotes_the_id_an_earlier_unreadable_key_left_too()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true);
+        var first = _h.Store.InstallId.ShouldNotBeNull();
+        var settings = new SettingsRepository(_h.Database.Db);
+        settings.Set(SharingStore.KeyKey, "not a key this account protected");
+        await _h.Consent(true, true, false);                                  // a new ID
+        var second = _h.Store.InstallId.ShouldNotBeNull();
+        settings.Set(SharingStore.KeyKey, "not one either");
+
+        var reply = await _h.Run(new DeleteMyDataCommand(10));
+
+        reply.ShouldBe(new SharingReply(10, false, "This PC's key can't be read, so the server can't be asked to delete what it holds. "
+            + $"Every switch is now off. To have it deleted, write to the address in the privacy policy, quoting the install IDs {second} and {first}."));
+    }
+
+    [Fact]
+    public async Task A_key_that_cannot_be_read_gives_way_to_a_new_id_that_starts_clean_and_the_old_one_is_kept_to_quote()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(true, true, true, share: true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+        await _h.TickAsync();                                                 // sent with the parts
+        var old = _h.Store.InstallId.ShouldNotBeNull();
+        new SettingsRepository(_h.Database.Db).Set(SharingStore.KeyKey, "not a key this account protected");   // copied from another PC
+
+        _h.Clock.SetUtcNow(Local(24, 10));
+        (await _h.Consent(true, true, true)).Ok.ShouldBeTrue();              // Share my detailed data turned off
+
+        var id = _h.Store.InstallId.ShouldNotBeNull();
+        (id == old, _h.Store.PreviousId).ShouldBe((false, old));
+        _h.Client.Calls.Where(call => call.Kind == "consent").Select(call => call.InstallId).ShouldBe(new[] { old, id });
+        _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().Problem.ShouldBe(Unheard(old));   // the server keeps its share on
+
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-24")]);
+        _h.Clock.SetUtcNow(Local(25, 1, 1));
+        await _h.TickAsync();
+        var report = _h.Client.Reports.Last();
+        (report.InstallId, report.Power.ShouldNotBeNull().Hardware is not null).ShouldBe((id, true));   // the new ID's first upload
+
+        (await _h.Run(new DeleteMyDataCommand(3))).ShouldBe(new SharingReply(3, false,
+            $"Your data has been deleted from the server. What was sent under the install ID {old}, whose key this PC couldn't read, "
+            + "can't be deleted from here: to have it deleted, write to the address in the privacy policy, quoting that ID."));
+        _h.Client.Calls.Where(call => call.Kind == "delete").Select(call => call.InstallId).ShouldBe(new[] { id });
+        (await _h.Run(new DeleteMyDataCommand(4))).ShouldBe(new SharingReply(4, false,
+            $"Every switch is now off. What was sent under the install ID {old}, whose key this PC couldn't read, "
+            + "can't be deleted from here: to have it deleted, write to the address in the privacy policy, quoting that ID."));
+    }
+
+    [Fact]
+    public async Task A_consent_change_the_server_cant_be_told_of_as_the_key_cannot_be_read_is_said_so_not_taken_as_heard()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true, share: true);
+        var id = _h.Store.InstallId.ShouldNotBeNull();
+        new SettingsRepository(_h.Database.Db).Set(SharingStore.KeyKey, "not a key this account protected");
+
+        (await _h.Consent(false, false, false)).Ok.ShouldBeTrue();          // everything withdrawn, share with it
+
+        _h.Client.Calls.Where(call => call.Kind == "consent").Select(call => call.InstallId).ShouldBe(new[] { id });
+        (_h.Store.ConsentPending, _h.Store.InstallId).ShouldBe((false, id));
+        _h.Store.Problem.ShouldBe(new SendProblem(Unheard(id), Rejected: false));
+        _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().Problem.ShouldBe(Unheard(id));
     }
 
     [Fact]
@@ -543,6 +639,48 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_day_built_before_the_time_zone_changed_goes_with_the_offset_its_minutes_count_from()
+    {
+        // Built at home in UTC+2, sent after the laptop started up in UTC-4.
+        _h.Clock.SetUtcNow(Local(24, 9));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(Local(24, 10, 40));
+        await _h.TickAsync();
+
+        _h.Clock.SetLocalTimeZone(West);
+        _h.Clock.SetUtcNow(new DateTimeOffset(2026, 9, 25, 1, 1, 0, TimeSpan.FromHours(-4)));   // tonight's minute where it is now
+        await _h.TickAsync();
+
+        var report = _h.Client.Reports.ShouldHaveSingleItem();
+        (report.Day, report.UtcOffsetMinutes).ShouldBe(("2026-09-24", 120));
+        Decoded(report).ShouldBe(Starts(Local(24, 10), 30));
+    }
+
+    [Fact]
+    public async Task A_day_built_partly_in_each_of_two_time_zones_sends_every_minute_at_its_own_time()
+    {
+        _h.Clock.SetUtcNow(Local(24, 9));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(Local(24, 10, 40));
+        await _h.TickAsync();                                                   // 10:00 to 10:30 in UTC+2: minutes 600 to 629
+
+        _h.Clock.SetLocalTimeZone(West);                                        // the service starts up again in UTC-4
+        var west = new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.FromHours(-4));
+        _h.Readings(west, TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(west.AddMinutes(40));
+        await _h.TickAsync();                                                   // the same day there, and the same minutes
+
+        _h.Clock.SetUtcNow(new DateTimeOffset(2026, 9, 25, 1, 1, 0, TimeSpan.FromHours(-4)));
+        await _h.TickAsync();
+
+        var report = _h.Client.Reports.ShouldHaveSingleItem();
+        report.Day.ShouldBe("2026-09-24");
+        Decoded(report).ShouldBe(Starts(Local(24, 10), 30).Concat(Starts(west, 30)).ToArray());
+    }
+
+    [Fact]
     public async Task Send_now_says_what_happened()
     {
         _h.Clock.SetUtcNow(Local(24, 0, 30));
@@ -558,6 +696,47 @@ public sealed class SharingWorkerTests : IDisposable
         var rejected = await _h.Run(new SendNowCommand(2));
         (rejected.Ok, rejected.Message).ShouldBe((false, "Rejected by the server: the minutes must rise."));
         _h.Outbox.Days().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Send_now_running_out_of_the_apps_time_is_no_fault_of_the_servers_so_it_is_no_problem_and_no_back_off()
+    {
+        _h.Clock.SetUtcNow(Local(24, 9));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        _h.Client.AnswerAsync = async (call, cancel) =>
+        {
+            if (call.Kind == "report") await Task.Delay(Timeout.Infinite, cancel);   // slower than the App waits
+            return new SendOutcome.Accepted();
+        };
+        var send = new SendNowCommand(2);
+        _h.Commands.TryQueue(send).ShouldBeTrue();
+
+        var handling = _h.TakeAndRunAsync();
+        _h.Clock.Advance(SharingWorker.AppWait);
+
+        (await send.Reply.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBe(
+            new SharingReply(2, false, "Couldn't send: the server didn't answer in time. Will try again."));
+        await handling;
+        (_h.Store.Problem, _h.Store.Backoff).ShouldBe((null, null));
+    }
+
+    [Fact]
+    public async Task Send_now_with_no_time_left_to_ask_the_server_leaves_the_upload_it_missed_due()
+    {
+        _h.Clock.SetUtcNow(Local(24, 9));                                     // the PC was off at tonight's minute
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        var send = new SendNowCommand(2);
+        _h.Commands.TryQueue(send).ShouldBeTrue();
+        _h.Clock.Advance(SharingWorker.AppWait);                              // all the App waits, behind another request
+
+        await _h.TakeAndRunAsync();
+
+        (await send.Reply).ShouldBe(new SharingReply(2, true, "Nothing went in time; the rest will go at the next chance."));
+        (_h.Client.Reports.Count(), _h.Store.LastRun, _h.Store.Problem, _h.Store.Backoff).ShouldBe((0, null, null, null));
+        await _h.TickAsync();
+        _h.Client.Reports.ShouldHaveSingleItem().Day.ShouldBe("2026-09-23");
     }
 
     [Fact]
@@ -667,6 +846,39 @@ public sealed class SharingWorkerTests : IDisposable
 
         _h.Client.Reports.Select(report => report.Day).ShouldBe(new[] { "2026-09-23", "2026-09-23" });   // gave way, then went
         (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
+    }
+
+    [Fact]
+    public async Task A_run_that_gave_way_starts_again_only_once_the_request_it_gave_way_to_is_answered()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        WakeLate(_h.Commands, TimeSpan.FromMilliseconds(20));
+        var uploads = new SemaphoreSlim(0);
+        _h.Client.AnswerAsync = async (call, cancel) =>
+        {
+            if (call.Kind == "report")
+            {
+                uploads.Release();
+                await Task.Delay(Timeout.Infinite, cancel);                     // every upload takes until it gives way
+            }
+            return new SendOutcome.Accepted();
+        };
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+
+        await _h.Running(async () =>
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                (await uploads.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBeTrue();
+                var preview = new PreviewCommand(i);
+                _h.Commands.TryQueue(preview).ShouldBeTrue();
+                (await preview.Reply.WaitAsync(TimeSpan.FromSeconds(5))).Ok.ShouldBeTrue();
+            }
+        });
+
+        _h.RunsStartedWhileTheAppWaited.ShouldBe(0);
     }
 
     [Fact]
@@ -831,6 +1043,38 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task The_clock_set_while_a_request_waits_neither_spends_nor_stretches_the_apps_wait()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true);
+        var delete = new DeleteMyDataCommand(2);
+        _h.Commands.TryQueue(delete).ShouldBeTrue();
+        _h.Wall.Step = TimeSpan.FromHours(1);                                  // Windows sets the clock an hour on
+
+        await _h.TakeAndRunAsync();
+
+        (await delete.Reply).ShouldBe(new SharingReply(2, true, "Your data has been deleted from the server."));
+
+        await _h.Consent(true, true, true);
+        _h.Client.AnswerAsync = async (_, cancel) =>
+        {
+            await Task.Delay(Timeout.Infinite, cancel);                        // the server never answers
+            return new SendOutcome.Accepted();
+        };
+        var late = new DeleteMyDataCommand(3);
+        _h.Commands.TryQueue(late).ShouldBeTrue();
+        _h.Clock.Advance(TimeSpan.FromSeconds(7));                             // seven seconds behind another request
+        _h.Wall.Step -= TimeSpan.FromHours(2);                                 // and the clock set back meanwhile
+
+        var handling = _h.TakeAndRunAsync();
+        _h.Clock.Advance(TimeSpan.FromSeconds(1));                             // the App's eight seconds are up
+
+        (await late.Reply.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBe(
+            new SharingReply(3, false, "Couldn't delete your data: the server didn't answer in time. Nothing was changed."));
+        await handling;
+    }
+
+    [Fact]
     public async Task Running_it_ticks_at_start_and_answers_commands()
     {
         _h.Clock.SetUtcNow(Local(24, 10));
@@ -859,15 +1103,50 @@ public sealed class SharingWorkerTests : IDisposable
     private static CrashReport Crash(DateTimeOffset at) =>
         new(at, "app", "0.6.0", ["System.InvalidOperationException"], "Collection was modified.", "   at X()");
 
+    /// <summary>
+    /// Has the inbox say it holds a request only <paramref name="lag"/> after it does, as when the pool thread that says so
+    /// runs late on a busy PC. The inbox's channel is its own, so it is swapped in by reflection.
+    /// </summary>
+    private static void WakeLate(SharingCommands commands, TimeSpan lag)
+    {
+        var channel = typeof(SharingCommands).GetField("_channel", BindingFlags.NonPublic | BindingFlags.Instance).ShouldNotBeNull();
+        channel.SetValue(commands, new LateChannel((Channel<SharingCommand>)channel.GetValue(commands)!, lag));
+    }
+
+    /// <summary>What the status says of a consent change the server can't be told of, as the key for <paramref name="id"/>
+    /// can't be read.</summary>
+    private static string Unheard(string id) =>
+        $"this PC's key can't be read, so the server wasn't told of your choices for install ID {id}. To have them applied to what "
+        + "was sent under it, write to the address in the privacy policy, quoting that ID";
+
+    /// <summary>UTC-4, where a laptop from the harness's UTC+2 starts up after travelling west.</summary>
+    private static readonly TimeZoneInfo West = TimeZoneInfo.CreateCustomTimeZone("PL-4", TimeSpan.FromHours(-4), "PL-4", "PL-4");
+
+    /// <summary>Each minute's UTC start as a reader of the report works it out: the day's midnight, less the header's offset,
+    /// plus the minute's index.</summary>
+    private static DateTimeOffset[] Decoded(ReportV1 report)
+    {
+        var midnight = new DateTimeOffset(LocalDays.Parse(report.Day).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        return [.. report.Power.ShouldNotBeNull().Minutes.T.Select(index => midnight.AddMinutes(index - report.UtcOffsetMinutes))];
+    }
+
+    /// <summary>The UTC starts of <paramref name="count"/> minutes from <paramref name="from"/>.</summary>
+    private static DateTimeOffset[] Starts(DateTimeOffset from, int count) =>
+        [.. Enumerable.Range(0, count).Select(i => from.AddMinutes(i).ToUniversalTime())];
+
     /// <summary>The worker wired to a temp database, a fake server, a fake clock in a UTC+2 zone and a board the loop would
-    /// have published to; its ticks and commands are run by the test, one at a time.</summary>
+    /// have published to; its ticks and commands are run by the test, one at a time. The worker and its inbox see the clock
+    /// through <see cref="Wall"/>, whose time can be set apart from its timestamps and timers.</summary>
     private sealed class Harness : IDisposable
     {
         private static readonly TimeZoneInfo Zone = TimeZoneInfo.CreateCustomTimeZone("PL+2", TimeSpan.FromHours(2), "PL+2", "PL+2");
 
+        private int _runsStartedWhileTheAppWaited;
+
         public Harness()
         {
-            Commands = new SharingCommands(Clock);
+            Wall = new SetClock(Clock);
+            Commands = new SharingCommands(Wall);
             Clock.SetLocalTimeZone(Zone);
             Board.Publish(SharingFakes.Settings);
             Board.Publish(SharingFakes.Status());
@@ -875,14 +1154,15 @@ public sealed class SharingWorkerTests : IDisposable
             Board.PublishDiscreteGpu(true);
             Directory.CreateDirectory(Sent);
             Directory.CreateDirectory(Crashes);
-            var environment = new SharingEnvironment(Sent, Crashes, () => new ScrubNames("alice", "DESKTOP-TEST", "CONTOSO"), () => SharingFakes.Host,
-                () => SendMinute);
-            Worker = new SharingWorker(Database.Db, Board, Commands, Client, environment, Clock, NullLogger<SharingWorker>.Instance);
+            var environment = new SharingEnvironment(Sent, Crashes, Names, () => SharingFakes.Host, () => SendMinute);
+            Worker = new SharingWorker(Database.Db, Board, Commands, Client, environment, Wall, NullLogger<SharingWorker>.Instance);
         }
 
         public TestDatabase Database { get; } = new();
 
         public FakeTimeProvider Clock { get; } = new(Local(24, 0));
+
+        public SetClock Wall { get; }
 
         public StatusBoard Board { get; } = new();
 
@@ -891,6 +1171,10 @@ public sealed class SharingWorkerTests : IDisposable
         public FakeSharingClient Client { get; } = new();
 
         public SharingWorker Worker { get; }
+
+        /// <summary>How many runs have started while a request the App waits on was queued: a run asks for the names to scrub
+        /// first thing. (A request's handling asks after taking it, and a run's upload before it goes.)</summary>
+        public int RunsStartedWhileTheAppWaited => Volatile.Read(ref _runsStartedWhileTheAppWaited);
 
         public string Sent => Path.Combine(Database.Folder, "Sent");
 
@@ -925,6 +1209,13 @@ public sealed class SharingWorkerTests : IDisposable
             return await command.Reply;
         }
 
+        /// <summary>Takes the next request from the inbox and carries it out, as the running worker does.</summary>
+        public Task TakeAndRunAsync()
+        {
+            Commands.TryTake(out var command).ShouldBeTrue();
+            return Worker.HandleAsync(command, CancellationToken.None);
+        }
+
         public Task<SharingReply> Consent(bool diagnostics, bool usage, bool power, bool share = false) =>
             Run(new SetConsentCommand(1, new Consent(ConsentText.Version, diagnostics, usage, power, share)));
 
@@ -935,6 +1226,12 @@ public sealed class SharingWorkerTests : IDisposable
         /// <summary>A crash file as the service writes one when it crashes.</summary>
         public void CrashFile(DateTimeOffset at, string message = "Boom.") =>
             ServiceCrashes.TryWrite(Crashes, new InvalidOperationException(message), at, "0.6.0").ShouldNotBeNull();
+
+        private ScrubNames Names()
+        {
+            if (Commands.AppWaiting) Interlocked.Increment(ref _runsStartedWhileTheAppWaited);
+            return new ScrubNames("alice", "DESKTOP-TEST", "CONTOSO");
+        }
 
         public void Dispose() => Database.Dispose();
     }
@@ -986,3 +1283,43 @@ internal sealed class FakeSharingClient : ISharingClient
 
 /// <param name="Kind"><c>report</c>, <c>consent</c> or <c>delete</c>.</param>
 internal sealed record SharingCall(string Kind, string Key, string? InstallId, Consent? Consent, ReportV1? Report, byte[] Body);
+
+/// <summary>A fake clock whose time can be set by <see cref="Step"/>, as Windows sets the PC's clock, while its timestamps
+/// and timers go on as before, as the system's do. (<see cref="FakeTimeProvider"/>'s timestamps follow its time.)</summary>
+internal sealed class SetClock(FakeTimeProvider inner) : TimeProvider
+{
+    public TimeSpan Step { get; set; }
+
+    public override TimeZoneInfo LocalTimeZone => inner.LocalTimeZone;
+
+    public override long TimestampFrequency => inner.TimestampFrequency;
+
+    public override DateTimeOffset GetUtcNow() => inner.GetUtcNow() + Step;
+
+    public override long GetTimestamp() => inner.GetTimestamp();
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+        inner.CreateTimer(callback, state, dueTime, period);
+}
+
+/// <summary>A channel whose reader says it has something to read only a set time after it has.</summary>
+internal sealed class LateChannel : Channel<SharingCommand>
+{
+    public LateChannel(Channel<SharingCommand> inner, TimeSpan lag)
+    {
+        Reader = new LateReader(inner.Reader, lag);
+        Writer = inner.Writer;
+    }
+
+    private sealed class LateReader(ChannelReader<SharingCommand> inner, TimeSpan lag) : ChannelReader<SharingCommand>
+    {
+        public override bool TryRead([MaybeNullWhen(false)] out SharingCommand item) => inner.TryRead(out item);
+
+        public override async ValueTask<bool> WaitToReadAsync(CancellationToken cancel = default)
+        {
+            var more = await inner.WaitToReadAsync(cancel).ConfigureAwait(false);
+            await Task.Delay(lag, cancel).ConfigureAwait(false);
+            return more;
+        }
+    }
+}

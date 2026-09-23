@@ -45,16 +45,22 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     internal const string ConsentBackoffKey = "sharing.consent-backoff";
     internal const string LastRunKey = "sharing.last-run";
     internal const string SentThroughKey = "sharing.sent-through";
+    internal const string PreviousIdKey = "sharing.previous-id";
 
     public const int FirstSendMinute = 10;
     public const int LastSendMinute = 359;
 
-    /// <summary>What forgetting removes: everything the server knew this PC by and all progress. The send minute stays.</summary>
+    /// <summary>What forgetting removes: everything the server knew this PC by and all progress. The send minute stays, and
+    /// so does the <see cref="PreviousId"/>, which only writing in can have the server forget.</summary>
     private static readonly string[] Forgotten =
     [
         IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, ConsentBackoffKey, LastRunKey,
         SentThroughKey,
     ];
+
+    /// <summary>What a new ID starts without: what was kept of the one before about the server. What this PC collected, and
+    /// when it last ran, stay.</summary>
+    private static readonly string[] OfTheId = [LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, ConsentBackoffKey];
 
     /// <summary>Mixed into the key's encryption, so no other program running as the same account reads it back by chance.</summary>
     private static readonly byte[] KeyEntropy = "PowerLedger data sharing install key"u8.ToArray();
@@ -70,19 +76,31 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
 
     public string? InstallId => settings.Get(IdKey);
 
+    /// <summary>The ID this PC sent under before its key couldn't be read and <see cref="Identity"/> made a new one, or null.
+    /// The server keeps what was sent under it, and only writing in, quoting it, can have that deleted.</summary>
+    public string? PreviousId => settings.Get(PreviousIdKey);
+
     /// <summary>The install key, or null when there is none or the one kept can't be decrypted by this account, as when the
     /// database came from another PC; without its key an ID is no use, so the next <see cref="Identity"/> makes both anew.</summary>
     public string? Key => Unprotect(settings.Get(KeyKey));
 
     /// <summary>The install's ID, a random GUID, and its key, 32 random bytes in base64url: made the first time a switch is
-    /// turned on and kept until forgotten.</summary>
+    /// turned on and kept until forgotten. An ID whose key can't be read is replaced: it is kept as the
+    /// <see cref="PreviousId"/>, and the new one starts without what was kept about the server for the old.</summary>
     public (string Id, string Key) Identity()
     {
-        if (InstallId is { } id && Key is { } key) return (id, key);
-        id = Guid.NewGuid().ToString("D");
-        key = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
-        settings.Set(IdKey, id);
+        if (InstallId is { } old)
+        {
+            if (Key is { } kept) return (old, kept);
+            settings.Set(PreviousIdKey, old);
+            foreach (var name in OfTheId) settings.Remove(name);
+            settings.Remove(IdKey);
+        }
+        // The ID is written last, so a crash between never leaves one beside a key made for another.
+        var id = Guid.NewGuid().ToString("D");
+        var key = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
         settings.Set(KeyKey, Protect(key));
+        settings.Set(IdKey, id);
         return (id, key);
     }
 
@@ -165,7 +183,7 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     }
 
     /// <summary>Forgets the ID, the key and every state about sending, and turns every switch off, as an answer to the
-    /// current wording. The send minute stays.</summary>
+    /// current wording. The send minute and the <see cref="PreviousId"/> stay.</summary>
     public void Forget(long nowMs)
     {
         foreach (var key in Forgotten) settings.Remove(key);

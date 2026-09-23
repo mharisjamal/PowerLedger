@@ -23,7 +23,13 @@ internal static class MinuteBuilder
     /// refuses more. Only a clock set back gives more, and such a minute is left out.</summary>
     public const double MaxSeconds = 120;
 
+    /// <summary>The last minute of a day the server takes: 0–1499, so a 25-hour day fits.</summary>
+    private const int LastIndex = 1499;
+
     private const long MinuteMs = 60_000;
+
+    /// <summary>The furthest a zone's offset is from UTC, and the report's header allows.</summary>
+    private const long MaxOffsetMinutes = 14 * 60;
 
     /// <param name="maxDeltaSeconds">The gap threshold for the sample interval the readings were taken at
     /// (<see cref="EnergyIntegrator.GapThresholdFor"/>).</param>
@@ -39,6 +45,30 @@ internal static class MinuteBuilder
             if (Fold(group.Key * MinuteMs, group, zone) is { } minute) minutes.Add(minute);
         }
         return minutes;
+    }
+
+    /// <summary>
+    /// A day's minutes as its upload sends them, with the UTC offset its header gives. A minute's start and index keep the
+    /// offset it was counted from, the zone's when it was built, and the zone can be another by the time the day goes, as
+    /// when a laptop starts up somewhere else: so the header gives that offset. A day built partly in one zone and partly in
+    /// another counts from the start most of its minutes fit, each index worked out again from its minute's start, and one
+    /// outside 0–<see cref="LastIndex"/> is left out, so every minute sent decodes to its own time. A day without minutes has
+    /// the offset <paramref name="zone"/> gives it.
+    /// </summary>
+    /// <param name="minutes">The day's minutes, oldest first.</param>
+    public static (int UtcOffsetMinutes, IReadOnlyList<MinuteRow> Minutes) ForReport(string day, IReadOnlyList<MinuteRow> minutes, TimeZoneInfo zone)
+    {
+        var date = LocalDays.Parse(day);
+        var midnightMs = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToUnixTimeMilliseconds();
+        long OffsetOf(long originMs) => (midnightMs - originMs) / MinuteMs;
+        bool Fits(MinuteRow minute, long originMs) => (minute.StartMs - originMs) / MinuteMs is >= 0 and <= LastIndex;
+
+        List<long> origins = [.. minutes.Select(minute => minute.StartMs - (minute.Minute * MinuteMs)).Distinct()
+            .Where(origin => Math.Abs(OffsetOf(origin)) <= MaxOffsetMinutes)];
+        if (origins.Count == 0) origins.Add(LocalDays.Origin(date, zone).ToUnixTimeMilliseconds());
+        var from = origins.MaxBy(origin => minutes.Count(minute => Fits(minute, origin)));   // the first on a tie
+        return ((int)OffsetOf(from), [.. minutes.Where(minute => Fits(minute, from))
+            .Select(minute => minute with { Minute = (int)((minute.StartMs - from) / MinuteMs) })]);
     }
 
     private static bool Counts(Reading row, double maxDeltaSeconds) =>

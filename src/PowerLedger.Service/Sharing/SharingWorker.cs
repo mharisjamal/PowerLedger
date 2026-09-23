@@ -104,7 +104,10 @@ internal sealed class SharingWorker : BackgroundService
             {
                 tick ??= timer.WaitForNextTickAsync(stop).AsTask();
                 inbox ??= _commands.Reader.WaitToReadAsync(stop).AsTask();
-                if (!_resume) await Task.WhenAny(tick, inbox).ConfigureAwait(false);   // a run that gave way goes on at once
+                // A run that gave way goes on at once, but only after the request it gave way to: the inbox says it has one on
+                // a pool thread, maybe later, so it is waited for rather than looked at, or the run would give way over and over.
+                if (!_resume) await Task.WhenAny(tick, inbox).ConfigureAwait(false);
+                else if (_commands.AppWaiting) await Task.WhenAny(inbox).ConfigureAwait(false);
 
                 if (inbox.IsCompleted)
                 {
@@ -301,7 +304,7 @@ internal sealed class SharingWorker : BackgroundService
         var nowMs = now.ToUnixTimeMilliseconds();
         var before = _store.StoredConsent;
         var was = before?.Consent is { Answered: true } answered ? answered : AllOff;
-        if (consent.AllowsAny) _store.Identity();                           // the first switch turned on makes the ID and key
+        if (consent.AllowsAny) Identity(changing: true);                    // the first switch turned on makes the ID and key
         if (consent.Power && !was.Power) _store.CollectedTo = nowMs;        // nothing from before the answer is collected
         if (!consent.Power)
         {
@@ -322,7 +325,11 @@ internal sealed class SharingWorker : BackgroundService
 
         var diagnosticsSince = consent.Diagnostics ? (was.Diagnostics ? before?.DiagnosticsSinceMs ?? nowMs : nowMs) : (long?)null;
         _store.SaveConsent(new StoredConsent(consent, nowMs, diagnosticsSince));
-        if (_store.InstallId is not null) _store.ConsentPending = true;
+        if (_store.InstallId is not null)
+        {
+            _store.ConsentPending = true;
+            _store.ConsentBackoff = null;                                     // a new change goes at once, whatever an older one left
+        }
         _log.LogInformation(
             "Data sharing set: diagnostics {Diagnostics}, usage {Usage}, power {Power}, share {Share}",
             consent.Diagnostics, consent.Usage, consent.Power, consent.Share);
@@ -417,13 +424,19 @@ internal sealed class SharingWorker : BackgroundService
         command.Answer(ok, message);
     }
 
+    /// <summary>Asks the server to delete what it holds, and forgets everything once it has. What was sent under an ID whose
+    /// key this PC couldn't read, the current one's or the <see cref="SharingStore.PreviousId"/>, can't be asked for: the
+    /// answer says so, quoting it, so the user can have it deleted by writing in.</summary>
     private async Task DeleteAsync(DeleteMyDataCommand command, CancellationToken stop)
     {
         var now = _clock.GetUtcNow();
+        var previous = _store.PreviousId;
         if (_store.InstallId is not { } id)
         {
             Forget(now);
-            command.Answer(true, "Nothing had been sent from this PC, and every switch is now off.");
+            command.Answer(previous is null, previous is null
+                ? "Nothing had been sent from this PC, and every switch is now off."
+                : $"Every switch is now off. {Undeletable(previous)}");
             return;
         }
         if (_store.Key is not { } key)
@@ -431,8 +444,9 @@ internal sealed class SharingWorker : BackgroundService
             // A key this account can't decrypt, as in a database copied from another PC: the server can't be asked, so
             // this PC stops sending and says how else to have the data deleted.
             Forget(now);
+            var ids = previous is null ? $"the install ID {id}" : $"the install IDs {id} and {previous}";
             command.Answer(false, "This PC's key can't be read, so the server can't be asked to delete what it holds. Every switch is "
-                + $"now off. To have it deleted, write to the address in the privacy policy, quoting the install ID {id}.");
+                + $"now off. To have it deleted, write to the address in the privacy policy, quoting {ids}.");
             return;
         }
         using var answerBy = AnswerBy(command);
@@ -441,7 +455,9 @@ internal sealed class SharingWorker : BackgroundService
         {
             _log.LogInformation("The server deleted this install's data; forgetting it");
             Forget(now);
-            command.Answer(true, "Your data has been deleted from the server.");
+            command.Answer(previous is null, previous is null
+                ? "Your data has been deleted from the server."
+                : $"Your data has been deleted from the server. {Undeletable(previous)}");
         }
         else
         {
@@ -553,9 +569,14 @@ internal sealed class SharingWorker : BackgroundService
     private async Task<bool> PostPendingConsentAsync(DateTimeOffset now, bool atOnce, CancellationToken stop)
     {
         if (!_store.ConsentPending) return true;
-        if (_store.InstallId is not { } id || _store.Key is not { } key)
+        if (_store.InstallId is not { } id)
         {
-            Posted();
+            Posted();                                                          // the server knows no ID of this PC's to change
+            return true;
+        }
+        if (_store.Key is not { } key)
+        {
+            Unheard(id);
             return true;
         }
         if (!atOnce && _store.ConsentBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return true;
@@ -589,11 +610,48 @@ internal sealed class SharingWorker : BackgroundService
         _store.ConsentBackoff = null;
     }
 
+    /// <summary>A consent change the server can't be told of, as the key for <paramref name="id"/> can't be read: it keeps
+    /// what was sent under that ID as the user allowed before. It can never be posted, so it waits no more, and the status
+    /// says so and how to have it applied.</summary>
+    private void Unheard(string id)
+    {
+        _log.LogWarning("The server can't be told of the consent change for {Id}, as its key can't be read", id);
+        Posted();
+        _store.Problem = new SendProblem(
+            $"this PC's key can't be read, so the server wasn't told of your choices for install ID {id}. To have them applied to "
+            + "what was sent under it, write to the address in the privacy policy, quoting that ID", Rejected: false);
+    }
+
+    /// <summary>
+    /// This PC's install ID and key (<see cref="SharingStore.Identity"/>). A key that can't be read, as in a database copied
+    /// from another PC, makes a new ID, logged with the old: the server keeps what was sent under the old one as it was, so
+    /// a consent change it hasn't heard, or the one being made, it now never will (<see cref="Unheard"/>).
+    /// </summary>
+    /// <param name="changing">True when the user is changing the consent.</param>
+    private (string Id, string Key) Identity(bool changing = false)
+    {
+        if (_store.InstallId is not { } old || _store.Key is not null) return _store.Identity();
+        var unheard = changing || _store.ConsentPending;
+        var identity = _store.Identity();
+        _log.LogWarning(
+            "This PC's install key can't be read, so it now shares as {Id}. What was sent as {Old} stays on the server, and only "
+            + "writing in, quoting that ID, can have it deleted", identity.Id, old);
+        if (unheard) Unheard(old);
+        return identity;
+    }
+
+    /// <summary>How to have what was sent under <paramref name="id"/> deleted, since this PC can't ask for it.</summary>
+    private static string Undeletable(string id) =>
+        $"What was sent under the install ID {id}, whose key this PC couldn't read, can't be deleted from here: to have it deleted, "
+        + "write to the address in the privacy policy, quoting that ID.";
+
     /// <summary>
     /// Sends the complete days waiting, oldest first and at most <see cref="MaxDaysPerRun"/>, each with the sections switched
     /// on as it is built, and the hardware when it changed since it last went. Before each day it makes way for a request
     /// the App waits on, so a switch the App turns off is off for every day not yet under way: the five-minute run gives way
-    /// and starts again once the App has its answer, and Send now stops, saying what went.
+    /// and starts again once the App has its answer, and Send now stops, saying what went. Send now running out of its own
+    /// time is no fault of the server's, so it is neither a problem nor a back-off, and a run that asked the server nothing
+    /// doesn't count as the night's.
     /// </summary>
     /// <param name="answerBy">Send now's time limit; none for the five-minute run, whose requests give way to the App instead.</param>
     private async Task<RunResult> SendAsync(DateTimeOffset now, CancellationToken answerBy, CancellationToken stop)
@@ -601,8 +659,9 @@ internal sealed class SharingWorker : BackgroundService
         var forApp = answerBy.CanBeCanceled;
         var lastRun = _store.LastRun;
         _store.LastRun = now.ToUnixTimeMilliseconds();
-        var (id, key) = _store.Identity();
+        var (id, key) = Identity();
         var result = new RunResult();
+        var asked = false;
         try
         {
             for (var days = 0; days < MaxDaysPerRun; days++)
@@ -630,6 +689,7 @@ internal sealed class SharingWorker : BackgroundService
                 var outcome = forApp
                     ? await CallAsync(Send, stop, answerBy).ConfigureAwait(false)
                     : await OwnCallAsync(Send, stop).ConfigureAwait(false);
+                asked |= outcome is not OutOfTime { Asked: false };
                 switch (outcome)
                 {
                     case SendOutcome.Accepted:
@@ -648,6 +708,10 @@ internal sealed class SharingWorker : BackgroundService
                         Forget(now);
                         result.Gone = true;
                         return result;
+                    case OutOfTime late:
+                        _log.LogInformation("Sending {Day} ran out of the App's time ({Reason}); it goes at the next chance", day, late.Text);
+                        result.Failed = late.Text;
+                        return result;
                     default:
                         var reason = outcome.Reason ?? "the server didn't take it";
                         _log.LogInformation("Sending {Day} failed ({Reason}); trying again later", day, reason);
@@ -657,13 +721,17 @@ internal sealed class SharingWorker : BackgroundService
                         return result;
                 }
             }
+            return result;
         }
         catch (GiveWay)
         {
-            _store.LastRun = lastRun;                                                   // not a run: it starts again
+            asked = false;                                                              // not a run: it starts again
             throw;
         }
-        return result;
+        finally
+        {
+            if (!asked) _store.LastRun = lastRun;
+        }
     }
 
     /// <summary>The day leaves the outbox, and a copy of what went is kept for the user to see.</summary>
@@ -736,18 +804,23 @@ internal sealed class SharingWorker : BackgroundService
         return _store.SentThrough is { } through && string.CompareOrdinal(day, through) <= 0 ? LocalDays.Text(today) : day;
     }
 
+    /// <summary>What a day's upload is built from. The header's offset is the one the minutes count from, which is the zone's
+    /// when they were built, not now (<see cref="MinuteBuilder.ForReport"/>).</summary>
     private ReportInputs Inputs(
-        string day, Consent consent, string installId, IReadOnlyList<MinuteRow> minutes, DayEvents events, bool withHardware, DateTimeOffset now) =>
-        new(_environment.Host(), installId, consent, day, LocalDays.UtcOffsetMinutes(LocalDays.Parse(day), Zone), minutes, events,
+        string day, Consent consent, string installId, IReadOnlyList<MinuteRow> minutes, DayEvents events, bool withHardware, DateTimeOffset now)
+    {
+        var (offset, sent) = MinuteBuilder.ForReport(day, minutes, Zone);
+        return new(_environment.Host(), installId, consent, day, offset, sent, events,
             _board.Status, _board.Facts, _board.Settings ?? ServiceSettings.Default, _tariffs.Schedule().At(now), _board.DiscreteGpu,
             withHardware, _environment.Names());
+    }
 
-    /// <summary>Makes a request for one the App waits on. One that doesn't answer before <paramref name="deadline"/> counts as
-    /// no answer, and so does one there is no time left to make, which isn't made.</summary>
+    /// <summary>Makes a request for one the App waits on. One that doesn't answer before <paramref name="deadline"/> is
+    /// <see cref="OutOfTime"/>, and so is one there is no time left to make, which isn't made.</summary>
     private static async Task<SendOutcome> CallAsync(
         Func<CancellationToken, Task<SendOutcome>> request, CancellationToken stop, CancellationToken deadline)
     {
-        if (deadline.IsCancellationRequested) return new SendOutcome.Unreachable(NoTimeLeft);
+        if (deadline.IsCancellationRequested) return new OutOfTime(NoTimeLeft, Asked: false);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, deadline);
         try
         {
@@ -755,7 +828,7 @@ internal sealed class SharingWorker : BackgroundService
         }
         catch (OperationCanceledException) when (!stop.IsCancellationRequested)
         {
-            return new SendOutcome.Unreachable(NotInTime);
+            return new OutOfTime(NotInTime, Asked: true);
         }
     }
 
@@ -777,10 +850,11 @@ internal sealed class SharingWorker : BackgroundService
     }
 
     /// <summary>When a request the App waits on must be answered: <see cref="AppWait"/> after it was queued, however long
-    /// those before it took, so the pipe has the answer inside its own limit.</summary>
+    /// those before it took, so the pipe has the answer inside its own limit. The wait is measured on the clock's timestamps,
+    /// so setting the PC's clock meanwhile neither spends nor stretches it.</summary>
     private CancellationTokenSource AnswerBy(SharingCommand command)
     {
-        var waited = command.QueuedAt is { } queued ? _clock.GetUtcNow() - queued : TimeSpan.Zero;
+        var waited = command.QueuedAt is { } queued ? _clock.GetElapsedTime(queued) : TimeSpan.Zero;
         if (waited < AppWait) return new CancellationTokenSource(waited > TimeSpan.Zero ? AppWait - waited : AppWait, _clock);
         var spent = new CancellationTokenSource();
         spent.Cancel();
@@ -814,6 +888,10 @@ internal sealed class SharingWorker : BackgroundService
     /// <summary>Thrown out of the worker's own work, where nothing is half-done, once a request the App waits on is queued:
     /// the work stops, the App is answered, and the work starts again.</summary>
     private sealed class GiveWay() : Exception("A request the App waits on comes first.");
+
+    /// <summary>No answer inside the App's own time limit, which is no fault of the server's.</summary>
+    /// <param name="Asked">False when there was no time left to make the request at all.</param>
+    private sealed record OutOfTime(string Text, bool Asked) : SendOutcome(Text);
 
     /// <summary>What a run did, for the App's Send now.</summary>
     private sealed class RunResult

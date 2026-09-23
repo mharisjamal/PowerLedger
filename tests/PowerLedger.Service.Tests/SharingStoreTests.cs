@@ -128,6 +128,36 @@ public sealed class SharingStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_key_that_cannot_be_read_is_replaced_keeping_the_old_id_to_quote_and_the_new_one_starts_clean()
+    {
+        var store = Store();
+        var consent = new StoredConsent(new Consent(ConsentText.Version, true, true, true, true), 1, 1);
+        store.SaveConsent(consent);
+        var (old, _) = store.Identity();
+        store.CollectedTo = 2;
+        store.LastSent = new LastSent(3, 4);
+        store.Problem = new SendProblem("x", false);
+        store.Backoff = new Backoff(1, 5);
+        store.HardwareHash = "h";
+        store.ConsentPending = true;
+        store.ConsentBackoff = new Backoff(1, 7);
+        store.LastRun = 6;
+        store.SentThrough = "2026-09-20";
+        new SettingsRepository(_database.Db).Set(SharingStore.KeyKey, "not a key this account protected");   // copied from another PC
+
+        var (id, key) = store.Identity();
+
+        id.ShouldNotBe(old);
+        (store.InstallId, store.Key, store.PreviousId).ShouldBe((id, key, old));
+        (store.LastSent, store.Problem, store.Backoff, store.HardwareHash, store.ConsentPending, store.ConsentBackoff)
+            .ShouldBe((null, null, null, null, false, null));
+        (store.StoredConsent, store.CollectedTo, store.LastRun, store.SentThrough).ShouldBe((consent, 2L, 6L, "2026-09-20"));   // this PC's own
+
+        store.Forget(nowMs: 99);
+        Store().PreviousId.ShouldBe(old);                                    // still there to quote
+    }
+
+    [Fact]
     public void Forgetting_drops_the_id_the_key_and_every_state_and_turns_every_switch_off_but_keeps_the_send_minute()
     {
         var store = Store(() => 42);

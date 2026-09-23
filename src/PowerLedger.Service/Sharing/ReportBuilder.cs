@@ -149,7 +149,8 @@ internal static partial class ReportBuilder
     {
         // A minute the server would refuse would take the whole day with it, so one with a figure past its ranges (a
         // monitor's typed figure absurdly high, say) is left out instead, and so is one whose index doesn't come after the
-        // last kept, as the server wants them rising: after the time zone changes, a day's minutes can repeat or fall back.
+        // last kept, as the server wants them rising. MinuteBuilder.ForReport counts a day's minutes from one start, so
+        // theirs always rise.
         var minutes = new List<MinuteRow>(all.Count);
         foreach (var minute in all.Where(WithinServerRanges))
         {
