@@ -32,10 +32,13 @@ internal sealed class ConsentViewModel : ObservableObject
         _threads = threads;
         _openBrowser = openBrowser;
         _openPayload = openPayload;
-        _diagnostics = current.Diagnostics;
-        _usage = current.Usage;
-        _power = current.Power;
-        _share = current.Share;
+        // an answer to an older wording of the choices counts for nothing (data-sharing design §1): pre-ticking it would
+        // let one Save re-consent everything it held under the new text
+        var starting = current.Answered ? current : Consent.Unanswered;
+        _diagnostics = starting.Diagnostics;
+        _usage = starting.Usage;
+        _power = starting.Power;
+        _share = starting.Share;
         AllowAll = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, true, true, true, true)));
         AllowNone = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, false, false, false, false)));
         Save = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, Diagnostics, Usage, Power, Share)));

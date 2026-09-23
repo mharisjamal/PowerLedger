@@ -28,6 +28,19 @@ public class ConsentViewModelTests
     }
 
     [Fact]
+    public void An_answer_to_an_older_wording_of_the_choices_shows_as_all_off()
+    {
+        // Consent.Answered is false for any version but the current one, whatever was ticked under that older wording.
+        var model = Model(new Consent(ConsentText.Version - 1, true, true, true, true));
+
+        model.Diagnostics.ShouldBeFalse();
+        model.Usage.ShouldBeFalse();
+        model.Power.ShouldBeFalse();
+        model.Share.ShouldBeFalse();
+        model.CanShare.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Share_is_greyed_until_power_and_turning_power_off_clears_it()
     {
         var model = Model();
