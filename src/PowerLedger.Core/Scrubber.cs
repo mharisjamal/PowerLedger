@@ -10,11 +10,17 @@ public sealed record ScrubNames(string? User, string? Machine, string? Domain)
 }
 
 /// <summary>
-/// Takes out of crash and error text whatever could name the user, the PC or its devices before it is kept for sending
-/// (data-sharing design §3): a profile path becomes <c>%USERPROFILE%</c>, a device path <c>&lt;device&gt;</c>, a Windows
-/// device instance ID <c>&lt;id&gt;</c>, an e-mail address <c>&lt;email&gt;</c>, an IP address <c>&lt;ip&gt;</c>, and the
-/// user, machine and domain names <c>&lt;user&gt;</c>, <c>&lt;machine&gt;</c> and <c>&lt;domain&gt;</c>.
-/// Scrubbing twice gives what scrubbing once did.
+/// Takes out of crash and error text whatever could name the user, the PC, its files or its devices before it is kept
+/// for sending (data-sharing design §3):
+/// <list type="bullet">
+/// <item>a file path, on a drive or a share, becomes <c>&lt;path&gt;</c>, except that a stack frame keeps its source
+/// file's name (<c>&lt;path&gt;\NowViewModel.cs:line 42</c>);</item>
+/// <item>a device path or interface path becomes <c>&lt;device&gt;</c>, and a Windows device instance ID <c>&lt;id&gt;</c>;</item>
+/// <item>an e-mail address becomes <c>&lt;email&gt;</c>, and an IP address <c>&lt;ip&gt;</c>;</item>
+/// <item>the user, machine and domain names become <c>&lt;user&gt;</c>, <c>&lt;machine&gt;</c> and <c>&lt;domain&gt;</c>.</item>
+/// </list>
+/// A path's end can't be known in free text, so an unquoted path takes the rest of its line with it: text lost, never
+/// text leaked. Scrubbing twice gives what scrubbing once did.
 /// </summary>
 public static partial class Scrubber
 {
@@ -28,9 +34,12 @@ public static partial class Scrubber
     public static string Scrub(string? text, ScrubNames names)
     {
         if (string.IsNullOrEmpty(text)) return "";
-        var result = ProfilePath().Replace(text, "%USERPROFILE%");
-        result = DevicePath().Replace(result, "<device>");
+        var result = DevicePath().Replace(text, "<device>");
+        result = InterfacePath().Replace(result, "<device>");
+        result = KnownInstanceId().Replace(result, "<id>");
         result = InstanceId().Replace(result, "<id>");
+        result = DrivePath().Replace(result, PathMark);
+        result = SharePath().Replace(result, "<path>");
         result = Email().Replace(result, "<email>");
         result = IpV6Full().Replace(result, "<ip>");
         result = IpV6Short().Replace(result, "<ip>");
@@ -42,6 +51,13 @@ public static partial class Scrubber
         return result;
     }
 
+    /// <summary>A path becomes <c>&lt;path&gt;</c>; a stack frame's source file (<c>…\File.cs:line 42</c>) keeps its name and line.</summary>
+    private static string PathMark(Match match)
+    {
+        var frame = StackFrameSource().Match(match.Value);
+        return frame.Success ? $@"<path>\{frame.Groups["file"].Value}{frame.Groups["line"].Value}" : "<path>";
+    }
+
     /// <summary>A name as a whole word, in any case. Names under three letters are left, since they would match inside
     /// ordinary words.</summary>
     private static string Name(string text, string? name, string mark) =>
@@ -50,18 +66,35 @@ public static partial class Scrubber
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
             : text;
 
-    /// <summary><c>C:\Users\alice</c> or <c>C:/Users/alice</c>, the user's folder name included.</summary>
-    [GeneratedRegex(@"(?i)[A-Z]:[\\/]Users[\\/][^\\/:*?""<>|\r\n]+")]
-    private static partial Regex ProfilePath();
-
     /// <summary><c>\\?\hid#vid_1b1c&amp;pid_1c05…</c>, up to the first space or quote.</summary>
     [GeneratedRegex(@"\\\\\?\\[^\s""'<>|]+")]
     private static partial Regex DevicePath();
 
-    /// <summary>A bus, a device and an instance with an ampersand in it: <c>USB\VID_1B1C&amp;PID_1C05\7&amp;2D0F1A&amp;0&amp;1</c>,
-    /// <c>DISPLAY\GSM5B7F\5&amp;1A2B3C&amp;0&amp;UID4352</c>.</summary>
+    /// <summary>An interface path written without its <c>\\?\</c>: <c>hid#vid_1b1c&amp;pid_1c05#8&amp;2d0f1a&amp;0&amp;0000#{guid}</c>.</summary>
+    [GeneratedRegex(@"(?i)\b[A-Z0-9_]+#[^\s""'<>|]*#\{[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}\}")]
+    private static partial Regex InterfacePath();
+
+    /// <summary>A device instance ID under one of Windows' bus enumerators, whatever its instance holds, which for USB
+    /// devices is often the serial number: <c>USB\VID_0764&amp;PID_0501\CR7GR2000123</c>.</summary>
+    [GeneratedRegex(@"(?i)\b(?:USB|USBSTOR|USBPRINT|HID|PCI|PCIIDE|DISPLAY|MONITOR|SWD|ACPI|ROOT|BTH|BTHENUM|BTHLE|BTHLEDEVICE|HDAUDIO|INTELAUDIO|MMDEVAPI|SCSI|STORAGE|NVME|IDE|UMB|SW|WPDBUSENUM|VMBUS|TS_USB)\\[^\s\\""'<>|]+\\[^\s""'<>|]+")]
+    private static partial Regex KnownInstanceId();
+
+    /// <summary>A bus, a device and an instance with an ampersand in it, under an enumerator not listed above.</summary>
     [GeneratedRegex(@"(?i)\b[A-Z0-9_]+\\[A-Z0-9_&.#-]+\\[A-Z0-9_&.#{}-]*&[A-Z0-9_&.#{}-]*")]
     private static partial Regex InstanceId();
+
+    /// <summary>A path on a drive, <c>C:\…</c> or <c>C:/…</c>, to the next quote, bracket, bar or line end. The drive letter
+    /// mustn't follow a letter or digit, so a URL's <c>http://</c> isn't taken for one.</summary>
+    [GeneratedRegex(@"(?i)(?<![A-Z0-9])[A-Z]:[\\/][^'""<>|\r\n]*")]
+    private static partial Regex DrivePath();
+
+    /// <summary>A share, <c>\\server\share\…</c>; not <c>\\.\pipe\…</c> or <c>\\?\…</c>, which start with a dot or a question mark.</summary>
+    [GeneratedRegex(@"\\\\[A-Za-z0-9_-][^\\/\s'""<>|]*\\[^'""<>|\r\n]*")]
+    private static partial Regex SharePath();
+
+    /// <summary>The end of a stack frame's path: the source file's name and its line.</summary>
+    [GeneratedRegex(@"[\\/](?<file>[^\\/]+\.cs)(?<line>:line \d+)\s*$")]
+    private static partial Regex StackFrameSource();
 
     [GeneratedRegex(@"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")]
     private static partial Regex Email();

@@ -340,7 +340,7 @@ public sealed class SharingWorkerTests : IDisposable
 
         OutboxEvents.ParseUsage(_h.Outbox.Events("2026-09-24", OutboxEvents.Usage).ShouldHaveSingleItem()).ShouldNotBeNull().AppOpens.ShouldBe(4);
         var crash = SharingJson.Read(_h.Outbox.Events("2026-09-24", OutboxEvents.Crash).ShouldHaveSingleItem(), SharingJson.Default.CrashReport);
-        crash.ShouldNotBeNull().Message.ShouldBe(@"Could not open %USERPROFILE%\notes.txt");
+        crash.ShouldNotBeNull().Message.ShouldBe("Could not open <path>");
     }
 
     [Fact]
@@ -358,14 +358,14 @@ public sealed class SharingWorkerTests : IDisposable
     {
         _h.Clock.SetUtcNow(Local(24, 10));
         await _h.Consent(true, false, false);
-        _h.CrashFile(Local(24, 10, 2), @"Access to C:\Users\alice\AppData was denied for DESKTOP-TEST");
+        _h.CrashFile(Local(24, 10, 2), @"Access to 'C:\Users\alice\AppData' was denied for DESKTOP-TEST");
         _h.CrashFile(Local(24, 9, 58));                                      // from before the answer
 
         _h.Clock.SetUtcNow(Local(24, 10, 5));
         await _h.TickAsync();
 
         var crash = SharingJson.Read(_h.Outbox.Events("2026-09-24", OutboxEvents.Crash).ShouldHaveSingleItem(), SharingJson.Default.CrashReport);
-        crash.ShouldNotBeNull().Message.ShouldBe(@"Access to %USERPROFILE%\AppData was denied for <machine>");
+        crash.ShouldNotBeNull().Message.ShouldBe("Access to '<path>' was denied for <machine>");
         Directory.GetFiles(_h.Crashes).ShouldBeEmpty();
 
         await _h.Consent(false, true, false);

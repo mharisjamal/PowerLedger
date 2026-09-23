@@ -76,9 +76,13 @@ serialises an existing object whole, so a field added to a model later can't lea
     brightness to 0.001, seconds to 0.1.
 - **Never sent:** the PC's name, the user's or domain's name, any serial number, Windows device instance IDs or paths,
   file paths, other programs or window titles, network addresses, and any location finer than the country. Crash text and
-  error text are scrubbed before storing: the user profile path becomes `%USERPROFILE%`, the user, machine and domain
-  names become `<user>`, `<machine>` and `<domain>`, device paths (`\\?\…`) become `<device>`, PnP instance IDs `<id>`,
-  e-mail addresses `<email>` and IP addresses `<ip>`.
+  error text are scrubbed before storing:
+  - A file path on a drive or a share becomes `<path>`, the rest of its line with it when it isn't quoted. A stack frame
+    keeps its source file's name.
+  - The user, machine and domain names become `<user>`, `<machine>` and `<domain>`.
+  - Device and interface paths (`\\?\…`, `hid#…#{…}`) become `<device>`, and device instance IDs `<id>`, a USB serial in
+    one included.
+  - E-mail addresses become `<email>` and IP addresses `<ip>`.
 
 ## 4. The collector, in the service
 

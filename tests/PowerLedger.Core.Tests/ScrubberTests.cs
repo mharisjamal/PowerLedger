@@ -10,10 +10,19 @@ public class ScrubberTests
     private static string Scrub(string text) => Scrubber.Scrub(text, Names);
 
     [Theory]
-    [InlineData(@"Could not find file 'C:\Users\alice\AppData\Local\PowerLedger\ui.json'.",
-        @"Could not find file '%USERPROFILE%\AppData\Local\PowerLedger\ui.json'.")]
-    [InlineData("Could not find file 'c:/users/Bob Smith/ui.json'.", "Could not find file '%USERPROFILE%/ui.json'.")]
-    public void AProfilePathLosesItsUsersName(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
+    [InlineData(@"Could not find file 'C:\Users\alice\AppData\Local\PowerLedger\ui.json'.", "Could not find file '<path>'.")]
+    [InlineData("Could not find file 'c:/users/Bob Smith/ui.json'.", "Could not find file '<path>'.")]
+    [InlineData(@"Could not open 'C:\Users\alice\Documents\Alice Smith - bank statement 2025.pdf'.", "Could not open '<path>'.")]
+    [InlineData(@"Access to the path 'D:\Clients\Acme Corp\invoice.pdf' is denied.", "Access to the path '<path>' is denied.")]
+    [InlineData(@"Access to the path D:\Clients\Acme Corp\invoice.pdf is denied.", "Access to the path <path>")]
+    [InlineData(@"Could not find '\\fileserver\share\Alice\notes.docx'.", "Could not find '<path>'.")]
+    [InlineData("Could not load file:///C:/Users/alice/x.dll", "Could not load file:///<path>")]
+    public void AFilePathIsTakenOutWhole(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
+
+    [Fact]
+    public void AStackFrameKeepsOnlyItsSourceFilesName() =>
+        Scrub(@"   at PowerLedger.App.Now.NowViewModel.Refresh() in D:\PowerLedger\src\PowerLedger.App\Now\NowViewModel.cs:line 42")
+            .ShouldBe(@"   at PowerLedger.App.Now.NowViewModel.Refresh() in <path>\NowViewModel.cs:line 42");
 
     [Fact]
     public void ADevicePathIsTakenOutWhole() =>
@@ -23,7 +32,14 @@ public class ScrubberTests
     [Theory]
     [InlineData(@"Monitor DISPLAY\GSM5B7F\5&1a2b3c&0&UID4352 did not answer", "Monitor <id> did not answer")]
     [InlineData(@"USB\VID_1B1C&PID_1C05\7&2D0F1A&0&1 went away", "<id> went away")]
+    [InlineData(@"USB\VID_0764&PID_0501\CR7GR2000123 went away", "<id> went away")]
+    [InlineData(@"HID\VID_1B1C&PID_1C05&MI_00\8&2D0F1A&0&0000 failed", "<id> failed")]
     public void AWindowsDeviceInstanceIdIsTakenOut(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
+
+    [Fact]
+    public void AnInterfacePathWithoutItsPrefixIsTakenOut() =>
+        Scrub("open hid#vid_1b1c&pid_1c05&mi_00#8&2d0f1a&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030} failed")
+            .ShouldBe("open <device> failed");
 
     [Theory]
     [InlineData("mail alice.smith@example.com now", "mail <email> now")]
@@ -54,7 +70,9 @@ public class ScrubberTests
     [Theory]
     [InlineData("at 10:11:12 the reading stopped")]
     [InlineData("in std::vector<abc::def>")]
-    [InlineData("   at PowerLedger.Service.SamplingLoop.OnMinute() in D:\\PowerLedger\\src\\SamplingLoop.cs:line 274")]
+    [InlineData(@"relative PowerLedger\src\App stays")]
+    [InlineData(@"the pipe \\.\pipe\PowerLedger.v1 closed")]
+    [InlineData("fetch https://api.github.com/repos/x/releases/latest failed")]
     public void OrdinaryTextIsLeftAlone(string text) => Scrub(text).ShouldBe(text);
 
     [Fact]

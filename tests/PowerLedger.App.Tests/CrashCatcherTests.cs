@@ -64,7 +64,7 @@ public sealed class CrashCatcherTests : IDisposable
         var path = Directory.GetFiles(_folder, "app-*.json").Single();
         var saved = JsonSerializer.Deserialize<CrashReport>(File.ReadAllText(path), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         saved.ShouldNotBeNull();
-        saved.Message.ShouldBe(@"failed for <user> at %USERPROFILE%\data.db");
+        saved.Message.ShouldBe("failed for <user> at <path>");
         saved.Component.ShouldBe("app");
     }
 

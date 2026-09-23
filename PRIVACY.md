@@ -36,8 +36,9 @@ to be sent.
 - your files and folders, and the other programs you run;
 - your location, beyond your country.
 
-Crash and error text is cleaned before it is sent: user, PC and domain names, profile folders, device paths and IDs,
-e-mail addresses and IP addresses are replaced by placeholders.
+Crash and error text is cleaned before it is sent: user, PC and domain names, file and folder paths, device paths, IDs
+and serial numbers, e-mail addresses and IP addresses are replaced by placeholders. A stack trace keeps only the name
+of PowerLedger's own source file.
 
 **Your IP address is not stored.** The server uses it to limit how often it can be called and to find your country
 (two letters), then drops it.
