@@ -36,6 +36,18 @@ public class PrivacyViewModelTests
         PrivacyViewModel.StatusLine(sharing, TimeZoneInfo.Utc, English).ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_problem_that_lasts_is_shown_as_it_is_whatever_the_switches(bool anyOn)
+    {
+        var sharing = new SharingStatus(new Consent(ConsentText.Version, anyOn, false, false, false), null, null, null,
+            "this PC's key can't be read, so the server wasn't told of your choices", false, 0, ProblemLasts: true);
+
+        PrivacyViewModel.StatusLine(sharing, TimeZoneInfo.Utc, English)
+            .ShouldBe("This PC's key can't be read, so the server wasn't told of your choices.");
+    }
+
     [Fact]
     public void A_last_sent_time_is_shown_in_the_users_culture_with_its_size_rounded_up()
     {

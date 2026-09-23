@@ -19,7 +19,7 @@ internal sealed record LastSent(long AtMs, long Bytes);
 
 /// <summary>Why the last try failed, in words the App can show; <paramref name="Rejected"/> when the server refused a day
 /// rather than not being reached.</summary>
-internal sealed record SendProblem(string Text, bool Rejected);
+internal sealed record SendProblem(string Text, bool Rejected, bool Lasts = false);
 
 /// <summary>Failed runs in a row, and when the next may start.</summary>
 internal sealed record Backoff(int Failures, long NextMs);

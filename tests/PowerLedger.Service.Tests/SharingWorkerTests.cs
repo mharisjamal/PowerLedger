@@ -513,8 +513,9 @@ public sealed class SharingWorkerTests : IDisposable
 
         _h.Client.Calls.Where(call => call.Kind == "consent").Select(call => call.InstallId).ShouldBe(new[] { id });
         (_h.Store.ConsentPending, _h.Store.InstallId).ShouldBe((false, id));
-        _h.Store.Problem.ShouldBe(new SendProblem(Unheard(id), Rejected: false));
-        _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().Problem.ShouldBe(Unheard(id));
+        _h.Store.Problem.ShouldBe(new SendProblem(Unheard(id), Rejected: false, Lasts: true));
+        var sharing = _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull();
+        (sharing.Problem, sharing.ProblemLasts).ShouldBe((Unheard(id), true));   // it won't clear by trying again
     }
 
     [Fact]

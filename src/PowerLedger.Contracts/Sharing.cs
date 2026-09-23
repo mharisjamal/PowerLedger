@@ -42,6 +42,8 @@ public sealed record Consent(int Version, bool Diagnostics, bool Usage, bool Pow
 /// <param name="Problem">Null while all is well; otherwise why the last try failed, in words the App can show.</param>
 /// <param name="Rejected">True when <paramref name="Problem"/> is the server refusing a day, false when it wasn't reached.</param>
 /// <param name="DaysWaiting">Complete days waiting to be sent.</param>
+/// <param name="ProblemLasts">True when <paramref name="Problem"/> won't clear by trying again, as when this PC's key can't
+/// be read: the App shows it as it is, whatever the switches. False from an older service.</param>
 public sealed record SharingStatus(
     Consent Consent,
     string? InstallId,
@@ -49,7 +51,8 @@ public sealed record SharingStatus(
     long? LastSentBytes,
     string? Problem,
     bool Rejected,
-    int DaysWaiting);
+    int DaysWaiting,
+    bool ProblemLasts = false);
 
 /// <summary>What the App counted since its last report, sent while Usage is on. The counts add to what the service holds
 /// for <paramref name="Day"/>; <paramref name="DaysSinceFirstRun"/>, <paramref name="Theme"/> and

@@ -194,6 +194,9 @@ internal sealed class PrivacyViewModel : ObservableObject
     /// the last upload's time and size, or the last problem, with how many complete days still wait.</summary>
     internal static string StatusLine(SharingStatus sharing, TimeZoneInfo zone, CultureInfo culture)
     {
+        // A problem that trying again won't clear is shown as the service words it, whatever the switches.
+        if (sharing.ProblemLasts && sharing.Problem is { Length: > 0 } lasting)
+            return char.ToUpper(lasting[0], culture) + lasting[1..] + (lasting.EndsWith('.') ? "" : ".");
         var consent = sharing.Consent;
         var basis = !consent.Answered ? "You haven't chosen yet."
             : !consent.AllowsAny ? "Nothing is sent."

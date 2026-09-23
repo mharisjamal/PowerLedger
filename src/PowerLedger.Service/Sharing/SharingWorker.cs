@@ -251,7 +251,8 @@ internal sealed class SharingWorker : BackgroundService
             var problem = _store.Problem;
             _board.Publish(new SharingStatus(
                 consent, _store.InstallId, last is null ? null : DateTimeOffset.FromUnixTimeMilliseconds(last.AtMs), last?.Bytes,
-                problem?.Text, problem?.Rejected ?? false, consent.AllowsAny ? CompleteDays(now, consent).Count : 0));
+                problem?.Text, problem?.Rejected ?? false, consent.AllowsAny ? CompleteDays(now, consent).Count : 0,
+                problem?.Lasts ?? false));
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -619,7 +620,7 @@ internal sealed class SharingWorker : BackgroundService
         Posted();
         _store.Problem = new SendProblem(
             $"this PC's key can't be read, so the server wasn't told of your choices for install ID {id}. To have them applied to "
-            + "what was sent under it, write to the address in the privacy policy, quoting that ID", Rejected: false);
+            + "what was sent under it, write to the address in the privacy policy, quoting that ID", Rejected: false, Lasts: true);
     }
 
     /// <summary>
