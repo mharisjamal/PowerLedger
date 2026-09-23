@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
 using PowerLedger.Contracts;
+using PowerLedger.Core;
 using PowerLedger.Storage;
 
 namespace PowerLedger.App;
@@ -55,12 +56,14 @@ public partial class App : Application
         _culture = culture;
         _sentFolder = Path.Combine(options.DataFolder, "Sent");
         var version = Version();
+        new CrashCatcher(CrashFolder, version, ScrubNames.Here()).Hook(this);   // data-sharing design §5: as early as the App can catch itself
         _theme = new ThemeManager(this, preferences.Theme);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
         IServerCheck check = options.PipeName == PipeProtocol.PipeName ? InstalledServiceCheck.FromServiceManager() : new TrustAnyServer();
         _link = new PipeServiceLink(options.PipeName, new LastInputIdleSource(), TimeProvider.System, check);
         var threads = new UiThreads(action => Dispatcher.InvokeAsync(action), action => Task.Run(action));
         _threads = threads;
+        new CrashForwarder(_link, threads, CrashFolder).Start();
         var history = new HistoryReader(_database);
         var sleep = new SleepSettings();
         byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, culture);
@@ -271,6 +274,10 @@ public partial class App : Application
             // Nothing to copy to here.
         }
     }
+
+    /// <summary>Where the App's own crashes are caught, before the service takes them on (data-sharing design §5).</summary>
+    private static string CrashFolder { get; } =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PowerLedger", "Crashes");
 
     private static string Version()
         => (typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0").Split('+')[0];
