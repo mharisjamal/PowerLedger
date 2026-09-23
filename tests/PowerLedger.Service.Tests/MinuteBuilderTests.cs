@@ -211,6 +211,25 @@ public class MinuteBuilderTests
         MinuteBuilder.Build(rows, London).ShouldBeEmpty();
     }
 
+    [Fact]
+    public void A_day_built_in_two_zones_too_far_apart_to_fit_counts_from_the_one_most_of_it_fits_and_leaves_the_rest_out()
+    {
+        var east = TimeZoneInfo.CreateCustomTimeZone("PL+2", TimeSpan.FromHours(2), "PL+2", "PL+2");
+        var west = TimeZoneInfo.CreateCustomTimeZone("PL-4", TimeSpan.FromHours(-4), "PL-4", "PL-4");
+        // 24 September's first ten minutes in UTC+2 and its last twenty in UTC-4, 29 hours apart: more than a day holds.
+        var first = MinuteBuilder.Build(Seconds(new DateTimeOffset(2026, 9, 24, 0, 0, 0, TimeSpan.FromHours(2)), 600), east);
+        var last = MinuteBuilder.Build(Seconds(new DateTimeOffset(2026, 9, 24, 23, 40, 0, TimeSpan.FromHours(-4)), 1200), west);
+
+        var (offset, minutes) = MinuteBuilder.ForReport("2026-09-24", [.. first, .. last], east);
+
+        offset.ShouldBe(-240);
+        minutes.Select(minute => minute.StartMs).ShouldBe(last.Select(minute => minute.StartMs));
+        minutes.Select(minute => minute.Minute).ShouldBe(Enumerable.Range(1420, 20));
+    }
+
+    /// <summary>A reading a second for <paramref name="count"/> seconds from <paramref name="from"/>.</summary>
+    private static List<Reading> Seconds(DateTimeOffset from, int count) => [.. Enumerable.Range(0, count).Select(s => Row(from.AddSeconds(s)))];
+
     /// <summary>The minute's UTC start as a reader of the report works it out: its day's midnight, less the day's offset in
     /// the header, plus its index.</summary>
     private static long Decoded(MinuteRow minute, TimeZoneInfo zone)

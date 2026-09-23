@@ -543,6 +543,48 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_day_built_before_the_time_zone_changed_goes_with_the_offset_its_minutes_count_from()
+    {
+        // Built at home in UTC+2, sent after the laptop started up in UTC-4.
+        _h.Clock.SetUtcNow(Local(24, 9));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(Local(24, 10, 40));
+        await _h.TickAsync();
+
+        _h.Clock.SetLocalTimeZone(West);
+        _h.Clock.SetUtcNow(new DateTimeOffset(2026, 9, 25, 1, 1, 0, TimeSpan.FromHours(-4)));   // tonight's minute where it is now
+        await _h.TickAsync();
+
+        var report = _h.Client.Reports.ShouldHaveSingleItem();
+        (report.Day, report.UtcOffsetMinutes).ShouldBe(("2026-09-24", 120));
+        Decoded(report).ShouldBe(Starts(Local(24, 10), 30));
+    }
+
+    [Fact]
+    public async Task A_day_built_partly_in_each_of_two_time_zones_sends_every_minute_at_its_own_time()
+    {
+        _h.Clock.SetUtcNow(Local(24, 9));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(Local(24, 10, 40));
+        await _h.TickAsync();                                                   // 10:00 to 10:30 in UTC+2: minutes 600 to 629
+
+        _h.Clock.SetLocalTimeZone(West);                                        // the service starts up again in UTC-4
+        var west = new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.FromHours(-4));
+        _h.Readings(west, TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(west.AddMinutes(40));
+        await _h.TickAsync();                                                   // the same day there, and the same minutes
+
+        _h.Clock.SetUtcNow(new DateTimeOffset(2026, 9, 25, 1, 1, 0, TimeSpan.FromHours(-4)));
+        await _h.TickAsync();
+
+        var report = _h.Client.Reports.ShouldHaveSingleItem();
+        report.Day.ShouldBe("2026-09-24");
+        Decoded(report).ShouldBe(Starts(Local(24, 10), 30).Concat(Starts(west, 30)).ToArray());
+    }
+
+    [Fact]
     public async Task Send_now_says_what_happened()
     {
         _h.Clock.SetUtcNow(Local(24, 0, 30));
@@ -858,6 +900,21 @@ public sealed class SharingWorkerTests : IDisposable
 
     private static CrashReport Crash(DateTimeOffset at) =>
         new(at, "app", "0.6.0", ["System.InvalidOperationException"], "Collection was modified.", "   at X()");
+
+    /// <summary>UTC-4, where a laptop from the harness's UTC+2 starts up after travelling west.</summary>
+    private static readonly TimeZoneInfo West = TimeZoneInfo.CreateCustomTimeZone("PL-4", TimeSpan.FromHours(-4), "PL-4", "PL-4");
+
+    /// <summary>Each minute's UTC start as a reader of the report works it out: the day's midnight, less the header's offset,
+    /// plus the minute's index.</summary>
+    private static DateTimeOffset[] Decoded(ReportV1 report)
+    {
+        var midnight = new DateTimeOffset(LocalDays.Parse(report.Day).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        return [.. report.Power.ShouldNotBeNull().Minutes.T.Select(index => midnight.AddMinutes(index - report.UtcOffsetMinutes))];
+    }
+
+    /// <summary>The UTC starts of <paramref name="count"/> minutes from <paramref name="from"/>.</summary>
+    private static DateTimeOffset[] Starts(DateTimeOffset from, int count) =>
+        [.. Enumerable.Range(0, count).Select(i => from.AddMinutes(i).ToUniversalTime())];
 
     /// <summary>The worker wired to a temp database, a fake server, a fake clock in a UTC+2 zone and a board the loop would
     /// have published to; its ticks and commands are run by the test, one at a time.</summary>

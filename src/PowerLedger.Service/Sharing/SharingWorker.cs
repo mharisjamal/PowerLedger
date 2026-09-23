@@ -736,11 +736,16 @@ internal sealed class SharingWorker : BackgroundService
         return _store.SentThrough is { } through && string.CompareOrdinal(day, through) <= 0 ? LocalDays.Text(today) : day;
     }
 
+    /// <summary>What a day's upload is built from. The header's offset is the one the minutes count from, which is the zone's
+    /// when they were built, not now (<see cref="MinuteBuilder.ForReport"/>).</summary>
     private ReportInputs Inputs(
-        string day, Consent consent, string installId, IReadOnlyList<MinuteRow> minutes, DayEvents events, bool withHardware, DateTimeOffset now) =>
-        new(_environment.Host(), installId, consent, day, LocalDays.UtcOffsetMinutes(LocalDays.Parse(day), Zone), minutes, events,
+        string day, Consent consent, string installId, IReadOnlyList<MinuteRow> minutes, DayEvents events, bool withHardware, DateTimeOffset now)
+    {
+        var (offset, sent) = MinuteBuilder.ForReport(day, minutes, Zone);
+        return new(_environment.Host(), installId, consent, day, offset, sent, events,
             _board.Status, _board.Facts, _board.Settings ?? ServiceSettings.Default, _tariffs.Schedule().At(now), _board.DiscreteGpu,
             withHardware, _environment.Names());
+    }
 
     /// <summary>Makes a request for one the App waits on. One that doesn't answer before <paramref name="deadline"/> counts as
     /// no answer, and so does one there is no time left to make, which isn't made.</summary>
