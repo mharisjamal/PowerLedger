@@ -8,3 +8,9 @@ export function utcDateString(offsetDays: number, now: Date): string {
 export function dayInRange(day: string, now: Date): boolean {
   return day >= utcDateString(-15, now) && day <= utcDateString(1, now);
 }
+
+/** `now`, shifted back `years` whole calendar years (so leap days land correctly), as `yyyy-MM-dd`. */
+export function utcDateYearsAgo(years: number, now: Date): string {
+  const shifted = new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate()));
+  return shifted.toISOString().slice(0, 10);
+}

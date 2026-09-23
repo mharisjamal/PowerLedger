@@ -1,6 +1,7 @@
 import { handleAdmin } from "./admin";
 import { handleConsent, handleDelete } from "./install";
 import { handleReport } from "./report";
+import { runRetention } from "./retention";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -20,5 +21,9 @@ export default {
     }
 
     return Response.json({ error: "Not found." }, { status: 404 });
+  },
+
+  async scheduled(_controller, env, _ctx): Promise<void> {
+    await runRetention(env);
   },
 } satisfies ExportedHandler<Cloudflare.Env>;
