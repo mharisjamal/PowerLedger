@@ -45,6 +45,42 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task An_answer_to_an_older_wording_sends_nothing_and_a_new_answer_collects_from_its_own_moment()
+    {
+        // Every switch was turned on under the wording before this one; the ID, progress and a waiting day are from then.
+        var older = new Consent(ConsentText.Version - 1, true, true, true, true);
+        _h.Store.SaveConsent(new StoredConsent(older, Local(20, 10).ToUnixTimeMilliseconds(), Local(20, 10).ToUnixTimeMilliseconds()));
+        _h.Store.Identity();
+        _h.Store.CollectedTo = Local(23, 10).ToUnixTimeMilliseconds();
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-22")]);
+        _h.Outbox.AddEvent("2026-09-23", OutboxEvents.Usage, OutboxEvents.MergeUsage(null, Usage("2026-09-23")));
+        _h.CrashFile(Local(24, 9));
+        _h.Readings(Local(24, 9), TimeSpan.FromMinutes(30));
+
+        _h.Clock.SetUtcNow(Local(24, 9, 40));
+        await _h.TickAsync();
+        _h.Clock.SetUtcNow(Local(25, 1, 1));
+        await _h.TickAsync();
+        (await _h.Run(new SendNowCommand(1))).ShouldBe(new SharingReply(1, false, "Nothing is sent until you choose what to share."));
+        await _h.Run(new ReportUsageCommand(2, Usage("2026-09-25")));
+
+        _h.Client.Calls.ShouldBeEmpty();
+        _h.Outbox.Days().ShouldBeEmpty();
+        Directory.GetFiles(_h.Crashes).ShouldBeEmpty();
+        _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().DaysWaiting.ShouldBe(0);
+
+        _h.Clock.SetUtcNow(Local(25, 9, 15));
+        await _h.Consent(false, false, true);
+        _h.Store.CollectedTo.ShouldBe(Local(25, 9, 15).ToUnixTimeMilliseconds());
+        _h.Readings(Local(25, 9), TimeSpan.FromMinutes(30));                   // 09:00 to 09:30, half before the answer
+        _h.Clock.SetUtcNow(Local(25, 9, 40));
+        await _h.TickAsync();
+
+        _h.Outbox.MinuteDays().ShouldBe(new[] { "2026-09-25" });
+        _h.Outbox.Minutes("2026-09-25").Select(minute => minute.Minute).ShouldBe(Enumerable.Range(555, 15));
+    }
+
+    [Fact]
     public async Task Tonights_minute_sends_yesterday_from_the_moment_the_user_said_yes()
     {
         _h.Readings(Local(24, 9, 30), TimeSpan.FromMinutes(60));            // 09:30 to 10:30, half of it before the consent

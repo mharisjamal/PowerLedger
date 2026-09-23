@@ -369,7 +369,8 @@ internal sealed class SharingWorker : BackgroundService
         var stored = _store.StoredConsent;
         if (stored is null || !stored.Consent.AllowsAny)
         {
-            command.Answer(false, stored is null ? "Nothing is sent until you choose what to share." : "Nothing is sent while every switch is off.");
+            // An answer to an older wording counts for nothing until the user answers again.
+            command.Answer(false, stored?.Consent.Answered == true ? "Nothing is sent while every switch is off." : "Nothing is sent until you choose what to share.");
             return;
         }
         if (!LoopHasPublished)
