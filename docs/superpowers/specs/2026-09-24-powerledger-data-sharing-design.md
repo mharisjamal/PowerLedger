@@ -107,8 +107,8 @@ upload. The App passes it what only the App knows over the pipe, as it does moni
   success the service does what a 410 does; on failure it says so and changes nothing.
 - **The endpoint** is built in (`https://powerledger-data.<account>.workers.dev`), overridden for tests the same way the
   update feed is.
-- **Uploads come from the service**, so they go direct or through the machine-wide WinHTTP proxy. A PC that reaches the
-  internet only through a proxy set for the user doesn't send.
+- **Uploads come from the service**, as LocalSystem, with .NET's default proxy handling, so a proxy set only for the
+  user's account isn't used. A PC that reaches the internet only through such a proxy doesn't send.
 
 ## 5. The App's part
 

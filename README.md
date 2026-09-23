@@ -80,9 +80,9 @@ deletes everything sent from the PC from the server.
 Never sent: names, serial numbers, files, other programs, and your IP address, which the server uses only to find your
 country. [PRIVACY.md](PRIVACY.md) has the details.
 
-The service sends one upload a day to PowerLedger's server, a Cloudflare Worker whose code is in `server/`. It goes
-direct or through the machine's WinHTTP proxy, since it comes from the service; a proxy set only for your account isn't
-used.
+The service sends one upload a day to PowerLedger's server, a Cloudflare Worker whose code is in `server/`. It comes
+from the service rather than from you, so a proxy set only for your Windows account isn't used, and a PC that reaches
+the internet only through such a proxy doesn't send.
 
 ## Requirements
 
