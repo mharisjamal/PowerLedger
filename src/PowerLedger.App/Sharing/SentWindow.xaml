@@ -7,6 +7,8 @@
         Background="{DynamicResource Brush.Panel}" Foreground="{DynamicResource Brush.Ink}"
         UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
     <DockPanel Margin="20">
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,0,0,14"
+                   Text="Each upload sent from this PC, newest first. Choose one to see it exactly as it went." />
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,14">
             <Button Style="{StaticResource Quiet}" Content="Send now" Command="{Binding SendNow}" />
             <TextBlock Style="{StaticResource Text.Secondary}" Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding Message}"
@@ -20,7 +22,7 @@
                 <DataTemplate DataType="{x:Type local:SentRow}">
                     <Grid Margin="2,8" Cursor="Hand">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="90" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Day}" />

@@ -242,7 +242,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Face" Background="Transparent" BorderBrush="{DynamicResource Brush.LineStrong}" BorderThickness="1" CornerRadius="3" Padding="11,5">
-                        <ContentPresenter />
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -305,7 +305,7 @@
         </Setter>
     </Style>
 
-    <!-- Words that act: underlined when hovered, amber when they have the keyboard. -->
+    <!-- Words that act: underlined so they read as clickable at rest, brighter when hovered, amber when they have the keyboard. -->
     <Style x:Key="Link" TargetType="Button">
         <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
         <Setter Property="FontSize" Value="11.5" />
@@ -314,10 +314,9 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <TextBlock x:Name="Words" Background="Transparent" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" />
+                    <TextBlock x:Name="Words" Background="Transparent" TextDecorations="Underline" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" />
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Words" Property="TextDecorations" Value="Underline" />
                             <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
