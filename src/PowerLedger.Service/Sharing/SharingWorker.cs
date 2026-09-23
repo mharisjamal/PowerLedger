@@ -301,7 +301,7 @@ internal sealed class SharingWorker : BackgroundService
         var nowMs = now.ToUnixTimeMilliseconds();
         var before = _store.StoredConsent;
         var was = before?.Consent is { Answered: true } answered ? answered : AllOff;
-        if (consent.AllowsAny) _store.Identity();                           // the first switch turned on makes the ID and key
+        if (consent.AllowsAny) Identity(changing: true);                    // the first switch turned on makes the ID and key
         if (consent.Power && !was.Power) _store.CollectedTo = nowMs;        // nothing from before the answer is collected
         if (!consent.Power)
         {
@@ -417,13 +417,19 @@ internal sealed class SharingWorker : BackgroundService
         command.Answer(ok, message);
     }
 
+    /// <summary>Asks the server to delete what it holds, and forgets everything once it has. What was sent under an ID whose
+    /// key this PC couldn't read, the current one's or the <see cref="SharingStore.PreviousId"/>, can't be asked for: the
+    /// answer says so, quoting it, so the user can have it deleted by writing in.</summary>
     private async Task DeleteAsync(DeleteMyDataCommand command, CancellationToken stop)
     {
         var now = _clock.GetUtcNow();
+        var previous = _store.PreviousId;
         if (_store.InstallId is not { } id)
         {
             Forget(now);
-            command.Answer(true, "Nothing had been sent from this PC, and every switch is now off.");
+            command.Answer(previous is null, previous is null
+                ? "Nothing had been sent from this PC, and every switch is now off."
+                : $"Every switch is now off. {Undeletable(previous)}");
             return;
         }
         if (_store.Key is not { } key)
@@ -431,8 +437,9 @@ internal sealed class SharingWorker : BackgroundService
             // A key this account can't decrypt, as in a database copied from another PC: the server can't be asked, so
             // this PC stops sending and says how else to have the data deleted.
             Forget(now);
+            var ids = previous is null ? $"the install ID {id}" : $"the install IDs {id} and {previous}";
             command.Answer(false, "This PC's key can't be read, so the server can't be asked to delete what it holds. Every switch is "
-                + $"now off. To have it deleted, write to the address in the privacy policy, quoting the install ID {id}.");
+                + $"now off. To have it deleted, write to the address in the privacy policy, quoting {ids}.");
             return;
         }
         using var answerBy = AnswerBy(command);
@@ -441,7 +448,9 @@ internal sealed class SharingWorker : BackgroundService
         {
             _log.LogInformation("The server deleted this install's data; forgetting it");
             Forget(now);
-            command.Answer(true, "Your data has been deleted from the server.");
+            command.Answer(previous is null, previous is null
+                ? "Your data has been deleted from the server."
+                : $"Your data has been deleted from the server. {Undeletable(previous)}");
         }
         else
         {
@@ -553,9 +562,14 @@ internal sealed class SharingWorker : BackgroundService
     private async Task<bool> PostPendingConsentAsync(DateTimeOffset now, bool atOnce, CancellationToken stop)
     {
         if (!_store.ConsentPending) return true;
-        if (_store.InstallId is not { } id || _store.Key is not { } key)
+        if (_store.InstallId is not { } id)
         {
-            Posted();
+            Posted();                                                          // the server knows no ID of this PC's to change
+            return true;
+        }
+        if (_store.Key is not { } key)
+        {
+            Unheard(id);
             return true;
         }
         if (!atOnce && _store.ConsentBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return true;
@@ -589,6 +603,41 @@ internal sealed class SharingWorker : BackgroundService
         _store.ConsentBackoff = null;
     }
 
+    /// <summary>A consent change the server can't be told of, as the key for <paramref name="id"/> can't be read: it keeps
+    /// what was sent under that ID as the user allowed before. It can never be posted, so it waits no more, and the status
+    /// says so and how to have it applied.</summary>
+    private void Unheard(string id)
+    {
+        _log.LogWarning("The server can't be told of the consent change for {Id}, as its key can't be read", id);
+        Posted();
+        _store.Problem = new SendProblem(
+            $"this PC's key can't be read, so the server wasn't told of your choices for install ID {id}. To have them applied to "
+            + "what was sent under it, write to the address in the privacy policy, quoting that ID", Rejected: false);
+    }
+
+    /// <summary>
+    /// This PC's install ID and key (<see cref="SharingStore.Identity"/>). A key that can't be read, as in a database copied
+    /// from another PC, makes a new ID, logged with the old: the server keeps what was sent under the old one as it was, so
+    /// a consent change it hasn't heard, or the one being made, it now never will (<see cref="Unheard"/>).
+    /// </summary>
+    /// <param name="changing">True when the user is changing the consent.</param>
+    private (string Id, string Key) Identity(bool changing = false)
+    {
+        if (_store.InstallId is not { } old || _store.Key is not null) return _store.Identity();
+        var unheard = changing || _store.ConsentPending;
+        var identity = _store.Identity();
+        _log.LogWarning(
+            "This PC's install key can't be read, so it now shares as {Id}. What was sent as {Old} stays on the server, and only "
+            + "writing in, quoting that ID, can have it deleted", identity.Id, old);
+        if (unheard) Unheard(old);
+        return identity;
+    }
+
+    /// <summary>How to have what was sent under <paramref name="id"/> deleted, since this PC can't ask for it.</summary>
+    private static string Undeletable(string id) =>
+        $"What was sent under the install ID {id}, whose key this PC couldn't read, can't be deleted from here: to have it deleted, "
+        + "write to the address in the privacy policy, quoting that ID.";
+
     /// <summary>
     /// Sends the complete days waiting, oldest first and at most <see cref="MaxDaysPerRun"/>, each with the sections switched
     /// on as it is built, and the hardware when it changed since it last went. Before each day it makes way for a request
@@ -601,7 +650,7 @@ internal sealed class SharingWorker : BackgroundService
         var forApp = answerBy.CanBeCanceled;
         var lastRun = _store.LastRun;
         _store.LastRun = now.ToUnixTimeMilliseconds();
-        var (id, key) = _store.Identity();
+        var (id, key) = Identity();
         var result = new RunResult();
         try
         {

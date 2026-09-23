@@ -422,6 +422,74 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_with_a_key_this_account_cannot_read_quotes_the_id_an_earlier_unreadable_key_left_too()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true);
+        var first = _h.Store.InstallId.ShouldNotBeNull();
+        var settings = new SettingsRepository(_h.Database.Db);
+        settings.Set(SharingStore.KeyKey, "not a key this account protected");
+        await _h.Consent(true, true, false);                                  // a new ID
+        var second = _h.Store.InstallId.ShouldNotBeNull();
+        settings.Set(SharingStore.KeyKey, "not one either");
+
+        var reply = await _h.Run(new DeleteMyDataCommand(10));
+
+        reply.ShouldBe(new SharingReply(10, false, "This PC's key can't be read, so the server can't be asked to delete what it holds. "
+            + $"Every switch is now off. To have it deleted, write to the address in the privacy policy, quoting the install IDs {second} and {first}."));
+    }
+
+    [Fact]
+    public async Task A_key_that_cannot_be_read_gives_way_to_a_new_id_that_starts_clean_and_the_old_one_is_kept_to_quote()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(true, true, true, share: true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+        await _h.TickAsync();                                                 // sent with the parts
+        var old = _h.Store.InstallId.ShouldNotBeNull();
+        new SettingsRepository(_h.Database.Db).Set(SharingStore.KeyKey, "not a key this account protected");   // copied from another PC
+
+        _h.Clock.SetUtcNow(Local(24, 10));
+        (await _h.Consent(true, true, true)).Ok.ShouldBeTrue();              // Share my detailed data turned off
+
+        var id = _h.Store.InstallId.ShouldNotBeNull();
+        (id == old, _h.Store.PreviousId).ShouldBe((false, old));
+        _h.Client.Calls.Where(call => call.Kind == "consent").Select(call => call.InstallId).ShouldBe(new[] { old, id });
+        _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().Problem.ShouldBe(Unheard(old));   // the server keeps its share on
+
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-24")]);
+        _h.Clock.SetUtcNow(Local(25, 1, 1));
+        await _h.TickAsync();
+        var report = _h.Client.Reports.Last();
+        (report.InstallId, report.Power.ShouldNotBeNull().Hardware is not null).ShouldBe((id, true));   // the new ID's first upload
+
+        (await _h.Run(new DeleteMyDataCommand(3))).ShouldBe(new SharingReply(3, false,
+            $"Your data has been deleted from the server. What was sent under the install ID {old}, whose key this PC couldn't read, "
+            + "can't be deleted from here: to have it deleted, write to the address in the privacy policy, quoting that ID."));
+        _h.Client.Calls.Where(call => call.Kind == "delete").Select(call => call.InstallId).ShouldBe(new[] { id });
+        (await _h.Run(new DeleteMyDataCommand(4))).ShouldBe(new SharingReply(4, false,
+            $"Every switch is now off. What was sent under the install ID {old}, whose key this PC couldn't read, "
+            + "can't be deleted from here: to have it deleted, write to the address in the privacy policy, quoting that ID."));
+    }
+
+    [Fact]
+    public async Task A_consent_change_the_server_cant_be_told_of_as_the_key_cannot_be_read_is_said_so_not_taken_as_heard()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true, share: true);
+        var id = _h.Store.InstallId.ShouldNotBeNull();
+        new SettingsRepository(_h.Database.Db).Set(SharingStore.KeyKey, "not a key this account protected");
+
+        (await _h.Consent(false, false, false)).Ok.ShouldBeTrue();          // everything withdrawn, share with it
+
+        _h.Client.Calls.Where(call => call.Kind == "consent").Select(call => call.InstallId).ShouldBe(new[] { id });
+        (_h.Store.ConsentPending, _h.Store.InstallId).ShouldBe((false, id));
+        _h.Store.Problem.ShouldBe(new SendProblem(Unheard(id), Rejected: false));
+        _h.Board.Status.ShouldNotBeNull().Sharing.ShouldNotBeNull().Problem.ShouldBe(Unheard(id));
+    }
+
+    [Fact]
     public async Task Usage_and_crashes_are_kept_only_while_their_switch_is_on_and_a_crash_only_from_after_the_answer()
     {
         _h.Clock.SetUtcNow(Local(24, 10));
@@ -900,6 +968,12 @@ public sealed class SharingWorkerTests : IDisposable
 
     private static CrashReport Crash(DateTimeOffset at) =>
         new(at, "app", "0.6.0", ["System.InvalidOperationException"], "Collection was modified.", "   at X()");
+
+    /// <summary>What the status says of a consent change the server can't be told of, as the key for <paramref name="id"/>
+    /// can't be read.</summary>
+    private static string Unheard(string id) =>
+        $"this PC's key can't be read, so the server wasn't told of your choices for install ID {id}. To have them applied to what "
+        + "was sent under it, write to the address in the privacy policy, quoting that ID";
 
     /// <summary>UTC-4, where a laptop from the harness's UTC+2 starts up after travelling west.</summary>
     private static readonly TimeZoneInfo West = TimeZoneInfo.CreateCustomTimeZone("PL-4", TimeSpan.FromHours(-4), "PL-4", "PL-4");
