@@ -55,31 +55,33 @@ public class ConsentViewModelTests
     }
 
     [Fact]
-    public async Task Allow_all_sends_every_switch_on_at_the_current_version()
+    public void Allow_all_sends_every_switch_on_at_the_current_version()
     {
         var model = Model();
-        await model.SendAsync(new Consent(ConsentText.Version, true, true, true, true));
+
+        model.AllowAll.Execute(null);
 
         _link.SharingRequests.Single().ShouldBe(new Consent(ConsentText.Version, true, true, true, true));
     }
 
     [Fact]
-    public async Task Allow_none_sends_every_switch_off()
+    public void Allow_none_sends_every_switch_off()
     {
         var model = Model(new Consent(ConsentText.Version, true, true, true, true));
-        await model.SendAsync(new Consent(ConsentText.Version, false, false, false, false));
+
+        model.AllowNone.Execute(null);
 
         _link.SharingRequests.Single().ShouldBe(Consent.Unanswered with { Version = ConsentText.Version });
     }
 
     [Fact]
-    public async Task Save_sends_what_is_ticked()
+    public void Save_sends_what_is_ticked()
     {
         var model = Model();
         model.Diagnostics = true;
         model.Power = true;
 
-        await model.SendAsync(new Consent(ConsentText.Version, model.Diagnostics, model.Usage, model.Power, model.Share));
+        model.Save.Execute(null);
 
         _link.SharingRequests.Single().ShouldBe(new Consent(ConsentText.Version, true, false, true, false));
     }
