@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
+using PowerLedger.Service.Sharing;
 using PowerLedger.Storage;
 using Shouldly;
 
@@ -10,6 +11,7 @@ public sealed class PipeHandlerTests : IDisposable
     private static readonly DateTimeOffset Now = Samples.T0;
     private readonly TestDatabase _database = new();
     private readonly LoopCommands _commands = new();
+    private readonly SharingCommands _sharing = new();
     private readonly StatusBoard _board = new();
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly ServiceSignals _signals;
@@ -20,7 +22,118 @@ public sealed class PipeHandlerTests : IDisposable
     {
         _signals = new ServiceSignals(_clock);
         _monitors = new MonitorBoard(MonitorBoardTests.Catalogue, _clock);
-        _handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock);
+        _handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock, _sharing);
+    }
+
+    public static TheoryData<PipeRequest, Type> SharingRequests() => new()
+    {
+        { new SetConsentRequest(30, new Consent(ConsentText.Version, true, false, true, true)), typeof(SetConsentCommand) },
+        { new PreviewUploadRequest(31), typeof(PreviewCommand) },
+        { new SendNowRequest(32), typeof(SendNowCommand) },
+        { new DeleteMyDataRequest(33), typeof(DeleteMyDataCommand) },
+    };
+
+    [Theory]
+    [MemberData(nameof(SharingRequests))]
+    public async Task A_sharing_request_goes_to_the_worker_and_is_answered_with_what_it_did(PipeRequest request, Type command)
+    {
+        var reply = Send(request);
+
+        var queued = await _sharing.Reader.ReadAsync();
+        queued.ShouldBeOfType(command);
+        queued.Id.ShouldBe(request.Id);
+        reply.IsCompleted.ShouldBeFalse();
+        queued.Answer(true, "Done.", @"C:\ProgramData\PowerLedger\Sent\preview.json");
+        (await reply).ShouldBe(new SharingReply(request.Id, true, "Done.", @"C:\ProgramData\PowerLedger\Sent\preview.json"));
+    }
+
+    [Fact]
+    public async Task The_consent_the_app_sent_is_the_one_the_worker_gets()
+    {
+        var consent = new Consent(ConsentText.Version, false, true, false, false);
+        var reply = Send(new SetConsentRequest(34, consent));
+
+        var queued = (await _sharing.Reader.ReadAsync()).ShouldBeOfType<SetConsentCommand>();
+        queued.Consent.ShouldBe(consent);
+        queued.Answer(false, "No.");
+        (await reply).ShouldBe(new SharingReply(34, false, "No."));
+    }
+
+    [Theory]
+    [InlineData(ConsentText.Version, false, "Sharing detailed data needs Hardware and power turned on.")]
+    [InlineData(ConsentText.Version - 1, true, "That answer is to an older wording of the choices. Please choose again.")]
+    public async Task A_consent_that_cannot_be_recorded_is_refused_without_bothering_the_worker(int version, bool power, string problem)
+    {
+        (await Send(new SetConsentRequest(35, new Consent(version, true, true, power, Share: true)))).ShouldBe(new ErrorReply(35, problem));
+        (await Send(new SetConsentRequest(36, null!))).ShouldBe(new ErrorReply(36, "The choices are missing."));
+        _sharing.Reader.TryRead(out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Usage_counts_and_a_crash_are_acknowledged_at_once_and_left_to_the_worker()
+    {
+        var counts = new UsageCounts("2026-09-24", 1, new Dictionary<string, int> { ["now"] = 1 }, new Dictionary<string, int>(), 0, 0, 2, "dark", "en-US");
+        var crash = new CrashReport(Now, "app", "0.6.0", ["System.Exception"], "Boom.", "   at X()");
+
+        (await Send(new ReportUsageRequest(37, counts))).ShouldBe(new OkReply(37));
+        (await Send(new ReportCrashRequest(38, crash))).ShouldBe(new OkReply(38));
+
+        (await _sharing.Reader.ReadAsync()).ShouldBeOfType<ReportUsageCommand>().Counts.ShouldBeSameAs(counts);
+        (await _sharing.Reader.ReadAsync()).ShouldBeOfType<ReportCrashCommand>().Crash.ShouldBeSameAs(crash);
+    }
+
+    [Fact]
+    public async Task Bad_counts_and_a_bad_crash_are_refused_saying_what_is_wrong()
+    {
+        var counts = new UsageCounts("2026-09-24", 1, new Dictionary<string, int> { ["Now Page"] = 1 }, new Dictionary<string, int>(), 0, 0, 2, "dark", "en-US");
+        var crash = new CrashReport(Now, "installer", "0.6.0", ["System.Exception"], "Boom.", "   at X()");
+
+        (await Send(new ReportUsageRequest(39, counts))).ShouldBe(new ErrorReply(39, "A counted name must be camelCase letters and digits, at most 40."));
+        (await Send(new ReportCrashRequest(40, crash))).ShouldBe(new ErrorReply(40, "A crash's component must be app or service."));
+        (await Send(new ReportUsageRequest(41, null!))).ShouldBe(new ErrorReply(41, "The counts are missing."));
+        (await Send(new ReportCrashRequest(42, null!))).ShouldBe(new ErrorReply(42, "The crash is missing."));
+        _sharing.Reader.TryRead(out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_worker_that_never_answers_gets_the_client_an_error_not_a_hang()
+    {
+        var reply = Send(new SendNowRequest(43));
+        (await _sharing.Reader.ReadAsync()).ShouldBeOfType<SendNowCommand>();
+
+        _clock.Advance(PipeHandler.LoopTimeout);
+
+        (await reply).ShouldBe(new ErrorReply(43, PipeHandler.NoAnswer));
+    }
+
+    [Fact]
+    public async Task The_status_carries_how_sharing_stands_as_the_worker_last_published_it()
+    {
+        var status = new ServiceStatus("0.6.0", Now, 5, [], 0, 0, new CalibrationStatus(0, 0, 0, 0), "", 0, null, null, null);
+        var sharing = new SharingStatus(new Consent(ConsentText.Version, true, true, false, false), SharingFakes.InstallId, Now, 41_000, null, false, 2);
+
+        _board.Publish(sharing);
+        (await Send(new GetStatusRequest(46))).ShouldBe(new ErrorReply(46, PipeHandler.Starting));   // the loop hasn't published yet
+
+        _board.Publish(status);
+        (await Send(new GetStatusRequest(47))).ShouldBeOfType<StatusReply>().Status.Sharing.ShouldBe(sharing);
+
+        var later = sharing with { DaysWaiting = 0, LastSentAt = Now.AddDays(1) };
+        _board.Publish(later);
+        (await Send(new GetStatusRequest(48))).ShouldBeOfType<StatusReply>().Status.Sharing.ShouldBe(later);
+        _board.Publish(status with { Ticks = 6 });
+        var reply = (await Send(new GetStatusRequest(49))).ShouldBeOfType<StatusReply>();
+        (reply.Status.Ticks, reply.Status.Sharing).ShouldBe((6L, later));
+    }
+
+    [Fact]
+    public async Task While_the_service_stops_sharing_requests_are_answered_no()
+    {
+        _sharing.Close();
+
+        (await Send(new SendNowRequest(44))).ShouldBe(new SharingReply(44, false, "The service is stopping."));
+        (await Send(new ReportCrashRequest(45, new CrashReport(Now, "app", "0.6.0", ["X"], "", ""))))
+            .ShouldBe(new ErrorReply(45, "The service is stopping."));
     }
 
     [Fact]

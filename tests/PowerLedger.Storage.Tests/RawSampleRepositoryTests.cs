@@ -1,3 +1,4 @@
+using PowerLedger.Contracts;
 using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
@@ -6,6 +7,28 @@ namespace PowerLedger.Storage.Tests;
 
 public class RawSampleRepositoryTests
 {
+    [Fact]
+    public void Read_range_gives_back_where_each_total_came_from_what_the_card_covered_and_what_was_measured()
+    {
+        using var t = new TestDatabase();
+        var repo = new RawSampleRepository(t.Db);
+        var modelled = Fixtures.Reading(0);
+        var measured = Fixtures.Reading(1) with
+        {
+            TotalSource = TotalSource.PowerSupplyWall,
+            GpuScope = GpuPowerScope.Package,
+            Measured = MeasuredParts.Cpu | MeasuredParts.Gpu | MeasuredParts.Total,
+        };
+        var upsNoGpu = Fixtures.Reading(2) with { TotalSource = TotalSource.Ups, GpuScope = GpuPowerScope.ChipOnly, Measured = MeasuredParts.Total };
+        repo.InsertBatch([modelled, measured, upsNoGpu]);
+
+        var back = repo.ReadRange(Fixtures.T0.ToUnixTimeMilliseconds(), Fixtures.T0.AddSeconds(3).ToUnixTimeMilliseconds());
+
+        back.ShouldBe(new[] { modelled, measured, upsNoGpu });
+        repo.ReadRange(Fixtures.T0.AddSeconds(1).ToUnixTimeMilliseconds(), Fixtures.T0.AddSeconds(2).ToUnixTimeMilliseconds())
+            .ShouldBe(new[] { measured });
+    }
+
     [Fact]
     public void A_batch_round_trips_every_field()
     {

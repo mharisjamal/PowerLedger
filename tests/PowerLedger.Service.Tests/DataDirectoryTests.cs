@@ -16,6 +16,10 @@ public sealed class DataDirectoryTests : IDisposable
         Directory.Exists(paths.DataDirectory).ShouldBeTrue();
         Directory.Exists(paths.Logs).ShouldBeTrue();
         paths.Database.ShouldBe(Path.Combine(_root, "power.db"));
+        // Data sharing's copies of what was sent, which the App reads, and the service's crash files, under the folder's ACL.
+        (paths.Sent, paths.Crashes).ShouldBe((Path.Combine(_root, "Sent"), Path.Combine(_root, "Crashes")));
+        Directory.Exists(paths.Sent).ShouldBeTrue();
+        Directory.Exists(paths.Crashes).ShouldBeTrue();
     }
 
     [Fact]

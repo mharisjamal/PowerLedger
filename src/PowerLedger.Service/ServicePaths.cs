@@ -12,6 +12,12 @@ internal sealed record ServicePaths(string DataDirectory)
 
     public string Logs => Path.Combine(DataDirectory, "logs");
 
+    /// <summary>Copies of what data sharing sent, the newest 30, and the preview of the next upload, for the App to show.</summary>
+    public string Sent => Path.Combine(DataDirectory, "Sent");
+
+    /// <summary>The service's crash files, until the sharing worker records or deletes them.</summary>
+    public string Crashes => Path.Combine(DataDirectory, "Crashes");
+
     /// <summary>C:\ProgramData\PowerLedger, unless configuration names another folder.</summary>
     public static ServicePaths From(IConfiguration configuration)
     {

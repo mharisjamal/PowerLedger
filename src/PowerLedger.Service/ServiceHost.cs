@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.EventLog;
 using PowerLedger.Contracts;
 using PowerLedger.Sensors;
+using PowerLedger.Service.Sharing;
 using PowerLedger.Storage;
 using Serilog;
 
@@ -73,10 +74,17 @@ internal static class ServiceHost
         services.AddSingleton(provider => provider.GetRequiredService<OpenedDatabase>().Database);
         services.AddSingleton(provider => new TariffRepository(provider.GetRequiredService<SqliteDatabase>()));
         services.AddSingleton(provider => LoopEnvironmentFor(provider, asService));
+        services.AddSingleton(paths);                           // Program writes the service's crash files under it
+        services.AddSingleton<SharingCommands>();
+        services.AddSingleton<ISharingClient>(_ => new SharingClient(SharingEndpoint.Resolve()));
         services.AddSingleton<PipeHandler>();
         services.AddHostedService<PowerNotifications>();
         services.AddSingleton<SamplingLoop>();                  // also resolved by Program and the lifetime, to see whether it failed
         services.AddHostedService(provider => provider.GetRequiredService<SamplingLoop>());
+        services.AddHostedService(provider => new SharingWorker(
+            provider.GetRequiredService<SqliteDatabase>(), provider.GetRequiredService<StatusBoard>(), provider.GetRequiredService<SharingCommands>(),
+            provider.GetRequiredService<ISharingClient>(), SharingEnvironment.For(paths), provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<ILogger<SharingWorker>>()));
         services.AddHostedService(provider => new PipeServer(
             provider.GetRequiredService<PipeHandler>(), provider.GetRequiredService<LiveFeed>(),
             provider.GetRequiredService<ServiceSignals>(), provider.GetRequiredService<ILogger<PipeServer>>(), pipeName));

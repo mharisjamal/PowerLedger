@@ -206,6 +206,7 @@ internal sealed class SamplingLoop : BackgroundService
             _log.LogInformation("Machine profile taken from detection for hardware {Hash}", facts.Hash);
         }
         _facts = facts;
+        _board.Publish(facts);
         _calibration.Use(facts.Hash, now);
         Use(settings);
     }
@@ -233,6 +234,7 @@ internal sealed class SamplingLoop : BackgroundService
             }
             _tickClock.Commit(now);
             var reading = _model!.Evaluate(result.Sample, out var monitorWatts);
+            reading = reading with { Measured = Frames.Measured(result.Sample, reading.TotalSource) };   // stored for data sharing
             var parts = reading.Components;
             // The battery delivers what the monitors running off the laptop draw, so they are taken out with the display, or
             // the learner would learn them into the rest of the laptop. The figure is the one the reading used.
@@ -285,10 +287,13 @@ internal sealed class SamplingLoop : BackgroundService
     }
 
     private void Publish(TickResult result, ReadingFrame frame, long ticks, IReadOnlyList<MonitorStatus> monitors)
-        => _board.Publish(new ServiceStatus(
+    {
+        _board.PublishDiscreteGpu(result.Sample.DGpuPresent);
+        _board.Publish(new ServiceStatus(
             Version, _startedAt, ticks, [.. result.Health.Select(Frames.From)], result.SuspectCount, _worker.Abandoned,
             _calibration.Status(), _facts?.Hash ?? "", _databaseBytes, _buffer.Problem, _environment.DatabaseNotice, frame, monitors,
             Frames.PowerDevices(result.Sample)));
+    }
 
     /// <summary>
     /// Carries the monitor settings from before monitors were detected over, and saves them (Plan J): whether a monitor the

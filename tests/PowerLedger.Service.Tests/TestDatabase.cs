@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Tests;
@@ -18,10 +17,11 @@ internal sealed class TestDatabase : IDisposable
 
     public SqliteDatabase Db { get; }
 
+    /// <summary>Closes this database's pooled connections, and no other's, then deletes the folder. Clearing every pool would
+    /// also close a connection that a test running alongside is opening (see <see cref="MidOpen"/>).</summary>
     public void Dispose()
     {
         Db.Dispose();
-        SqliteConnection.ClearAllPools();
         try
         {
             Directory.Delete(Folder, recursive: true);

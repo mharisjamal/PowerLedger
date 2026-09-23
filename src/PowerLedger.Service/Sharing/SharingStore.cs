@@ -1,0 +1,170 @@
+using System.Buffers.Text;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text.Json.Serialization.Metadata;
+using PowerLedger.Contracts;
+using PowerLedger.Storage;
+
+namespace PowerLedger.Service.Sharing;
+
+/// <summary>The user's answer as the service keeps it.</summary>
+/// <param name="AtMs">When it was given.</param>
+/// <param name="DiagnosticsSinceMs">When Crash and sensor reports was last turned on, so a crash from before is never
+/// recorded; null while it is off.</param>
+internal sealed record StoredConsent(Consent Consent, long AtMs, long? DiagnosticsSinceMs = null);
+
+/// <summary>The last upload the server accepted: when, and its size as sent.</summary>
+internal sealed record LastSent(long AtMs, long Bytes);
+
+/// <summary>Why the last try failed, in words the App can show; <paramref name="Rejected"/> when the server refused a day
+/// rather than not being reached.</summary>
+internal sealed record SendProblem(string Text, bool Rejected);
+
+/// <summary>Failed runs in a row, and when the next may start.</summary>
+internal sealed record Backoff(int Failures, long NextMs);
+
+/// <summary>
+/// Sharing's state in the service's settings table (data-sharing design §4), outside the service settings, so a settings
+/// save can never overwrite it. The install key never leaves the service except to the server.
+/// </summary>
+/// <param name="pickMinute">Chooses the send minute, once; by default at random from 10 to 359, 00:10 to 05:59.</param>
+internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickMinute = null)
+{
+    internal const string ConsentKey = "sharing.consent";
+    internal const string IdKey = "sharing.id";
+    internal const string KeyKey = "sharing.key";
+    internal const string MinuteKey = "sharing.minute";
+    internal const string CollectedToKey = "sharing.collected-to";
+    internal const string LastSentKey = "sharing.last-sent";
+    internal const string ProblemKey = "sharing.problem";
+    internal const string BackoffKey = "sharing.backoff";
+    internal const string HardwareHashKey = "sharing.hardware-hash";
+    internal const string ConsentPendingKey = "sharing.consent-pending";
+    internal const string LastRunKey = "sharing.last-run";
+    internal const string SentThroughKey = "sharing.sent-through";
+
+    public const int FirstSendMinute = 10;
+    public const int LastSendMinute = 359;
+
+    /// <summary>What forgetting removes: everything the server knew this PC by and all progress. The send minute stays.</summary>
+    private static readonly string[] Forgotten =
+        [IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, LastRunKey, SentThroughKey];
+
+    private readonly Func<int> _pickMinute = pickMinute ?? (() => RandomNumberGenerator.GetInt32(FirstSendMinute, LastSendMinute + 1));
+
+    public StoredConsent? StoredConsent => Read(ConsentKey, SharingJson.Default.StoredConsent);
+
+    /// <summary>What the user agreed to, or <see cref="Consent.Unanswered"/> before they answered.</summary>
+    public Consent Consent => StoredConsent?.Consent ?? Consent.Unanswered;
+
+    public void SaveConsent(StoredConsent value) => Write(ConsentKey, value, SharingJson.Default.StoredConsent);
+
+    public string? InstallId => settings.Get(IdKey);
+
+    public string? Key => settings.Get(KeyKey);
+
+    /// <summary>The install's ID, a random GUID, and its key, 32 random bytes in base64url: made the first time a switch is
+    /// turned on and kept until forgotten.</summary>
+    public (string Id, string Key) Identity()
+    {
+        if (InstallId is { } id && Key is { } key) return (id, key);
+        id = Guid.NewGuid().ToString("D");
+        key = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        settings.Set(IdKey, id);
+        settings.Set(KeyKey, key);
+        return (id, key);
+    }
+
+    /// <summary>Minutes after local midnight at which the day's upload goes, chosen once per install.</summary>
+    public int SendMinute
+    {
+        get
+        {
+            if (int.TryParse(settings.Get(MinuteKey), NumberStyles.None, CultureInfo.InvariantCulture, out var minute)
+                && minute is >= FirstSendMinute and <= LastSendMinute)
+            {
+                return minute;
+            }
+            minute = Math.Clamp(_pickMinute(), FirstSendMinute, LastSendMinute);
+            settings.Set(MinuteKey, minute.ToString(CultureInfo.InvariantCulture));
+            return minute;
+        }
+    }
+
+    /// <summary>Readings before this, UTC milliseconds, are in the outbox; null while Hardware and power is off.</summary>
+    public long? CollectedTo
+    {
+        get => ReadLong(CollectedToKey);
+        set => WriteLong(CollectedToKey, value);
+    }
+
+    public LastSent? LastSent
+    {
+        get => Read(LastSentKey, SharingJson.Default.LastSent);
+        set => Write(LastSentKey, value, SharingJson.Default.LastSent);
+    }
+
+    public SendProblem? Problem
+    {
+        get => Read(ProblemKey, SharingJson.Default.SendProblem);
+        set => Write(ProblemKey, value, SharingJson.Default.SendProblem);
+    }
+
+    public Backoff? Backoff
+    {
+        get => Read(BackoffKey, SharingJson.Default.Backoff);
+        set => Write(BackoffKey, value, SharingJson.Default.Backoff);
+    }
+
+    /// <summary>The hardware section last sent, as <see cref="ReportJson.Hash"/> gives it.</summary>
+    public string? HardwareHash
+    {
+        get => settings.Get(HardwareHashKey);
+        set => WriteText(HardwareHashKey, value);
+    }
+
+    /// <summary>True while a consent change hasn't reached the server.</summary>
+    public bool ConsentPending
+    {
+        get => settings.Get(ConsentPendingKey) == "1";
+        set => WriteText(ConsentPendingKey, value ? "1" : null);
+    }
+
+    /// <summary>When the last send run started, UTC milliseconds.</summary>
+    public long? LastRun
+    {
+        get => ReadLong(LastRunKey);
+        set => WriteLong(LastRunKey, value);
+    }
+
+    /// <summary>The newest day sent, or refused by the server: a day at or before it is closed, so nothing more is filed under it.</summary>
+    public string? SentThrough
+    {
+        get => settings.Get(SentThroughKey);
+        set => WriteText(SentThroughKey, value);
+    }
+
+    /// <summary>Forgets the ID, the key and every state about sending, and turns every switch off, as an answer to the
+    /// current wording. The send minute stays.</summary>
+    public void Forget(long nowMs)
+    {
+        foreach (var key in Forgotten) settings.Remove(key);
+        SaveConsent(new StoredConsent(new Consent(ConsentText.Version, false, false, false, false), nowMs));
+    }
+
+    private T? Read<T>(string key, JsonTypeInfo<T> type) where T : class => SharingJson.Read(settings.Get(key), type);
+
+    private void Write<T>(string key, T? value, JsonTypeInfo<T> type) where T : class =>
+        WriteText(key, value is null ? null : SharingJson.Write(value, type));
+
+    private long? ReadLong(string key) =>
+        long.TryParse(settings.Get(key), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) ? value : null;
+
+    private void WriteLong(string key, long? value) => WriteText(key, value?.ToString(CultureInfo.InvariantCulture));
+
+    private void WriteText(string key, string? value)
+    {
+        if (value is null) settings.Remove(key);
+        else settings.Set(key, value);
+    }
+}

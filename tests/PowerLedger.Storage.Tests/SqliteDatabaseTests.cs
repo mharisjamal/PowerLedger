@@ -75,7 +75,7 @@ public class SqliteDatabaseTests
     {
         using var t = new TestDatabase();
         new SettingsRepository(t.Db).Set("a", "1");
-        SqliteConnection.ClearAllPools();
+        t.Db.Dispose();                                             // closes the pooled writer, the last connection
         File.Exists(t.Path + "-wal").ShouldBeTrue();
         File.Exists(t.Path + "-shm").ShouldBeTrue();
     }
@@ -91,7 +91,6 @@ public class SqliteDatabaseTests
         try
         {
             using (var writer = SqliteDatabase.OpenAndMigrate(path)) new SettingsRepository(writer).Set("tariff.currency", "EUR");
-            SqliteConnection.ClearAllPools();
             Protect(folder, FileSystemRights.ReadAndExecute);
             Should.Throw<UnauthorizedAccessException>(() => File.WriteAllBytes(System.IO.Path.Combine(folder, "probe"), []));
 
@@ -100,7 +99,6 @@ public class SqliteDatabaseTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             Protect(folder, FileSystemRights.FullControl);
             try
             {

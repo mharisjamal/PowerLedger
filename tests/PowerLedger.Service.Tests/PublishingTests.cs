@@ -1,4 +1,5 @@
 using PowerLedger.Contracts;
+using PowerLedger.Core;
 using PowerLedger.Sensors;
 using Shouldly;
 
@@ -6,6 +7,20 @@ namespace PowerLedger.Service.Tests;
 
 public class PublishingTests
 {
+    [Fact]
+    public void A_reading_is_marked_with_what_its_sample_measured_rather_than_the_model_worked_out()
+    {
+        var at = Samples.T0;
+        Frames.Measured(Samples.At(at, cpuW: null), TotalSource.Model).ShouldBe(MeasuredParts.None);
+        Frames.Measured(Samples.At(at, cpuW: 8), TotalSource.Model).ShouldBe(MeasuredParts.Cpu);
+        Frames.Measured(Samples.At(at, cpuW: double.NaN), TotalSource.Battery).ShouldBe(MeasuredParts.Total);
+        // A card Windows has switched off reads 0 W, as its library would say.
+        Frames.Measured(Samples.At(at, cpuW: null) with { DGpuPresent = true, DGpuW = 0 }, TotalSource.Model).ShouldBe(MeasuredParts.Gpu);
+        Frames.Measured(Samples.At(at, cpuW: 8) with { DGpuPresent = true, DGpuW = 42 }, TotalSource.Ups)
+            .ShouldBe(MeasuredParts.Cpu | MeasuredParts.Gpu | MeasuredParts.Total);
+        Frames.Measured(Samples.At(at, cpuW: null), TotalSource.PowerSupplyWall).ShouldBe(MeasuredParts.Total);
+    }
+
     [Fact]
     public void A_reading_becomes_a_frame_field_for_field_with_the_reports_bands()
     {
