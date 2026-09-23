@@ -24,6 +24,7 @@ internal sealed class ConsentViewModel : ObservableObject
     private bool _usage;
     private bool _power;
     private bool _share;
+    private bool _busy;
     private string? _message;
 
     public ConsentViewModel(IServiceLink link, UiThreads threads, Consent current, Action<Uri> openBrowser, Action<string> openPayload)
@@ -39,10 +40,10 @@ internal sealed class ConsentViewModel : ObservableObject
         _usage = starting.Usage;
         _power = starting.Power;
         _share = starting.Share;
-        AllowAll = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, true, true, true, true)));
-        AllowNone = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, false, false, false, false)));
-        Save = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, Diagnostics, Usage, Power, Share)));
-        SeeWhatWouldBeSent = new RelayCommand(() => _ = PreviewAsync());
+        AllowAll = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, true, true, true, true)), () => !Busy);
+        AllowNone = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, false, false, false, false)), () => !Busy);
+        Save = new RelayCommand(() => _ = SendAsync(new Consent(ConsentText.Version, Diagnostics, Usage, Power, Share)), () => !Busy);
+        SeeWhatWouldBeSent = new RelayCommand(() => _ = PreviewAsync(), () => !Busy);
         OpenPrivacyPolicy = new RelayCommand(() => _openBrowser(PrivacyPolicyUri));
     }
 
@@ -77,22 +78,28 @@ internal sealed class ConsentViewModel : ObservableObject
     /// <summary>Why the last choice wasn't taken, or null.</summary>
     public string? Message { get => _message; private set => SetProperty(ref _message, value); }
 
-    public ICommand AllowAll { get; }
+    /// <summary>A choice or a preview is still on its way to the service (finding 6: sharing requests are serialised, so
+    /// this can take a few seconds); the buttons below refuse a second press meanwhile.</summary>
+    public bool Busy { get => _busy; private set => SetProperty(ref _busy, value); }
 
-    public ICommand AllowNone { get; }
+    public IRelayCommand AllowAll { get; }
 
-    public ICommand Save { get; }
+    public IRelayCommand AllowNone { get; }
 
-    public ICommand SeeWhatWouldBeSent { get; }
+    public IRelayCommand Save { get; }
+
+    public IRelayCommand SeeWhatWouldBeSent { get; }
 
     public ICommand OpenPrivacyPolicy { get; }
 
     /// <summary>Sends a choice, and closes the dialog once the service has taken it. Call on the UI thread.</summary>
     internal async Task SendAsync(Consent consent)
     {
+        SetBusy(true);
         var result = await _link.SetConsentAsync(consent).ConfigureAwait(false);
         _threads.Post(() =>
         {
+            SetBusy(false);
             if (result.Ok)
             {
                 Applied?.Invoke(consent);
@@ -105,11 +112,22 @@ internal sealed class ConsentViewModel : ObservableObject
     /// <summary>Asks the service to write what the next upload would carry, and opens it. Call on the UI thread.</summary>
     internal async Task PreviewAsync()
     {
+        SetBusy(true);
         var result = await _link.PreviewUploadAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
+            SetBusy(false);
             if (result.Ok && result.Path is { } path) _openPayload(path);
             else Message = result.Message;
         });
+    }
+
+    private void SetBusy(bool value)
+    {
+        Busy = value;
+        AllowAll.NotifyCanExecuteChanged();
+        AllowNone.NotifyCanExecuteChanged();
+        Save.NotifyCanExecuteChanged();
+        SeeWhatWouldBeSent.NotifyCanExecuteChanged();
     }
 }

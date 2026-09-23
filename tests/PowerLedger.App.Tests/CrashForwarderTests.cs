@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using Shouldly;
 
@@ -10,6 +11,7 @@ public sealed class CrashForwarderTests : IDisposable
     private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly string _folder = Path.Combine(Path.GetTempPath(), $"powerledger-forward-{Guid.NewGuid():N}");
     private readonly FakeLink _link = new();
+    private readonly FakeTimeProvider _clock = new();
 
     public CrashForwarderTests() => Directory.CreateDirectory(_folder);
 
@@ -33,7 +35,7 @@ public sealed class CrashForwarderTests : IDisposable
         _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, true, true));   // diagnostics off
         _link.Connect(true);
 
-        await new CrashForwarder(_link, UiThreads.Inline, _folder).RunAsync();
+        await new CrashForwarder(_link, UiThreads.Inline, _folder, _clock).RunAsync();
 
         _link.Writes.ShouldBeEmpty();
         Directory.GetFiles(_folder).ShouldHaveSingleItem();
@@ -46,7 +48,7 @@ public sealed class CrashForwarderTests : IDisposable
         _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, true, false, false, false));
         _link.Connect(true);
 
-        await new CrashForwarder(_link, UiThreads.Inline, _folder).RunAsync();
+        await new CrashForwarder(_link, UiThreads.Inline, _folder, _clock).RunAsync();
 
         _link.Writes.OfType<CrashReport>().Count().ShouldBe(1);
         Directory.GetFiles(_folder).ShouldBeEmpty();
@@ -60,7 +62,7 @@ public sealed class CrashForwarderTests : IDisposable
         _link.Connect(true);
         _link.Answer = new WriteResult("Refused.");
 
-        await new CrashForwarder(_link, UiThreads.Inline, _folder).RunAsync();
+        await new CrashForwarder(_link, UiThreads.Inline, _folder, _clock).RunAsync();
 
         Directory.GetFiles(_folder).ShouldHaveSingleItem();
     }
@@ -72,7 +74,7 @@ public sealed class CrashForwarderTests : IDisposable
         _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, false, false, false));   // no consent at all
         _link.Connect(true);
 
-        await new CrashForwarder(_link, UiThreads.Inline, _folder).RunAsync();
+        await new CrashForwarder(_link, UiThreads.Inline, _folder, _clock).RunAsync();
 
         Directory.GetFiles(_folder).ShouldBeEmpty();
     }
@@ -82,7 +84,7 @@ public sealed class CrashForwarderTests : IDisposable
     {
         WriteCrash("app-1.json");
         _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, true, false, false, false));
-        var forwarder = new CrashForwarder(_link, UiThreads.Inline, _folder);
+        var forwarder = new CrashForwarder(_link, UiThreads.Inline, _folder, _clock);
 
         forwarder.Start();
         _link.Writes.ShouldBeEmpty();   // not connected yet
@@ -100,7 +102,7 @@ public sealed class CrashForwarderTests : IDisposable
     {
         WriteCrash("app-1.json");
         _link.Status = Statuses.Running();   // connected, but no Sharing yet: still starting, or an old service
-        var forwarder = new CrashForwarder(_link, UiThreads.Inline, _folder);
+        var forwarder = new CrashForwarder(_link, UiThreads.Inline, _folder, _clock);
 
         forwarder.Start();
         _link.Connect(true);
@@ -110,6 +112,28 @@ public sealed class CrashForwarderTests : IDisposable
 
         _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, true, false, false, false));
         _link.Connect(true);   // the service finishes starting and reconnects with a Sharing status
+
+        _link.Writes.OfType<CrashReport>().Count().ShouldBe(1);
+        Directory.GetFiles(_folder).ShouldBeEmpty();
+    }
+
+    /// <summary>A connection that stays up while the service is still starting, as right after an update, never fires
+    /// another connection event to retry on; the same ten-second timer <see cref="ConsentGate"/> uses must retry too.
+    /// </summary>
+    [Fact]
+    public void It_retries_every_ten_seconds_while_the_service_has_not_published_sharing_yet()
+    {
+        WriteCrash("app-1.json");
+        _link.Status = Statuses.Running();   // connected, but no Sharing yet: still starting
+        var forwarder = new CrashForwarder(_link, UiThreads.Inline, _folder, _clock);
+
+        forwarder.Start();
+        _link.Connect(true);
+
+        _link.Writes.ShouldBeEmpty();   // no Sharing status seen yet: not sent, but not given up on either
+
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, true, false, false, false));   // the service finishes starting
+        _clock.Advance(CrashForwarder.RetryEvery);   // no further connection event: only the timer can retry this
 
         _link.Writes.OfType<CrashReport>().Count().ShouldBe(1);
         Directory.GetFiles(_folder).ShouldBeEmpty();

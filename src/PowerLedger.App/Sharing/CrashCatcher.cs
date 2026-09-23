@@ -10,9 +10,12 @@ namespace PowerLedger.App;
 /// <summary>
 /// Catches the App's own crashes (data-sharing design §5): the dispatcher's unhandled exceptions, the AppDomain's, and
 /// unobserved task exceptions. Existing behaviour is untouched — nothing here marks an exception handled that wasn't, so
-/// the App ends the way it always did; this only writes what happened first. Each crash is trimmed to the sizes the pipe
-/// and the server accept and scrubbed of names and paths before it ever reaches disk, since <see cref="CrashForwarder"/>
-/// later sends the file on as it is.
+/// the App ends the way it always did; this only writes what happened first. Each crash is scrubbed of names and paths,
+/// then trimmed to the sizes the pipe and the server accept, before it ever reaches disk, since
+/// <see cref="CrashForwarder"/> later sends the file on as it is. Scrubbing runs before trimming, not after: it can
+/// lengthen the text (a short name replaced by <c>&lt;user&gt;</c>, a short path by <c>&lt;path&gt;\File.cs:line N</c>),
+/// so trimming the raw text first could leave the scrubbed result over the pipe's own limit, failing every session's send
+/// until the file is old enough to be deleted.
 /// </summary>
 internal sealed class CrashCatcher(string folder, string version, ScrubNames names, Action<Exception, string, string, ScrubNames>? write = null)
 {
@@ -51,15 +54,16 @@ internal sealed class CrashCatcher(string folder, string version, ScrubNames nam
         }
     }
 
-    /// <summary>Builds, trims and scrubs a crash report, then writes it to <paramref name="folder"/> as
-    /// <c>app-&lt;utc ticks&gt;.json</c>. Never throws: a crash handler that itself threw would replace the crash being
-    /// reported with a worse one.</summary>
+    /// <summary>Builds, scrubs and trims a crash report, then writes it to <paramref name="folder"/> as
+    /// <c>app-&lt;utc ticks&gt;.json</c>. Trimming runs after scrubbing, not before: scrubbing can lengthen the text, so
+    /// trimming the raw text first could leave the scrubbed result over the pipe's own limit. Never throws: a crash
+    /// handler that itself threw would replace the crash being reported with a worse one.</summary>
     internal static void Write(Exception error, string folder, string version, ScrubNames names)
     {
         try
         {
             var report = Build(error, version);
-            var scrubbed = report with { Message = Scrubber.Scrub(report.Message, names), Stack = Scrubber.Scrub(report.Stack, names) };
+            var scrubbed = (report with { Message = Scrubber.Scrub(report.Message, names), Stack = Scrubber.Scrub(report.Stack, names) }).Trimmed();
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, $"app-{DateTime.UtcNow.Ticks}.json");
             File.WriteAllText(path, JsonSerializer.Serialize(scrubbed, Options));
@@ -70,11 +74,11 @@ internal sealed class CrashCatcher(string folder, string version, ScrubNames nam
         }
     }
 
-    /// <summary>The trimmed report for one exception: its type chain outermost first, an <see cref="AggregateException"/>'s
-    /// branches included, the outermost message, and every exception's own text as .NET writes it (spec: "the stack
-    /// traces, outermost first").</summary>
-    internal static CrashReport Build(Exception error, string version) => new CrashReport(
-        DateTimeOffset.UtcNow, "app", version, [.. TypeChain(error)], error.Message, error.ToString()).Trimmed();
+    /// <summary>The report for one exception, not yet trimmed: its type chain outermost first, an
+    /// <see cref="AggregateException"/>'s branches included, the outermost message, and every exception's own text as
+    /// .NET writes it (spec: "the stack traces, outermost first"). <see cref="Write"/> trims it after scrubbing.</summary>
+    internal static CrashReport Build(Exception error, string version) => new(
+        DateTimeOffset.UtcNow, "app", version, [.. TypeChain(error)], error.Message, error.ToString());
 
     private static IEnumerable<string> TypeChain(Exception error)
     {

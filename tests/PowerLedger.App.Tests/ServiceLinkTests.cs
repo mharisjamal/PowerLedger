@@ -179,6 +179,30 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         _service.Requests.OfType<DeleteMyDataRequest>().Count().ShouldBe(1);
     }
 
+    /// <summary>The service serves one request at a time per pipe connection, and its own reply timeout starts when it
+    /// queues a request; a second slow sharing request written while the first is still outstanding could be carried out
+    /// after the App has already given up on it (finding 6). The App must wait for one to answer before writing the
+    /// next.</summary>
+    [Fact]
+    public async Task A_second_sharing_request_is_not_written_until_the_first_has_answered()
+    {
+        _service.HoldReplyTo = request => request is SendNowRequest;
+
+        var first = _link.SendNowAsync();
+        await WaitFor.True(() => _service.Requests.OfType<SendNowRequest>().Any());   // the first reached the service
+
+        var second = _link.DeleteMyDataAsync();
+        await Task.Delay(300);   // give the App every chance to write the second, if it does not wait for the first
+        _service.Requests.OfType<DeleteMyDataRequest>().ShouldBeEmpty();   // still waiting behind the unanswered first
+        second.IsCompleted.ShouldBeFalse();
+
+        _service.ReleaseHeldReplies();
+
+        (await first).ShouldBe(new SharingOutcome(true, "Sent."));
+        (await second).ShouldBe(new SharingOutcome(true, "Your data has been deleted from the server."));
+        _service.Requests.OfType<DeleteMyDataRequest>().Count().ShouldBe(1);
+    }
+
     [Fact]
     public async Task A_sharing_refusal_comes_back_in_the_services_words()
     {

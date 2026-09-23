@@ -116,6 +116,69 @@ public partial class UsageCounterTests
     }
 
     [Fact]
+    public void Start_before_the_link_connects_seeds_again_once_it_does()
+    {
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));
+        var counter = Model();
+
+        counter.Start();   // not connected yet: the seed finds nothing
+        _link.StatusReads.ShouldBe(1);
+
+        _link.Connect(true);   // connects a moment later
+
+        _link.StatusReads.ShouldBe(2);   // seeded again, rather than waiting up to fifteen minutes for the first flush
+    }
+
+    [Fact]
+    public async Task A_consent_answered_before_the_seed_could_run_drops_what_was_counted_before_it()
+    {
+        var counter = Model();
+        counter.Start();          // not connected yet: the seed can't learn the current consent
+        counter.CountAppOpen();   // e.g. counted while the main window was already open but the pipe hadn't connected
+
+        counter.ConsentChanged(new Consent(ConsentText.Version, false, true, false, false));   // the dialog's Allow ... Usage
+
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));
+        _link.Connect(true);
+
+        await counter.FlushAsync();
+        _link.Writes.OfType<UsageCounts>().Single().AppOpens.ShouldBe(0);   // the pre-consent open did not go out
+
+        _link.Writes.Clear();
+        counter.CountAppOpen();   // counted after consent is known
+        await counter.FlushAsync();
+        _link.Writes.OfType<UsageCounts>().Single().AppOpens.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Usage_from_an_answer_to_an_older_wording_of_the_choices_is_not_trusted()
+    {
+        _link.Connect(true);
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version - 1, false, true, false, false));   // old version, usage ticked
+        var counter = Model();
+        counter.CountAppOpen();
+
+        await counter.FlushAsync();
+
+        _link.Writes.OfType<UsageCounts>().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Seeding_from_an_answer_to_an_older_wording_does_not_learn_usage_is_on()
+    {
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version - 1, false, true, false, false));   // old version, usage ticked
+        _link.Connect(true);
+        var counter = Model();
+        counter.Start();   // seeds once, already connected
+
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));   // answered afresh, now current
+        counter.CountAppOpen();
+        await counter.FlushAsync();
+
+        _link.Writes.OfType<UsageCounts>().ShouldBeEmpty();   // the seed must not have trusted the stale "on", so this flip is still caught
+    }
+
+    [Fact]
     public async Task Counts_are_kept_when_the_service_cannot_be_reached()
     {
         _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));

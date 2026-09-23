@@ -51,15 +51,24 @@ internal sealed class UsageCounter : IDisposable
     {
         _periodic ??= _clock.CreateTimer(_ => _ = FlushAsync(), null, FlushEvery, FlushEvery);
         ScheduleMidnight();
+        _link.ConnectionChanged += OnConnectionChanged;
         _ = SeedAsync();
     }
 
     /// <summary>Tells the counter the consent an App action just took: the consent dialog's or Settings → Privacy's own
-    /// successful setConsent (data-sharing design §3), known at once rather than only at the next flush. Safe to call
-    /// from the UI thread.</summary>
+    /// successful setConsent (data-sharing design §3), known at once rather than only at the next flush. Unlike a flush's
+    /// or the seed's own first-ever observation, an unknown previous state here is never trusted: it can only mean the
+    /// seed had not yet run when this consent changed (Start ran before the link connected), so whatever is held cannot
+    /// be shown to be held only since consent, and is dropped exactly as if consent had been off. Safe to call from the
+    /// UI thread.</summary>
     public void ConsentChanged(Consent consent)
     {
-        lock (_gate) Observe(consent.Usage);
+        var usageOn = consent.Answered && consent.Usage;
+        lock (_gate)
+        {
+            if (!usageOn || _usageOn != true) Reset();
+            _usageOn = usageOn;
+        }
     }
 
     public void CountAppOpen() => Change(() => _appOpens++);
@@ -77,8 +86,17 @@ internal sealed class UsageCounter : IDisposable
 
     public void Dispose()
     {
+        _link.ConnectionChanged -= OnConnectionChanged;
         _periodic?.Dispose();
         _midnight?.Dispose();
+    }
+
+    /// <summary>Seeds again once the link (re)connects (data-sharing design §3): Start's own seed can run before the pipe
+    /// has finished connecting and find nothing, which must not leave the consent unknown for up to the next fifteen-
+    /// minute flush.</summary>
+    private void OnConnectionChanged(bool connected)
+    {
+        if (connected) _threads.Background(() => _ = SeedAsync());
     }
 
     /// <summary>Reads the service's status, then sends, drops or keeps what is held, depending what it says. Safe to call
@@ -91,13 +109,15 @@ internal sealed class UsageCounter : IDisposable
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         if (status?.Sharing is not { } sharing) return;   // the service is unreachable, or older and sends no Sharing status: try again later
 
+        // an answer to an older wording of the choices counts for nothing (data-sharing design §1), whatever Usage says
+        var usageOn = sharing.Consent.Answered && sharing.Consent.Usage;
         bool sendable;
         lock (_gate)
         {
             // on, and not a fresh change from a known off: what is held can't be from before consent (a first-ever
             // observation of on, with nothing known before it, is trusted, so an already-consented session sends normally)
-            sendable = sharing.Consent.Usage && _usageOn != false;
-            Observe(sharing.Consent.Usage);
+            sendable = usageOn && _usageOn != false;
+            Observe(usageOn);
         }
         if (!sendable) return;   // off, or only just found on from a known off: this snapshot might hold counts from before consent
 
@@ -110,7 +130,7 @@ internal sealed class UsageCounter : IDisposable
     private async Task SeedAsync()
     {
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
-        if (status?.Sharing is { } sharing) lock (_gate) Observe(sharing.Consent.Usage);
+        if (status?.Sharing is { } sharing) lock (_gate) Observe(sharing.Consent.Answered && sharing.Consent.Usage);
     }
 
     private static void Bump(Dictionary<string, int> counts, string name) => counts[name] = counts.GetValueOrDefault(name) + 1;

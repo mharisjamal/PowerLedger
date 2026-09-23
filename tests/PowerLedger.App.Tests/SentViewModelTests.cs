@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using PowerLedger.Contracts;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -80,5 +81,26 @@ public sealed class SentViewModelTests : IDisposable
         model.Message.ShouldBe("Sent.");
         model.Empty.ShouldBeNull();
         model.Rows.Single().Day.ShouldBe("24 Sep 2026");
+    }
+
+    /// <summary>The service can take seconds over a sharing request (finding 6: they are serialised, so a second one
+    /// waits its turn); Send now must show that and refuse a second press meanwhile.</summary>
+    [Fact]
+    public async Task Send_now_is_busy_while_on_its_way_to_the_service()
+    {
+        _link.Connect(true);
+        var gate = new TaskCompletionSource<SharingOutcome>();
+        _link.SharingGate = gate;
+        var model = Model();
+
+        model.SendNow.Execute(null);
+
+        model.Busy.ShouldBeTrue();
+        model.SendNow.CanExecute(null).ShouldBeFalse();
+
+        gate.SetResult(new SharingOutcome(true, "Sent."));
+
+        await WaitFor.True(() => !model.Busy);
+        model.SendNow.CanExecute(null).ShouldBeTrue();
     }
 }

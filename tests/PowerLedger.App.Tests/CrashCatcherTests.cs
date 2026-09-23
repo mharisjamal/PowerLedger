@@ -68,6 +68,28 @@ public sealed class CrashCatcherTests : IDisposable
         saved.Component.ShouldBe("app");
     }
 
+    /// <summary>Scrubbing can lengthen the text (a short name replaced by <c>&lt;user&gt;</c>, a short path by
+    /// <c>&lt;path&gt;\File.cs:line N</c>), so a message already at the limit must be trimmed again after scrubbing, not
+    /// only before it, or it fails the pipe's own length check every session until it is old enough to be deleted.
+    /// </summary>
+    [Fact]
+    public void A_message_lengthened_past_the_limit_by_scrubbing_is_trimmed_afterwards()
+    {
+        const string username = "bob";   // short: "<user>" (6 characters) is longer than the 3-letter name it replaces
+        var names = new ScrubNames(username, "DESKTOP-X", "CONTOSO");
+        var message = new string('a', CrashReport.MaxMessageLength - 1 - username.Length) + " " + username;
+        message.Length.ShouldBe(CrashReport.MaxMessageLength);   // exactly at the limit before scrubbing: trimming first would cut nothing
+        var error = new InvalidOperationException(message);
+
+        CrashCatcher.Write(error, _folder, "0.6.0", names);
+
+        var path = Directory.GetFiles(_folder, "app-*.json").Single();
+        var saved = JsonSerializer.Deserialize<CrashReport>(File.ReadAllText(path), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        saved.ShouldNotBeNull();
+        saved.Message.Length.ShouldBeLessThanOrEqualTo(CrashReport.MaxMessageLength);
+        saved.Message.ShouldEndWith("<us");   // "<user>" itself was cut to fit, proving the trim ran after scrubbing grew it
+    }
+
     [Fact]
     public void Writing_never_throws_even_when_the_folder_cannot_be_made()
     {

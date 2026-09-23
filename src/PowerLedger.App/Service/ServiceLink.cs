@@ -126,6 +126,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentDictionary<long, TaskCompletionSource<PipeMessage>> _pending = new();
+    private readonly SemaphoreSlim _sharingGate = new(1, 1);
     private long _lastId;
     private volatile MessageChannel? _channel;
     private volatile string? _refusal;
@@ -181,6 +182,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         await _stop.CancelAsync().ConfigureAwait(false);
         if (_run is not null) await _run.ConfigureAwait(false);
         _stop.Dispose();
+        _sharingGate.Dispose();
     }
 
     private long NextId() => Interlocked.Increment(ref _lastId);
@@ -314,17 +316,28 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     }
 
     /// <summary>A sharing request: sent only while connected to a server that passed the check, and answered in words
-    /// (data-sharing design §5).</summary>
+    /// (data-sharing design §5). The service serves one request at a time per connection, and its own reply limits start
+    /// when it queues a request rather than when the App wrote it, so at most one of these is ever outstanding: a second
+    /// one waits here, before it is written, for the first to answer — otherwise a request could be carried out after the
+    /// App had already given up on it (e.g. Delete sent right after a modeless Send now's window).</summary>
     private async Task<SharingOutcome> SharingAsync(PipeRequest request, CancellationToken cancel)
     {
         if (_channel is null) return SharingOutcome.NotConnected;
         if (_refusal is { } refusal) return new SharingOutcome(false, refusal);
-        return await SendAsync(request, cancel).ConfigureAwait(false) switch
+        await _sharingGate.WaitAsync(cancel).ConfigureAwait(false);
+        try
         {
-            SharingReply reply => new SharingOutcome(reply.Ok, reply.Message, reply.Path),
-            ErrorReply error => new SharingOutcome(false, error.Message),
-            _ => SharingOutcome.NoAnswer,
-        };
+            return await SendAsync(request, cancel).ConfigureAwait(false) switch
+            {
+                SharingReply reply => new SharingOutcome(reply.Ok, reply.Message, reply.Path),
+                ErrorReply error => new SharingOutcome(false, error.Message),
+                _ => SharingOutcome.NoAnswer,
+            };
+        }
+        finally
+        {
+            _sharingGate.Release();
+        }
     }
 
     private async Task<PipeMessage> RequestAsync(MessageChannel channel, PipeRequest request, CancellationToken cancel)

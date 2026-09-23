@@ -95,6 +95,52 @@ public class ConsentGateTests
         _opened.ShouldBe(new[] { Consent.Unanswered });
     }
 
+    /// <summary>A timer tick and a connection event can both start a run while a status read is still on its way; without
+    /// an atomic claim on "done", both would come back unanswered and both open the dialog, the second showing all off
+    /// and overwriting the first answer. Once the gated read completes, the two runs' continuations are not guaranteed to
+    /// finish on the calling thread or within the same instant (one can be resumed on a different thread-pool thread), so
+    /// this waits in real time for whichever run wins rather than asserting immediately.</summary>
+    [Fact]
+    public async Task Overlapping_runs_open_the_dialog_only_once()
+    {
+        _link.Status = Statuses.WithSharing(Consent.Unanswered);
+        var statusGate = new TaskCompletionSource<ServiceStatus?>();
+        _link.StatusGate = statusGate;
+        _link.Connect(true);
+        var gate = Gate();
+
+        gate.CheckOnce();                           // the first run: awaiting the gated status read
+        _link.StatusReads.ShouldBe(1);
+        _clock.Advance(ConsentGate.RetryEvery);      // the periodic timer fires a second, overlapping run
+        _link.StatusReads.ShouldBe(2);
+
+        statusGate.SetResult(_link.Status);          // both runs' status reads complete together
+
+        await WaitFor.True(() => _opened.Count > 0);
+        _opened.Count.ShouldBe(1);
+    }
+
+    /// <summary>The App can exit while a run is still awaiting the service's answer; that run must not open a dialog
+    /// afterwards, owned by a window that may already be gone. The real delay gives a broken fix every chance to open it
+    /// anyway before this checks.</summary>
+    [Fact]
+    public async Task A_run_already_in_flight_does_not_open_after_dispose()
+    {
+        _link.Status = Statuses.WithSharing(Consent.Unanswered);
+        var statusGate = new TaskCompletionSource<ServiceStatus?>();
+        _link.StatusGate = statusGate;
+        _link.Connect(true);
+        var gate = Gate();
+
+        gate.CheckOnce();   // the run started, awaiting the gated status read
+        gate.Dispose();     // the App is exiting before the service answered
+
+        statusGate.SetResult(_link.Status);
+
+        await Task.Delay(200);
+        _opened.ShouldBeEmpty();
+    }
+
     [Fact]
     public void A_second_check_once_done_reads_the_status_no_further_times()
     {

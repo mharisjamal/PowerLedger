@@ -35,6 +35,7 @@ public partial class App : Application
     private CultureInfo? _culture;
     private string? _sentFolder;
     private ConsentGate? _consentGate;
+    private CrashForwarder? _crashForwarder;
     private UsageCounter? _usage;
     private bool _exiting;
 
@@ -64,7 +65,8 @@ public partial class App : Application
         _link = new PipeServiceLink(options.PipeName, new LastInputIdleSource(), TimeProvider.System, check);
         var threads = new UiThreads(action => Dispatcher.InvokeAsync(action), action => Task.Run(action));
         _threads = threads;
-        new CrashForwarder(_link, threads, CrashFolder).Start();
+        _crashForwarder = new CrashForwarder(_link, threads, CrashFolder, TimeProvider.System);
+        _crashForwarder.Start();
         var history = new HistoryReader(_database);
         var sleep = new SleepSettings();
         byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, culture);
@@ -259,6 +261,8 @@ public partial class App : Application
         _exiting = true;
         try
         {
+            _consentGate?.Dispose();   // data-sharing design §2: a run still awaiting the service's answer must not open a dialog now
+            _crashForwarder?.Dispose();
             if (_usage is not null)
             {
                 await _usage.FlushOnExitAsync();   // data-sharing design §3: send what's held while the pipe still is
