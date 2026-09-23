@@ -26,11 +26,11 @@ internal abstract class SharingCommand(long id)
     /// once they are queued.</summary>
     public virtual bool AppWaits => true;
 
-    /// <summary>When it was queued: the App has its answer within <see cref="SharingWorker.AppWait"/> of then, whatever came
-    /// before it. Null for one handed to the worker directly.</summary>
-    public DateTimeOffset? QueuedAt { get; private set; }
+    /// <summary>When it was queued, as the clock's timestamp, which setting the PC's clock doesn't move: the App has its answer
+    /// within <see cref="SharingWorker.AppWait"/> of then, whatever came before it. Null for one handed to the worker directly.</summary>
+    public long? QueuedAt { get; private set; }
 
-    internal void Queued(DateTimeOffset at) => QueuedAt = at;
+    internal void Queued(long timestamp) => QueuedAt = timestamp;
 
     /// <summary>The worker takes the command before doing any of it.</summary>
     /// <returns>False when the pipe has given up on it: it is then left undone.</returns>
@@ -85,7 +85,8 @@ internal sealed class DeleteMyDataCommand(long id) : SharingCommand(id);
 /// memory; one that finds it full is told to try again. It also tells the worker when a request the App waits on is
 /// queued, so an upload or anything else the worker does on its own gives way to it (see <see cref="Attention"/>).
 /// </summary>
-/// <param name="clock">Stamps each command as it is queued; the system's clock when null.</param>
+/// <param name="clock">Stamps each command as it is queued; the system's clock when null. The worker measures the wait on
+/// the same clock.</param>
 internal sealed class SharingCommands(TimeProvider? clock = null)
 {
     public const int Capacity = 256;
@@ -131,7 +132,7 @@ internal sealed class SharingCommands(TimeProvider? clock = null)
     /// <returns>False when the inbox is full or the service is stopping; the command has then been answered no.</returns>
     public bool TryQueue(SharingCommand command)
     {
-        command.Queued(_clock.GetUtcNow());
+        command.Queued(_clock.GetTimestamp());
         if (!_channel.Writer.TryWrite(command))
         {
             command.Answer(false, _closed ? Stopping : Busy);

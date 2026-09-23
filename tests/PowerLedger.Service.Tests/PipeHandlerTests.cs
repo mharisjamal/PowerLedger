@@ -101,7 +101,7 @@ public sealed class PipeHandlerTests : IDisposable
     {
         var reply = Send(new SetConsentRequest(43, new Consent(ConsentText.Version, true, true, true, true)));
         var queued = (await _sharing.Reader.ReadAsync()).ShouldBeOfType<SetConsentCommand>();
-        queued.QueuedAt.ShouldBe(Now);
+        queued.QueuedAt.ShouldBe(_clock.GetTimestamp());
 
         _clock.Advance(PipeHandler.LoopTimeout);
 

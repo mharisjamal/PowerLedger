@@ -977,6 +977,38 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task The_clock_set_while_a_request_waits_neither_spends_nor_stretches_the_apps_wait()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true);
+        var delete = new DeleteMyDataCommand(2);
+        _h.Commands.TryQueue(delete).ShouldBeTrue();
+        _h.Wall.Step = TimeSpan.FromHours(1);                                  // Windows sets the clock an hour on
+
+        await _h.TakeAndRunAsync();
+
+        (await delete.Reply).ShouldBe(new SharingReply(2, true, "Your data has been deleted from the server."));
+
+        await _h.Consent(true, true, true);
+        _h.Client.AnswerAsync = async (_, cancel) =>
+        {
+            await Task.Delay(Timeout.Infinite, cancel);                        // the server never answers
+            return new SendOutcome.Accepted();
+        };
+        var late = new DeleteMyDataCommand(3);
+        _h.Commands.TryQueue(late).ShouldBeTrue();
+        _h.Clock.Advance(TimeSpan.FromSeconds(7));                             // seven seconds behind another request
+        _h.Wall.Step -= TimeSpan.FromHours(2);                                 // and the clock set back meanwhile
+
+        var handling = _h.TakeAndRunAsync();
+        _h.Clock.Advance(TimeSpan.FromSeconds(1));                             // the App's eight seconds are up
+
+        (await late.Reply.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBe(
+            new SharingReply(3, false, "Couldn't delete your data: the server didn't answer in time. Nothing was changed."));
+        await handling;
+    }
+
+    [Fact]
     public async Task Running_it_ticks_at_start_and_answers_commands()
     {
         _h.Clock.SetUtcNow(Local(24, 10));
@@ -1037,7 +1069,8 @@ public sealed class SharingWorkerTests : IDisposable
         [.. Enumerable.Range(0, count).Select(i => from.AddMinutes(i).ToUniversalTime())];
 
     /// <summary>The worker wired to a temp database, a fake server, a fake clock in a UTC+2 zone and a board the loop would
-    /// have published to; its ticks and commands are run by the test, one at a time.</summary>
+    /// have published to; its ticks and commands are run by the test, one at a time. The worker and its inbox see the clock
+    /// through <see cref="Wall"/>, whose time can be set apart from its timestamps and timers.</summary>
     private sealed class Harness : IDisposable
     {
         private static readonly TimeZoneInfo Zone = TimeZoneInfo.CreateCustomTimeZone("PL+2", TimeSpan.FromHours(2), "PL+2", "PL+2");
@@ -1046,7 +1079,8 @@ public sealed class SharingWorkerTests : IDisposable
 
         public Harness()
         {
-            Commands = new SharingCommands(Clock);
+            Wall = new SetClock(Clock);
+            Commands = new SharingCommands(Wall);
             Clock.SetLocalTimeZone(Zone);
             Board.Publish(SharingFakes.Settings);
             Board.Publish(SharingFakes.Status());
@@ -1055,12 +1089,14 @@ public sealed class SharingWorkerTests : IDisposable
             Directory.CreateDirectory(Sent);
             Directory.CreateDirectory(Crashes);
             var environment = new SharingEnvironment(Sent, Crashes, Names, () => SharingFakes.Host, () => SendMinute);
-            Worker = new SharingWorker(Database.Db, Board, Commands, Client, environment, Clock, NullLogger<SharingWorker>.Instance);
+            Worker = new SharingWorker(Database.Db, Board, Commands, Client, environment, Wall, NullLogger<SharingWorker>.Instance);
         }
 
         public TestDatabase Database { get; } = new();
 
         public FakeTimeProvider Clock { get; } = new(Local(24, 0));
+
+        public SetClock Wall { get; }
 
         public StatusBoard Board { get; } = new();
 
@@ -1105,6 +1141,13 @@ public sealed class SharingWorkerTests : IDisposable
         {
             await Worker.HandleAsync(command, CancellationToken.None);
             return await command.Reply;
+        }
+
+        /// <summary>Takes the next request from the inbox and carries it out, as the running worker does.</summary>
+        public Task TakeAndRunAsync()
+        {
+            Commands.TryTake(out var command).ShouldBeTrue();
+            return Worker.HandleAsync(command, CancellationToken.None);
         }
 
         public Task<SharingReply> Consent(bool diagnostics, bool usage, bool power, bool share = false) =>
@@ -1174,6 +1217,24 @@ internal sealed class FakeSharingClient : ISharingClient
 
 /// <param name="Kind"><c>report</c>, <c>consent</c> or <c>delete</c>.</param>
 internal sealed record SharingCall(string Kind, string Key, string? InstallId, Consent? Consent, ReportV1? Report, byte[] Body);
+
+/// <summary>A fake clock whose time can be set by <see cref="Step"/>, as Windows sets the PC's clock, while its timestamps
+/// and timers go on as before, as the system's do. (<see cref="FakeTimeProvider"/>'s timestamps follow its time.)</summary>
+internal sealed class SetClock(FakeTimeProvider inner) : TimeProvider
+{
+    public TimeSpan Step { get; set; }
+
+    public override TimeZoneInfo LocalTimeZone => inner.LocalTimeZone;
+
+    public override long TimestampFrequency => inner.TimestampFrequency;
+
+    public override DateTimeOffset GetUtcNow() => inner.GetUtcNow() + Step;
+
+    public override long GetTimestamp() => inner.GetTimestamp();
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+        inner.CreateTimer(callback, state, dueTime, period);
+}
 
 /// <summary>A channel whose reader says it has something to read only a set time after it has.</summary>
 internal sealed class LateChannel : Channel<SharingCommand>

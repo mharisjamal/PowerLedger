@@ -834,10 +834,11 @@ internal sealed class SharingWorker : BackgroundService
     }
 
     /// <summary>When a request the App waits on must be answered: <see cref="AppWait"/> after it was queued, however long
-    /// those before it took, so the pipe has the answer inside its own limit.</summary>
+    /// those before it took, so the pipe has the answer inside its own limit. The wait is measured on the clock's timestamps,
+    /// so setting the PC's clock meanwhile neither spends nor stretches it.</summary>
     private CancellationTokenSource AnswerBy(SharingCommand command)
     {
-        var waited = command.QueuedAt is { } queued ? _clock.GetUtcNow() - queued : TimeSpan.Zero;
+        var waited = command.QueuedAt is { } queued ? _clock.GetElapsedTime(queued) : TimeSpan.Zero;
         if (waited < AppWait) return new CancellationTokenSource(waited > TimeSpan.Zero ? AppWait - waited : AppWait, _clock);
         var spent = new CancellationTokenSource();
         spent.Cancel();
