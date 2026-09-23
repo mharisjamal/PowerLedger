@@ -388,6 +388,24 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_with_a_key_this_account_cannot_read_turns_everything_off_and_says_how_to_have_the_data_deleted()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true);
+        var id = _h.Store.InstallId.ShouldNotBeNull();
+        new SettingsRepository(_h.Database.Db).Set(SharingStore.KeyKey, "not a key this account protected");   // copied from another PC
+
+        var reply = await _h.Run(new DeleteMyDataCommand(10));
+
+        reply.Ok.ShouldBeFalse();
+        reply.Message.ShouldBe("This PC's key can't be read, so the server can't be asked to delete what it holds. Every switch is "
+            + $"now off. To have it deleted, write to the address in the privacy policy, quoting the install ID {id}.");
+        _h.Client.Calls.Where(call => call.Kind == "delete").ShouldBeEmpty();
+        _h.Store.InstallId.ShouldBeNull();
+        _h.Store.Consent.ShouldBe(new Consent(ConsentText.Version, false, false, false, false));
+    }
+
+    [Fact]
     public async Task Usage_and_crashes_are_kept_only_while_their_switch_is_on_and_a_crash_only_from_after_the_answer()
     {
         _h.Clock.SetUtcNow(Local(24, 10));

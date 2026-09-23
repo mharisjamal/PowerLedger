@@ -420,10 +420,19 @@ internal sealed class SharingWorker : BackgroundService
     private async Task DeleteAsync(DeleteMyDataCommand command, CancellationToken stop)
     {
         var now = _clock.GetUtcNow();
-        if (_store.InstallId is not { } id || _store.Key is not { } key)
+        if (_store.InstallId is not { } id)
         {
             Forget(now);
             command.Answer(true, "Nothing had been sent from this PC, and every switch is now off.");
+            return;
+        }
+        if (_store.Key is not { } key)
+        {
+            // A key this account can't decrypt, as in a database copied from another PC: the server can't be asked, so
+            // this PC stops sending and says how else to have the data deleted.
+            Forget(now);
+            command.Answer(false, "This PC's key can't be read, so the server can't be asked to delete what it holds. Every switch is "
+                + $"now off. To have it deleted, write to the address in the privacy policy, quoting the install ID {id}.");
             return;
         }
         using var answerBy = AnswerBy(command);
