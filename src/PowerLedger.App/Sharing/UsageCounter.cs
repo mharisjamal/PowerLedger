@@ -51,15 +51,23 @@ internal sealed class UsageCounter : IDisposable
     {
         _periodic ??= _clock.CreateTimer(_ => _ = FlushAsync(), null, FlushEvery, FlushEvery);
         ScheduleMidnight();
+        _link.ConnectionChanged += OnConnectionChanged;
         _ = SeedAsync();
     }
 
     /// <summary>Tells the counter the consent an App action just took: the consent dialog's or Settings → Privacy's own
-    /// successful setConsent (data-sharing design §3), known at once rather than only at the next flush. Safe to call
-    /// from the UI thread.</summary>
+    /// successful setConsent (data-sharing design §3), known at once rather than only at the next flush. Unlike a flush's
+    /// or the seed's own first-ever observation, an unknown previous state here is never trusted: it can only mean the
+    /// seed had not yet run when this consent changed (Start ran before the link connected), so whatever is held cannot
+    /// be shown to be held only since consent, and is dropped exactly as if consent had been off. Safe to call from the
+    /// UI thread.</summary>
     public void ConsentChanged(Consent consent)
     {
-        lock (_gate) Observe(consent.Usage);
+        lock (_gate)
+        {
+            if (!consent.Usage || _usageOn != true) Reset();
+            _usageOn = consent.Usage;
+        }
     }
 
     public void CountAppOpen() => Change(() => _appOpens++);
@@ -77,8 +85,17 @@ internal sealed class UsageCounter : IDisposable
 
     public void Dispose()
     {
+        _link.ConnectionChanged -= OnConnectionChanged;
         _periodic?.Dispose();
         _midnight?.Dispose();
+    }
+
+    /// <summary>Seeds again once the link (re)connects (data-sharing design §3): Start's own seed can run before the pipe
+    /// has finished connecting and find nothing, which must not leave the consent unknown for up to the next fifteen-
+    /// minute flush.</summary>
+    private void OnConnectionChanged(bool connected)
+    {
+        if (connected) _threads.Background(() => _ = SeedAsync());
     }
 
     /// <summary>Reads the service's status, then sends, drops or keeps what is held, depending what it says. Safe to call
