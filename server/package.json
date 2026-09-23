@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "vitest run && node --test tools/",
+    "test": "vitest run && node --test \"tools/**/*.test.mjs\"",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "types": "wrangler types"

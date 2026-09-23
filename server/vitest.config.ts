@@ -23,6 +23,9 @@ export default defineConfig(async () => {
       }),
     ],
     test: {
+      // Only the Worker's own tests: tools/export.test.mjs runs under plain Node (node:test,
+      // package.json's "test" script), not inside the Workers runtime this project sets up.
+      include: ["test/**/*.test.ts"],
       setupFiles: ["./test/apply-migrations.ts"],
     },
   };
