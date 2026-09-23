@@ -63,6 +63,27 @@ under the [EPA Data License](https://edg.epa.gov/EPA_Data_License.html). PowerLe
 affiliated with ENERGY STAR or the EPA, and doesn't use the ENERGY STAR mark. The table ships inside PowerLedger, so
 nothing is fetched.
 
+## Sharing data
+
+PowerLedger sends nothing unless you choose to. From 0.6.0 it asks once, in a dialog with four switches, all off until
+you turn them on:
+- **Crash and sensor reports**;
+- **Usage**;
+- **Hardware and power**: each part's model and its watts minute by minute, to make estimates more accurate for
+  everyone;
+- **Share my detailed data**: lets what Hardware and power sends be given or sold, under a random ID, to researchers,
+  hardware makers and energy companies.
+
+**Allow none** is as easy as **Allow all**. Settings → Privacy changes any switch, shows each upload that went, and
+deletes everything sent from the PC from the server.
+
+Never sent: names, serial numbers, files, other programs, and your IP address, which the server uses only to find your
+country. [PRIVACY.md](PRIVACY.md) has the details.
+
+The service sends one upload a day to PowerLedger's server, a Cloudflare Worker whose code is in `server/`. It goes
+direct or through the machine's WinHTTP proxy, since it comes from the service; a proxy set only for your account isn't
+used.
+
 ## Requirements
 
 Windows 10 1809 or later, or Windows 11, on x64 or Arm64. 32-bit (x86) Windows and Windows in S mode are not
@@ -186,6 +207,8 @@ can publish to the repository, or `GH_TOKEN` has to hold a token for one.
 
 - `docs/superpowers/specs/2026-09-08-powerledger-design.md`: the design.
 - `docs/superpowers/plans/`: how it was built, plan by plan.
+- `PRIVACY.md`: what PowerLedger sends when you allow it, who receives it, and your rights.
+- `server/`: the Worker that receives shared data, with its tests and the owner's export tool.
 - `assets/brand/`: the logo, a P on an amber tile whose bowl is a meter's dial and whose stem is a ledger's margin.
   `make-brand.ps1` draws it and writes the Windows icon, the SVGs and PNGs, and the installer's images.
 - `assets/monitors/`: the table of certified monitors PowerLedger ships. `make-monitor-table.ps1` rebuilds it from the
