@@ -98,6 +98,31 @@ public class ConsentViewModelTests
     }
 
     [Fact]
+    public async Task Success_reports_the_consent_that_was_applied()
+    {
+        var model = Model();
+        Consent? applied = null;
+        model.Applied += c => applied = c;
+
+        await model.SendAsync(new Consent(ConsentText.Version, true, true, true, true));
+
+        applied.ShouldBe(new Consent(ConsentText.Version, true, true, true, true));
+    }
+
+    [Fact]
+    public async Task A_refusal_reports_nothing_applied()
+    {
+        _link.SharingAnswer = new SharingOutcome(false, "Sharing detailed data needs Hardware and power turned on.");
+        var model = Model();
+        var applied = false;
+        model.Applied += _ => applied = true;
+
+        await model.SendAsync(new Consent(ConsentText.Version, false, false, false, true));
+
+        applied.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Closing_without_a_command_sends_nothing()
     {
         Model();

@@ -46,6 +46,10 @@ internal sealed class ConsentViewModel : ObservableObject
     /// <summary>The choice was sent and taken: the dialog closes.</summary>
     public event Action? Closed;
 
+    /// <summary>The choice was sent and taken, carrying what it was (data-sharing design §3): lets the App's usage
+    /// counter know the consent it just sent at once, rather than only at its next flush.</summary>
+    public event Action<Consent>? Applied;
+
     public bool Diagnostics { get => _diagnostics; set => SetProperty(ref _diagnostics, value); }
 
     public bool Usage { get => _usage; set => SetProperty(ref _usage, value); }
@@ -86,7 +90,11 @@ internal sealed class ConsentViewModel : ObservableObject
         var result = await _link.SetConsentAsync(consent).ConfigureAwait(false);
         _threads.Post(() =>
         {
-            if (result.Ok) Closed?.Invoke();
+            if (result.Ok)
+            {
+                Applied?.Invoke(consent);
+                Closed?.Invoke();
+            }
             else Message = result.Message;
         });
     }

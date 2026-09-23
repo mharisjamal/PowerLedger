@@ -115,6 +115,33 @@ public class PrivacyViewModelTests
     }
 
     [Fact]
+    public void A_successful_tick_reports_the_consent_that_was_applied()
+    {
+        var model = Model();
+        model.Apply(Statuses.WithSharing(Consent.Unanswered).Sharing);
+        Consent? applied = null;
+        model.Applied += c => applied = c;
+
+        model.Diagnostics = true;
+
+        applied.ShouldBe(new Consent(ConsentText.Version, true, false, false, false));
+    }
+
+    [Fact]
+    public void A_refusal_reports_nothing_applied()
+    {
+        _link.SharingAnswer = new SharingOutcome(false, "Sharing detailed data needs Hardware and power turned on.");
+        var model = Model();
+        model.Apply(Statuses.WithSharing(Consent.Unanswered).Sharing);
+        var applied = false;
+        model.Applied += _ => applied = true;
+
+        model.Share = true;   // needs Power too, so the service refuses it
+
+        applied.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Delete_asks_first_and_sends_only_on_delete()
     {
         var model = Model();

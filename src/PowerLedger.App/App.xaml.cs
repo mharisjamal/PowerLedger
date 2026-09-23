@@ -91,6 +91,7 @@ public partial class App : Application
         _settings = new SettingsViewModel(
             _link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates,
             openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
+        _settings.Privacy.Applied += consent => _usage?.ConsentChanged(consent);   // data-sharing design §3: known to usage counting at once
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
@@ -218,6 +219,7 @@ public partial class App : Application
     {
         if (_window is null || _link is null || _threads is null) return;
         var model = new ConsentViewModel(_link, _threads, current, OpenPage, OpenPayload);
+        model.Applied += consent => _usage?.ConsentChanged(consent);   // data-sharing design §3: known to usage counting at once
         new ConsentDialog(model) { Owner = _window }.ShowDialog();
     }
 

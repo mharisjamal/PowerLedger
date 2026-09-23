@@ -59,10 +59,60 @@ public partial class UsageCounterTests
 
         _link.Writes.OfType<UsageCounts>().ShouldBeEmpty();
 
-        // turning usage on afterwards sends nothing from before it was on
+        // turning usage on afterwards sends nothing from before it was on: this flush only learns of the change, so it
+        // drops what it holds rather than sending it, even though nothing has been counted since off was last seen
         _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));
         await counter.FlushAsync();
-        _link.Writes.OfType<UsageCounts>().Single().AppOpens.ShouldBe(0);
+        _link.Writes.OfType<UsageCounts>().ShouldBeEmpty();
+
+        // counting resumes normally now that usage is known to be on
+        counter.CountAppOpen();
+        await counter.FlushAsync();
+        _link.Writes.OfType<UsageCounts>().Single().AppOpens.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Starting_reads_the_current_consent_so_a_later_flip_to_usage_on_is_recognised_as_a_change()
+    {
+        _link.Connect(true);
+        _link.Status = Statuses.WithSharing(Consent.Unanswered);   // usage off when the App starts
+        var counter = Model();
+        counter.Start();   // reads the status once, off, without waiting for a flush
+
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));   // usage turns on
+        counter.CountAppOpen();
+        await counter.FlushAsync();
+
+        _link.Writes.OfType<UsageCounts>().ShouldBeEmpty();   // Start already knew it was off, so this flush's turn-on is caught
+    }
+
+    [Fact]
+    public async Task A_consent_the_app_itself_just_sent_is_known_before_the_next_flush()
+    {
+        _link.Connect(true);
+        _link.Status = Statuses.WithSharing(Consent.Unanswered);
+        var counter = Model();
+        counter.ConsentChanged(Consent.Unanswered);   // the dialog's own Allow none just saved this, off
+
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));   // and now it's on
+        counter.CountAppOpen();
+        await counter.FlushAsync();
+
+        _link.Writes.OfType<UsageCounts>().ShouldBeEmpty();   // ConsentChanged already knew it was off, so this flush's turn-on is caught
+    }
+
+    [Fact]
+    public async Task A_consent_the_app_itself_just_turned_on_lets_the_very_next_flush_send()
+    {
+        _link.Connect(true);
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));
+        var counter = Model();
+        counter.ConsentChanged(new Consent(ConsentText.Version, false, true, false, false));   // Save just turned usage on
+        counter.CountAppOpen();
+
+        await counter.FlushAsync();
+
+        _link.Writes.OfType<UsageCounts>().Single().AppOpens.ShouldBe(1);
     }
 
     [Fact]
