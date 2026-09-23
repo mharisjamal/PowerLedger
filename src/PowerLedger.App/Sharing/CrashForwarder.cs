@@ -9,6 +9,8 @@ namespace PowerLedger.App;
 /// session, every file <see cref="CrashCatcher"/> left waits for the service to say Crash and sensor reports is on, then
 /// is sent with <c>reportCrash</c> and deleted once the service takes it; a file the service refuses is kept for the next
 /// try. Whatever the consent, a file older than <see cref="MaxAge"/> is deleted, since nothing that old is still wanted.
+/// A connection with no Sharing status yet — the service still starting, or older than the feature — does not use up
+/// this session's run: it tries again on the next connection.
 /// </summary>
 internal sealed class CrashForwarder(IServiceLink link, UiThreads threads, string folder)
 {
@@ -16,17 +18,15 @@ internal sealed class CrashForwarder(IServiceLink link, UiThreads threads, strin
 
     private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    private bool _started;
+    private bool _done;
 
-    /// <summary>Waits for the link's first connection this session, then runs once. Call on the UI thread, before
-    /// <see cref="IServiceLink.Start"/>.</summary>
+    /// <summary>Waits for the link's first connection this session, then runs; retries on every later connection until a
+    /// status carrying Sharing comes back. Call on the UI thread, before <see cref="IServiceLink.Start"/>.</summary>
     public void Start() => link.ConnectionChanged += OnConnectionChanged;
 
     private void OnConnectionChanged(bool connected)
     {
-        if (!connected || _started) return;
-        _started = true;
-        link.ConnectionChanged -= OnConnectionChanged;
+        if (!connected || _done) return;
         threads.Background(() => _ = RunAsync());
     }
 
@@ -34,7 +34,10 @@ internal sealed class CrashForwarder(IServiceLink link, UiThreads threads, strin
     {
         DeleteOld(folder, DateTime.UtcNow - MaxAge);
         var status = await link.GetStatusAsync().ConfigureAwait(false);
-        if (status?.Sharing?.Consent.Diagnostics != true) return;
+        if (status?.Sharing is not { } sharing) return;   // link not connected yet, or the service still starting: try again next connection
+        _done = true;
+        link.ConnectionChanged -= OnConnectionChanged;
+        if (!sharing.Consent.Diagnostics) return;
         foreach (var path in Files(folder))
         {
             if (Read(path) is not { } report) continue;   // not readable as a crash: leave it for age to clear

@@ -91,4 +91,27 @@ public sealed class CrashForwarderTests : IDisposable
 
         _link.Writes.OfType<CrashReport>().Count().ShouldBe(1);
     }
+
+    /// <summary>The pipe can connect before the service has published a Sharing status — just starting, or an old
+    /// service that never will. Either way, that must not use up the session's one run: it must try again on the next
+    /// connection rather than leaving the file stranded until the App restarts.</summary>
+    [Fact]
+    public void It_retries_on_the_next_connection_if_the_service_has_not_published_sharing_yet()
+    {
+        WriteCrash("app-1.json");
+        _link.Status = Statuses.Running();   // connected, but no Sharing yet: still starting, or an old service
+        var forwarder = new CrashForwarder(_link, UiThreads.Inline, _folder);
+
+        forwarder.Start();
+        _link.Connect(true);
+
+        _link.Writes.ShouldBeEmpty();
+        Directory.GetFiles(_folder).ShouldHaveSingleItem();   // no Sharing status seen yet: not sent, but not given up on either
+
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, true, false, false, false));
+        _link.Connect(true);   // the service finishes starting and reconnects with a Sharing status
+
+        _link.Writes.OfType<CrashReport>().Count().ShouldBe(1);
+        Directory.GetFiles(_folder).ShouldBeEmpty();
+    }
 }
