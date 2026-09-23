@@ -27,6 +27,18 @@ internal sealed class FakeService(string name) : IAsyncDisposable
 
     public bool HasClient => _client is not null;
 
+    /// <summary>When set, the reply to a request this matches waits for <see cref="ReleaseHeldReplies"/>, so a test can
+    /// see whether the App writes a further request before an earlier one has been answered (finding 6: the service
+    /// serves one request at a time, so the App must not have two of the slow sharing requests outstanding together).
+    /// Requests are still read and enqueued into <see cref="Requests"/> as soon as they arrive, whether or not their
+    /// reply is held, since that is what shows whether the App wrote them.</summary>
+    public Func<PipeRequest, bool>? HoldReplyTo { get; set; }
+
+    private readonly TaskCompletionSource _releaseHeld = new();
+
+    /// <summary>Lets every reply <see cref="HoldReplyTo"/> is holding go out.</summary>
+    public void ReleaseHeldReplies() => _releaseHeld.TrySetResult();
+
     public void Start()
     {
         _stop = new CancellationTokenSource();
@@ -78,7 +90,7 @@ internal sealed class FakeService(string name) : IAsyncDisposable
                     while (await channel.ReadAsync(stop) is PipeRequest request)
                     {
                         Requests.Enqueue(request);
-                        await channel.WriteAsync(Reply(request), stop);
+                        _ = ReplyAsync(channel, request, stop);   // replying never blocks reading the next request
                     }
                 }
                 catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException)
@@ -90,6 +102,19 @@ internal sealed class FakeService(string name) : IAsyncDisposable
                     _client = null;
                 }
             }
+        }
+    }
+
+    private async Task ReplyAsync(MessageChannel channel, PipeRequest request, CancellationToken stop)
+    {
+        try
+        {
+            if (HoldReplyTo?.Invoke(request) == true) await _releaseHeld.Task.WaitAsync(stop).ConfigureAwait(false);
+            await channel.WriteAsync(Reply(request), stop).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            // The client left, or the test stopped the service, while this reply was held or on its way.
         }
     }
 
