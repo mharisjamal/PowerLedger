@@ -16,6 +16,13 @@ namespace PowerLedger.Contracts;
 [JsonDerivedType(typeof(ResetCalibrationRequest), "resetCalibration")]
 [JsonDerivedType(typeof(ReportActivityRequest), "reportActivity")]
 [JsonDerivedType(typeof(ReportBrightnessRequest), "reportBrightness")]
+[JsonDerivedType(typeof(SetConsentRequest), "setConsent")]
+[JsonDerivedType(typeof(ReportUsageRequest), "reportUsage")]
+[JsonDerivedType(typeof(ReportCrashRequest), "reportCrash")]
+[JsonDerivedType(typeof(PreviewUploadRequest), "previewUpload")]
+[JsonDerivedType(typeof(SendNowRequest), "sendNow")]
+[JsonDerivedType(typeof(DeleteMyDataRequest), "deleteMyData")]
+[JsonDerivedType(typeof(SharingReply), "sharing")]
 [JsonDerivedType(typeof(OkReply), "ok")]
 [JsonDerivedType(typeof(ErrorReply), "error")]
 [JsonDerivedType(typeof(StatusReply), "status")]
@@ -100,3 +107,26 @@ public sealed record ErrorReply(long? Id, string Message) : PipeMessage;
 public sealed record StatusReply(long Id, ServiceStatus Status) : PipeMessage;
 
 public sealed record SettingsReply(long Id, ServiceSettings Settings) : PipeMessage;
+
+/// <summary>Record the user's answer to the consent dialog, or a change made in Settings → Privacy (data-sharing design
+/// §1). Refused when it answers an older wording or shares detailed data without Hardware and power.</summary>
+public sealed record SetConsentRequest(long Id, Consent Consent) : PipeRequest(Id);
+
+/// <summary>The App's counts since its last report, added to the day's. Acknowledged, and ignored, while Usage is off.</summary>
+public sealed record ReportUsageRequest(long Id, UsageCounts Counts) : PipeRequest(Id);
+
+/// <summary>An App crash caught on an earlier run. Acknowledged, and ignored, while Crash and sensor reports is off.</summary>
+public sealed record ReportCrashRequest(long Id, CrashReport Crash) : PipeRequest(Id);
+
+/// <summary>Build what the next upload would carry into a file, and reply with its path in a <see cref="SharingReply"/>.
+/// The file, not the pipe, carries it, since a day of minutes is bigger than a pipe message may be.</summary>
+public sealed record PreviewUploadRequest(long Id) : PipeRequest(Id);
+
+/// <summary>Send every complete day waiting now, instead of at tonight's minute.</summary>
+public sealed record SendNowRequest(long Id) : PipeRequest(Id);
+
+/// <summary>Ask the server to delete everything sent from this PC; on success every switch goes off and the ID is forgotten.</summary>
+public sealed record DeleteMyDataRequest(long Id) : PipeRequest(Id);
+
+/// <summary>What a sharing request did, in words the App can show, and for a preview the file it was written to.</summary>
+public sealed record SharingReply(long Id, bool Ok, string Message, string? Path = null) : PipeMessage;

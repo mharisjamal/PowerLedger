@@ -12,7 +12,7 @@ PowerLedger still works fully with nothing sent, and nothing is sent until a use
 |---|---|---|
 | `diagnostics` | Crash and sensor reports | crashes, and which sensors work or fail on which hardware (§3) |
 | `usage` | Usage | days used, pages opened, settings changed by name, never by value |
-| `power` | Hardware and power | each part's model, and minute-by-minute watts per part with loads, brightness and states, marked measured or estimated; tariff price, currency and CO₂ factor |
+| `power` | Hardware and power | each part's model, and minute-by-minute watts per part with loads, brightness and states, marked measured or estimated; tariff price and currency |
 | `share` | Share my detailed data | nothing more: it lets what `power` sends be given or sold, as it is, to researchers, hardware makers and energy companies |
 
 - **Every switch is off until the user turns it on.** `share` needs `power`: it can't be turned on alone, and turning
@@ -27,10 +27,10 @@ PowerLedger still works fully with nothing sent, and nothing is sent until a use
 
 ## 2. Where the user decides
 
-- **New installs:** a wizard step, "Help make PowerLedger better", before the last step.
-- **Existing installs, and after a version change of the text:** a dialog the first time the main window opens in each
-  App session, until it is answered. **Allow none** is an answer; closing the dialog is not, and sends nothing.
-- **The dialog and the wizard step** say that PowerLedger works fully without sending anything, then list the four
+- **New installs:** the dialog opens as soon as the setup wizard finishes, before the main window is used.
+- **Existing installs, and after a version change of the text:** the same dialog, the first time the main window opens
+  in each App session, until it is answered. **Allow none** is an answer; closing the dialog is not, and sends nothing.
+- **The dialog** says that PowerLedger works fully without sending anything, then lists the four
   switches, each with its one-line description and a **What's sent** expander giving the exact fields. **Allow all**,
   **Allow none** and **Save choices** are the same size and style. **See what would be sent** opens the payload the next
   upload would carry, built now. **Privacy policy** opens `PRIVACY.md` on GitHub.
@@ -52,21 +52,21 @@ serialises an existing object whole, so a field added to a model later can't lea
   and its UTC offset in minutes. The server adds the country, two letters, from Cloudflare's own lookup of the address
   the upload came from, and keeps nothing else of that address.
 - **`diagnostics`:**
-  - each sensor source by stable id (`cpuEnergy`, `battery`, `cpuLoad`, `nvidia`, `amd`, `arc`, `gpuLoad`,
-    `brightness`, `displayState`, `ups`, `psu`): its state at upload (working, not on this machine, failing, note), how
+  - each sensor source by the service's own name for it (`energy-meter`, `battery`, `cpu-load`, `nvidia-gpu`,
+    `amd-gpu`, `arc-gpu`, `gpu-load`, `display`, `activity`, `ups`, `power-supply`): its state at upload (working, not on this machine, failing, note), how
     many times it failed that day, its last error, and the model it read (a graphics card, UPS or supply name);
   - each crash since the last upload, of the App or the service: when, which, version, exception type chain, message and
     stack trace; at most 20 a day, each at most 16 KB.
 - **`usage`:** the App's opens, the pages opened by name with counts, the settings changed by name with counts, reports
   exported, updates installed, days since the first run, the App's theme and display language.
 - **`power`:**
-  - **hardware**, in the first upload and whenever the inventory changes: processor model, cores and threads, TDP
-    (detected or typed); each graphics adapter's vendor, model, memory and whether it is discrete; memory size; each
-    drive's kind and size; each monitor's maker code, product code, model name, size, resolution, refresh rate, HDR,
+  - **hardware**, in the first upload and whenever it changes: processor model, logical processors, TDP (detected or
+    typed); the graphics card's vendor, model, whether it is discrete and its TDP (detected or typed); memory size; each
+    monitor's maker code, product code, model name, size, resolution, refresh rate, HDR,
     whether it has its own plug and is counted, and its figure with where that came from; the supply's tier, rated watts
-    and name when it reports one; a UPS's model and what the user said it powers; the laptop battery's design capacity;
-    the machine profile's chassis, fans, extras and panel size; the sample interval; tariff price, currency and CO₂
-    factor.
+    and name when it reports one; a UPS's model and what the user said it powers; the machine profile's memory sticks
+    and kind, drive counts, fans, extras and panel size; the sample interval; the current tariff's price and currency.
+    The CO₂ factor lives only in the App's own preferences, so it isn't sent.
   - **minutes**, columnar (one array per field, all the same length): the minute from local midnight (0–1499, so a
     25-hour day fits), average and highest total watts, average watts of each part (processor, graphics, display, memory,
     storage, board, extras, monitors, supply losses, unattributed), average processor load, graphics load and brightness,
@@ -135,7 +135,8 @@ for the index.
   - Limits: at most 1 MB as sent, and at most 8 MB unpacked, counted while decompressing so a zip bomb stops early.
   - Checks: the header, hardware, diagnostics and usage against `server/schema/report-v1.schema.json`, where unknown
     fields are refused. The minutes by a hand-written check: equal lengths, minutes rising and unique within 0–1499,
-    every number finite and in range (watts 0–5000, loads and brightness 0–1, seconds 0–60).
+    every number finite and in range (watts 0–5000, unattributed watts −5000–5000 since the rest goes negative when the
+    parts over-report, loads and brightness 0–1, seconds 0–120 since a reading counts in the minute it ends in).
   - The day must fall between 15 days back and tomorrow.
   - The body is stored as it came, `reports/v1/<install>/<day>.json.gz`, with the country and the time received in the
     object's metadata and the index. A day sent again replaces the first.
@@ -204,7 +205,7 @@ for the index.
     PnP instance ID produce a payload containing none of them.
 - **App:**
   - The dialog: all off at first, `share` greyed until `power`, the three buttons equal, closing sends nothing.
-  - The wizard step is there.
+  - It opens after the wizard finishes, and on a later start while unanswered.
   - The Privacy section saves itself.
   - A crash is written and passed on.
   - Usage counts add up.

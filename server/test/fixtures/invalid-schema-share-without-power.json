@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "installId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+  "app": "0.6.0",
+  "windows": "10.0.26200",
+  "arch": "x64",
+  "chassis": "desktop",
+  "consent": {
+    "version": 1,
+    "diagnostics": true,
+    "usage": false,
+    "power": false,
+    "share": true
+  },
+  "day": "2026-09-24",
+  "utcOffsetMinutes": 300,
+  "diagnostics": {
+    "sources": [],
+    "crashes": []
+  }
+}

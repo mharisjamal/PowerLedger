@@ -1,0 +1,875 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mharisjamal/PowerLedger/blob/main/server/schema/report-v1.schema.json",
+  "title": "PowerLedger daily report, version 1",
+  "description": "One PC's day, as its service sends it. The minutes' columns are checked by the server's own code (ranges, lengths, order), not here, to keep a report inside the Worker's CPU limit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "installId",
+    "app",
+    "windows",
+    "arch",
+    "chassis",
+    "consent",
+    "day",
+    "utcOffsetMinutes"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "installId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "app": {
+      "$ref": "#/$defs/version"
+    },
+    "windows": {
+      "type": "string",
+      "pattern": "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,6}$"
+    },
+    "arch": {
+      "enum": [
+        "x64",
+        "arm64"
+      ]
+    },
+    "chassis": {
+      "enum": [
+        "desktop",
+        "laptop"
+      ]
+    },
+    "consent": {
+      "$ref": "#/$defs/consent"
+    },
+    "day": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "utcOffsetMinutes": {
+      "type": "integer",
+      "minimum": -840,
+      "maximum": 840
+    },
+    "diagnostics": {
+      "$ref": "#/$defs/diagnostics"
+    },
+    "usage": {
+      "$ref": "#/$defs/usage"
+    },
+    "power": {
+      "$ref": "#/$defs/power"
+    }
+  },
+  "allOf": [
+    {
+      "anyOf": [
+        {
+          "required": [
+            "diagnostics"
+          ]
+        },
+        {
+          "required": [
+            "usage"
+          ]
+        },
+        {
+          "required": [
+            "power"
+          ]
+        }
+      ]
+    },
+    {
+      "if": {
+        "required": [
+          "diagnostics"
+        ]
+      },
+      "then": {
+        "properties": {
+          "consent": {
+            "properties": {
+              "diagnostics": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "usage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "consent": {
+            "properties": {
+              "usage": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "power"
+        ]
+      },
+      "then": {
+        "properties": {
+          "consent": {
+            "properties": {
+              "power": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]{1,4}\\.[0-9]{1,5}\\.[0-9]{1,6}$"
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "counts": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]{0,39}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/count"
+      }
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "diagnostics",
+        "usage",
+        "power",
+        "share"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "diagnostics": {
+          "type": "boolean"
+        },
+        "usage": {
+          "type": "boolean"
+        },
+        "power": {
+          "type": "boolean"
+        },
+        "share": {
+          "type": "boolean"
+        }
+      },
+      "not": {
+        "required": [
+          "share",
+          "power"
+        ],
+        "properties": {
+          "share": {
+            "const": true
+          },
+          "power": {
+            "const": false
+          }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sources",
+        "crashes"
+      ],
+      "properties": {
+        "sources": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "crashes": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/crash"
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "state",
+        "failures",
+        "lastError",
+        "device"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$",
+          "description": "The service's own source name: energy-meter, battery, cpu-load, nvidia-gpu, amd-gpu, arc-gpu, gpu-load, display, activity, ups, power-supply."
+        },
+        "state": {
+          "enum": [
+            "working",
+            "notOnMachine",
+            "failing",
+            "note"
+          ]
+        },
+        "failures": {
+          "$ref": "#/$defs/count"
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2000
+        },
+        "device": {
+          "$ref": "#/$defs/name"
+        }
+      }
+    },
+    "crash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "component",
+        "version",
+        "types",
+        "message",
+        "stack"
+      ],
+      "properties": {
+        "at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,7})?Z$"
+        },
+        "component": {
+          "enum": [
+            "app",
+            "service"
+          ]
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "types": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "stack": {
+          "type": "string",
+          "maxLength": 12000
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appOpens",
+        "pages",
+        "settings",
+        "reportsExported",
+        "updatesInstalled",
+        "daysSinceFirstRun",
+        "theme",
+        "language"
+      ],
+      "properties": {
+        "appOpens": {
+          "$ref": "#/$defs/count"
+        },
+        "pages": {
+          "$ref": "#/$defs/counts"
+        },
+        "settings": {
+          "$ref": "#/$defs/counts"
+        },
+        "reportsExported": {
+          "$ref": "#/$defs/count"
+        },
+        "updatesInstalled": {
+          "$ref": "#/$defs/count"
+        },
+        "daysSinceFirstRun": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 36500
+        },
+        "theme": {
+          "enum": [
+            "light",
+            "dark",
+            "system"
+          ]
+        },
+        "language": {
+          "type": "string",
+          "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8}){0,3}$"
+        }
+      }
+    },
+    "power": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hardware",
+        "minutes"
+      ],
+      "properties": {
+        "hardware": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hardware"
+            }
+          ]
+        },
+        "minutes": {
+          "$ref": "#/$defs/minutes"
+        }
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu",
+        "gpus",
+        "memoryGb",
+        "monitors",
+        "psu",
+        "ups",
+        "profile",
+        "sampleIntervalS",
+        "tariff"
+      ],
+      "properties": {
+        "cpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "model",
+            "cores",
+            "threads",
+            "tdpW",
+            "tdpTyped"
+          ],
+          "properties": {
+            "model": {
+              "$ref": "#/$defs/name"
+            },
+            "cores": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1024
+            },
+            "threads": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 2048
+            },
+            "tdpW": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "tdpTyped": {
+              "type": "boolean"
+            }
+          }
+        },
+        "gpus": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "vendor",
+              "model",
+              "memoryMb",
+              "discrete",
+              "tdpW",
+              "tdpTyped"
+            ],
+            "properties": {
+              "vendor": {
+                "enum": [
+                  "nvidia",
+                  "amd",
+                  "intel",
+                  "qualcomm",
+                  "other"
+                ]
+              },
+              "model": {
+                "$ref": "#/$defs/name"
+              },
+              "memoryMb": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1048576
+              },
+              "discrete": {
+                "type": "boolean"
+              },
+              "tdpW": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 1,
+                "maximum": 2000
+              },
+              "tdpTyped": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "memoryGb": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 16384
+        },
+        "monitors": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "maker",
+              "product",
+              "model",
+              "sizeIn",
+              "width",
+              "height",
+              "refreshHz",
+              "hdr",
+              "ownPlug",
+              "counted",
+              "figureW",
+              "figureFrom"
+            ],
+            "properties": {
+              "maker": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z]{3}$"
+              },
+              "product": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9A-F]{4}$"
+              },
+              "model": {
+                "$ref": "#/$defs/name"
+              },
+              "sizeIn": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 5,
+                "maximum": 150
+              },
+              "width": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "maximum": 20000
+              },
+              "height": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "maximum": 20000
+              },
+              "refreshHz": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "hdr": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "ownPlug": {
+                "type": "boolean"
+              },
+              "counted": {
+                "type": "boolean"
+              },
+              "figureW": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "figureFrom": {
+                "enum": [
+                  "energyStar",
+                  "estimated",
+                  "typed",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        },
+        "psu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tier",
+            "ratedW",
+            "name"
+          ],
+          "properties": {
+            "tier": {
+              "enum": [
+                "white",
+                "bronze",
+                "silver",
+                "gold",
+                "platinum",
+                "titanium"
+              ]
+            },
+            "ratedW": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 50,
+              "maximum": 5000
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            }
+          }
+        },
+        "ups": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model",
+                "powers"
+              ],
+              "properties": {
+                "model": {
+                  "$ref": "#/$defs/name"
+                },
+                "powers": {
+                  "enum": [
+                    "notSaid",
+                    "thisPc",
+                    "thisPcAndMonitors",
+                    "more"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ramSticks",
+            "ramDdr5",
+            "ssdCount",
+            "hddCount",
+            "fanCount",
+            "extrasW",
+            "panelIn"
+          ],
+          "properties": {
+            "ramSticks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "ramDdr5": {
+              "type": "boolean"
+            },
+            "ssdCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "hddCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "fanCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "extrasW": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5000
+            },
+            "panelIn": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 150
+            }
+          }
+        },
+        "sampleIntervalS": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600
+        },
+        "tariff": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "pricePerKwh",
+                "currency"
+              ],
+              "properties": {
+                "pricePerKwh": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "column": {
+      "type": "array",
+      "maxItems": 1500
+    },
+    "minutes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "t",
+        "avgW",
+        "maxW",
+        "cpuW",
+        "gpuW",
+        "displayW",
+        "ramW",
+        "storageW",
+        "boardW",
+        "extrasW",
+        "monitorsW",
+        "psuLossW",
+        "unattributedW",
+        "cpuLoad",
+        "gpuLoad",
+        "brightness",
+        "displayOnS",
+        "idleS",
+        "lockedS",
+        "batteryS",
+        "measuredS",
+        "calibratedS",
+        "estimatedS",
+        "samples",
+        "totalSource",
+        "gpuScope",
+        "measuredMask"
+      ],
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/column"
+        },
+        "avgW": {
+          "$ref": "#/$defs/column"
+        },
+        "maxW": {
+          "$ref": "#/$defs/column"
+        },
+        "cpuW": {
+          "$ref": "#/$defs/column"
+        },
+        "gpuW": {
+          "$ref": "#/$defs/column"
+        },
+        "displayW": {
+          "$ref": "#/$defs/column"
+        },
+        "ramW": {
+          "$ref": "#/$defs/column"
+        },
+        "storageW": {
+          "$ref": "#/$defs/column"
+        },
+        "boardW": {
+          "$ref": "#/$defs/column"
+        },
+        "extrasW": {
+          "$ref": "#/$defs/column"
+        },
+        "monitorsW": {
+          "$ref": "#/$defs/column"
+        },
+        "psuLossW": {
+          "$ref": "#/$defs/column"
+        },
+        "unattributedW": {
+          "$ref": "#/$defs/column"
+        },
+        "cpuLoad": {
+          "$ref": "#/$defs/column"
+        },
+        "gpuLoad": {
+          "$ref": "#/$defs/column"
+        },
+        "brightness": {
+          "$ref": "#/$defs/column"
+        },
+        "displayOnS": {
+          "$ref": "#/$defs/column"
+        },
+        "idleS": {
+          "$ref": "#/$defs/column"
+        },
+        "lockedS": {
+          "$ref": "#/$defs/column"
+        },
+        "batteryS": {
+          "$ref": "#/$defs/column"
+        },
+        "measuredS": {
+          "$ref": "#/$defs/column"
+        },
+        "calibratedS": {
+          "$ref": "#/$defs/column"
+        },
+        "estimatedS": {
+          "$ref": "#/$defs/column"
+        },
+        "samples": {
+          "$ref": "#/$defs/column"
+        },
+        "totalSource": {
+          "$ref": "#/$defs/column"
+        },
+        "gpuScope": {
+          "$ref": "#/$defs/column"
+        },
+        "measuredMask": {
+          "$ref": "#/$defs/column"
+        }
+      }
+    }
+  }
+}

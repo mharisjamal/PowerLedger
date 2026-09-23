@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "installId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+  "app": "0.6.0",
+  "windows": "10.0.26200",
+  "arch": "arm64",
+  "chassis": "laptop",
+  "consent": {
+    "version": 1,
+    "diagnostics": false,
+    "usage": false,
+    "power": true,
+    "share": false
+  },
+  "day": "2026-09-24",
+  "utcOffsetMinutes": 300,
+  "power": {
+    "hardware": null,
+    "minutes": {
+      "t": [
+        1499
+      ],
+      "avgW": [
+        142.3
+      ],
+      "maxW": [
+        160.2
+      ],
+      "cpuW": [
+        35.2
+      ],
+      "gpuW": [
+        40.5
+      ],
+      "displayW": [
+        0
+      ],
+      "ramW": [
+        6.0
+      ],
+      "storageW": [
+        3.1
+      ],
+      "boardW": [
+        20.0
+      ],
+      "extrasW": [
+        0
+      ],
+      "monitorsW": [
+        24.3
+      ],
+      "psuLossW": [
+        13.2
+      ],
+      "unattributedW": [
+        0
+      ],
+      "cpuLoad": [
+        0.121
+      ],
+      "gpuLoad": [
+        0.2
+      ],
+      "brightness": [
+        0.6
+      ],
+      "displayOnS": [
+        60
+      ],
+      "idleS": [
+        0
+      ],
+      "lockedS": [
+        0
+      ],
+      "batteryS": [
+        60
+      ],
+      "measuredS": [
+        60
+      ],
+      "calibratedS": [
+        0
+      ],
+      "estimatedS": [
+        0
+      ],
+      "samples": [
+        60
+      ],
+      "totalSource": [
+        1
+      ],
+      "gpuScope": [
+        0
+      ],
+      "measuredMask": [
+        5
+      ]
+    }
+  }
+}

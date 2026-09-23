@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" Version="9.4.0" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Shouldly" Version="4.3.0" />
@@ -15,6 +16,11 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The report schema and fixtures the Worker's tests use too (data-sharing design §9), so the two sides can't drift. -->
+    <None Include="..\..\server\schema\report-v1.schema.json" Link="Contract\report-v1.schema.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\server\test\fixtures\*.json" Link="Contract\fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

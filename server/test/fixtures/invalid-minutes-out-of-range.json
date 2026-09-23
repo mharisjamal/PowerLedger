@@ -1,0 +1,266 @@
+{
+  "schema": 1,
+  "installId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+  "app": "0.6.0",
+  "windows": "10.0.26200",
+  "arch": "x64",
+  "chassis": "desktop",
+  "consent": {
+    "version": 1,
+    "diagnostics": true,
+    "usage": true,
+    "power": true,
+    "share": true
+  },
+  "day": "2026-09-24",
+  "utcOffsetMinutes": 300,
+  "diagnostics": {
+    "sources": [
+      {
+        "id": "energy-meter",
+        "state": "working",
+        "failures": 0,
+        "lastError": null,
+        "device": null
+      },
+      {
+        "id": "nvidia-gpu",
+        "state": "working",
+        "failures": 0,
+        "lastError": null,
+        "device": "NVIDIA GeForce RTX 4070"
+      },
+      {
+        "id": "power-supply",
+        "state": "note",
+        "failures": 0,
+        "lastError": "No power supply found on USB.",
+        "device": null
+      }
+    ],
+    "crashes": [
+      {
+        "at": "2026-09-24T10:11:12.345Z",
+        "component": "app",
+        "version": "0.6.0",
+        "types": [
+          "System.InvalidOperationException"
+        ],
+        "message": "Collection was modified; enumeration operation may not execute.",
+        "stack": "   at PowerLedger.App.Now.NowViewModel.Refresh()\n   at PowerLedger.App.Shell.Tick()"
+      }
+    ]
+  },
+  "usage": {
+    "appOpens": 3,
+    "pages": {
+      "now": 5,
+      "history": 2,
+      "settings": 1
+    },
+    "settings": {
+      "tariff": 1,
+      "theme": 1
+    },
+    "reportsExported": 0,
+    "updatesInstalled": 0,
+    "daysSinceFirstRun": 12,
+    "theme": "dark",
+    "language": "en-US"
+  },
+  "power": {
+    "hardware": {
+      "cpu": {
+        "model": "AMD Ryzen 7 7800X3D 8-Core Processor",
+        "cores": null,
+        "threads": 16,
+        "tdpW": 120,
+        "tdpTyped": false
+      },
+      "gpus": [
+        {
+          "vendor": "nvidia",
+          "model": "NVIDIA GeForce RTX 4070",
+          "memoryMb": null,
+          "discrete": true,
+          "tdpW": 200,
+          "tdpTyped": false
+        }
+      ],
+      "memoryGb": 32,
+      "monitors": [
+        {
+          "maker": "GSM",
+          "product": "5B7F",
+          "model": "LG ULTRAGEAR",
+          "sizeIn": 27,
+          "width": 2560,
+          "height": 1440,
+          "refreshHz": 165,
+          "hdr": false,
+          "ownPlug": true,
+          "counted": true,
+          "figureW": 24.3,
+          "figureFrom": "energyStar"
+        }
+      ],
+      "psu": {
+        "tier": "gold",
+        "ratedW": 850,
+        "name": null
+      },
+      "ups": null,
+      "profile": {
+        "ramSticks": 2,
+        "ramDdr5": true,
+        "ssdCount": 1,
+        "hddCount": 0,
+        "fanCount": 3,
+        "extrasW": 0,
+        "panelIn": null
+      },
+      "sampleIntervalS": 1,
+      "tariff": {
+        "pricePerKwh": 0.25,
+        "currency": "USD"
+      }
+    },
+    "minutes": {
+      "t": [
+        600,
+        601,
+        602
+      ],
+      "avgW": [
+        142.3,
+        9000,
+        139.8
+      ],
+      "maxW": [
+        160.2,
+        171.0,
+        150.4
+      ],
+      "cpuW": [
+        35.2,
+        40.1,
+        33.3
+      ],
+      "gpuW": [
+        40.5,
+        44.0,
+        39.9
+      ],
+      "displayW": [
+        0,
+        0,
+        0
+      ],
+      "ramW": [
+        6.0,
+        6.0,
+        6.0
+      ],
+      "storageW": [
+        3.1,
+        3.1,
+        3.1
+      ],
+      "boardW": [
+        20.0,
+        20.0,
+        20.0
+      ],
+      "extrasW": [
+        0,
+        0,
+        0
+      ],
+      "monitorsW": [
+        24.3,
+        24.3,
+        24.3
+      ],
+      "psuLossW": [
+        13.2,
+        13.9,
+        13.0
+      ],
+      "unattributedW": [
+        0,
+        -1.3,
+        0.2
+      ],
+      "cpuLoad": [
+        0.121,
+        0.187,
+        0.103
+      ],
+      "gpuLoad": [
+        0.2,
+        0.31,
+        null
+      ],
+      "brightness": [
+        0.6,
+        0.6,
+        null
+      ],
+      "displayOnS": [
+        60,
+        60,
+        60
+      ],
+      "idleS": [
+        0,
+        0,
+        30
+      ],
+      "lockedS": [
+        0,
+        0,
+        0
+      ],
+      "batteryS": [
+        0,
+        0,
+        0
+      ],
+      "measuredS": [
+        0,
+        0,
+        0
+      ],
+      "calibratedS": [
+        0,
+        0,
+        0
+      ],
+      "estimatedS": [
+        60,
+        60,
+        60
+      ],
+      "samples": [
+        60,
+        60,
+        60
+      ],
+      "totalSource": [
+        0,
+        0,
+        0
+      ],
+      "gpuScope": [
+        0,
+        0,
+        0
+      ],
+      "measuredMask": [
+        3,
+        3,
+        3
+      ]
+    }
+  }
+}
