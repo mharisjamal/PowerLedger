@@ -1,6 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { utcDateString } from "../src/day";
+import { discardIfDeleted } from "../src/report";
 import { gzip, gzipJson, randomInstallId, randomKey } from "./support";
 import validFull from "./fixtures/valid-full.json";
 import validDiagnosticsOnly from "./fixtures/valid-diagnostics-only.json";
@@ -173,5 +174,53 @@ describe("POST /v1/report", () => {
       .bind(report.installId)
       .first<{ country: string }>();
     expect(row?.country).toBe("PK");
+  });
+});
+
+/** A body of `total` zero bytes, streamed in 64 KB chunks with no declared length. */
+function streamedZeros(total: number): ReadableStream<Uint8Array> {
+  let sent = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (sent >= total) {
+        controller.close();
+        return;
+      }
+      const chunk = new Uint8Array(Math.min(64 * 1024, total - sent));
+      sent += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+  });
+}
+
+describe("POST /v1/report, limits and races", () => {
+  it("refuses a body over 1 MB even when its length isn't declared", async () => {
+    const response = await SELF.fetch("https://example.com/v1/report", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${randomKey()}`, "Content-Encoding": "gzip" },
+      body: streamedZeros(2 * 1024 * 1024),
+    });
+    expect(response.status).toBe(413);
+  });
+
+  it("takes back a report stored for an install deleted while it was being stored", async () => {
+    const installId = randomInstallId();
+    const day = utcDateString(-1, new Date());
+    const r2Key = `reports/v1/${installId}/${day}.json.gz`;
+    await env.REPORTS.put(r2Key, new Uint8Array([1, 2, 3]));
+    await env.DB.prepare(
+      "INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key) VALUES (?, ?, 0, 3, 'power', 'XX', ?)",
+    )
+      .bind(installId, day, r2Key)
+      .run();
+
+    expect(await discardIfDeleted(env, installId, day, r2Key)).toBe(false);
+    expect(await env.REPORTS.head(r2Key)).not.toBeNull();
+
+    await env.DB.prepare("INSERT INTO tombstones (id, deleted_at) VALUES (?, 0)").bind(installId).run();
+    expect(await discardIfDeleted(env, installId, day, r2Key)).toBe(true);
+    expect(await env.REPORTS.head(r2Key)).toBeNull();
+    const row = await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(installId).first();
+    expect(row).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { bearer, checkInstall, countRequest } from "./auth";
+import { readBounded } from "./body";
 import { firstConsentError, GUID_PATTERN } from "./schema";
 
 const MAX_BODY_BYTES = 4096;
@@ -10,9 +11,12 @@ function errorResponse(status: number, message: string): Response {
 
 type SmallJson = { ok: true; value: unknown } | { ok: false; response: Response };
 
-async function readSmallJson(request: Request): Promise<SmallJson> {
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > MAX_BODY_BYTES) {
+async function readSmallJson(request: Request, env: Cloudflare.Env): Promise<SmallJson> {
+  const address = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const limited = await env.ADDRESS_LIMIT.limit({ key: address });
+  if (!limited.success) return { ok: false, response: errorResponse(429, "Too many requests from this address.") };
+  const bytes = await readBounded(request, MAX_BODY_BYTES);
+  if (bytes === null) {
     return { ok: false, response: errorResponse(413, "The body is larger than 4 KB.") };
   }
   try {
@@ -26,7 +30,7 @@ export async function handleConsent(request: Request, env: Cloudflare.Env): Prom
   const key = bearer(request);
   if (!key) return errorResponse(401, "A valid bearer key is required.");
 
-  const parsed = await readSmallJson(request);
+  const parsed = await readSmallJson(request, env);
   if (!parsed.ok) return parsed.response;
 
   const schemaError = firstConsentError(parsed.value);
@@ -66,7 +70,7 @@ export async function handleDelete(request: Request, env: Cloudflare.Env): Promi
   const key = bearer(request);
   if (!key) return errorResponse(401, "A valid bearer key is required.");
 
-  const parsed = await readSmallJson(request);
+  const parsed = await readSmallJson(request, env);
   if (!parsed.ok) return parsed.response;
 
   const installId = (parsed.value as { installId?: unknown } | null)?.installId;
@@ -86,9 +90,12 @@ export async function handleDelete(request: Request, env: Cloudflare.Env): Promi
   return Response.json({ ok: true });
 }
 
-/** Deletes an install's objects and rows (a "new" install has nothing to delete but its own
- * just-created row) and leaves a tombstone, so any later request for it gives 410. */
+/** Leaves a tombstone first, so any request for the install gives 410 from now on and a report already on its way
+ * takes itself back (report.ts, step 11); then deletes the install's objects and rows. A "new" install has nothing
+ * to delete but its own just-created row. */
 async function forgetInstall(env: Cloudflare.Env, installId: string): Promise<void> {
+  await env.DB.prepare("INSERT OR IGNORE INTO tombstones (id, deleted_at) VALUES (?, ?)").bind(installId, Date.now()).run();
+
   const known = await env.DB.prepare("SELECT r2_key FROM reports WHERE install_id = ?")
     .bind(installId)
     .all<{ r2_key: string }>();
@@ -103,10 +110,11 @@ async function forgetInstall(env: Cloudflare.Env, installId: string): Promise<vo
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor);
 
-  await env.DB.prepare("DELETE FROM reports WHERE install_id = ?").bind(installId).run();
-  await env.DB.prepare("DELETE FROM requests WHERE install_id = ?").bind(installId).run();
-  await env.DB.prepare("DELETE FROM installs WHERE id = ?").bind(installId).run();
-  await env.DB.prepare("INSERT INTO tombstones (id, deleted_at) VALUES (?, ?)").bind(installId, Date.now()).run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM reports WHERE install_id = ?").bind(installId),
+    env.DB.prepare("DELETE FROM requests WHERE install_id = ?").bind(installId),
+    env.DB.prepare("DELETE FROM installs WHERE id = ?").bind(installId),
+  ]);
 }
 
 async function deleteInBatches(env: Cloudflare.Env, keys: string[]): Promise<void> {

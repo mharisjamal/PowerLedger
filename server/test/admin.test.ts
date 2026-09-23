@@ -158,3 +158,27 @@ describe("GET /admin/object", () => {
     expect(response.status).toBe(404);
   });
 });
+
+describe("GET /admin/list, guards", () => {
+  it("refuses a cursor that isn't a day and an install", async () => {
+    for (const after of ["2026-09-01|not-a-guid", "yesterday|0f8fad5b-d9cb-469f-a165-70867728950e", "2026-09-01|"]) {
+      const response = await SELF.fetch(`https://example.com/admin/list?after=${encodeURIComponent(after)}`, { headers: ADMIN });
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it("never lists what a deleted install left behind, shared or not", async () => {
+    const installId = randomInstallId();
+    const day = utcDateString(-1, new Date());
+    await env.DB.prepare(
+      "INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key) VALUES (?, ?, 0, 3, 'power', 'XX', ?)",
+    )
+      .bind(installId, day, `reports/v1/${installId}/${day}.json.gz`)
+      .run();
+    await env.DB.prepare("INSERT INTO tombstones (id, deleted_at) VALUES (?, 0)").bind(installId).run();
+
+    const response = await SELF.fetch(`https://example.com/admin/list?from=${day}&to=${day}&limit=1000`, { headers: ADMIN });
+    const listed = (await response.json()) as { items: { installId: string }[] };
+    expect(listed.items.some((item) => item.installId === installId)).toBe(false);
+  });
+});

@@ -33,8 +33,12 @@ export function csvLine(fields) {
   return fields.map(csvField).join(",");
 }
 
+/** One cell. A number is written as it is; text that a spreadsheet would read as a formula (starting with =, +, -, @,
+ * a tab or a carriage return) gets an apostrophe in front, so opening the file can't run anything. */
 function csvField(value) {
-  const text = value === null || value === undefined ? "" : String(value);
+  if (typeof value === "number") return String(value);
+  let text = value === null || value === undefined ? "" : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

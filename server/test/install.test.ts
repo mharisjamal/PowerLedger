@@ -139,3 +139,25 @@ describe("POST /v1/delete", () => {
     expect(response.status).toBe(410);
   });
 });
+
+describe("consent and delete bodies", () => {
+  it("refuses a consent body over 4 KB even when its length isn't declared", async () => {
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= 64 * 1024) {
+          controller.close();
+          return;
+        }
+        sent += 1024;
+        controller.enqueue(new Uint8Array(1024).fill(32));
+      },
+    });
+    const response = await SELF.fetch("https://example.com/v1/consent", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${randomKey()}` },
+      body,
+    });
+    expect(response.status).toBe(413);
+  });
+});

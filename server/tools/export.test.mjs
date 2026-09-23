@@ -65,3 +65,10 @@ test("minuteRows is empty when the report has no power section", () => {
   const rows = minuteRows({ day: "2026-09-24", chassis: "desktop", arch: "x64" }, "abc123", "PK");
   assert.deepEqual(rows, []);
 });
+
+test("csvLine keeps a text cell from being read as a formula, and leaves numbers alone", () => {
+  assert.equal(
+    csvLine(["=SUM(A1)", "+1", "@cmd", "-cmd", "	x", -1.3, 5, "plain"]),
+    "'=SUM(A1),'+1,'@cmd,'-cmd,'	x,-1.3,5,plain",
+  );
+});

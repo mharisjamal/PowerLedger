@@ -34,7 +34,12 @@ if (Test-Path $configPath) {
 
 # Only the owner can read or write it: reset inheritance, then grant just this account.
 icacls $configPath /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Couldn't limit $configPath to this account (icacls exit $LASTEXITCODE)." }
 
-$config.token | npx wrangler secret put ADMIN_TOKEN | Out-Null
+# The token goes in on standard input and wrangler's own output is kept back; neither is ever shown.
+$config.token | npx wrangler secret put ADMIN_TOKEN 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "wrangler couldn't set the admin token (exit $LASTEXITCODE). Run 'npx wrangler login' in server\ first, then run this again."
+}
 
 Write-Output 'Admin token set.'

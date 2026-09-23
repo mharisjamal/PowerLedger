@@ -1,4 +1,5 @@
 import { bearer, checkInstall, countRequest } from "./auth";
+import { readBounded } from "./body";
 import { dayInRange } from "./day";
 import { gunzipBounded } from "./gzip";
 import { checkMinutes } from "./minutes";
@@ -28,19 +29,17 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
   const key = bearer(request);
   if (!key) return errorResponse(401, "A valid bearer key is required.");
 
-  // 2. Content-Encoding and the as-sent size limit, before any decompression work.
-  if (request.headers.get("Content-Encoding") !== "gzip") {
-    return errorResponse(413, "The body must be sent gzip-encoded.");
-  }
-  const body = new Uint8Array(await request.arrayBuffer());
-  if (body.byteLength > MAX_BODY_BYTES) {
-    return errorResponse(413, "The body is larger than 1 MB.");
-  }
-
-  // 3. Per-address rate limit.
+  // 2. Per-address rate limit, before reading anything.
   const address = request.headers.get("CF-Connecting-IP") ?? "unknown";
   const limited = await env.ADDRESS_LIMIT.limit({ key: address });
   if (!limited.success) return errorResponse(429, "Too many requests from this address.");
+
+  // 3. Content-Encoding and the as-sent size limit, counted while reading so an oversized body is never held whole.
+  if (request.headers.get("Content-Encoding") !== "gzip") {
+    return errorResponse(413, "The body must be sent gzip-encoded.");
+  }
+  const body = await readBounded(request, MAX_BODY_BYTES);
+  if (body === null) return errorResponse(413, "The body is larger than 1 MB.");
 
   // 4. Bounded decompression, then JSON.
   let unpacked: Uint8Array | null;
@@ -123,6 +122,23 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
     )
     .run();
 
-  // 11.
+  // 11. A delete that landed while this report was being stored has already swept the install; take back what this
+  // request added after the sweep, so a deleted install keeps nothing.
+  if (await discardIfDeleted(env, report.installId, report.day, r2Key)) {
+    return errorResponse(410, "This install's data has been deleted.");
+  }
+
   return Response.json({ ok: true });
+}
+
+/** Deletes one day's object and row when the install has a tombstone; true when it did. */
+export async function discardIfDeleted(env: Cloudflare.Env, installId: string, day: string, r2Key: string): Promise<boolean> {
+  const tombstone = await env.DB.prepare("SELECT 1 FROM tombstones WHERE id = ?").bind(installId).first();
+  if (!tombstone) return false;
+  await env.REPORTS.delete(r2Key);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM reports WHERE install_id = ? AND day = ?").bind(installId, day),
+    env.DB.prepare("DELETE FROM installs WHERE id = ?").bind(installId),
+  ]);
+  return true;
 }

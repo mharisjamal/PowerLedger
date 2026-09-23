@@ -1,4 +1,7 @@
 import { timingSafeEqualStrings } from "./auth";
+import { GUID_PATTERN } from "./schema";
+
+const DAY_PATTERN = /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
 
 function errorResponse(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
@@ -82,13 +85,18 @@ async function handleList(request: Request, env: Cloudflare.Env): Promise<Respon
   }
   if (after) {
     const separator = after.indexOf("|");
-    if (separator === -1) return errorResponse(400, "after must be <day>|<installId>.");
-    const afterDay = after.slice(0, separator);
-    const afterInstallId = after.slice(separator + 1);
+    const afterDay = separator === -1 ? "" : after.slice(0, separator);
+    const afterInstallId = separator === -1 ? "" : after.slice(separator + 1);
+    if (!DAY_PATTERN.test(afterDay) || !GUID_PATTERN.test(afterInstallId)) {
+      return errorResponse(400, "after must be <day>|<installId>, as a page's next gives it.");
+    }
     conditions.push("(reports.day > ? OR (reports.day = ? AND reports.install_id > ?))");
     params.push(afterDay, afterDay, afterInstallId);
   }
   if (shared) conditions.push("installs.share = 1");
+  // A report stored while its install was being deleted is taken back at once (report.ts); this keeps one that
+  // hasn't been yet out of every listing, shared or not.
+  conditions.push("reports.install_id NOT IN (SELECT id FROM tombstones)");
 
   const join = shared ? "JOIN installs ON installs.id = reports.install_id" : "";
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
