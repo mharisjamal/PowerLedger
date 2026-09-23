@@ -76,5 +76,31 @@ internal sealed class FakeLink : IServiceLink
         return Task.FromResult(Answer);
     }
 
+    public Task<WriteResult> ReportUsageAsync(UsageCounts counts, CancellationToken cancel = default) => Write(counts);
+
+    public Task<WriteResult> ReportCrashAsync(CrashReport crash, CancellationToken cancel = default) => Write(crash);
+
+    /// <summary>Every sharing request the App asked for, in order: a <see cref="Consent"/> for setConsent, or the string
+    /// "preview", "sendNow" or "delete" for the others.</summary>
+    public List<object> SharingRequests { get; } = [];
+
+    /// <summary>What every sharing request comes back as.</summary>
+    public SharingOutcome SharingAnswer { get; set; } = new(true, "Done.");
+
+    public Task<SharingOutcome> SetConsentAsync(Consent consent, CancellationToken cancel = default) => Sharing(consent);
+
+    public Task<SharingOutcome> PreviewUploadAsync(CancellationToken cancel = default) => Sharing("preview");
+
+    public Task<SharingOutcome> SendNowAsync(CancellationToken cancel = default) => Sharing("sendNow");
+
+    public Task<SharingOutcome> DeleteMyDataAsync(CancellationToken cancel = default) => Sharing("delete");
+
+    private Task<SharingOutcome> Sharing(object request)
+    {
+        if (!IsConnected) return Task.FromResult(SharingOutcome.NotConnected);
+        SharingRequests.Add(request);
+        return Task.FromResult(SharingAnswer);
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
