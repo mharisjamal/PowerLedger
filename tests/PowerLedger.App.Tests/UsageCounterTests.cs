@@ -151,6 +151,34 @@ public partial class UsageCounterTests
     }
 
     [Fact]
+    public async Task Usage_from_an_answer_to_an_older_wording_of_the_choices_is_not_trusted()
+    {
+        _link.Connect(true);
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version - 1, false, true, false, false));   // old version, usage ticked
+        var counter = Model();
+        counter.CountAppOpen();
+
+        await counter.FlushAsync();
+
+        _link.Writes.OfType<UsageCounts>().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Seeding_from_an_answer_to_an_older_wording_does_not_learn_usage_is_on()
+    {
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version - 1, false, true, false, false));   // old version, usage ticked
+        _link.Connect(true);
+        var counter = Model();
+        counter.Start();   // seeds once, already connected
+
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));   // answered afresh, now current
+        counter.CountAppOpen();
+        await counter.FlushAsync();
+
+        _link.Writes.OfType<UsageCounts>().ShouldBeEmpty();   // the seed must not have trusted the stale "on", so this flip is still caught
+    }
+
+    [Fact]
     public async Task Counts_are_kept_when_the_service_cannot_be_reached()
     {
         _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));

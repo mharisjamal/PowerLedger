@@ -63,10 +63,11 @@ internal sealed class UsageCounter : IDisposable
     /// UI thread.</summary>
     public void ConsentChanged(Consent consent)
     {
+        var usageOn = consent.Answered && consent.Usage;
         lock (_gate)
         {
-            if (!consent.Usage || _usageOn != true) Reset();
-            _usageOn = consent.Usage;
+            if (!usageOn || _usageOn != true) Reset();
+            _usageOn = usageOn;
         }
     }
 
@@ -108,13 +109,15 @@ internal sealed class UsageCounter : IDisposable
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         if (status?.Sharing is not { } sharing) return;   // the service is unreachable, or older and sends no Sharing status: try again later
 
+        // an answer to an older wording of the choices counts for nothing (data-sharing design §1), whatever Usage says
+        var usageOn = sharing.Consent.Answered && sharing.Consent.Usage;
         bool sendable;
         lock (_gate)
         {
             // on, and not a fresh change from a known off: what is held can't be from before consent (a first-ever
             // observation of on, with nothing known before it, is trusted, so an already-consented session sends normally)
-            sendable = sharing.Consent.Usage && _usageOn != false;
-            Observe(sharing.Consent.Usage);
+            sendable = usageOn && _usageOn != false;
+            Observe(usageOn);
         }
         if (!sendable) return;   // off, or only just found on from a known off: this snapshot might hold counts from before consent
 
@@ -127,7 +130,7 @@ internal sealed class UsageCounter : IDisposable
     private async Task SeedAsync()
     {
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
-        if (status?.Sharing is { } sharing) lock (_gate) Observe(sharing.Consent.Usage);
+        if (status?.Sharing is { } sharing) lock (_gate) Observe(sharing.Consent.Answered && sharing.Consent.Usage);
     }
 
     private static void Bump(Dictionary<string, int> counts, string name) => counts[name] = counts.GetValueOrDefault(name) + 1;
