@@ -23,7 +23,7 @@ public sealed class SharingStoreTests : IDisposable
         store.Consent.ShouldBe(Consent.Unanswered);
         store.StoredConsent.ShouldBeNull();
         (store.InstallId, store.Key, store.CollectedTo, store.LastSent, store.Problem, store.Backoff).ShouldBe((null, null, null, null, null, null));
-        (store.HardwareHash, store.ConsentPending, store.LastRun, store.SentThrough).ShouldBe((null, false, null, null));
+        (store.HardwareHash, store.ConsentPending, store.ConsentBackoff, store.LastRun, store.SentThrough).ShouldBe((null, false, null, null, null));
     }
 
     [Fact]
@@ -38,6 +38,7 @@ public sealed class SharingStoreTests : IDisposable
         store.Backoff = new Backoff(3, 4_000);
         store.HardwareHash = "abc123";
         store.ConsentPending = true;
+        store.ConsentBackoff = new Backoff(2, 6_000);
         store.LastRun = 5_000;
         store.SentThrough = "2026-09-23";
 
@@ -48,12 +49,14 @@ public sealed class SharingStoreTests : IDisposable
         again.LastSent.ShouldBe(new LastSent(3_000, 41_234));
         again.Problem.ShouldBe(new SendProblem("The server said no.", true));
         again.Backoff.ShouldBe(new Backoff(3, 4_000));
+        again.ConsentBackoff.ShouldBe(new Backoff(2, 6_000));
         (again.HardwareHash, again.ConsentPending, again.LastRun, again.SentThrough).ShouldBe(("abc123", true, 5_000L, "2026-09-23"));
 
         again.Problem = null;
         again.Backoff = null;
         again.ConsentPending = false;
-        (Store().Problem, Store().Backoff, Store().ConsentPending).ShouldBe((null, null, false));
+        again.ConsentBackoff = null;
+        (Store().Problem, Store().Backoff, Store().ConsentPending, Store().ConsentBackoff).ShouldBe((null, null, false, null));
     }
 
     [Fact]
@@ -137,6 +140,7 @@ public sealed class SharingStoreTests : IDisposable
         store.Backoff = new Backoff(1, 5);
         store.HardwareHash = "h";
         store.ConsentPending = true;
+        store.ConsentBackoff = new Backoff(1, 7);
         store.LastRun = 6;
         store.SentThrough = "2026-09-20";
 
@@ -146,7 +150,7 @@ public sealed class SharingStoreTests : IDisposable
         after.StoredConsent.ShouldBe(new StoredConsent(new Consent(ConsentText.Version, false, false, false, false), 99, null));
         after.Consent.Answered.ShouldBeTrue();
         (after.InstallId, after.Key, after.CollectedTo, after.LastSent, after.Problem, after.Backoff).ShouldBe((null, null, null, null, null, null));
-        (after.HardwareHash, after.ConsentPending, after.LastRun, after.SentThrough).ShouldBe((null, false, null, null));
+        (after.HardwareHash, after.ConsentPending, after.ConsentBackoff, after.LastRun, after.SentThrough).ShouldBe((null, false, null, null, null));
         after.SendMinute.ShouldBe(42);
     }
 

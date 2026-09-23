@@ -42,6 +42,7 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     internal const string BackoffKey = "sharing.backoff";
     internal const string HardwareHashKey = "sharing.hardware-hash";
     internal const string ConsentPendingKey = "sharing.consent-pending";
+    internal const string ConsentBackoffKey = "sharing.consent-backoff";
     internal const string LastRunKey = "sharing.last-run";
     internal const string SentThroughKey = "sharing.sent-through";
 
@@ -50,7 +51,10 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
 
     /// <summary>What forgetting removes: everything the server knew this PC by and all progress. The send minute stays.</summary>
     private static readonly string[] Forgotten =
-        [IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, LastRunKey, SentThroughKey];
+    [
+        IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, ConsentBackoffKey, LastRunKey,
+        SentThroughKey,
+    ];
 
     /// <summary>Mixed into the key's encryption, so no other program running as the same account reads it back by chance.</summary>
     private static readonly byte[] KeyEntropy = "PowerLedger data sharing install key"u8.ToArray();
@@ -117,10 +121,19 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
         set => Write(ProblemKey, value, SharingJson.Default.SendProblem);
     }
 
+    /// <summary>The uploads' back-off.</summary>
     public Backoff? Backoff
     {
         get => Read(BackoffKey, SharingJson.Default.Backoff);
         set => Write(BackoffKey, value, SharingJson.Default.Backoff);
+    }
+
+    /// <summary>The back-off of a consent change the server hasn't heard, apart from the uploads', so neither pushes the
+    /// other's next try back.</summary>
+    public Backoff? ConsentBackoff
+    {
+        get => Read(ConsentBackoffKey, SharingJson.Default.Backoff);
+        set => Write(ConsentBackoffKey, value, SharingJson.Default.Backoff);
     }
 
     /// <summary>The hardware section last sent, as <see cref="ReportJson.Hash"/> gives it.</summary>

@@ -249,6 +249,35 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_consent_change_waiting_to_be_posted_backs_off_on_its_own_so_the_reports_keep_their_steps()
+    {
+        var reports = new List<DateTimeOffset>();
+        var consents = new List<DateTimeOffset>();
+        _h.Client.Answer = call =>
+        {
+            (call.Kind == "report" ? reports : consents).Add(_h.Clock.GetUtcNow());
+            return new SendOutcome.Unreachable("no network");
+        };
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+
+        for (var now = Local(24, 1, 1); now < Local(24, 17); now = now.AddMinutes(5))
+        {
+            _h.Clock.SetUtcNow(now);
+            await _h.TickAsync();
+        }
+
+        reports.ShouldBe(new[] { Local(24, 1, 1), Local(24, 2, 1), Local(24, 4, 1), Local(24, 8, 1), Local(24, 16, 1) });
+        consents.ShouldBe(new[] { Local(24, 0, 30), Local(24, 1, 31), Local(24, 3, 31), Local(24, 7, 31), Local(24, 15, 31) });
+
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(25, 8, 1));
+        await _h.TickAsync();
+        (_h.Store.ConsentPending, _h.Store.ConsentBackoff, _h.Store.Backoff).ShouldBe((false, null, null));
+    }
+
+    [Fact]
     public async Task The_hardware_goes_with_the_first_upload_and_again_only_after_a_change()
     {
         _h.Clock.SetUtcNow(Local(24, 0, 30));

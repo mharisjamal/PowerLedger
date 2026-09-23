@@ -487,17 +487,17 @@ internal sealed class SharingWorker : BackgroundService
     }
 
     /// <summary>Posts a consent change the server hasn't heard. The App waiting on it gets it tried at once; otherwise it
-    /// waits out a back-off, since the server counts every request against the install's daily limit.</summary>
+    /// waits out a back-off of its own, since the server counts every request against the install's daily limit.</summary>
     /// <returns>False when the server has deleted this install, which is then forgotten.</returns>
     private async Task<bool> PostPendingConsentAsync(DateTimeOffset now, CancellationToken stop, bool fromApp)
     {
         if (!_store.ConsentPending) return true;
         if (_store.InstallId is not { } id || _store.Key is not { } key)
         {
-            _store.ConsentPending = false;
+            Posted();
             return true;
         }
-        if (!fromApp && _store.Backoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return true;
+        if (!fromApp && _store.ConsentBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return true;
 
         using var deadline = fromApp ? new CancellationTokenSource(AppWait, _clock) : null;
         var consent = _store.Consent;
@@ -506,7 +506,7 @@ internal sealed class SharingWorker : BackgroundService
         switch (outcome)
         {
             case SendOutcome.Accepted:
-                _store.ConsentPending = false;
+                Posted();
                 return true;
             case SendOutcome.Gone:
                 _log.LogInformation("The server has deleted this install; forgetting it");
@@ -514,13 +514,20 @@ internal sealed class SharingWorker : BackgroundService
                 return false;
             case SendOutcome.Rejected rejected:
                 _log.LogWarning("The server refused the consent change for good: {Reason}", rejected.Text);
-                _store.ConsentPending = false;
+                Posted();
                 return true;
             default:
                 _log.LogInformation("The consent change didn't reach the server ({Reason}); it will be tried again", outcome.Reason);
-                _store.Backoff = SendSchedule.After(_store.Backoff, now);
+                _store.ConsentBackoff = SendSchedule.After(_store.ConsentBackoff, now);
                 return true;
         }
+    }
+
+    /// <summary>The consent change needs posting no more.</summary>
+    private void Posted()
+    {
+        _store.ConsentPending = false;
+        _store.ConsentBackoff = null;
     }
 
     /// <summary>Sends the complete days waiting, oldest first and at most <see cref="MaxDaysPerRun"/>, each with the sections
@@ -584,7 +591,7 @@ internal sealed class SharingWorker : BackgroundService
         _store.LastSent = new LastSent(now.ToUnixTimeMilliseconds(), body.Length);
         _store.Problem = null;
         _store.Backoff = null;
-        _store.ConsentPending = false;                                         // the report carried the consent as it is now
+        Posted();                                                              // the report carried the consent as it is now
         if (hardwareHash is not null) _store.HardwareHash = hardwareHash;
     }
 
