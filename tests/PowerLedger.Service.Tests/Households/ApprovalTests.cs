@@ -255,6 +255,7 @@ public sealed class ApprovalTests : IAsyncLifetime
         var (_, study, household) = await BothAsked(desktop);
         var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
         await study.Send<HouseholdReply>(new AnswerPromptRequest(9, confirm.PromptId!, true));
+        await study.Worker.Running;                                                // its user's answer is kept before its next turn
         var newer = HouseholdCrypto.NewKey();                                      // the laptop rotated; the desktop hasn't heard
         using var laptopKeys = laptop.Worker.Store.DeviceKeys();
         using var client = new RelayClient(FakeRelay.Endpoint, _clock, _relay);
