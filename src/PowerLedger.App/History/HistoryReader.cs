@@ -7,9 +7,12 @@ using PowerLedger.Storage;
 namespace PowerLedger.App;
 
 /// <param name="Cpu">The processor's name as Windows reports it.</param>
-/// <param name="Gpu">The graphics adapter the service names, when there is one.</param>
+/// <param name="Gpu">The graphics cards the service names, joined with " + " when there are several, or the processor's
+/// graphics when there is no card.</param>
 /// <param name="DisplayDiagonalInches">The built-in panel's size; 0 when the machine has none.</param>
-internal sealed record MachineNames(string? Cpu, string? Gpu, double DisplayDiagonalInches);
+/// <param name="GpuRough">True when a card's rating is only the service's rough figure from its memory, so watts worked out
+/// from its load are a rough estimate.</param>
+internal sealed record MachineNames(string? Cpu, string? Gpu, double DisplayDiagonalInches, bool GpuRough = false);
 
 /// <summary>Everything the Now screen reads from history in one pass, so its parts always agree.</summary>
 internal sealed record HistorySnapshot(
@@ -127,7 +130,8 @@ internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeH
             using var json = JsonDocument.Parse(record.Json);
             var root = json.RootElement;
             var inches = root.TryGetProperty("DisplayDiagonalInches", out var size) && size.TryGetDouble(out var value) ? value : 0;
-            return new MachineNames(Text(root, "CpuName"), Text(root, "GpuName"), inches);
+            var rough = root.TryGetProperty("GpuTdpRough", out var flag) && flag.ValueKind == JsonValueKind.True;
+            return new MachineNames(Text(root, "CpuName"), Text(root, "GpuName"), inches, rough);
         }
         catch (JsonException)
         {
