@@ -1,3 +1,4 @@
+import { addressOf } from "../address";
 import { readBounded } from "../body";
 import { errorResponse, ok, overAddressLimit } from "./http";
 
@@ -7,8 +8,14 @@ import { errorResponse, ok, overAddressLimit } from "./http";
 export const MEETING_SLOTS = ["adder", "joiner", "answer", "welcome", "joined"] as const;
 export const MAX_SLOT_BYTES = 8 * 1024;
 export const MEETING_LIFETIME_MS = 10 * 60 * 1000;
+/** Live meetings at most, the whole server's: past it, a new one waits (503). */
+export const MAX_LIVE_MEETINGS = 5000;
 
-/** PUT /v1/meetings/{id}/{slot}: 8 KB at most, written once, within 10 minutes of the meeting's first PUT. */
+/**
+ * PUT /v1/meetings/{id}/{slot}: 8 KB at most, written once, within 10 minutes of the meeting's first PUT. Every PUT
+ * clears the meetings that have ended. Starting a meeting has a per-address limit of its own (MEETING_LIMIT, 429), and
+ * the server keeps at most 5000 live (503).
+ */
 export async function handlePutSlot(
   request: Request,
   env: Cloudflare.Env,
@@ -26,8 +33,19 @@ export async function handlePutSlot(
   const meeting = await env.DB.prepare("SELECT MIN(created) AS created FROM meetings WHERE id = ?")
     .bind(id)
     .first<{ created: number | null }>();
+  const ended = now - MEETING_LIFETIME_MS;
+  await env.DB.prepare("DELETE FROM meetings WHERE created <= ?").bind(ended).run();
+  if (meeting?.created != null && meeting.created <= ended) return errorResponse(410, "This meeting has ended.");
+
   const created = meeting?.created ?? now;
-  if (now - created >= MEETING_LIFETIME_MS) return errorResponse(410, "This meeting has ended.");
+  if (meeting?.created == null) {
+    const starting = await env.MEETING_LIMIT.limit({ key: addressOf(request) });
+    if (!starting.success) return errorResponse(429, "Too many pairing codes from this address; wait a minute.");
+    const live = await env.DB.prepare("SELECT COUNT(DISTINCT id) AS n FROM meetings WHERE created > ?")
+      .bind(ended)
+      .first<{ n: number }>();
+    if ((live?.n ?? 0) >= MAX_LIVE_MEETINGS) return errorResponse(503, "The server is busy; try again later.");
+  }
 
   const written = await env.DB.prepare(
     "INSERT INTO meetings (id, slot, body, created) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING slot",

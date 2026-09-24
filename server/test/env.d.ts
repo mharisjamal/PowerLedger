@@ -5,6 +5,8 @@ declare namespace Cloudflare {
     REPORTS?: R2Bucket;
     DB: D1Database;
     ADDRESS_LIMIT: RateLimit;
+    // Starting a pairing-by-code meeting, per address (wrangler.toml).
+    MEETING_LIMIT: RateLimit;
     // A secret in production (`wrangler secret put ADMIN_TOKEN`), so it never lives in
     // wrangler.toml; set for tests in vitest.config.ts.
     ADMIN_TOKEN: string;

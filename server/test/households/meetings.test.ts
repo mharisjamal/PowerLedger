@@ -21,8 +21,61 @@ function get(id: string, slot: string): Promise<Response> {
 }
 
 function putRequest(id: string, slot: string, body: BodyInit): Request {
-  return new Request(`https://example.com/v1/meetings/${id}/${slot}`, { method: "PUT", body });
+  return new Request(`https://example.com/v1/meetings/${id}/${slot}`, {
+    method: "PUT",
+    headers: { "CF-Connecting-IP": randomAddress() },
+    body,
+  });
 }
+
+const refusing = { limit: async () => ({ success: false }) };
+
+async function liveMeetings(): Promise<number> {
+  return (await env.DB.prepare("SELECT COUNT(DISTINCT id) AS n FROM meetings").first<{ n: number }>())!.n;
+}
+
+describe("meeting volume", () => {
+  it("clears ended meetings on every put", async () => {
+    const ended = meetingId();
+    await env.DB.prepare("INSERT INTO meetings (id, slot, body, created) VALUES (?, 'adder', x'00', ?)")
+      .bind(ended, Date.now() - MEETING_LIFETIME_MS - 1000)
+      .run();
+
+    expect((await put(meetingId(), "adder", "{}")).status).toBe(200);
+
+    expect(await env.DB.prepare("SELECT 1 FROM meetings WHERE id = ?").bind(ended).first()).toBeNull();
+  });
+
+  it("puts starting a meeting behind a per-address limit of its own", async () => {
+    const limited = { ...env, MEETING_LIMIT: refusing } as unknown as Cloudflare.Env;
+    const started = meetingId();
+    expect((await handlePutSlot(putRequest(started, "adder", "{}"), env, started, "adder")).status).toBe(200);
+
+    const fresh = meetingId();
+    expect((await handlePutSlot(putRequest(fresh, "adder", "{}"), limited, fresh, "adder")).status).toBe(429);
+    expect((await handlePutSlot(putRequest(started, "joiner", "{}"), limited, started, "joiner")).status).toBe(200);
+  });
+
+  it("gives 503 for a new meeting while 5000 are live, but still takes slots of those", async () => {
+    const started = meetingId();
+    expect((await put(started, "adder", "{}")).status).toBe(200);
+    await env.DB.prepare(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+       INSERT INTO meetings (id, slot, body, created) SELECT printf('ffff%028x', i), 'adder', x'00', ? FROM n`,
+    )
+      .bind(5000 - (await liveMeetings()), Date.now())
+      .run();
+    try {
+      expect(await liveMeetings()).toBe(5000);
+      const busy = await put(meetingId(), "adder", "{}");
+      expect(busy.status).toBe(503);
+      expect(await busy.json()).toEqual({ error: "The server is busy; try again later." });
+      expect((await put(started, "joiner", "{}")).status).toBe(200);
+    } finally {
+      await env.DB.prepare("DELETE FROM meetings WHERE id LIKE 'ffff%'").run();
+    }
+  });
+});
 
 describe("the meeting slots", () => {
   it("give back what was put, byte for byte, with no signature", async () => {
