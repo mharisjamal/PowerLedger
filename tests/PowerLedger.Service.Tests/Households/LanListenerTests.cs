@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using Microsoft.Extensions.Logging.Abstractions;
 using PowerLedger.Service.Households.Lan;
 using Shouldly;
@@ -20,7 +21,17 @@ public class LanListenerTests
 
             var disposing = listener.DisposeAsync();                            // not awaited: the port must be shut already
 
-            await Should.ThrowAsync<IOException>(() => LanConnector.ConnectAsync(IPAddress.Loopback, port, TimeSpan.FromSeconds(5)));
+            // Binding the port again works only once nothing listens on it. A connection attempt would tell too, but
+            // Windows takes about 2 s to report a refused one on loopback.
+            var again = new TcpListener(IPAddress.Loopback, port);
+            try
+            {
+                Should.NotThrow(again.Start, $"round {round}");
+            }
+            finally
+            {
+                again.Stop();
+            }
             await disposing;
         }
     }
