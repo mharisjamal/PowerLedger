@@ -2,8 +2,10 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Automation.Peers;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 
 namespace PowerLedger.App;
 
@@ -18,6 +20,8 @@ internal partial class MidnightWindow : Window, IShellWindow
     private readonly Action _feedback;
     private readonly Extent _size;
     private readonly Extent _minimum;
+    private readonly DispatcherTimer _problemTimer = new();
+    private bool _switching;
 
     /// <param name="looks">The switcher the App opened this window through (plan O 0.4). The top bar's Switch look goes
     /// through <see cref="ShellViewModel.SwitchLook"/> instead, so the choice is saved as Settings saves it.</param>
@@ -39,7 +43,12 @@ internal partial class MidnightWindow : Window, IShellWindow
         KindGlyph.ToolTip = shell.Settings.Service.IsDesktop ? "Desktop" : "Laptop";
         ShowTheme();
         shell.Settings.PropertyChanged += OnSettingsChanged;
-        Closed += (_, _) => shell.Settings.PropertyChanged -= OnSettingsChanged;   // Settings outlives a window a switch closes
+        Closed += (_, _) =>
+        {
+            shell.Settings.PropertyChanged -= OnSettingsChanged;   // Settings outlives a window a switch closes
+            _problemTimer.Stop();
+        };
+        _problemTimer.Tick += (_, _) => HideProblem();
         if (shell.Page == Page.Now) shell.Page = Page.Dashboard;   // Midnight's sidebar never selects Now
         Loaded += (_, _) => MovePill(animate: false);
         StateChanged += (_, _) => MaximizeButton.Content = WindowState == WindowState.Maximized ? "" : "";
@@ -73,6 +82,9 @@ internal partial class MidnightWindow : Window, IShellWindow
 
     /// <summary>The pill behind the current sidebar item, for a test to check where it sits.</summary>
     internal Border Pill => NavPill;
+
+    /// <summary>How long a failed switch's banner stays unless dismissed.</summary>
+    internal TimeSpan ProblemShownFor { get; set; } = TimeSpan.FromSeconds(8);
 
     /// <summary>Closes for good: the App's Closing handler hides a window to the tray only while it is the current one.</summary>
     public void CloseForSwitch() => Close();
@@ -143,11 +155,38 @@ internal partial class MidnightWindow : Window, IShellWindow
     private void ThemeClick(object sender, RoutedEventArgs e)
         => _shell.Settings.Theme = _theme.Current == Theme.Dark ? ThemeChoice.Light : ThemeChoice.Dark;
 
-    /// <summary>A theme chosen here or in Settings: the toggle turns to offer the other.</summary>
+    /// <summary>A theme chosen here or in Settings: the toggle turns to offer the other. A look chosen by the top bar's
+    /// Switch look that didn't open: Settings has already put why on its message line, which is out of sight here.</summary>
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(SettingsViewModel.Theme)) ShowTheme();
+        if (e.PropertyName != nameof(SettingsViewModel.Look) || !_switching) return;
+        _switching = false;
+        if (_shell.Settings.AppMessage is { } problem) ShowProblem(problem);
     }
+
+    /// <summary>The Click comes just before the button's command, which chooses the look through Settings.</summary>
+    private void SwitchLookClick(object sender, RoutedEventArgs e) => _switching = true;
+
+    private void ShowProblem(string problem)
+    {
+        SwitchProblemText.Text = problem;
+        SwitchProblem.Visibility = Visibility.Visible;
+        SwitchProblem.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Motion.Fade(Motion.Fast)) { EasingFunction = (IEasingFunction)FindResource("M.Ease.In") });
+        UIElementAutomationPeer.CreatePeerForElement(SwitchProblem)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        _problemTimer.Stop();
+        _problemTimer.Interval = ProblemShownFor;
+        _problemTimer.Start();
+    }
+
+    private void HideProblem()
+    {
+        _problemTimer.Stop();
+        SwitchProblem.BeginAnimation(OpacityProperty, null);
+        SwitchProblem.Visibility = Visibility.Collapsed;
+    }
+
+    private void DismissProblem(object sender, RoutedEventArgs e) => HideProblem();
 
     private void SettingsClick(object sender, RoutedEventArgs e) => _shell.Page = Page.Settings;
 

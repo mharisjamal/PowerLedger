@@ -365,6 +365,58 @@ public class MidnightRenderingTests
             }
         });
 
+    /// <summary>A look that won't open from the top bar says why on the page in view, not on Settings' line out of sight:
+    /// a banner under the page header until it is dismissed or its time is up. A message from elsewhere raises none.</summary>
+    [Fact]
+    public void A_look_that_wont_open_from_the_top_bar_says_why_on_the_page_until_dismissed_or_its_time_is_up()
+    {
+        Directory.CreateDirectory(UiHarness.Folder);
+        UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var ui = new FakeUiSettings { Current = UiPreferences.Default with { Look = Look.Midnight }, LookProblem = "Couldn't open the Classic look: its window failed to load." };
+            var shell = MidnightFixtures.Shell(saver, ui: ui);
+            var window = MidnightFixtures.Window(shell);
+            window.ProblemShownFor = TimeSpan.FromSeconds(1);
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                var banner = UiHarness.Find<Border>(window, border => AutomationProperties.GetName(border) == "Look switch problem")!;
+                banner.IsVisible.ShouldBeFalse();
+                var switchLook = UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Switch look")!;
+                void Press(Button button)
+                {
+                    ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(button)).Invoke();
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                }
+
+                Press(switchLook);
+                shell.Settings.Look.ShouldBe(Look.Midnight, "the window stays");
+                banner.IsVisible.ShouldBeTrue();
+                UiHarness.Find<TextBlock>(banner, text => text.Text == ui.LookProblem).ShouldNotBeNull();
+                UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-switch-problem-Dark.png");
+                for (var waited = 0; waited < 5000 && banner.IsVisible; waited += 100) UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                banner.IsVisible.ShouldBeFalse("it goes by itself");
+
+                Press(switchLook);
+                banner.IsVisible.ShouldBeTrue();
+                Press(UiHarness.Find<Button>(banner, button => AutomationProperties.GetName(button) == "Dismiss")!);
+                banner.IsVisible.ShouldBeFalse("dismissed");
+
+                shell.Settings.StartWithWindows = !shell.Settings.StartWithWindows;
+                ui.LookProblem = null;
+                shell.Settings.Look = Look.Classic;   // from Settings, where its own line says it
+                UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                banner.IsVisible.ShouldBeFalse("only the top bar's switch raises it");
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+    }
+
     /// <summary>The caption's close is an ordinary close: the App's Closing handler, not the window, turns it into a hide
     /// to the tray while the window is the current one, and lets it through once a switch has moved on.</summary>
     [Fact]

@@ -12,10 +12,10 @@ namespace PowerLedger.App.Tests;
 internal static class MidnightFixtures
 {
     /// <summary>The shell with every screen on the same Tuesday afternoon, on the Dashboard.</summary>
-    public static ShellViewModel Shell(FakeSaver saver, Updater? updates = null)
+    public static ShellViewModel Shell(FakeSaver saver, Updater? updates = null, FakeUiSettings? ui = null)
     {
         var now = NowScreen();
-        var shell = new ShellViewModel(now, BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.8.0", updates,
+        var shell = new ShellViewModel(now, BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(ui), WizardScreen(), "0.8.0", updates,
             DashboardScreen(now));
         shell.Page = Page.Dashboard;
         return shell;
@@ -152,12 +152,14 @@ internal static class MidnightFixtures
         return model;
     }
 
-    public static SettingsViewModel SettingsScreen()
+    /// <summary>Settings over <paramref name="ui"/>, by default preferences in the Midnight look, as a Midnight window has them.</summary>
+    public static SettingsViewModel SettingsScreen(FakeUiSettings? ui = null)
     {
         var link = new FakeLink();
         link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) with { PowerDevices = [Statuses.Ups, Statuses.PowerSupply] };
         link.Connect(true);
-        return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
+        ui ??= new FakeUiSettings { Current = UiPreferences.Default with { Look = Look.Midnight } };
+        return new SettingsViewModel(link, new FakeMachineHistory(), ui, UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");
     }
 
