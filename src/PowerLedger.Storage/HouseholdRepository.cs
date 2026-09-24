@@ -99,6 +99,22 @@ public sealed class HouseholdRepository(SqliteDatabase db)
         return (long)cmd.ExecuteScalar()!;
     }
 
+    /// <summary>For each device with rows, how far its rows reach, in the order they are sent: the newest change, and the
+    /// latest hour among the rows changed then.</summary>
+    public Dictionary<string, (long Changed, long Hour)> Reach()
+    {
+        using var c = db.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText =
+            "SELECT r.device_id, r.changed_ms, MAX(r.hour_ms) FROM household_rows r " +
+            "JOIN (SELECT device_id, MAX(changed_ms) AS newest FROM household_rows GROUP BY device_id) m " +
+            "ON r.device_id = m.device_id AND r.changed_ms = m.newest GROUP BY r.device_id, r.changed_ms";
+        using var r = cmd.ExecuteReader();
+        var reach = new Dictionary<string, (long, long)>(StringComparer.Ordinal);
+        while (r.Read()) reach[r.GetString(0)] = (r.GetInt64(1), r.GetInt64(2));
+        return reach;
+    }
+
     /// <summary>For each device with rows, when its newest change was.</summary>
     public Dictionary<string, long> Latest()
     {

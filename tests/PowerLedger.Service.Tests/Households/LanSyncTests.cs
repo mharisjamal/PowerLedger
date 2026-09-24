@@ -70,6 +70,20 @@ public sealed class LanSyncTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_sync_cut_short_goes_on_next_time_from_the_last_row_that_came_even_among_rows_changed_at_once()
+    {
+        _desktop.Household.Upsert([.. Enumerable.Range(0, LanSync.RowsPerFrame + 5).Select(hour => Row(_desktop.Id, hour, 1, changed: 100))]);
+
+        (await _laptop.SyncWith(_desktop, cutAfter: 4)).Ok.ShouldBeFalse();     // hello, prove, have, the first rows; then the Wi-Fi drops
+        _laptop.Household.RowsBetween(_desktop.Id, 0, long.MaxValue).Count.ShouldBe(LanSync.RowsPerFrame);
+
+        var again = await _laptop.SyncWith(_desktop);
+
+        again.RowsIn.ShouldBe(5);
+        _laptop.Household.RowsBetween(_desktop.Id, 0, long.MaxValue).Count.ShouldBe(LanSync.RowsPerFrame + 5);
+    }
+
+    [Fact]
     public async Task A_member_learns_of_a_new_member_the_other_knows_and_of_its_rows()
     {
         using var newcomer = DeviceKeys.Create();
@@ -150,6 +164,18 @@ public sealed class LanSyncTests : IAsyncLifetime
         }
     }
 
+    /// <summary>A connection that breaks once it has handed over a number of frames.</summary>
+    private sealed class CutAfter(IFrameChannel inner, int frames) : IFrameChannel
+    {
+        private int _count;
+
+        public Task SendAsync(ReadOnlyMemory<byte> frame, CancellationToken cancel = default) => inner.SendAsync(frame, cancel);
+
+        public async Task<byte[]?> ReceiveAsync(CancellationToken cancel = default) => ++_count > frames ? null : await inner.ReceiveAsync(cancel);
+
+        public ValueTask DisposeAsync() => inner.DisposeAsync();
+    }
+
     /// <summary>One PC: its database, its keys and its listener on loopback, answering sync hellos.</summary>
     private sealed class Pc : IAsyncDisposable
     {
@@ -190,10 +216,11 @@ public sealed class LanSyncTests : IAsyncLifetime
             Listener.Start();
         }
 
-        public async Task<SyncOutcome> SyncWith(Pc other)
+        /// <param name="cutAfter">The connection breaks once this side has received so many frames.</param>
+        public async Task<SyncOutcome> SyncWith(Pc other, int? cutAfter = null)
         {
             await using var channel = await LanConnector.ConnectAsync(IPAddress.Loopback, other.Listener!.Port, TimeSpan.FromSeconds(5));
-            return await new LanSync(Household, _clock).SyncAsync(channel, Identity, CancellationToken.None);
+            return await new LanSync(Household, _clock).SyncAsync(cutAfter is { } frames ? new CutAfter(channel, frames) : channel, Identity, CancellationToken.None);
         }
 
         public async ValueTask DisposeAsync()

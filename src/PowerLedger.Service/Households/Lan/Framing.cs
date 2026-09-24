@@ -237,6 +237,10 @@ internal sealed record LanMessage
 
     public Dictionary<string, long>? Latest { get; init; }
 
+    /// <summary>In a <c>have</c>, beside <see cref="Latest"/>: the latest hour among each member's rows changed at its newest
+    /// change, so a sync cut short goes on from the row after it (plan 0.8).</summary>
+    public Dictionary<string, long>? Hours { get; init; }
+
     public string? Device { get; init; }
 
     public List<WireRow>? Rows { get; init; }

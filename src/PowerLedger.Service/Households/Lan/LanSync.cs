@@ -14,7 +14,8 @@ internal sealed record SyncOutcome(bool Ok, string? PeerId, int RowsIn, int Rows
 /// <summary>
 /// Sync on the same network (households design §5, plan 0.6). After the hellos and the key exchange each side proves its
 /// device key by signing <c>"sync" ‖ eph_a ‖ eph_b</c>, which only a member's key checks against; then each says what it
-/// has, as the newest change it holds of each member's rows, and sends the rows the other lacks, then done. The side that
+/// has, as the newest change it holds of each member's rows and the latest hour among the rows changed then, and sends
+/// the rows the other lacks in that order, then done: a sync cut short goes on from the row after the last that came. The side that
 /// connected sends first each time, so the two never both wait to write. The <c>have</c> also carries the members each
 /// knows, so a PC added elsewhere is learned of here; only a member's own entry changes its name.
 /// </summary>
@@ -111,11 +112,12 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
     private LanMessage Have()
     {
         var members = household.Members().Where(member => member.LeftMs is null).ToList();
-        var latest = household.Latest();
+        var reach = household.Reach();
         return new LanMessage
         {
             Type = "have",
-            Latest = members.ToDictionary(member => member.DeviceId, member => latest.GetValueOrDefault(member.DeviceId)),
+            Latest = members.ToDictionary(member => member.DeviceId, member => reach.GetValueOrDefault(member.DeviceId).Changed),
+            Hours = members.Where(member => reach.ContainsKey(member.DeviceId)).ToDictionary(member => member.DeviceId, member => reach[member.DeviceId].Hour),
             Members = [.. members.Select(Wire.Member)],
         };
     }
@@ -140,14 +142,18 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
         }
     }
 
-    /// <summary>Sends every current member's rows that changed after the newest the other side has of them, then done.</summary>
+    /// <summary>Sends every current member's rows after the last the other side has of them, in the order they changed, then
+    /// done.</summary>
     private async Task<int> SendRowsAsync(LanConversation talk, LanMessage theirs, CancellationToken cancel)
     {
         var sent = 0;
         foreach (var member in household.Members().Where(member => member.LeftMs is null))
         {
             var after = theirs.Latest?.GetValueOrDefault(member.DeviceId) ?? 0;
-            foreach (var chunk in household.ChangedAfter(member.DeviceId, after).Chunk(RowsPerFrame))
+            var rows = theirs.Hours?.TryGetValue(member.DeviceId, out var hour) == true
+                ? household.ChangedAfter(member.DeviceId, after, hour)
+                : household.ChangedAfter(member.DeviceId, after);
+            foreach (var chunk in rows.Chunk(RowsPerFrame))
             {
                 await talk.SendAsync(new LanMessage { Type = "rows", Device = member.DeviceId, Rows = [.. chunk.Select(Wire.Row)] }, cancel)
                     .ConfigureAwait(false);
