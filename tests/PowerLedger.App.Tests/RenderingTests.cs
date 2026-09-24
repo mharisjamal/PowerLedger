@@ -1368,6 +1368,88 @@ public class RenderingTests
         });
     }
 
+    /// <summary>Send feedback's rail button (bug-icon glyph, spec's feedback feature): sits at the foot of the rail,
+    /// its tooltip names what it's for, and pressing it fires the App's own open request.</summary>
+    [Fact]
+    public void The_rails_feedback_button_shows_and_asks_to_open_the_window()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.2.0");
+                var window = new MainWindow
+                {
+                    DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    var button = Find<Button>(window, b => AutomationProperties.GetName(b) == "Send feedback").ShouldNotBeNull(theme.ToString());
+                    button.IsVisible.ShouldBeTrue(theme.ToString());
+                    button.ToolTip.ShouldBe("Send feedback or report a bug", theme.ToString());
+                    // App.xaml.cs wires FeedbackRequested to open the window (ShellViewModelTests covers the command
+                    // itself); this only checks the button in the rail is bound to it.
+                    button.Command.ShouldBeSameAs(shell.Feedback, theme.ToString());
+                    Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"feedback-button-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Send feedback (spec's feedback feature): its heading, images row, log tick and Send/Cancel fit a short
+    /// screen, in both themes.</summary>
+    [Fact]
+    public void Send_feedback_shows_its_fields_and_fits_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var sender = new FeedbackSender(
+                    new FakeHttp().Client(), Path.Combine(Path.GetTempPath(), "pl-feedback-render-tests"), new FakeTimeProvider(Now));
+                var model = new FeedbackViewModel(sender, UiThreads.Inline, () => null);
+                var window = new SendFeedbackWindow(model, null, new FakeImagePicker())
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Tell us what's wrong, or what you'd like").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "This goes to the developer's private issue tracker on GitHub.").ShouldNotBeNull(theme.ToString());
+                    Find<CheckBox>(window, c => Equals(c.Content, "Attach the log, it helps with bugs")).ShouldNotBeNull(theme.ToString())
+                        .IsChecked.ShouldBe(true, theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Cancel", "Send" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 460, (int)window.ActualHeight, $"send-feedback-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();
