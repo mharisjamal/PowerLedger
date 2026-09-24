@@ -30,7 +30,7 @@ jobs:
         shell: pwsh
         run: |
           foreach ($project in 'Core', 'Storage', 'Service') {
-            dotnet test "tests/PowerLedger.$project.Tests" -c Release -r win-x86 --self-contained `
+            dotnet test "tests/PowerLedger.$project.Tests" -c Release -r win-x86 -p:SelfContained=true `
               --filter "Category!=Hardware&Category!=UI&Category!=Installed&Category!=Worker"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
