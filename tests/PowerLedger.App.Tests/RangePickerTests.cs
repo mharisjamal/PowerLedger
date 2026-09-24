@@ -16,8 +16,16 @@ public class RangePickerTests
     [InlineData("ThisMonth", "September 2026")]
     [InlineData("LastMonth", "August 2026")]
     [InlineData("Custom", "2 Sep – 8 Sep 2026")]
+    [InlineData("LastHour", "Last hour")]
+    [InlineData("LastYear", "Last 365 days")]
+    [InlineData("All", "Since 8 Sep 2026")]
     public void Each_choice_resolves_to_its_range(string choice, string title)
         => new RangePicker(Enum.Parse<RangeChoice>(choice), Today).Resolve(Now, TimeZoneInfo.Utc, English).Title.ShouldBe(title);
+
+    [Fact]
+    public void All_starts_where_the_history_starts_when_told()
+        => new RangePicker(RangeChoice.All, Today).Resolve(Now, TimeZoneInfo.Utc, English, first: new DateTimeOffset(2026, 7, 20, 8, 0, 0, TimeSpan.Zero))
+            .Title.ShouldBe("Since 20 Jul 2026");
 
     [Fact]
     public void Custom_days_change_the_range_only_while_custom_is_chosen()

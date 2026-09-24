@@ -16,9 +16,21 @@ internal static class MidnightFixtures
     {
         var now = NowScreen();
         var shell = new ShellViewModel(now, BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.8.0", updates,
-            new DashboardViewModel(now));
+            DashboardScreen(now));
         shell.Page = Page.Dashboard;
         return shell;
+    }
+
+    /// <summary>The Dashboard over today's five-minute readings, the week's hourly ones for the longer ranges, and a month of days.</summary>
+    public static DashboardViewModel DashboardScreen(NowViewModel now)
+    {
+        var day = new DateTimeOffset(Now.Date, TimeSpan.Zero);
+        var history = new FakeRangeHistory
+        {
+            Answer = range => Reports.Typical(range) with { Series = range.Bucket == TimeSpan.FromMinutes(5) ? DaySeries(day) : WeekSeries(range) },
+        };
+        var summary = new FakeHistory { Snapshot = Snapshots.Typical(Now, DaySeries(day)), First = Now.AddDays(-40) };
+        return new DashboardViewModel(now, history, summary, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, UiThreads.Inline);
     }
 
     /// <summary>
@@ -38,7 +50,7 @@ internal static class MidnightFixtures
         {
             WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
         };
-        window.Resources.MergedDictionaries.Add(TempPalette.Load(theme));
+        window.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, theme));
         window.Closed += (_, _) => manager.Dispose();
         return window;
     }

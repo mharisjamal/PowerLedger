@@ -4,16 +4,6 @@ using System.Windows.Controls;
 
 namespace PowerLedger.App;
 
-/// <summary>What a KPI's trend slot holds (plan O F8): a rise, a fall, no change, the quality chip, or plain words.</summary>
-internal enum TrendKind
-{
-    Up,
-    Down,
-    Flat,
-    Quality,
-    Text,
-}
-
 /// <summary>
 /// A trend (plan O M1-2): ▲ in green for a rise, ▼ in red for a fall, — in muted ink for no change, each with a few
 /// words; words alone for <see cref="TrendKind.Text"/>; nothing for <see cref="TrendKind.Quality"/>, whose slot the view

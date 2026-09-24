@@ -30,7 +30,7 @@ public class MidnightStyleSheetTests
         {
             var styles = MidnightStylesTests.Load();
             var host = new Border { Width = 720, Padding = new Thickness(24) };
-            host.Resources.MergedDictionaries.Add(TempPalette.Load(theme));
+            host.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, theme));
             host.Resources.MergedDictionaries.Add(styles);
             host.SetResourceReference(Border.BackgroundProperty, "M.Ground");
             host.Child = Sheet(styles);

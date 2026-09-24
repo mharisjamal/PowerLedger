@@ -3,7 +3,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace PowerLedger.App;
 
-/// <summary>The ranges the history screens offer (spec §9: today, 7 days, 30 days and custom, and the months a report wants).</summary>
+/// <summary>The ranges the history screens offer (spec §9: today, 7 days, 30 days and custom, and the months a report
+/// wants), and the Dashboard's hour, year and all (Midnight look design §4).</summary>
 internal enum RangeChoice
 {
     Today,
@@ -12,6 +13,9 @@ internal enum RangeChoice
     ThisMonth,
     LastMonth,
     Custom,
+    LastHour,
+    LastYear,
+    All,
 }
 
 /// <summary>
@@ -53,13 +57,17 @@ internal sealed class RangePicker : ObservableObject
     /// <summary>The custom range's last day.</summary>
     public DateTime? To { get => _to; set => SetDay(ref _to, value, nameof(To)); }
 
-    public DateRange Resolve(DateTimeOffset now, TimeZoneInfo zone, CultureInfo culture) => Choice switch
+    /// <summary>The range chosen; <paramref name="first"/> is where the history begins, which All starts from.</summary>
+    public DateRange Resolve(DateTimeOffset now, TimeZoneInfo zone, CultureInfo culture, DateTimeOffset? first = null) => Choice switch
     {
         RangeChoice.Today => Ranges.Today(now, zone, culture),
         RangeChoice.SevenDays => Ranges.LastDays(7, now, zone, culture),
         RangeChoice.ThirtyDays => Ranges.LastDays(30, now, zone, culture),
         RangeChoice.ThisMonth => Ranges.ThisMonth(now, zone, culture),
         RangeChoice.LastMonth => Ranges.LastMonth(now, zone, culture),
+        RangeChoice.LastHour => Ranges.LastHour(now, zone, culture),
+        RangeChoice.LastYear => Ranges.LastYear(now, zone, culture),
+        RangeChoice.All => Ranges.All(first, now, zone, culture),
         _ => Ranges.Days(Day(_from, now, zone), Day(_to, now, zone), now, zone, culture),
     };
 

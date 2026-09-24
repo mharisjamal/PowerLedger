@@ -42,6 +42,11 @@ public class ChartTests
             .ShouldBe(new AxisTick[] { new(0, "00:00"), new(72, "06:00"), new(144, "12:00"), new(216, "18:00") });
 
     [Fact]
+    public void An_hour_is_marked_at_each_quarter_inside_it()
+        => Charts.Ticks(Ranges.LastHour(Now, Utc, English), Utc, English)
+            .ShouldBe(new AxisTick[] { new(12, "13:45"), new(27, "14:00"), new(42, "14:15"), new(57, "14:30") });
+
+    [Fact]
     public void A_week_is_marked_at_each_midnight()
     {
         var ticks = Charts.Ticks(Ranges.LastDays(7, Now, Utc, English), Utc, English);

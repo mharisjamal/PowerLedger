@@ -56,16 +56,8 @@ internal sealed class Initials : Instrument
         return (int)(hash % RingSize);
     }
 
-    /// <summary>Whether letters on <paramref name="disc"/> should be light: its relative luminance (WCAG) is under 0.4.</summary>
-    internal static bool WantsLightLetters(Color disc)
-    {
-        static double Linear(byte channel)
-        {
-            var c = channel / 255.0;
-            return c <= 0.03928 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
-        }
-        return 0.2126 * Linear(disc.R) + 0.7152 * Linear(disc.G) + 0.0722 * Linear(disc.B) < 0.4;
-    }
+    /// <summary>Whether letters on <paramref name="disc"/> should be light: its relative luminance (WCAG, as Contrast reckons it) is under 0.4.</summary>
+    internal static bool WantsLightLetters(Color disc) => Contrast.Luminance(disc) < 0.4;
 
     internal override string Describe() => string.IsNullOrWhiteSpace(Member) ? "Unnamed PC" : Member;
 
