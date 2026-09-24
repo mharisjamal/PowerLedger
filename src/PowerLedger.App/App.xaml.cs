@@ -45,6 +45,7 @@ public partial class App : Application
     private FeedbackSender? _feedbackSender;
     private ITimer? _feedbackRetryTimer;
     private string? _dataFolder;
+    private WhatsNewWindow? _whatsNewWindow;
 
     /// <summary>Review finding A4, follow-up: every open Join/Approve/Confirm join/Recovery code prompt, by its
     /// promptId, so a pushed <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others
@@ -119,6 +120,7 @@ public partial class App : Application
                 ShowWindow),
             OpenPage);
         _updates.PropertyChanged += OnUpdatesChanged;
+        _updates.NotesRequested += OpenWhatsNewWindow;
         _settings = new SettingsViewModel(
             _link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates,
             openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
@@ -302,6 +304,23 @@ public partial class App : Application
         _feedbackWindow.Show();
     }
 
+    /// <summary>What's new, from the update card's own link: modeless, owned by the main window, single-instance like
+    /// Add a PC and Send feedback (owner's round: in-app instead of the browser).</summary>
+    private void OpenWhatsNewWindow()
+    {
+        if (_whatsNewWindow is not null)
+        {
+            _whatsNewWindow.Activate();
+            return;
+        }
+        if (_window is null || _updates is null) return;
+        var model = new WhatsNewViewModel(_updates.WhatsNewTitle, _updates.WhatsNewPoints, _updates.OpenNotes);
+        model.Closed += () => _whatsNewWindow?.Close();
+        _whatsNewWindow = new WhatsNewWindow(model) { Owner = _window };
+        _whatsNewWindow.Closed += (_, _) => _whatsNewWindow = null;
+        _whatsNewWindow.Show();
+    }
+
     /// <summary>The last 300 lines of the App's own log and, if it can be read, of the service's (Send feedback's
     /// attach-log tick), capped together at the Worker's own character limit.</summary>
     private string? ReadFeedbackLog()
@@ -468,6 +487,7 @@ public partial class App : Application
             if (_updates is not null)
             {
                 _updates.PropertyChanged -= OnUpdatesChanged;
+                _updates.NotesRequested -= OpenWhatsNewWindow;
                 _updates.Dispose();
             }
             _monthly?.Dispose();
@@ -475,6 +495,7 @@ public partial class App : Application
             _brightnessReader?.Dispose();
             _feedbackRetryTimer?.Dispose();
             _feedbackWindow?.Close();
+            _whatsNewWindow?.Close();
             _window?.Close();
             _tray?.Dispose();
             if (_now is not null)

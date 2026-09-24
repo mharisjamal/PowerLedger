@@ -12,6 +12,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
@@ -1419,6 +1420,48 @@ public class RenderingTests
                         button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
                     }
                     Save(window, 460, (int)window.ActualHeight, $"send-feedback-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>What's new (owner's round): the title, its plain points and the GitHub link, fitting a short screen, in
+    /// both themes.</summary>
+    [Fact]
+    public void Whats_new_shows_its_points_and_fits_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        var points = WhatsNew.Releases.Single(r => r.Version == "0.7.0").Points;
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var opened = 0;
+                var model = new WhatsNewViewModel("What's new in 0.7.0", points, new RelayCommand(() => opened++));
+                var window = new WhatsNewWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "What's new in 0.7.0").ShouldNotBeNull(theme.ToString());
+                    foreach (var point in points) Find<TextBlock>(window, t => t.Text == point).ShouldNotBeNull(theme.ToString());
+                    var link = Find<Button>(window, b => Equals(b.Content, "Full notes on GitHub")).ShouldNotBeNull(theme.ToString());
+                    link.Command.Execute(null);
+                    opened.ShouldBe(1, theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    var close = Find<Button>(window, b => Equals(b.Content, "Close")).ShouldNotBeNull(theme.ToString());
+                    close.TranslatePoint(new Point(0, close.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, theme.ToString());
+                    Save(window, 440, (int)window.ActualHeight, $"whats-new-{theme}.png");
                 }
                 finally
                 {

@@ -383,6 +383,30 @@ public class UpdaterTests
         _opened.Single().ShouldBe(new Uri("https://github.com/mharisjamal/PowerLedger/releases/tag/v0.3.0"));
     }
 
+    /// <summary>Owner's round: the card's "What's new" no longer opens the browser itself — it asks the App to open
+    /// WhatsNewWindow, which uses OpenNotes for its own "Full notes on GitHub" link.</summary>
+    [Fact]
+    public void Show_whats_new_asks_the_app_to_open_the_window_without_touching_the_browser()
+    {
+        var updater = Updater();
+        var raised = 0;
+        updater.NotesRequested += () => raised++;
+
+        updater.ShowWhatsNew.Execute(null);
+
+        raised.ShouldBe(1);
+        _opened.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Whats_new_title_and_points_are_the_running_versions_bundled_notes()
+    {
+        var updater = Updater("0.7.0");
+
+        updater.WhatsNewTitle.ShouldBe("What's new in 0.7.0");
+        updater.WhatsNewPoints.ShouldBe(WhatsNew.Releases.Single(r => r.Version == "0.7.0").Points);
+    }
+
     [Fact]
     public async Task The_card_hears_of_every_change()
     {
