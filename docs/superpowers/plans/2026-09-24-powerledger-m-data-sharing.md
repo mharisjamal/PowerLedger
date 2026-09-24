@@ -783,4 +783,43 @@ names match `^[a-z][A-Za-z0-9]{0,39}$`.
 
 ## Results
 
-Filled in after the release.
+Released as **v0.6.0** on 2026-09-24: https://github.com/mharisjamal/PowerLedger/releases/tag/v0.6.0.
+
+**Installers:**
+
+| File | SHA-256 |
+|---|---|
+| `PowerLedger-0.6.0-setup.exe` | `bbca685a…e608` |
+| `PowerLedger-0.6.0-setup-x64.exe` | `c46091bd…68c4` |
+| `PowerLedger-0.6.0-setup-arm64.exe` | `9e6f2149…0c73` |
+
+**The server** is live at `https://powerledger-data.powerledger-data.workers.dev`.
+- R2 isn't enabled on the account yet, so report bodies are kept in D1 (`report_bodies`, migration 0002) through
+  `server/src/store.ts`. Once R2 is on, bodies go there and those kept in D1 stay readable.
+- The live smoke test gave: report 200, consent 200, wrong key 403, delete 200, report after delete 410.
+
+**Tests at release:**
+- .NET: 2,126 filtered (Core 277, Storage 59, App 783, Sensors 571, Service 436), plus the App's UI render tests.
+- The Worker: 106 vitest and 7 `node:test`.
+
+**CI** run 35951652355: server, build and installer-arm64 all passed.
+
+**Sandbox:** 92 of 92 on the last two runs, updating 0.3.0 → 0.6.0.
+- The first run passed 86 of 91. Moving the clock a day on didn't hold, because Hyper-V sets the Sandbox's clock back to
+  the host's; the script now stops `vmictimesync` and `w32time` first.
+- The run also found the consent dialog could run past a short screen's bottom. The buttons now have a row of their
+  own, and the dialog is no taller than the work area.
+
+**Reviews:**
+- The server's security review found 7 problems, all fixed: bounded body reads, rate-limiting before reading, tombstoning
+  before deleting, taking back a report that lands mid-delete, checking the list cursor, CSV formulas, and the token
+  script's exit code.
+- Three whole-branch rounds found 24, then 17, then 6 problems, all fixed with tests. The main ones:
+  - usage counted before consent;
+  - the consent dialog skipped on a slow start;
+  - a switch withdrawn mid-run;
+  - requests the pipe had given up on still being applied;
+  - DPAPI for the install key;
+  - whole-path scrubbing, device serials and SIDs, and patterns that were slow on long text;
+  - day offsets across a time-zone change;
+  - a problem that trying again won't clear, which is now kept until the user answers again.
