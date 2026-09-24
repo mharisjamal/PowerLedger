@@ -2,8 +2,9 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { sha256hex } from "../../src/auth";
 import { base64urlEncode } from "../../src/households/encoding";
+import { handleHouseholdRoutes } from "../../src/households/routes";
 import { runRetention } from "../../src/retention";
-import { addMember, createHousehold, newDevice, signedFetch, type TestDevice } from "./support";
+import { addMember, createHousehold, hookBefore, newDevice, signedFetch, signedRequest, type TestDevice } from "./support";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -568,6 +569,44 @@ describe("recovery", () => {
     const familyPc = await signIn(undefined, family.account);
     expect((await asAccount(familyPc, "POST", "/v1/account/recover", { verifier: familyVerifier })).status).toBe(404);
     expect(await isMember(hid, newPc.device.id)).toBe(true);
+  });
+
+  it("recovers once when two PCs race: the one whose batch runs second finds the code used up and gets 404", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const verifier = nonce();
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
+    const first = await signIn(undefined, owner.account);
+    const second = await signIn(undefined, owner.account);
+
+    const raced = hookBefore(env, /UPDATE members SET removed/, async () => {
+      expect((await asAccount(second, "POST", "/v1/account/recover", { verifier })).status).toBe(200);
+    });
+    const request = await signedRequest(first.device, "POST", "/v1/account/recover", JSON.stringify({ verifier }), {
+      headers: { Authorization: `Session ${first.session}` },
+    });
+    expect((await handleHouseholdRoutes(request, raced))!.status).toBe(404);
+
+    expect(await isMember(hid, second.device.id)).toBe(true);
+    expect(await isMember(hid, first.device.id)).toBe(false);
+    expect(await isMember(hid, owner.device.id)).toBe(false);
+  });
+
+  it("clears the requests of the PCs it removes: those they approved, and those they committed to", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const verifier = nonce();
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
+    const approved = await signIn(undefined, owner.account);
+    await asAccount(approved, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, approved);
+    expect((await approveAs(hid, owner.device, approved)).status).toBe(200);
+    const waiting = await signIn(undefined, owner.account);
+    await asAccount(waiting, "POST", "/v1/account/requests");
+    expect((await commitAs(hid, approved.device, waiting)).status).toBe(200);
+
+    const newPc = await signIn(undefined, owner.account);
+    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier })).status).toBe(200);
+
+    expect(await env.DB.prepare("SELECT device FROM join_requests WHERE household = ?").bind(hid).all()).toMatchObject({ results: [] });
   });
 
   it("won't recover through a recovery whose holder is no longer a member", async () => {

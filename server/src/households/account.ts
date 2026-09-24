@@ -405,20 +405,43 @@ export async function handleRecover(env: Cloudflare.Env, session: SessionRow, bo
     return errorResponse(403, "That isn't this account's recovery verifier.");
   }
 
-  const now = Date.now();
-  const alreadyIn = await isCurrentMember(env, row.household, session.device);
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE members SET removed = ?1, removed_epoch = ?2
-       WHERE household = ?3 AND device != ?4 AND removed IS NULL`,
-    ).bind(now, row.current, row.household, session.device),
-    ...(alreadyIn ? [] : [addMemberStatement(env, row.household, session.device, session.sign_key, session.dh_key, now)]),
+  // One transaction, every write in it conditioned on the code just checked still being there: of two recovers racing,
+  // the second finds it used up, changes nothing and gets 404.
+  const hid = row.household;
+  const unused = "EXISTS (SELECT 1 FROM recovery WHERE account = ?8 AND verifier_hash = ?9)";
+  const bind = (statement: D1PreparedStatement) =>
+    statement.bind(hid, session.device, session.sign_key, session.dh_key, Date.now(), null, null, session.account, row.verifier_hash);
+  const results = await env.DB.batch([
+    bind(env.DB.prepare(`SELECT 1 AS unused WHERE ${unused}`)),
+    // The requests of the PCs about to be removed (theirs, approved or not, and those they committed to), and the caller's.
+    bind(env.DB.prepare(
+      `DELETE FROM join_requests WHERE household = ?1 AND ${unused} AND (device = ?2
+         OR device IN (SELECT device FROM members WHERE household = ?1 AND device != ?2 AND removed IS NULL)
+         OR approver IN (SELECT device FROM members WHERE household = ?1 AND device != ?2 AND removed IS NULL))`,
+    )),
+    // Every other member removed, at the household's current epoch.
+    bind(env.DB.prepare(
+      `UPDATE members SET removed = ?5, removed_epoch = (SELECT epoch FROM households WHERE id = ?1)
+       WHERE household = ?1 AND device != ?2 AND removed IS NULL AND ${unused}`,
+    )),
+    // The caller added, or added back if it was removed; a current caller is left as it is.
+    bind(env.DB.prepare(
+      `INSERT INTO members (household, device, sign_key, dh_key, added, removed, added_epoch, removed_epoch)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, (SELECT epoch FROM households WHERE id = ?1), ?7 WHERE ${unused}
+       ON CONFLICT (household, device) DO UPDATE SET
+         sign_key = excluded.sign_key, dh_key = excluded.dh_key, added = excluded.added, removed = NULL,
+         added_epoch = excluded.added_epoch, removed_epoch = NULL
+       WHERE members.removed IS NOT NULL`,
+    )),
     // Every recovery of the household goes, not this account's alone: the others' holders were just removed.
-    env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)")
-      .bind(row.household),
-    env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(row.household, session.device),
+    bind(env.DB.prepare(
+      `DELETE FROM recovery WHERE ${unused} AND account IN (SELECT account FROM account_households WHERE household = ?1)`,
+    )),
+    env.DB.prepare("SELECT epoch FROM households WHERE id = ?").bind(hid),
   ]);
-  return Response.json({ household: row.household, epoch: row.current });
+  if (results[0].results.length === 0) return errorResponse(404, "This account has nothing to recover.");
+  const epoch = (results[5].results[0] as { epoch: number }).epoch;
+  return Response.json({ household: hid, epoch });
 }
 
 /** POST /v1/auth/signout: ends this PC's session, signed by the PC it was given to. A session already ended is done. */
