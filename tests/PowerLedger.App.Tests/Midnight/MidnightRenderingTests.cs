@@ -486,6 +486,189 @@ public class MidnightRenderingTests
         });
     }
 
+    private const string IntroName = "This is PowerLedger's new look";
+
+    /// <summary>A Midnight window over preferences that have not yet introduced the new look.</summary>
+    private static (MidnightWindow Window, ShellViewModel Shell, FakeUiSettings Ui) Introducing(FakeSaver saver, Theme theme = Theme.Dark)
+    {
+        var ui = new FakeUiSettings { Current = UiPreferences.Default };   // Midnight, as every PC from 0.7.x lands
+        var shell = MidnightFixtures.Shell(saver, ui: ui);
+        return (MidnightFixtures.Window(shell, theme), shell, ui);
+    }
+
+    private static Border? Intro(Window window) => UiHarness.Find<Border>(window, border => AutomationProperties.GetName(border) == IntroName);
+
+    private static void Press(Button button)
+    {
+        ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(button)).Invoke();
+        UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+    }
+
+    /// <summary>Midnight look design §1: the first time Midnight shows, a banner under the page header says this is the new
+    /// look and how to go back, with Switch back and Got it; accent-edged, not a warning, blocking nothing, and staying
+    /// until answered. Drawn in both themes and in a short window.</summary>
+    [Fact]
+    public void The_first_midnight_window_says_this_is_the_new_look_until_got_it()
+    {
+        Directory.CreateDirectory(UiHarness.Folder);
+        foreach (var theme in new[] { Theme.Dark, Theme.Light })
+        {
+            UiHarness.OnUi(() =>
+            {
+                using var saver = new FakeSaver();
+                var (window, shell, ui) = Introducing(saver, theme);
+                window.Show();
+                try
+                {
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(400));
+                    var intro = Intro(window)!;
+                    intro.IsVisible.ShouldBeTrue();
+                    intro.BorderBrush.ShouldBe(window.FindResource("M.Accent"), "an accent edge: news, not a warning");
+                    UiHarness.Find<TextBlock>(intro, text => text.Text == IntroName).ShouldNotBeNull();
+                    UiHarness.Find<TextBlock>(intro, text => text.Text == "Prefer the classic one? Switch back any time here, or in Settings → Preferences.").ShouldNotBeNull();
+                    UiHarness.Find<Button>(intro, button => Equals(button.Content, "Switch back")).ShouldNotBeNull();
+                    var gotIt = UiHarness.Find<Button>(intro, button => Equals(button.Content, "Got it"))!;
+                    UiHarness.Find<DashboardView>(window)!.IsEnabled.ShouldBeTrue("nothing is blocked");
+                    UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-new-look-{theme}.png");
+
+                    Press(gotIt);
+                    intro.IsVisible.ShouldBeFalse();
+                    ui.Current.LookIntroduced.ShouldBeTrue();
+                    ui.Changes.ShouldBe(["look introduced"], "nothing switched");
+                }
+                finally
+                {
+                    window.CloseForSwitch();
+                }
+
+                var again = MidnightFixtures.Window(shell, theme);
+                again.Show();
+                try
+                {
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(200));
+                    Intro(again)!.IsVisible.ShouldBeFalse("once is enough");
+                }
+                finally
+                {
+                    again.CloseForSwitch();
+                }
+            });
+            new FileInfo(Path.Combine(UiHarness.Folder, $"midnight-new-look-{theme}.png")).Length.ShouldBeGreaterThan(30_000);
+        }
+    }
+
+    [Fact]
+    public void In_a_short_window_the_new_look_banner_still_fits_beside_the_page()
+    {
+        Directory.CreateDirectory(UiHarness.Folder);
+        UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var (window, _, _) = Introducing(saver);
+            window.FitTo(new Bounds(-20000, 0, 880 + 2 * WindowFit.Margin, 560 + 2 * WindowFit.Margin));
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(400));
+                var intro = Intro(window)!;
+                intro.IsVisible.ShouldBeTrue();
+                foreach (var button in UiTree.Descendants<Button>(intro))
+                    button.TranslatePoint(new Point(button.ActualWidth, 0), intro).X.ShouldBeLessThanOrEqualTo(intro.ActualWidth, $"{button.Content} inside the banner");
+                UiHarness.Find<ScrollViewer>(UiHarness.Find<DashboardView>(window)!)!.ViewportHeight.ShouldBeGreaterThan(150, "the page still shows under it");
+                UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-short-new-look.png");
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+    }
+
+    /// <summary>Switch back chooses Classic through Settings, as the top bar's Switch look does, and retires the banner.</summary>
+    [Fact]
+    public void Switch_back_in_the_banner_chooses_classic_through_settings_and_retires_it()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var (window, shell, ui) = Introducing(saver);
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                Press(UiHarness.Find<Button>(Intro(window)!, button => Equals(button.Content, "Switch back"))!);
+                ui.Changes.ShouldContain("look Classic");
+                shell.Settings.Look.ShouldBe(Look.Classic);
+                ui.Current.LookIntroduced.ShouldBeTrue();
+                Intro(window)!.IsVisible.ShouldBeFalse();
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
+    /// <summary>Any look switch retires it: back and forth from Settings, and it is not there on the return.</summary>
+    [Fact]
+    public void Any_look_switch_retires_the_banner_for_good()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var (window, shell, ui) = Introducing(saver);
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                Intro(window)!.IsVisible.ShouldBeTrue();
+                shell.Settings.Look = Look.Classic;
+                shell.Settings.Look = Look.Midnight;
+                UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                ui.Current.LookIntroduced.ShouldBeTrue();
+                Intro(window)!.IsVisible.ShouldBeFalse();
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
+    /// <summary>Not while the wizard has the window, and never in Classic, which has no such banner at all.</summary>
+    [Fact]
+    public void Not_during_setup_and_not_in_classic()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var (window, shell, _) = Introducing(saver);
+            shell.BeginSetup();
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                Intro(window)!.IsVisible.ShouldBeFalse("the wizard has the window");
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+
+            var classic = new MainWindow
+            {
+                DataContext = MidnightFixtures.Shell(saver, ui: new FakeUiSettings { Current = UiPreferences.Default }), WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                ShowInTaskbar = false, ShowActivated = false,
+            };
+            classic.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Classic, Theme.Dark));
+            classic.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                Intro(classic).ShouldBeNull();
+                UiHarness.Find<TextBlock>(classic, text => text.Text == IntroName).ShouldBeNull();
+            }
+            finally
+            {
+                ((IShellWindow)classic).CloseForSwitch();
+            }
+        });
+
     /// <summary>The caption's close is an ordinary close: the App's Closing handler, not the window, turns it into a hide
     /// to the tray while the window is the current one, and lets it through once a switch has moved on.</summary>
     [Fact]

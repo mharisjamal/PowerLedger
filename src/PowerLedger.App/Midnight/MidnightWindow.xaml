@@ -260,18 +260,42 @@
                     </StackPanel>
                 </DockPanel>
 
-                <!-- A look the top bar's Switch look couldn't open: why, on the page in view rather than on Settings' line out of
-                     sight, until dismissed or ProblemShownFor on. -->
-                <Border x:Name="SwitchProblem" Grid.Row="2" Style="{StaticResource M.Card.Flat}" BorderBrush="{DynamicResource M.Bad}" Padding="14,6,6,6"
-                        Margin="32,14,32,0" Visibility="Collapsed" AutomationProperties.Name="Look switch problem" AutomationProperties.LiveSetting="Assertive">
-                    <DockPanel>
-                        <Button DockPanel.Dock="Right" Style="{StaticResource M.IconButton}" Width="28" Height="28" MinHeight="28" FontSize="9" Content="&#xE8BB;"
-                                Click="DismissProblem" ToolTip="Dismiss" AutomationProperties.Name="Dismiss" VerticalAlignment="Center" />
-                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Glyph}" Foreground="{DynamicResource M.Bad}" Text="&#xE7BA;" Margin="0,0,10,0"
-                                   AutomationProperties.Name="Problem" />
-                        <TextBlock x:Name="SwitchProblemText" Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    </DockPanel>
-                </Border>
+                <!-- Banners under the page header, flat, in the page's flow: they block nothing. Not while the wizard has the window. -->
+                <StackPanel Grid.Row="2" Margin="32,0,32,0" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
+                    <!-- The new look, said once (Midnight look design §1): news, so an accent edge, not a warning's red; it stays
+                         until answered. Switch back chooses Classic through Settings; Got it, either button or any look switch
+                         retires it for good (UiPreferences.LookIntroduced). -->
+                    <Border x:Name="LookIntro" Style="{StaticResource M.Card.Flat}" BorderBrush="{DynamicResource M.Accent}" Padding="16,12,12,12"
+                            Margin="0,14,0,0" Visibility="Collapsed" AutomationProperties.Name="This is PowerLedger's new look" AutomationProperties.LiveSetting="Polite">
+                        <DockPanel>
+                            <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center" Margin="16,0,0,0">
+                                <Button Style="{StaticResource M.Button.Outline}" Content="Switch back" Click="SwitchBackClick" Margin="0,2,8,2"
+                                        ToolTip="Back to the classic look" />
+                                <Button Style="{StaticResource M.Button.Primary}" Content="Got it" Click="GotItClick" Margin="0,2" />
+                            </WrapPanel>
+                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Glyph}" Foreground="{DynamicResource M.Accent}" FontSize="16" Text="&#xE790;"
+                                       Margin="0,1,12,0" VerticalAlignment="Top" AutomationProperties.Name="New" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource M.Text.Heading}" FontSize="14" Text="This is PowerLedger's new look" TextWrapping="Wrap" />
+                                <TextBlock Style="{StaticResource M.Text.Secondary}" Margin="0,3,0,0" TextWrapping="Wrap"
+                                           Text="Prefer the classic one? Switch back any time here, or in Settings → Preferences." />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- A look the top bar's Switch look couldn't open: why, on the page in view rather than on Settings' line out
+                         of sight, until dismissed or ProblemShownFor on. -->
+                    <Border x:Name="SwitchProblem" Style="{StaticResource M.Card.Flat}" BorderBrush="{DynamicResource M.Bad}" Padding="14,6,6,6"
+                            Margin="0,14,0,0" Visibility="Collapsed" AutomationProperties.Name="Look switch problem" AutomationProperties.LiveSetting="Assertive">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource M.IconButton}" Width="28" Height="28" MinHeight="28" FontSize="9" Content="&#xE8BB;"
+                                    Click="DismissProblem" ToolTip="Dismiss" AutomationProperties.Name="Dismiss" VerticalAlignment="Center" />
+                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Glyph}" Foreground="{DynamicResource M.Bad}" Text="&#xE7BA;" Margin="0,0,10,0"
+                                       AutomationProperties.Name="Problem" />
+                            <TextBlock x:Name="SwitchProblemText" Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+                </StackPanel>
 
                 <local:PageHost x:Name="Pages" Grid.Row="3" Content="{Binding Current}" Margin="0,6,0,0" />
             </Grid>

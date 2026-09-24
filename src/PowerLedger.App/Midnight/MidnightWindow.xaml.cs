@@ -23,6 +23,7 @@ internal partial class MidnightWindow : Window, IShellWindow
     private readonly Extent _minimum;
     private readonly DispatcherTimer _problemTimer = new();
     private bool _switching;
+    private bool _introAnnounced;
 
     /// <param name="looks">The switcher the App opened this window through (plan O 0.4). The top bar's Switch look goes
     /// through <see cref="ShellViewModel.SwitchLook"/> instead, so the choice is saved as Settings saves it.</param>
@@ -45,6 +46,7 @@ internal partial class MidnightWindow : Window, IShellWindow
         AutomationProperties.SetName(KindGlyph, (string)KindGlyph.ToolTip);
         ShowTheme();
         ShowState();
+        ShowIntro();
         // Nothing in the shell changes until the window shows: a switch whose new window fails to show puts the page back
         // as it was, which a window that had already mapped it here would have changed under it.
         shell.Settings.PropertyChanged += OnSettingsChanged;
@@ -56,7 +58,11 @@ internal partial class MidnightWindow : Window, IShellWindow
             _problemTimer.Stop();
         };
         _problemTimer.Tick += (_, _) => HideProblem();
-        IsVisibleChanged += (_, _) => ShowOwnPage();
+        IsVisibleChanged += (_, _) =>
+        {
+            ShowOwnPage();
+            AnnounceIntro();
+        };
         Loaded += (_, _) => MovePill(animate: false);
         // A short window draws its items closer; the pill follows once they have their new heights.
         SizeChanged += (_, _) => Dispatcher.BeginInvoke(() => MovePill(animate: false), DispatcherPriority.Loaded);
@@ -193,6 +199,7 @@ internal partial class MidnightWindow : Window, IShellWindow
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(SettingsViewModel.Theme)) ShowTheme();
+        if (e.PropertyName == nameof(SettingsViewModel.LookIntroduced)) ShowIntro();
         if (e.PropertyName != nameof(SettingsViewModel.Look) || !_switching) return;
         _switching = false;
         if (_shell.Settings.AppMessage is { } problem) ShowProblem(problem);
@@ -200,6 +207,29 @@ internal partial class MidnightWindow : Window, IShellWindow
 
     /// <summary>The Click comes just before the button's command, which chooses the look through Settings.</summary>
     private void SwitchLookClick(object sender, RoutedEventArgs e) => _switching = true;
+
+    /// <summary>The new look's banner shows until it has been introduced: its buttons or any look switch retire it.</summary>
+    private void ShowIntro() => LookIntro.Visibility = _shell.Settings.LookIntroduced ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>A screen reader hears the banner once, when the window it is in first shows with it.</summary>
+    private void AnnounceIntro()
+    {
+        if (_introAnnounced || !IsVisible || LookIntro.Visibility != Visibility.Visible) return;
+        _introAnnounced = true;
+        UIElementAutomationPeer.CreatePeerForElement(LookIntro)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+    }
+
+    /// <summary>Switch back: Classic, chosen through Settings as the top bar's Switch look chooses it, so it is saved and
+    /// a window that won't open says why here; the banner retired first, whatever the switch does.</summary>
+    private void SwitchBackClick(object sender, RoutedEventArgs e)
+    {
+        _shell.Settings.IntroduceLook();
+        _switching = true;
+        _shell.Settings.Look = Look.Classic;
+        _switching = false;   // a look already Classic raises nothing to clear it
+    }
+
+    private void GotItClick(object sender, RoutedEventArgs e) => _shell.Settings.IntroduceLook();
 
     private void ShowProblem(string problem)
     {
