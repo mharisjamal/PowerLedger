@@ -45,10 +45,16 @@ CREATE TABLE meetings (
 );
 CREATE INDEX meetings_created ON meetings(created);
 CREATE TABLE device_requests (
-  device  TEXT NOT NULL,
-  utc_day TEXT NOT NULL,                      -- yyyy-MM-dd
-  count   INTEGER NOT NULL,
+  device      TEXT NOT NULL,
+  utc_day     TEXT NOT NULL,                  -- yyyy-MM-dd
+  count       INTEGER NOT NULL,               -- signed requests taken
+  batches     INTEGER NOT NULL DEFAULT 0,     -- batches taken
+  batch_bytes INTEGER NOT NULL DEFAULT 0,     -- their sealed bytes
   PRIMARY KEY (device, utc_day)
+);
+CREATE TABLE daily_totals (                   -- what the whole server took in a UTC day, against its safety cap
+  utc_day     TEXT PRIMARY KEY,
+  batch_bytes INTEGER NOT NULL
 );
 CREATE TABLE seen_signatures (                -- signed requests already taken, so none is taken twice
   device TEXT NOT NULL,

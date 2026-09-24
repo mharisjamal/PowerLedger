@@ -16,7 +16,8 @@ describe("the households schema", () => {
     ]);
     expect(await columns("key_envelopes")).toEqual(["household", "epoch", "device", "from_device", "body", "created"]);
     expect(await columns("meetings")).toEqual(["id", "slot", "body", "created"]);
-    expect(await columns("device_requests")).toEqual(["device", "utc_day", "count"]);
+    expect(await columns("device_requests")).toEqual(["device", "utc_day", "count", "batches", "batch_bytes"]);
+    expect(await columns("daily_totals")).toEqual(["utc_day", "batch_bytes"]);
     expect(await columns("seen_signatures")).toEqual(["device", "r", "seen"]);
   });
 

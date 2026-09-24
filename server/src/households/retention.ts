@@ -45,6 +45,7 @@ export async function runHouseholdRetention(env: Cloudflare.Env, now: Date): Pro
     env.DB.prepare("DELETE FROM meetings WHERE created <= ?").bind(now.getTime() - MEETING_LIFETIME_MS),
     env.DB.prepare("DELETE FROM join_requests WHERE created <= ?").bind(now.getTime() - JOIN_REQUEST_LIFETIME_MS),
     env.DB.prepare("DELETE FROM device_requests WHERE utc_day < ?").bind(utcDateString(-REQUEST_RETENTION_DAYS, now)),
+    env.DB.prepare("DELETE FROM daily_totals WHERE utc_day < ?").bind(utcDateString(-REQUEST_RETENTION_DAYS, now)),
     env.DB.prepare("DELETE FROM seen_signatures WHERE seen < ?").bind(now.getTime() - SEEN_RETENTION_MS),
   ]);
 }
