@@ -382,6 +382,26 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Entering_another_household_drops_what_the_old_one_still_had_to_hear_but_its_removals()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        var den = await Start("Den PC", ChassisKind.Desktop);
+        await WorkerPc.Pair(desktop, laptop);                                       // a household the server hasn't heard of yet
+        await desktop.Send<HouseholdReply>(new RemovePcRequest(1, laptop.Worker.DeviceId));
+        var old = desktop.Worker.Store.HouseholdId!;
+        await WorkerPc.Pair(study, den);
+
+        await WorkerPc.Pair(study, desktop);                                        // the desktop joins the study PC's household
+
+        desktop.Worker.Store.HouseholdId.ShouldBe(study.Worker.Store.HouseholdId);
+        desktop.Worker.Store.Pending.ShouldBe([
+            new PendingOp(PendingOp.Remove, old, Device: laptop.Worker.DeviceId),
+            new PendingOp(PendingOp.Remove, old, Device: desktop.Worker.DeviceId)]);
+    }
+
+    [Fact]
     public async Task Removing_a_pc_that_has_left_removes_its_rows_and_this_pc_cant_be_removed()
     {
         var (desktop, laptop, _) = await Household();

@@ -172,13 +172,19 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         }
     }
 
-    /// <summary>Tells the server what it still has to hear, oldest first, stopping at the first that can't go yet. One the
-    /// server won't ever take is dropped, and logged, but for a new key, which stays queued (plan 0.9); a 410 says this PC was
-    /// removed from that household, and whatever else waits for it is dropped too.</summary>
+    /// <summary>
+    /// Tells the server what it still has to hear, oldest first. Each request belongs to a household (plan 0.9), and one that
+    /// can't go yet holds up only the requests of its household after it. One the server won't ever take is dropped, and
+    /// logged, but for a new key, which stays queued with nothing posted under the old key meanwhile. A 410 says this PC is
+    /// no longer in that household: a removal or leave counts as done, and whatever else waits for it is dropped too. A
+    /// household this PC is no longer in that doesn't take its requests at all (401) has nothing to be told.
+    /// </summary>
     public async Task FlushAsync(DeviceKeys keys, RelayRun run, CancellationToken cancel)
     {
-        while (store.Pending is [var op, ..])
+        var held = new HashSet<string>(StringComparer.Ordinal);
+        while (store.Pending.FirstOrDefault(waiting => !held.Contains(waiting.Household)) is { } op)
         {
+            var mine = op.Household == store.HouseholdId;
             var result = op.Kind switch
             {
                 PendingOp.Create => await relay.CreateHouseholdAsync(keys, op.Household, cancel).ConfigureAwait(false),
@@ -196,29 +202,40 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             };
             if (result.Ok)
             {
-                store.Pending = [.. store.Pending.Skip(1)];
+                Done(op);
                 continue;
             }
-            if (op.Household == store.HouseholdId && result.Status is 401 or 410) Refused(result);   // not added yet, or a clock far off
+            if (result.Status is 401 or 410)
+            {
+                if (mine) Refused(result);                                     // not added yet, or a clock far off
+                else ClockRight();
+            }
             if (result.Removed)
             {
-                if (op.Household == store.HouseholdId) WasRemoved(run);
+                if (mine) WasRemoved(run);
                 store.Pending = [.. store.Pending.Where(other => other.Household != op.Household)];
                 continue;
             }
-            if (op.Kind == PendingOp.RecoveryEnvelope && result.Status == 401)
+            if (!mine && result.Status == 401)
+            {
+                log.LogInformation("A household this PC is no longer in doesn't take its {Kind}; it is dropped", op.Kind);
+            }
+            else if (op.Kind == PendingOp.RecoveryEnvelope && result.Status == 401)
             {
                 store.Session = null;                                          // the session has ended: signed out elsewhere
             }
             else if (result.Transient)
             {
-                throw new RelayStop($"Couldn't reach the server to update the household: {result.Problem}.");
+                if (mine) throw new RelayStop($"Couldn't reach the server to update the household: {result.Problem}.");
+                held.Add(op.Household);                                        // goes again later, holding up only its own household
+                continue;
             }
             else if (op.Kind == PendingOp.Keys)
             {
                 log.LogWarning("The server didn't take the household's new key ({Status}: {Problem}); it goes again later", result.Status, result.Problem);
                 run.Problem = $"The server didn't take the household's new key ({result.Problem}), so this PC sends nothing through it until it does.";
-                return;                                                        // kept, and nothing posted under the old key meanwhile
+                held.Add(op.Household);                                        // kept, and nothing posted under the old key meanwhile
+                continue;
             }
             else if (!(op.Kind == PendingOp.Remove && result.Status == 404))  // already gone: removed by another, or it left
             {
@@ -228,8 +245,16 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                     run.Notices.Add("The household already has 16 PCs, so the newest one can only sync on the same network.");
                 }
             }
-            store.Pending = [.. store.Pending.Skip(1)];
+            Done(op);
         }
+    }
+
+    /// <summary>Takes a request the server has heard, or won't ever take, off the queue.</summary>
+    private void Done(PendingOp op)
+    {
+        var pending = store.Pending.ToList();
+        pending.Remove(op);
+        store.Pending = pending;
     }
 
     /// <summary>True while a new key for this PC's household waits for the server.</summary>
@@ -423,13 +448,20 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     /// </summary>
     private void Refused<T>(RelayResult<T> result)
     {
+        ClockRight();
+        if (store.RelayConfirmed) return;
+        throw new RelayStop(++_unconfirmedRuns >= QuietRuns ? NotAddedYet : null);
+    }
+
+    /// <summary>Stops the run when this PC's clock is so far from the server's, as its answers' Date shows, that the server
+    /// refuses every signed request.</summary>
+    private void ClockRight()
+    {
         if (relay.Skew is { } skew && skew.Duration() > ClockSlack)
         {
             var minutes = (int)Math.Round(skew.Duration().TotalMinutes);
             throw new RelayStop($"This PC's clock is {minutes} minutes {(skew > TimeSpan.Zero ? "ahead" : "behind")}, so the server refuses its requests. Set the clock right.");
         }
-        if (store.RelayConfirmed) return;
-        throw new RelayStop(++_unconfirmedRuns >= QuietRuns ? NotAddedYet : null);
     }
 
     /// <summary>This PC's rows that changed since the last post, oldest change first; a post the server stops part way

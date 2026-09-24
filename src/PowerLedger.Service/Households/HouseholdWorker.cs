@@ -471,6 +471,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             var householdId = Wire.NewHouseholdId();
             ClearOthers();
+            KeepOnlyRemovalsOfOthers(householdId);
             _store.EnterHousehold(householdId, 1, HouseholdCrypto.NewKey());
             SaveSelf(now);
             _members.Self(_keys.DeviceId, 1);
@@ -545,6 +546,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             if (_store.HouseholdId is not null) LeaveLocked(now);
             ClearOthers();
+            KeepOnlyRemovalsOfOthers(householdId);
             _store.EnterHousehold(householdId, epoch, key);
             _store.HistoryPosted = [.. entries.Where(entry => entry.RemovedEpoch is not { } removed || entry.AddedEpoch > removed).Select(entry => entry.Id)];
         }
@@ -719,6 +721,11 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     }
 
     private static long HourOf(DateTimeOffset time) => time.ToUnixTimeMilliseconds() / 3_600_000;
+
+    /// <summary>Entering <paramref name="householdId"/> drops what other households still had to hear (plan 0.9), but their
+    /// removals, this PC's own leaving among them: a household that never hears of one keeps the PC in it.</summary>
+    private void KeepOnlyRemovalsOfOthers(string householdId) =>
+        _store.Pending = [.. _store.Pending.Where(op => op.Household == householdId || op.Kind == PendingOp.Remove)];
 
     /// <summary>Removes every other PC and its rows, as when this PC enters another household.</summary>
     private void ClearOthers()

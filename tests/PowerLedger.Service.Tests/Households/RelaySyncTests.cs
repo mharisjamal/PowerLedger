@@ -345,6 +345,57 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
+    public async Task An_old_households_request_the_server_doesnt_take_from_this_pc_is_dropped_and_holds_nothing_up()
+    {
+        const string Old = "aaaa0000bbbb1111aaaa0000bbbb1111";                    // never on the server: this PC left it before it was told
+        using var study = DeviceKeys.Create();
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Remove, Old, Device: _desktop.Id));
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Add, Household, Sign: Wire.Encode(study.SignPublic), Dh: Wire.Encode(study.DhPublic),
+            Proof: Wire.Encode(Wire.SignJoin(study, Household))));
+
+        (await _desktop.RunAsync()).Problem.ShouldBeNull();
+
+        _desktop.Store.Pending.ShouldBeEmpty();
+        _relay.Members(Household).Keys.ShouldContain(study.DeviceId);
+    }
+
+    [Fact]
+    public async Task An_old_households_request_that_cant_go_yet_waits_without_holding_up_this_households()
+    {
+        const string Old = "aaaa0000bbbb1111aaaa0000bbbb1111";
+        using var study = DeviceKeys.Create();
+        var leave = new PendingOp(PendingOp.Remove, Old, Device: _desktop.Id);
+        _desktop.Store.AddPending(leave);
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Add, Household, Sign: Wire.Encode(study.SignPublic), Dh: Wire.Encode(study.DhPublic),
+            Proof: Wire.Encode(Wire.SignJoin(study, Household))));
+        _relay.Intercept = (request, _) => request.RequestUri!.AbsolutePath.Contains(Old, StringComparison.Ordinal)
+            ? FakeRelay.Error(503, "The server is busy; try again later.")
+            : null;
+
+        (await _desktop.RunAsync()).Problem.ShouldBeNull();
+
+        _desktop.Store.Pending.ShouldBe([leave]);
+        _relay.Members(Household).Keys.ShouldContain(study.DeviceId);
+    }
+
+    [Fact]
+    public async Task A_removal_or_leave_the_server_answers_with_410_counts_as_done()
+    {
+        using var other = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
+        const string Old = "aaaa0000bbbb1111aaaa0000bbbb1111";
+        _relay.Seed(Old, _desktop.Keys, other.Keys);
+        _relay.Remove(Old, _desktop.Id);                                           // removed there before its own leave went
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Remove, Old, Device: other.Id));
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Remove, Old, Device: _desktop.Id));
+
+        var run = await _desktop.RunAsync();
+
+        (run.Problem, run.Removed).ShouldBe(((string?)null, false));
+        _desktop.Store.Pending.ShouldBeEmpty();
+        _desktop.Store.HouseholdId.ShouldBe(Household);
+    }
+
+    [Fact]
     public async Task A_member_added_without_the_joiners_own_proof_is_refused_and_dropped()
     {
         using var stranger = DeviceKeys.Create();
