@@ -9,7 +9,8 @@ namespace PowerLedger.Service.Households;
 /// in millionths of that tariff's currency. A row is written only when its figures differ from the one kept, and then as
 /// changed now, so a later correction of an hour, or a tariff entered for the past, replaces it on every member. Now is
 /// never earlier than just after this PC's newest change: after the clock goes back, what is built still counts as newer
-/// than everything before it, and goes to the other members.
+/// than everything before it, and goes to the other members. A change more than a day ahead, left by a clock that ran
+/// fast, goes back to now once (plan 0.9), since every member takes one as no later than a day from its own now.
 /// </summary>
 internal sealed class HourRows(AggregateRepository aggregates, TariffRepository tariffs, HouseholdRepository household)
 {
@@ -34,6 +35,16 @@ internal sealed class HourRows(AggregateRepository aggregates, TariffRepository 
             changed.Add(row);
         }
         return changed.Count == 0 ? 0 : household.Upsert(changed);
+    }
+
+    /// <summary>Moves this PC's change times back to now when the newest is more than a day ahead of it (plan 0.9).</summary>
+    /// <returns>True when they moved.</returns>
+    public bool Rebase(string deviceId, DateTimeOffset now)
+    {
+        var nowMs = now.ToUnixTimeMilliseconds();
+        if (household.LatestChange(deviceId) <= nowMs + (long)TimeSpan.FromDays(1).TotalMilliseconds) return false;
+        household.Rebase(deviceId, nowMs);
+        return true;
     }
 
     /// <summary>One hour's row, costed at <paramref name="tariff"/>, or with no cost when there is none.</summary>

@@ -114,10 +114,17 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         lock (_gate) RemoveMember(household, device);
     }
 
-    /// <summary>Drops the household's batches, as retention does after 90 days; the numbering goes on from where it was.</summary>
-    public void DropBatches(string household)
+    /// <summary>Drops the household's batches, or those numbered up to <paramref name="throughSeq"/>, as retention does after
+    /// 90 days; the numbering goes on from where it was.</summary>
+    public void DropBatches(string household, long throughSeq = long.MaxValue)
     {
-        lock (_gate) _batches.RemoveAll(batch => batch.Household == household);
+        lock (_gate) _batches.RemoveAll(batch => batch.Household == household && batch.Seq <= throughSeq);
+    }
+
+    /// <summary>The number the household's newest batch was given.</summary>
+    public long LastSeq(string household)
+    {
+        lock (_gate) return _nextSeq.GetValueOrDefault(household);
     }
 
     /// <summary>True once the household's last member has gone.</summary>

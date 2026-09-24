@@ -105,6 +105,35 @@ public sealed class HourRowsTests : IDisposable
     }
 
     [Fact]
+    public void Rows_changed_more_than_a_day_ahead_go_back_to_now_once_and_changes_carry_on_after_them()
+    {
+        var now = Midnight.AddHours(5);
+        Aggregates.UpsertHour(Hour(0, energyWh: 10));
+        Aggregates.UpsertHour(Hour(1, energyWh: 20));
+        Rows.Build(Me, Midnight.AddDays(-1), now.AddYears(1));                  // built while the clock was a year fast
+
+        Rows.Rebase(Me, now).ShouldBeTrue();
+
+        (Changed(0), Changed(1)).ShouldBe((now, now));
+        Rows.Rebase(Me, now.AddMinutes(1)).ShouldBeFalse();                      // once
+        Aggregates.UpsertHour(Hour(0, energyWh: 11));
+        Rows.Build(Me, Midnight.AddDays(-1), now).ShouldBe(1);
+        Changed(0).ShouldBe(now.AddMilliseconds(1));                              // after the newest, as ever
+    }
+
+    [Fact]
+    public void Rows_changed_less_than_a_day_ahead_stay_as_they_are()
+    {
+        var now = Midnight.AddHours(5);
+        Aggregates.UpsertHour(Hour(0, energyWh: 10));
+        Rows.Build(Me, Midnight.AddDays(-1), now.AddHours(23));
+
+        Rows.Rebase(Me, now).ShouldBeFalse();
+
+        Changed(0).ShouldBe(now.AddHours(23));
+    }
+
+    [Fact]
     public void Only_the_hours_from_the_start_are_built_and_the_backfill_reaches_back_13_months()
     {
         var now = Midnight.AddHours(5);

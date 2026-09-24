@@ -84,8 +84,8 @@ internal static class Membership
 /// <summary>
 /// Sync through the server (households design §5, plan 0.6), run every 15 minutes. First whatever the server still has to
 /// be told, in order; then, every six hours, the member list, for who was removed; then this PC's rows that changed since
-/// the last post, sealed with the household key as batches of at most 1 MB; its year of rows once for each member it
-/// hasn't posted it for; then the other members' batches after the cursor, each opened under its epoch's key and the
+/// the last post, sealed with the household key as batches of at most 1 MB; all its rows again when a snapshot is due
+/// (plan 0.9); then the other members' batches after the cursor, each opened under its epoch's key and the
 /// associated data that ties it to its household, device, epoch and sequence number, once its sender's signature over it
 /// checks against the sign key this PC holds for that member (plan 0.8); a batch under a newer epoch reads the member list
 /// and this PC's envelope for it, whose sealer must be a member this PC knows. Each batch carries its sender's member list,
@@ -142,7 +142,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                     if (!RotationPending)                                       // plan 0.9: nothing goes under a key a new one waits to replace
                     {
                         await PostNewRowsAsync(keys, householdId, name, kind, run, cancel).ConfigureAwait(false);
-                        await PostHistoryAsync(keys, householdId, name, kind, run, cancel).ConfigureAwait(false);
+                        await PostSnapshotAsync(keys, householdId, name, kind, run, cancel).ConfigureAwait(false);
                     }
                     await FetchAsync(keys, householdId, run, cancel).ConfigureAwait(false);
                 }
@@ -480,21 +480,36 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         store.PostedHour = null;                                               // every row changed then has gone
     }
 
-    /// <summary>This PC's last 13 months of rows, once, for each member it hasn't posted them for (households design §5).</summary>
-    private async Task PostHistoryAsync(DeviceKeys keys, string householdId, string name, ChassisKind kind, RelayRun run, CancellationToken cancel)
+    /// <summary>How often this PC posts all its rows again at the least, and at the most, unless the epoch changed (plan 0.9).</summary>
+    public static readonly TimeSpan SnapshotAtLeast = TimeSpan.FromDays(30);
+
+    public static readonly TimeSpan SnapshotAtMost = TimeSpan.FromDays(1);
+
+    /// <summary>
+    /// Posts all this PC's rows of the last 13 months again (plan 0.9), so a PC that was away, or is new, reads the whole
+    /// history with the current key, whatever expired on the server: under a new key once it takes effect, as on entering
+    /// a household; a day or more after the last time once a member has joined since; and every 30 days. One cut short, as
+    /// by the server's daily limit, goes on from its last batch, unless the key has changed since.
+    /// </summary>
+    private async Task PostSnapshotAsync(DeviceKeys keys, string householdId, string name, ChassisKind kind, RelayRun run, CancellationToken cancel)
     {
-        var posted = store.HistoryPosted;
-        var newcomers = household.Members()
-            .Where(member => member.LeftMs is null && member.DeviceId != keys.DeviceId && !posted.Contains(member.DeviceId))
-            .Select(member => member.DeviceId)
-            .ToList();
-        if (newcomers.Count == 0) return;
+        var epoch = store.Epoch;
+        var since = Now - (store.SnapshotAt ?? long.MinValue / 2);
+        var resuming = store.SnapshotFrom is { } from && from.Epoch == epoch ? from.Hour : (long?)null;
+        if (resuming is null && store.SnapshotEpoch == epoch && since < (long)SnapshotAtLeast.TotalMilliseconds
+            && !(store.SnapshotWanted && since >= (long)SnapshotAtMost.TotalMilliseconds))
+        {
+            return;
+        }
         var now = clock.GetUtcNow();
-        var from = Math.Max(HourRows.BackfillFrom(now).ToUnixTimeMilliseconds(), (store.HistoryHour ?? -1) + 1);
-        var rows = household.RowsBetween(keys.DeviceId, from, now.ToUnixTimeMilliseconds());
-        if (rows.Count > 0) await PostRowsAsync(keys, householdId, name, kind, rows, run, last => store.HistoryHour = last.HourMs, cancel).ConfigureAwait(false);
-        store.HistoryPosted = [.. posted, .. newcomers];
-        store.HistoryHour = null;
+        var start = Math.Max(HourRows.BackfillFrom(now).ToUnixTimeMilliseconds(), (resuming ?? -1) + 1);
+        var rows = household.RowsBetween(keys.DeviceId, start, now.ToUnixTimeMilliseconds());
+        if (rows.Count > 0) await PostRowsAsync(keys, householdId, name, kind, rows, run, last => store.SnapshotFrom = (epoch, last.HourMs), cancel).ConfigureAwait(false);
+        store.SnapshotFrom = null;
+        store.SnapshotEpoch = epoch;
+        store.SnapshotAt = Now;
+        store.SnapshotWanted = false;
+        log.LogInformation("Posted all this PC's rows again, under epoch {Epoch}", epoch);
     }
 
     /// <summary>Posts the rows as batches under the current key, each at most 1 MB as posted: a batch that would be larger

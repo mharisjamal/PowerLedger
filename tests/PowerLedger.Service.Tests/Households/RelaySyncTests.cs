@@ -30,7 +30,7 @@ public sealed class RelaySyncTests : IDisposable
         foreach (var pc in new[] { _desktop, _laptop })
         {
             pc.Store.EnterHousehold(Household, 1, _key);
-            pc.Store.HistoryPosted = [_desktop.Id, _laptop.Id];
+            AsIfSnapshotJustWent(pc);
             foreach (var member in new[] { _desktop, _laptop }) pc.Household.SaveMember(member.AsMember());
         }
         _relay.Seed(Household, _desktop.Keys, _laptop.Keys);
@@ -112,7 +112,7 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
-    public async Task A_new_member_gets_each_members_year_of_rows_once_in_batches_of_at_most_1_MB()
+    public async Task A_snapshot_of_this_pcs_year_goes_in_batches_of_at_most_1_MB_and_a_new_member_reads_it_all()
     {
         var random = new Random(7);
         var year = Enumerable.Range(0, 24 * 390).Select(hour => new HouseholdRow(
@@ -122,7 +122,8 @@ public sealed class RelaySyncTests : IDisposable
             random.NextInt64(100_000), "EUR", ChangedMs: 1_000)).ToList();
         _desktop.Household.Upsert(year);
         _desktop.Store.PostedThrough = 1_000;                                   // all posted long ago
-        _desktop.Store.HistoryPosted = [_desktop.Id];                           // and the laptop is new
+        _desktop.Store.SnapshotAt = Now.AddDays(-1).ToUnixTimeMilliseconds();   // the last snapshot a day ago,
+        _desktop.Store.SnapshotWanted = true;                                   // and the laptop new since
 
         var first = await _desktop.RunAsync();
         var again = await _desktop.RunAsync();
@@ -134,6 +135,44 @@ public sealed class RelaySyncTests : IDisposable
         again.RowsOut.ShouldBe(0);
         (await _laptop.RunAsync()).RowsIn.ShouldBe(withinYear);
         _laptop.Household.RowsBetween(_desktop.Id, 0, long.MaxValue).Count.ShouldBe(withinYear);
+    }
+
+    [Fact]
+    public async Task Every_pc_posts_all_its_rows_again_every_30_days_so_rows_whose_batches_expired_reach_a_pc_that_was_away()
+    {
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100)]);
+        await _desktop.RunAsync();
+        _clock.Advance(TimeSpan.FromDays(29));
+        _desktop.Household.Upsert([Row(_desktop.Id, 1, 11, changed: 200)]);
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(1);                          // only what changed, within the 30 days
+        _clock.Advance(TimeSpan.FromDays(2));
+        var beforeSnapshot = _relay.LastSeq(Household);
+
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(2);                          // 31 days on: everything again
+        _relay.DropBatches(Household, beforeSnapshot);                             // the older batches expire on the server
+
+        (await _laptop.RunAsync()).RowsIn.ShouldBe(2);
+        _laptop.Household.Row(_desktop.Id, Hour(0)).ShouldNotBeNull().EnergyWh.ShouldBe(10);
+    }
+
+    [Fact]
+    public async Task A_snapshot_goes_at_once_under_a_new_key_but_after_a_new_member_at_most_once_a_day()
+    {
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100), Row(_desktop.Id, 1, 11, changed: 100)]);
+        _desktop.Store.PostedThrough = 100;
+        using var study = DeviceKeys.Create();
+        _desktop.Members.Add(new MemberInfo(study.DeviceId, "Study PC", ChassisKind.Desktop, study.SignPublic, study.DhPublic), 1,
+            Now.ToUnixTimeMilliseconds());                                          // a new member, an hour after the last snapshot
+        _clock.Advance(TimeSpan.FromHours(1));
+
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(0);                          // not twice in a day
+        _clock.Advance(TimeSpan.FromDays(1));
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(2);                          // a day on, for it
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(0);
+
+        _desktop.Sync.StartRotation(Household);
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(2);                          // under the new key at once
+        _relay.Batches.Last().Epoch.ShouldBe(2);
     }
 
     [Fact]
@@ -181,7 +220,7 @@ public sealed class RelaySyncTests : IDisposable
     {
         _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100)]);
         _desktop.Store.EnterHousehold(Household, 1, HouseholdCrypto.NewKey());       // a key the laptop doesn't hold
-        _desktop.Store.HistoryPosted = [_desktop.Id, _laptop.Id];
+        AsIfSnapshotJustWent(_desktop);
         await _desktop.RunAsync();
 
         var run = await _laptop.RunAsync();
@@ -197,7 +236,7 @@ public sealed class RelaySyncTests : IDisposable
     {
         using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
         study.Store.EnterHousehold(Household, 1, _key);
-        study.Store.HistoryPosted = [_desktop.Id, _laptop.Id, study.Id];
+        AsIfSnapshotJustWent(study);
         study.Household.SaveMember(study.AsMember());
         study.Household.Upsert([Row(study.Id, 0, 7, changed: 500)]);
         _relay.Seed(Household, study.Keys);
@@ -337,7 +376,8 @@ public sealed class RelaySyncTests : IDisposable
         var run = await _laptop.RunAsync();
 
         _desktop.Store.Epoch.ShouldBe(2);
-        _relay.Batches.ShouldHaveSingleItem().Epoch.ShouldBe(2);
+        _relay.Batches.ShouldNotBeEmpty();
+        _relay.Batches.ShouldAllBe(batch => batch.Epoch == 2);                   // the new row, and every row again under the new key
         run.RowsIn.ShouldBe(1);
         _laptop.Store.Epoch.ShouldBe(2);
         _laptop.Store.CurrentKey.ShouldBe(_desktop.Store.CurrentKey);
@@ -489,7 +529,8 @@ public sealed class RelaySyncTests : IDisposable
 
         run.Problem.ShouldBeNull();
         _desktop.Store.Epoch.ShouldBe(2);
-        _relay.Batches.Single(batch => batch.Device == _desktop.Id).Epoch.ShouldBe(2);
+        _relay.Batches.Where(batch => batch.Device == _desktop.Id).ShouldNotBeEmpty();
+        _relay.Batches.Where(batch => batch.Device == _desktop.Id).ShouldAllBe(batch => batch.Epoch == 2);
     }
 
     [Fact]
@@ -684,6 +725,13 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     private static long Hour(int hour) => Now.AddDays(-1).AddHours(hour).ToUnixTimeMilliseconds();
+
+    /// <summary>As if the PC had just posted all its rows under its current key, so a test sees only what it sets going.</summary>
+    private void AsIfSnapshotJustWent(RelayPc pc)
+    {
+        pc.Store.SnapshotEpoch = pc.Store.Epoch;
+        pc.Store.SnapshotAt = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+    }
 
     private static HouseholdRow Row(string device, int hour, double energyWh, long changed) => new(
         device, Hour(hour), energyWh, 1, 1, 1, 1, 0, 0, 3600, 0, 0, 3600, 0, 0, 1_000, "GBP", changed);

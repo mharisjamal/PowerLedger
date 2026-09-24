@@ -127,6 +127,11 @@ public sealed class HouseholdRepository(SqliteDatabase db)
         return latest;
     }
 
+    /// <summary>Moves one device's change times later than <paramref name="toMs"/> back to it, as after its clock ran fast.</summary>
+    /// <returns>How many rows moved.</returns>
+    public int Rebase(string deviceId, long toMs) => Execute(
+        "UPDATE household_rows SET changed_ms = $to WHERE device_id = $device AND changed_ms > $to", ("$device", deviceId), ("$to", toMs));
+
     /// <summary>Removes every row of one device.</summary>
     /// <returns>How many went.</returns>
     public int DeleteRows(string deviceId) => Execute("DELETE FROM household_rows WHERE device_id = $device", ("$device", deviceId));

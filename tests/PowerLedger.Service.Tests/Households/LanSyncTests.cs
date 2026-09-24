@@ -149,6 +149,20 @@ public sealed class LanSyncTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Rows_changed_far_ahead_go_to_a_member_once_they_are_back_at_now_and_not_at_every_sync()
+    {
+        var farAhead = Now.AddYears(1).ToUnixTimeMilliseconds();                  // this PC's clock once ran a year fast
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: farAhead), Row(_desktop.Id, 1, 11, changed: farAhead)]);
+        (await _desktop.SyncWith(_laptop)).RowsOut.ShouldBe(2);
+        (await _desktop.SyncWith(_laptop)).RowsOut.ShouldBe(2);                     // the laptop takes them as a day from now, and asks again
+
+        _desktop.Rows.Rebase(_desktop.Id, Now).ShouldBeTrue();
+
+        (await _desktop.SyncWith(_laptop)).RowsOut.ShouldBe(0);
+        _laptop.Household.Row(_desktop.Id, Hour(1)).ShouldNotBeNull().EnergyWh.ShouldBe(11);
+    }
+
+    [Fact]
     public async Task A_pc_that_isnt_a_member_is_refused_and_one_claiming_a_members_key_fails_its_prove()
     {
         var stranger = new Pc("Stranger", ChassisKind.Laptop, _clock);
@@ -281,6 +295,9 @@ public sealed class LanSyncTests : IAsyncLifetime
         public string Id => Keys.DeviceId;
 
         public HouseholdRepository Household { get; }
+
+        /// <summary>This PC's own hour rows, as its worker builds them.</summary>
+        public HourRows Rows => new(new AggregateRepository(_database.Db), new TariffRepository(_database.Db), Household);
 
         public LanListener? Listener { get; private set; }
 

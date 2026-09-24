@@ -112,7 +112,10 @@ public sealed class HouseholdStoreTests : IDisposable
         var store = Store();
         store.EnterHousehold("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey());
         store.PostedThrough = 1_234;
-        store.HistoryPosted = ["a", "b"];
+        store.SnapshotEpoch = 1;
+        store.SnapshotAt = 4_321;
+        store.SnapshotWanted = true;
+        store.SnapshotFrom = (1, 3_600_000);
         store.RelayConfirmed = true;
         store.MembersCheckedAt = 5_678;
         store.Problem = "Couldn't sync through the server: it was down.";
@@ -121,12 +124,12 @@ public sealed class HouseholdStoreTests : IDisposable
         var again = Store();
         (again.PostedThrough, again.RelayConfirmed, again.MembersCheckedAt, again.Problem)
             .ShouldBe((1_234L, true, (long?)5_678, "Couldn't sync through the server: it was down."));
-        again.HistoryPosted.ShouldBe(["a", "b"]);
+        (again.SnapshotEpoch, again.SnapshotAt, again.SnapshotWanted, again.SnapshotFrom).ShouldBe(((int?)1, (long?)4_321, true, ((int, long)?)(1, 3_600_000)));
 
         again.LeaveHousehold();
         var left = Store();
         (left.PostedThrough, left.RelayConfirmed, left.MembersCheckedAt, left.Problem).ShouldBe((0L, false, (long?)null, (string?)null));
-        left.HistoryPosted.ShouldBeEmpty();
+        (left.SnapshotEpoch, left.SnapshotAt, left.SnapshotWanted, left.SnapshotFrom).ShouldBe(((int?)null, (long?)null, false, ((int, long)?)null));
         left.Pending.ShouldHaveSingleItem().Device.ShouldBe("c");
     }
 

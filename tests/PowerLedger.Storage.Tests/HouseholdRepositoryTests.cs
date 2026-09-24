@@ -98,6 +98,17 @@ public sealed class HouseholdRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void Change_times_later_than_a_moment_move_back_to_it_for_one_device_only()
+    {
+        Repository.Upsert([Row(Laptop, 0, changedMs: 100), Row(Laptop, Hour, changedMs: 900), Row(Desktop, 0, changedMs: 900)]);
+
+        Repository.Rebase(Laptop, 500).ShouldBe(1);
+
+        Repository.RowsBetween(Laptop, 0, 2 * Hour).Select(row => row.ChangedMs).ShouldBe([100L, 500L]);
+        Repository.LatestChange(Desktop).ShouldBe(900);
+    }
+
+    [Fact]
     public void A_member_is_kept_renamed_marked_left_and_synced_and_its_first_time_stays()
     {
         byte[] sign = [1, 2, 3], dh = [4, 5, 6];

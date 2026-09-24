@@ -58,6 +58,7 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
         if (known?.Removed is { } removed && epoch <= removed) return false;
         household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
         Set(member.Id, (known ?? new MemberEpochs(epoch)).Merge(new MemberEpochs(epoch)));
+        store.SnapshotWanted = true;                                           // the new member reads the history (plan 0.9)
         return true;
     }
 
@@ -184,6 +185,7 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
                 household.SaveMember(sender with { Name = own.Name, Kind = own.Kind });
             }
         }
+        if (added.Count > 0) store.SnapshotWanted = true;
         return new Learned(removed, added);
     }
 

@@ -226,7 +226,6 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     public async Task Removing_a_pc_changes_the_key_for_those_who_stay_and_the_removed_pc_cant_read_what_comes_after()
     {
         var (desktop, laptop, study) = await Household();
-        desktop.Worker.Store.HistoryPosted = [desktop.Worker.DeviceId, laptop.Worker.DeviceId, study.Worker.DeviceId];
         foreach (var pc in new[] { desktop, laptop, study }) await pc.Worker.RunOnceAsync(CancellationToken.None);
         var oldKey = study.Worker.Store.CurrentKey.ShouldNotBeNull();
         _clock.Advance(TimeSpan.FromMinutes(1));
@@ -399,6 +398,26 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         desktop.Worker.Store.Pending.ShouldBe([
             new PendingOp(PendingOp.Remove, old, Device: laptop.Worker.DeviceId),
             new PendingOp(PendingOp.Remove, old, Device: desktop.Worker.DeviceId)]);
+    }
+
+    [Fact]
+    public async Task Rows_left_far_ahead_by_a_clock_that_ran_fast_go_back_to_now_once_and_to_the_others_again()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        await WorkerPc.Pair(desktop, laptop);
+        var farAhead = Now.AddYears(1).ToUnixTimeMilliseconds();
+        desktop.Household.Upsert([Row(desktop.Worker.DeviceId, 0, 5, changed: farAhead)]);
+        desktop.Worker.Store.PostedThrough = farAhead;                              // posted while the clock was a year fast
+        _clock.Advance(TimeSpan.FromHours(1));
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                  // the hour's rows are built
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);
+
+        var now = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+        desktop.Household.Row(desktop.Worker.DeviceId, Hour(0)).ShouldNotBeNull().ChangedMs.ShouldBe(now);
+        laptop.Household.Row(desktop.Worker.DeviceId, Hour(0)).ShouldNotBeNull().ChangedMs.ShouldBe(now);
+        desktop.Worker.Store.PostedThrough.ShouldBeLessThanOrEqualTo(now);
     }
 
     [Fact]

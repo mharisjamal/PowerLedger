@@ -30,7 +30,6 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string SequenceKey = "household.next-seq";
     internal const string SessionKey = "household.session";
     internal const string PostedThroughKey = "household.posted-through";
-    internal const string HistoryKey = "household.history-posted";
     internal const string ConfirmedKey = "household.relay-confirmed";
     internal const string MembersCheckedKey = "household.members-checked";
     internal const string PendingKey = "household.pending";
@@ -40,7 +39,10 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string AskedToJoinKey = "household.asked-to-join";
     internal const string AccountKey = "household.account";
     internal const string PostedHourKey = "household.posted-hour";
-    internal const string HistoryHourKey = "household.history-hour";
+    internal const string SnapshotEpochKey = "household.snapshot-epoch";
+    internal const string SnapshotAtKey = "household.snapshot-at";
+    internal const string SnapshotWantedKey = "household.snapshot-wanted";
+    internal const string SnapshotFromKey = "household.snapshot-from";
     internal const string MemberEpochsKey = "household.member-epochs";
     internal const string RotationKeyKey = "household.rotation-key";
     internal const string RotationPostKey = "household.rotation-post";
@@ -51,8 +53,8 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     /// server still has to be told stays: it names its household.</summary>
     private static readonly string[] OfTheHousehold =
         [
-            IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, HistoryKey, HistoryHourKey, ConfirmedKey,
-            MembersCheckedKey, ProblemKey, WaitingKey, MemberEpochsKey, RotationKeyKey, RotationPostKey, LaggingKey,
+            IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, SnapshotEpochKey, SnapshotAtKey, SnapshotWantedKey,
+            SnapshotFromKey, ConfirmedKey, MembersCheckedKey, ProblemKey, WaitingKey, MemberEpochsKey, RotationKeyKey, RotationPostKey, LaggingKey,
         ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
@@ -231,18 +233,36 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         set => WriteText(PostedHourKey, value?.ToString(CultureInfo.InvariantCulture));
     }
 
-    /// <summary>The hour the post of this PC's year for new members has reached, when it stopped part way through; null otherwise.</summary>
-    public long? HistoryHour
+    /// <summary>The epoch this PC last posted all its rows under (plan 0.9); null before it has in this household.</summary>
+    public int? SnapshotEpoch
     {
-        get => long.TryParse(settings.Get(HistoryHourKey), NumberStyles.None, CultureInfo.InvariantCulture, out var hour) ? hour : null;
-        set => WriteText(HistoryHourKey, value?.ToString(CultureInfo.InvariantCulture));
+        get => int.TryParse(settings.Get(SnapshotEpochKey), NumberStyles.None, CultureInfo.InvariantCulture, out var epoch) ? epoch : null;
+        set => WriteText(SnapshotEpochKey, value?.ToString(CultureInfo.InvariantCulture));
     }
 
-    /// <summary>The members this PC has posted its year of rows for, or that were already members when it joined.</summary>
-    public IReadOnlyList<string> HistoryPosted
+    /// <summary>When this PC last finished posting all its rows, unix milliseconds; null before it has in this household.</summary>
+    public long? SnapshotAt
     {
-        get => HouseholdJson.Read(settings.Get(HistoryKey), HouseholdJson.Default.ListString) ?? [];
-        set => settings.Set(HistoryKey, HouseholdJson.Write([.. value], HouseholdJson.Default.ListString));
+        get => long.TryParse(settings.Get(SnapshotAtKey), NumberStyles.None, CultureInfo.InvariantCulture, out var at) ? at : null;
+        set => WriteText(SnapshotAtKey, value?.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>True once a member has joined since this PC last posted all its rows, which it then does again.</summary>
+    public bool SnapshotWanted
+    {
+        get => settings.Get(SnapshotWantedKey) == "1";
+        set => WriteText(SnapshotWantedKey, value ? "1" : null);
+    }
+
+    /// <summary>Where a post of all this PC's rows that stopped part way through goes on: under that epoch, after that hour;
+    /// null when none did.</summary>
+    public (int Epoch, long Hour)? SnapshotFrom
+    {
+        get => settings.Get(SnapshotFromKey)?.Split(':') is [var epoch, var hour]
+            && int.TryParse(epoch, NumberStyles.None, CultureInfo.InvariantCulture, out var e) && long.TryParse(hour, NumberStyles.None, CultureInfo.InvariantCulture, out var h)
+            ? (e, h)
+            : null;
+        set => WriteText(SnapshotFromKey, value is { } from ? string.Create(CultureInfo.InvariantCulture, $"{from.Epoch}:{from.Hour}") : null);
     }
 
     /// <summary>True once the server has taken a request from this PC as a member of this household: a refusal after that

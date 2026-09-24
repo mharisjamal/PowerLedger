@@ -475,9 +475,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             _store.EnterHousehold(householdId, 1, HouseholdCrypto.NewKey());
             SaveSelf(now);
             _members.Self(_keys.DeviceId, 1);
-            _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
-            _rowsBuiltForHour = HourOf(now);
-            _store.PostedThrough = now.ToUnixTimeMilliseconds();           // the year goes to each newcomer as its history
+            BuildRows(now);
+            _store.PostedThrough = _household.LatestChange(_keys.DeviceId);   // the year goes as the first snapshot
             _store.AddPending(new PendingOp(PendingOp.Create, householdId));
             _log.LogInformation("Made a household to add {Name} to", joiner.Name);
         }
@@ -535,20 +534,19 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     /// <summary>Takes this PC into a household with its key, inside the gate, leaving any other first (see
     /// <see cref="EnterAsync"/>), added at <paramref name="epoch"/>. The members in <paramref name="entries"/>, with their
-    /// epochs, are learned from then on (plan 0.9); each current one has its year of rows from this PC through its new rows,
-    /// not as history.</summary>
+    /// epochs, are learned from then on (plan 0.9). In a household new to it, this PC's year goes as its first snapshot.</summary>
     /// <param name="fromId">The PC whose list it is, which gives its own name and kind.</param>
     private void EnterLocked(string householdId, int epoch, byte[] key, IReadOnlyList<WireMember> entries, string? fromId)
     {
         var now = _clock.GetUtcNow();
         var nowMs = now.ToUnixTimeMilliseconds();
-        if (_store.HouseholdId != householdId)
+        var entering = _store.HouseholdId != householdId;
+        if (entering)
         {
             if (_store.HouseholdId is not null) LeaveLocked(now);
             ClearOthers();
             KeepOnlyRemovalsOfOthers(householdId);
             _store.EnterHousehold(householdId, epoch, key);
-            _store.HistoryPosted = [.. entries.Where(entry => entry.RemovedEpoch is not { } removed || entry.AddedEpoch > removed).Select(entry => entry.Id)];
         }
         else
         {
@@ -559,8 +557,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         SaveSelf(now);
         _members.Self(_keys.DeviceId, epoch);
         _members.Learn(entries, fromId, _keys.DeviceId, nowMs);
-        _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
-        _rowsBuiltForHour = HourOf(now);
+        BuildRows(now);
+        if (entering) _store.PostedThrough = _household.LatestChange(_keys.DeviceId);
         Announce();
         Publish();
     }
@@ -716,6 +714,19 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     {
         var now = _clock.GetUtcNow();
         if (HourOf(now) == _rowsBuiltForHour) return;
+        BuildRows(now);
+    }
+
+    /// <summary>Builds this PC's rows up to now. Change times left far ahead by a clock that ran fast go back to now first,
+    /// once (plan 0.9), and those rows go to the server again.</summary>
+    private void BuildRows(DateTimeOffset now)
+    {
+        if (_rows.Rebase(_keys.DeviceId, now))
+        {
+            _store.PostedThrough = Math.Min(_store.PostedThrough, now.ToUnixTimeMilliseconds() - 1);
+            _store.PostedHour = null;
+            _log.LogInformation("This PC's rows had change times far ahead, left by a clock that ran fast; they were moved back to now");
+        }
         _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
         _rowsBuiltForHour = HourOf(now);
     }
