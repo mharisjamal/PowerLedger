@@ -16,8 +16,8 @@ public class HouseholdViewModelTests
 
     private HouseholdViewModel Model() => new(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English);
 
-    private static ServiceStatus InHousehold(string deviceId = "aaaa")
-        => Statuses.Running() with { Household = new HouseholdStatus("hh1", deviceId, "Desktop-1", ChassisKind.Desktop, true, [], null) };
+    private static ServiceStatus InHousehold(string deviceId = "aaaa", string name = "Desktop-1")
+        => Statuses.Running() with { Household = new HouseholdStatus("hh1", deviceId, name, ChassisKind.Desktop, true, [], null) };
 
     private static HouseholdSnapshot SnapshotWith(IReadOnlyList<HouseholdMemberRow> members, IReadOnlyList<DeviceEnergy>? month = null) => new(
         new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], month ?? []), members);
@@ -186,5 +186,191 @@ public class HouseholdViewModelTests
         model.Hide();
         _clock.Advance(HouseholdViewModel.RefreshEvery * 3);
         _history.Reads.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void The_name_box_follows_this_pcs_name_until_the_user_types_something_else()
+    {
+        _link.Status = InHousehold();
+        _link.Connect(true);
+        var model = Model();
+
+        model.Show();
+        model.NameInput.ShouldBe("Desktop-1");
+
+        model.NameInput = "My desktop";                    // an unsaved edit
+        _clock.Advance(HouseholdViewModel.RefreshEvery);    // a routine refresh must not clobber it
+        model.NameInput.ShouldBe("My desktop");
+    }
+
+    [Fact]
+    public void A_rename_from_elsewhere_still_updates_an_untouched_box()
+    {
+        _link.Status = InHousehold();
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        _link.Status = InHousehold(name: "Renamed-elsewhere");
+        _clock.Advance(HouseholdViewModel.RefreshEvery);
+
+        model.NameInput.ShouldBe("Renamed-elsewhere");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Save_name_is_disabled_for_an_empty_name(string input)
+    {
+        var model = Model();
+        model.NameInput = input;
+        model.SaveName.CanExecute(null).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Save_name_is_disabled_past_forty_characters()
+    {
+        var model = Model();
+        model.NameInput = new string('x', 41);
+        model.SaveName.CanExecute(null).ShouldBeFalse();
+
+        model.NameInput = new string('x', 40);
+        model.SaveName.CanExecute(null).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Saving_a_name_sends_it_trimmed_and_reports_the_result()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.NameInput = "  Study PC  ";
+
+        model.SaveName.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe(("rename", "Study PC"));
+        model.NameMessage.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_refused_rename_shows_why()
+    {
+        _link.Connect(true);
+        _link.HouseholdAnswer = new HouseholdOutcome(false, "Names are 1 to 40 characters.");
+        var model = Model();
+        model.NameInput = "Study PC";
+
+        model.SaveName.Execute(null);
+
+        model.NameMessage.ShouldBe("Names are 1 to 40 characters.");
+    }
+
+    [Fact]
+    public void Removing_a_pc_asks_first_and_names_it()
+    {
+        _link.Status = InHousehold("aaaa");
+        _link.Connect(true);
+        _history.Answer = _ => SnapshotWith([
+            new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-30), null, Now),
+            new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-10), null, Now),
+        ]);
+        var model = Model();
+        model.Show();
+        var other = model.Members.Single(m => m.DeviceId == "bbbb");
+
+        model.AskRemove.Execute(other);
+
+        model.IsConfirming.ShouldBeTrue();
+        model.ConfirmText.ShouldNotBeNull().ShouldContain("Laptop-2");
+        _link.HouseholdRequests.ShouldBeEmpty();            // asked, not yet sent
+    }
+
+    [Fact]
+    public void This_pc_cannot_be_asked_to_remove_itself()
+    {
+        _link.Status = InHousehold("aaaa");
+        _link.Connect(true);
+        _history.Answer = _ => SnapshotWith([new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-30), null, Now)]);
+        var model = Model();
+        model.Show();
+        var self = model.Members.Single();
+
+        model.AskRemove.Execute(self);
+
+        model.IsConfirming.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Confirming_a_removal_sends_it_and_reads_the_list_again()
+    {
+        _link.Status = InHousehold("aaaa");
+        _link.Connect(true);
+        _history.Answer = _ => SnapshotWith([
+            new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-30), null, Now),
+            new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-10), null, Now),
+        ]);
+        var model = Model();
+        model.Show();
+        var readsBefore = _history.Reads.Count;
+        model.AskRemove.Execute(model.Members.Single(m => m.DeviceId == "bbbb"));
+
+        model.ConfirmPending.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe(("remove", "bbbb"));
+        model.IsConfirming.ShouldBeFalse();
+        _history.Reads.Count.ShouldBeGreaterThan(readsBefore);
+    }
+
+    [Fact]
+    public void Cancelling_a_removal_sends_nothing()
+    {
+        _link.Status = InHousehold("aaaa");
+        _link.Connect(true);
+        _history.Answer = _ => SnapshotWith([
+            new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-30), null, Now),
+            new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-10), null, Now),
+        ]);
+        var model = Model();
+        model.Show();
+        model.AskRemove.Execute(model.Members.Single(m => m.DeviceId == "bbbb"));
+
+        model.CancelPending.Execute(null);
+
+        model.IsConfirming.ShouldBeFalse();
+        _link.HouseholdRequests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Leaving_asks_first_then_sends_it_once_confirmed()
+    {
+        _link.Status = InHousehold();
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+
+        model.AskLeave.Execute(null);
+        model.IsConfirming.ShouldBeTrue();
+        model.ConfirmText.ShouldNotBeNull().ShouldContain("Leave");
+        _link.HouseholdRequests.ShouldBeEmpty();
+
+        model.ConfirmPending.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe("leave");
+        model.IsConfirming.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_refused_leave_shows_why_and_stops_confirming()
+    {
+        _link.Status = InHousehold();
+        _link.Connect(true);
+        _link.HouseholdAnswer = new HouseholdOutcome(false, "The service didn't answer, so the change may not have been made.");
+        var model = Model();
+        model.Show();
+
+        model.AskLeave.Execute(null);
+        model.ConfirmPending.Execute(null);
+
+        model.IsConfirming.ShouldBeFalse();
+        model.ActionMessage.ShouldBe("The service didn't answer, so the change may not have been made.");
     }
 }

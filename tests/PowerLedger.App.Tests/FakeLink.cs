@@ -124,6 +124,9 @@ internal sealed class FakeLink : IServiceLink
     /// <summary>What every household request comes back as.</summary>
     public HouseholdOutcome HouseholdAnswer { get; set; } = new(true, "Done.");
 
+    /// <summary>When set, a household request completes only once the test resolves this, to test what happens meanwhile.</summary>
+    public TaskCompletionSource<HouseholdOutcome>? HouseholdGate { get; set; }
+
     public Task<IReadOnlyList<FoundPc>?> BrowsePcsAsync(CancellationToken cancel = default) => Task.FromResult(IsConnected ? FoundPcs : null);
 
     public Task<HouseholdOutcome> AddPcAsync(string instanceId, CancellationToken cancel = default) => Household(instanceId);
@@ -134,11 +137,19 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<HouseholdOutcome> AnswerPromptAsync(string promptId, bool accept, CancellationToken cancel = default) => Household((promptId, accept));
 
+    public Task<HouseholdOutcome> RemovePcAsync(string deviceId, CancellationToken cancel = default) => Household(("remove", deviceId));
+
+    public Task<HouseholdOutcome> LeaveHouseholdAsync(CancellationToken cancel = default) => Household("leave");
+
+    public Task<HouseholdOutcome> RenamePcAsync(string name, CancellationToken cancel = default) => Household(("rename", name));
+
+    public Task<HouseholdOutcome> SetDiscoverableAsync(bool on, CancellationToken cancel = default) => Household(("discoverable", on));
+
     private Task<HouseholdOutcome> Household(object request)
     {
         if (!IsConnected) return Task.FromResult(HouseholdOutcome.NotConnected);
         HouseholdRequests.Add(request);
-        return Task.FromResult(HouseholdAnswer);
+        return HouseholdGate?.Task ?? Task.FromResult(HouseholdAnswer);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

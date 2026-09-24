@@ -20,6 +20,14 @@ internal sealed record HouseholdPeriod(string Title, string Energy, IReadOnlyLis
 /// ("synced 2 minutes ago", "last seen 3 days ago", "left").</summary>
 internal sealed record HouseholdMemberDisplay(string DeviceId, string Name, string Kind, bool IsThisPc, string Energy, double Share, string Status);
 
+/// <summary>What Remove or Leave is waiting to be told to go ahead with (households design §2: removing and leaving ask first).</summary>
+internal enum PendingAction
+{
+    None,
+    RemovePc,
+    LeaveHousehold,
+}
+
 /// <summary>
 /// The Household page (households design §2, Plan N task A1): today's, this week's and this month's energy and cost, a
 /// bar per PC sized by its share of this month, and each PC's name, kind and sync status. It reads the service's status,
@@ -48,6 +56,13 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private HouseholdPeriod _month;
     private IReadOnlyList<HouseholdMemberDisplay> _members = [];
     private string? _message = Explanation;
+    private string _nameInput = "";
+    private string? _lastServerName;
+    private string? _nameMessage;
+    private PendingAction _pending = PendingAction.None;
+    private HouseholdMemberDisplay? _pendingMember;
+    private string? _confirmText;
+    private string? _actionMessage;
 
     public HouseholdViewModel(IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture)
     {
@@ -61,6 +76,15 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         _week = Empty("This week");
         _month = Empty("This month");
         AddPc = new RelayCommand(() => AddPcRequested?.Invoke());
+        SaveName = new RelayCommand(() => _ = SaveNameAsync(), () => IsValidName(_nameInput));
+        AskRemove = new RelayCommand<HouseholdMemberDisplay>(member =>
+        {
+            if (member is not null && !member.IsThisPc)
+                BeginConfirm(PendingAction.RemovePc, member, $"Remove {member.Name} from your household? It will need to be added again to rejoin.");
+        });
+        AskLeave = new RelayCommand(() => BeginConfirm(PendingAction.LeaveHousehold, null, "Leave this household? You can join or start another one later."));
+        ConfirmPending = new RelayCommand(() => _ = ConfirmPendingAsync());
+        CancelPending = new RelayCommand(EndConfirm);
     }
 
     /// <summary>False before a household exists, or once this PC has left one; the page shows the explanation instead.</summary>
@@ -91,6 +115,48 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     public ICommand AddPc { get; }
 
     public event Action? AddPcRequested;
+
+    /// <summary>Rename this PC's box: follows the service's name until the user types a different one (households design
+    /// §2, 1 to 40 characters).</summary>
+    public string NameInput
+    {
+        get => _nameInput;
+        set
+        {
+            if (SetProperty(ref _nameInput, value)) SaveName.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>Why the last rename didn't stick, or null.</summary>
+    public string? NameMessage { get => _nameMessage; private set => SetProperty(ref _nameMessage, value); }
+
+    public IRelayCommand SaveName { get; }
+
+    /// <summary>Remove or Leave is waiting on Confirm or Cancel.</summary>
+    public bool IsConfirming => _pending != PendingAction.None;
+
+    /// <summary>What Remove or Leave is asking, or null.</summary>
+    public string? ConfirmText
+    {
+        get => _confirmText;
+        private set
+        {
+            if (SetProperty(ref _confirmText, value)) OnPropertyChanged(nameof(IsConfirming));
+        }
+    }
+
+    /// <summary>Why the last Remove or Leave didn't go through, or null.</summary>
+    public string? ActionMessage { get => _actionMessage; private set => SetProperty(ref _actionMessage, value); }
+
+    /// <summary>Asks first: another PC's row offers this, never this PC's own.</summary>
+    public IRelayCommand<HouseholdMemberDisplay> AskRemove { get; }
+
+    /// <summary>Asks first.</summary>
+    public IRelayCommand AskLeave { get; }
+
+    public IRelayCommand ConfirmPending { get; }
+
+    public IRelayCommand CancelPending { get; }
 
     /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
     public void Show()
@@ -152,6 +218,9 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         Month = PeriodOf("This month", snapshot.Month);
         Members = Rows(household!, snapshot, now);
         Message = null;
+        // Follows the service's name, unless the user has typed one it hasn't sent yet.
+        if (_lastServerName is null || _nameInput == _lastServerName) NameInput = household!.Name;
+        _lastServerName = household!.Name;
     }
 
     private HouseholdPeriod PeriodOf(string title, HouseholdRangeTotals totals) => new(
@@ -184,4 +253,53 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     }
 
     private HouseholdPeriod Empty(string title) => new(title, Format.Kwh(0, _culture), []);
+
+    private static bool IsValidName(string input) => input.Trim().Length is >= 1 and <= 40;
+
+    /// <summary>Sends the trimmed name (households design §2, RenamePcRequest: 1 to 40 characters). Call on the UI thread.</summary>
+    private async Task SaveNameAsync()
+    {
+        var name = _nameInput.Trim();
+        var result = await _link.RenamePcAsync(name).ConfigureAwait(false);
+        _threads.Post(() =>
+        {
+            if (result.Ok) _lastServerName = name;
+            NameMessage = result.Ok ? null : result.Message;
+        });
+    }
+
+    private void BeginConfirm(PendingAction action, HouseholdMemberDisplay? member, string text)
+    {
+        _pending = action;
+        _pendingMember = member;
+        ActionMessage = null;
+        ConfirmText = text;
+    }
+
+    private void EndConfirm()
+    {
+        _pending = PendingAction.None;
+        _pendingMember = null;
+        ConfirmText = null;
+    }
+
+    /// <summary>Removing and leaving ask first (households design §2); this sends the one that was confirmed. Call on the
+    /// UI thread.</summary>
+    private async Task ConfirmPendingAsync()
+    {
+        var action = _pending;
+        var member = _pendingMember;
+        var result = action switch
+        {
+            PendingAction.RemovePc when member is not null => await _link.RemovePcAsync(member.DeviceId).ConfigureAwait(false),
+            PendingAction.LeaveHousehold => await _link.LeaveHouseholdAsync().ConfigureAwait(false),
+            _ => HouseholdOutcome.NoAnswer,
+        };
+        _threads.Post(() =>
+        {
+            EndConfirm();
+            ActionMessage = result.Ok ? null : result.Message;
+            if (result.Ok) Refresh();
+        });
+    }
 }

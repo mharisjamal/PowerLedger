@@ -78,6 +78,9 @@
                                     <StackPanel DockPanel.Dock="Right" Margin="16,0,0,0">
                                         <TextBlock Style="{StaticResource Text.Number}" Text="{Binding Energy}" HorizontalAlignment="Right" />
                                         <TextBlock Style="{StaticResource Text.Muted}" Text="{Binding Status}" HorizontalAlignment="Right" />
+                                        <Button Style="{StaticResource Link}" Content="Remove" HorizontalAlignment="Right" Margin="0,4,0,0"
+                                                Command="{Binding DataContext.AskRemove, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" Visibility="{Binding IsThisPc, Converter={StaticResource HiddenWhen}}" />
                                     </StackPanel>
                                     <StackPanel>
                                         <DockPanel LastChildFill="False">
@@ -99,6 +102,27 @@
                 </ItemsControl>
 
                 <Button Style="{StaticResource Link}" Margin="0,20,0,0" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
+
+                <TextBlock Style="{StaticResource Text.Eyebrow}" Margin="0,28,0,10" Text="MANAGE THIS HOUSEHOLD" />
+                <StackPanel Visibility="{Binding IsConfirming, Converter={StaticResource HiddenWhen}}">
+                    <DockPanel MaxWidth="420" HorizontalAlignment="Left">
+                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource Text.Muted}" Text="This PC's name" Margin="0,0,10,0" VerticalAlignment="Center" />
+                        <Button DockPanel.Dock="Right" Style="{StaticResource Quiet}" Content="Save" Margin="8,0,0,0" Command="{Binding SaveName}" />
+                        <TextBox Style="{StaticResource Field}" Text="{Binding NameInput, UpdateSourceTrigger=PropertyChanged}" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Text.Muted}" Margin="0,6,0,0" Foreground="{DynamicResource Brush.Amber}" Text="{Binding NameMessage}"
+                               Visibility="{Binding NameMessage, Converter={StaticResource VisibleWhenText}}" />
+                    <Button Style="{StaticResource Quiet}" Margin="0,16,0,0" Content="Leave this household…" Command="{Binding AskLeave}" HorizontalAlignment="Left" />
+                </StackPanel>
+                <StackPanel Visibility="{Binding IsConfirming, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" MaxWidth="420" HorizontalAlignment="Left" Text="{Binding ConfirmText}" />
+                    <TextBlock Style="{StaticResource Text.Muted}" Margin="0,8,0,0" Foreground="{DynamicResource Brush.Amber}" Text="{Binding ActionMessage}"
+                               Visibility="{Binding ActionMessage, Converter={StaticResource VisibleWhenText}}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Style="{StaticResource Quiet}" Content="Cancel" Command="{Binding CancelPending}" />
+                        <Button Style="{StaticResource Quiet}" Content="Confirm" Command="{Binding ConfirmPending}" Margin="8,0,0,0" />
+                    </StackPanel>
+                </StackPanel>
             </StackPanel>
 
         </StackPanel>

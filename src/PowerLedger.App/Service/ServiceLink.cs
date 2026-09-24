@@ -114,6 +114,17 @@ internal interface IServiceLink : IAsyncDisposable
 
     /// <summary>The user's answer to a pushed Join or Approve prompt.</summary>
     Task<HouseholdOutcome> AnswerPromptAsync(string promptId, bool accept, CancellationToken cancel = default);
+
+    /// <summary>Removes another PC from the household; the household key changes (households design §6).</summary>
+    Task<HouseholdOutcome> RemovePcAsync(string deviceId, CancellationToken cancel = default);
+
+    Task<HouseholdOutcome> LeaveHouseholdAsync(CancellationToken cancel = default);
+
+    /// <summary>This PC's name in the household, 1 to 40 characters.</summary>
+    Task<HouseholdOutcome> RenamePcAsync(string name, CancellationToken cancel = default);
+
+    /// <summary>Whether other PCs on a Private network can find this one.</summary>
+    Task<HouseholdOutcome> SetDiscoverableAsync(bool on, CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -228,6 +239,18 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public Task<HouseholdOutcome> AnswerPromptAsync(string promptId, bool accept, CancellationToken cancel = default)
         => HouseholdAsync(new AnswerPromptRequest(NextId(), promptId, accept), cancel);
+
+    public Task<HouseholdOutcome> RemovePcAsync(string deviceId, CancellationToken cancel = default)
+        => HouseholdAsync(new RemovePcRequest(NextId(), deviceId), cancel);
+
+    public Task<HouseholdOutcome> LeaveHouseholdAsync(CancellationToken cancel = default)
+        => HouseholdAsync(new LeaveHouseholdRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> RenamePcAsync(string name, CancellationToken cancel = default)
+        => HouseholdAsync(new RenamePcRequest(NextId(), name), cancel);
+
+    public Task<HouseholdOutcome> SetDiscoverableAsync(bool on, CancellationToken cancel = default)
+        => HouseholdAsync(new SetDiscoverableRequest(NextId(), on), cancel);
 
     public async ValueTask DisposeAsync()
     {
