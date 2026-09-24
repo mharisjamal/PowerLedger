@@ -24,7 +24,8 @@ internal interface IHouseholdRequests
 {
     /// <summary>Answers within <see cref="HouseholdWorker.AppWait"/>: work that takes longer, a pairing say, goes on after the
     /// answer and reports through pushed notices.</summary>
-    Task<PipeMessage> HandleAsync(PipeRequest request, CancellationToken cancel);
+    /// <param name="session">The Windows session of the pipe client that asked; null when Windows wouldn't say.</param>
+    Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel);
 }
 
 /// <summary>
@@ -51,6 +52,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     internal const string Busy = "The household is busy. Try again in a moment.";
     internal const string NotInOne = "This PC isn't in a household.";
+    internal const string NotAtTheScreen = "Only someone at this PC's screen can change its household.";
 
     private readonly StatusBoard _board;
     private readonly NoticeHub _notices;
@@ -217,8 +219,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>Wakes the worker for a turn soon, as after a pairing, so the server hears of it.</summary>
     internal void Kick() => _kick.Release();
 
-    public async Task<PipeMessage> HandleAsync(PipeRequest request, CancellationToken cancel)
+    /// <summary>Carries out a request from the App. Anything that changes the household, pairing and signing in included,
+    /// is taken only from a client in the console session, the one at the screen (plan 0.8): another user's session on the
+    /// same PC, or a service, may only look for PCs.</summary>
+    public async Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel)
     {
+        if (request is not BrowsePcsRequest && !_notices.AtTheScreen(session)) return Reply(request.Id, false, NotAtTheScreen);
         try
         {
             return request switch

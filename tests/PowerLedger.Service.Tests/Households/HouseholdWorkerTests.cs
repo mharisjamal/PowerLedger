@@ -362,6 +362,30 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         desktop.Board.Household!.Problem.ShouldNotBeNull().ShouldStartWith("Couldn't reach the server");
     }
 
+    public static TheoryData<PipeRequest> Changes() =>
+    [
+        new AddPcRequest(1, "a1"), new StartCodePairingRequest(2), new JoinByCodeRequest(3, "K7QM-2XHD-9PW4-R8TA"), new AnswerPromptRequest(4, "p1", true),
+        new RemovePcRequest(5, "0123456789abcdef0123456789abcdef"), new LeaveHouseholdRequest(6), new RenamePcRequest(7, "Study PC"),
+        new SetDiscoverableRequest(8, false), new SignInRequest(9, "microsoft", "token", "salt"), new SignOutRequest(10), new DeleteAccountRequest(11),
+        new CancelPairingRequest(12), new NewRecoveryCodeRequest(13),
+    ];
+
+    [Theory]
+    [MemberData(nameof(Changes))]
+    public async Task A_change_asked_from_outside_the_console_session_is_refused(PipeRequest request)
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+
+        foreach (var session in new uint?[] { WorkerPc.Screen + 1, null, NoticeHub.NoSession })
+        {
+            (await desktop.Worker.HandleAsync(request, session, CancellationToken.None)).ShouldBe(
+                new HouseholdReply(request.Id, false, HouseholdWorker.NotAtTheScreen));
+        }
+        desktop.Worker.Store.Name.ShouldBe("Desktop-7");
+        desktop.Worker.Store.Discoverable.ShouldBeTrue();
+        (await desktop.Worker.HandleAsync(new BrowsePcsRequest(14), WorkerPc.Screen + 1, CancellationToken.None)).ShouldBeOfType<FoundPcsReply>();
+    }
+
     [Fact]
     public async Task Signing_out_or_deleting_the_account_while_signed_out_says_so()
     {

@@ -128,6 +128,7 @@ internal sealed class PipeServer(
     private async Task ServeAsync(NamedPipeServerStream stream, CancellationToken stop)
     {
         var client = Guid.NewGuid().ToString("N");
+        var session = Households.ConsoleSessions.OfClient(stream.SafePipeHandle);
         using var done = CancellationTokenSource.CreateLinkedTokenSource(stop);
         await using var channel = new MessageChannel(stream);
         ChannelReader<ReadingFrame>? frames = null;
@@ -137,15 +138,12 @@ internal sealed class PipeServer(
         {
             while (await channel.ReadAsync(done.Token).ConfigureAwait(false) is { } message)
             {
-                var reply = await handler.HandleAsync(message, client, done.Token).ConfigureAwait(false);
+                var reply = await handler.HandleAsync(message, client, done.Token, session).ConfigureAwait(false);
                 await channel.WriteAsync(reply, done.Token).ConfigureAwait(false);
                 if (message is SubscribeRequest && frames is null)
                 {
                     frames = feed.Subscribe();
-                    if (notices is not null && Households.ConsoleSessions.OfClient(stream.SafePipeHandle) is { } session)
-                    {
-                        householdNotices = notices.Subscribe(session);
-                    }
+                    if (notices is not null && session is { } at) householdNotices = notices.Subscribe(at);
                     pump = Task.WhenAll(PumpAsync(channel, frames, done.Token), PumpAsync(channel, householdNotices, done.Token));
                 }
             }

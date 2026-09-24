@@ -315,8 +315,9 @@ public sealed class PipeHandlerTests : IDisposable
         var households = new FakeHouseholds(request => Task.FromResult<PipeMessage>(new HouseholdReply(request.Id, true, "Done.")));
         var handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock, _sharing, households);
 
-        (await handler.HandleAsync(request, "client-1", CancellationToken.None)).ShouldBe(new HouseholdReply(request.Id, true, "Done."));
+        (await handler.HandleAsync(request, "client-1", CancellationToken.None, session: 3)).ShouldBe(new HouseholdReply(request.Id, true, "Done."));
         households.Received.ShouldBe([request]);
+        households.Sessions.ShouldBe([(uint?)3]);                              // the client's session goes with it
         (await Send(request)).ShouldBe(new ErrorReply(request.Id, "The service does not handle that request."));
     }
 
@@ -340,6 +341,7 @@ public sealed class PipeHandlerTests : IDisposable
     private sealed class FakeHouseholds(Func<PipeRequest, Task<PipeMessage>> answer) : Households.IHouseholdRequests
     {
         private readonly List<PipeRequest> _received = [];
+        private readonly List<uint?> _sessions = [];
 
         public List<PipeRequest> Received
         {
@@ -349,9 +351,21 @@ public sealed class PipeHandlerTests : IDisposable
             }
         }
 
-        public Task<PipeMessage> HandleAsync(PipeRequest request, CancellationToken cancel)
+        public List<uint?> Sessions
         {
-            lock (_received) _received.Add(request);
+            get
+            {
+                lock (_received) return [.. _sessions];
+            }
+        }
+
+        public Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel)
+        {
+            lock (_received)
+            {
+                _received.Add(request);
+                _sessions.Add(session);
+            }
             return answer(request);
         }
     }

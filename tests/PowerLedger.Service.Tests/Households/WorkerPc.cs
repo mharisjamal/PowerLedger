@@ -34,7 +34,7 @@ internal sealed class WorkerPc : IAsyncDisposable
         TimeSpan codeWait)
     {
         Board.Publish(ServiceSettings.Default with { Profile = ServiceSettings.Default.Profile with { Chassis = kind } });
-        var notices = new NoticeHub(() => 1);
+        var notices = new NoticeHub(() => Screen);
         _client = client;
         var environment = new HouseholdEnvironment(
             network.Join(), Category, _client, IPAddress.Loopback, () => name, RunLoop: false,
@@ -43,7 +43,7 @@ internal sealed class WorkerPc : IAsyncDisposable
         Worker = new HouseholdWorker(_database.Db, Board, notices, environment, clock, NullLogger<HouseholdWorker>.Instance);
         Household = new HouseholdRepository(_database.Db);
         if (!appAtTheScreen) return;
-        var screen = notices.Subscribe(1);
+        var screen = notices.Subscribe(Screen);
         if (!autoAnswer)
         {
             _app = screen;
@@ -83,7 +83,10 @@ internal sealed class WorkerPc : IAsyncDisposable
     public AggregateRepository Aggregates => new(_database.Db);
 
     public async Task<T> Send<T>(PipeRequest request) where T : PipeMessage =>
-        (await Worker.HandleAsync(request, CancellationToken.None)).ShouldBeOfType<T>();
+        (await Worker.HandleAsync(request, Screen, CancellationToken.None)).ShouldBeOfType<T>();
+
+    /// <summary>The session at this PC's screen, where its App runs.</summary>
+    public const uint Screen = 1;
 
     /// <summary>The next notice of <paramref name="kind"/> the App gets, passing over others.</summary>
     public async Task<HouseholdNotice> Next(NoticeKind kind, Func<string, bool>? matching = null)
@@ -124,7 +127,7 @@ internal sealed class WorkerPc : IAsyncDisposable
             {
                 if (notice is { Kind: NoticeKind.JoinPrompt or NoticeKind.ApprovePrompt or NoticeKind.ConfirmCode, PromptId: { } prompt })
                 {
-                    await Worker.HandleAsync(new AnswerPromptRequest(0, prompt, true), stop);
+                    await Worker.HandleAsync(new AnswerPromptRequest(0, prompt, true), Screen, stop);
                 }
                 await seen.WriteAsync(notice, stop);
             }

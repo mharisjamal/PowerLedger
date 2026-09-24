@@ -22,6 +22,10 @@ internal sealed class NoticeHub(Func<uint>? consoleSession = null)
     private readonly Lock _gate = new();
     private Subscriber[] _subscribers = [];
 
+    /// <summary>True when <paramref name="session"/> is the one at the screen: only a client there may change the household
+    /// (plan 0.8). A session Windows wouldn't give counts as elsewhere.</summary>
+    public bool AtTheScreen(uint? session) => session is { } given && given != NoSession && given == _consoleSession();
+
     /// <summary>True while a client in the console session is listening: someone can be asked.</summary>
     public bool AnyoneAtTheScreen
     {

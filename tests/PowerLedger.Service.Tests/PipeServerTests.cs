@@ -57,6 +57,31 @@ public sealed class PipeServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_household_request_goes_with_the_session_of_the_client_that_sent_it()
+    {
+        uint? seen = 0;
+        var households = new SessionRecorder(session => seen = session);
+        var handler = new PipeHandler(
+            new LoopCommands(), _board, _monitors, _signals, new TariffRepository(_database.Db), TimeProvider.System, new Sharing.SharingCommands(), households);
+        var name = $"PowerLedger.test.{Guid.NewGuid():N}";
+        var server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, name, _notices);
+        await server.StartAsync(CancellationToken.None);
+        try
+        {
+            await server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
+            await using var client = await ConnectAsync(name);
+            await client.WriteAsync(new SetDiscoverableRequest(1, false));
+            (await client.ReadAsync()).ShouldBe(new HouseholdReply(1, true, "Done."));
+            seen.ShouldBe((uint)System.Diagnostics.Process.GetCurrentProcess().SessionId);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+            server.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task A_request_gets_its_reply_on_the_same_connection()
     {
         await using var client = await ConnectAsync();
@@ -145,10 +170,20 @@ public sealed class PipeServerTests : IAsyncLifetime
         users.PipeAccessRights.HasFlag(PipeAccessRights.CreateNewInstance).ShouldBeFalse();
     }
 
-    private async Task<MessageChannel> ConnectAsync()
+    private async Task<MessageChannel> ConnectAsync(string? name = null)
     {
-        var pipe = new NamedPipeClientStream(".", _name, PipeDirection.InOut, PipeOptions.Asynchronous);
+        var pipe = new NamedPipeClientStream(".", name ?? _name, PipeDirection.InOut, PipeOptions.Asynchronous);
         await pipe.ConnectAsync(5000);
         return new MessageChannel(pipe);
+    }
+
+    /// <summary>Household requests answered at once, noting the session each came from.</summary>
+    private sealed class SessionRecorder(Action<uint?> seen) : Households.IHouseholdRequests
+    {
+        public Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel)
+        {
+            seen(session);
+            return Task.FromResult<PipeMessage>(new HouseholdReply(request.Id, true, "Done."));
+        }
     }
 }
