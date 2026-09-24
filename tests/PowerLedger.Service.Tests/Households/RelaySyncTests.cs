@@ -290,10 +290,41 @@ public sealed class RelaySyncTests : IDisposable
         newcomer.Store.EnterHousehold(Household, 1, _key);
         newcomer.Household.SaveMember(newcomer.AsMember());
 
-        var run = await newcomer.RunAsync();
+        for (var quiet = 1; quiet < RelaySync.QuietRuns; quiet++)
+        {
+            var run = await newcomer.RunAsync();
+            (run.Problem, run.Removed).ShouldBe(((string?)null, false));
+        }
+
+        (await newcomer.RunAsync()).Problem.ShouldBe(RelaySync.NotAddedYet);        // after an hour, the wait shows
+        newcomer.Store.HouseholdId.ShouldBe(Household);
+    }
+
+    [Fact]
+    public async Task Before_the_server_takes_it_again_a_pc_added_back_after_a_removal_waits_instead_of_leaving()
+    {
+        _relay.Remove(Household, _laptop.Id);                                     // removed, which it hadn't heard of
+        _laptop.Store.RelayConfirmed = false;                                     // then paired in again: the add is still on its way
+
+        var run = await _laptop.RunAsync();
 
         (run.Problem, run.Removed).ShouldBe(((string?)null, false));
-        newcomer.Store.HouseholdId.ShouldBe(Household);
+        _laptop.Store.HouseholdId.ShouldBe(Household);
+        _laptop.Store.CurrentKey.ShouldBe(_key);
+    }
+
+    [Fact]
+    public async Task A_clock_far_off_the_servers_shows_as_the_problem_at_once()
+    {
+        using var skewed = new RelayPc("Laptop-2", ChassisKind.Laptop, _relay, new FakeTimeProvider(Now.AddMinutes(12)));
+        skewed.Store.EnterHousehold(Household, 1, _key);
+        skewed.Household.SaveMember(skewed.AsMember());
+        _relay.Seed(Household, skewed.Keys);
+
+        var run = await skewed.RunAsync();
+
+        run.Problem.ShouldBe("This PC's clock is 12 minutes ahead, so the server refuses its requests. Set the clock right.");
+        skewed.Client.Skew.ShouldBe(TimeSpan.FromMinutes(12));
     }
 
     [Fact]

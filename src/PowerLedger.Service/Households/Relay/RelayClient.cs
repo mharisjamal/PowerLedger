@@ -59,6 +59,10 @@ internal sealed class RelayClient : IDisposable
 
     public void Dispose() => _http.Dispose();
 
+    /// <summary>How far this PC's clock was ahead of the server's at its last answer, from the answer's Date; null before one
+    /// came with a Date.</summary>
+    public TimeSpan? Skew { get; private set; }
+
     /// <summary><c>POST /v1/households</c>: makes the household with this PC its first member.</summary>
     public Task<RelayResult<Done>> CreateHouseholdAsync(DeviceKeys keys, string householdId, CancellationToken cancel) =>
         SendAsync<Done>(HttpMethod.Post, "v1/households", Json(new CreateHouseholdBody(householdId, Wire.Encode(keys.SignPublic), Wire.Encode(keys.DhPublic)),
@@ -189,6 +193,7 @@ internal sealed class RelayClient : IDisposable
         try
         {
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancel).ConfigureAwait(false);
+            if (response.Headers.Date is { } date) Skew = _clock.GetUtcNow() - date;
             var bytes = await ReadAsync(response, cancel).ConfigureAwait(false);
             var status = (int)response.StatusCode;
             if (status is >= 200 and < 300) return new RelayResult<byte[]>(status, bytes, null);

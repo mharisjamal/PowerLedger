@@ -516,6 +516,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         else
         {
             _store.AddKey(epoch, key);
+            _store.RelayConfirmed = false;                                     // added again, maybe after a removal it hadn't heard of
         }
         _store.AskedToJoin = null;
         foreach (var member in members.Where(member => member.Id != _keys.DeviceId))

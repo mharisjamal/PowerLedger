@@ -165,8 +165,11 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         var body = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancel);
         lock (_gate) _calls.Add($"{request.Method} {request.RequestUri!.AbsolutePath}");
         if (Down) throw new HttpRequestException("No such host is known.");
-        if (Intercept?.Invoke(request, body) is { } intercepted) return intercepted;
-        lock (_gate) return Route(request, body);
+        HttpResponseMessage response;
+        if (Intercept?.Invoke(request, body) is { } intercepted) response = intercepted;
+        else lock (_gate) response = Route(request, body);
+        response.Headers.Date = clock.GetUtcNow();                             // the server's own clock, as the Worker's answers carry it
+        return response;
     }
 
     private HttpResponseMessage Route(HttpRequestMessage request, byte[] body)

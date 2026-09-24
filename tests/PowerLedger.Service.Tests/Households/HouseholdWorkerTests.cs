@@ -278,6 +278,38 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_pc_added_again_after_a_removal_it_hadnt_heard_of_waits_for_the_server_instead_of_leaving()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        await WorkerPc.Pair(desktop, laptop);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);
+        laptop.Worker.Store.RelayConfirmed.ShouldBeTrue();
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        await desktop.Send<HouseholdReply>(new RemovePcRequest(1, laptop.Worker.DeviceId));
+        laptop.Category.IsPrivate = false;                                       // the laptop is away, and doesn't hear
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        // The desktop's user adds the laptop again by code; the laptop is back before the desktop tells the server so.
+        var code = (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(2))).Code!;
+        await laptop.Send<HouseholdReply>(new JoinByCodeRequest(3, code));
+        await laptop.Send<HouseholdReply>(new AnswerPromptRequest(4, (await laptop.Next(NoticeKind.JoinPrompt)).PromptId!, true));
+        (await laptop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("This PC joined Desktop-7's household.");
+        await desktop.Worker.Running;
+        laptop.Worker.Store.RelayConfirmed.ShouldBeFalse();
+
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);                // 410: the add hasn't reached the server
+        laptop.Worker.Store.HouseholdId.ShouldBe(desktop.Worker.Store.HouseholdId);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);
+
+        laptop.Worker.Store.HouseholdId.ShouldBe(desktop.Worker.Store.HouseholdId);
+        laptop.Worker.Store.RelayConfirmed.ShouldBeTrue();
+        laptop.Board.Household!.Problem.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Removing_a_pc_that_has_left_removes_its_rows_and_this_pc_cant_be_removed()
     {
         var (desktop, laptop, _) = await Household();

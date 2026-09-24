@@ -107,6 +107,16 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
 
     /// <summary>How long a batch under a newer epoch waits for this PC's envelope before it is passed over.</summary>
     public static readonly TimeSpan KeyWait = TimeSpan.FromHours(24);
+
+    /// <summary>Runs the server may refuse a PC it hasn't taken as a member yet before the wait shows as a problem.</summary>
+    public const int QuietRuns = 4;
+
+    /// <summary>How far this PC's clock may be from the server's before its signed requests are refused.</summary>
+    public static readonly TimeSpan ClockSlack = TimeSpan.FromMinutes(5);
+
+    internal const string NotAddedYet = "The server hasn't taken this PC into the household yet. If this goes on, add it again from another PC in the household.";
+
+    private int _unconfirmedRuns;
     private const int FirstChunk = 4000;
 
     /// <summary>One run. Stopping the service cancels it; a run stopped by <paramref name="cancel"/> leaves nothing half-done
@@ -182,6 +192,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                 store.Pending = [.. store.Pending.Skip(1)];
                 continue;
             }
+            if (op.Household == store.HouseholdId && result.Status is 401 or 410) Refused(result);   // not added yet, or a clock far off
             if (result.Removed)
             {
                 if (op.Household == store.HouseholdId) WasRemoved(run);
@@ -334,21 +345,44 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         run.Notices.Add("This PC was removed from the household.");
     }
 
-    /// <summary>A refusal from a household route: 410 says this PC was removed; 401 from a PC the server has never taken as a
-    /// member means it hasn't been added yet, and it waits quietly; anything else is a problem to show.</summary>
+    /// <summary>A refusal from a household route: 410 says this PC was removed; anything else is a problem to show. Before
+    /// the server has taken a request from this PC as a member of this household, a 401 or a 410 means only that it hasn't
+    /// been added, or added again, yet (<see cref="Refused"/>).</summary>
     /// <returns>True for an answer to go on with.</returns>
     private bool Check<T>(RelayResult<T> result, RelayRun run)
     {
-        if (result.Ok) return true;
+        if (result.Ok)
+        {
+            _unconfirmedRuns = 0;
+            return true;
+        }
+        if (result.Status is 401 or 410) Refused(result);
         if (result.Removed)
         {
             WasRemoved(run);
             return false;
         }
-        if (result.Status == 401 && !store.RelayConfirmed) throw new RelayStop(null);  // not added yet: the adder's queue will
         if (result.Transient) throw new RelayStop($"Couldn't sync through the server: {result.Problem}.");
         log.LogWarning("The server refused a household request ({Status}: {Problem})", result.Status, result.Problem);
         throw new RelayStop($"The server refused to sync: {result.Problem}.");
+    }
+
+    /// <summary>
+    /// A 401 or a 410 for this PC's household. With this PC's clock far from the server's, as its answers' Date shows, the
+    /// server refuses every signed request: said at once. Before the server has taken a request from this PC as a member of
+    /// this household, as just after joining or being added again after a removal it hadn't heard of, the PC that added it
+    /// may not have told the server yet: the run stops quietly, and says so only after <see cref="QuietRuns"/> runs.
+    /// Otherwise it returns, and the refusal is taken as it is.
+    /// </summary>
+    private void Refused<T>(RelayResult<T> result)
+    {
+        if (relay.Skew is { } skew && skew.Duration() > ClockSlack)
+        {
+            var minutes = (int)Math.Round(skew.Duration().TotalMinutes);
+            throw new RelayStop($"This PC's clock is {minutes} minutes {(skew > TimeSpan.Zero ? "ahead" : "behind")}, so the server refuses its requests. Set the clock right.");
+        }
+        if (store.RelayConfirmed) return;
+        throw new RelayStop(++_unconfirmedRuns >= QuietRuns ? NotAddedYet : null);
     }
 
     /// <summary>This PC's rows that changed since the last post, oldest change first; a post the server stops part way
