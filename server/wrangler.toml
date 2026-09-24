@@ -18,6 +18,12 @@ name = "ADDRESS_LIMIT"
 namespace_id = "1001"
 simple = { limit = 60, period = 60 }
 
+# Starting a pairing-by-code meeting, per address: far more than anyone pairing needs, far fewer than a flood.
+[[ratelimits]]
+name = "MEETING_LIMIT"
+namespace_id = "1002"
+simple = { limit = 10, period = 60 }
+
 [triggers]
 crons = ["17 3 * * *"]
 

@@ -11,7 +11,7 @@ import {
 } from "../../src/households/auth";
 import { base64urlDecode } from "../../src/households/encoding";
 import vectors from "../fixtures/households/vectors.json";
-import { newDevice, randomHouseholdId, signedRequest } from "./support";
+import { aliasedDevice, newDevice, randomHouseholdId, signedRequest } from "./support";
 
 const vectorBody = base64urlDecode(vectors.request.body)!;
 const vectorNow = vectors.request.time * 1000;
@@ -114,7 +114,7 @@ describe("verifySigned", () => {
   it("refuses a PC that isn't a member of the path's household", async () => {
     const { request, body } = vectorRequest({ path: `/v1/households/${randomHouseholdId()}/batches` });
     const result = await verifySigned(request, env, body, { now: vectorNow });
-    expect((result as Response).status).toBe(403);
+    expect((result as Response).status).toBe(401);
   });
 
   it("refuses a removed member", async () => {
@@ -124,7 +124,24 @@ describe("verifySigned", () => {
 
     const request = await signedRequest(device, "GET", `/v1/households/${hid}/members`);
     const result = await verifySigned(request, env, await bodyOf(request));
-    expect((result as Response).status).toBe(403);
+    expect((result as Response).status).toBe(410);
+    expect(await (result as Response).json()).toEqual({ error: "This PC was removed from the household." });
+  });
+
+  it("gives no member row and a bad signature the same 401, telling a removed PC so only when its signature is good", async () => {
+    const removed = await newDevice();
+    const stranger = await newDevice();
+    const hid = randomHouseholdId();
+    await seedMember(hid, removed.id, removed.sign, Date.now());
+
+    const fromStranger = await signedRequest(stranger, "GET", `/v1/households/${hid}/members`);
+    const noRow = (await verifySigned(fromStranger, env, new Uint8Array(0))) as Response;
+    const forged = await signedRequest(removed, "POST", `/v1/households/${hid}/batches`, "{}", { signedBody: "{ }" });
+    const badSignature = (await verifySigned(forged, env, await bodyOf(forged))) as Response;
+
+    expect(noRow.status).toBe(401);
+    expect(badSignature.status).toBe(401);
+    expect(await noRow.json()).toEqual(await badSignature.json());
   });
 
   it("accepts a fresh request from a current member, 300 s off at most", async () => {
@@ -189,6 +206,24 @@ describe("verifySigned", () => {
     expect((await verifySigned(over, env, new Uint8Array(0)) as Response).status).toBe(429);
   });
 
+  it("doesn't count a replayed request against the PC's day", async () => {
+    const device = await newDevice();
+    const hid = randomHouseholdId();
+    await seedMember(hid, device.id, device.sign);
+    const request = await signedRequest(device, "GET", `/v1/households/${hid}/members`);
+    expect(await verifySigned(request.clone(), env, new Uint8Array(0))).not.toBeInstanceOf(Response);
+
+    for (let i = 0; i < 3; i++) {
+      expect(((await verifySigned(request.clone(), env, new Uint8Array(0))) as Response).status).toBe(401);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const row = await env.DB.prepare("SELECT count FROM device_requests WHERE device = ? AND utc_day = ?")
+      .bind(device.id, today)
+      .first<{ count: number }>();
+    expect(row?.count).toBe(1);
+  });
+
   it("takes a day of 15-minute syncs: a PC's 400th request today is still fine", async () => {
     const device = await newDevice();
     const hid = randomHouseholdId();
@@ -212,6 +247,13 @@ describe("verifySignedByKey", () => {
   it("refuses a signature over another path, even by the right key", async () => {
     const { request, body } = vectorRequest({ path: "/v1/households" });
     const result = await verifySignedByKey(request, env, body, vectors.signSpki, { now: vectorNow });
+    expect((result as Response).status).toBe(401);
+  });
+
+  it("refuses a key posted in an aliased encoding, even signed by it and naming the ID its bytes give", async () => {
+    const aliased = await aliasedDevice(await newDevice());
+    const request = await signedRequest(aliased, "POST", "/v1/households", "{}");
+    const result = await verifySignedByKey(request, env, await bodyOf(request), aliased.sign);
     expect((result as Response).status).toBe(401);
   });
 

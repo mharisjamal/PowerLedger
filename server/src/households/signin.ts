@@ -1,8 +1,8 @@
 import { sha256hex } from "../auth";
-import { verifySignedByKey } from "./auth";
+import { readSignedHeaders, verifySignedByKey } from "./auth";
 import { base64urlEncode, sha256 } from "./encoding";
 import { readKeys, readSmall } from "./households";
-import { addressOf, errorResponse, parseObject } from "./http";
+import { errorResponse, overAddressLimit, parseObject } from "./http";
 import { checkIdToken, JwksCache, type Provider } from "./idtoken";
 
 const MAX_NONCE_CHARS = 256;
@@ -32,11 +32,14 @@ export async function boundNonce(device: string, salt: string): Promise<string> 
  * POST /v1/auth/signin: {"provider","idToken","nonce","sign","dh"}, signed by the PC with that signing key; "nonce" is a
  * salt, and the ID token's nonce claim must be boundNonce(the signing PC's device ID, salt). Checks the ID token, keeps
  * the account as provider and subject only, and gives the PC a new session: 32 random bytes, kept hashed. Answers
- * {"session","householdId","hasRecovery"}, the household being the one the account is linked to, or null.
+ * {"session","account","householdId","hasRecovery"}: the account's opaque ID (what join requests show), and the
+ * household it's linked to, or null.
  */
 export async function handleSignin(request: Request, env: Cloudflare.Env, deps: SigninDeps = defaultDeps): Promise<Response> {
-  const limited = await env.ADDRESS_LIMIT.limit({ key: addressOf(request) });
-  if (!limited.success) return errorResponse(429, "Too many requests from this address.");
+  const limited = await overAddressLimit(request, env);
+  if (limited) return limited;
+  const headers = readSignedHeaders(request, Date.now());
+  if (headers instanceof Response) return headers;
 
   const body = await readSmall(request);
   if (body instanceof Response) return body;
@@ -82,6 +85,7 @@ export async function handleSignin(request: Request, env: Cloudflare.Env, deps: 
 
   return Response.json({
     session,
+    account: account!.id,
     householdId: (link.results[0] as { household: string } | undefined)?.household ?? null,
     hasRecovery: recovery.results.length > 0,
   });

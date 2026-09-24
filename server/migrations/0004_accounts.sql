@@ -34,9 +34,9 @@ CREATE TABLE join_requests (                  -- PCs signed in as a linked accou
 );
 CREATE INDEX join_requests_account ON join_requests(account);
 CREATE TABLE recovery (
-  account  TEXT PRIMARY KEY,
-  body     TEXT NOT NULL,                     -- the household key sealed under the recovery code's key, base64url, as sent
-  verifier TEXT NOT NULL,                     -- base64url, 32 bytes made from the household key: what recover's proof is checked with
-  epoch    INTEGER,                           -- the sealed key's epoch, when the PC says
-  updated  INTEGER NOT NULL                   -- ms
+  account       TEXT PRIMARY KEY,
+  body          TEXT NOT NULL,                -- the household key sealed under the recovery code's key, base64url, as sent
+  verifier_hash TEXT NOT NULL,                -- hex SHA-256 of the 32-byte verifier recover must send; never the verifier
+  epoch         INTEGER NOT NULL,             -- the household's epoch when this was put: recover needs it still current
+  updated       INTEGER NOT NULL              -- ms
 );

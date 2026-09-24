@@ -24,6 +24,8 @@ export interface Jwk {
   e?: string;
   alg?: string;
   use?: string;
+  /** Microsoft's: the issuer the key signs for, "https://login.microsoftonline.com/{tenantid}/v2.0" for any tenant. */
+  issuer?: string;
 }
 
 export type JwksFetcher = (url: string) => Promise<Jwk[]>;
@@ -92,10 +94,11 @@ function audienceIsRight(claims: Record<string, unknown>, clientId: string): boo
 }
 
 /**
- * Checks an OpenID Connect ID token (households design §7): RS256 by a key in the provider's JWKS, the provider's
- * issuer, this app's client ID as audience, not expired nor issued in the future (5 minutes' allowance), and the nonce
- * the sign-in was started with, which the caller works out for the PC signing in (signin.ts, boundNonce). The subject is
- * all that's kept.
+ * Checks an OpenID Connect ID token (households design §7): RS256 only, by a key in the provider's JWKS (a Microsoft
+ * key's own issuer, when it has one, must fit); the provider's issuer; this app's client ID as audience (several only
+ * with azp this app); an expiry not past, an issue time not in the future and a not-before not to come (5 minutes'
+ * allowance); and the nonce the sign-in was started with, which the caller works out for the PC signing in (signin.ts,
+ * boundNonce). The subject, scoped to its issuer (tenant and sub for Microsoft), is all that's kept.
  */
 export async function checkIdToken(
   token: string,
@@ -138,13 +141,22 @@ export async function checkIdToken(
 
   const seconds = now / 1000;
   if (!issuerIsRight(provider, claims)) return refuse("The ID token is from another issuer.");
+  // A Microsoft key may name the issuers it signs for, {tenantid} standing for the token's tenant.
+  if (provider === "microsoft" && typeof jwk.issuer === "string" && jwk.issuer.replace("{tenantid}", String(claims.tid)) !== claims.iss) {
+    return refuse("The ID token's key signs for another issuer.");
+  }
   if (!audienceIsRight(claims, clientId)) return refuse("The ID token is for another app.");
   if (typeof claims.exp !== "number" || claims.exp + CLOCK_SKEW_SECONDS < seconds) return refuse("The ID token has expired.");
-  if (typeof claims.iat === "number" && claims.iat - CLOCK_SKEW_SECONDS > seconds) return refuse("The ID token is from the future.");
+  if (typeof claims.iat !== "number") return refuse("The ID token has no issue time.");
+  if (claims.iat - CLOCK_SKEW_SECONDS > seconds) return refuse("The ID token is from the future.");
+  if (claims.nbf !== undefined && (typeof claims.nbf !== "number" || claims.nbf - CLOCK_SKEW_SECONDS > seconds)) {
+    return refuse("The ID token is not valid yet.");
+  }
   if (claims.nonce !== nonce) return refuse("The ID token wasn't asked for by this PC: its nonce doesn't match.");
   if (typeof claims.sub !== "string" || claims.sub.length === 0 || claims.sub.length > 255) {
     return refuse("The ID token has no subject.");
   }
 
-  return { ok: true, subject: claims.sub };
+  // Scoped to its issuer: a Microsoft subject is only unique within its tenant; Google has the one issuer.
+  return { ok: true, subject: provider === "microsoft" ? `${claims.tid}:${claims.sub}` : claims.sub };
 }

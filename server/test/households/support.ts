@@ -26,6 +26,25 @@ export async function newDevice(): Promise<TestDevice> {
   };
 }
 
+/** The same P-256 public key as `spki` (base64url, canonical), re-encoded with its point compressed: an alias WebCrypto
+ * imports as the same key, though its bytes, and so a device ID hashed from them, differ. */
+export function compressedSpki(spki: string): string {
+  const canonical = Uint8Array.from(atob(spki.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const algorithm = canonical.slice(2, 23); // SEQUENCE { ecPublicKey, prime256v1 }
+  const x = canonical.slice(27, 59);
+  const yIsOdd = (canonical[90] & 1) === 1;
+  const body = [...algorithm, 0x03, 0x22, 0x00, yIsOdd ? 0x03 : 0x02, ...x];
+  return base64urlEncode(new Uint8Array([0x30, body.length, ...body]));
+}
+
+/** A PC whose signing key is posted in its compressed alias, with the device ID those bytes give. */
+export async function aliasedDevice(device: TestDevice): Promise<TestDevice> {
+  const sign = compressedSpki(device.sign);
+  const bytes = Uint8Array.from(atob(sign.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return { ...device, sign, id: hex(digest.slice(0, 16)) };
+}
+
 export function randomHouseholdId(): string {
   return hex(crypto.getRandomValues(new Uint8Array(16)));
 }
@@ -115,8 +134,17 @@ export async function createHousehold(device: TestDevice): Promise<string> {
   return id;
 }
 
-/** `by`, a member, adds `device`. */
+/** The joining PC's proof that it holds its keys and asks to join this household: its signature over UTF-8
+ * "powerledger join|{hid}|{sign}|{dh}", the keys as the base64url posted. */
+export async function joinProof(device: TestDevice, householdId: string, sign = device.sign, dh = device.dh): Promise<string> {
+  const statement = new TextEncoder().encode(`powerledger join|${householdId}|${sign}|${dh}`);
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, device.signPrivate, statement);
+  return base64urlEncode(new Uint8Array(signature));
+}
+
+/** `by`, a member, adds `device`, with its proof. */
 export async function addMember(householdId: string, by: TestDevice, device: TestDevice): Promise<void> {
-  const response = await signedFetch(by, "POST", `/v1/households/${householdId}/members`, { sign: device.sign, dh: device.dh });
+  const body = { sign: device.sign, dh: device.dh, proof: await joinProof(device, householdId) };
+  const response = await signedFetch(by, "POST", `/v1/households/${householdId}/members`, body);
   if (response.status !== 200) throw new Error(`add gave ${response.status}: ${await response.text()}`);
 }

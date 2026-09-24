@@ -1,5 +1,5 @@
 import { readBounded } from "../body";
-import { deleteBodies, getBody, putBody } from "../store";
+import { deleteBodies, getBodies, putBody } from "../store";
 import { type MemberRow } from "./auth";
 import { base64urlDecode, base64urlEncode } from "./encoding";
 import { isEpoch } from "./households";
@@ -14,6 +14,47 @@ export const MAX_PAGE_BYTES = 4 * 1024 * 1024;
 const MIN_SEALED_BYTES = 28;
 const WHOLE_NUMBER = /^[0-9]{1,15}$/;
 
+/** What one PC may post in a UTC day: a year's backfill fits many times over, a flood doesn't. */
+export const MAX_BATCHES_PER_DAY = 200;
+export const MAX_BATCH_BYTES_PER_DAY = 5 * 1024 * 1024;
+/** What the whole server takes in a UTC day, a safety cap on storage whatever happens. */
+export const MAX_TOTAL_BATCH_BYTES_PER_DAY = 2 * 1024 * 1024 * 1024;
+const BUSY = "The server is busy; try again later.";
+
+/**
+ * Counts a batch of `size` sealed bytes against the PC's day (429 past 200 batches or 5 MB) and then the server's (503
+ * past 2 GB, giving the PC's count back); null when both have room.
+ */
+async function countBatch(env: Cloudflare.Env, device: string, size: number, day: string): Promise<Response | null> {
+  const mine = await env.DB.prepare(
+    `INSERT INTO device_requests (device, utc_day, count, batches, batch_bytes) VALUES (?1, ?2, 0, 1, ?3)
+     ON CONFLICT (device, utc_day) DO UPDATE SET
+       batches = device_requests.batches + 1, batch_bytes = device_requests.batch_bytes + excluded.batch_bytes
+     WHERE device_requests.batches < ?4 AND device_requests.batch_bytes + excluded.batch_bytes <= ?5
+     RETURNING batches`,
+  )
+    .bind(device, day, size, MAX_BATCHES_PER_DAY, MAX_BATCH_BYTES_PER_DAY)
+    .first();
+  if (!mine) return errorResponse(429, "This PC has sent as many batches as it can today.");
+
+  const all = await env.DB.prepare(
+    `INSERT INTO daily_totals (utc_day, batch_bytes) VALUES (?1, ?2)
+     ON CONFLICT (utc_day) DO UPDATE SET batch_bytes = daily_totals.batch_bytes + excluded.batch_bytes
+     WHERE daily_totals.batch_bytes + excluded.batch_bytes <= ?3
+     RETURNING batch_bytes`,
+  )
+    .bind(day, size, MAX_TOTAL_BATCH_BYTES_PER_DAY)
+    .first();
+  if (all) return null;
+
+  await env.DB.prepare(
+    "UPDATE device_requests SET batches = batches - 1, batch_bytes = batch_bytes - ?3 WHERE device = ?1 AND utc_day = ?2",
+  )
+    .bind(device, day, size)
+    .run();
+  return errorResponse(503, BUSY);
+}
+
 export async function readBatch(request: Request): Promise<Uint8Array | Response> {
   return (await readBounded(request, MAX_BATCH_BYTES)) ?? errorResponse(413, "A batch is at most 1 MB.");
 }
@@ -21,7 +62,8 @@ export async function readBatch(request: Request): Promise<Uint8Array | Response
 /**
  * POST /v1/households/{hid}/batches: {"device","epoch","seq","body"} (plan 0.6), where seq is the sender's own sequence
  * number, part of the sealed body's associated data. The Worker numbers the household's batches in arrival order, max +
- * 1, which is what GET's cursor counts; the sealed body goes to the body store.
+ * 1, which is what GET's cursor counts; the sealed body goes to the body store. Each PC may post 200 batches and 5 MB a
+ * UTC day (429), and the server takes 2 GB a day in all (503).
  */
 export async function handlePostBatch(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
@@ -33,8 +75,11 @@ export async function handlePostBatch(env: Cloudflare.Env, member: MemberRow, bo
     return errorResponse(400, "body must be the sealed batch, as base64url.");
   }
 
-  // The body first, under a key of its own: a row is never seen before its body is there.
   const received = Date.now();
+  const refused = await countBatch(env, member.device, sealedBytes.byteLength, new Date(received).toISOString().slice(0, 10));
+  if (refused) return refused;
+
+  // The body first, under a key of its own: a row is never seen before its body is there.
   const key = `batches/v1/${member.household}/${crypto.randomUUID()}`;
   await putBody(env, key, sealedBytes, { contentType: "application/octet-stream", receivedAt: received });
   try {
@@ -87,21 +132,23 @@ export async function handleGetBatches(
     .bind(member.household, after, member.device, limit + 1)
     .all<BatchRow>();
 
-  const items: { seq: number; device: string; epoch: number; body: string }[] = [];
-  let next = after;
+  // The page is settled from the rows' sizes, then its bodies are read in one go.
+  const page: BatchRow[] = [];
   let more = rows.results.length > limit;
   let total = 0;
   for (const row of rows.results.slice(0, limit)) {
-    if (items.length > 0 && total + row.bytes > pageBytes) {
+    if (page.length > 0 && total + row.bytes > pageBytes) {
       more = true;
       break;
     }
-    next = row.seq;
-    const sealedBytes = await getBody(env, row.r2_key);
-    if (!sealedBytes) continue; // Retention took it between the query and now.
-    total += sealedBytes.byteLength;
-    items.push({ seq: row.device_seq, device: row.device, epoch: row.epoch, body: base64urlEncode(sealedBytes) });
+    page.push(row);
+    total += row.bytes;
   }
+  const bodies = await getBodies(env, page.map((row) => row.r2_key));
 
+  const items = page
+    .filter((row) => bodies.has(row.r2_key)) // Retention may take one between the query and now.
+    .map((row) => ({ seq: row.device_seq, device: row.device, epoch: row.epoch, body: base64urlEncode(bodies.get(row.r2_key)!) }));
+  const next = page.length > 0 ? page[page.length - 1].seq : after;
   return Response.json({ items, next, more });
 }

@@ -4,7 +4,7 @@ import { sha256hex } from "../../src/auth";
 import { base64urlEncode } from "../../src/households/encoding";
 import { type Jwk, JwksCache, JWKS_URLS } from "../../src/households/idtoken";
 import { handleSignin } from "../../src/households/signin";
-import { newDevice, randomAddress, randomHouseholdId, signHeaders, type TestDevice } from "./support";
+import { newDevice, randomAddress, randomHouseholdId, signedRequest, signHeaders, type TestDevice } from "./support";
 
 const MS_CLIENT = "11111111-2222-3333-4444-555555555555";
 const GOOGLE_CLIENT = "test-client.apps.googleusercontent.com";
@@ -30,12 +30,12 @@ beforeAll(async () => {
   jwks = [{ kty: "RSA", kid: "test-key", use: "sig", alg: "RS256", n: exported.n!, e: exported.e! }];
 });
 
-/** A provider serving the test JWKS, counting how often it's asked. */
-function testProvider(): { cache: JwksCache; fetched: string[] } {
+/** A provider serving the test JWKS (with `issuer` on its key when given), counting how often it's asked. */
+function testProvider(issuer?: string): { cache: JwksCache; fetched: string[] } {
   const fetched: string[] = [];
   const cache = new JwksCache(async (url) => {
     fetched.push(url);
-    return jwks;
+    return issuer === undefined ? jwks : jwks.map((key) => ({ ...key, issuer }));
   });
   return { cache, fetched };
 }
@@ -104,6 +104,7 @@ async function signinRequest(device: TestDevice, provider: string, token: string
 
 interface SigninReply {
   session: string;
+  account: string;
   householdId: string | null;
   hasRecovery: boolean;
 }
@@ -117,13 +118,20 @@ describe("POST /v1/auth/signin", () => {
     const response = await handleSignin(await signinRequest(pc, "microsoft", await idToken(claims)), testEnv, { jwks: cache });
     expect(response.status).toBe(200);
     const reply = (await response.json()) as SigninReply;
-    expect(reply).toEqual({ session: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), householdId: null, hasRecovery: false });
+    expect(reply).toEqual({
+      session: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      account: expect.any(String),
+      householdId: null,
+      hasRecovery: false,
+    });
     expect(fetched).toEqual([JWKS_URLS.microsoft]);
 
+    // A Microsoft subject is only unique within its tenant, so the account is the two.
     const account = await env.DB.prepare("SELECT id, provider, subject FROM accounts WHERE subject = ?")
-      .bind(claims.sub)
+      .bind(`${TENANT}:${claims.sub}`)
       .first<{ id: string; provider: string; subject: string }>();
-    expect(account).toMatchObject({ provider: "microsoft", subject: claims.sub });
+    expect(account).toMatchObject({ provider: "microsoft", subject: `${TENANT}:${claims.sub}` });
+    expect(reply.account).toBe(account!.id);
 
     const session = await env.DB.prepare("SELECT account, device, sign_key, dh_key FROM sessions WHERE token_hash = ?")
       .bind(await sha256hex(reply.session))
@@ -162,7 +170,7 @@ describe("POST /v1/auth/signin", () => {
     const hid = randomHouseholdId();
     await env.DB.batch([
       env.DB.prepare("INSERT INTO account_households (account, household, linked) VALUES (?, ?, 1)").bind(account!.id, hid),
-      env.DB.prepare("INSERT INTO recovery (account, body, verifier, epoch, updated) VALUES (?, 'b', 'v', 1, 1)").bind(account!.id),
+      env.DB.prepare("INSERT INTO recovery (account, body, verifier_hash, epoch, updated) VALUES (?, 'b', 'h', 1, 1)").bind(account!.id),
     ]);
 
     const again = await signIn();
@@ -200,7 +208,13 @@ describe("POST /v1/auth/signin", () => {
       ["no subject", "google", async (pc) => idToken(await googleClaims(pc, { sub: "" })), "subject"],
       ["signed by another key", "google", async (pc) => idToken(await googleClaims(pc), { key: otherKey.privateKey }), "signature"],
       ["an unknown key", "google", async (pc) => idToken(await googleClaims(pc), { kid: "unknown" }), "key"],
-      ["not RS256", "google", async (pc) => idToken(await googleClaims(pc), { alg: "HS256" }), "RS256"],
+      ["HS256", "google", async (pc) => idToken(await googleClaims(pc), { alg: "HS256" }), "RS256"],
+      ["ES256", "google", async (pc) => idToken(await googleClaims(pc), { alg: "ES256" }), "RS256"],
+      ["PS256", "google", async (pc) => idToken(await googleClaims(pc), { alg: "PS256" }), "RS256"],
+      ["alg none, unsigned", "google", async (pc) => `${encodeJson({ alg: "none", kid: "test-key" })}.${encodeJson(await googleClaims(pc))}.`, "RS256"],
+      ["no issue time", "google", async (pc) => idToken(await googleClaims(pc, { iat: undefined })), "issue time"],
+      ["not valid yet", "google", async (pc) => idToken(await googleClaims(pc, { nbf: now + 3600 })), "not valid yet"],
+      ["several audiences, no azp", "google", async (pc) => idToken(await googleClaims(pc, { aud: [GOOGLE_CLIENT, "other"] })), "another app"],
       ["not a JWT", "google", async () => "not.a.jwt", "JWT"],
     ];
 
@@ -211,6 +225,48 @@ describe("POST /v1/auth/signin", () => {
       expect(response.status, name).toBe(401);
       expect(((await response.json()) as { error: string }).error, name).toContain(reason);
     }
+  });
+
+  it("takes several audiences when azp is this app, and a not-before already past", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const { cache } = testProvider();
+    const pc = await newDevice();
+    const claims = await googleClaims(pc, { aud: [GOOGLE_CLIENT, "other"], azp: GOOGLE_CLIENT, nbf: now - 60 });
+
+    const response = await handleSignin(await signinRequest(pc, "google", await idToken(claims)), testEnv, { jwks: cache });
+    expect(response.status).toBe(200);
+  });
+
+  it("keeps Microsoft accounts apart by tenant, even with the same subject", async () => {
+    const { cache } = testProvider();
+    const sub = `ms-${crypto.randomUUID()}`;
+    const otherTenant = "72f988bf-86f1-41af-91ab-2d7cd011db47";
+
+    for (const tid of [TENANT, otherTenant]) {
+      const pc = await newDevice();
+      const claims = await microsoftClaims(pc, { sub, tid, iss: `https://login.microsoftonline.com/${tid}/v2.0` });
+      expect((await handleSignin(await signinRequest(pc, "microsoft", await idToken(claims)), testEnv, { jwks: cache })).status).toBe(200);
+    }
+
+    const accounts = await env.DB.prepare("SELECT subject FROM accounts WHERE provider = 'microsoft' AND subject LIKE ?")
+      .bind(`%:${sub}`)
+      .all<{ subject: string }>();
+    expect(accounts.results.map((row) => row.subject).sort()).toEqual([`${otherTenant}:${sub}`, `${TENANT}:${sub}`].sort());
+  });
+
+  it("checks a Microsoft key's own issuer, its {tenantid} filled in from the token", async () => {
+    const pc = await newDevice();
+    const token = await idToken(await microsoftClaims(pc));
+
+    const common = testProvider("https://login.microsoftonline.com/{tenantid}/v2.0");
+    expect((await handleSignin(await signinRequest(pc, "microsoft", token), testEnv, { jwks: common.cache })).status).toBe(200);
+
+    const other = await newDevice();
+    const otherToken = await idToken(await microsoftClaims(other));
+    const pinned = testProvider("https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0");
+    const refused = await handleSignin(await signinRequest(other, "microsoft", otherToken), testEnv, { jwks: pinned.cache });
+    expect(refused.status).toBe(401);
+    expect(((await refused.json()) as { error: string }).error).toContain("key");
   });
 
   it("refuses an ID token asked for by another PC, even with the same salt", async () => {
@@ -252,12 +308,16 @@ describe("POST /v1/auth/signin", () => {
     const noGoogle = { ...testEnv, GOOGLE_CLIENT_ID: "" } as Cloudflare.Env;
     expect((await handleSignin(await signinRequest(pc, "google", token), noGoogle, { jwks: cache })).status).toBe(503);
 
-    const response = await SELF.fetch("https://example.com/v1/auth/signin", {
+    const signed = await SELF.fetch(await signedRequest(pc, "POST", "/v1/auth/signin", "{}"));
+    expect(signed.status).toBe(400);
+
+    // An unsigned one is refused on its headers, before its body is read.
+    const unsigned = await SELF.fetch("https://example.com/v1/auth/signin", {
       method: "POST",
       headers: { "CF-Connecting-IP": randomAddress() },
       body: "{}",
     });
-    expect(response.status).toBe(400);
+    expect(unsigned.status).toBe(401);
   });
 
   it("gives 503 when the provider's keys can't be fetched", async () => {

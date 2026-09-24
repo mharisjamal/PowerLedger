@@ -1,6 +1,16 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { addMember, createHousehold, newDevice, randomHouseholdId, signedFetch, type TestDevice } from "./support";
+import {
+  addMember,
+  aliasedDevice,
+  compressedSpki,
+  createHousehold,
+  joinProof,
+  newDevice,
+  randomHouseholdId,
+  signedFetch,
+  type TestDevice,
+} from "./support";
 
 interface MemberJson {
   device: string;
@@ -71,6 +81,17 @@ describe("POST /v1/households", () => {
     }
   });
 
+  it("gives 400 for a key in a compressed or other aliased encoding, which would give one key two device IDs", async () => {
+    const pc = await newDevice();
+    const aliased = await aliasedDevice(pc);
+
+    const aliasedSign = await signedFetch(aliased, "POST", "/v1/households", { id: randomHouseholdId(), sign: aliased.sign, dh: pc.dh });
+    expect(aliasedSign.status).toBe(400);
+
+    const aliasedDh = await signedFetch(pc, "POST", "/v1/households", { id: randomHouseholdId(), sign: pc.sign, dh: compressedSpki(pc.dh) });
+    expect(aliasedDh.status).toBe(400);
+  });
+
   it("gives 413 for a body over 16 KB", async () => {
     const pc = await newDevice();
     const response = await signedFetch(pc, "POST", "/v1/households", { id: randomHouseholdId(), sign: pc.sign, dh: pc.dh, pad: "x".repeat(17_000) });
@@ -91,15 +112,15 @@ describe("POST /v1/households/{hid}/members", () => {
     expect(list.find((member) => member.device === second.id)).toMatchObject({ sign: second.sign, dh: second.dh, removed: null });
   });
 
-  it("gives 403 to a PC that isn't a member", async () => {
+  it("gives 401 to a PC that isn't a member", async () => {
     const hid = await createHousehold(await newDevice());
     const stranger = await newDevice();
 
     const response = await signedFetch(stranger, "POST", `/v1/households/${hid}/members`, { sign: stranger.sign, dh: stranger.dh });
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
   });
 
-  it("takes adding a current member again as done", async () => {
+  it("takes adding a current member again with the same keys as done, and with another dh key as 409", async () => {
     const first = await newDevice();
     const second = await newDevice();
     const hid = await createHousehold(first);
@@ -107,6 +128,32 @@ describe("POST /v1/households/{hid}/members", () => {
 
     await addMember(hid, first, second);
     expect(await members(hid, first)).toHaveLength(2);
+
+    const otherDh = (await newDevice()).dh;
+    const response = await signedFetch(first, "POST", `/v1/households/${hid}/members`, {
+      sign: second.sign,
+      dh: otherDh,
+      proof: await joinProof(second, hid, second.sign, otherDh),
+    });
+    expect(response.status).toBe(409);
+    expect((await members(hid, first)).find((member) => member.device === second.id)?.dh).toBe(second.dh);
+  });
+
+  it("needs the joining PC's proof: its signature over this household and the keys posted", async () => {
+    const first = await newDevice();
+    const joining = await newDevice();
+    const hid = await createHousehold(first);
+    const add = (body: Record<string, unknown>) => signedFetch(first, "POST", `/v1/households/${hid}/members`, body);
+    const keys = { sign: joining.sign, dh: joining.dh };
+
+    expect((await add(keys)).status).toBe(400);
+    expect((await add({ ...keys, proof: "not a proof" })).status).toBe(400);
+    expect((await add({ ...keys, proof: await joinProof(first, hid, joining.sign, joining.dh) })).status).toBe(403);
+    expect((await add({ ...keys, proof: await joinProof(joining, randomHouseholdId()) })).status).toBe(403);
+    expect((await add({ ...keys, proof: await joinProof(joining, hid, joining.sign, (await newDevice()).dh) })).status).toBe(403);
+    expect(await members(hid, first)).toHaveLength(1);
+
+    expect((await add({ ...keys, proof: await joinProof(joining, hid) })).status).toBe(200);
   });
 
   it("stops at 16 current members", async () => {
@@ -115,7 +162,11 @@ describe("POST /v1/households/{hid}/members", () => {
     for (let i = 0; i < 15; i++) await addMember(hid, first, await newDevice());
 
     const seventeenth = await newDevice();
-    const response = await signedFetch(first, "POST", `/v1/households/${hid}/members`, { sign: seventeenth.sign, dh: seventeenth.dh });
+    const response = await signedFetch(first, "POST", `/v1/households/${hid}/members`, {
+      sign: seventeenth.sign,
+      dh: seventeenth.dh,
+      proof: await joinProof(seventeenth, hid),
+    });
     expect(response.status).toBe(409);
     expect(await members(hid, first)).toHaveLength(16);
   });
@@ -141,7 +192,7 @@ describe("DELETE /v1/households/{hid}/members/{device}", () => {
 
     const removed = (await members(hid, first)).find((member) => member.device === second.id);
     expect(removed?.removed).toBeGreaterThan(Date.now() - 60_000);
-    expect((await signedFetch(second, "GET", `/v1/households/${hid}/members`)).status).toBe(403);
+    expect((await signedFetch(second, "GET", `/v1/households/${hid}/members`)).status).toBe(410);
   });
 
   it("lets a member leave, and a removed PC be added back", async () => {
@@ -151,7 +202,7 @@ describe("DELETE /v1/households/{hid}/members/{device}", () => {
     await addMember(hid, first, second);
 
     expect((await signedFetch(second, "DELETE", `/v1/households/${hid}/members/${second.id}`)).status).toBe(200);
-    expect((await signedFetch(second, "GET", `/v1/households/${hid}/members`)).status).toBe(403);
+    expect((await signedFetch(second, "GET", `/v1/households/${hid}/members`)).status).toBe(410);
 
     await addMember(hid, first, second);
     const back = (await members(hid, second)).find((member) => member.device === second.id);
@@ -214,19 +265,38 @@ describe("the household's keys", () => {
     expect((await signedFetch(first, "GET", `/v1/households/${hid}/keys/3`)).status).toBe(404);
   });
 
-  it("takes an epoch's keys once: the same post again is done, other keys for it or an older epoch are 409", async () => {
+  it("takes only the household's next epoch, current + 1, which then becomes current", async () => {
     const first = await newDevice();
     const hid = await createHousehold(first);
-    const keys = { epoch: 3, envelopes: [{ device: first.id, body: envelope() }] };
+    const keysAt = (epoch: number) => ({ epoch, envelopes: [{ device: first.id, body: envelope() }] });
+    const post = (epoch: number) => signedFetch(first, "POST", `/v1/households/${hid}/keys`, keysAt(epoch));
+    const current = async () =>
+      (await env.DB.prepare("SELECT epoch FROM households WHERE id = ?").bind(hid).first<{ epoch: number }>())!.epoch;
+
+    expect(await current()).toBe(1);
+    expect((await post(1)).status).toBe(409);
+    expect((await post(3)).status).toBe(409);
+    expect((await post(2)).status).toBe(200);
+    expect(await current()).toBe(2);
+
+    expect((await post(2)).status).toBe(409);
+    expect((await post(3)).status).toBe(200);
+    expect(await current()).toBe(3);
+  });
+
+  it("takes an identical retry of the current epoch's keys from the same PC as done, and anything else as 409", async () => {
+    const first = await newDevice();
+    const second = await newDevice();
+    const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    const keys = { epoch: 2, envelopes: [{ device: first.id, body: envelope() }, { device: second.id, body: envelope() }] };
 
     expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
-    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
-
-    const other = { epoch: 3, envelopes: [{ device: first.id, body: envelope() }] };
-    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, other)).status).toBe(409);
-
-    const older = { epoch: 2, envelopes: [{ device: first.id, body: envelope() }] };
-    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, older)).status).toBe(409);
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);   // its answer was lost
+    expect((await signedFetch(second, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(409);  // not the sealer
+    const changed = { epoch: 2, envelopes: [{ device: first.id, body: envelope() }, { device: second.id, body: envelope() }] };
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, changed)).status).toBe(409);
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, { epoch: 2, envelopes: [keys.envelopes[0]] })).status).toBe(409);
   });
 
   it("refuses envelopes for PCs that aren't current members, and malformed ones", async () => {
@@ -249,21 +319,21 @@ describe("the household's keys", () => {
     }
   });
 
-  it("gives 403 to a PC that isn't a member", async () => {
+  it("gives 401 to a PC that isn't a member", async () => {
     const hid = await createHousehold(await newDevice());
     const stranger = await newDevice();
 
-    expect((await signedFetch(stranger, "GET", `/v1/households/${hid}/keys/1`)).status).toBe(403);
+    expect((await signedFetch(stranger, "GET", `/v1/households/${hid}/keys/1`)).status).toBe(401);
     const posted = await signedFetch(stranger, "POST", `/v1/households/${hid}/keys`, { epoch: 2, envelopes: [{ device: stranger.id, body: envelope() }] });
-    expect(posted.status).toBe(403);
+    expect(posted.status).toBe(401);
   });
 });
 
 describe("GET /v1/households/{hid}/members", () => {
-  it("gives 403 to a PC that isn't a member, and 401 unsigned", async () => {
+  it("gives 401 to a PC that isn't a member, and to an unsigned request", async () => {
     const hid = await createHousehold(await newDevice());
 
-    expect((await signedFetch(await newDevice(), "GET", `/v1/households/${hid}/members`)).status).toBe(403);
+    expect((await signedFetch(await newDevice(), "GET", `/v1/households/${hid}/members`)).status).toBe(401);
     expect((await SELF.fetch(`https://example.com/v1/households/${hid}/members`)).status).toBe(401);
   });
 });

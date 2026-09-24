@@ -110,12 +110,12 @@ describe("POST and GET /v1/households/{hid}/batches", () => {
     }
   });
 
-  it("gives 403 to a removed member, both ways", async () => {
+  it("gives 410 to a removed member, both ways", async () => {
     const { hid, first, second } = await pair();
     await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`);
 
-    expect((await post(hid, second, 1)).status).toBe(403);
-    expect((await signedFetch(second, "GET", `/v1/households/${hid}/batches?after=0`)).status).toBe(403);
+    expect((await post(hid, second, 1)).status).toBe(410);
+    expect((await signedFetch(second, "GET", `/v1/households/${hid}/batches?after=0`)).status).toBe(410);
   });
 
   it("gives 413 for a batch over 1 MB, and takes one just under", async () => {
@@ -174,4 +174,45 @@ describe("POST and GET /v1/households/{hid}/batches", () => {
     expect(fetched.more).toBe(true);
     expect(fetched.next).toBe(2);
   });
+
+  it("reads a page's bodies from D1 in one query, not one an item", async () => {
+    const { hid, first, second } = await pair();
+    const noR2 = withoutR2(env);
+    const bodies: string[] = [];
+    for (let seq = 1; seq <= 30; seq++) {
+      const body = sealed();
+      bodies.push(body);
+      const request = await signedRequest(first, "POST", `/v1/households/${hid}/batches`, JSON.stringify({ device: first.id, epoch: 1, seq, body }));
+      expect((await handleHouseholdRoutes(request, noR2))!.status).toBe(200);
+    }
+    const member = await env.DB.prepare("SELECT * FROM members WHERE household = ? AND device = ?")
+      .bind(hid, second.id)
+      .first<MemberRow>();
+    const counted = countingQueries(noR2);
+
+    const url = new URL(`https://example.com/v1/households/${hid}/batches?after=0`);
+    const fetched = (await (await handleGetBatches(counted.env, member!, url)).json()) as BatchPage;
+
+    expect(fetched.items.map((item) => item.body)).toEqual(bodies);
+    expect(counted.queries()).toBeLessThanOrEqual(2);
+  });
 });
+
+/** `target` with its D1 counting the statements prepared on it. */
+function countingQueries(target: Cloudflare.Env): { env: Cloudflare.Env; queries: () => number } {
+  let queries = 0;
+  const db = target.DB;
+  const counting = new Proxy(db, {
+    get(object, property) {
+      if (property === "prepare") {
+        return (sql: string) => {
+          queries++;
+          return object.prepare(sql);
+        };
+      }
+      const value = Reflect.get(object, property);
+      return typeof value === "function" ? value.bind(object) : value;
+    },
+  });
+  return { env: { ...target, DB: counting }, queries: () => queries };
+}

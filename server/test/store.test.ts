@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { deleteBodies, getBody, putBody } from "../src/store";
+import { deleteBodies, getBodies, getBody, putBody } from "../src/store";
 import { withoutR2 } from "./support";
 
 function freshKey(): string {
@@ -95,5 +95,36 @@ describe("store, without R2 bound", () => {
 
   it("returns null for a missing key", async () => {
     expect(await getBody(withoutR2(env), freshKey())).toBeNull();
+  });
+
+  it("reads and deletes many bodies with one statement each way, not one a key", async () => {
+    const noR2 = withoutR2(env);
+    const keys = Array.from({ length: 30 }, () => freshKey());
+    for (const [i, key] of keys.entries()) await putBody(noR2, key, new Uint8Array([i]), META);
+    let statements = 0;
+    const counting = {
+      ...noR2,
+      DB: new Proxy(noR2.DB, {
+        get(object, property) {
+          if (property === "prepare") {
+            return (sql: string) => {
+              statements++;
+              return object.prepare(sql);
+            };
+          }
+          const value = Reflect.get(object, property);
+          return typeof value === "function" ? value.bind(object) : value;
+        },
+      }),
+    };
+
+    const bodies = await getBodies(counting, [...keys, freshKey()]);
+    expect(statements).toBe(1);
+    expect(bodies.size).toBe(30);
+    expect(bodies.get(keys[7])).toEqual(new Uint8Array([7]));
+
+    await deleteBodies(counting, keys);
+    expect(statements).toBe(2);
+    expect(await getBody(noR2, keys[7])).toBeNull();
   });
 });

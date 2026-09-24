@@ -1,3 +1,4 @@
+import { addressOf } from "./address";
 import { bearer, checkInstall, countRequest } from "./auth";
 import { readBounded } from "./body";
 import { firstConsentError, GUID_PATTERN } from "./schema";
@@ -13,8 +14,7 @@ function errorResponse(status: number, message: string): Response {
 type SmallJson = { ok: true; value: unknown } | { ok: false; response: Response };
 
 async function readSmallJson(request: Request, env: Cloudflare.Env): Promise<SmallJson> {
-  const address = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  const limited = await env.ADDRESS_LIMIT.limit({ key: address });
+  const limited = await env.ADDRESS_LIMIT.limit({ key: addressOf(request) });
   if (!limited.success) return { ok: false, response: errorResponse(429, "Too many requests from this address.") };
   const bytes = await readBounded(request, MAX_BODY_BYTES);
   if (bytes === null) {

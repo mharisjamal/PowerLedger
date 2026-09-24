@@ -1,8 +1,17 @@
-import { deviceIdOf, DEVICE_ID, importSignKey, isDhKey, type MemberRow, verifySignedByKey } from "./auth";
+import {
+  deviceIdOf,
+  DEVICE_ID,
+  importSignKey,
+  isDhKey,
+  type MemberRow,
+  readSignedHeaders,
+  verifySignature,
+  verifySignedByKey,
+} from "./auth";
 import { readBounded } from "../body";
 import { deleteBodies } from "../store";
 import { base64urlDecode } from "./encoding";
-import { errorResponse, isWholeNumber, ok, parseObject } from "./http";
+import { errorResponse, isWholeNumber, ok, overAddressLimit, parseObject } from "./http";
 
 export const HOUSEHOLD_ID = /^[0-9a-f]{32}$/;
 /** Households design §8. */
@@ -29,8 +38,14 @@ export async function readKeys(posted: Record<string, unknown> | null): Promise<
   return { sign, dh };
 }
 
-/** POST /v1/households: {"id","sign","dh"}, signed by that signing key, whose PC becomes the one member. */
+/** POST /v1/households: {"id","sign","dh"}, signed by that signing key, whose PC becomes the one member. Behind the
+ * address limit, and refused on its headers before the body is read. */
 export async function handleCreateHousehold(request: Request, env: Cloudflare.Env): Promise<Response> {
+  const limited = await overAddressLimit(request, env);
+  if (limited) return limited;
+  const headers = readSignedHeaders(request, Date.now());
+  if (headers instanceof Response) return headers;
+
   const body = await readSmall(request);
   if (body instanceof Response) return body;
 
@@ -80,33 +95,76 @@ export function addMemberStatement(
   ).bind(household, device, sign, dh, now, MAX_MEMBERS);
 }
 
-/** POST /v1/households/{hid}/members: {"sign","dh"}, by a member. */
-export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
-  const keys = await readKeys(parseObject(body));
-  if (keys instanceof Response) return keys;
-  const device = await deviceIdOf(base64urlDecode(keys.sign)!);
-
-  const current = await env.DB.prepare("SELECT 1 FROM members WHERE household = ? AND device = ? AND removed IS NULL")
-    .bind(member.household, device)
-    .first();
-  if (current) return ok();
-
-  const added = await addMemberStatement(env, member.household, device, keys.sign, keys.dh, Date.now()).first();
-  return added ? ok() : errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
+/** What a joining PC signs to show it holds its keys and asks to join this household (plan N, contract A). */
+export function joinStatement(household: string, sign: string, dh: string): Uint8Array {
+  return new TextEncoder().encode(`powerledger join|${household}|${sign}|${dh}`);
 }
 
-/** DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. The removed PC's session
- * ends too, so a PC taken out of the household (a lost laptop, say) can't go on asking the account to let it back in.
- * The household ends with its last member. */
+/**
+ * POST /v1/households/{hid}/members: {"sign","dh","proof"}, by a member. The proof is the joining PC's ECDSA signature
+ * (P1363, base64url) over "powerledger join|{hid}|{sign}|{dh}", the keys as posted, so no member can add keys whose PC
+ * never asked to join. A current member with the same keys is done; with another dh key, 409.
+ */
+export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
+  const posted = parseObject(body);
+  const keys = await readKeys(posted);
+  if (keys instanceof Response) return keys;
+  const proof = typeof posted?.proof === "string" ? base64urlDecode(posted.proof) : null;
+  if (!proof || proof.byteLength !== 64) {
+    return errorResponse(400, 'proof must be the joining PC\'s signature over "powerledger join|{hid}|{sign}|{dh}", as base64url.');
+  }
+  if (!(await verifySignature(keys.sign, joinStatement(member.household, keys.sign, keys.dh), proof))) {
+    return errorResponse(403, "The proof isn't the joining PC's signature over this household and its keys.");
+  }
+  const device = await deviceIdOf(base64urlDecode(keys.sign)!);
+
+  const current = await env.DB.prepare("SELECT dh_key FROM members WHERE household = ? AND device = ? AND removed IS NULL")
+    .bind(member.household, device)
+    .first<{ dh_key: string }>();
+  if (current) {
+    return current.dh_key === keys.dh ? ok() : errorResponse(409, "This PC is already a member, with another key-agreement key.");
+  }
+
+  const added = await addMemberStatement(env, member.household, device, keys.sign, keys.dh, Date.now()).first();
+  if (!added) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
+  // Added directly, it has nothing left to wait for.
+  await env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(member.household, device).run();
+  return ok();
+}
+
+/**
+ * DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. A PC taken out (a lost
+ * laptop, say) mustn't keep a way back in, so with it go:
+ * - every linked account's recovery envelope, whose key is about to be replaced anyway;
+ * - the link of each account the removed PC was signed in as, and those sessions of it (accounts linked to another
+ *   household are left alone, so one household can't reach into another's by adding and removing a PC);
+ * - any request of the PC's to join this household.
+ * The household ends with its last member.
+ */
 export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
+  const hid = member.household;
   const removed = await env.DB.prepare(
     "UPDATE members SET removed = ? WHERE household = ? AND device = ? AND removed IS NULL RETURNING device",
   )
-    .bind(Date.now(), member.household, device)
+    .bind(Date.now(), hid, device)
     .first();
   if (!removed) return errorResponse(404, "That PC isn't a member of this household.");
 
-  await env.DB.prepare("DELETE FROM sessions WHERE device = ?").bind(device).run();
+  // Read before the sessions go: the accounts the removed PC was signed in as, linked to this household.
+  const signedIn = await env.DB.prepare(
+    `SELECT s.account FROM sessions s JOIN account_households l ON l.account = s.account AND l.household = ?
+     WHERE s.device = ?`,
+  )
+    .bind(hid, device)
+    .all<{ account: string }>();
+  const accounts = JSON.stringify(signedIn.results.map((row) => row.account));
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)").bind(hid),
+    env.DB.prepare("DELETE FROM sessions WHERE device = ? AND account IN (SELECT value FROM json_each(?))").bind(device, accounts),
+    env.DB.prepare("DELETE FROM account_households WHERE household = ? AND account IN (SELECT value FROM json_each(?))")
+      .bind(hid, accounts),
+    env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(hid, device),
+  ]);
 
   const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM members WHERE household = ? AND removed IS NULL")
     .bind(member.household)
@@ -160,8 +218,18 @@ export function isEpoch(value: unknown): value is number {
   return isWholeNumber(value, MAX_EPOCH);
 }
 
-/** POST /v1/households/{hid}/keys: {"epoch","envelopes":[{"device","body"}]}, the household key of a new epoch sealed to
- * current members. An epoch takes its keys once, and only when it's later than every epoch already here. */
+/** The household's current epoch (households.epoch, 1 at creation). */
+export async function currentEpoch(env: Cloudflare.Env, household: string): Promise<number | null> {
+  const row = await env.DB.prepare("SELECT epoch FROM households WHERE id = ?").bind(household).first<{ epoch: number }>();
+  return row?.epoch ?? null;
+}
+
+/**
+ * POST /v1/households/{hid}/keys: {"epoch","envelopes":[{"device","body"}]}, the household key of a new epoch sealed to
+ * current members. The Worker keeps each household's epoch: only current + 1 is taken, and it becomes current with its
+ * envelopes. An identical retry of the current epoch's keys by the PC that sealed them is taken as done, since its first
+ * answer may have been lost; anything else at another epoch gets 409.
+ */
 export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
   const epoch = posted?.epoch;
@@ -187,22 +255,16 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     return errorResponse(400, "Every envelope must be for a current member.");
   }
 
-  const existing = await env.DB.prepare("SELECT device, body FROM key_envelopes WHERE household = ? AND epoch = ?")
-    .bind(member.household, epoch)
-    .all<Envelope>();
-  if (existing.results.length > 0) {
-    const same =
-      existing.results.length === envelopes.length &&
-      envelopes.every((item) => existing.results.some((row) => row.device === item.device && row.body === item.body));
-    return same ? ok() : errorResponse(409, `Epoch ${epoch} already has its keys.`);
+  const at = await currentEpoch(env, member.household);
+  if (at !== null && epoch === at && (await isSameKeys(env, member, epoch, envelopes))) return ok();
+  if (at === null || epoch !== at + 1) {
+    return errorResponse(409, `The household's key is at epoch ${at}; new keys are for epoch ${(at ?? 0) + 1} only.`);
   }
-
-  const latest = await env.DB.prepare("SELECT MAX(epoch) AS epoch FROM key_envelopes WHERE household = ?")
-    .bind(member.household)
-    .first<{ epoch: number | null }>();
-  if (latest?.epoch != null && epoch <= latest.epoch) {
-    return errorResponse(409, `Keys for epoch ${latest.epoch} are already here; a new epoch must be later.`);
-  }
+  // Claim the epoch first: of two members rotating at once, one moves it and the other gets 409.
+  const moved = await env.DB.prepare("UPDATE households SET epoch = ?2 WHERE id = ?1 AND epoch = ?3 RETURNING epoch")
+    .bind(member.household, epoch, at)
+    .first();
+  if (!moved) return errorResponse(409, `Epoch ${epoch} already has its keys.`);
 
   const now = Date.now();
   try {
@@ -213,11 +275,26 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
         ).bind(member.household, epoch, item.device, member.device, item.body, now),
       ),
     );
-  } catch {
-    // Another member's keys for this epoch landed first.
-    return errorResponse(409, `Epoch ${epoch} already has its keys.`);
+  } catch (error) {
+    // Nothing kept: put the epoch back, so the household isn't left at an epoch with no keys.
+    await env.DB.prepare("UPDATE households SET epoch = ?3 WHERE id = ?1 AND epoch = ?2").bind(member.household, epoch, at).run();
+    throw error;
   }
   return ok();
+}
+
+/** True when the epoch already holds exactly these envelopes, all sealed by this PC: a retry of a post whose answer was
+ * lost, so the PC doesn't make a new key for nothing. */
+async function isSameKeys(env: Cloudflare.Env, member: MemberRow, epoch: number, envelopes: Envelope[]): Promise<boolean> {
+  const stored = await env.DB.prepare("SELECT device, from_device, body FROM key_envelopes WHERE household = ? AND epoch = ?")
+    .bind(member.household, epoch)
+    .all<{ device: string; from_device: string; body: string }>();
+  if (stored.results.length !== envelopes.length) return false;
+  const byDevice = new Map(stored.results.map((row) => [row.device, row]));
+  return envelopes.every((item) => {
+    const row = byDevice.get(item.device);
+    return row !== undefined && row.from_device === member.device && row.body === item.body;
+  });
 }
 
 /** GET /v1/households/{hid}/keys/{epoch}: the caller's own envelope, and who sealed it. */

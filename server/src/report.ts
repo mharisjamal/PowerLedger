@@ -1,3 +1,4 @@
+import { addressOf } from "./address";
 import { bearer, checkInstall, countRequest } from "./auth";
 import { readBounded } from "./body";
 import { dayInRange } from "./day";
@@ -30,9 +31,8 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
   const key = bearer(request);
   if (!key) return errorResponse(401, "A valid bearer key is required.");
 
-  // 2. Per-address rate limit, before reading anything.
-  const address = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  const limited = await env.ADDRESS_LIMIT.limit({ key: address });
+  // 2. Per-address rate limit (an IPv6 address by its /64), before reading anything.
+  const limited = await env.ADDRESS_LIMIT.limit({ key: addressOf(request) });
   if (!limited.success) return errorResponse(429, "Too many requests from this address.");
 
   // 3. Content-Encoding and the as-sent size limit, counted while reading so an oversized body is never held whole.
