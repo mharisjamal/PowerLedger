@@ -1,6 +1,6 @@
 import { utcDateString } from "../day";
 import { deleteBodies } from "../store";
-import { APPROVED_REQUEST_LIFETIME_MS, JOIN_REQUEST_LIFETIME_MS } from "./account";
+import { APPROVED_REQUEST_LIFETIME_MS, JOIN_REQUEST_LIFETIME_MS, RECOVER_RETRY_MS } from "./account";
 import { TIME_WINDOW_SECONDS } from "./auth";
 import { MEETING_LIFETIME_MS } from "./meetings";
 
@@ -59,9 +59,9 @@ interface BatchKeyRow {
 /**
  * The households' part of the daily cron (households design §5, §8): batches and their bodies past 90 days, worked
  * through a round at a time for as long as the budget lasts, then meetings past their 10 minutes, join requests waiting
- * past 24 hours or approved more than 7 days ago, per-PC request counts and daily totals past 2 days, and seen
- * signatures past the time window. Each is a part of
- * its own: one failing doesn't stop the others.
+ * past 24 hours or approved more than 7 days ago, recovers remembered past the 10 minutes a retry is answered in, per-PC
+ * request counts and daily totals past 2 days, and seen signatures past the time window. Each is a part of its own: one
+ * failing doesn't stop the others.
  */
 export async function runHouseholdRetention(
   env: Cloudflare.Env,
@@ -99,6 +99,7 @@ export async function runHouseholdRetention(
          WHERE (approved_epoch IS NULL AND created <= ?1) OR (approved_epoch IS NOT NULL AND approved_at <= ?2)`,
       ).bind(now.getTime() - JOIN_REQUEST_LIFETIME_MS, now.getTime() - APPROVED_REQUEST_LIFETIME_MS),
     ],
+    ["used recoveries", env.DB.prepare("DELETE FROM used_recoveries WHERE used <= ?").bind(now.getTime() - RECOVER_RETRY_MS)],
     ["per-PC counts", env.DB.prepare("DELETE FROM device_requests WHERE utc_day < ?").bind(utcDateString(-REQUEST_RETENTION_DAYS, now))],
     ["daily totals", env.DB.prepare("DELETE FROM daily_totals WHERE utc_day < ?").bind(utcDateString(-REQUEST_RETENTION_DAYS, now))],
     ["seen signatures", env.DB.prepare("DELETE FROM seen_signatures WHERE seen < ?").bind(now.getTime() - SEEN_RETENTION_MS)],

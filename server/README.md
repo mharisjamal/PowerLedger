@@ -43,14 +43,17 @@ for the design.
   (`{"epoch","envelopes":[{"device","body"}]}`, each envelope 1024 characters at most) takes only the current
   epoch + 1, sealed to exactly the current members (one for a PC that isn't current is 400; a current one left out is
   409). The envelopes and the epoch's move are one step that holds only while the members and the epoch are as they
-  were, so a PC added or removed meanwhile makes it 409. A re-post of the very bytes the rotation to the current epoch
+  were, so a PC added or removed meanwhile makes it 409. Every 409 carries `{"epoch"}`, the household's epoch as it is
+  then, which a PC whose epoch was taken rotates on from. A re-post of the very bytes the rotation to the current epoch
   was taken with, by the PC that sealed them, is 200, whatever changed since. `GET …/{hid}/keys/{epoch}` gives
   `{"epoch","from","body"}`, the caller's own.
 - **Removing a PC**, or its leaving, leaves accounts alone, sessions and links included, except that a recovery the
   removed PC holds is deleted; it also clears the PC's request to join, and the waiting requests it had committed to
-  approve, whose PCs may then ask again. **When the last member goes**, the household and its members stay, all
-  removed, so a former member gets 410, not 401; its batches, key envelopes and requests, and every account's link to
-  it and recovery for it, go.
+  approve, whose PCs may then ask again. So a PC approved but never entered can leave like any other, then ask again
+  with the same session; its envelope at the epoch it left at is never sealed again, so its new approval comes after
+  the rotation. **When the last member goes**, the household and its members stay, all removed, so a former member
+  gets 410, not 401; its batches, key envelopes and requests, and every account's link to it, recovery for it and
+  recover of it remembered for a retry, go.
 - **Batches.** `POST …/{hid}/batches` (`{"device","epoch","seq","body","sig"}`, at most 1 MB, `seq` the sender's own,
   `sig` its 64-byte P1363 signature over `BatchToSign(BatchAad(…), body)`, required but not checked here: members check
   it); a PC posts at most 200 batches and 5 MB of them a UTC day (429), and the server takes at most 2 GB a day in all
@@ -69,7 +72,7 @@ for the design.
   request, so a token only signs in the PC that asked for it. A Microsoft account is its tenant and subject.
 - **Accounts**, with `Authorization: Session <token>` as well as the signature: `POST /v1/account/household`
   (`{"householdId"}`, required, a household the PC is a current member of); `POST /v1/auth/signout` (the session and
-  the PC's own requests); `DELETE /v1/account`.
+  the PC's own requests); `DELETE /v1/account` (its link, sessions, requests, recovery and recovers remembered).
 - **Approvals** run commit, then reveal, so both screens show the code before anything is sealed; each step is
   written once (an identical retry by the same PC is 200, anything else 409), and a request lasts 24 hours.
   1. The waiting PC asks: `POST /v1/account/requests` (16 waiting a household, 2 an account; asking again starts a
@@ -99,13 +102,15 @@ for the design.
   through a recovery whose holder is still a current member (404 otherwise). The caller becomes the household's only
   current member, every other removed at the current epoch with the requests they made or committed to, and every
   recovery of the household is deleted, all in one step that holds only while the code is unused: of two recovers
-  racing, the second gets 404. It answers `{"household","epoch"}`.
+  racing, the second gets 404. It answers `{"household","epoch"}`, and for 10 minutes answers a retry by the same PC
+  with the same verifier the same, though the code is used up (its first answer may have been lost); any other PC gets
+  404.
 - **Address limit.** Every household, account, sign-in and meeting route, and the reports ones, are behind
   `ADDRESS_LIMIT` (60 a minute), an IPv6 address counted by its /64.
 - **Retention.** The daily cron also drops batches past 90 days, ended meetings, join requests waiting past 24 hours or
-  approved more than 7 days ago, per-PC
-  counts and daily totals past 2 days and seen signatures past 10 minutes. Backlogs are worked through for up to
-  20 s a run, and each part runs on its own, so one failing doesn't stop the others.
+  approved more than 7 days ago, recovers remembered past their 10 minutes, per-PC counts and daily totals past 2 days
+  and seen signatures past 10 minutes. Backlogs are worked through for up to 20 s a run, and each part runs on its own,
+  so one failing doesn't stop the others.
 
 Sign-in needs the public client IDs in `wrangler.toml`'s `[vars]`, `MS_CLIENT_ID` and `GOOGLE_CLIENT_ID`; while one is
 empty, that provider's sign-in answers 503. `wrangler.toml` also binds `MEETING_LIMIT`. Migrations

@@ -20,6 +20,8 @@ export const MAX_WAITING_PER_ACCOUNT = 2;
 export const JOIN_REQUEST_LIFETIME_MS = 24 * 60 * 60 * 1000;
 /** An approved request stays this long from its approval, or until its PC withdraws it. */
 export const APPROVED_REQUEST_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+/** A recover's answer is given again to a retry by the same PC for this long (plan 0.10; the daily cron forgets it). */
+export const RECOVER_RETRY_MS = 10 * 60 * 1000;
 const MAX_RECOVERY_CHARS = MAX_SEALED_LIST_CHARS;
 const VERIFIER_BYTES = 32;
 /** An approval's commit, nonce and reveal (plan 0.9). */
@@ -458,11 +460,15 @@ export async function handleGetRecovery(env: Cloudflare.Env, session: SessionRow
  * sealed. On the account's authority, with no approval, the calling PC becomes the household's only current member:
  * every other is removed at the current epoch. The code is used up: the recovery is deleted, and the PC makes a new code
  * and rotates the key. Answers {"household","epoch"}, the epoch being the household's current one. Like every signed
- * request, it's taken once.
+ * request, it's taken once; but for 10 minutes a retry by the same PC with the same verifier, its answer lost on the
+ * way, gets the same answer, though the code is used up. Any other PC gets 404.
  */
 export async function handleRecover(env: Cloudflare.Env, session: SessionRow, body: Uint8Array): Promise<Response> {
   const verifier = readVerifier(parseObject(body)?.verifier);
   if (!verifier) return errorResponse(400, "verifier must be 32 bytes, as base64url.");
+  const verifierHash = hex(await sha256(verifier));
+  const before = await recoveredBefore(env, session, verifierHash);
+  if (before) return Response.json(before);
 
   // Only a recovery whose holder is still a current member counts: a removed PC's code must never bring it back.
   const row = await env.DB.prepare(
@@ -474,12 +480,12 @@ export async function handleRecover(env: Cloudflare.Env, session: SessionRow, bo
     .bind(session.account)
     .first<{ verifier_hash: string; household: string; current: number }>();
   if (!row) return errorResponse(404, "This account has nothing to recover.");
-  if (!timingSafeEqualStrings(hex(await sha256(verifier)), row.verifier_hash)) {
+  if (!timingSafeEqualStrings(verifierHash, row.verifier_hash)) {
     return errorResponse(403, "That isn't this account's recovery verifier.");
   }
 
   // One transaction, every write in it conditioned on the code just checked still being there: of two recovers racing,
-  // the second finds it used up, changes nothing and gets 404.
+  // the second finds it used up, changes nothing and gets 404, unless it's the same PC's retry, answered as the first.
   const hid = row.household;
   const unused = "EXISTS (SELECT 1 FROM recovery WHERE account = ?8 AND verifier_hash = ?9)";
   const bind = (statement: D1PreparedStatement) =>
@@ -506,15 +512,40 @@ export async function handleRecover(env: Cloudflare.Env, session: SessionRow, bo
          added_epoch = excluded.added_epoch, removed_epoch = NULL
        WHERE members.removed IS NOT NULL`,
     )),
+    // The answer, kept for this PC's retry.
+    bind(env.DB.prepare(
+      `INSERT INTO used_recoveries (account, verifier_hash, device, household, epoch, used)
+       SELECT ?8, ?9, ?2, ?1, (SELECT epoch FROM households WHERE id = ?1), ?5 WHERE ${unused}
+       ON CONFLICT (account, verifier_hash) DO UPDATE SET
+         device = excluded.device, household = excluded.household, epoch = excluded.epoch, used = excluded.used
+       RETURNING household, epoch`,
+    )),
     // Every recovery of the household goes, not this account's alone: the others' holders were just removed.
     bind(env.DB.prepare(
       `DELETE FROM recovery WHERE ${unused} AND account IN (SELECT account FROM account_households WHERE household = ?1)`,
     )),
-    env.DB.prepare("SELECT epoch FROM households WHERE id = ?").bind(hid),
   ]);
-  if (results[0].results.length === 0) return errorResponse(404, "This account has nothing to recover.");
-  const epoch = (results[5].results[0] as { epoch: number }).epoch;
-  return Response.json({ household: hid, epoch });
+  if (results[0].results.length === 0) {
+    const won = await recoveredBefore(env, session, verifierHash);
+    return won ? Response.json(won) : errorResponse(404, "This account has nothing to recover.");
+  }
+  const { household, epoch } = results[4].results[0] as { household: string; epoch: number };
+  return Response.json({ household, epoch });
+}
+
+/** What a recover by this PC with this verifier answered in the last 10 minutes, if one took; null otherwise. */
+async function recoveredBefore(
+  env: Cloudflare.Env,
+  session: SessionRow,
+  verifierHash: string,
+): Promise<{ household: string; epoch: number } | null> {
+  const rows = await env.DB.prepare(
+    "SELECT verifier_hash, household, epoch FROM used_recoveries WHERE account = ? AND device = ? AND used > ?",
+  )
+    .bind(session.account, session.device, Date.now() - RECOVER_RETRY_MS)
+    .all<{ verifier_hash: string; household: string; epoch: number }>();
+  const used = rows.results.find((row) => timingSafeEqualStrings(verifierHash, row.verifier_hash));
+  return used ? { household: used.household, epoch: used.epoch } : null;
 }
 
 /** POST /v1/auth/signout: ends this PC's session, signed by the PC it was given to. A session already ended is done. */
@@ -542,12 +573,13 @@ export async function handleSignout(request: Request, env: Cloudflare.Env): Prom
   return ok();
 }
 
-/** DELETE /v1/account: the account, its link, every session, its PCs' join requests and its recovery envelope (households
- * design §7). The household and its members carry on without sign-in. */
+/** DELETE /v1/account: the account, its link, every session, its PCs' join requests, its recovery envelope and the
+ * recovers remembered for a retry (households design §7). The household and its members carry on without sign-in. */
 export async function handleDeleteAccount(env: Cloudflare.Env, session: SessionRow): Promise<Response> {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM join_requests WHERE account = ?").bind(session.account),
     env.DB.prepare("DELETE FROM recovery WHERE account = ?").bind(session.account),
+    env.DB.prepare("DELETE FROM used_recoveries WHERE account = ?").bind(session.account),
     env.DB.prepare("DELETE FROM account_households WHERE account = ?").bind(session.account),
     env.DB.prepare("DELETE FROM sessions WHERE account = ?").bind(session.account),
     env.DB.prepare("DELETE FROM accounts WHERE id = ?").bind(session.account),

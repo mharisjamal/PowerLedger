@@ -374,6 +374,40 @@ describe("the household's keys", () => {
     expect(await current()).toBe(3);
   });
 
+  it("answers every 409 with the household's epoch as it is then, which a PC that lost its epoch rotates on from", async () => {
+    const first = await newDevice();
+    const second = await newDevice();
+    const joining = await newDevice();
+    const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    const keys = (epoch: number, to: TestDevice[] = [first, second]) => ({
+      epoch,
+      envelopes: to.map((pc) => ({ device: pc.id, body: envelope() })),
+    });
+    const conflict = async (response: Response, epoch: number) => {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: expect.any(String), epoch });
+    };
+    const raced = async (epoch: number, hook: () => Promise<unknown>) => {
+      const request = await signedRequest(first, "POST", `/v1/households/${hid}/keys`, JSON.stringify(keys(epoch)));
+      return (await handleHouseholdRoutes(request, hookBefore(env, /INSERT INTO key_envelopes/, hook)))!;
+    };
+
+    await conflict(await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys(1)), 1);
+    await conflict(await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys(3)), 1);
+    await conflict(await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys(2, [first])), 1);
+
+    // Another member takes epoch 2 between this post's look and its write: the answer has 2, not the 1 it looked at.
+    await conflict(await raced(2, () => rotate(hid, second, 2, [first, second])), 2);
+    await conflict(await raced(3, () => addMember(hid, second, joining)), 2);
+
+    // Envelopes already there at the next epoch.
+    await env.DB.prepare("INSERT INTO key_envelopes (household, epoch, device, from_device, body, created) VALUES (?, 3, ?, ?, ?, 1)")
+      .bind(hid, joining.id, second.id, envelope())
+      .run();
+    await conflict(await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys(3, [first, second, joining])), 2);
+  });
+
   it("takes an identical retry of the current epoch's keys from the same PC as done, and anything else as 409", async () => {
     const first = await newDevice();
     const second = await newDevice();
