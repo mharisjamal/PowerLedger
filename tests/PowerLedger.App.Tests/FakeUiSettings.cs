@@ -16,6 +16,17 @@ internal sealed class FakeUiSettings : IUiSettings
         return null;
     }
 
+    /// <summary>What <see cref="SetLook"/> answers instead of switching, for a test of a window that won't open.</summary>
+    public string? LookProblem { get; set; }
+
+    public string? SetLook(Look look)
+    {
+        if (LookProblem is not null) return LookProblem;
+        Current = Current with { Look = look };
+        Changes.Add($"look {look}");
+        return null;
+    }
+
     public string? UseCo2(double kgPerKwh)
     {
         if (!(kgPerKwh >= 0 && kgPerKwh < UiPreferences.MaxCo2KgPerKwh)) return "refused";

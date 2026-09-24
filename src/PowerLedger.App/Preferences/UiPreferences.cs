@@ -21,6 +21,11 @@ internal sealed record UiPreferences
 
     public ThemeChoice Theme { get; init; } = ThemeChoice.System;
 
+    /// <summary>Which front end the window opens in (Midnight look design §1): Classic until the user chooses, so nobody's
+    /// App changes on update. A name this version doesn't know reads as Classic rather than failing the whole file.</summary>
+    [JsonConverter(typeof(LookJsonConverter))]
+    public Look Look { get; init; } = Look.Classic;
+
     /// <summary>Kilograms of CO₂ per kWh used for every CO₂ figure; spec §9's default is the world average, which a
     /// ui.json without the field keeps. It has a setter rather than init for that: the JSON source generator gives an
     /// init-only property missing from the file its type's default, 0, where a setter is left alone, and
@@ -62,6 +67,7 @@ internal sealed record UiPreferences
     public UiPreferences Sanitised() => this with
     {
         Theme = Enum.IsDefined(Theme) ? Theme : ThemeChoice.System,
+        Look = Enum.IsDefined(Look) ? Look : Look.Classic,
         Co2KgPerKwh = double.IsFinite(Co2KgPerKwh) && Co2KgPerKwh >= 0 && Co2KgPerKwh < MaxCo2KgPerKwh ? Co2KgPerKwh : Co2.DefaultKgPerKwh,
     };
 }
@@ -92,6 +98,18 @@ internal sealed class UiPreferencesStore(string path)
         File.WriteAllText(temporary, JsonSerializer.Serialize(preferences, UiJson.Default.UiPreferences));
         File.Move(temporary, path, overwrite: true);
     }
+}
+
+/// <summary>A look by its name, and any name this version doesn't know as Classic, so a ui.json written by a newer App
+/// still loads whole; the string-enum converter would refuse the file instead.</summary>
+internal sealed class LookJsonConverter : JsonConverter<Look>
+{
+    public override Look Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.TokenType == JsonTokenType.String && Enum.TryParse<Look>(reader.GetString(), ignoreCase: true, out var look) && Enum.IsDefined(look)
+            ? look
+            : Look.Classic;
+
+    public override void Write(Utf8JsonWriter writer, Look value, JsonSerializerOptions options) => writer.WriteStringValue(value.ToString());
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true, UseStringEnumConverter = true)]
