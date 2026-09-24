@@ -12,17 +12,28 @@ public class JoinPromptViewModelTests
 
     private JoinPromptViewModel Model(HouseholdNotice notice) => new(_link, UiThreads.Inline, _clock, notice);
 
-    private static HouseholdNotice Notice(string? comparisonCode = "482 913", DateTimeOffset? expiresAt = null, string? fromName = "Desktop-7")
-        => new(NoticeKind.JoinPrompt, "prompt-1", "", fromName, comparisonCode, expiresAt ?? Now.AddMinutes(2));
+    private static HouseholdNotice Notice(
+        string text = "Join Desktop-7's household?", string? comparisonCode = "482 913", DateTimeOffset? expiresAt = null, string? fromName = "Desktop-7")
+        => new(NoticeKind.JoinPrompt, "prompt-1", text, fromName, comparisonCode, expiresAt ?? Now.AddMinutes(2));
 
     [Fact]
-    public void The_heading_names_the_household_and_shows_the_comparison_code_from_pairing_on_the_network()
+    public void The_heading_is_the_services_own_wording_and_shows_the_comparison_code_from_pairing_on_the_network()
     {
-        var model = Model(Notice(comparisonCode: "482 913", fromName: "Desktop-7"));
+        var model = Model(Notice(text: "Join Desktop-7's household?", comparisonCode: "482 913", fromName: "Desktop-7"));
 
         model.Heading.ShouldBe("Join Desktop-7's household?");
         model.HasComparisonLine.ShouldBeTrue();
         model.ComparisonLine.ShouldBe("Its code is 482 913. Check it matches the code on Desktop-7.");
+    }
+
+    /// <summary>The service already appends the leave warning to Text when this PC belongs to another household; the
+    /// App shows it as given rather than rebuilding it from its own read of the status.</summary>
+    [Fact]
+    public void The_leave_warning_is_shown_exactly_as_the_service_words_it()
+    {
+        var model = Model(Notice(text: "Join Desktop-7's household? Joining leaves the household this PC is in now."));
+
+        model.Heading.ShouldBe("Join Desktop-7's household? Joining leaves the household this PC is in now.");
     }
 
     [Fact]
@@ -35,32 +46,10 @@ public class JoinPromptViewModelTests
     }
 
     [Fact]
-    public void With_no_name_the_heading_still_reads_sensibly()
+    public void With_no_name_the_comparison_line_still_reads_sensibly()
     {
         var model = Model(Notice(fromName: null));
-        model.Heading.ShouldBe("Join the other PC's household?");
-    }
-
-    [Fact]
-    public void A_pc_already_in_a_household_is_warned_that_joining_leaves_it()
-    {
-        _link.Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "This-PC", ChassisKind.Desktop, true, [], null) };
-        _link.Connect(true);
-
-        var model = Model(Notice());
-
-        model.ShowLeaveWarning.ShouldBeTrue();
-    }
-
-    [Fact]
-    public void A_pc_in_no_household_gets_no_leave_warning()
-    {
-        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "aaaa", "This-PC", ChassisKind.Desktop, true, [], null) };
-        _link.Connect(true);
-
-        var model = Model(Notice());
-
-        model.ShowLeaveWarning.ShouldBeFalse();
+        model.ComparisonLine.ShouldBe("Its code is 482 913. Check it matches the code on the other PC.");
     }
 
     [Fact]
@@ -107,7 +96,7 @@ public class JoinPromptViewModelTests
     [Fact]
     public void With_no_expiry_it_never_times_out_on_its_own()
     {
-        var model = Model(new HouseholdNotice(NoticeKind.JoinPrompt, "prompt-1", "", "Desktop-7", "482 913", ExpiresAt: null));
+        var model = Model(new HouseholdNotice(NoticeKind.JoinPrompt, "prompt-1", "Join Desktop-7's household?", "Desktop-7", "482 913", ExpiresAt: null));
         var closed = 0;
         model.Closed += () => closed++;
 

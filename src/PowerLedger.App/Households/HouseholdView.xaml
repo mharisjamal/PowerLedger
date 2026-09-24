@@ -125,6 +125,32 @@
                 </StackPanel>
             </StackPanel>
 
+            <TextBlock Style="{StaticResource Text.Eyebrow}" Margin="0,28,0,10" Text="SIGN IN" />
+            <StackPanel DataContext="{Binding Account}">
+                <StackPanel Orientation="Horizontal" Visibility="{Binding SignedIn, Converter={StaticResource HiddenWhen}}">
+                    <Button Style="{StaticResource Quiet}" Content="{Binding MicrosoftButtonText}" Command="{Binding SignInWithMicrosoft}" />
+                    <Button Style="{StaticResource Quiet}" Content="{Binding GoogleButtonText}" Command="{Binding SignInWithGoogle}" Margin="8,0,0,0" />
+                </StackPanel>
+                <StackPanel Visibility="{Binding SignedIn, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Email}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0" Visibility="{Binding ConfirmingDelete, Converter={StaticResource HiddenWhen}}">
+                        <Button Style="{StaticResource Quiet}" Content="Sign out" Command="{Binding SignOut}" />
+                        <Button Style="{StaticResource Quiet}" Content="Delete account…" Command="{Binding DeleteAccount}" Margin="8,0,0,0" />
+                    </StackPanel>
+                    <StackPanel Margin="0,10,0,0" Visibility="{Binding ConfirmingDelete, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource Text.Body}" FontWeight="SemiBold" Text="Delete account" />
+                        <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Text="This removes your account and its recovery code. Your household and its members carry on without sign-in." />
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Style="{StaticResource Quiet}" Content="Delete" Command="{Binding ConfirmDelete}" Margin="0,0,8,0" />
+                            <Button Style="{StaticResource Quiet}" Content="Cancel" Command="{Binding CancelDelete}" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+                <TextBlock Style="{StaticResource Text.Muted}" Margin="0,10,0,0" Foreground="{DynamicResource Brush.Amber}" Text="{Binding Message}"
+                           Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+            </StackPanel>
+
         </StackPanel>
     </ScrollViewer>
 </UserControl>

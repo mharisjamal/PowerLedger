@@ -60,7 +60,7 @@ public class RenderingTests
         ("now", Page.Now, _ => { }, 560, true),
         ("breakdown", Page.Breakdown, shell => shell.Breakdown.Range.Choice = RangeChoice.SevenDays, 560, true),
         ("report", Page.Report, _ => { }, 560, true),
-        ("household", Page.Household, _ => { }, 560, false),
+        ("household", Page.Household, _ => { }, 560, true),
         ("settings", Page.Settings, _ => { }, 560, true),
         ("wizard", Page.Now, MachineStep, 560, false),
         ("wizard-laptop", Page.Now, LaptopStep, 560, false),
@@ -834,8 +834,8 @@ public class RenderingTests
         });
     }
 
-    /// <summary>The Join prompt (households design §2, §3): the household's name, the comparison code, the leave warning
-    /// for a PC already in one, and its buttons fitting a short screen, in both themes.</summary>
+    /// <summary>The Join prompt (households design §2, §3): the service's own wording, which already carries the leave
+    /// warning for a PC already in one, the comparison code, and its buttons fitting a short screen, in both themes.</summary>
     [Fact]
     public void The_join_prompt_shows_the_household_name_the_code_and_the_leave_warning()
     {
@@ -850,7 +850,9 @@ public class RenderingTests
                     Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "This-PC", ChassisKind.Desktop, true, [], null) },
                 };
                 link.Connect(true);
-                var notice = new HouseholdNotice(NoticeKind.JoinPrompt, "p1", "", "Desktop-7", "482 913", Now.AddMinutes(2));
+                var notice = new HouseholdNotice(
+                    NoticeKind.JoinPrompt, "p1", "Join Desktop-7's household? Joining leaves the household this PC is in now.", "Desktop-7", "482 913",
+                    Now.AddMinutes(2));
                 var model = new JoinPromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
                 var window = new JoinPromptWindow(model)
                 {
@@ -861,9 +863,8 @@ public class RenderingTests
                 try
                 {
                     Pump(TimeSpan.FromMilliseconds(300));
-                    Find<TextBlock>(window, t => t.Text == "Join Desktop-7's household?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Join Desktop-7's household? Joining leaves the household this PC is in now.").ShouldNotBeNull(theme.ToString());
                     Find<TextBlock>(window, t => t.Text == "Its code is 482 913. Check it matches the code on Desktop-7.").ShouldNotBeNull(theme.ToString());
-                    Find<TextBlock>(window, t => t.Text == "Joining will leave your current household.").ShouldNotBeNull(theme.ToString());
                     window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
                     var content = (FrameworkElement)window.Content;
                     foreach (var label in new[] { "Don't join", "Join" })
@@ -1076,7 +1077,7 @@ public class RenderingTests
                     new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-20), null, Now.AddDays(-3)),
                 ]),
         };
-        return new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English);
+        return new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
     }
 
     /// <summary>Settings against a running service, with a tariff, this laptop's detection, two external monitors — one in

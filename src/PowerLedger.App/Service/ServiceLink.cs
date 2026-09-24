@@ -125,6 +125,14 @@ internal interface IServiceLink : IAsyncDisposable
 
     /// <summary>Whether other PCs on a Private network can find this one.</summary>
     Task<HouseholdOutcome> SetDiscoverableAsync(bool on, CancellationToken cancel = default);
+
+    /// <summary>N2: sign in with an ID token the App got from the provider in the browser, and the nonce salt
+    /// (households design §7); with a recovery code, restores a household without approval.</summary>
+    Task<HouseholdOutcome> SignInAsync(string provider, string idToken, string nonce, string? recoveryCode, CancellationToken cancel = default);
+
+    Task<HouseholdOutcome> SignOutAsync(CancellationToken cancel = default);
+
+    Task<HouseholdOutcome> DeleteAccountAsync(CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -251,6 +259,13 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public Task<HouseholdOutcome> SetDiscoverableAsync(bool on, CancellationToken cancel = default)
         => HouseholdAsync(new SetDiscoverableRequest(NextId(), on), cancel);
+
+    public Task<HouseholdOutcome> SignInAsync(string provider, string idToken, string nonce, string? recoveryCode, CancellationToken cancel = default)
+        => HouseholdAsync(new SignInRequest(NextId(), provider, idToken, nonce, recoveryCode), cancel);
+
+    public Task<HouseholdOutcome> SignOutAsync(CancellationToken cancel = default) => HouseholdAsync(new SignOutRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> DeleteAccountAsync(CancellationToken cancel = default) => HouseholdAsync(new DeleteAccountRequest(NextId()), cancel);
 
     public async ValueTask DisposeAsync()
     {

@@ -14,7 +14,7 @@ public class HouseholdViewModelTests
     private readonly FakeHouseholdHistory _history = new();
     private readonly FakeLink _link = new();
 
-    private HouseholdViewModel Model() => new(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English);
+    private HouseholdViewModel Model() => new(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, FakeAccount.Model(_link));
 
     private static ServiceStatus InHousehold(string deviceId = "aaaa", string name = "Desktop-1")
         => Statuses.Running() with { Household = new HouseholdStatus("hh1", deviceId, name, ChassisKind.Desktop, true, [], null) };

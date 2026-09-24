@@ -19,7 +19,7 @@ public class ShellViewModelTests
         new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { }),
         new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
         new ReportViewModel(_history, _householdHistory, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4),
-        new HouseholdViewModel(_link, _householdHistory, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
+        new HouseholdViewModel(_link, _householdHistory, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, FakeAccount.Model(_link)),
         new SettingsViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         "0.1.0");

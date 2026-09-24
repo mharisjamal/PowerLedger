@@ -64,7 +64,9 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private string? _confirmText;
     private string? _actionMessage;
 
-    public HouseholdViewModel(IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture)
+    public HouseholdViewModel(
+        IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
+        SignInViewModel account)
     {
         _link = link;
         _history = history;
@@ -72,6 +74,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         _clock = clock;
         _zone = zone;
         _culture = culture;
+        Account = account;
         _today = Empty("Today");
         _week = Empty("This week");
         _month = Empty("This month");
@@ -86,6 +89,9 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         ConfirmPending = new RelayCommand(() => _ = ConfirmPendingAsync());
         CancelPending = new RelayCommand(EndConfirm);
     }
+
+    /// <summary>N2's sign-in section (Plan N tasks A6, A7): works whether or not this PC is in a household.</summary>
+    public SignInViewModel Account { get; }
 
     /// <summary>False before a household exists, or once this PC has left one; the page shows the explanation instead.</summary>
     public bool HasHousehold { get => _hasHousehold; private set => SetProperty(ref _hasHousehold, value); }
@@ -198,6 +204,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
 
     private void Apply(HouseholdStatus? household, HouseholdSnapshot? snapshot, DateTimeOffset now)
     {
+        Account.Apply(household);   // sign-in works whether or not this PC is in a household
         HasHousehold = household?.HouseholdId is not null;
         if (!HasHousehold)
         {

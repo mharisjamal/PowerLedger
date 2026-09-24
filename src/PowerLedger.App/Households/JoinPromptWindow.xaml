@@ -19,9 +19,6 @@
                 <TextBlock Style="{StaticResource Text.Body}" FontSize="16" TextWrapping="Wrap" Text="{Binding Heading}" />
                 <TextBlock Style="{StaticResource Text.Secondary}" Margin="0,12,0,0" TextWrapping="Wrap" Text="{Binding ComparisonLine}"
                            Visibility="{Binding HasComparisonLine, Converter={StaticResource VisibleWhen}}" />
-                <TextBlock Style="{StaticResource Text.Muted}" Margin="0,12,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Brush.Amber}"
-                           Visibility="{Binding ShowLeaveWarning, Converter={StaticResource VisibleWhen}}"
-                           Text="Joining will leave your current household." />
             </StackPanel>
         </ScrollViewer>
         <StackPanel Grid.Row="1" Margin="28,4,28,20">

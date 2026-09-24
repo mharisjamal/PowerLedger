@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -76,12 +77,14 @@ public partial class App : Application
         _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
         _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture);
         _report = new ReportViewModel(history, householdHistory, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
-        _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture);
-        _household.AddPcRequested += OpenAddPcWindow;
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _preferences.ApplyFirstRunDefaults();
         _preferences.EnsureFirstRunAt();   // data-sharing design §3: backfills an install from before this field existed
+        var signIn = new SignIn(() => new HttpLoopbackServer(), OpenPage, new HttpClient());
+        var account = new SignInViewModel(_link, _preferences, signIn, threads, SignInClients.Microsoft, SignInClients.Google);
+        _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account);
+        _household.AddPcRequested += OpenAddPcWindow;
         var http = UpdateHttp.Create(version);
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
