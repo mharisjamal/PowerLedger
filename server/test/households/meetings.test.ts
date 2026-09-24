@@ -99,6 +99,21 @@ describe("the meeting slots", () => {
     expect(await (await get(id, "joined")).text()).toBe("{\"proof\":\"x\"}");
   });
 
+  it("include \"welcomed\", where the adder acknowledges the join, under the same rules", async () => {
+    const id = meetingId();
+    expect((await get(id, "welcomed")).status).toBe(404);
+    expect((await put(id, "welcomed", "x".repeat(8193))).status).toBe(413);
+    expect((await put(id, "welcomed", "sealed")).status).toBe(200);
+    expect((await put(id, "welcomed", "again")).status).toBe(409);
+    expect(await (await get(id, "welcomed")).text()).toBe("sealed");
+
+    const start = Date.now();
+    const late = meetingId();
+    expect((await handlePutSlot(putRequest(late, "adder", "{}"), env, late, "adder", start)).status).toBe(200);
+    const over = start + MEETING_LIFETIME_MS;
+    expect((await handlePutSlot(putRequest(late, "welcomed", "sealed"), env, late, "welcomed", over)).status).toBe(410);
+  });
+
   it("give 404 for a slot nobody has written", async () => {
     const id = meetingId();
     expect((await get(id, "joiner")).status).toBe(404);

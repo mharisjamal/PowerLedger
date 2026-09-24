@@ -47,7 +47,7 @@ for the design.
   (503, "The server is busy; try again later."). `GET …/{hid}/batches?after=&limit=` gives
   `{"items":[{"seq","device","epoch","body","sig"}],"next","more"}`: the others' batches as posted, `next` the cursor
   to send as `after` next time, `more` when another page waits.
-- **Meetings**, for pairing by code: `PUT`/`GET /v1/meetings/{id}/{adder|joiner|answer|welcome|joined}`, unsigned;
+- **Meetings**, for pairing by code: `PUT`/`GET /v1/meetings/{id}/{adder|joiner|answer|welcome|joined|welcomed}`, unsigned;
   each slot written once, 8 KB at most, for 10 minutes from the meeting's first `PUT`. Every `PUT` clears ended
   meetings; starting one has its own per-address limit (`MEETING_LIMIT`, 10 a minute, 429), and at most 5000 are live
   (503).
