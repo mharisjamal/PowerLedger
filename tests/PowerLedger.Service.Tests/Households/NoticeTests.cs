@@ -44,7 +44,7 @@ public sealed class NoticeTests
     }
 
     [Fact]
-    public async Task A_join_prompt_shows_the_code_and_the_warning_and_waits_for_the_answer()
+    public async Task A_join_prompt_carries_the_code_beside_its_words_with_the_warning_and_waits_for_the_answer()
     {
         var clock = new FakeTimeProvider();
         var hub = new NoticeHub(() => 1);
@@ -56,7 +56,7 @@ public sealed class NoticeTests
         var notice = await app.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         notice.Kind.ShouldBe(NoticeKind.JoinPrompt);
         notice.Text.ShouldBe(
-            "Join Desktop-7's household? Its code is 482 913. Check it matches the code on Desktop-7. Joining leaves the household this PC is in now.");
+            "Join Desktop-7's household? Joining leaves the household this PC is in now and removes that household's rows from this PC.");
         (notice.FromName, notice.ComparisonCode, notice.ExpiresAt).ShouldBe(("Desktop-7", "482 913", (DateTimeOffset?)clock.GetUtcNow().AddMinutes(2)));
         prompts.Answer("not-the-id", true).ShouldBeFalse();
         prompts.Answer(notice.PromptId!, true).ShouldBeTrue();

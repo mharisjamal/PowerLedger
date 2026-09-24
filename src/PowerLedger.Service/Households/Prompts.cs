@@ -18,6 +18,9 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
     /// <summary>What a <see cref="NoticeKind.Withdraw"/> notice says.</summary>
     internal const string Withdrawn = "That question has closed.";
 
+    /// <summary>Said to a PC already in a household: entering another takes the old one's rows off it (households design §6).</summary>
+    internal const string LeavesWarning = "Joining leaves the household this PC is in now and removes that household's rows from this PC.";
+
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _open = new(StringComparer.Ordinal);
 
     /// <summary>How many prompts wait for an answer now.</summary>
@@ -25,13 +28,8 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
 
     public Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel)
     {
-        var text = question switch
-        {
-            { FromName: null } => "Join the household of the PC that made this code?",
-            { ComparisonCode: { } code } => $"Join {question.FromName}'s household? Its code is {code}. Check it matches the code on {question.FromName}.",
-            _ => $"Join {question.FromName}'s household?",
-        };
-        if (question.LeavesHousehold) text += " Joining leaves the household this PC is in now.";
+        var text = question.FromName is null ? "Join the household of the PC that made this code?" : $"Join {question.FromName}'s household?";
+        if (question.LeavesHousehold) text += " " + LeavesWarning;
         return AskAsync(NoticeKind.JoinPrompt, text, question.FromName, question.ComparisonCode, cancel);
     }
 

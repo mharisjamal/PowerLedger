@@ -73,15 +73,21 @@ internal static partial class Wire
         _ => null,
     };
 
-    /// <summary>A name as the App may show it: trimmed, without control characters, at most <see cref="MaxName"/> characters;
-    /// null when nothing is left.</summary>
+    /// <summary>A name as the App may show it: trimmed, without control characters, nor the format characters that can hide
+    /// text or turn it round, such as U+202E (right-to-left override), nor line and paragraph separators; at most
+    /// <see cref="MaxName"/> characters; null when nothing is left.</summary>
     public static string? Name(string? name)
     {
         if (name is null) return null;
-        var clean = new string([.. name.Where(character => !char.IsControl(character))]).Trim();
+        var clean = new string([.. name.Where(Shown)]).Trim();
         if (clean.Length > MaxName) clean = clean[..MaxName].TrimEnd();
         return clean.Length > 0 ? clean : null;
     }
+
+    private static bool Shown(char character) =>
+        !char.IsControl(character) && char.GetUnicodeCategory(character) is not
+            (System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.LineSeparator
+            or System.Globalization.UnicodeCategory.ParagraphSeparator);
 
     public static bool IsDeviceId(string? id) => id is not null && Hex32().IsMatch(id);
 
