@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:PowerLedger.App"
+        xmlns:midnight="clr-namespace:PowerLedger.App.Midnight"
         Title="PowerLedger" Icon="pack://application:,,,/PowerLedger;component/Brand/PowerLedger.ico" Width="1180" Height="900" MinWidth="960" MinHeight="640"
         WindowStartupLocation="CenterScreen" Background="{DynamicResource M.Ground}"
         UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
@@ -17,23 +18,24 @@
                 <!-- Midnight's styles live here, not at Application level, so its implicit styles never reach Classic or the dialogs;
                      the views merge the same instance (SharedDictionary). M2's page-only styles (Styles.Midnight.Pages.xaml) merge after this one. -->
                 <local:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.xaml" />
+                <local:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.Pages.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <local:PageTitle x:Key="PageTitle" />
             <DataTemplate DataType="{x:Type local:DashboardViewModel}">
                 <local:DashboardView />
             </DataTemplate>
-            <!-- Classic's views stand in for History, Report, Household and Settings until M2's Midnight views land. -->
+            <!-- Midnight's own views over Classic's ViewModels (Midnight look design §2). -->
             <DataTemplate DataType="{x:Type local:BreakdownViewModel}">
-                <local:BreakdownView />
+                <midnight:HistoryView />
             </DataTemplate>
             <DataTemplate DataType="{x:Type local:ReportViewModel}">
-                <local:ReportView />
+                <midnight:ReportView />
             </DataTemplate>
             <DataTemplate DataType="{x:Type local:HouseholdViewModel}">
-                <local:HouseholdView />
+                <midnight:HouseholdView />
             </DataTemplate>
             <DataTemplate DataType="{x:Type local:SettingsViewModel}">
-                <local:SettingsView />
+                <midnight:SettingsView />
             </DataTemplate>
             <DataTemplate DataType="{x:Type local:WizardViewModel}">
                 <local:WizardView />

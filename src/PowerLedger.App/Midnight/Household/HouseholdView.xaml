@@ -3,33 +3,40 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:app="clr-namespace:PowerLedger.App">
     <UserControl.Resources>
-        <!-- Prose and forms keep to a readable measure inside a card; a period's cost lines sit under its energy. -->
-        <Style x:Key="Measure" TargetType="StackPanel">
-            <Setter Property="MaxWidth" Value="560" />
-            <Setter Property="HorizontalAlignment" Value="Left" />
-        </Style>
-        <Style x:Key="Prose" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
-            <Setter Property="TextWrapping" Value="Wrap" />
-        </Style>
-        <DataTemplate x:Key="Period">
-            <StackPanel>
-                <TextBlock Style="{StaticResource M.Card.Title}" Text="{Binding Title, Converter={StaticResource Upper}}" />
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Style="{StaticResource M.Text.Display}" Text="{Binding Energy}" />
-                    <TextBlock Style="{StaticResource M.Text.Secondary}" Text="kWh" Margin="8,0,0,7" VerticalAlignment="Bottom" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Midnight's styles and the page styles, the one instance the window merges (SharedDictionary): a view the
+                     window's DataTemplate builds resolves its StaticResources before it joins the window. -->
+                <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.Pages.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- Prose and forms keep to a readable measure inside a card; a period's cost lines sit under its energy. -->
+            <Style x:Key="Measure" TargetType="StackPanel">
+                <Setter Property="MaxWidth" Value="560" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+            </Style>
+            <Style x:Key="Prose" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+            <DataTemplate x:Key="Period">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="{Binding Title, Converter={StaticResource Upper}}" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource M.Text.Display}" Text="{Binding Energy}" />
+                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="kWh" Margin="8,0,0,7" VerticalAlignment="Bottom" />
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Costs}" Focusable="False" Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type app:HouseholdCostLine}">
+                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                    <TextBlock Style="{StaticResource M.Text.Number}" Text="{Binding Cost}" />
+                                    <TextBlock Style="{StaticResource M.Text.Muted}" Text="{Binding Currency}" Margin="6,0,0,0" VerticalAlignment="Bottom" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
-                <ItemsControl ItemsSource="{Binding Costs}" Focusable="False" Margin="0,4,0,0">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type app:HouseholdCostLine}">
-                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                <TextBlock Style="{StaticResource M.Text.Number}" Text="{Binding Cost}" />
-                                <TextBlock Style="{StaticResource M.Text.Muted}" Text="{Binding Currency}" Margin="6,0,0,0" VerticalAlignment="Bottom" />
-                            </StackPanel>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </DataTemplate>
+            </DataTemplate>
+        </ResourceDictionary>
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">

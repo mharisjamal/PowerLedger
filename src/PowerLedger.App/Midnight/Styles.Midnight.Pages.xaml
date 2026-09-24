@@ -3,8 +3,12 @@
                     xmlns:app="clr-namespace:PowerLedger.App">
 
     <!-- Page-only styles for Midnight's History, Report, Household and Settings pages (Plan O task M2-6), merged by
-         MidnightWindow after Styles.Midnight.xaml, whose keys these build on. Cards sit on an 8 px rhythm: 24 around the
-         page, 16 between cards, 20 inside them. -->
+         MidnightWindow after Styles.Midnight.xaml, whose keys these build on, and by each page. Cards sit on an 8 px
+         rhythm: 24 around the page, 16 between cards, 20 inside them. -->
+    <ResourceDictionary.MergedDictionaries>
+        <!-- The keys these build on, the one instance the window merges, so a page can merge this dictionary alone. -->
+        <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.xaml" />
+    </ResourceDictionary.MergedDictionaries>
 
     <Thickness x:Key="M.Page.Margin">24,8,24,24</Thickness>
     <Thickness x:Key="M.Card.Gap">0,16,0,0</Thickness>

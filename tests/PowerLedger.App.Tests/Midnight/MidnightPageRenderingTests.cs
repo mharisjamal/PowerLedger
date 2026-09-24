@@ -45,7 +45,7 @@ public class MidnightPageRenderingTests
                 model.Show();
                 var view = new Midnight.HistoryView { DataContext = model };
                 using var page = Page(view, 1010);
-                var pills = AllOf<RadioButton>(view).Where(p => p.Content is string).ToList();
+                var pills = AllOf<RadioButton>(view).Where(p => p.Content is string && p.IsVisible).ToList();
                 pills.Select(p => p.Content).ShouldBe(["Today", "7 days", "30 days", "This month", "Last month", "Custom", "W", "Wh"], ignoreOrder: true, theme.ToString());
                 pills.Where(p => p.IsChecked == true).Select(p => p.Content).ShouldBe(["7 days", "W"], ignoreOrder: true, theme.ToString());
                 Find<StackedChart>(view).ShouldNotBeNull(theme.ToString()).ActualHeight.ShouldBe(300, theme.ToString());
@@ -170,7 +170,7 @@ public class MidnightPageRenderingTests
                     Find<TextBlock>(explainer, t => t.Text == "Your PCs").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeFalse(theme.ToString());
                     var add = AllOf<Button>(explainer).Where(b => Equals(b.Content, "Add a PC") && b.IsVisible).ToList();
                     add.Count.ShouldBe(1, theme.ToString());
-                    add[0].Style.ShouldBe(Application.Current.FindResource("M.Button.Primary"), theme.ToString());
+                    add[0].Style.ShouldBe(explainer.FindResource("M.Button.Primary"), theme.ToString());
                     Find<TextBlock>(explainer, t => t.Text == "SIGN IN").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
                     Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-household-none-{theme}.png");
                 }
@@ -214,13 +214,13 @@ public class MidnightPageRenderingTests
                 {
                     var eyebrow = Find<TextBlock>(view, t => t.Text == title).ShouldNotBeNull($"{title} on {theme}");
                     eyebrow.IsVisible.ShouldBeTrue($"{title} on {theme}");
-                    Ancestor<Border>(eyebrow, b => b.Style == Application.Current.FindResource("M.Card")).ShouldNotBeNull($"{title} in a card on {theme}");
+                    Ancestor<Border>(eyebrow, b => b.Style == view.FindResource("M.Card")).ShouldNotBeNull($"{title} in a card on {theme}");
                 }
                 AllOf<RadioButton>(view).Where(p => p.Content is "Classic" or "Midnight" or "Like Windows" or "Dark" or "Light").Count().ShouldBe(5, theme.ToString());
                 AllOf<RadioButton>(view).Where(p => p.Content is "Like Windows").Single().IsChecked.ShouldBe(true, theme.ToString());
                 var switches = AllOf<ToggleButton>(view).Where(t => t is not CheckBox and not RadioButton).ToList();
                 switches.Select(t => t.Content).ShouldContain("Crash and sensor reports", theme.ToString());
-                var toggle = (Style)Application.Current.FindResource("M.Switch");
+                var toggle = (Style)view.FindResource("M.Switch");
                 switches.ShouldAllBe(t => t.Style == toggle || t.Style!.BasedOn == toggle, theme.ToString());
                 model.Service.Monitors.Count.ShouldBe(2, theme.ToString());
                 foreach (var monitor in model.Service.Monitors)
@@ -437,24 +437,10 @@ public class MidnightPageRenderingTests
     };
 
     /// <summary>
-    /// Midnight's palette, styles and page styles over the application's dictionaries until disposed, the page styles
-    /// merged after the styles as MidnightWindow will.
+    /// Midnight's palette over the application's dictionaries until disposed, and nothing else: each page carries
+    /// Midnight's styles itself, as it must when the window's DataTemplate builds it outside the window's tree.
     /// </summary>
-    private static IDisposable Midnight(Theme theme)
-    {
-        var palette = UsePalette(theme);
-        var styles = Use(MidnightStylesTests.Load());
-        var pages = Use(new ResourceDictionary
-        {
-            Source = new Uri("pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.Pages.xaml", UriKind.Absolute),
-        });
-        return new Undo(() =>
-        {
-            pages.Dispose();
-            styles.Dispose();
-            palette.Dispose();
-        });
-    }
+    private static IDisposable Midnight(Theme theme) => UsePalette(theme);
 
     /// <summary>A page laid out at <paramref name="width"/> and its whole length, on Midnight's ground, as the window's page host would show it.</summary>
     private static PageHost Page(FrameworkElement view, double width)
@@ -475,11 +461,6 @@ public class MidnightPageRenderingTests
     private sealed record PageHost(Border Host, Window Window) : IDisposable
     {
         public void Dispose() => Window.Close();
-    }
-
-    private sealed class Undo(Action undo) : IDisposable
-    {
-        public void Dispose() => undo();
     }
 
     /// <summary>The same machine's last seven days the Classic renders show: asleep overnight, working days, quiet evenings.</summary>

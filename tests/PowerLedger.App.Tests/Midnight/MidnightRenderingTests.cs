@@ -65,10 +65,10 @@ public class MidnightRenderingTests
                 var canvas = UiHarness.Find<Grid>(window, grid => grid.Name == "Nav")!;   // the pill's canvas fills this cell
                 foreach (var (label, page, view) in new[]
                 {
-                    ("History", Page.Breakdown, typeof(BreakdownView)),
-                    ("Report", Page.Report, typeof(ReportView)),
-                    ("Household", Page.Household, typeof(HouseholdView)),
-                    ("Settings", Page.Settings, typeof(SettingsView)),
+                    ("History", Page.Breakdown, typeof(Midnight.HistoryView)),
+                    ("Report", Page.Report, typeof(Midnight.ReportView)),
+                    ("Household", Page.Household, typeof(Midnight.HouseholdView)),
+                    ("Settings", Page.Settings, typeof(Midnight.SettingsView)),
                     ("Dashboard", Page.Dashboard, typeof(DashboardView)),
                 })
                 {
@@ -82,7 +82,7 @@ public class MidnightRenderingTests
                     Canvas.GetLeft(window.Pill).ShouldBe(at.X, 0.5, $"the pill under {label}");
                     window.Pill.ActualWidth.ShouldBe(item.ActualWidth, 0.5);
                     UiHarness.Find<FrameworkElement>(window, element => element.GetType() == view).ShouldNotBeNull($"the {label} page");
-                    if (page == Page.Household) UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-household-classic-view-Dark.png");
+                    if (page != Page.Dashboard) UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-window-{label.ToLowerInvariant()}-Dark.png");
                 }
             }
             finally

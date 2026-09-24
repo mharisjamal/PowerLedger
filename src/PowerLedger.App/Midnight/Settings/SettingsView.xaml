@@ -4,46 +4,53 @@
              xmlns:app="clr-namespace:PowerLedger.App"
              xmlns:contracts="clr-namespace:PowerLedger.Contracts;assembly=PowerLedger.Contracts">
     <UserControl.Resources>
-        <Style x:Key="Label" TargetType="TextBlock" BasedOn="{StaticResource M.Settings.Label}" />
-        <Style x:Key="Row" TargetType="StackPanel" BasedOn="{StaticResource M.Settings.Row}" />
-        <Style x:Key="Aside" TargetType="TextBlock" BasedOn="{StaticResource M.Settings.Aside}" />
-        <Style x:Key="Note" TargetType="TextBlock" BasedOn="{StaticResource M.Note}" />
-        <Style x:Key="Said" TargetType="TextBlock" BasedOn="{StaticResource M.Said}" />
-        <!-- A choice among a few: pills on one track. -->
-        <Style x:Key="Choice" TargetType="RadioButton" BasedOn="{StaticResource M.Pill}" />
-        <Style x:Key="Choices" TargetType="Border" BasedOn="{StaticResource M.PillTrack}" />
-        <Style x:Key="Field" TargetType="TextBox" BasedOn="{StaticResource M.Field}" />
-        <Style x:Key="Tick" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}" />
-        <!-- A privacy switch: the title beside the switch, the explanation under both. -->
-        <Style x:Key="Switch" TargetType="ToggleButton" BasedOn="{StaticResource M.Switch}">
-            <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
-        <Style x:Key="SwitchNote" TargetType="TextBlock" BasedOn="{StaticResource M.Note}">
-            <Setter Property="Margin" Value="46,4,0,0" />
-        </Style>
-        <!-- A preference switch's words, which wrap in a narrow page: the switch lays its content out on one line otherwise. -->
-        <Style x:Key="SwitchText" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="MaxWidth" Value="340" />
-        </Style>
-        <!-- A monitor's "Count it". One that runs off the PC always counts, so its box shows ticked, can't be unticked, and says why. -->
-        <Style x:Key="Counts" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}">
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding OwnPlug}" Value="False">
-                    <Setter Property="ToolTip" Value="Runs off this PC, so it counts as part of what the PC draws" />
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-        <!-- A monitor's "has its own plug", asked only on a laptop. A desktop still shows it for a monitor held to run off the PC,
-             so that can be undone, and once it has been ticked or unticked, so it doesn't go from under the pointer. -->
-        <Style x:Key="Plug" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}">
-            <Setter Property="Visibility" Value="{Binding DataContext.IsDesktop, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource HiddenWhen}}" />
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding ShowsPlug}" Value="True">
-                    <Setter Property="Visibility" Value="Visible" />
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Midnight's styles and the page styles, the one instance the window merges (SharedDictionary): a view the
+                     window's DataTemplate builds resolves its StaticResources before it joins the window. -->
+                <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.Pages.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="Label" TargetType="TextBlock" BasedOn="{StaticResource M.Settings.Label}" />
+            <Style x:Key="Row" TargetType="StackPanel" BasedOn="{StaticResource M.Settings.Row}" />
+            <Style x:Key="Aside" TargetType="TextBlock" BasedOn="{StaticResource M.Settings.Aside}" />
+            <Style x:Key="Note" TargetType="TextBlock" BasedOn="{StaticResource M.Note}" />
+            <Style x:Key="Said" TargetType="TextBlock" BasedOn="{StaticResource M.Said}" />
+            <!-- A choice among a few: pills on one track. -->
+            <Style x:Key="Choice" TargetType="RadioButton" BasedOn="{StaticResource M.Pill}" />
+            <Style x:Key="Choices" TargetType="Border" BasedOn="{StaticResource M.PillTrack}" />
+            <Style x:Key="Field" TargetType="TextBox" BasedOn="{StaticResource M.Field}" />
+            <Style x:Key="Tick" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}" />
+            <!-- A privacy switch: the title beside the switch, the explanation under both. -->
+            <Style x:Key="Switch" TargetType="ToggleButton" BasedOn="{StaticResource M.Switch}">
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="SwitchNote" TargetType="TextBlock" BasedOn="{StaticResource M.Note}">
+                <Setter Property="Margin" Value="46,4,0,0" />
+            </Style>
+            <!-- A preference switch's words, which wrap in a narrow page: the switch lays its content out on one line otherwise. -->
+            <Style x:Key="SwitchText" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="MaxWidth" Value="340" />
+            </Style>
+            <!-- A monitor's "Count it". One that runs off the PC always counts, so its box shows ticked, can't be unticked, and says why. -->
+            <Style x:Key="Counts" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding OwnPlug}" Value="False">
+                        <Setter Property="ToolTip" Value="Runs off this PC, so it counts as part of what the PC draws" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <!-- A monitor's "has its own plug", asked only on a laptop. A desktop still shows it for a monitor held to run off the PC,
+                 so that can be undone, and once it has been ticked or unticked, so it doesn't go from under the pointer. -->
+            <Style x:Key="Plug" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}">
+                <Setter Property="Visibility" Value="{Binding DataContext.IsDesktop, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource HiddenWhen}}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding ShowsPlug}" Value="True">
+                        <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </ResourceDictionary>
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">

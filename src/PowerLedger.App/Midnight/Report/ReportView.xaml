@@ -4,19 +4,26 @@
              xmlns:app="clr-namespace:PowerLedger.App"
              xmlns:local="clr-namespace:PowerLedger.App.Midnight">
     <UserControl.Resources>
-        <!-- The sheet's cards sit two to a row, 16 px apart; a card's title is its eyebrow. -->
-        <Style x:Key="Left" TargetType="Border" BasedOn="{StaticResource M.Card}">
-            <Setter Property="Grid.Column" Value="0" />
-            <Setter Property="Margin" Value="0,16,8,0" />
-        </Style>
-        <Style x:Key="Right" TargetType="Border" BasedOn="{StaticResource M.Card}">
-            <Setter Property="Grid.Column" Value="1" />
-            <Setter Property="Margin" Value="8,16,0,0" />
-        </Style>
-        <Style TargetType="app:LedgerRow" BasedOn="{StaticResource M.LedgerRow}" />
-        <Style x:Key="Export" TargetType="Button" BasedOn="{StaticResource M.Button.Outline}">
-            <Setter Property="Margin" Value="0,0,6,6" />
-        </Style>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Midnight's styles and the page styles, the one instance the window merges (SharedDictionary): a view the
+                     window's DataTemplate builds resolves its StaticResources before it joins the window. -->
+                <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.Pages.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- The sheet's cards sit two to a row, 16 px apart; a card's title is its eyebrow. -->
+            <Style x:Key="Left" TargetType="Border" BasedOn="{StaticResource M.Card}">
+                <Setter Property="Grid.Column" Value="0" />
+                <Setter Property="Margin" Value="0,16,8,0" />
+            </Style>
+            <Style x:Key="Right" TargetType="Border" BasedOn="{StaticResource M.Card}">
+                <Setter Property="Grid.Column" Value="1" />
+                <Setter Property="Margin" Value="8,16,0,0" />
+            </Style>
+            <Style TargetType="app:LedgerRow" BasedOn="{StaticResource M.LedgerRow}" />
+            <Style x:Key="Export" TargetType="Button" BasedOn="{StaticResource M.Button.Outline}">
+                <Setter Property="Margin" Value="0,0,6,6" />
+            </Style>
+        </ResourceDictionary>
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">

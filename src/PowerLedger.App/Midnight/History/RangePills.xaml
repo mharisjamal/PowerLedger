@@ -2,6 +2,15 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:app="clr-namespace:PowerLedger.App">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Midnight's styles and the page styles, the one instance the window merges (SharedDictionary): a view the
+                     window's DataTemplate builds resolves its StaticResources before it joins the window. -->
+                <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.Pages.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
     <!-- The same six ranges Classic's RangeBar offers, as pills on one track, with the custom dates in fields beside them. -->
     <WrapPanel>
         <Border Style="{StaticResource M.PillTrack}" Margin="0,0,0,6">
