@@ -302,6 +302,45 @@ describe("join requests", () => {
     expect((await approveAs(hid, owner.device, laptop)).status).toBe(200);
   });
 
+  it("approve only if nothing changed since the approval looked: a rotation, a denial or an ask-again between gives 409", async () => {
+    type Race = { hid: string; owner: SignedIn; second: TestDevice; laptop: SignedIn };
+    const changes: [string, (race: Race) => Promise<unknown>][] = [
+      ["a rotation", (race) => rotate(race.hid, race.owner.device, 2, [race.owner.device, race.second])],
+      ["a denial", (race) => signedFetch(race.second, "DELETE", `/v1/households/${race.hid}/requests/${race.laptop.device.id}`)],
+      ["an ask-again", (race) => asAccount(race.laptop, "POST", "/v1/account/requests")],
+    ];
+    for (const [name, change] of changes) {
+      const { hid, owner } = await linkedHousehold();
+      const second = await newDevice();
+      await addMember(hid, owner.device, second);
+      const laptop = await signIn(undefined, owner.account);
+      await asAccount(laptop, "POST", "/v1/account/requests");
+      await readyToApprove(hid, owner.device, laptop);
+      const raced = hookBefore(env, /INSERT INTO members|INSERT INTO key_envelopes|UPDATE join_requests SET approved/, () =>
+        change({ hid, owner, second, laptop }),
+      );
+      const body = JSON.stringify({ epoch: 1, body: envelope() });
+      const request = await signedRequest(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, body);
+
+      expect((await handleHouseholdRoutes(request, raced))!.status, name).toBe(409);
+      expect(await isMember(hid, laptop.device.id), name).toBe(false);
+      expect(await env.DB.prepare("SELECT 1 FROM key_envelopes WHERE device = ?").bind(laptop.device.id).first(), name).toBeNull();
+    }
+  });
+
+  it("take an identical approval retry as done, and any other once approved as 409", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
+    const body = envelope();
+
+    expect((await approveAs(hid, owner.device, laptop, 1, body)).status).toBe(200);
+    expect((await approveAs(hid, owner.device, laptop, 1, body)).status).toBe(200);
+    expect((await approveAs(hid, owner.device, laptop, 1, envelope())).status).toBe(409);
+    expect((await approveAs(hid, owner.device, (await signIn(undefined, owner.account)), 1, body)).status).toBe(404);
+  });
+
   it("let only the member that committed reveal and approve", async () => {
     const { hid, owner } = await linkedHousehold();
     const second = await newDevice();

@@ -2,7 +2,6 @@ import { sha256hex, timingSafeEqualStrings } from "../auth";
 import { checkSession, finishSession, type MemberRow, type SessionRow, sessionToken } from "./auth";
 import { base64urlDecode, hex, sha256 } from "./encoding";
 import {
-  addMemberStatement,
   currentEpoch,
   HOUSEHOLD_ID,
   isEnvelopeBody,
@@ -281,12 +280,25 @@ export async function handleOwnRequests(env: Cloudflare.Env, session: SessionRow
 }
 
 /**
+ * The condition every write of an approval holds under, its parameters from ?first on: the request still as the approval
+ * read it (the same approver and reveal, not asked again since, not yet approved) and the household's key still at the
+ * epoch it read. Parameters: household, device, approver, reveal, created, epoch.
+ */
+function asRead(first: number): string {
+  const [household, device, approver, reveal, created, epoch] = [0, 1, 2, 3, 4, 5].map((i) => `?${first + i}`);
+  return `EXISTS (SELECT 1 FROM join_requests WHERE household = ${household} AND device = ${device} AND approver = ${approver}
+      AND reveal = ${reveal} AND created = ${created} AND approved_epoch IS NULL)
+    AND (SELECT epoch FROM households WHERE id = ${household}) = ${epoch}`;
+}
+
+/**
  * POST /v1/households/{hid}/requests/{device}/approve: {"epoch","body"}, the household key at its current epoch sealed
  * for the waiting PC (with the member list, HouseholdCrypto.WrapFor, from the approving member). Only the member that
  * committed may approve (403), and only after its reveal (409). In one step the PC becomes a member, its envelope is kept
- * and its request is marked approved at that epoch, staying so until the PC reads it; a full household leaves all three
- * as they were. Any epoch but the current one is 409, and so is an envelope the PC already has at it: one is never
- * overwritten.
+ * and its request is marked approved at that epoch, staying so until the PC withdraws it; a full household leaves all
+ * three as they were. Any epoch but the current one is 409, and so is an envelope the PC already has at it: one is never
+ * overwritten. The step holds only if nothing changed since the look: a rotation, a denial or the PC asking again in
+ * between gives 409. An identical retry of an approval already made is done.
  */
 export async function handleApprove(env: Cloudflare.Env, member: MemberRow, device: string, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
@@ -295,7 +307,7 @@ export async function handleApprove(env: Cloudflare.Env, member: MemberRow, devi
   }
 
   const request = await waitingRequest(env, member.household, device);
-  if (!request) return errorResponse(404, "That PC isn't waiting to join this household.");
+  if (!request) return afterApproval(env, member, device, posted.epoch, posted.body);
   if (request.approver !== member.device) return errorResponse(403, "Only the member that committed can approve.");
   if (request.reveal === null) return errorResponse(409, "The approval's reveal hasn't been made yet.");
 
@@ -308,25 +320,58 @@ export async function handleApprove(env: Cloudflare.Env, member: MemberRow, devi
   if (sealedAlready) return errorResponse(409, "That PC already has a key at this epoch.");
 
   const now = Date.now();
+  const read = [member.household, device, member.device, request.reveal, request.created, epoch];
   const alreadyIn = await isCurrentMember(env, member.household, device);
   const results = await env.DB.batch([
-    ...(alreadyIn ? [] : [addMemberStatement(env, member.household, device, request.sign_key, request.dh_key, now)]),
+    env.DB.prepare(`SELECT 1 AS unchanged WHERE ${asRead(1)}`).bind(...read),
+    ...(alreadyIn
+      ? []
+      : [
+          env.DB.prepare(
+            `INSERT INTO members (household, device, sign_key, dh_key, added, removed, added_epoch, removed_epoch)
+             SELECT ?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL
+             WHERE (SELECT COUNT(*) FROM members WHERE household = ?1 AND removed IS NULL) < ?7 AND ${asRead(8)}
+             ON CONFLICT (household, device) DO UPDATE SET
+               sign_key = excluded.sign_key, dh_key = excluded.dh_key, added = excluded.added, removed = NULL,
+               added_epoch = excluded.added_epoch, removed_epoch = NULL
+             RETURNING device`,
+          ).bind(member.household, device, request.sign_key, request.dh_key, now, epoch, MAX_MEMBERS, ...read),
+        ]),
     env.DB.prepare(
       `INSERT INTO key_envelopes (household, epoch, device, from_device, body, created)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6
-       WHERE EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?3 AND removed IS NULL)
+       WHERE EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?3 AND removed IS NULL) AND ${asRead(7)}
        ON CONFLICT (household, epoch, device) DO NOTHING
        RETURNING device`,
-    ).bind(member.household, epoch, device, member.device, posted.body, now),
+    ).bind(member.household, epoch, device, member.device, posted.body, now, ...read),
     env.DB.prepare(
-      `UPDATE join_requests SET approved_epoch = ?3, approved_at = ?4 WHERE household = ?1 AND device = ?2
-       AND EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?2 AND removed IS NULL)`,
-    ).bind(member.household, device, epoch, now),
+      `UPDATE join_requests SET approved_epoch = ?1, approved_at = ?2 WHERE household = ?3 AND device = ?4
+       AND EXISTS (SELECT 1 FROM members WHERE household = ?3 AND device = ?4 AND removed IS NULL) AND ${asRead(5)}`,
+    ).bind(epoch, now, member.household, device, ...read),
   ]);
-  if (!alreadyIn && results[0].results.length === 0) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
+  if (results[0].results.length === 0) {
+    return errorResponse(409, "The request or the household's key changed meanwhile; look again.");
+  }
+  if (!alreadyIn && results[1].results.length === 0) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
   // Another member's approval sealed one first, between the look above and this: that one stays.
-  if (results[alreadyIn ? 0 : 1].results.length === 0) return errorResponse(409, "That PC already has a key at this epoch.");
+  if (results[alreadyIn ? 1 : 2].results.length === 0) return errorResponse(409, "That PC already has a key at this epoch.");
   return ok();
+}
+
+/** An approval posted for a PC not waiting: done when it's the very approval already made (its answer was lost), 409 for
+ * any other once the PC is approved, and 404 when it isn't. */
+async function afterApproval(env: Cloudflare.Env, member: MemberRow, device: string, epoch: number, body: string): Promise<Response> {
+  const approved = await env.DB.prepare(
+    `SELECT r.approver, r.approved_epoch, k.from_device, k.body FROM join_requests r
+     LEFT JOIN key_envelopes k ON k.household = r.household AND k.epoch = r.approved_epoch AND k.device = r.device
+     WHERE r.household = ? AND r.device = ? AND r.approved_epoch IS NOT NULL`,
+  )
+    .bind(member.household, device)
+    .first<{ approver: string; approved_epoch: number; from_device: string | null; body: string | null }>();
+  if (!approved) return errorResponse(404, "That PC isn't waiting to join this household.");
+  const same = approved.approver === member.device && approved.approved_epoch === epoch &&
+    approved.from_device === member.device && approved.body === body;
+  return same ? ok() : errorResponse(409, "That PC has already been approved.");
 }
 
 function isSealed(value: unknown, maxChars: number): value is string {
