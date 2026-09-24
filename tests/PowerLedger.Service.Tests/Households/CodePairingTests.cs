@@ -49,6 +49,7 @@ public sealed class CodePairingTests : IDisposable
 
         joined.ShouldBeOfType<PairingOutcome.Joined>().Other.Id.ShouldBe(_adderKeys.DeviceId);
         added.ShouldBeOfType<PairingOutcome.Joined>().Other.Id.ShouldBe(_joinerKeys.DeviceId);
+        Wire.IsJoinProof(((PairingOutcome.Joined)added).Other, Household, ((PairingOutcome.Joined)added).Proof).ShouldBeTrue();
         added.Text.ShouldBe("Laptop-2 joined your household.");
         asked.ShouldNotBeNull().ComparisonCode.ShouldBeNull();
         (asked.FromName, asked.LeavesHousehold).ShouldBe(("Desktop-7", true));

@@ -10,15 +10,20 @@ internal sealed record RelayResult<T>(int Status, T? Value, string? Error)
 {
     public bool Ok => Status is >= 200 and < 300;
 
-    /// <summary>Worth trying again later: no answer, too many requests, a signature the server refused, which a wrong clock
-    /// gives, or the server's own fault.</summary>
+    /// <summary>Worth trying again later: no answer, a request the server didn't take as a member's, which a wrong clock or a
+    /// PC not added yet gives, too many requests today, or the server busy or at fault.</summary>
     public bool Transient => Status is 0 or 401 or 408 or 429 or >= 500;
+
+    /// <summary>410: the server says this PC was removed from the household.</summary>
+    public bool Removed => Status == 410;
 
     /// <summary>The problem in words the App can show after "Couldn't sync:", without a full stop.</summary>
     public string Problem => Status switch
     {
         0 => Error ?? "the server couldn't be reached",
-        401 => $"the server didn't accept this PC's signature ({Error ?? "401"}); check the PC's clock",
+        401 => $"the server didn't take this PC's request as a member's ({Error ?? "401"}); check the PC's clock",
+        429 => "this PC has asked the server too much today; it tries again later",
+        503 => "the server is busy; this PC tries again later",
         _ => Error ?? $"the server answered {Status}",
     };
 }
@@ -59,10 +64,11 @@ internal sealed class RelayClient : IDisposable
         SendAsync<Done>(HttpMethod.Post, "v1/households", Json(new CreateHouseholdBody(householdId, Wire.Encode(keys.SignPublic), Wire.Encode(keys.DhPublic)),
             HouseholdJson.Default.CreateHouseholdBody), keys, null, cancel);
 
-    /// <summary><c>POST /v1/households/{hid}/members</c>: a member adds another PC by its keys.</summary>
-    public Task<RelayResult<Done>> AddMemberAsync(DeviceKeys keys, string householdId, byte[] sign, byte[] dh, CancellationToken cancel) =>
+    /// <summary><c>POST /v1/households/{hid}/members</c>: a member adds another PC by its keys, with that PC's own signature
+    /// over its join (<see cref="Wire.JoinProof"/>).</summary>
+    public Task<RelayResult<Done>> AddMemberAsync(DeviceKeys keys, string householdId, byte[] sign, byte[] dh, byte[] proof, CancellationToken cancel) =>
         SendAsync<Done>(HttpMethod.Post, $"v1/households/{householdId}/members",
-            Json(new MemberKeysBody(Wire.Encode(sign), Wire.Encode(dh)), HouseholdJson.Default.MemberKeysBody), keys, null, cancel);
+            Json(new MemberKeysBody(Wire.Encode(sign), Wire.Encode(dh), Wire.Encode(proof)), HouseholdJson.Default.MemberKeysBody), keys, null, cancel);
 
     /// <summary><c>DELETE /v1/households/{hid}/members/{device}</c>: a member removes another, or itself.</summary>
     public Task<RelayResult<Done>> RemoveMemberAsync(DeviceKeys keys, string householdId, string deviceId, CancellationToken cancel) =>
@@ -120,9 +126,10 @@ internal sealed class RelayClient : IDisposable
     public Task<RelayResult<RecoveryReply>> GetRecoveryAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
         SendAsync(HttpMethod.Get, "v1/account/recovery", null, keys, HouseholdJson.Default.RecoveryReply, cancel, session: session);
 
-    /// <summary>N2's <c>POST /v1/account/recover</c>: this PC joins the account's household on a proof it opened the envelope.</summary>
-    public Task<RelayResult<Done>> RecoverAsync(DeviceKeys keys, string session, byte[] proof, CancellationToken cancel) =>
-        SendAsync<Done>(HttpMethod.Post, "v1/account/recover", Json(new RecoverBody(Wire.Encode(proof)), HouseholdJson.Default.RecoverBody), keys,
+    /// <summary>N2's <c>POST /v1/account/recover</c>: this PC joins the account's household on the verifier, which only a PC
+    /// that opened the recovery envelope can make.</summary>
+    public Task<RelayResult<Done>> RecoverAsync(DeviceKeys keys, string session, byte[] verifier, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, "v1/account/recover", Json(new RecoverBody(Wire.Encode(verifier)), HouseholdJson.Default.RecoverBody), keys,
             null, cancel, session: session);
 
     /// <summary>N2's <c>GET /v1/households/{hid}/requests</c>: the PCs signed in as the account waiting to join.</summary>
@@ -232,8 +239,8 @@ internal sealed class RelayClient : IDisposable
 /// <summary>The body of <c>POST /v1/households</c>.</summary>
 internal sealed record CreateHouseholdBody(string Id, string Sign, string Dh);
 
-/// <summary>A PC's keys, as <c>POST …/members</c> takes them.</summary>
-internal sealed record MemberKeysBody(string Sign, string Dh);
+/// <summary>A PC's keys, as <c>POST …/members</c> takes them, with its signature over its join.</summary>
+internal sealed record MemberKeysBody(string Sign, string Dh, string Proof);
 
 /// <summary>One member's sealed key.</summary>
 internal sealed record EnvelopeBody(string Device, string Body);
@@ -274,7 +281,7 @@ internal sealed record RecoveryBody(string Body, string Verifier, int Epoch);
 
 internal sealed record RecoveryReply(string? HouseholdId, int? Epoch, string Body);
 
-internal sealed record RecoverBody(string Proof);
+internal sealed record RecoverBody(string Verifier);
 
 /// <summary>N2: a PC signed in as the account waiting to join.</summary>
 internal sealed record JoinRequestItem(string Device, string Sign, string Dh, long Created);

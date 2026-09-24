@@ -238,6 +238,9 @@ internal sealed record LanMessage
     public List<WireRow>? Rows { get; init; }
 
     public string? Mac { get; init; }
+
+    /// <summary>The joining PC's signature over its join (<see cref="Wire.JoinProof"/>), which the server wants to add it.</summary>
+    public string? Proof { get; init; }
 }
 
 internal static class LanMessages

@@ -1,5 +1,6 @@
 using System.Buffers.Text;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -9,10 +10,11 @@ using PowerLedger.Core.Households;
 namespace PowerLedger.Service.Tests;
 
 /// <summary>
-/// The Worker's household routes in memory, as <c>server/src/households</c> answers them: the signature checks in their
-/// order (headers, time, member, signature, replay), membership, batches numbered as they arrive with each item carrying
-/// its sender's own sequence number, key envelopes, and meeting slots written once for 10 minutes. N2's routes answer as
-/// the Worker's do, with sessions kept as given.
+/// The Worker's household routes in memory, as <c>server/src/households</c> answers them after the security review: the
+/// signature checks in their order (headers, time, member, signature, replay), 401 for a PC that isn't a member and 410 for
+/// one that was removed; a member added only with the joiner's own proof; the household's current epoch, which a rotation
+/// must follow by one and an approval must use; batches numbered as they arrive with each item carrying its sender's own
+/// sequence number; meeting slots written once for 10 minutes; and N2's accounts, sessions, links, requests and recovery.
 /// </summary>
 internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 {
@@ -20,6 +22,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Dictionary<string, Member>> _households = [];
+    private readonly Dictionary<string, int> _epochs = [];
     private readonly List<Batch> _batches = [];
     private readonly Dictionary<(string Household, int Epoch, string Device), (string From, string Body)> _envelopes = [];
     private readonly Dictionary<(string Meeting, string Slot), (byte[] Body, DateTimeOffset Created)> _meetings = [];
@@ -29,44 +32,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     private readonly Dictionary<string, Session> _sessions = [];
     private readonly Dictionary<string, string> _links = [];
     private readonly Dictionary<(string Household, string Device), JoinRequest> _requests = [];
-    private readonly Dictionary<string, (string Body, string Verifier, int? Epoch)> _recovery = [];
-
-    /// <summary>N2: an ID token as the fake checks it: the provider, the subject and the nonce it was made for.</summary>
-    public static string IdToken(string provider, string subject, string deviceId, string salt) => $"{provider}|{subject}|{BoundNonce(deviceId, salt)}";
-
-    /// <summary>N2: the nonce the App asks the provider for, as the Worker works it out (signin.ts boundNonce).</summary>
-    public static string BoundNonce(string deviceId, string salt) =>
-        Encode(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes($"{deviceId}:{salt}")));
-
-    /// <summary>N2: the household the account of <paramref name="subject"/> is linked to.</summary>
-    public string? LinkOf(string subject)
-    {
-        lock (_gate) return _accounts.Where(pair => pair.Key.Subject == subject).Select(pair => _links.GetValueOrDefault(pair.Value)).FirstOrDefault();
-    }
-
-    /// <summary>N2: the recovery envelope of the account of <paramref name="subject"/>.</summary>
-    public (string Body, string Verifier, int? Epoch)? RecoveryOf(string subject)
-    {
-        lock (_gate)
-        {
-            var account = _accounts.Where(pair => pair.Key.Subject == subject).Select(pair => pair.Value).FirstOrDefault();
-            return account is not null && _recovery.TryGetValue(account, out var envelope) ? envelope : null;
-        }
-    }
-
-    /// <summary>N2: the devices waiting to join a household.</summary>
-    public IReadOnlyList<string> Waiting(string household)
-    {
-        lock (_gate) return [.. _requests.Keys.Where(key => key.Household == household).Select(key => key.Device)];
-    }
-
-    public int Sessions
-    {
-        get
-        {
-            lock (_gate) return _sessions.Count;
-        }
-    }
+    private readonly Dictionary<string, (string Body, string Verifier, int Epoch)> _recovery = [];
 
     /// <summary>While true, nothing answers.</summary>
     public bool Down { get; set; }
@@ -100,12 +66,19 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         lock (_gate) return _households.TryGetValue(household, out var members) ? new Dictionary<string, Member>(members) : [];
     }
 
+    /// <summary>The household's current epoch as the server tracks it.</summary>
+    public int Epoch(string household)
+    {
+        lock (_gate) return _epochs.GetValueOrDefault(household, 1);
+    }
+
     /// <summary>Makes a household with its members, as if they had been added one by one.</summary>
     public void Seed(string household, params DeviceKeys[] members)
     {
         lock (_gate)
         {
             var list = _households.TryGetValue(household, out var existing) ? existing : _households[household] = [];
+            _epochs.TryAdd(household, 1);
             foreach (var member in members)
             {
                 list[member.DeviceId] = new Member(Encode(member.SignPublic), Encode(member.DhPublic), Now, null);
@@ -123,7 +96,56 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         lock (_gate) _meetings[(meeting, slot)] = (body, clock.GetUtcNow());
     }
 
+    /// <summary>N2: an ID token as the fake checks it: the provider, the subject and the nonce it was made for.</summary>
+    public static string IdToken(string provider, string subject, string deviceId, string salt) => $"{provider}|{subject}|{BoundNonce(deviceId, salt)}";
+
+    /// <summary>N2: the nonce the App asks the provider for, as the Worker works it out (signin.ts boundNonce).</summary>
+    public static string BoundNonce(string deviceId, string salt) => Encode(SHA256.HashData(Encoding.UTF8.GetBytes($"{deviceId}:{salt}")));
+
+    /// <summary>N2: the household the account of <paramref name="subject"/> is linked to.</summary>
+    public string? LinkOf(string subject)
+    {
+        lock (_gate) return AccountOf(subject) is { } account ? _links.GetValueOrDefault(account) : null;
+    }
+
+    /// <summary>N2: takes the account's link away, as the Worker does when the PC that linked it is removed.</summary>
+    public void Unlink(string subject)
+    {
+        lock (_gate)
+        {
+            if (AccountOf(subject) is { } account) _links.Remove(account);
+        }
+    }
+
+    /// <summary>N2: the recovery envelope of the account of <paramref name="subject"/>.</summary>
+    public (string Body, string Verifier, int Epoch)? RecoveryOf(string subject)
+    {
+        lock (_gate) return AccountOf(subject) is { } account && _recovery.TryGetValue(account, out var envelope) ? envelope : null;
+    }
+
+    /// <summary>N2: the devices waiting to join a household.</summary>
+    public IReadOnlyList<string> Waiting(string household)
+    {
+        lock (_gate) return [.. _requests.Keys.Where(key => key.Household == household).Select(key => key.Device)];
+    }
+
+    /// <summary>N2: a PC signed in as another account asks to join the household that account is linked to.</summary>
+    public void Ask(string household, DeviceKeys pc, string account)
+    {
+        lock (_gate) _requests[(household, pc.DeviceId)] = new JoinRequest(account, Encode(pc.SignPublic), Encode(pc.DhPublic), Now);
+    }
+
+    public int Sessions
+    {
+        get
+        {
+            lock (_gate) return _sessions.Count;
+        }
+    }
+
     private long Now => clock.GetUtcNow().ToUnixTimeMilliseconds();
+
+    private string? AccountOf(string subject) => _accounts.Where(pair => pair.Key.Subject == subject).Select(pair => pair.Value).FirstOrDefault();
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
     {
@@ -146,8 +168,9 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 
         var household = match.Groups[1].Value;
         var rest = match.Groups[2].Value;
-        if (Authenticate(request, body, device => _households.TryGetValue(household, out var members)
-                && members.TryGetValue(device, out var member) && member.Removed is null ? member.Sign : null) is { } refused)
+        if (Authenticate(request, body, device => _households.TryGetValue(household, out var members) && members.TryGetValue(device, out var member)
+                ? (member.Sign, member.Removed is not null)
+                : null) is { } refused)
         {
             return refused;
         }
@@ -165,10 +188,16 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
             {
                 var posted = JsonNode.Parse(body)!;
                 var sign = (string)posted["sign"]!;
+                var dh = (string)posted["dh"]!;
+                var proof = posted["proof"] is { } given ? Decode((string)given!) : [];
+                if (!HouseholdCrypto.Verify(Decode(sign), Encoding.UTF8.GetBytes($"powerledger join|{household}|{sign}|{dh}"), proof))
+                {
+                    return Error(400, "proof must be the joining PC's signature over its join.");
+                }
                 var device = HouseholdCrypto.DeviceIdOf(Decode(sign));
                 if (list.TryGetValue(device, out var current) && current.Removed is null) return Ok();
                 if (list.Values.Count(member => member.Removed is null) >= 16) return Error(409, "This household already has 16 PCs.");
-                list[device] = new Member(sign, (string)posted["dh"]!, Now, null);
+                list[device] = new Member(sign, dh, Now, null);
                 return Ok();
             }
             case ("DELETE", var removing) when removing.StartsWith("/members/", StringComparison.Ordinal):
@@ -183,13 +212,18 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 var posted = JsonNode.Parse(body)!;
                 var epoch = (int)posted["epoch"]!;
                 var envelopes = posted["envelopes"]!.AsArray().Select(item => ((string)item!["device"]!, (string)item["body"]!)).ToList();
-                if (envelopes.Any(item => !list.TryGetValue(item.Item1, out var member) || member.Removed is not null))
+                if (envelopes.Count is 0 or > 16 || envelopes.Any(item => !list.TryGetValue(item.Item1, out var member) || member.Removed is not null))
                 {
                     return Error(400, "Every envelope must be for a current member.");
                 }
-                var latest = _envelopes.Keys.Where(key => key.Household == household).Select(key => key.Epoch).DefaultIfEmpty(0).Max();
-                if (epoch <= latest) return Error(409, $"Epoch {epoch} already has its keys.");
+                var current = _epochs.GetValueOrDefault(household, 1);
+                if (epoch == current && envelopes.All(item => _envelopes.TryGetValue((household, epoch, item.Item1), out var kept) && kept.Body == item.Item2))
+                {
+                    return Ok();                                                   // the same keys again
+                }
+                if (epoch != current + 1) return Error(409, $"The household is at epoch {current}; a new key must be for {current + 1}.");
                 foreach (var (device, sealedKey) in envelopes) _envelopes[(household, epoch, device)] = (caller, sealedKey);
+                _epochs[household] = epoch;
                 return Ok();
             }
             case ("GET", var getting) when getting.StartsWith("/keys/", StringComparison.Ordinal):
@@ -227,10 +261,11 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 });
             }
             case ("GET", "/requests"):
-                return Json(new JsonArray([.. _requests.Where(pair => pair.Key.Household == household && _links.GetValueOrDefault(pair.Value.Account) == household)
+                return Json(new JsonArray([.. _requests.Where(pair => pair.Key.Household == household)
                     .Select(pair => (JsonNode)new JsonObject
                     {
                         ["device"] = pair.Key.Device, ["sign"] = pair.Value.Sign, ["dh"] = pair.Value.Dh, ["created"] = pair.Value.Created,
+                        ["account"] = pair.Value.Account,
                     })]));
             case ("POST", var approving) when approving.StartsWith("/requests/", StringComparison.Ordinal) && approving.EndsWith("/approve", StringComparison.Ordinal):
             {
@@ -238,13 +273,15 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 if (!_requests.TryGetValue((household, device), out var waiting)) return Error(404, "That PC isn't waiting to join this household.");
                 var posted = JsonNode.Parse(body)!;
                 var epoch = (int)posted["epoch"]!;
-                var latest = _envelopes.Keys.Where(key => key.Household == household).Select(key => key.Epoch).DefaultIfEmpty(0).Max();
-                if (epoch < latest) return Error(409, $"The household's key is at epoch {latest} now; approve with that one.");
+                var current = _epochs.GetValueOrDefault(household, 1);
+                if (epoch != current) return Error(409, $"The household's key is at epoch {current} now; approve with that one.");
                 list[device] = new Member(waiting.Sign, waiting.Dh, Now, null);
                 _envelopes[(household, epoch, device)] = (caller, (string)posted["body"]!);
                 _requests.Remove((household, device));
                 return Ok();
             }
+            case ("DELETE", var denying) when denying.StartsWith("/requests/", StringComparison.Ordinal):
+                return _requests.Remove((household, denying["/requests/".Length..])) ? Ok() : Error(404, "That PC isn't waiting to join this household.");
             default:
                 return Error(404, "Not found.");
         }
@@ -255,7 +292,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     {
         var posted = JsonNode.Parse(body)!;
         var sign = (string)posted["sign"]!;
-        if (Authenticate(request, body, device => HouseholdCrypto.DeviceIdOf(Decode(sign)) == device ? sign : null) is { } refused) return refused;
+        if (Authenticate(request, body, device => HouseholdCrypto.DeviceIdOf(Decode(sign)) == device ? (sign, false) : null) is { } refused) return refused;
         var device = request.Headers.GetValues("X-PL-Device").Single();
         var provider = (string)posted["provider"]!;
         var parts = ((string)posted["idToken"]!).Split('|');
@@ -263,11 +300,11 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         if (parts[2] != BoundNonce(device, (string)posted["nonce"]!)) return Error(401, "The ID token's nonce doesn't match.");
         if (!_accounts.TryGetValue((provider, parts[1]), out var account)) _accounts[(provider, parts[1])] = account = Guid.NewGuid().ToString("N");
         foreach (var old in _sessions.Where(pair => pair.Value.Device == device).Select(pair => pair.Key).ToList()) _sessions.Remove(old);
-        var token = Encode(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var token = Encode(RandomNumberGenerator.GetBytes(32));
         _sessions[token] = new Session(account, device, sign, (string)posted["dh"]!);
         return Json(new JsonObject
         {
-            ["session"] = token, ["householdId"] = _links.GetValueOrDefault(account), ["hasRecovery"] = _recovery.ContainsKey(account),
+            ["session"] = token, ["account"] = account, ["householdId"] = _links.GetValueOrDefault(account), ["hasRecovery"] = _recovery.ContainsKey(account),
         });
     }
 
@@ -278,14 +315,15 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         var token = header.StartsWith("Session ", StringComparison.Ordinal) ? header["Session ".Length..] : "";
         if (path == "/v1/auth/signout" && !_sessions.ContainsKey(token)) return Ok();
         if (!_sessions.TryGetValue(token, out var session)) return Error(401, "This session has ended: sign in again.");
-        if (Authenticate(request, body, device => device == session.Device ? session.Sign : null) is { } refused) return refused;
+        if (Authenticate(request, body, device => device == session.Device ? (session.Sign, false) : null) is { } refused) return refused;
         bool IsMember(string household) =>
             _households.TryGetValue(household, out var members) && members.TryGetValue(session.Device, out var member) && member.Removed is null;
         switch (method, path)
         {
             case ("POST", "/v1/account/household"):
             {
-                var named = (string)JsonNode.Parse(body)!["householdId"]!;
+                if (JsonNode.Parse(body)?["householdId"] is not { } given) return Error(400, "householdId is required.");
+                var named = (string)given!;
                 if (!IsMember(named)) return Error(403, "This PC isn't a member of that household.");
                 _links.TryAdd(session.Account, named);
                 return _links[session.Account] == named ? Json(new JsonObject { ["ok"] = true, ["householdId"] = named }) : Error(409, "Linked to another.");
@@ -302,7 +340,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 var posted = JsonNode.Parse(body)!;
                 if (!_links.TryGetValue(session.Account, out var household)) return Error(409, "This account isn't linked to a household yet.");
                 if (!IsMember(household)) return Error(403, "Only a PC in the household can set how to recover it.");
-                _recovery[session.Account] = ((string)posted["body"]!, (string)posted["verifier"]!, (int?)posted["epoch"]);
+                _recovery[session.Account] = ((string)posted["body"]!, (string)posted["verifier"]!, _epochs.GetValueOrDefault(household, 1));
                 return Ok();
             }
             case ("GET", "/v1/account/recovery"):
@@ -315,9 +353,8 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 {
                     return Error(404, "This account has nothing to recover.");
                 }
-                var proof = Decode((string)JsonNode.Parse(body)!["proof"]!);
-                var expected = System.Security.Cryptography.HMACSHA256.HashData(Decode(envelope.Verifier), Encoding.UTF8.GetBytes(session.Device));
-                if (!proof.AsSpan().SequenceEqual(expected)) return Error(403, "The recovery proof doesn't match.");
+                if ((string?)JsonNode.Parse(body)!["verifier"] != envelope.Verifier) return Error(403, "The recovery verifier doesn't match.");
+                if (envelope.Epoch != _epochs.GetValueOrDefault(household, 1)) return Error(409, "The recovery envelope is for an older key.");
                 _households[household][session.Device] = new Member(session.Sign, session.Dh, Now, null);
                 _requests.Remove((household, session.Device));
                 return Json(new JsonObject { ["ok"] = true, ["householdId"] = household });
@@ -342,13 +379,14 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         var posted = JsonNode.Parse(body)!;
         var id = (string)posted["id"]!;
         var sign = (string)posted["sign"]!;
-        if (Authenticate(request, body, device => HouseholdCrypto.DeviceIdOf(Decode(sign)) == device ? sign : null) is { } refused) return refused;
+        if (Authenticate(request, body, device => HouseholdCrypto.DeviceIdOf(Decode(sign)) == device ? (sign, false) : null) is { } refused) return refused;
         var device = request.Headers.GetValues("X-PL-Device").Single();
         if (_households.TryGetValue(id, out var existing))
         {
             return existing.TryGetValue(device, out var member) && member.Removed is null ? Ok() : Error(409, "A household with this ID already exists.");
         }
         _households[id] = new Dictionary<string, Member> { [device] = new Member(sign, (string)posted["dh"]!, Now, null) };
+        _epochs[id] = 1;
         return Ok();
     }
 
@@ -359,6 +397,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         var ended = now - created >= TimeSpan.FromMinutes(10);
         if (method == "PUT")
         {
+            if (body.Length == 0) return Error(400, "A meeting slot can't be empty.");
             if (body.Length > 8 * 1024) return Error(413, "A meeting slot holds at most 8 KB.");
             if (ended) return Error(410, "This meeting has ended.");
             if (_meetings.ContainsKey((meeting, slot))) return Error(409, "This slot has already been written.");
@@ -369,8 +408,9 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(kept.Body) };
     }
 
-    /// <summary>The Worker's checks, in its order; null when the request passes.</summary>
-    private HttpResponseMessage? Authenticate(HttpRequestMessage request, byte[] body, Func<string, string?> signKeyOf)
+    /// <summary>The Worker's checks, in its order; null when the request passes. <paramref name="keyOf"/> gives the key the
+    /// device must have signed with and whether it was removed, or null when it isn't one the route knows.</summary>
+    private HttpResponseMessage? Authenticate(HttpRequestMessage request, byte[] body, Func<string, (string Sign, bool Removed)?> keyOf)
     {
         string? Header(string name) => request.Headers.TryGetValues(name, out var values) ? values.Single() : null;
         var device = Header("X-PL-Device");
@@ -378,11 +418,11 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         var signature = Header("X-PL-Signature") is { } text ? Decode(text) : null;
         if (device is null || time is null || signature is not { Length: 64 }) return Error(401, "This request needs the X-PL headers.");
         if (Math.Abs(clock.GetUtcNow().ToUnixTimeSeconds() - long.Parse(time)) > 300) return Error(401, "This request's time is more than 5 minutes off.");
-        if (signKeyOf(device) is not { } sign) return Error(403, "This PC isn't a member of this household.");
+        if (keyOf(device) is not { } key) return Error(401, "This request isn't signed by a member.");
         var signed = HouseholdCrypto.RequestToSign(request.Method.Method, request.RequestUri!.PathAndQuery, long.Parse(time), body);
-        if (!HouseholdCrypto.Verify(Decode(sign), signed, signature)) return Error(401, "This request's signature doesn't match.");
+        if (!HouseholdCrypto.Verify(Decode(key.Sign), signed, signature)) return Error(401, "This request isn't signed by a member.");
         if (!_seen.Add(Convert.ToHexString(signature.AsSpan(0, 32)))) return Error(401, "This request has already been made.");
-        return null;
+        return key.Removed ? Error(410, "This PC was removed from this household.") : null;
     }
 
     private static HttpResponseMessage Ok() => Json(new JsonObject { ["ok"] = true });
@@ -400,7 +440,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     [GeneratedRegex("^/v1/households/([0-9a-f]{32})(/.*)$")]
     private static partial Regex HouseholdPath();
 
-    [GeneratedRegex("^/v1/meetings/([0-9a-f]{32})/(adder|joiner|answer|welcome)$")]
+    [GeneratedRegex("^/v1/meetings/([0-9a-f]{32})/(adder|joiner|answer|welcome|joined)$")]
     private static partial Regex MeetingPath();
 
     public sealed record Member(string Sign, string Dh, long Added, long? Removed);

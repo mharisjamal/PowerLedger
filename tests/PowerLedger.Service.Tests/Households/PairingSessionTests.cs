@@ -38,6 +38,7 @@ public sealed class PairingSessionTests : IDisposable
 
         var added = (await adding).ShouldBeOfType<PairingOutcome.Joined>();
         var joined = (await joining).ShouldBeOfType<PairingOutcome.Joined>();
+        Wire.IsJoinProof(added.Other, "5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", added.Proof).ShouldBeTrue();
 
         added.Other.Id.ShouldBe(_joinerKeys.DeviceId);
         added.Other.Name.ShouldBe("Laptop-2");
@@ -172,6 +173,30 @@ public sealed class PairingSessionTests : IDisposable
 
         (await adding).ShouldBeOfType<PairingOutcome.Failed>();
         await joining;
+    }
+
+    [Fact]
+    public async Task A_joiner_that_doesnt_sign_its_joining_isnt_added()
+    {
+        var (adderEnd, joinerEnd) = FramePipe.Create();
+        var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, (_, _) => Task.CompletedTask,
+            _ => Task.FromResult(new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)])), Quick, CancellationToken.None);
+
+        // A hand-made joiner that says yes and takes the welcome, then signs its joining with a key that isn't its own.
+        var hello = PowerLedger.Service.Households.Lan.Hello.Of(LanMessages.Read(await joinerEnd.ReceiveAsync())).ShouldNotBeNull();
+        using var eph = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        var ephPublic = eph.ExportSubjectPublicKeyInfo();
+        await joinerEnd.SendAsync(LanMessages.Write(LanMessages.Hello("pair", ephPublic, Joiner.Keys, Joiner.Name, Joiner.Kind, Joiner.Instance)));
+        using var cipher = FrameCipher.For(adder: false, HouseholdCrypto.Agree(eph, hello.Eph), hello.Eph, ephPublic);
+        await joinerEnd.SendAsync(cipher.Seal(LanMessages.Write(new LanMessage { Type = "answer", Accept = true })));
+        cipher.Open((await joinerEnd.ReceiveAsync())!);
+        using var other = DeviceKeys.Create();
+        await joinerEnd.SendAsync(cipher.Seal(LanMessages.Write(new LanMessage
+        {
+            Type = "joined", Proof = Wire.Encode(Wire.SignJoin(other, "5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f")),
+        })));
+
+        (await adding).ShouldBeOfType<PairingOutcome.Failed>().Text.ShouldBe("Laptop-2 didn't sign its joining, so it wasn't added.");
     }
 
     public void Dispose()

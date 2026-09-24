@@ -9,16 +9,14 @@ namespace PowerLedger.Service.Households;
 
 /// <summary>
 /// N2's recovery envelope (households design §7): the household key sealed under the key made from the recovery code, with
-/// its household and epoch as associated data, and the verifier the server checks a recovering PC's proof with, since it
-/// never has the key: HKDF of the household key, and the proof HMAC-SHA256 of the PC's device ID under it.
+/// its household and epoch as associated data, and the verifier, HKDF of the household key: the server keeps it, and a
+/// recovering PC shows it, which only a PC that opened the envelope can make, since the server never has the key.
 /// </summary>
 internal static class Recovery
 {
     public static byte[] Aad(string householdId, int epoch) => Encoding.UTF8.GetBytes($"powerledger recovery|{householdId}|{epoch}");
 
     public static byte[] Verifier(byte[] householdKey) => HouseholdCrypto.Hkdf(householdKey, [], "powerledger recovery verifier");
-
-    public static byte[] Proof(byte[] verifier, string deviceId) => HMACSHA256.HashData(verifier, Encoding.UTF8.GetBytes(deviceId));
 
     public static RecoveryBody Envelope(byte[] recoveryKey, string householdId, int epoch, byte[] householdKey) => new(
         Wire.Encode(HouseholdCrypto.Seal(recoveryKey, householdKey, Aad(householdId, epoch))), Wire.Encode(Verifier(householdKey)), epoch);
@@ -135,8 +133,7 @@ internal sealed partial class HouseholdWorker
         var recoveryKey = RecoveryCode.Key(recovery);
         if (Recovery.Open(recoveryKey, got.Value!) is not { } key) return Reply(id, false, "That recovery code doesn't open your account's household.");
         var envelope = got.Value!;
-        var proof = Recovery.Proof(Recovery.Verifier(key), _keys.DeviceId);
-        var recovered = await _environment.Relay.RecoverAsync(_keys, session, proof, cancel).ConfigureAwait(false);
+        var recovered = await _environment.Relay.RecoverAsync(_keys, session, Recovery.Verifier(key), cancel).ConfigureAwait(false);
         if (!recovered.Ok) return Reply(id, false, $"Couldn't recover your household: {recovered.Problem}.");
         EnterLocked(envelope.HouseholdId!, envelope.Epoch!.Value, key, []);
         _store.RecoveryKey = recoveryKey;

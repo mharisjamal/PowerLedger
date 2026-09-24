@@ -453,13 +453,14 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>Records a pairing this PC started: the new member here, and on the server once it can be told.</summary>
     private async Task AddedAsync(PairingOutcome outcome)
     {
-        if (outcome is PairingOutcome.Joined { Other: var joiner })
+        if (outcome is PairingOutcome.Joined { Other: var joiner, Proof: var proof })
         {
             using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
             {
                 var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
                 _household.SaveMember(new HouseholdMember(joiner.Id, joiner.Name, joiner.Kind, joiner.Sign, joiner.Dh, nowMs, null, null));
-                _store.AddPending(new PendingOp(PendingOp.Add, _store.HouseholdId!, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh)));
+                _store.AddPending(new PendingOp(PendingOp.Add, _store.HouseholdId!, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
+                    Proof: proof is null ? null : Wire.Encode(proof)));
                 Announce();
             }
             Kick();
@@ -531,17 +532,18 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             return Reply(request.Id, true, $"{member.Name}'s rows were removed.");
         }
 
-        // Households design §6: a new key under the next epoch, sealed to each member that stays, then the removal and the keys.
+        // Households design §6: a new key under the next epoch, sealed to each member that stays and to this PC, so the server
+        // moves to the epoch even when no other PC stays; then the removal and the keys.
         var householdId = _store.HouseholdId;
         var epoch = _store.Epoch + 1;
         var key = HouseholdCrypto.NewKey();
         var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
-        var staying = _household.Members().Where(other => other.LeftMs is null && other.DeviceId != member.DeviceId && other.DeviceId != _keys.DeviceId);
+        var staying = _household.Members().Where(other => other.LeftMs is null && other.DeviceId != member.DeviceId);
         var envelopes = KeyWrap.For(_keys, householdId, epoch, key, staying);
         _store.AddKey(epoch, key);
         _household.MarkLeft(member.DeviceId, nowMs);
         _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: member.DeviceId));
-        if (envelopes.Count > 0) _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch, Envelopes: envelopes));
+        _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch, Envelopes: envelopes));
         QueueRecovery(householdId, epoch, key);
         Announce();
         Kick();

@@ -93,7 +93,8 @@ public sealed class RelaySyncTests : IDisposable
         const string Fresh = "aaaa0000bbbb1111aaaa0000bbbb1111";
         desktop.Store.EnterHousehold(Fresh, 1, _key);
         desktop.Store.AddPending(new PendingOp(PendingOp.Create, Fresh));
-        desktop.Store.AddPending(new PendingOp(PendingOp.Add, Fresh, Sign: Wire.Encode(_laptop.Keys.SignPublic), Dh: Wire.Encode(_laptop.Keys.DhPublic)));
+        desktop.Store.AddPending(new PendingOp(PendingOp.Add, Fresh, Sign: Wire.Encode(_laptop.Keys.SignPublic), Dh: Wire.Encode(_laptop.Keys.DhPublic),
+            Proof: Wire.Encode(Wire.SignJoin(_laptop.Keys, Fresh))));
         relay.Down = true;
 
         var offline = await desktop.RunAsync();
@@ -224,7 +225,20 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
-    public async Task Two_rotations_to_the_same_epoch_settle_on_the_one_the_server_took_first()
+    public async Task A_member_added_without_the_joiners_own_proof_is_refused_and_dropped()
+    {
+        using var stranger = DeviceKeys.Create();
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Add, Household, Sign: Wire.Encode(stranger.SignPublic), Dh: Wire.Encode(stranger.DhPublic),
+            Proof: Wire.Encode(Wire.SignJoin(_desktop.Keys, Household))));
+
+        (await _desktop.RunAsync()).Problem.ShouldBeNull();
+
+        _desktop.Store.Pending.ShouldBeEmpty();
+        _relay.Members(Household).Keys.ShouldNotContain(stranger.DeviceId);
+    }
+
+    [Fact]
+    public async Task Two_rotations_to_the_same_epoch_settle_by_rotating_again_after_the_one_the_server_took()
     {
         var mine = HouseholdCrypto.NewKey();
         var theirs = HouseholdCrypto.NewKey();
@@ -236,8 +250,32 @@ public sealed class RelaySyncTests : IDisposable
 
         (await _desktop.RunAsync()).Problem.ShouldBeNull();
 
-        _desktop.Store.CurrentKey.ShouldBe(theirs);
+        _desktop.Store.KeyFor(2).ShouldBe(theirs);
+        _desktop.Store.Epoch.ShouldBe(3);
+        _relay.Epoch(Household).ShouldBe(3);
         _desktop.Store.Pending.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_new_key_sealed_to_a_pc_removed_meanwhile_is_sealed_again_to_those_still_in()
+    {
+        using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
+        _relay.Seed(Household, study.Keys);
+        _desktop.Household.SaveMember(study.AsMember());
+        _laptop.Household.SaveMember(study.AsMember());
+        _relay.Remove(Household, study.Id);                                       // another member removed it
+        var next = HouseholdCrypto.NewKey();
+        _desktop.Store.AddKey(2, next);
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Keys, Household, Epoch: 2,
+            Envelopes: KeyWrap.For(_desktop.Keys, Household, 2, next, [_laptop.AsMember(), study.AsMember()])));
+
+        (await _desktop.RunAsync()).Problem.ShouldBeNull();
+
+        _relay.Epoch(Household).ShouldBe(2);
+        _desktop.Household.Member(study.Id).ShouldNotBeNull().LeftMs.ShouldNotBeNull();
+        (await _laptop.RunAsync()).Problem.ShouldBeNull();
+        _laptop.Store.Epoch.ShouldBe(2);                                          // the members read found the new epoch's key
+        _laptop.Store.CurrentKey.ShouldBe(next);
     }
 
     public void Dispose()

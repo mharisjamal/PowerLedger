@@ -26,8 +26,9 @@ internal interface IPromptBroker
 /// <summary>How a pairing ended, with words the App can show.</summary>
 internal abstract record PairingOutcome(string Text)
 {
-    /// <summary>The other PC joined, or this one joined the other's household.</summary>
-    public sealed record Joined(MemberInfo Other, string Text) : PairingOutcome(Text);
+    /// <summary>The other PC joined, or this one joined the other's household. For the adding side, <paramref name="Proof"/> is
+    /// the joining PC's signature over its join, which the server wants to add it.</summary>
+    public sealed record Joined(MemberInfo Other, string Text, byte[]? Proof = null) : PairingOutcome(Text);
 
     /// <summary>The user at the joining PC said no, or didn't answer.</summary>
     public sealed record Refused(string Text) : PairingOutcome(Text);
@@ -89,8 +90,13 @@ internal static class PairingSession
 
             var welcome = await welcomeFor(hello.From).ConfigureAwait(false);
             await talk.SendAsync(WelcomeMessage(welcome), cancel).ConfigureAwait(false);
-            await talk.ReceiveAsync("joined", cancel).ConfigureAwait(false);
-            return new PairingOutcome.Joined(hello.From, $"{name} joined your household.");
+            var joined = await talk.ReceiveAsync("joined", cancel).ConfigureAwait(false);
+            var proof = Wire.Decode(joined.Proof);
+            if (!Wire.IsJoinProof(hello.From, welcome.HouseholdId, proof))
+            {
+                return new PairingOutcome.Failed($"{name} didn't sign its joining, so it wasn't added.");
+            }
+            return new PairingOutcome.Joined(hello.From, $"{name} joined your household.", proof);
         }
         catch (LanException error)
         {
@@ -133,7 +139,8 @@ internal static class PairingSession
                 return new PairingOutcome.Failed($"{name} sent a household that wasn't a good one, so nothing was changed.");
             }
             await enter(welcome, hello.From).ConfigureAwait(false);
-            await talk.SendAsync(new LanMessage { Type = "joined" }, cancel).ConfigureAwait(false);
+            await talk.SendAsync(new LanMessage { Type = "joined", Proof = Wire.Encode(Wire.SignJoin(me.Keys, welcome.HouseholdId)) }, cancel)
+                .ConfigureAwait(false);
             return new PairingOutcome.Joined(hello.From, $"This PC joined {name}'s household.");
         }
         catch (LanException error)

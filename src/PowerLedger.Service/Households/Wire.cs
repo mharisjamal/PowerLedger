@@ -90,6 +90,20 @@ internal static partial class Wire
 
     public static string NewHouseholdId() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
 
+    /// <summary>What a joining PC signs so a member can add it on the server: <c>powerledger join|{hid}|{sign}|{dh}</c>, its
+    /// keys as the base64url it is added under. Only the PC holding the signing key can make it, so no member, and not the
+    /// server, can add a PC that didn't ask to join.</summary>
+    public static byte[] JoinProof(string householdId, string sign, string dh) =>
+        System.Text.Encoding.UTF8.GetBytes($"powerledger join|{householdId}|{sign}|{dh}");
+
+    /// <summary>This PC's proof for joining <paramref name="householdId"/>.</summary>
+    public static byte[] SignJoin(DeviceKeys keys, string householdId) =>
+        HouseholdCrypto.SignData(keys.Sign, JoinProof(householdId, Encode(keys.SignPublic), Encode(keys.DhPublic)));
+
+    /// <summary>True when <paramref name="proof"/> is the joining PC's own signature over its join.</summary>
+    public static bool IsJoinProof(MemberInfo joiner, string householdId, byte[]? proof) =>
+        proof is not null && HouseholdCrypto.Verify(joiner.Sign, JoinProof(householdId, Encode(joiner.Sign), Encode(joiner.Dh)), proof);
+
     public static WireMember Member(MemberInfo member) =>
         new(member.Id, member.Name, Kind(member.Kind), Encode(member.Sign), Encode(member.Dh));
 

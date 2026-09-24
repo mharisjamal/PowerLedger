@@ -13,7 +13,7 @@ namespace PowerLedger.Service.Households.Relay;
 /// new epoch's keys. Each names its household, so what leaving asks of the server still goes after this PC has left.</summary>
 internal sealed record PendingOp(
     string Kind, string Household, string? Device = null, string? Sign = null, string? Dh = null, int? Epoch = null,
-    List<EnvelopeBody>? Envelopes = null, RecoveryBody? Recovery = null)
+    List<EnvelopeBody>? Envelopes = null, RecoveryBody? Recovery = null, string? Proof = null)
 {
     public const string Create = "create";
     public const string Add = "add";
@@ -140,16 +140,18 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     private long Now => clock.GetUtcNow().ToUnixTimeMilliseconds();
 
     /// <summary>Tells the server what it still has to hear, oldest first, stopping at the first that can't go yet. One the
-    /// server won't ever take is dropped, and logged.</summary>
+    /// server won't ever take is dropped, and logged; a 410 says this PC was removed from that household, and whatever else
+    /// waits for it is dropped too. A new key the server refuses is made again from where the household is now.</summary>
     public async Task FlushAsync(DeviceKeys keys, RelayRun run, CancellationToken cancel)
     {
+        var remade = 0;
         while (store.Pending is [var op, ..])
         {
             var result = op.Kind switch
             {
                 PendingOp.Create => await relay.CreateHouseholdAsync(keys, op.Household, cancel).ConfigureAwait(false),
-                PendingOp.Add when Wire.PublicKey(op.Sign) is { } sign && Wire.PublicKey(op.Dh) is { } dh =>
-                    await relay.AddMemberAsync(keys, op.Household, sign, dh, cancel).ConfigureAwait(false),
+                PendingOp.Add when Wire.PublicKey(op.Sign) is { } sign && Wire.PublicKey(op.Dh) is { } dh && Wire.Decode(op.Proof) is { } proof =>
+                    await relay.AddMemberAsync(keys, op.Household, sign, dh, proof, cancel).ConfigureAwait(false),
                 PendingOp.Remove when op.Device is { } device =>
                     await relay.RemoveMemberAsync(keys, op.Household, device, cancel).ConfigureAwait(false),
                 PendingOp.Keys when op is { Epoch: { } epoch, Envelopes: { } envelopes } =>
@@ -159,23 +161,31 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                 PendingOp.RecoveryEnvelope => new RelayResult<Done>(200, null, null),   // signed out since: nobody to put it for
                 _ => new RelayResult<Done>(400, null, "it wasn't a request this PC can make"),
             };
-            if (!result.Ok && op.Kind == PendingOp.RecoveryEnvelope && result.Status == 401)
+            if (result.Ok)
+            {
+                store.Pending = [.. store.Pending.Skip(1)];
+                continue;
+            }
+            if (result.Removed)
+            {
+                if (op.Household == store.HouseholdId) WasRemoved(run);
+                store.Pending = [.. store.Pending.Where(other => other.Household != op.Household)];
+                continue;
+            }
+            if (op.Kind == PendingOp.RecoveryEnvelope && result.Status == 401)
             {
                 store.Session = null;                                          // the session has ended: signed out elsewhere
             }
-            else if (!result.Ok && result.Transient)
+            else if (result.Transient)
             {
                 throw new RelayStop($"Couldn't reach the server to update the household: {result.Problem}.");
             }
-            if (!result.Ok && op is { Kind: PendingOp.Remove } && result.Status == 404)
+            else if (op.Kind == PendingOp.Keys && result.Status is 400 or 409 && remade++ < 3
+                && await RemakeKeysAsync(keys, op, result.Status, cancel).ConfigureAwait(false))
             {
-                // Already gone: removed by another member, or it left.
+                continue;                                                      // a new rotation stands in its place
             }
-            else if (!result.Ok && op is { Kind: PendingOp.Keys, Epoch: { } taken } && result.Status == 409)
-            {
-                await AdoptKeyAsync(keys, op.Household, taken, cancel).ConfigureAwait(false);
-            }
-            else if (!result.Ok)
+            else if (!(op.Kind == PendingOp.Remove && result.Status == 404))  // already gone: removed by another, or it left
             {
                 log.LogWarning("The server won't take the household's {Kind} ({Status}: {Problem}); it is dropped", op.Kind, result.Status, result.Problem);
                 if (op.Kind == PendingOp.Add && result.Status == 409)
@@ -187,11 +197,39 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         }
     }
 
-    /// <summary>Another member's new key for the same epoch reached the server first: this PC takes that one.</summary>
-    private async Task AdoptKeyAsync(DeviceKeys keys, string householdId, int epoch, CancellationToken cancel)
+    /// <summary>
+    /// A new key the server refused: with 409, it doesn't follow the household's current epoch, as when another member
+    /// rotated first or this PC was behind; with 400, it was sealed to a PC that is no longer a member. This PC takes every
+    /// newer key it can have, marks who has gone, and rotates again from where the household is now, to the members it
+    /// knows are still in and itself, so no PC that left holds the newest key.
+    /// </summary>
+    /// <returns>True when the new rotation took the refused one's place at the head of the queue.</returns>
+    private async Task<bool> RemakeKeysAsync(DeviceKeys keys, PendingOp op, int status, CancellationToken cancel)
     {
-        if (householdId != store.HouseholdId) return;
-        if (await FetchKeyAsync(keys, householdId, epoch, cancel).ConfigureAwait(false) is { } key) store.AddKey(epoch, key, replace: true);
+        if (op.Household != store.HouseholdId || op.Epoch is not { } refused) return false;
+        if (status == 409)
+        {
+            for (var epoch = refused; epoch < refused + 8; epoch++)
+            {
+                if (await FetchKeyAsync(keys, op.Household, epoch, cancel).ConfigureAwait(false) is not { } key) break;
+                store.AddKey(epoch, key, replace: true);
+            }
+        }
+        var members = await relay.MembersAsync(keys, op.Household, cancel).ConfigureAwait(false);
+        if (members.Ok)
+        {
+            foreach (var gone in members.Value!.Where(member => member.Removed is not null && member.Device != keys.DeviceId))
+            {
+                household.MarkLeft(gone.Device, gone.Removed!.Value);
+            }
+        }
+        var next = status == 409 ? store.Epoch + 1 : refused;
+        var nextKey = status == 409 ? HouseholdCrypto.NewKey() : store.KeyFor(refused) ?? HouseholdCrypto.NewKey();
+        var staying = household.Members().Where(member => member.LeftMs is null);
+        store.AddKey(next, nextKey, replace: true);
+        store.Pending = [op with { Epoch = next, Envelopes = KeyWrap.For(keys, op.Household, next, nextKey, staying) }, .. store.Pending.Skip(1)];
+        log.LogInformation("The server refused the key for epoch {Refused} ({Status}); rotating again at epoch {Next}", refused, status, next);
+        return true;
     }
 
     /// <summary>Reads the member list for who has gone: members the server says were removed are marked as left, and this PC
@@ -236,21 +274,18 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         run.Notices.Add("This PC was removed from the household.");
     }
 
-    /// <summary>A refusal from a household route: a PC the server has taken as a member before that is refused now was
-    /// removed; one it never took hasn't been added yet, and waits quietly.</summary>
+    /// <summary>A refusal from a household route: 410 says this PC was removed; 401 from a PC the server has never taken as a
+    /// member means it hasn't been added yet, and it waits quietly; anything else is a problem to show.</summary>
     /// <returns>True for an answer to go on with.</returns>
     private bool Check<T>(RelayResult<T> result, RelayRun run)
     {
         if (result.Ok) return true;
-        if (result.Status == 403)
+        if (result.Removed)
         {
-            if (store.RelayConfirmed)
-            {
-                WasRemoved(run);
-                return false;
-            }
-            throw new RelayStop(null);
+            WasRemoved(run);
+            return false;
         }
+        if (result.Status == 401 && !store.RelayConfirmed) throw new RelayStop(null);  // not added yet: the adder's queue will
         if (result.Transient) throw new RelayStop($"Couldn't sync through the server: {result.Problem}.");
         log.LogWarning("The server refused a household request ({Status}: {Problem})", result.Status, result.Problem);
         throw new RelayStop($"The server refused to sync: {result.Problem}.");

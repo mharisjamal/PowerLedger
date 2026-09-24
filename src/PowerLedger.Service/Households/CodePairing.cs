@@ -32,8 +32,9 @@ internal sealed class CodeMeeting(string code, string normalized, ECDiffieHellma
 /// makes a code of 80 random bits and puts its hello in the meeting's <c>adder</c> slot; the joining PC, given the code,
 /// reads it and puts its own in <c>joiner</c>. Each hello carries a MAC under a key made from the code, so the server, which
 /// only sees the meeting ID made from the code, can't put in keys of its own. Both then agree a secret from their ephemeral
-/// keys; the joining PC's user is asked, without a comparison code since the code vouches for the adder, and the answer
-/// and the welcome go through the <c>answer</c> and <c>welcome</c> slots, sealed. A meeting lasts 10 minutes.
+/// keys; the joining PC's user is asked, without a comparison code since the code vouches for the adder, and the answer,
+/// the welcome and the joining PC's proof of its join go through the <c>answer</c>, <c>welcome</c> and <c>joined</c> slots,
+/// sealed. A meeting lasts 10 minutes.
 /// </summary>
 /// <param name="wait">How a poll waits for the next; <see cref="PollEvery"/> on the clock when null.</param>
 internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<TimeSpan, CancellationToken, Task>? wait = null)
@@ -84,7 +85,15 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         var sealedWelcome = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(PairingSession.WelcomeMessage(welcome)), Encoding.ASCII.GetBytes("welcome"));
         var put = await relay.PutSlotAsync(meeting.MeetingId, "welcome", sealedWelcome, cancel).ConfigureAwait(false);
         if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give {joiner.From.Name} the household: {put.Problem}.");
-        return new PairingOutcome.Joined(joiner.From, $"{joiner.From.Name} joined your household.");
+
+        var sealedProof = await PollAsync(meeting.MeetingId, "joined", deadline, cancel).ConfigureAwait(false);
+        if (sealedProof is null) return new PairingOutcome.Failed($"{joiner.From.Name} didn't finish joining before the code ran out.");
+        var proof = OpenBytes(toAdder, sealedProof, "joined");
+        if (!Wire.IsJoinProof(joiner.From, welcome.HouseholdId, proof))
+        {
+            return new PairingOutcome.Failed($"{joiner.From.Name} didn't sign its joining, so it wasn't added.");
+        }
+        return new PairingOutcome.Joined(joiner.From, $"{joiner.From.Name} joined your household.", proof);
     }
 
     /// <summary>The joining side, given the code as the user typed it.</summary>
@@ -129,6 +138,13 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
             return new PairingOutcome.Failed($"{adder.From.Name} sent a household that wasn't a good one, so nothing was changed.");
         }
         await enter(welcome, adder.From).ConfigureAwait(false);
+        var joined = HouseholdCrypto.Seal(toAdder, Wire.SignJoin(me.Keys, welcome.HouseholdId), Encoding.ASCII.GetBytes("joined"));
+        put = await relay.PutSlotAsync(meetingId, "joined", joined, cancel).ConfigureAwait(false);
+        if (!put.Ok)
+        {
+            return new PairingOutcome.Failed(
+                $"This PC joined {adder.From.Name}'s household, but couldn't tell it so: {put.Problem}. They sync once they meet on the network.");
+        }
         return new PairingOutcome.Joined(adder.From, $"This PC joined {adder.From.Name}'s household.");
     }
 
@@ -155,11 +171,14 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         return (HouseholdCrypto.Hkdf(shared, salt, Side + "a2j"), HouseholdCrypto.Hkdf(shared, salt, Side + "j2a"));
     }
 
-    private static LanMessage? Open(byte[] key, byte[] sealedBytes, string slot)
+    private static LanMessage? Open(byte[] key, byte[] sealedBytes, string slot) =>
+        OpenBytes(key, sealedBytes, slot) is { } plaintext ? LanMessages.Read(plaintext) : null;
+
+    private static byte[]? OpenBytes(byte[] key, byte[] sealedBytes, string slot)
     {
         try
         {
-            return LanMessages.Read(HouseholdCrypto.Open(key, sealedBytes, Encoding.ASCII.GetBytes(slot)));
+            return HouseholdCrypto.Open(key, sealedBytes, Encoding.ASCII.GetBytes(slot));
         }
         catch (CryptographicException)
         {

@@ -137,7 +137,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         desktop.Worker.Store.Epoch.ShouldBe(2);
         var pending = desktop.Worker.Store.Pending;
         pending.Select(op => op.Kind).ShouldBe([PendingOp.Remove, PendingOp.Keys]);
-        pending[1].Envelopes.ShouldNotBeNull().Select(envelope => envelope.Device).ShouldBe([laptop.Worker.DeviceId]);
+        pending[1].Envelopes.ShouldNotBeNull().Select(envelope => envelope.Device).ShouldBe([desktop.Worker.DeviceId, laptop.Worker.DeviceId], ignoreOrder: true);
         desktop.Board.Household!.Members.Single(member => member.DeviceId == study.Worker.DeviceId).Left.ShouldBeTrue();
 
         desktop.Household.Upsert([Row(desktop.Worker.DeviceId, 1, 42, changed: Now.ToUnixTimeMilliseconds() + 1)]);
