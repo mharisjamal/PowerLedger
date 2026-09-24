@@ -18,8 +18,8 @@ internal sealed record SyncOutcome(bool Ok, string? PeerId, int RowsIn, int Rows
 /// has, as the newest change it holds of each member's rows and the latest hour among the rows changed then, and sends
 /// the rows the other lacks in that order, then done: a sync cut short goes on from the row after the last that came. The side that
 /// connected sends first each time, so the two never both wait to write. The <c>have</c> also carries the members each
-/// knows, the removed ones among them (plan 0.8), so a PC added or removed elsewhere is learned of here, and a removed PC
-/// is never taken back on the word of one that hasn't heard (<see cref="MemberBook"/>).
+/// knows with their epochs, the removed ones among them (plan 0.9), so a PC added or removed elsewhere is learned of here
+/// from a current member, and a removed PC is never taken back on the word of one that hasn't heard (<see cref="MemberBook"/>).
 /// </summary>
 internal sealed class LanSync(HouseholdRepository household, MemberBook members, TimeProvider clock, PairingTimeouts? timeouts = null)
 {
@@ -112,11 +112,13 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
 
     /// <summary>The current member the hello's keys belong to, or null.</summary>
     private HouseholdMember? Member(Hello hello) =>
-        household.Member(hello.From.Id) is { LeftMs: null } member && member.SignKey.AsSpan().SequenceEqual(hello.From.Sign) ? member : null;
+        members.Current(hello.From.Id) is { } member && member.SignKey.AsSpan().SequenceEqual(hello.From.Sign) ? member : null;
+
+    private List<HouseholdMember> CurrentMembers() => [.. household.Members().Where(member => members.Current(member.DeviceId) is not null)];
 
     private LanMessage Have()
     {
-        var current = household.Members().Where(member => member.LeftMs is null).ToList();
+        var current = CurrentMembers();
         var reach = household.Reach();
         return new LanMessage
         {
@@ -136,7 +138,7 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
     private async Task<int> SendRowsAsync(LanConversation talk, LanMessage theirs, CancellationToken cancel)
     {
         var sent = 0;
-        foreach (var member in household.Members().Where(member => member.LeftMs is null))
+        foreach (var member in CurrentMembers())
         {
             var after = theirs.Latest?.GetValueOrDefault(member.DeviceId) ?? 0;
             var rows = theirs.Hours?.TryGetValue(member.DeviceId, out var hour) == true
@@ -164,7 +166,7 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
             var message = await talk.ReceiveAnyAsync(cancel).ConfigureAwait(false);
             if (message.Type == "done") break;
             if (message.Type != "rows") throw new LanException(LanProblem.Broken);
-            if (message.Device is not { } device || household.Member(device) is not { LeftMs: null }) continue;
+            if (message.Device is not { } device || members.Current(device) is null) continue;
             StillIn(peerId, stillIn);
             var rows = Wire.CapChanged((message.Rows ?? []).Select(row => Wire.Row(device, row)).OfType<HouseholdRow>(), nowMs);
             taken += household.Upsert(rows);
@@ -179,6 +181,6 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
     /// <summary>Ends a sync that came in once this PC has left the household it began in, or the other PC has gone from it.</summary>
     private void StillIn(string peerId, Func<bool>? stillIn)
     {
-        if (stillIn?.Invoke() == false || household.Member(peerId) is not { LeftMs: null }) throw new LanException(LanProblem.NotAMember);
+        if (stillIn?.Invoke() == false || members.Current(peerId) is null) throw new LanException(LanProblem.NotAMember);
     }
 }

@@ -173,10 +173,9 @@ public sealed class SignInTests : IAsyncLifetime
         await laptop.Worker.RunOnceAsync(CancellationToken.None);
         laptop.Board.Household!.RecoveryMissing.ShouldBeFalse();
 
-        await desktop.Send<HouseholdReply>(new SignOutRequest(8));
         _clock.Advance(TimeSpan.FromMinutes(1));
-        await desktop.Send<HouseholdReply>(new RemovePcRequest(9, study.Worker.DeviceId));
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);                 // a removal takes the account's recovery away
+        await laptop.Send<HouseholdReply>(new RemovePcRequest(9, desktop.Worker.DeviceId));
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);                  // removing the PC that holds the code takes the recovery away
         _relay.RecoveryOf("alice").ShouldBeNull();
         _clock.Advance(RelaySync.MembersEvery);
         await laptop.Worker.RunOnceAsync(CancellationToken.None);
@@ -186,7 +185,7 @@ public sealed class SignInTests : IAsyncLifetime
         (await laptop.Next(NoticeKind.RecoveryCode)).RecoveryCode.ShouldNotBeNull();
         laptop.Board.Household!.RecoveryMissing.ShouldBeFalse();
         _relay.RecoveryOf("alice").ShouldNotBeNull().Epoch.ShouldBe(_relay.Epoch(household));
-        _relay.RecoveryOf("alice")!.Value.Epoch.ShouldBe(laptop.Worker.Store.Epoch);   // sealed at the key the server is at
+        _relay.RecoveryOf("alice")!.Epoch.ShouldBe(laptop.Worker.Store.Epoch);   // sealed at the key the server is at
     }
 
     [Fact]

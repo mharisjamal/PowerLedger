@@ -41,7 +41,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string AccountKey = "household.account";
     internal const string PostedHourKey = "household.posted-hour";
     internal const string HistoryHourKey = "household.history-hour";
-    internal const string TombstonesKey = "household.tombstones";
+    internal const string MemberEpochsKey = "household.member-epochs";
     internal const string RotationKeyKey = "household.rotation-key";
     internal const string RecoveryCodeKey = "household.recovery-code";
     internal const string LaggingKey = "household.lagging";
@@ -51,7 +51,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     private static readonly string[] OfTheHousehold =
         [
             IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, HistoryKey, HistoryHourKey, ConfirmedKey,
-            MembersCheckedKey, ProblemKey, WaitingKey, TombstonesKey, RotationKeyKey, LaggingKey,
+            MembersCheckedKey, ProblemKey, WaitingKey, MemberEpochsKey, RotationKeyKey, LaggingKey,
         ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
@@ -248,12 +248,12 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         set => WriteText(MembersCheckedKey, value?.ToString(CultureInfo.InvariantCulture));
     }
 
-    /// <summary>The PCs removed from the household that this PC knows of, by device ID (plan 0.8): kept when their rows go, so
-    /// none is taken back on the word of a PC that hasn't heard.</summary>
-    public IReadOnlyDictionary<string, Tombstone> Tombstones
+    /// <summary>The household's members' epochs as this PC knows them, by device ID (plan 0.9), the removed ones among them:
+    /// kept when a removed PC's rows go, so none is taken back on the word of a PC that hasn't heard.</summary>
+    public IReadOnlyDictionary<string, MemberEpochs> MemberEpochs
     {
-        get => HouseholdJson.Read(settings.Get(TombstonesKey), HouseholdJson.Default.DictionaryStringTombstone) ?? [];
-        set => WriteText(TombstonesKey, value.Count == 0 ? null : HouseholdJson.Write(new Dictionary<string, Tombstone>(value), HouseholdJson.Default.DictionaryStringTombstone));
+        get => HouseholdJson.Read(settings.Get(MemberEpochsKey), HouseholdJson.Default.DictionaryStringMemberEpochs) ?? [];
+        set => WriteText(MemberEpochsKey, value.Count == 0 ? null : HouseholdJson.Write(new Dictionary<string, MemberEpochs>(value), HouseholdJson.Default.DictionaryStringMemberEpochs));
     }
 
     /// <summary>Current members whose batches still come under an older epoch than this PC's, by device ID: since when, unix

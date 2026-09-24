@@ -8,8 +8,15 @@ namespace PowerLedger.Service.Households.Lan;
 /// <summary>This PC as it introduces itself when pairing.</summary>
 internal sealed record PairingIdentity(DeviceKeys Keys, string Name, ChassisKind Kind, string Instance);
 
-/// <summary>What the adding PC gives the joining one (households design §3): the household, its key and epoch, and its members.</summary>
-internal sealed record Welcome(string HouseholdId, int Epoch, byte[] Key, IReadOnlyList<MemberInfo> Members);
+/// <summary>What the adding PC gives the joining one (households design §3, plan 0.9): the household, its key and epoch, and the
+/// members it knows with their epochs, the removed ones among them.</summary>
+/// <param name="Members">The current members, with their keys.</param>
+/// <param name="Entries">Every member the adding PC knows, current or removed, as the welcome carries them.</param>
+internal sealed record Welcome(string HouseholdId, int Epoch, byte[] Key, IReadOnlyList<MemberInfo> Members, IReadOnlyList<WireMember>? Entries = null)
+{
+    /// <summary>Every member the welcome carries: its entries, or its current members when made without them.</summary>
+    public IReadOnlyList<WireMember> AllEntries => Entries ?? [.. Members.Select(Wire.Member)];
+}
 
 /// <summary>What the user at the joining PC is asked.</summary>
 /// <param name="FromName">The adding PC's name; null for a pairing by code, whose meeting carries no names.</param>
@@ -73,11 +80,12 @@ internal static class PairingSession
     /// <param name="expectedInstance">The instance name the PC chosen was announced under; a hello under another is refused.</param>
     /// <param name="broker">Asks this PC's user whether the other PC shows the same code.</param>
     /// <param name="welcomeFor">Makes the welcome for the joining PC once both users said yes, making the household if there
-    /// is none yet.</param>
-    /// <param name="record">Records the joining PC as a member, with its proof for the server, before it is told it is in.</param>
+    /// is none yet; null when the joining PC can't be added yet, as a PC removed at this PC's epoch can't.</param>
+    /// <param name="record">Records the joining PC as a member, with its proof for the server, before it is told it is in;
+    /// false when it couldn't be.</param>
     public static async Task<PairingOutcome> AddAsync(
         IFrameChannel channel, PairingIdentity me, string? expectedInstance, IPromptBroker broker,
-        Func<MemberInfo, Task<Welcome>> welcomeFor, Func<MemberInfo, byte[], Task> record, PairingTimeouts timeouts, CancellationToken cancel)
+        Func<MemberInfo, Task<Welcome?>> welcomeFor, Func<MemberInfo, byte[], Task<bool>> record, PairingTimeouts timeouts, CancellationToken cancel)
     {
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
@@ -139,7 +147,11 @@ internal static class PairingSession
                 return new PairingOutcome.Refused($"Adding {name} was cancelled.");
             }
 
-            var welcome = await welcomeFor(hello.From).ConfigureAwait(false);
+            if (await welcomeFor(hello.From).ConfigureAwait(false) is not { } welcome)
+            {
+                await CancelAsync(talk).ConfigureAwait(false);
+                return new PairingOutcome.Failed(NotYet(name));
+            }
             await talk.SendAsync(WelcomeMessage(welcome), cancel).ConfigureAwait(false);
             var joined = await Until(pending, cancel).ConfigureAwait(false);
             pending = null;
@@ -149,7 +161,11 @@ internal static class PairingSession
             {
                 return new PairingOutcome.Failed($"{name} didn't sign its joining, so it wasn't added.");
             }
-            await record(hello.From, proof!).ConfigureAwait(false);
+            if (!await record(hello.From, proof!).ConfigureAwait(false))
+            {
+                await CancelAsync(talk).ConfigureAwait(false);
+                return new PairingOutcome.Failed(NotYet(name));
+            }
             try
             {
                 await talk.SendAsync(new LanMessage { Type = "welcomed" }, cancel).ConfigureAwait(false);
@@ -325,32 +341,56 @@ internal static class PairingSession
         _ = pending?.ContinueWith(read => read.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
-    public static LanMessage WelcomeMessage(Welcome welcome) => new()
-    {
-        Type = "welcome",
-        Household = welcome.HouseholdId,
-        Epoch = welcome.Epoch,
-        Key = Wire.Encode(welcome.Key),
-        Members = [.. welcome.Members.Select(Wire.Member)],
-    };
+    /// <summary>Said when the joining PC can't be added yet: a PC removed at this PC's epoch comes back only once this PC has
+    /// made the household a new key, which needs the server (plan 0.9).</summary>
+    internal static string NotYet(string name) =>
+        $"{name} can't be added until this PC has given the household a new key, which needs the server. Check this PC is online, then try again.";
 
-    /// <summary>The welcome in <paramref name="message"/>, checked: a household ID, an epoch, a 32-byte key and at most 16
-    /// members, each with the ID its key makes, the adder among them under the keys it paired with. Null otherwise.</summary>
+    /// <summary>The welcome as sent: every member the adding PC knows, with their epochs. With <paramref name="maxBytes"/>, as for
+    /// a meeting slot, the members removed earliest are left out until it fits; the current ones always go.</summary>
+    public static LanMessage WelcomeMessage(Welcome welcome, int? maxBytes = null)
+    {
+        var entries = welcome.AllEntries.ToList();
+        var message = new LanMessage
+        {
+            Type = "welcome",
+            Household = welcome.HouseholdId,
+            Epoch = welcome.Epoch,
+            Key = Wire.Encode(welcome.Key),
+            Members = entries,
+        };
+        var removed = entries.Where(entry => !IsCurrent(entry)).OrderBy(entry => entry.RemovedEpoch).ToList();
+        while (maxBytes is { } most && removed.Count > 0 && LanMessages.Write(message).Length > most)
+        {
+            entries.Remove(removed[0]);
+            removed.RemoveAt(0);
+        }
+        return message;
+    }
+
+    /// <summary>The welcome in <paramref name="message"/>, checked: a household ID, an epoch, a 32-byte key, and at most 16 current
+    /// members, each with the ID its key makes, the adder among them under the keys it paired with, beside at most
+    /// <see cref="MemberBook.MaxRemoved"/> removed ones. Null otherwise.</summary>
     public static Welcome? ReadWelcome(LanMessage message, MemberInfo adder)
     {
         if (!Wire.IsHouseholdId(message.Household) || message.Epoch is not > 0 || Wire.Decode(message.Key) is not { Length: HouseholdCrypto.KeyLength } key)
         {
             return null;
         }
-        if (message.Members is not { Count: > 0 and <= Wire.MaxMembers } sent) return null;
-        var members = sent.Select(Wire.Member).ToList();
+        if (message.Members is not { Count: > 0 } sent || sent.Count > Wire.MaxMembers + MemberBook.MaxRemoved) return null;
+        if (sent.Any(entry => !Wire.IsDeviceId(entry?.Id))) return null;
+        var current = sent.Where(IsCurrent).ToList();
+        if (current.Count > Wire.MaxMembers) return null;
+        var members = current.Select(Wire.Member).ToList();
         if (members.Any(member => member is null)) return null;
         if (!members.Any(member => member!.Id == adder.Id && member.Sign.AsSpan().SequenceEqual(adder.Sign) && member.Dh.AsSpan().SequenceEqual(adder.Dh)))
         {
             return null;
         }
-        return new Welcome(message.Household!, message.Epoch.Value, key, [.. members!]);
+        return new Welcome(message.Household!, message.Epoch.Value, key, [.. members!], sent);
     }
+
+    private static bool IsCurrent(WireMember entry) => entry.RemovedEpoch is not { } removed || (entry.AddedEpoch ?? 0) > removed;
 }
 
 /// <summary>

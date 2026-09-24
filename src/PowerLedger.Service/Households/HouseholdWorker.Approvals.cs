@@ -97,11 +97,11 @@ internal sealed partial class HouseholdWorker
             Volatile.Write(ref _waitingApprovals, Math.Max(0, Volatile.Read(ref _waitingApprovals) - 1));
             if (result.Ok)
             {
-                // A member now, known here by the keys its user's approval vouched for: its batches check against them, and this
-                // PC's own member list introduces it to the others (plan 0.8). Its name comes with its first batch.
-                _members.Restore(item.Device);
-                _household.SaveMember(new HouseholdMember(
-                    item.Device, NewPcName, ChassisKind.Desktop, Wire.PublicKey(item.Sign)!, dh, _clock.GetUtcNow().ToUnixTimeMilliseconds(), null, null));
+                // A member now, added at this PC's epoch and known here by the keys its user's approval vouched for: its batches
+                // check against them, and this PC's own member list introduces it to the others (plan 0.9). Its name comes with
+                // its first batch.
+                _members.Add(new MemberInfo(item.Device, NewPcName, ChassisKind.Desktop, Wire.PublicKey(item.Sign)!, dh), epoch,
+                    _clock.GetUtcNow().ToUnixTimeMilliseconds());
                 _log.LogInformation("Approved {Device} into the household", item.Device);
                 Info("The PC signed in as you is now in your household.");
                 Kick();
@@ -191,7 +191,7 @@ internal sealed partial class HouseholdWorker
                 if (_store.AskedToJoin != householdId) return;
                 if (yes)
                 {
-                    EnterLocked(householdId, epoch, key, []);
+                    EnterLocked(householdId, epoch, key, [], null);
                     _store.RelayConfirmed = true;
                     _log.LogInformation("Approved into the household at epoch {Epoch}", epoch);
                     Info("This PC joined your household.");

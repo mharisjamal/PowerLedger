@@ -461,8 +461,9 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     }
 
     /// <summary>The welcome for a PC being added, making the household first when this PC is in none (households design
-    /// §1: it is made when a PC adds its first other PC).</summary>
-    private async Task<Welcome> WelcomeForAsync(MemberInfo joiner)
+    /// §1: it is made when a PC adds its first other PC). A PC removed at this PC's epoch can come back only at a newer one
+    /// (plan 0.9), so the new key its removal started goes to the server first; null while it can't.</summary>
+    private async Task<Welcome?> WelcomeForAsync(MemberInfo joiner)
     {
         using var entered = await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false);
         var now = _clock.GetUtcNow();
@@ -472,34 +473,43 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             ClearOthers();
             _store.EnterHousehold(householdId, 1, HouseholdCrypto.NewKey());
             SaveSelf(now);
+            _members.Self(_keys.DeviceId, 1);
             _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
             _rowsBuiltForHour = HourOf(now);
             _store.PostedThrough = now.ToUnixTimeMilliseconds();           // the year goes to each newcomer as its history
             _store.AddPending(new PendingOp(PendingOp.Create, householdId));
             _log.LogInformation("Made a household to add {Name} to", joiner.Name);
         }
+        else if (_members.EpochsOf(joiner.Id)?.Removed >= _store.Epoch)
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            limit.CancelAfter(GateWait);
+            await _relaySync.FinishRotationAsync(_keys, limit.Token).ConfigureAwait(false);
+            if (_members.EpochsOf(joiner.Id)?.Removed >= _store.Epoch) return null;
+        }
         var members = _household.Members()
-            .Where(member => member.LeftMs is null && member.DeviceId != joiner.Id)
+            .Where(member => _members.Current(member.DeviceId) is not null && member.DeviceId != joiner.Id)
             .Select(member => new MemberInfo(member.DeviceId, member.Name, member.Kind, member.SignKey, member.DhKey))
             .Take(Wire.MaxMembers)
             .ToList();
-        return new Welcome(_store.HouseholdId!, _store.Epoch, _store.CurrentKey!, members);
+        return new Welcome(_store.HouseholdId!, _store.Epoch, _store.CurrentKey!, members, [.. _members.Entries().Where(entry => entry.Id != joiner.Id)]);
     }
 
-    /// <summary>Records a PC this one is adding, before it is told it is in: the new member here, and on the server once it
-    /// can be told.</summary>
-    private async Task RecordAsync(MemberInfo joiner, byte[] proof)
+    /// <summary>Records a PC this one is adding, before it is told it is in: the new member here, added at this PC's epoch
+    /// (plan 0.9), and on the server once it can be told.</summary>
+    /// <returns>False when it couldn't be added: it was removed at this PC's epoch.</returns>
+    private async Task<bool> RecordAsync(MemberInfo joiner, byte[] proof)
     {
         using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
         {
             var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
-            _members.Restore(joiner.Id);                                       // this PC's user added it, again if it had been removed
-            _household.SaveMember(new HouseholdMember(joiner.Id, joiner.Name, joiner.Kind, joiner.Sign, joiner.Dh, nowMs, null, null));
-            _store.AddPending(new PendingOp(PendingOp.Add, _store.HouseholdId!, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
+            if (_store.HouseholdId is not { } householdId || !_members.Add(joiner, _store.Epoch, nowMs)) return false;
+            _store.AddPending(new PendingOp(PendingOp.Add, householdId, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
                 Proof: Wire.Encode(proof)));
             Announce();
         }
         Kick();
+        return true;
     }
 
     /// <summary>Tells the App how a pairing this PC started ended. Its user's own adds never count toward pausing pairing.</summary>
@@ -516,16 +526,18 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     {
         using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
         {
-            EnterLocked(welcome.HouseholdId, welcome.Epoch, welcome.Key, welcome.Members);
+            EnterLocked(welcome.HouseholdId, welcome.Epoch, welcome.Key, welcome.AllEntries, adder.Id);
             _log.LogInformation("Joined {Name}'s household", adder.Name);
         }
         Kick();
     }
 
     /// <summary>Takes this PC into a household with its key, inside the gate, leaving any other first (see
-    /// <see cref="EnterAsync"/>). The members given are known from then on; each has its year of rows from this PC through
-    /// its new rows, not as history.</summary>
-    private void EnterLocked(string householdId, int epoch, byte[] key, IReadOnlyList<MemberInfo> members)
+    /// <see cref="EnterAsync"/>), added at <paramref name="epoch"/>. The members in <paramref name="entries"/>, with their
+    /// epochs, are learned from then on (plan 0.9); each current one has its year of rows from this PC through its new rows,
+    /// not as history.</summary>
+    /// <param name="fromId">The PC whose list it is, which gives its own name and kind.</param>
+    private void EnterLocked(string householdId, int epoch, byte[] key, IReadOnlyList<WireMember> entries, string? fromId)
     {
         var now = _clock.GetUtcNow();
         var nowMs = now.ToUnixTimeMilliseconds();
@@ -534,7 +546,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             if (_store.HouseholdId is not null) LeaveLocked(now);
             ClearOthers();
             _store.EnterHousehold(householdId, epoch, key);
-            _store.HistoryPosted = [.. members.Select(member => member.Id)];
+            _store.HistoryPosted = [.. entries.Where(entry => entry.RemovedEpoch is not { } removed || entry.AddedEpoch > removed).Select(entry => entry.Id)];
         }
         else
         {
@@ -542,12 +554,9 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             _store.RelayConfirmed = false;                                     // added again, maybe after a removal it hadn't heard of
         }
         _store.AskedToJoin = null;
-        foreach (var member in members.Where(member => member.Id != _keys.DeviceId))
-        {
-            _members.Restore(member.Id);                                       // the adding PC vouches it is in
-            _household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
-        }
         SaveSelf(now);
+        _members.Self(_keys.DeviceId, epoch);
+        _members.Learn(entries, fromId, _keys.DeviceId, nowMs);
         _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
         _rowsBuiltForHour = HourOf(now);
         Announce();
@@ -563,9 +572,9 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             return Reply(request.Id, false, "That PC isn't in this household.");
         }
-        if (member.LeftMs is not null)
+        if (_members.Current(member.DeviceId) is null)
         {
-            _members.ForgetRows(member.DeviceId);                              // its tombstone stays
+            _members.ForgetRows(member.DeviceId);                              // its epochs stay
             return Reply(request.Id, true, $"{member.Name}'s rows were removed.");
         }
 
@@ -585,7 +594,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>
     /// Deletes the rows this PC keeps from PCs no longer in its household (plan 0.8, "Old rows"): the one named, which must
     /// have left or been removed, or with none named every such PC's, which after leaving is all of them, this PC's own
-    /// too. A removed PC's tombstone stays, so it is never taken back on another PC's word.
+    /// too. A removed PC's epochs stay, so it is never taken back on another PC's word.
     /// </summary>
     private async Task<PipeMessage> RemoveOldRowsAsync(RemoveOldRowsRequest request, CancellationToken cancel)
     {
@@ -605,7 +614,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         var stay = _store.HouseholdId is null
             ? []
-            : _household.Members().Where(member => member.LeftMs is null).Select(member => member.DeviceId).Append(_keys.DeviceId).ToHashSet(StringComparer.Ordinal);
+            : _household.Members().Where(member => _members.Current(member.DeviceId) is not null).Select(member => member.DeviceId).Append(_keys.DeviceId)
+                .ToHashSet(StringComparer.Ordinal);
         var old = withRows.Union(_household.Members().Select(member => member.DeviceId)).Where(id => !stay.Contains(id)).ToList();
         foreach (var id in old) _members.ForgetRows(id);
         if (_store.HouseholdId is null) _rowsBuiltForHour = -1;

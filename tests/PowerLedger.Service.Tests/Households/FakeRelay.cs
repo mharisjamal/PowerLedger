@@ -10,12 +10,13 @@ using PowerLedger.Core.Households;
 namespace PowerLedger.Service.Tests;
 
 /// <summary>
-/// The Worker's household routes in memory, as <c>server/src/households</c> answers them after the security review: the
+/// The Worker's household routes in memory, as <c>server/src/households</c> answers them after the security re-review: the
 /// signature checks in their order (headers, time, member, signature, replay), 401 for a PC that isn't a member and 410 for
-/// one that was removed; a member added only with the joiner's own proof; the household's current epoch, which a rotation
-/// must follow by one and an approval must use; batches numbered as they arrive with each item carrying its sender's own
-/// sequence number and signature, kept as sent; meeting slots written once for 10 minutes; and N2's accounts, sessions,
-/// links, requests and recovery.
+/// one that was removed; a member added only with the joiner's own proof; members with the household's epoch when each
+/// was added and removed (plan 0.9); the household's current epoch, which a rotation must follow by one and an approval
+/// must use; a household kept as ended when its last member goes; batches numbered from a counter that never goes back,
+/// each item carrying its sender's own sequence number and signature, kept as sent; meeting slots written once for 10
+/// minutes; and N2's accounts, sessions, links, requests and recovery.
 /// </summary>
 internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 {
@@ -24,6 +25,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Dictionary<string, Member>> _households = [];
     private readonly Dictionary<string, int> _epochs = [];
+    private readonly Dictionary<string, long> _nextSeq = [];
     private readonly List<Batch> _batches = [];
     private readonly Dictionary<(string Household, int Epoch, string Device), (string From, string Body)> _envelopes = [];
     private readonly Dictionary<(string Meeting, string Slot), (byte[] Body, DateTimeOffset Created)> _meetings = [];
@@ -33,7 +35,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     private readonly Dictionary<string, Session> _sessions = [];
     private readonly Dictionary<string, string> _links = [];
     private readonly Dictionary<(string Household, string Device), JoinRequest> _requests = [];
-    private readonly Dictionary<string, (string Body, string Verifier, int Epoch)> _recovery = [];
+    private readonly Dictionary<string, Recovery> _recovery = [];
 
     /// <summary>While true, nothing answers.</summary>
     public bool Down { get; set; }
@@ -79,7 +81,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         lock (_gate) return _epochs.GetValueOrDefault(household, 1);
     }
 
-    /// <summary>Makes a household with its members, as if they had been added one by one.</summary>
+    /// <summary>Makes a household with its members, as if they had been added one by one at its current epoch.</summary>
     public void Seed(string household, params DeviceKeys[] members)
     {
         lock (_gate)
@@ -88,14 +90,27 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
             _epochs.TryAdd(household, 1);
             foreach (var member in members)
             {
-                list[member.DeviceId] = new Member(Encode(member.SignPublic), Encode(member.DhPublic), Now, null);
+                list[member.DeviceId] = new Member(Encode(member.SignPublic), Encode(member.DhPublic), Now, null, _epochs[household]);
             }
         }
     }
 
+    /// <summary>Removes a member as another member's request would.</summary>
     public void Remove(string household, string device)
     {
-        lock (_gate) _households[household][device] = _households[household][device] with { Removed = Now };
+        lock (_gate) RemoveMember(household, device);
+    }
+
+    /// <summary>Drops the household's batches, as retention does after 90 days; the numbering goes on from where it was.</summary>
+    public void DropBatches(string household)
+    {
+        lock (_gate) _batches.RemoveAll(batch => batch.Household == household);
+    }
+
+    /// <summary>True once the household's last member has gone.</summary>
+    public bool Ended(string household)
+    {
+        lock (_gate) return _households.TryGetValue(household, out var members) && members.Values.All(member => member.Removed is not null);
     }
 
     public void PutSlot(string meeting, string slot, byte[] body)
@@ -131,7 +146,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     }
 
     /// <summary>N2: the recovery envelope of the account of <paramref name="subject"/>.</summary>
-    public (string Body, string Verifier, int Epoch)? RecoveryOf(string subject)
+    public Recovery? RecoveryOf(string subject)
     {
         lock (_gate) return AccountOf(subject) is { } account && _recovery.TryGetValue(account, out var envelope) ? envelope : null;
     }
@@ -195,11 +210,14 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         switch (method, rest)
         {
             case ("GET", "/members"):
-                return Json(new JsonArray([.. list.Select(pair => (JsonNode)new JsonObject
+                return Json(new JsonObject
                 {
-                    ["device"] = pair.Key, ["sign"] = pair.Value.Sign, ["dh"] = pair.Value.Dh, ["added"] = pair.Value.Added,
-                    ["removed"] = pair.Value.Removed,
-                })]));
+                    ["members"] = new JsonArray([.. list.Select(pair => (JsonNode)new JsonObject
+                    {
+                        ["device"] = pair.Key, ["sign"] = pair.Value.Sign, ["dh"] = pair.Value.Dh, ["added"] = pair.Value.Added,
+                        ["removed"] = pair.Value.Removed, ["addedEpoch"] = pair.Value.AddedEpoch, ["removedEpoch"] = pair.Value.RemovedEpoch,
+                    })]),
+                });
             case ("POST", "/members"):
             {
                 var posted = JsonNode.Parse(body)!;
@@ -211,17 +229,17 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                     return Error(400, "proof must be the joining PC's signature over its join.");
                 }
                 var device = HouseholdCrypto.DeviceIdOf(Decode(sign));
-                if (list.TryGetValue(device, out var current) && current.Removed is null) return Ok();
+                if (list.TryGetValue(device, out var current) && current.Removed is null) return current.Dh == dh ? Ok() : Error(409, "Another key-agreement key.");
                 if (list.Values.Count(member => member.Removed is null) >= 16) return Error(409, "This household already has 16 PCs.");
-                list[device] = new Member(sign, dh, Now, null);
+                list[device] = new Member(sign, dh, Now, null, _epochs.GetValueOrDefault(household, 1));   // added back: its removal cleared
+                _requests.Remove((household, device));
                 return Ok();
             }
             case ("DELETE", var removing) when removing.StartsWith("/members/", StringComparison.Ordinal):
             {
                 var device = removing["/members/".Length..];
-                if (!list.TryGetValue(device, out var member) || member.Removed is not null) return Error(404, "That PC isn't a member of this household.");
-                list[device] = member with { Removed = Now };
-                foreach (var linked in _links.Where(pair => pair.Value == household).Select(pair => pair.Key).ToList()) _recovery.Remove(linked);
+                if (!list.ContainsKey(device)) return Error(404, "That PC isn't a member of this household.");
+                RemoveMember(household, device);                                  // one already removed is done
                 return Ok();
             }
             case ("POST", "/keys"):
@@ -234,9 +252,11 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                     return Error(400, "Every envelope must be for a current member.");
                 }
                 var current = _epochs.GetValueOrDefault(household, 1);
-                if (epoch == current && envelopes.All(item => _envelopes.TryGetValue((household, epoch, item.Item1), out var kept) && kept.Body == item.Item2))
+                var mine = _envelopes.Where(pair => pair.Key.Household == household && pair.Key.Epoch == epoch && pair.Value.From == caller).ToList();
+                if (epoch == current && mine.Count == envelopes.Count
+                    && envelopes.All(item => mine.Any(pair => pair.Key.Device == item.Item1 && pair.Value.Body == item.Item2)))
                 {
-                    return Ok();                                                   // the same keys again
+                    return Ok();                                                   // this PC's very rotation again, whatever changed since
                 }
                 if (epoch != current + 1) return Error(409, $"The household is at epoch {current}; a new key must be for {current + 1}.");
                 foreach (var (device, sealedKey) in envelopes) _envelopes[(household, epoch, device)] = (caller, sealedKey);
@@ -259,7 +279,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 {
                     return Error(400, "sig must be the sender's signature over the batch: 64 bytes, as base64url.");
                 }
-                var seq = _batches.Where(batch => batch.Household == household).Select(batch => batch.Seq).DefaultIfEmpty(0).Max() + 1;
+                var seq = _nextSeq[household] = _nextSeq.GetValueOrDefault(household) + 1;
                 _batches.Add(new Batch(household, seq, caller, (int)posted["epoch"]!, (long)posted["seq"]!, Decode((string)posted["body"]!), (string)sig!));
                 return Ok();
             }
@@ -296,7 +316,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 var epoch = (int)posted["epoch"]!;
                 var current = _epochs.GetValueOrDefault(household, 1);
                 if (epoch != current) return Error(409, $"The household's key is at epoch {current} now; approve with that one.");
-                list[device] = new Member(waiting.Sign, waiting.Dh, Now, null);
+                if (!list.TryGetValue(device, out var already) || already.Removed is not null) list[device] = new Member(waiting.Sign, waiting.Dh, Now, null, current);
                 _envelopes[(household, epoch, device)] = (caller, (string)posted["body"]!);
                 _requests.Remove((household, device));
                 return Ok();
@@ -361,7 +381,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 var posted = JsonNode.Parse(body)!;
                 if (!_links.TryGetValue(session.Account, out var household)) return Error(409, "This account isn't linked to a household yet.");
                 if (!IsMember(household)) return Error(403, "Only a PC in the household can set how to recover it.");
-                _recovery[session.Account] = ((string)posted["body"]!, (string)posted["verifier"]!, _epochs.GetValueOrDefault(household, 1));
+                _recovery[session.Account] = new Recovery((string)posted["body"]!, (string)posted["verifier"]!, _epochs.GetValueOrDefault(household, 1), session.Device);
                 return Ok();
             }
             case ("GET", "/v1/account/recovery"):
@@ -376,7 +396,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 }
                 if ((string?)JsonNode.Parse(body)!["verifier"] != envelope.Verifier) return Error(403, "The recovery verifier doesn't match.");
                 if (envelope.Epoch != _epochs.GetValueOrDefault(household, 1)) return Error(409, "The recovery envelope is for an older key.");
-                _households[household][session.Device] = new Member(session.Sign, session.Dh, Now, null);
+                _households[household][session.Device] = new Member(session.Sign, session.Dh, Now, null, _epochs.GetValueOrDefault(household, 1));
                 _requests.Remove((household, session.Device));
                 return Json(new JsonObject { ["ok"] = true, ["householdId"] = household });
             }
@@ -406,7 +426,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         {
             return existing.TryGetValue(device, out var member) && member.Removed is null ? Ok() : Error(409, "A household with this ID already exists.");
         }
-        _households[id] = new Dictionary<string, Member> { [device] = new Member(sign, (string)posted["dh"]!, Now, null) };
+        _households[id] = new Dictionary<string, Member> { [device] = new Member(sign, (string)posted["dh"]!, Now, null, 1) };
         _epochs[id] = 1;
         return Ok();
     }
@@ -446,6 +466,31 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         return key.Removed ? Error(410, "This PC was removed from this household.") : null;
     }
 
+    /// <summary>Removes a member at the household's epoch, as the Worker does: accounts are left alone but for a recovery the
+    /// removed PC holds, its request to join goes, and when no member is left the household ends, its members kept as
+    /// removed while its batches, keys, requests, links and recoveries go.</summary>
+    private void RemoveMember(string household, string device)
+    {
+        var list = _households[household];
+        if (list[device].Removed is not null) return;
+        list[device] = list[device] with { Removed = Now, RemovedEpoch = _epochs.GetValueOrDefault(household, 1) };
+        var linked = _links.Where(pair => pair.Value == household).Select(pair => pair.Key).ToHashSet();
+        foreach (var account in _recovery.Where(pair => pair.Value.Holder == device && linked.Contains(pair.Key)).Select(pair => pair.Key).ToList())
+        {
+            _recovery.Remove(account);
+        }
+        _requests.Remove((household, device));
+        if (list.Values.Any(member => member.Removed is null)) return;
+        foreach (var account in linked)
+        {
+            _recovery.Remove(account);
+            _links.Remove(account);
+        }
+        foreach (var key in _requests.Keys.Where(key => key.Household == household).ToList()) _requests.Remove(key);
+        foreach (var key in _envelopes.Keys.Where(key => key.Household == household).ToList()) _envelopes.Remove(key);
+        _batches.RemoveAll(batch => batch.Household == household);
+    }
+
     private static HttpResponseMessage Ok() => Json(new JsonObject { ["ok"] = true });
 
     internal static HttpResponseMessage Json(JsonNode node) =>
@@ -464,7 +509,10 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     [GeneratedRegex("^/v1/meetings/([0-9a-f]{32})/(adder|joiner|answer|welcome|joined|welcomed)$")]
     private static partial Regex MeetingPath();
 
-    public sealed record Member(string Sign, string Dh, long Added, long? Removed);
+    public sealed record Member(string Sign, string Dh, long Added, long? Removed, int AddedEpoch = 1, int? RemovedEpoch = null);
+
+    /// <summary>An account's recovery: its sealed body, its verifier, the epoch it was put at and the PC that holds its code.</summary>
+    public sealed record Recovery(string Body, string Verifier, int Epoch, string Holder);
 
     private sealed record Batch(string Household, long Seq, string Device, int Epoch, long DeviceSeq, byte[] Body, string Sig);
 

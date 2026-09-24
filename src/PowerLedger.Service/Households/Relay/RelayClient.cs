@@ -88,8 +88,12 @@ internal sealed class RelayClient : IDisposable
         SendAsync(HttpMethod.Get, $"v1/households/{householdId}/keys/{epoch}", null, keys, HouseholdJson.Default.KeyEnvelopeReply, cancel);
 
     /// <summary><c>GET /v1/households/{hid}/members</c>: every PC that is or was a member.</summary>
-    public Task<RelayResult<List<ServerMember>>> MembersAsync(DeviceKeys keys, string householdId, CancellationToken cancel) =>
-        SendAsync(HttpMethod.Get, $"v1/households/{householdId}/members", null, keys, HouseholdJson.Default.ListServerMember, cancel);
+    public async Task<RelayResult<List<ServerMember>>> MembersAsync(DeviceKeys keys, string householdId, CancellationToken cancel)
+    {
+        var listed = await SendAsync(HttpMethod.Get, $"v1/households/{householdId}/members", null, keys, HouseholdJson.Default.MembersReply, cancel)
+            .ConfigureAwait(false);
+        return new RelayResult<List<ServerMember>>(listed.Status, listed.Ok ? listed.Value?.Members ?? [] : null, listed.Error);
+    }
 
     /// <summary><c>POST /v1/households/{hid}/batches</c>: one sealed batch of this PC's rows.</summary>
     public Task<RelayResult<Done>> PostBatchAsync(DeviceKeys keys, string householdId, BatchPost batch, CancellationToken cancel) =>
@@ -260,8 +264,12 @@ internal sealed record PostKeysBody(int Epoch, List<EnvelopeBody> Envelopes);
 /// <summary>What <c>GET …/keys/{epoch}</c> answers: this PC's envelope and the member that sealed it.</summary>
 internal sealed record KeyEnvelopeReply(int Epoch, string From, string Body);
 
-/// <summary>A member as the server lists it, times in unix milliseconds.</summary>
-internal sealed record ServerMember(string Device, string Sign, string Dh, long Added, long? Removed);
+/// <summary>A member as the server lists it: the household's epoch when it was added, and when it was removed, which order
+/// membership (plan 0.9), and the times, in unix milliseconds, for display.</summary>
+internal sealed record ServerMember(string Device, string Sign, string Dh, long Added, long? Removed, int AddedEpoch = 0, int? RemovedEpoch = null);
+
+/// <summary>What <c>GET …/members</c> answers.</summary>
+internal sealed record MembersReply(List<ServerMember>? Members);
 
 /// <summary>A batch as posted (plan 0.6, 0.8): <see cref="Seq"/> is this PC's own sequence number, in the sealed body's associated
 /// data; <see cref="Sig"/> this PC's signature over <see cref="HouseholdCrypto.BatchToSign"/>.</summary>

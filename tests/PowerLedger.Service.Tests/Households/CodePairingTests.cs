@@ -195,9 +195,9 @@ public sealed class CodePairingTests : IDisposable
         _joinerKeys.Dispose();
     }
 
-    private static Task NoRecord(MemberInfo joiner, byte[] proof) => Task.CompletedTask;
+    private static Task<bool> NoRecord(MemberInfo joiner, byte[] proof) => Task.FromResult(true);
 
-    private Task<Welcome> Welcome(MemberInfo joiner) => Task.FromResult(
+    private Task<Welcome?> Welcome(MemberInfo joiner) => Task.FromResult<Welcome?>(
         new Welcome(Household, 1, _key, [new MemberInfo(_adderKeys.DeviceId, "Desktop-7", ChassisKind.Desktop, _adderKeys.SignPublic, _adderKeys.DhPublic)]));
 
     /// <summary>A hello for a meeting slot, with a MAC under a key that isn't the code's.</summary>

@@ -487,18 +487,54 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
-    public async Task A_member_that_rotated_and_then_left_still_hands_over_the_key_it_made_before_it_went()
+    public async Task A_key_sealed_by_a_pc_removed_here_isnt_taken_even_for_the_epoch_after_its_removal()
     {
         _desktop.Sync.StartRotation(Household);
         await _desktop.RunAsync();                                                  // epoch 2, sealed to the laptop too
-        _relay.Remove(Household, _desktop.Id);                                      // then the desktop left
-        _laptop.Members.Remove(_desktop.Id, Now.ToUnixTimeMilliseconds());          // heard of while the laptop was at epoch 1
+        _relay.Remove(Household, _desktop.Id);
+        _laptop.Members.Remove(_desktop.Id, Now.ToUnixTimeMilliseconds());          // removed here while the laptop was at epoch 1
 
         (await _laptop.Client.GetKeyAsync(_laptop.Keys, Household, 2, CancellationToken.None)).Ok.ShouldBeTrue();
         await _laptop.Sync.CatchUpAsync(_laptop.Keys, CancellationToken.None);
 
-        _laptop.Store.Epoch.ShouldBe(2);
-        _laptop.Store.CurrentKey.ShouldBe(_desktop.Store.CurrentKey);
+        _laptop.Store.Epoch.ShouldBe(1);                                            // it knows that key: nothing goes under it
+        _laptop.Store.KeyFor(2).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_removed_pcs_batch_brings_in_nobody_and_its_rows_count_only_up_to_its_removal()
+    {
+        using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
+        _relay.Seed(Household, study.Keys);
+        _laptop.Household.SaveMember(study.AsMember());
+        _laptop.Members.Remove(study.Id, Now.ToUnixTimeMilliseconds());             // removed at epoch 1
+        var k2 = HouseholdCrypto.NewKey();
+        _laptop.Store.AddKey(2, k2);                                                // the new key it was left out of
+        using var ghost = DeviceKeys.Create();
+        var farAhead = Now.AddYears(5).ToUnixTimeMilliseconds();
+        List<WireMember> list =
+        [
+            new(ghost.DeviceId, "Ghost", "desktop", Wire.Encode(ghost.SignPublic), Wire.Encode(ghost.DhPublic), Added: farAhead),
+            new(study.Id, "Study PC", "desktop", Wire.Encode(study.Keys.SignPublic), Wire.Encode(study.Keys.DhPublic), Added: farAhead),
+        ];
+        var device = new WireMember(study.Id, "Study PC", "desktop");
+        var before = Sealed(_key, Household, study.Id, 1, 1, new BatchPlain(1, device, [Wire.Row(Row(study.Id, 0, 5, changed: 500))], list), study.Keys);
+        var after = Sealed(k2, Household, study.Id, 2, 2, new BatchPlain(1, device, [Wire.Row(Row(study.Id, 1, 6, changed: 600))], list), study.Keys);
+        _relay.Intercept = (request, _) => request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.EndsWith("/batches", StringComparison.Ordinal)
+            ? FakeRelay.Json(new System.Text.Json.Nodes.JsonObject
+            {
+                ["items"] = new System.Text.Json.Nodes.JsonArray(before, after),
+                ["next"] = 2,
+                ["more"] = false,
+            })
+            : null;
+
+        await _laptop.RunAsync();
+
+        _laptop.Household.Member(ghost.DeviceId).ShouldBeNull();                    // nobody comes in on its word
+        _laptop.Household.Member(study.Id).ShouldNotBeNull().LeftMs.ShouldNotBeNull();   // nor does it bring itself back
+        _laptop.Household.Row(study.Id, Hour(0)).ShouldNotBeNull().EnergyWh.ShouldBe(5);   // its own rows from before its removal
+        _laptop.Household.Row(study.Id, Hour(1)).ShouldBeNull();                    // none under a key after it
     }
 
     public void Dispose()

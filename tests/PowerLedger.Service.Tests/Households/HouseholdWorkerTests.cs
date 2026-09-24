@@ -322,11 +322,71 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_removed_pc_is_added_back_only_at_the_new_epoch_its_removal_started_once_the_server_has_it()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        await WorkerPc.Pair(desktop, laptop);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        var household = desktop.Worker.Store.HouseholdId!;
+        _relay.Intercept = (request, _) => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/keys", StringComparison.Ordinal)
+            ? FakeRelay.Error(503, "The server is busy; try again later.")
+            : null;
+        await desktop.Send<HouseholdReply>(new RemovePcRequest(1, laptop.Worker.DeviceId));   // removed at epoch 1; its new key waits
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        var code = (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(2))).Code!;
+        await laptop.Send<HouseholdReply>(new JoinByCodeRequest(3, code));
+        await laptop.Send<HouseholdReply>(new AnswerPromptRequest(4, (await laptop.Next(NoticeKind.JoinPrompt)).PromptId!, true));
+
+        (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe(PairingSession.NotYet("Laptop-2"));
+        (await laptop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("The other PC stopped the pairing, so nothing was changed.");
+        await desktop.Worker.Running;
+        Members(desktop).Current(laptop.Worker.DeviceId).ShouldBeNull();
+        desktop.Worker.Store.Pending.Select(op => op.Kind).ShouldBe([PendingOp.Keys]);
+
+        _relay.Intercept = null;
+        code = (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(5))).Code!;   // the new key goes first, then the add at its epoch
+        await laptop.Send<HouseholdReply>(new JoinByCodeRequest(6, code));
+        await laptop.Send<HouseholdReply>(new AnswerPromptRequest(7, (await laptop.Next(NoticeKind.JoinPrompt)).PromptId!, true));
+        (await laptop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("This PC joined Desktop-7's household.");
+        await desktop.Worker.Running;
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        desktop.Worker.Store.Epoch.ShouldBe(2);
+        Members(desktop).EpochsOf(laptop.Worker.DeviceId).ShouldBe(new MemberEpochs(2, 1));
+        Members(laptop).EpochsOf(laptop.Worker.DeviceId).ShouldBe(new MemberEpochs(2));
+        laptop.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);
+        _relay.Members(household)[laptop.Worker.DeviceId].ShouldSatisfyAllConditions(
+            member => member.Removed.ShouldBeNull(), member => member.AddedEpoch.ShouldBe(2));
+    }
+
+    [Fact]
+    public async Task The_welcome_carries_every_member_with_its_epochs_the_removed_ones_by_their_id_alone()
+    {
+        var (desktop, laptop, study) = await Household();
+        await desktop.Send<HouseholdReply>(new RemovePcRequest(1, study.Worker.DeviceId));
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                  // removed at 1, and the key moves to 2
+        var den = await Start("Den PC", ChassisKind.Desktop);
+
+        await WorkerPc.Pair(desktop, den);
+
+        var members = Members(den);
+        members.EpochsOf(den.Worker.DeviceId).ShouldBe(new MemberEpochs(2));
+        members.EpochsOf(desktop.Worker.DeviceId).ShouldBe(new MemberEpochs(1));
+        members.EpochsOf(laptop.Worker.DeviceId).ShouldBe(new MemberEpochs(1));
+        members.EpochsOf(study.Worker.DeviceId).ShouldBe(new MemberEpochs(1, 1));  // never to be taken back on a stale list
+        den.Household.Member(study.Worker.DeviceId).ShouldBeNull();
+        den.Household.Member(laptop.Worker.DeviceId).ShouldNotBeNull().DhKey.ShouldBe(laptop.Household.Member(laptop.Worker.DeviceId)!.DhKey);
+        Members(desktop).EpochsOf(den.Worker.DeviceId).ShouldBe(new MemberEpochs(2));
+    }
+
+    [Fact]
     public async Task Removing_a_pc_that_has_left_removes_its_rows_and_this_pc_cant_be_removed()
     {
         var (desktop, laptop, _) = await Household();
         desktop.Household.Upsert([Row(laptop.Worker.DeviceId, 0, 5, changed: 1)]);
-        desktop.Household.MarkLeft(laptop.Worker.DeviceId, 1);
+        Members(desktop).Remove(laptop.Worker.DeviceId, 1);
 
         (await desktop.Send<HouseholdReply>(new RemovePcRequest(1, laptop.Worker.DeviceId))).ShouldBe(
             new HouseholdReply(1, true, "Laptop-2's rows were removed."));
@@ -335,7 +395,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         desktop.Household.Member(laptop.Worker.DeviceId).ShouldBeNull();
         desktop.Household.Row(laptop.Worker.DeviceId, Hour(0)).ShouldBeNull();
-        desktop.Worker.Store.Tombstones.ShouldContainKey(laptop.Worker.DeviceId);   // never taken back on another's word
+        Members(desktop).EpochsOf(laptop.Worker.DeviceId).ShouldBe(new MemberEpochs(1, 1));   // never taken back on another's word
         desktop.Worker.Store.Epoch.ShouldBe(1);
     }
 
@@ -344,7 +404,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     {
         var (desktop, laptop, study) = await Household();
         desktop.Household.Upsert([Row(laptop.Worker.DeviceId, 0, 5, changed: 1), Row(study.Worker.DeviceId, 0, 6, changed: 1)]);
-        desktop.Household.MarkLeft(laptop.Worker.DeviceId, 1);
+        Members(desktop).Remove(laptop.Worker.DeviceId, 1);
         await desktop.Send<HouseholdReply>(new SetDiscoverableRequest(9, true));   // the status again
         desktop.Board.Household!.Members.Single(member => member.DeviceId == laptop.Worker.DeviceId).Left.ShouldBeTrue();
 
@@ -354,7 +414,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         desktop.Household.Row(laptop.Worker.DeviceId, Hour(0)).ShouldBeNull();
         desktop.Household.Member(laptop.Worker.DeviceId).ShouldBeNull();
         desktop.Board.Household!.Members.ShouldNotContain(member => member.DeviceId == laptop.Worker.DeviceId);
-        desktop.Worker.Store.Tombstones.ShouldContainKey(laptop.Worker.DeviceId);   // never added back on another PC's word
+        Members(desktop).EpochsOf(laptop.Worker.DeviceId).ShouldNotBeNull().Current.ShouldBeFalse();   // never added back on another PC's word
         desktop.Household.Row(study.Worker.DeviceId, Hour(0)).ShouldNotBeNull();     // a current member's stay
     }
 
@@ -377,7 +437,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         var (desktop, laptop, study) = await Household();
         desktop.Household.Upsert([
             Row(desktop.Worker.DeviceId, 0, 4, changed: 1), Row(laptop.Worker.DeviceId, 0, 5, changed: 1), Row(study.Worker.DeviceId, 0, 6, changed: 1)]);
-        desktop.Household.MarkLeft(study.Worker.DeviceId, 1);
+        Members(desktop).Remove(study.Worker.DeviceId, 1);
 
         (await desktop.Send<HouseholdReply>(new RemoveOldRowsRequest(1))).ShouldBe(new HouseholdReply(1, true, "The old rows were removed."));
 
@@ -539,6 +599,9 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     private static long Hour(int hour) => Now.AddDays(-1).AddHours(hour).ToUnixTimeMilliseconds();
+
+    /// <summary>The PC's members as its worker keeps them, for a test to change as another PC's word would.</summary>
+    private static MemberBook Members(WorkerPc pc) => new(pc.Worker.Store, pc.Household);
 
     private static HouseholdRow Row(string device, int hour, double energyWh, long changed) => new(
         device, Hour(hour), energyWh, 1, 1, 1, 1, 0, 0, 3600, 0, 0, 3600, 0, 0, 1_000, "GBP", changed);

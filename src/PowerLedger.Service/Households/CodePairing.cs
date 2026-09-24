@@ -47,6 +47,9 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
     /// <summary>How often a slot is looked at while waiting: the Worker lets an address make 60 requests a minute.</summary>
     public static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(3);
 
+    /// <summary>The most a meeting slot holds (the Worker's limit), less room for sealing.</summary>
+    internal const int MaxWelcome = 8 * 1024 - 64;
+
     private const string Side = "powerledger code ";
     private readonly Func<TimeSpan, CancellationToken, Task> _wait = wait ?? ((delay, cancel) => Task.Delay(delay, clock, cancel));
 
@@ -65,9 +68,11 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
     /// <summary>The adding side from there: waits for a joining PC's hello and checks its MAC, then its answer, then sends
     /// the welcome, and once the joining PC's proof comes, records it and says so, all within the meeting's 10 minutes.
     /// Cancelled, it tells the joining PC so in the next slot it would have written, as far as it has got.</summary>
-    /// <param name="record">Records the joining PC as a member, with its proof for the server, before it is told it is in.</param>
+    /// <param name="welcomeFor">Makes the welcome for the joining PC; null when it can't be added yet.</param>
+    /// <param name="record">Records the joining PC as a member, with its proof for the server, before it is told it is in;
+    /// false when it couldn't be.</param>
     public async Task<PairingOutcome> AddAsync(
-        CodeMeeting meeting, PairingIdentity me, Func<MemberInfo, Task<Welcome>> welcomeFor, Func<MemberInfo, byte[], Task> record,
+        CodeMeeting meeting, PairingIdentity me, Func<MemberInfo, Task<Welcome?>> welcomeFor, Func<MemberInfo, byte[], Task<bool>> record,
         CancellationToken cancel)
     {
         var deadline = meeting.Opened + Lifetime;
@@ -96,8 +101,13 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
             }
             var joiner = new MemberInfo(keys.Id, name, kind, keys.Sign, keys.Dh);
 
-            var welcome = await welcomeFor(joiner).ConfigureAwait(false);
-            var sealedWelcome = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(PairingSession.WelcomeMessage(welcome)), Encoding.ASCII.GetBytes("welcome"));
+            if (await welcomeFor(joiner).ConfigureAwait(false) is not { } welcome)
+            {
+                await GoodbyeAsync(meeting.MeetingId, "welcome", toJoiner).ConfigureAwait(false);
+                return new PairingOutcome.Failed(PairingSession.NotYet(name));
+            }
+            var sealedWelcome = HouseholdCrypto.Seal(
+                toJoiner, LanMessages.Write(PairingSession.WelcomeMessage(welcome, MaxWelcome)), Encoding.ASCII.GetBytes("welcome"));
             var put = await relay.PutSlotAsync(meeting.MeetingId, "welcome", sealedWelcome, cancel).ConfigureAwait(false);
             if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give {name} the household: {put.Problem}.");
             goodbye = (toJoiner, "welcomed");
@@ -110,7 +120,11 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
             {
                 return new PairingOutcome.Failed($"{name} didn't sign its joining, so it wasn't added.");
             }
-            await record(joiner, proof!).ConfigureAwait(false);
+            if (!await record(joiner, proof!).ConfigureAwait(false))
+            {
+                await GoodbyeAsync(meeting.MeetingId, "welcomed", toJoiner).ConfigureAwait(false);
+                return new PairingOutcome.Failed(PairingSession.NotYet(name));
+            }
             goodbye = null;
             var welcomed = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(new LanMessage { Type = "welcomed" }), Encoding.ASCII.GetBytes("welcomed"));
             if (!await PutUntilAsync(meeting.MeetingId, "welcomed", welcomed, deadline, cancel).ConfigureAwait(false))

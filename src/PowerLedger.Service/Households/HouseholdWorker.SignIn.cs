@@ -231,7 +231,7 @@ internal sealed partial class HouseholdWorker
         var envelope = got.Value!;
         var recovered = await _environment.Relay.RecoverAsync(_keys, session, Recovery.Verifier(key), cancel).ConfigureAwait(false);
         if (!recovered.Ok) return Reply(id, false, $"Couldn't recover your household: {recovered.Problem}.");
-        EnterLocked(envelope.HouseholdId!, envelope.Epoch!.Value, key, []);
+        EnterLocked(envelope.HouseholdId!, envelope.Epoch!.Value, key, [], null);
         _store.RecoveryKey = recoveryKey;
         _store.RelayConfirmed = true;
         _log.LogInformation("Recovered the household with the recovery code");
