@@ -52,7 +52,7 @@
 
             <!-- A KPI card: the label, the figure with its unit set smaller, the line under it, the trend or the quality chip, and the hatched bar. -->
             <DataTemplate x:Key="Kpi" DataType="{x:Type local:KpiCard}">
-                <Border Style="{StaticResource M.Card}" Margin="0,0,16,16" AutomationProperties.Name="{Binding Label}">
+                <local:Card Style="{StaticResource M.Card}" Margin="0,0,16,16" AutomationProperties.Name="{Binding Label}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="{Binding Label, Converter={StaticResource Upper}}" />
                         <TextBlock Style="{StaticResource M.Text.Display}" Margin="0,10,0,0" TextTrimming="CharacterEllipsis">
@@ -70,7 +70,7 @@
                         </Grid>
                         <local:HatchBar Style="{StaticResource M.HatchBar}" Margin="0,14,0,0" Value="{Binding Fill}" />
                     </StackPanel>
-                </Border>
+                </local:Card>
                 <DataTemplate.Triggers>
                     <!-- What an arrow is against, for the two cards that have one; words alone ("first month") say it themselves. -->
                     <DataTrigger Binding="{Binding Label}" Value="Today">
@@ -125,7 +125,7 @@
             </ItemsControl>
 
             <!-- Power over time: the range's name, the pills, the chart, the key to its colours. -->
-            <Border Style="{StaticResource M.Card}" Margin="0,0,0,16" AutomationProperties.Name="Power over time">
+            <local:Card Style="{StaticResource M.Card}" Margin="0,0,0,16" AutomationProperties.Name="Power over time">
                 <StackPanel>
                     <DockPanel>
                         <Border DockPanel.Dock="Right" Style="{StaticResource M.PillTrack}" Margin="16,0,0,0" VerticalAlignment="Top">
@@ -171,10 +171,10 @@
                         <local:HatchBar Style="{StaticResource M.HatchBar}" Width="18" Value="0" VerticalAlignment="Center" /><TextBlock Text="Asleep" />
                     </WrapPanel>
                 </StackPanel>
-            </Border>
+            </local:Card>
 
             <!-- Where the power went: a row a part over the table's own range, each against the same length of time before it. -->
-            <Border Style="{StaticResource M.Card}" AutomationProperties.Name="Where the power went">
+            <local:Card Style="{StaticResource M.Card}" AutomationProperties.Name="Where the power went">
                 <StackPanel>
                     <DockPanel>
                         <Border DockPanel.Dock="Right" Style="{StaticResource M.PillTrack}" Margin="16,0,0,0" VerticalAlignment="Top">
@@ -249,7 +249,7 @@
                         </ItemsControl>
                     </StackPanel>
                 </StackPanel>
-            </Border>
+            </local:Card>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

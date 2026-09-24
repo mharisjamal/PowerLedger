@@ -20,6 +20,7 @@
     <sys:Double x:Key="M.Radius.Control">8</sys:Double>
     <sys:Double x:Key="M.Blur.Tooltip">12</sys:Double>
     <sys:Double x:Key="M.Elevation.Card">12</sys:Double>
+    <sys:Double x:Key="M.Elevation.Card.Hover">16</sys:Double>
     <sys:Double x:Key="M.Elevation.Tooltip">20</sys:Double>
     <CornerRadius x:Key="M.Corner.Card">14</CornerRadius>
     <CornerRadius x:Key="M.Corner.Control">8</CornerRadius>
@@ -90,7 +91,9 @@
     </Style>
     <Style x:Key="{x:Static SystemParameters.FocusVisualStyleKey}" BasedOn="{StaticResource M.Focus.Ring}" />
 
-    <!-- Surfaces. A card floats on a shadow the palette colours (Elevation); hovering lifts it by 4 (0.5). -->
+    <!-- Surfaces. A card (local:Card) floats on a shadow it paints behind itself in the palette's colour; hovering lifts it
+         by 4 (0.5). No Effect: the card's text keeps ClearType and a redraw inside it stays inside it. M.Card on a plain
+         Border sets properties only a Card draws, so that Border is flat. -->
     <Style x:Key="M.Card.Flat" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource M.Panel}" />
         <Setter Property="BorderBrush" Value="{DynamicResource M.LineStrong}" />
@@ -100,21 +103,21 @@
         <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
     <Style x:Key="M.Card" TargetType="Border" BasedOn="{StaticResource M.Card.Flat}">
-        <Setter Property="local:Elevation.Shadow" Value="{DynamicResource M.Shadow}" />
-        <Setter Property="local:Elevation.Depth" Value="{StaticResource M.Elevation.Card}" />
+        <Setter Property="local:Card.Shadow" Value="{DynamicResource M.Shadow}" />
+        <Setter Property="local:Card.Depth" Value="{StaticResource M.Elevation.Card}" />
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
                 <Trigger.EnterActions>
                     <BeginStoryboard>
                         <Storyboard>
-                            <DoubleAnimation Storyboard.TargetProperty="(local:Elevation.Depth)" To="16" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.In}" />
+                            <DoubleAnimation Storyboard.TargetProperty="(local:Card.Depth)" To="{StaticResource M.Elevation.Card.Hover}" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.In}" />
                         </Storyboard>
                     </BeginStoryboard>
                 </Trigger.EnterActions>
                 <Trigger.ExitActions>
                     <BeginStoryboard>
                         <Storyboard>
-                            <DoubleAnimation Storyboard.TargetProperty="(local:Elevation.Depth)" To="12" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.Out}" />
+                            <DoubleAnimation Storyboard.TargetProperty="(local:Card.Depth)" To="{StaticResource M.Elevation.Card}" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.Out}" />
                         </Storyboard>
                     </BeginStoryboard>
                 </Trigger.ExitActions>

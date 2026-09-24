@@ -99,6 +99,64 @@ public class MidnightControlsTests
             marks[2].Describe().ShouldBe("Up 12%", "the arrow and its words still say which way the figure went");
         });
 
+    /// <summary>A card's shadow, as layers: each a rounded rectangle a little larger and fainter than the one inside it,
+    /// set down by a third of the depth, adding up to a soft edge rather than a line.</summary>
+    [Fact]
+    public void A_cards_shadow_is_rings_that_grow_to_its_depth_and_sit_below_it()
+    {
+        var layers = Card.ShadowLayers(new Size(200, 100), 14, 12);
+        layers.Count.ShouldBe(6);
+        layers[0].Rect.ShouldBe(new Rect(-12, 4 - 12, 224, 124), "the outermost reaches the depth, set down by a third of it");
+        layers[0].Radius.ShouldBe(26, "the corner grows with it");
+        layers[^1].Rect.ShouldBe(new Rect(-2, 4 - 2, 204, 104));
+        layers.Zip(layers.Skip(1)).ShouldAllBe(pair => pair.First.Rect.Contains(pair.Second.Rect), "outermost first, each inside the last");
+        layers.Sum(layer => layer.Alpha).ShouldBe(Card.Peak, 1e-9, "they add up to the peak at the card's edge");
+        Card.ShadowLayers(new Size(200, 100), 14, 0).ShouldBeEmpty();
+        Card.ShadowLayers(new Size(200, 100), 14, 16).Count.ShouldBe(8, "a raised card, a longer falloff");
+    }
+
+    /// <summary>The shadow is drawn behind the card, not by an Effect on it: the card's text keeps ClearType and a redraw
+    /// inside it never goes through an effect. A plain Border in M.Card is flat. Only the card itself answers the pointer.</summary>
+    [Fact]
+    [Trait("Category", "UI")]
+    public void A_card_paints_its_own_shadow_without_an_effect_and_a_plain_border_in_its_style_is_flat()
+        => UiHarness.OnUi(() =>
+        {
+            var styles = MidnightStylesTests.Load();
+            var host = new Grid { Width = 360, Height = 200 };
+            host.Resources.MergedDictionaries.Add(styles);
+            host.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, Theme.Light));
+            host.SetResourceReference(Panel.BackgroundProperty, "M.Ground");
+            var card = new Card { Style = (Style)styles["M.Card"], Width = 200, Height = 100, Child = new TextBlock { Text = "Card" } };
+            var plain = new Border { Style = (Style)styles["M.Card"], Width = 20, Height = 20, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+            host.Children.Add(card);
+            host.Children.Add(plain);
+            host.Measure(new Size(360, 200));
+            host.Arrange(new Rect(0, 0, 360, 200));
+            host.UpdateLayout();
+
+            card.Effect.ShouldBeNull();
+            plain.Effect.ShouldBeNull("M.Card on a plain Border is flat");
+            card.Depth.ShouldBe((double)styles["M.Elevation.Card"]);
+            card.Shadow.ShouldNotBeNull();
+
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(360, 200, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(host);
+            byte Red(int x, int y)
+            {
+                var pixel = new byte[4];
+                bitmap.CopyPixels(new Int32Rect(x, y, 1, 1), pixel, 4, 0);
+                return pixel[2];
+            }
+            var below = card.TranslatePoint(new Point(100, 100 + 3), host);
+            var far = new Point(345, 195);
+            Red((int)below.X, (int)below.Y).ShouldBeLessThan(Red((int)far.X, (int)far.Y), "the ground just under the card is shaded");
+
+            var outside = new Point(100, 100 + 6);   // in the card's own coordinates, just under it
+            VisualTreeHelper.HitTest(card, outside).ShouldBeNull("the shadow doesn't take the pointer");
+            VisualTreeHelper.HitTest(card, new Point(100, 50)).ShouldNotBeNull();
+        });
+
     [Fact]
     public void The_bars_and_the_disc_describe_themselves()
         => Sta.Run(() =>

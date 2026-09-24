@@ -68,7 +68,7 @@ public class MidnightStyleSheetTests
 
         Row(Text("M.Text.Display", "1.24"), Text("M.Text.Title", "Dashboard"), Text("M.Text.Heading", "Power over time"), Text("M.Text.Body", "Body text"),
             Text("M.Text.Secondary", "Secondary"), Text("M.Text.Muted", "Muted"), Text("M.Text.Eyebrow", "POWER NOW"), Text("M.Text.Number", "92 W"));
-        Row(new Border { Style = S("M.Card"), Width = 200, Child = Text("M.Text.Body", "Card") },
+        Row(new Card { Style = S("M.Card"), Width = 200, Child = Text("M.Text.Body", "Card") },
             new Border { Style = S("M.Card.Flat"), Width = 200, Child = Text("M.Text.Body", "Flat card") },
             new Border { Style = S("M.Glass"), Width = 200, Padding = new Thickness(12), Child = new Grid { Children = { new Rectangle { Style = S("M.Glass.Highlight") }, Text("M.Text.Body", "Glass") } } });
 

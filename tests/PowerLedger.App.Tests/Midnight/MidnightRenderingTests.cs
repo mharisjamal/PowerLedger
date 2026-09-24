@@ -45,11 +45,18 @@ public class MidnightRenderingTests
                     Checked(view, "Power over time").ShouldBe("1D");
                     Pills(view, "Where the power went").ShouldBe(["Today", "7 days", "30 days"]);
                     Checked(view, "Where the power went").ShouldBe("Today");
-                    UiTree.Descendants<ShareBar>(Card(view, "Where the power went")).Count().ShouldBe(4, "a row a part");
+                    UiTree.Descendants<ShareBar>(CardNamed(view, "Where the power went")).Count().ShouldBe(4, "a row a part");
                     UiTree.Descendants<TrendMark>(view).Where(mark => mark.Kind is TrendKind.Up or TrendKind.Down)
                         .ShouldAllBe(mark => mark.LowerIsBetter, "every trend on the page is of energy, where less is better");
-                    UiTree.Descendants<TrendMark>(Card(view, "Today")).Single().Sense.ShouldBe(TrendSense.Bad, "today runs above the average day");
+                    UiTree.Descendants<TrendMark>(CardNamed(view, "Today")).Single().Sense.ShouldBe(TrendSense.Bad, "today runs above the average day");
                     UiTree.Descendants<Border>(view).ShouldNotContain(border => border.Style == window.Resources["M.Glass"], "glass stays on the top bar and tooltips");
+                    UiTree.Descendants<Card>(view).Count().ShouldBe(5, "three KPI cards, the chart's and the table's, each painting its own shadow");
+                    // No Effect over a card's text or the chart: text keeps ClearType, and the crosshair redraws the chart alone.
+                    foreach (var element in UiTree.Descendants<TextBlock>(view).Cast<DependencyObject>().Append(UiHarness.Find<AreaChart>(view)!))
+                    {
+                        for (var node = element; node is not null; node = VisualTreeHelper.GetParent(node))
+                            (node as UIElement)?.Effect.ShouldBeNull($"{node.GetType().Name} over {element}");
+                    }
                     UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-dashboard-{theme}.png");
                     var scroller = UiHarness.Find<ScrollViewer>(view)!;
                     scroller.ScrollToEnd();
@@ -219,7 +226,7 @@ public class MidnightRenderingTests
                 window.ActualWidth.ShouldBe(960);
                 var view = UiHarness.Find<DashboardView>(window)!;
                 UiHarness.Find<System.Windows.Controls.Primitives.UniformGrid>(view)!.Columns.ShouldBe(1, "one card under another under 1100 wide");
-                var table = Card(view, "Where the power went");
+                var table = CardNamed(view, "Where the power went");
                 var inside = table.ActualWidth - table.Padding.Right - table.BorderThickness.Right;
                 foreach (var mark in UiTree.Descendants<TrendMark>(table))
                     mark.TranslatePoint(new Point(mark.ActualWidth, 0), table).X.ShouldBeLessThanOrEqualTo(inside + 0.5, "the trend column stays inside the card");
@@ -227,7 +234,7 @@ public class MidnightRenderingTests
                     name.DesiredSize.Width.ShouldBeLessThanOrEqualTo(name.ActualWidth + 0.5, $"{name.Text} is whole");
                 foreach (var title in new[] { "Power over time", "Where the power went" })
                 {
-                    var card = Card(view, title);
+                    var card = CardNamed(view, title);
                     var heading = UiHarness.Find<TextBlock>(card, text => text.Text == title)!;
                     var pills = UiHarness.Find<Border>(card, border => border.Style == window.Resources["M.PillTrack"])!;
                     heading.TranslatePoint(new Point(heading.ActualWidth, 0), card).X
@@ -386,14 +393,14 @@ public class MidnightRenderingTests
         });
 
     /// <summary>The Dashboard's card that <paramref name="title"/> names for a screen reader.</summary>
-    private static Border Card(DashboardView view, string title)
+    private static Border CardNamed(DashboardView view, string title)
         => UiHarness.Find<Border>(view, border => AutomationProperties.GetName(border) == title) ?? throw new InvalidOperationException($"No card {title}.");
 
     private static string[] Pills(DashboardView view, string card)
-        => [.. UiTree.Descendants<RadioButton>(Card(view, card)).Select(pill => (string)pill.Content)];
+        => [.. UiTree.Descendants<RadioButton>(CardNamed(view, card)).Select(pill => (string)pill.Content)];
 
     private static string? Checked(DashboardView view, string card)
-        => UiTree.Descendants<RadioButton>(Card(view, card)).SingleOrDefault(pill => pill.IsChecked == true)?.Content as string;
+        => UiTree.Descendants<RadioButton>(CardNamed(view, card)).SingleOrDefault(pill => pill.IsChecked == true)?.Content as string;
 
     /// <summary>
     /// The window with the chart's tooltip laid where it opens over the chart: a popup is a window of its own, which a render
