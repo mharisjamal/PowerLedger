@@ -316,9 +316,9 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 }
                 if (envelopes.Count != list.Values.Count(member => member.Removed is null))
                 {
-                    return Error(409, "Every current member needs the new key; look at the members again.");
+                    return Error(409, "Every current member needs the new key; look at the members again.", current);
                 }
-                if (epoch != current + 1) return Error(409, $"The household's key is at epoch {current}; new keys are for epoch {current + 1} only.");
+                if (epoch != current + 1) return Error(409, $"The household's key is at epoch {current}; new keys are for epoch {current + 1} only.", current);
                 foreach (var (device, sealedKey) in envelopes) _envelopes[(household, epoch, device)] = (caller, sealedKey);
                 _epochs[household] = epoch;
                 return Ok();
@@ -684,6 +684,10 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 
     internal static HttpResponseMessage Error(int status, string message) =>
         new((HttpStatusCode)status) { Content = new StringContent(JsonSerializer.Serialize(new { error = message }), Encoding.UTF8, "application/json") };
+
+    /// <summary>An error with the household's epoch as it is, as every 409 on new keys carries it (plan 0.10).</summary>
+    internal static HttpResponseMessage Error(int status, string message, int epoch) =>
+        new((HttpStatusCode)status) { Content = new StringContent(JsonSerializer.Serialize(new { error = message, epoch }), Encoding.UTF8, "application/json") };
 
     private static string Encode(byte[] bytes) => Base64Url.EncodeToString(bytes);
 

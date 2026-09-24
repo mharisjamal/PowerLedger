@@ -11,8 +11,9 @@ using Shouldly;
 namespace PowerLedger.Service.Tests;
 
 /// <summary>Who is in, and who a new key goes to, through the server (plan 0.10): the server's list says who is in, a PC
-/// nobody introduced is taken out after three days, a removal known only from a list keeps nobody out of a new key, and a
-/// new key made for a removal rotates on after losing its epoch.</summary>
+/// nobody introduced is taken out after three days, and a removal known only from a list keeps nobody out of a new key. A
+/// new key that loses its epoch rotates on from the server's, always when it was made for a removal, while fetching goes
+/// on; and a PC behind the server's epoch posts nothing under the key it has.</summary>
 public sealed class RelayMembershipTests : IDisposable
 {
     private const string Household = "5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f";
@@ -133,6 +134,68 @@ public sealed class RelayMembershipTests : IDisposable
         var mine = _relay.Batches.Where(batch => batch.Device == p.Id).ToList();
         mine.ShouldNotBeEmpty();
         mine.ShouldAllBe(batch => batch.Epoch == 3);                               // never under the key D holds
+    }
+
+    [Fact]
+    public async Task A_rotation_that_lost_its_epoch_rotates_on_from_the_servers_epoch_and_fetching_goes_on_meanwhile()
+    {
+        var (desktop, laptop, gone) = (NewPc("Desktop-7"), NewPc("Laptop-2"), NewPc("Gone-D"));
+        InHousehold(desktop, laptop, gone);
+        _relay.Remove(Household, gone.Id);                                         // the laptop removes D and rotates to 2
+        laptop.Members.Remove(gone.Id, NowMs);
+        var key2 = HouseholdCrypto.NewKey();
+        (await laptop.Client.PostKeysAsync(laptop.Keys, Household, 2, KeyWrap.For(laptop.Keys, Household, 2, key2, [desktop.AsMember(), laptop.AsMember()]),
+            CancellationToken.None)).Ok.ShouldBeTrue();
+        var study = NewPc("Study PC");                                             // welcomed by the desktop at 1, with D still in its list
+        study.Store.EnterHousehold(Household, 1, _key1);
+        foreach (var member in new[] { desktop, laptop, gone, study }) study.Household.SaveMember(member.AsMember());
+        _relay.Seed(Household, study.Keys);                                        // the desktop's add reaches the server, at 2
+        (await study.RunAsync()).Notices.ShouldBe(["Gone-D is no longer in the household."]);   // a new key of its own waits, for 2
+        var key3 = HouseholdCrypto.NewKey();                                       // then the laptop rotates again, sealed to the study PC too
+        (await laptop.Client.PostKeysAsync(laptop.Keys, Household, 3, KeyWrap.For(laptop.Keys, Household, 3, key3,
+            [desktop.AsMember(), laptop.AsMember(), study.AsMember()]), CancellationToken.None)).Ok.ShouldBeTrue();
+        laptop.Store.AddKey(2, key2);
+        laptop.Store.AddKey(3, key3);
+        laptop.Household.SaveMember(study.AsMember());                              // the desktop's list introduced it there
+        laptop.Household.Upsert([Row(laptop.Id, 2, 20, changed: NowMs + 5)]);
+        (await laptop.RunAsync()).RowsOut.ShouldBeGreaterThan(0);
+        var posts = _relay.Posted($"POST /v1/households/{Household}/keys");
+
+        var run = await study.RunAsync();
+
+        run.Problem.ShouldBeNull();
+        study.Household.Row(laptop.Id, Hour(2)).ShouldNotBeNull().EnergyWh.ShouldBe(20);
+        study.Store.KeyFor(3).ShouldBe(key3);
+        study.Store.Epoch.ShouldBe(4);                                             // made for a removal: rotated on from the server's 3
+        _relay.Sealed(Household, 4).ShouldBe([desktop.Id, laptop.Id, study.Id], ignoreOrder: true);
+        study.Store.Pending.ShouldBeEmpty();
+        (_relay.Posted($"POST /v1/households/{Household}/keys") - posts).ShouldBe(2);   // the one refused, then the one after the server's epoch
+    }
+
+    [Fact]
+    public async Task A_pc_added_across_a_rotation_posts_nothing_under_the_key_it_was_welcomed_with_and_makes_a_newer_one()
+    {
+        var (desktop, laptop, gone) = (NewPc("Desktop-7"), NewPc("Laptop-2"), NewPc("Gone-D"));
+        InHousehold(desktop, laptop, gone);
+        _relay.Remove(Household, gone.Id);
+        (await laptop.Client.PostKeysAsync(laptop.Keys, Household, 2, KeyWrap.For(laptop.Keys, Household, 2, HouseholdCrypto.NewKey(),
+            [desktop.AsMember(), laptop.AsMember()]), CancellationToken.None)).Ok.ShouldBeTrue();
+        var newbie = NewPc("Newbie");                                              // welcomed at 1 by the desktop, which knew D was removed
+        newbie.Store.EnterHousehold(Household, 1, _key1);
+        foreach (var member in new[] { desktop, laptop, newbie }) newbie.Household.SaveMember(member.AsMember());
+        newbie.Members.Learn([new WireMember(gone.Id, null, null, AddedEpoch: 1, RemovedEpoch: 1)], desktop.Id, newbie.Id, NowMs);
+        newbie.Household.Upsert([Row(newbie.Id, 3, 33, changed: NowMs + 1)]);
+        _relay.Seed(Household, newbie.Keys);                                       // its add reaches the server after the new key, at 2
+
+        (await newbie.RunAsync()).RowsOut.ShouldBe(0);
+        _relay.Batches.ShouldNotContain(batch => batch.Device == newbie.Id);      // nothing under the key D holds
+        (await newbie.RunAsync()).Problem.ShouldBeNull();
+
+        newbie.Store.Epoch.ShouldBe(3);
+        _relay.Sealed(Household, 3).ShouldBe([desktop.Id, laptop.Id, newbie.Id], ignoreOrder: true);
+        var posted = _relay.Batches.Where(batch => batch.Device == newbie.Id).ToList();
+        posted.ShouldNotBeEmpty();
+        posted.ShouldAllBe(batch => batch.Epoch == 3);
     }
 
     public void Dispose()

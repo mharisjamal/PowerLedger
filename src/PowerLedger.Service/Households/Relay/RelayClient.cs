@@ -5,8 +5,9 @@ using PowerLedger.Core.Households;
 
 namespace PowerLedger.Service.Households.Relay;
 
-/// <summary>What the Worker answered: its status, 0 when it couldn't be reached, and the value or its error sentence.</summary>
-internal sealed record RelayResult<T>(int Status, T? Value, string? Error)
+/// <summary>What the Worker answered: its status, 0 when it couldn't be reached, and the value or its error sentence. A 409 on
+/// new keys also gives the household's epoch as it was then (plan 0.10).</summary>
+internal sealed record RelayResult<T>(int Status, T? Value, string? Error, int? Epoch = null)
 {
     public bool Ok => Status is >= 200 and < 300;
 
@@ -194,7 +195,7 @@ internal sealed class RelayClient : IDisposable
         string contentType = "application/json", string? session = null)
     {
         var raw = await SendRawAsync(method, path, body, signer, session, cancel, contentType).ConfigureAwait(false);
-        if (!raw.Ok) return new RelayResult<T>(raw.Status, default, raw.Error);
+        if (!raw.Ok) return new RelayResult<T>(raw.Status, default, raw.Error, raw.Epoch);
         if (reply is null) return new RelayResult<T>(raw.Status, default, null);
         try
         {
@@ -227,10 +228,9 @@ internal sealed class RelayClient : IDisposable
             var bytes = await ReadAsync(response, cancel).ConfigureAwait(false);
             var status = (int)response.StatusCode;
             if (status is >= 200 and < 300) return new RelayResult<byte[]>(status, bytes, null);
-            var error = HouseholdJson.Read(bytes, HouseholdJson.Default.ServerError)?.Error is { Length: > 0 } sentence
-                ? sentence.Trim().TrimEnd('.')
-                : null;
-            return new RelayResult<byte[]>(status, null, error);
+            var said = HouseholdJson.Read(bytes, HouseholdJson.Default.ServerError);
+            var error = said?.Error is { Length: > 0 } sentence ? sentence.Trim().TrimEnd('.') : null;
+            return new RelayResult<byte[]>(status, null, error, said?.Epoch);
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
@@ -363,4 +363,4 @@ internal sealed record SealedKeyList(string Key, List<WireMember> Members);
 internal sealed record ApproveBody(int Epoch, string Body);
 
 /// <summary>What the server says when it refuses: <c>{"error": "…"}</c>.</summary>
-internal sealed record ServerError(string? Error);
+internal sealed record ServerError(string? Error, int? Epoch = null);
