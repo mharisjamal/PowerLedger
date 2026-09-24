@@ -45,6 +45,7 @@ public partial class App : Application
     private FeedbackSender? _feedbackSender;
     private ITimer? _feedbackRetryTimer;
     private string? _dataFolder;
+    private WhatsNewWindow? _whatsNewWindow;
 
     /// <summary>Review finding A4, follow-up: every open Join/Approve/Confirm join/Recovery code prompt, by its
     /// promptId, so a pushed <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others
@@ -119,6 +120,7 @@ public partial class App : Application
                 ShowWindow),
             OpenPage);
         _updates.PropertyChanged += OnUpdatesChanged;
+        _updates.NotesRequested += OpenWhatsNewWindow;
         _settings = new SettingsViewModel(
             _link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates,
             openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
@@ -250,16 +252,17 @@ public partial class App : Application
         if (_preferences is { Current.FirstRunDone: true }) _consentGate?.CheckOnce();
     }
 
-    /// <summary>Opens the consent dialog, modal and owned by the main window (data-sharing design §2).</summary>
+    /// <summary>Opens the consent dialog, modal and owned by the main window (data-sharing design §2, owner's round: one
+    /// screen, two choices — the status that triggered it no longer has anything left to show).</summary>
     private void OpenConsentDialog(Consent current)
     {
         if (_window is null || _link is null || _threads is null) return;
-        var model = new ConsentViewModel(_link, _threads, current, OpenPage, OpenPayload);
+        var model = new ConsentViewModel(_link, _threads, OpenPage);
         model.Applied += consent => _usage?.ConsentChanged(consent);   // data-sharing design §3: known to usage counting at once
         new ConsentDialog(model) { Owner = _window }.ShowDialog();
     }
 
-    /// <summary>Opens one payload file, owned by the main window: "See what would be sent" and each row of "What's been sent".</summary>
+    /// <summary>Opens one payload file, owned by the main window: each row of "What's been sent".</summary>
     private void OpenPayload(string path)
     {
         if (_window is null) return;
@@ -299,6 +302,23 @@ public partial class App : Application
         _feedbackWindow = new SendFeedbackWindow(model, _window, new ImagePicker()) { Owner = _window };
         _feedbackWindow.Closed += (_, _) => _feedbackWindow = null;
         _feedbackWindow.Show();
+    }
+
+    /// <summary>What's new, from the update card's own link: modeless, owned by the main window, single-instance like
+    /// Add a PC and Send feedback (owner's round: in-app instead of the browser).</summary>
+    private void OpenWhatsNewWindow()
+    {
+        if (_whatsNewWindow is not null)
+        {
+            _whatsNewWindow.Activate();
+            return;
+        }
+        if (_window is null || _updates is null) return;
+        var model = new WhatsNewViewModel(_updates.WhatsNewTitle, _updates.WhatsNewPoints, _updates.OpenNotes);
+        model.Closed += () => _whatsNewWindow?.Close();
+        _whatsNewWindow = new WhatsNewWindow(model) { Owner = _window };
+        _whatsNewWindow.Closed += (_, _) => _whatsNewWindow = null;
+        _whatsNewWindow.Show();
     }
 
     /// <summary>The last 300 lines of the App's own log and, if it can be read, of the service's (Send feedback's
@@ -467,6 +487,7 @@ public partial class App : Application
             if (_updates is not null)
             {
                 _updates.PropertyChanged -= OnUpdatesChanged;
+                _updates.NotesRequested -= OpenWhatsNewWindow;
                 _updates.Dispose();
             }
             _monthly?.Dispose();
@@ -474,6 +495,7 @@ public partial class App : Application
             _brightnessReader?.Dispose();
             _feedbackRetryTimer?.Dispose();
             _feedbackWindow?.Close();
+            _whatsNewWindow?.Close();
             _window?.Close();
             _tray?.Dispose();
             if (_now is not null)

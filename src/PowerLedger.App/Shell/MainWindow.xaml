@@ -110,7 +110,7 @@
                                 <Button Style="{StaticResource Quiet}" Margin="0,9,0,0" HorizontalAlignment="Left" Content="{Binding ActionLabel}"
                                         Command="{Binding Act}" Visibility="{Binding ActionLabel, Converter={StaticResource VisibleWhenText}}" />
                                 <Button Style="{StaticResource Link}" Margin="0,8,0,0" HorizontalAlignment="Left" Content="What's new"
-                                        Command="{Binding OpenNotes}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
+                                        Command="{Binding ShowWhatsNew}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
                             </StackPanel>
                         </Border>
                         <StackPanel>
