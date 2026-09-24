@@ -14,8 +14,10 @@ internal sealed record Approving(
     bool Revealed = false, bool Accepted = false, int? Epoch = null, string? Body = null);
 
 /// <summary>N2: this PC's answer to the member that committed to approving it (plan 0.9): that member's device and keys, its
-/// commitment, the nonce this PC sent back, and whether this PC's user has said the two codes match.</summary>
-internal sealed record Answering(string Household, string Approver, string Sign, string Dh, string Commit, string Nonce, bool Confirmed = false);
+/// commitment, the nonce this PC sent back, and whether this PC's user has said the two codes match; and when it made the
+/// nonce, unix milliseconds, from which it looks every 10 seconds for a while (plan 0.10).</summary>
+internal sealed record Answering(
+    string Household, string Approver, string Sign, string Dh, string Commit, string Nonce, bool Confirmed = false, long? Since = null);
 
 /// <summary>
 /// N2's sealed key lists (plan 0.9): the household key and a member list, as an approval and a recovery carry them, at most
@@ -328,6 +330,55 @@ internal sealed partial class HouseholdWorker
 
     private static string Commit(string nonce) => Wire.Decode(nonce) is { } bytes ? Wire.Encode(HouseholdCrypto.Commitment(bytes)) : "";
 
+    /// <summary>How often a PC looks at an approval under way (plan 0.10), and for how long after it began.</summary>
+    internal static readonly TimeSpan ApprovalPace = TimeSpan.FromSeconds(10);
+
+    internal static readonly TimeSpan ApprovalWindow = TimeSpan.FromMinutes(10);
+
+    /// <summary>True while an approval is under way on this PC (plan 0.10): as the member approving, for
+    /// <see cref="ApprovalWindow"/> from its commit; as the PC asking, for as long from its nonce.</summary>
+    internal bool ApprovalUnderWay
+    {
+        get
+        {
+            var window = (long)ApprovalWindow.TotalMilliseconds;
+            return (_store.Approving is { } approving && Now - approving.Started < window)
+                || (_store.AskedToJoin is not null && _store.Answering is { Since: { } since } && Now - since < window);
+        }
+    }
+
+    /// <summary>A light turn while an approval is under way (plan 0.10): the approval's next step alone, on either side, so the
+    /// two screens show their codes within seconds of each other.</summary>
+    internal async Task RunApprovalTurnAsync(CancellationToken stop)
+    {
+        using var lease = await _gate.EnterBackgroundAsync(stop).ConfigureAwait(false);
+        try
+        {
+            await CheckApprovedAsync(lease.Attention).ConfigureAwait(false);
+            if (_store.HouseholdId is not null && _store.Approving is not null) await PollRequestsAsync(lease.Attention).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!stop.IsCancellationRequested)
+        {
+            Kick();                                                            // gave way: a whole turn once the request is done
+        }
+        finally
+        {
+            Publish();
+        }
+    }
+
+    private async Task RunApprovalTurnSafelyAsync(CancellationToken stop)
+    {
+        try
+        {
+            await RunApprovalTurnAsync(stop).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException || !stop.IsCancellationRequested)
+        {
+            _log.LogError(error, "A look at the approval under way failed");
+        }
+    }
+
     private DateOnly Today => DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
 
     private bool MayStartApproval() => _store.ApprovalsStarted is not { } started || started.Day != Today || started.Count < ApprovalsADay;
@@ -393,7 +444,8 @@ internal sealed partial class HouseholdWorker
             {
                 return;
             }
-            answering = new Answering(householdId, approver.Device, approver.Sign, approver.Dh, request.Commit, Wire.Encode(HouseholdCrypto.NewNonce()));
+            answering = new Answering(householdId, approver.Device, approver.Sign, approver.Dh, request.Commit, Wire.Encode(HouseholdCrypto.NewNonce()),
+                Since: Now);
             _store.Answering = answering;                                      // kept before it goes: one nonce per request
         }
         else if (answering.Approver != approver.Device || answering.Sign != approver.Sign || answering.Dh != approver.Dh || answering.Commit != request.Commit)

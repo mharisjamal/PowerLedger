@@ -198,6 +198,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             {
                 await RunOnceSafelyAsync(stop).ConfigureAwait(false);
                 var kicked = _kick.WaitAsync(stop);
+                while (ApprovalUnderWay && !stop.IsCancellationRequested)     // plan 0.10: looked at every 10 seconds meanwhile
+                {
+                    var paced = Task.Delay(ApprovalPace, _clock, stop);
+                    if (await Task.WhenAny(tick, kicked, paced).ConfigureAwait(false) != paced) break;
+                    await RunApprovalTurnSafelyAsync(stop).ConfigureAwait(false);
+                }
                 if (await Task.WhenAny(tick, kicked).ConfigureAwait(false) == tick)
                 {
                     if (!await tick.ConfigureAwait(false)) break;

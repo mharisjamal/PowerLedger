@@ -29,15 +29,16 @@ internal sealed class WorkerPc : IAsyncDisposable
 
     /// <param name="client">The server, fake or real; the PC disposes it.</param>
     /// <param name="codeWait">How long a pairing by code waits between looks at a meeting slot.</param>
+    /// <param name="runLoop">True for the worker's own loop of turns, on <paramref name="clock"/>; tests drive the turns otherwise.</param>
     public WorkerPc(
         string name, ChassisKind kind, FakeNetwork network, RelayClient client, TimeProvider clock, bool appAtTheScreen, bool autoAnswer,
-        TimeSpan codeWait)
+        TimeSpan codeWait, bool runLoop = false)
     {
         Board.Publish(ServiceSettings.Default with { Profile = ServiceSettings.Default.Profile with { Chassis = kind } });
         var notices = new NoticeHub(() => Screen);
         _client = client;
         var environment = new HouseholdEnvironment(
-            Discovery = network.Join(), Category, _client, IPAddress.Loopback, () => name, RunLoop: false,
+            Discovery = network.Join(), Category, _client, IPAddress.Loopback, () => name, RunLoop: runLoop,
             BrowseTime: TimeSpan.Zero, Timeouts: new PairingTimeouts(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)),
             CodeWait: (_, cancel) => Task.Delay(codeWait, cancel));
         Worker = new HouseholdWorker(_database.Db, Board, notices, environment, clock, NullLogger<HouseholdWorker>.Instance);

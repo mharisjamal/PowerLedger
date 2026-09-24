@@ -8,13 +8,18 @@ namespace PowerLedger.Service.Households;
 /// <summary>
 /// Asks the user at the screen (households design §3, §7): a prompt goes as a pushed <see cref="HouseholdNotice"/> to the App
 /// in the console session, and waits for its <see cref="AnswerPromptRequest"/>. For pairing, nobody there means no at once,
-/// and no answer in two minutes means no. N2's prompts have no answer instead (plan 0.9): one that closes unanswered comes
-/// back at a later turn, and never counts as a no. A prompt whose token is cancelled, as when its connection has gone or
+/// and no answer in two minutes means no. N2's prompts stay up for ten minutes, so both PCs' are on screen together, and have
+/// no answer instead (plan 0.9, 0.10): one that closes unanswered comes back at a later turn, and never counts as a no. A
+/// prompt whose token is cancelled, as when its connection has gone or
 /// the other side cancelled, is withdrawn: a <see cref="NoticeKind.Withdraw"/> notice names it, so the App closes it.
 /// </summary>
 internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : IPromptBroker
 {
     public static readonly TimeSpan Timeout = PairingTimeouts.Prompt;
+
+    /// <summary>How long N2's two prompts, <see cref="NoticeKind.ApprovePrompt"/> and <see cref="NoticeKind.ConfirmJoin"/>, stay up
+    /// (plan 0.10).</summary>
+    public static readonly TimeSpan ApprovalTimeout = TimeSpan.FromMinutes(10);
 
     /// <summary>What a <see cref="NoticeKind.Withdraw"/> notice says.</summary>
     internal const string Withdrawn = "That question has closed.";
@@ -47,13 +52,15 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
     public bool TryAskToApprove(bool asYou, string code, CancellationToken cancel, out Task<bool?> answer) => TryAsk(
         NoticeKind.ApprovePrompt,
         asYou ? "A PC signed in as you asks to join your household. Approve it?" : "A PC asks to join your household. Approve it?",
-        null, code, cancel, out answer);
+        null, code, cancel, out answer, ApprovalTimeout);
 
     /// <summary>N2: a member is about to approve this PC (plan 0.9). Before anything is sealed, its user checks that PC
     /// shows the same code: a server that put in keys of its own would make the two differ.</summary>
     /// <returns>Null when it wasn't answered: it comes back at a later turn.</returns>
     public Task<bool?> ConfirmJoinAsync(string code, CancellationToken cancel) =>
-        AskOrNotAsync(NoticeKind.ConfirmJoin, $"Does your other PC show {code}? Approve it there too.", null, code, cancel);
+        TryAsk(NoticeKind.ConfirmJoin, $"Does your other PC show {code}? Approve it there too.", null, code, cancel, out var answer, ApprovalTimeout)
+            ? answer
+            : Task.FromResult<bool?>(null);
 
     /// <summary>The user's answer to an open prompt.</summary>
     /// <returns>False when no prompt of that ID waits: it was answered, ran out, or never was.</returns>
@@ -66,27 +73,30 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
     private Task<bool?> AskOrNotAsync(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel) =>
         TryAsk(kind, text, fromName, code, cancel, out var answer) ? answer : Task.FromResult<bool?>(null);
 
-    /// <summary>Shows a prompt at once; false when it couldn't be shown.</summary>
-    private bool TryAsk(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel, out Task<bool?> answer)
+    /// <summary>Shows a prompt at once, up for <paramref name="timeout"/>, <see cref="Timeout"/> by default; false when it
+    /// couldn't be shown.</summary>
+    private bool TryAsk(
+        NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel, out Task<bool?> answer, TimeSpan? timeout = null)
     {
         var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         var waiting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var upFor = timeout ?? Timeout;
         _open[id] = waiting;
-        if (!notices.Publish(new HouseholdNotice(kind, id, text, fromName, code, clock.GetUtcNow() + Timeout)))
+        if (!notices.Publish(new HouseholdNotice(kind, id, text, fromName, code, clock.GetUtcNow() + upFor)))
         {
             _open.TryRemove(id, out _);
             answer = Task.FromResult<bool?>(null);
             return false;
         }
-        answer = AnswerAsync(id, waiting, fromName, cancel);
+        answer = AnswerAsync(id, waiting, fromName, upFor, cancel);
         return true;
     }
 
-    private async Task<bool?> AnswerAsync(string id, TaskCompletionSource<bool> waiting, string? fromName, CancellationToken cancel)
+    private async Task<bool?> AnswerAsync(string id, TaskCompletionSource<bool> waiting, string? fromName, TimeSpan upFor, CancellationToken cancel)
     {
         try
         {
-            return await waiting.Task.WaitAsync(Timeout, clock, cancel).ConfigureAwait(false);
+            return await waiting.Task.WaitAsync(upFor, clock, cancel).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

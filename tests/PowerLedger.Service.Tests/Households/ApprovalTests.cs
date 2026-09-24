@@ -230,7 +230,7 @@ public sealed class ApprovalTests : IAsyncLifetime
         var (desktop, study, household) = await BothAsked();
         var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
 
-        _clock.Advance(HouseholdPrompts.Timeout);
+        _clock.Advance(HouseholdPrompts.ApprovalTimeout);                          // both up for ten minutes, then closed unanswered
         await desktop.Worker.Running;
         await study.Worker.Running;
 
@@ -427,9 +427,10 @@ public sealed class ApprovalTests : IAsyncLifetime
     private static SignInRequest SignIn(WorkerPc pc, string salt = "salt-1") =>
         new(7, "google", FakeRelay.IdToken("google", "alice", pc.Worker.DeviceId, salt), salt);
 
-    private async Task<WorkerPc> Start(string name, ChassisKind kind = ChassisKind.Laptop)
+    private async Task<WorkerPc> Start(string name, ChassisKind kind = ChassisKind.Laptop, bool runLoop = false)
     {
-        var pc = new WorkerPc(name, kind, _network, _relay, _clock, appAtTheScreen: true);
+        var pc = new WorkerPc(name, kind, _network, new RelayClient(FakeRelay.Endpoint, _clock, _relay), _clock, appAtTheScreen: true, autoAnswer: false,
+            codeWait: TimeSpan.FromMilliseconds(5), runLoop: runLoop);
         _pcs.Add(pc);
         await pc.Worker.StartAsync(CancellationToken.None);
         return pc;
@@ -446,6 +447,66 @@ public sealed class ApprovalTests : IAsyncLifetime
 
     /// <summary>A household with a member signed in, and a study PC signed in as the same account asking to join, both asked
     /// about the approval: its code on both screens, nothing sealed yet.</summary>
+    [Fact]
+    public async Task Both_prompts_stay_up_for_ten_minutes_so_the_two_codes_are_on_screen_together()
+    {
+        var (desktop, study, _) = await BothAsked();
+        var until = _clock.GetUtcNow() + TimeSpan.FromMinutes(10);
+
+        (await desktop.Next(NoticeKind.ApprovePrompt)).ExpiresAt.ShouldBe(until);
+        (await study.Next(NoticeKind.ConfirmJoin)).ExpiresAt.ShouldBe(until);
+    }
+
+    [Fact]
+    public async Task While_an_approval_is_under_way_each_side_looks_at_just_the_approval_for_ten_minutes()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await study.Send<HouseholdReply>(SignIn(study));
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                  // it commits
+        desktop.Worker.ApprovalUnderWay.ShouldBeTrue();
+        study.Worker.ApprovalUnderWay.ShouldBeFalse();
+        await study.Worker.RunOnceAsync(CancellationToken.None);                    // its nonce
+        study.Worker.ApprovalUnderWay.ShouldBeTrue();
+        var calls = _relay.Calls.Count;
+
+        await desktop.Worker.RunApprovalTurnAsync(CancellationToken.None);
+        await study.Worker.RunApprovalTurnAsync(CancellationToken.None);
+
+        (await desktop.Next(NoticeKind.ApprovePrompt)).ShouldNotBeNull();
+        (await study.Next(NoticeKind.ConfirmJoin)).ShouldNotBeNull();
+        _relay.Calls.Skip(calls).ShouldAllBe(call => call.Contains("/requests", StringComparison.Ordinal));   // the approval alone, nothing else
+        _clock.Advance(HouseholdWorker.ApprovalWindow);
+        desktop.Worker.ApprovalUnderWay.ShouldBeFalse();
+        study.Worker.ApprovalUnderWay.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task The_worker_looks_at_an_approval_under_way_every_ten_seconds_rather_than_at_its_next_turn()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop, runLoop: true);
+        var laptop = await Start("Laptop-2");
+        await WorkerPc.Pair(desktop, laptop);
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        _clock.Advance(TimeSpan.FromSeconds(30));                                  // its first turns
+        await WaitFor.True(() => desktop.Worker.Store.Pending.Count == 0);
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await study.Send<HouseholdReply>(SignIn(study));
+        _clock.Advance(HouseholdWorker.Every);                                     // its next turn: it commits
+        await WaitFor.True(() => desktop.Worker.Store.Approving is not null);
+        await study.Worker.RunOnceAsync(CancellationToken.None);                    // the study PC answers with its nonce
+
+        for (var step = 0; step < 6 && desktop.Worker.Prompts.Open == 0; step++)
+        {
+            _clock.Advance(HouseholdWorker.ApprovalPace);
+            for (var wait = 0; wait < 30 && desktop.Worker.Prompts.Open == 0; wait++) await Task.Delay(10);   // its light turn, if one is due
+        }
+
+        desktop.Worker.Prompts.Open.ShouldBe(1);                                    // within a minute, not at a turn 15 minutes on
+        (await desktop.Next(NoticeKind.ApprovePrompt)).ShouldNotBeNull();
+    }
+
     [Fact]
     public async Task A_pc_approved_that_never_confirms_takes_itself_out_when_its_approval_lapses_and_may_ask_again()
     {
