@@ -61,6 +61,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         Tariff = new TariffForm(link, threads, clock, zone, culture, regionCurrency);
         Service = new ServiceForm(link, threads, culture, savesItself: true);
         Privacy = new PrivacyViewModel(link, threads, zone, culture, openSent ?? (() => { }), openBrowser ?? (_ => { }), copyToClipboard ?? (_ => { }));
+        Household = new HouseholdSettingsViewModel(link, threads);
         Tariff.Saved += ReadTariffs;
         Service.Saved += OnSaved;
         SaveCo2 = new RelayCommand(ApplyCo2);
@@ -83,6 +84,9 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public ServiceForm Service { get; }
 
     public PrivacyViewModel Privacy { get; }
+
+    /// <summary>Settings → Household (households design §2).</summary>
+    public HouseholdSettingsViewModel Household { get; }
 
     /// <summary>What the service detected, in one line.</summary>
     public string Detected { get => _detected; private set => SetProperty(ref _detected, value); }
@@ -270,6 +274,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     private void ShowStatus(ServiceStatus? status)
     {
         Privacy.Apply(status?.Sharing);
+        Household.Apply(status?.Household);
         if (status is null)
         {
             ServiceState = "The service isn't running.";

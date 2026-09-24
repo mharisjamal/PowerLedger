@@ -15,6 +15,7 @@ using System.Windows.Threading;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
+using PowerLedger.Storage;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -41,6 +42,7 @@ public class RenderingTests
         (Page.Breakdown, "breakdown", shell => shell.Breakdown.Range.Choice = RangeChoice.SevenDays, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Breakdown, "custom", shell => shell.Breakdown.Range.Choice = RangeChoice.Custom, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Report, "report", _ => { }, shell => new ReportView { DataContext = shell.Report }),
+        (Page.Household, "household", _ => { }, shell => new HouseholdView { DataContext = shell.Household }),
         (Page.Settings, "settings", SavedSettings, shell => new SettingsView { DataContext = shell.Settings }),
         (Page.Now, "wizard", shell => shell.BeginSetup(), shell => new WizardView { DataContext = shell.Wizard }),
         (Page.Now, "wizard-machine", MachineStep, shell => new WizardView { DataContext = shell.Wizard }),
@@ -58,6 +60,7 @@ public class RenderingTests
         ("now", Page.Now, _ => { }, 560, true),
         ("breakdown", Page.Breakdown, shell => shell.Breakdown.Range.Choice = RangeChoice.SevenDays, 560, true),
         ("report", Page.Report, _ => { }, 560, true),
+        ("household", Page.Household, _ => { }, 560, true),
         ("settings", Page.Settings, _ => { }, 560, true),
         ("wizard", Page.Now, MachineStep, 560, false),
         ("wizard-laptop", Page.Now, LaptopStep, 560, false),
@@ -491,7 +494,7 @@ public class RenderingTests
                     co2KgPerKwh: 0.38, startService: () => { });
                 now.Start();
                 nowLink.Connect(true);
-                var shell = new ShellViewModel(now, BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.1.0");
+                var shell = new ShellViewModel(now, BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.1.0");
                 shell.Page = Page.Now;
                 var nowWindow = new MainWindow
                 {
@@ -576,7 +579,7 @@ public class RenderingTests
                 UseTheme(theme);
                 foreach (var (name, updates) in new[] { ("ready", ReadyUpdate()), ("available", AvailableUpdate()), ("updated", UpdatedApp()) })
                 {
-                    var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.2.0", updates);
+                    var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.2.0", updates);
                     var window = new MainWindow
                     {
                         DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
@@ -831,6 +834,54 @@ public class RenderingTests
         });
     }
 
+    /// <summary>The Join prompt (households design §2, §3): the service's own wording, which already carries the leave
+    /// warning for a PC already in one, the comparison code, and its buttons fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void The_join_prompt_shows_the_household_name_the_code_and_the_leave_warning()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink
+                {
+                    Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "This-PC", ChassisKind.Desktop, true, [], null) },
+                };
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.JoinPrompt, "p1", "Join Desktop-7's household? Joining leaves the household this PC is in now.", "Desktop-7", "482 913",
+                    Now.AddMinutes(2));
+                var model = new JoinPromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new JoinPromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Join Desktop-7's household? Joining leaves the household this PC is in now.").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Its code is 482 913. Check it matches the code on Desktop-7.").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Don't join", "Join" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 420, (int)window.ActualHeight, $"join-prompt-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();
@@ -948,7 +999,7 @@ public class RenderingTests
     }
 
     private static ShellViewModel Shell(FakeSaver saver)
-        => new(NowScreen(), BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.1.0");
+        => new(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.1.0");
 
     private static void Save(Visual visual, int width, int height, string name)
     {
@@ -1000,8 +1051,33 @@ public class RenderingTests
     private static ReportViewModel ReportScreen(FakeSaver saver)
     {
         var history = new FakeRangeHistory { Answer = Month };
-        return new ReportViewModel(history, new FakeSleep(), saver, _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
+        return new ReportViewModel(history, new FakeHouseholdHistory(), new FakeSleep(), saver, _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, 0.38);
+    }
+
+    /// <summary>A household of two PCs: this desktop, well ahead this month, and a laptop last seen three days ago.</summary>
+    private static HouseholdViewModel HouseholdScreen()
+    {
+        var link = new FakeLink
+        {
+            Status = Statuses.Running() with
+            {
+                Household = new HouseholdStatus("hh1", "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null),
+            },
+        };
+        link.Connect(true);
+        var history = new FakeHouseholdHistory
+        {
+            Answer = _ => new HouseholdSnapshot(
+                new HouseholdRangeTotals(1.62, [new CurrencyCost("USD", 0.28m)], []),
+                new HouseholdRangeTotals(11.4, [new CurrencyCost("USD", 1.94m)], []),
+                new HouseholdRangeTotals(46.8, [new CurrencyCost("USD", 7.96m)], [new DeviceEnergy("aaaa", 34.2), new DeviceEnergy("bbbb", 12.6)]),
+                [
+                    new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-40), null, Now.AddMinutes(-2)),
+                    new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-20), null, Now.AddDays(-3)),
+                ]),
+        };
+        return new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
     }
 
     /// <summary>Settings against a running service, with a tariff, this laptop's detection, two external monitors — one in

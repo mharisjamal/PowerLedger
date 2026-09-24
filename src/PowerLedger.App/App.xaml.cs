@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -21,6 +22,7 @@ public partial class App : Application
     private NowViewModel? _now;
     private BreakdownViewModel? _breakdown;
     private ReportViewModel? _report;
+    private HouseholdViewModel? _household;
     private AppPreferences? _preferences;
     private SettingsViewModel? _settings;
     private WizardViewModel? _wizard;
@@ -68,16 +70,22 @@ public partial class App : Application
         _crashForwarder = new CrashForwarder(_link, threads, CrashFolder, TimeProvider.System);
         _crashForwarder.Start();
         var history = new HistoryReader(_database);
+        var householdHistory = new HouseholdHistory(_database);
         var sleep = new SleepSettings();
         byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, culture);
 
         _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
         _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture);
-        _report = new ReportViewModel(history, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
+        _report = new ReportViewModel(history, householdHistory, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _preferences.ApplyFirstRunDefaults();
         _preferences.EnsureFirstRunAt();   // data-sharing design §3: backfills an install from before this field existed
+        var signIn = new SignIn(() => new HttpLoopbackServer(), OpenPage, new HttpClient());
+        var account = new SignInViewModel(_link, _preferences, signIn, threads, SignInClients.Microsoft, SignInClients.Google);
+        _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account);
+        _household.AddPcRequested += OpenAddPcWindow;
+        account.RecoveryCodeReceived += OpenRecoveryCodeWindow;   // already raised on the UI thread, via UiThreads.Post
         var http = UpdateHttp.Create(version);
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
@@ -97,7 +105,7 @@ public partial class App : Application
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
-        _shell = new ShellViewModel(_now, _breakdown, _report, _settings, _wizard, version, _updates);
+        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates);
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
         _settings.PropertyChanged += OnSettingsChanged;
@@ -105,6 +113,7 @@ public partial class App : Application
         _settings.Service.Saved += CountMachineChanged;
         _report.PropertyChanged += OnReportChanged;
         _tray = new TrayIcon(ShowWindow, ExitUi, autostart);
+        _link.HouseholdNoticeReceived += OnHouseholdNotice;
         _monthly = new MonthlyReports(
             history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,
             written => Dispatcher.InvokeAsync(() =>
@@ -152,6 +161,7 @@ public partial class App : Application
             Page.Now => "now",
             Page.Breakdown => "breakdown",
             Page.Report => "report",
+            Page.Household => "household",
             _ => "settings",
         });
     }
@@ -232,6 +242,55 @@ public partial class App : Application
         new PayloadWindow(path) { Owner = _window }.Show();
     }
 
+    /// <summary>Add a PC from the Household page (households design §2), modeless and owned by the main window.</summary>
+    private void OpenAddPcWindow()
+    {
+        if (_window is null || _link is null || _threads is null) return;
+        new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window }.Show();
+    }
+
+    /// <summary>A pushed household notice (households design §9): a Join or Approve prompt opens a modal on top of
+    /// whatever is showing; anything else shows as a tray notification. Raised off the UI thread.</summary>
+    private void OnHouseholdNotice(HouseholdNotice notice)
+    {
+        switch (notice.Kind)
+        {
+            case NoticeKind.JoinPrompt:
+                Dispatcher.InvokeAsync(() => OpenJoinPromptWindow(notice));
+                break;
+            case NoticeKind.ApprovePrompt:
+                Dispatcher.InvokeAsync(() => OpenApprovePromptWindow(notice));
+                break;
+            case NoticeKind.Info:
+                Dispatcher.InvokeAsync(() => _tray?.Notify("PowerLedger", notice.Text, null));
+                break;
+        }
+    }
+
+    /// <summary>The Join prompt (households design §2, §3): modal, owned by the main window when it is open.</summary>
+    private void OpenJoinPromptWindow(HouseholdNotice notice)
+    {
+        if (_link is null || _threads is null) return;
+        var model = new JoinPromptViewModel(_link, _threads, TimeProvider.System, notice);
+        new JoinPromptWindow(model) { Owner = _window }.ShowDialog();
+    }
+
+    /// <summary>The Approve prompt (households design §7): modal, owned by the main window when it is open.</summary>
+    private void OpenApprovePromptWindow(HouseholdNotice notice)
+    {
+        if (_link is null || _threads is null) return;
+        var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice);
+        new ApprovePromptWindow(model) { Owner = _window }.ShowDialog();
+    }
+
+    /// <summary>A first sign-in that linked a household made a recovery code (households design §7): shown once, modal
+    /// and owned by the main window.</summary>
+    private void OpenRecoveryCodeWindow(string code)
+    {
+        var model = new RecoveryCodeViewModel(code, new FileSaver(), CopyToClipboard);
+        new RecoveryCodeWindow(model) { Owner = _window }.ShowDialog();
+    }
+
     /// <summary>"What's been sent…" in Settings → Privacy (data-sharing design §2).</summary>
     private void OpenSentWindow()
     {
@@ -293,6 +352,7 @@ public partial class App : Application
             }
             _breakdown?.Dispose();
             _report?.Dispose();
+            _household?.Dispose();
             _settings?.Dispose();
             _wizard?.Dispose();
             if (_link is not null) await _link.DisposeAsync();

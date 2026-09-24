@@ -8,6 +8,7 @@ internal enum Page
     Now,
     Breakdown,
     Report,
+    Household,
     Settings,
 }
 
@@ -18,12 +19,13 @@ internal sealed class ShellViewModel : ObservableObject
     private bool _isSetup;
 
     public ShellViewModel(
-        NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, SettingsViewModel settings, WizardViewModel wizard, string version,
-        Updater? updates = null)
+        NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, HouseholdViewModel household, SettingsViewModel settings,
+        WizardViewModel wizard, string version, Updater? updates = null)
     {
         Now = now;
         Breakdown = breakdown;
         Report = report;
+        Household = household;
         Settings = settings;
         Wizard = wizard;
         Version = version;
@@ -37,6 +39,8 @@ internal sealed class ShellViewModel : ObservableObject
     public BreakdownViewModel Breakdown { get; }
 
     public ReportViewModel Report { get; }
+
+    public HouseholdViewModel Household { get; }
 
     public SettingsViewModel Settings { get; }
 
@@ -76,6 +80,7 @@ internal sealed class ShellViewModel : ObservableObject
         Page.Now => Now,
         Page.Breakdown => Breakdown,
         Page.Report => Report,
+        Page.Household => Household,
         _ => Settings,
     };
 
@@ -102,6 +107,8 @@ internal sealed class ShellViewModel : ObservableObject
         else Breakdown.Hide();
         if (shown == Page.Report) Report.Show();
         else Report.Hide();
+        if (shown == Page.Household) Household.Show();
+        else Household.Hide();
         if (shown == Page.Settings) Settings.Show();
         else Settings.Hide();
     }

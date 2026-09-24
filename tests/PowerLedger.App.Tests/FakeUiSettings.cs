@@ -74,6 +74,13 @@ internal sealed class FakeUiSettings : IUiSettings
         return null;
     }
 
+    public string? SetSignedInEmail(string? email)
+    {
+        Current = Current with { SignedInEmail = email };
+        Changes.Add($"signed in email {email}");
+        return null;
+    }
+
     /// <summary>Tests can set this to control what a first run is stamped with; UtcNow otherwise.</summary>
     public Func<DateTimeOffset> Now { get; set; } = () => DateTimeOffset.UtcNow;
 }

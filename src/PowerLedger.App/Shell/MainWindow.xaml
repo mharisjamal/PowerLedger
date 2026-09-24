@@ -18,6 +18,9 @@
         <DataTemplate DataType="{x:Type local:ReportViewModel}">
             <local:ReportView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type local:HouseholdViewModel}">
+            <local:HouseholdView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type local:SettingsViewModel}">
             <local:SettingsView />
         </DataTemplate>
@@ -112,6 +115,8 @@
                                          IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Breakdown}}" />
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Report"
                                          IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Report}}" />
+                            <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Household"
+                                         IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Household}}" />
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Settings"
                                          IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Settings}}" />
                         </StackPanel>

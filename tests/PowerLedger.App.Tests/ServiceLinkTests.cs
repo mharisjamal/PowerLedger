@@ -46,6 +46,50 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Browsing_and_household_requests_reach_the_service_and_come_back()
+    {
+        _service.FoundPcs = [new FoundPc("inst-1", "Laptop-2", InThisHousehold: false)];
+        _service.HouseholdCode = "K7QM-2XHD-9PW4-R8TA";
+
+        (await _link.BrowsePcsAsync()).ShouldBe(_service.FoundPcs);
+
+        var added = await _link.AddPcAsync("inst-1");
+        added.ShouldBe(new HouseholdOutcome(true, "Done."));
+        _service.Requests.OfType<AddPcRequest>().Single().InstanceId.ShouldBe("inst-1");
+
+        var code = await _link.StartCodePairingAsync();
+        code.ShouldBe(new HouseholdOutcome(true, "Here's your code.", "K7QM-2XHD-9PW4-R8TA"));
+
+        var joined = await _link.JoinByCodeAsync("K7QM-2XHD-9PW4-R8TA");
+        joined.ShouldBe(new HouseholdOutcome(true, "Done."));
+        _service.Requests.OfType<JoinByCodeRequest>().Single().Code.ShouldBe("K7QM-2XHD-9PW4-R8TA");
+    }
+
+    [Fact]
+    public async Task A_household_refusal_comes_back_in_the_services_words()
+    {
+        _service.Refuse = "This household already has 16 PCs.";
+        (await _link.AddPcAsync("inst-1")).ShouldBe(new HouseholdOutcome(false, "This household already has 16 PCs."));
+    }
+
+    [Fact]
+    public async Task A_pushed_household_notice_reaches_the_app_without_closing_the_connection()
+    {
+        var notices = new ConcurrentQueue<HouseholdNotice>();
+        _link.HouseholdNoticeReceived += notices.Enqueue;
+
+        var notice = new HouseholdNotice(NoticeKind.JoinPrompt, "p1", "Join Desktop-7's household?", "Desktop-7", "482 913", DateTimeOffset.UnixEpoch.AddMinutes(2));
+        await _service.PushAsync(notice);
+
+        await WaitFor.True(() => !notices.IsEmpty);
+        notices.Single().ShouldBe(notice);
+        // The pipe reader kept running rather than treating the notice as an unknown message and closing: a normal
+        // request still gets an answer, and no spurious disconnect was recorded.
+        (await _link.GetStatusAsync()).ShouldNotBeNull();
+        _changes.ToArray().ShouldBe(new[] { true });
+    }
+
+    [Fact]
     public async Task Status_and_settings_come_back_for_the_request_that_asked()
     {
         (await _link.GetStatusAsync()).ShouldNotBeNull().Version.ShouldBe("0.1.0+b688a18");
@@ -143,6 +187,8 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         await using var alone = new PipeServiceLink($"PowerLedger.nobody.{Guid.NewGuid():N}", new FixedIdle(0), _clock, new TrustAnyServer());
         (await alone.ResetCalibrationAsync()).ShouldBe(WriteResult.NotConnected);
         (await alone.SetConsentAsync(Consent.Unanswered)).ShouldBe(SharingOutcome.NotConnected);
+        (await alone.AddPcAsync("inst-1")).ShouldBe(HouseholdOutcome.NotConnected);
+        (await alone.BrowsePcsAsync()).ShouldBeNull();
     }
 
     [Fact]

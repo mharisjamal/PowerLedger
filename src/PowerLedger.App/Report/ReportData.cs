@@ -1,4 +1,5 @@
 using System.Globalization;
+using PowerLedger.Contracts;
 using PowerLedger.Core;
 using PowerLedger.Storage;
 
@@ -13,6 +14,44 @@ internal sealed record QualityMix(double Measured, double Calibrated, double Est
 /// <summary>One day's energy for the daily bars.</summary>
 internal sealed record DayBar(DateOnly Day, double Kwh);
 
+/// <summary>One member PC's own simple report (Plan N task A5), from household_rows: its name and kind, energy, cost by
+/// currency, and the same four bands the main report uses.</summary>
+internal sealed record HouseholdMemberReportData(string Name, string Kind, string Energy, IReadOnlyList<HouseholdCostLine> Costs, IReadOnlyList<PartRow> Parts);
+
+/// <summary>"Include my household" (households design §2): the combined total, and every member's own simple report.</summary>
+internal sealed record HouseholdReportData(string Energy, IReadOnlyList<HouseholdCostLine> Costs, IReadOnlyList<HouseholdMemberReportData> Members)
+{
+    public static HouseholdReportData From(HouseholdRangeTotals totals, IReadOnlyList<DeviceReport> devices, IReadOnlyList<HouseholdMemberRow> members, CultureInfo culture)
+    {
+        var names = members.ToDictionary(m => m.DeviceId, m => (m.Name, m.Kind), StringComparer.Ordinal);
+        return new HouseholdReportData(
+            Format.Kwh(totals.EnergyKwh, culture),
+            [.. totals.Costs.Select(c => new HouseholdCostLine(c.Currency, Money.Format(c.Cost, c.Currency, culture)))],
+            [.. devices.Select(d =>
+            {
+                var (name, kind) = names.TryGetValue(d.DeviceId, out var found) ? found : (d.DeviceId, ChassisKind.Desktop);
+                return new HouseholdMemberReportData(
+                    name, kind == ChassisKind.Laptop ? "Laptop" : "Desktop", Format.Kwh(d.EnergyKwh, culture),
+                    [.. d.Costs.Select(c => new HouseholdCostLine(c.Currency, Money.Format(c.Cost, c.Currency, culture)))],
+                    BandsOf(d.CpuKwh, d.GpuKwh, d.DisplayKwh, d.RestKwh, culture));
+            })]);
+    }
+
+    /// <summary>The same four bands <see cref="Bands.Rows"/> draws, for a member PC whose only figures come from
+    /// household_rows, not a full <see cref="RangeTotals"/>.</summary>
+    private static IReadOnlyList<PartRow> BandsOf(double cpu, double gpu, double display, double rest, CultureInfo culture)
+    {
+        (Part Part, string Name, double Kwh)[] bands = [(Part.Cpu, "CPU package", cpu), (Part.Gpu, "GPU", gpu), (Part.Display, "Display", display), (Part.Rest, "Rest of system", rest)];
+        var clean = bands.Select(b => (b.Part, b.Name, Kwh: double.IsFinite(b.Kwh) ? Math.Max(0, b.Kwh) : 0)).ToList();
+        var total = clean.Sum(b => b.Kwh);
+        return [.. clean.Select(b =>
+        {
+            var share = total > 0 ? b.Kwh / total : 0;
+            return new PartRow(b.Part, b.Name, Format.Kwh(b.Kwh, culture), Format.Percent(share, culture), share);
+        })];
+    }
+}
+
 /// <summary>
 /// Everything a report shows (spec §9 Report), written out. The Report screen, the PDF and the monthly job all read this,
 /// so they always agree.
@@ -24,7 +63,7 @@ internal sealed record ReportData(
     string On, string IdleOn, string IdleOff, string Asleep, string Unmonitored,
     string IdleWaste, string IdleWasteNote, string Advice,
     IReadOnlyList<PartRow> Parts, IReadOnlyList<ReportLine> Equivalents,
-    QualityMix Quality, string QualityText, IReadOnlyList<DayBar> Days)
+    QualityMix Quality, string QualityText, IReadOnlyList<DayBar> Days, HouseholdReportData? Household = null)
 {
     /// <summary>What each quality means, under the quality bar on the Report screen and in the PDF. The external monitors'
     /// watts come from their own figures whatever the quality, but aren't always added to it: a monitor running off a laptop
@@ -41,7 +80,8 @@ internal sealed record ReportData(
 
     /// <summary>The report for a range, priced as history priced it, with CO₂ at <paramref name="co2KgPerKwh"/> and the
     /// suggestion from Windows' <paramref name="sleep"/> timeouts.</summary>
-    public static ReportData From(RangeReport report, SleepTimeouts sleep, double co2KgPerKwh, TimeZoneInfo zone, CultureInfo culture)
+    public static ReportData From(
+        RangeReport report, SleepTimeouts sleep, double co2KgPerKwh, TimeZoneInfo zone, CultureInfo culture, HouseholdReportData? household = null)
     {
         var t = report.Totals;
         var (first, last) = Ranges.Covered(report.Range, zone);
@@ -75,7 +115,8 @@ internal sealed record ReportData(
             t.MeasuredShare + t.CalibratedShare + t.EstimatedShare > 0
                 ? $"{Format.Percent(t.MeasuredShare, culture)} measured · {Format.Percent(t.CalibratedShare, culture)} calibrated · {Format.Percent(t.EstimatedShare, culture)} estimated"
                 : "no readings",
-            Bars(first, Ranges.LocalDay(report.Range.Through.AddTicks(-1), zone), report.Days));
+            Bars(first, Ranges.LocalDay(report.Range.Through.AddTicks(-1), zone), report.Days),
+            household);
     }
 
     /// <summary>The tariff in force at the range's end, and the day it started when that was inside the range, since

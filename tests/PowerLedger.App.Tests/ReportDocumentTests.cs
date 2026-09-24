@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text;
+using PowerLedger.Contracts;
+using PowerLedger.Storage;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -44,5 +46,29 @@ public class ReportDocumentTests
     {
         var range = Ranges.Days(new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 29), Now, TimeZoneInfo.Utc, English);
         ReportDocument.Generate(Data(range, English), "0.1.0", Now, English).Length.ShouldBeGreaterThan(5_000);
+    }
+
+    [Fact]
+    public void Including_the_household_adds_a_page_per_member_and_still_draws()
+    {
+        var range = Ranges.ThisMonth(Now, TimeZoneInfo.Utc, English);
+        var household = HouseholdReportData.From(
+            new HouseholdRangeTotals(46.8, [new CurrencyCost("USD", 7.96m)], []),
+            [
+                new DeviceReport("aaaa", 34.2, 15.4, 3.8, 1.9, 13.1, [new CurrencyCost("USD", 5.81m)]),
+                new DeviceReport("bbbb", 12.6, 5.1, 1.3, 0.8, 5.4, [new CurrencyCost("USD", 2.15m)]),
+            ],
+            [
+                new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-40), null, Now),
+                new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-20), null, Now),
+            ],
+            English);
+        var data = ReportData.From(Reports.Typical(range), SleepTimeouts.Unknown, 0.38, TimeZoneInfo.Utc, English, household);
+        var without = ReportDocument.Generate(Data(range, English), "0.1.0", Now, English);
+
+        var withHousehold = ReportDocument.Generate(data, "0.1.0", Now, English);
+
+        Encoding.ASCII.GetString(withHousehold, 0, 5).ShouldBe("%PDF-");
+        withHousehold.Length.ShouldBeGreaterThan(without.Length);   // two extra member pages
     }
 }

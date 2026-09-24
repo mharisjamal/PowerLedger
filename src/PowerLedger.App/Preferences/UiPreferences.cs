@@ -52,6 +52,10 @@ internal sealed record UiPreferences
     /// <summary>The version that last ran, so the first start of a newer one can say it was updated.</summary>
     public string? LastVersion { get; init; }
 
+    /// <summary>N2's signed-in e-mail, from the ID token, shown on the Household page; never sent anywhere, and never
+    /// the account's authority, which is the session the service holds (households design §7).</summary>
+    public string? SignedInEmail { get; init; }
+
     public static UiPreferences Default { get; } = new();
 
     /// <summary>The same preferences with anything out of range put back to its default.</summary>

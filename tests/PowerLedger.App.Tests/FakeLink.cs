@@ -9,6 +9,8 @@ internal sealed class FakeLink : IServiceLink
 
     public event Action<bool>? ConnectionChanged;
 
+    public event Action<HouseholdNotice>? HouseholdNoticeReceived;
+
     public bool IsConnected { get; private set; }
 
     public ServiceStatus? Status { get; set; } = Statuses.Running();
@@ -20,6 +22,10 @@ internal sealed class FakeLink : IServiceLink
     }
 
     public void Push(ReadingFrame frame) => FrameReceived?.Invoke(frame);
+
+    /// <summary>Pushes a household notice as the service would (households design §9), for a test to see how the App
+    /// reacts to a join or approve prompt, pairing progress, or information.</summary>
+    public void PushNotice(HouseholdNotice notice) => HouseholdNoticeReceived?.Invoke(notice);
 
     public void Connect(bool connected)
     {
@@ -106,6 +112,51 @@ internal sealed class FakeLink : IServiceLink
         if (!IsConnected) return Task.FromResult(SharingOutcome.NotConnected);
         SharingRequests.Add(request);
         return SharingGate?.Task ?? Task.FromResult(SharingAnswer);
+    }
+
+    /// <summary>PCs "found" on the network, answered by <see cref="BrowsePcsAsync"/> while connected.</summary>
+    public IReadOnlyList<FoundPc>? FoundPcs { get; set; } = [];
+
+    /// <summary>Every household request the App asked for, in order: the instance id for Add a PC, the code for Join by
+    /// code, or "startCodePairing" for the rest.</summary>
+    public List<object> HouseholdRequests { get; } = [];
+
+    /// <summary>What every household request comes back as.</summary>
+    public HouseholdOutcome HouseholdAnswer { get; set; } = new(true, "Done.");
+
+    /// <summary>When set, a household request completes only once the test resolves this, to test what happens meanwhile.</summary>
+    public TaskCompletionSource<HouseholdOutcome>? HouseholdGate { get; set; }
+
+    public Task<IReadOnlyList<FoundPc>?> BrowsePcsAsync(CancellationToken cancel = default) => Task.FromResult(IsConnected ? FoundPcs : null);
+
+    public Task<HouseholdOutcome> AddPcAsync(string instanceId, CancellationToken cancel = default) => Household(instanceId);
+
+    public Task<HouseholdOutcome> StartCodePairingAsync(CancellationToken cancel = default) => Household("startCodePairing");
+
+    public Task<HouseholdOutcome> JoinByCodeAsync(string code, CancellationToken cancel = default) => Household(code);
+
+    public Task<HouseholdOutcome> AnswerPromptAsync(string promptId, bool accept, CancellationToken cancel = default) => Household((promptId, accept));
+
+    public Task<HouseholdOutcome> RemovePcAsync(string deviceId, CancellationToken cancel = default) => Household(("remove", deviceId));
+
+    public Task<HouseholdOutcome> LeaveHouseholdAsync(CancellationToken cancel = default) => Household("leave");
+
+    public Task<HouseholdOutcome> RenamePcAsync(string name, CancellationToken cancel = default) => Household(("rename", name));
+
+    public Task<HouseholdOutcome> SetDiscoverableAsync(bool on, CancellationToken cancel = default) => Household(("discoverable", on));
+
+    public Task<HouseholdOutcome> SignInAsync(string provider, string idToken, string nonce, string? recoveryCode, CancellationToken cancel = default)
+        => Household(("signIn", provider, idToken, nonce, recoveryCode));
+
+    public Task<HouseholdOutcome> SignOutAsync(CancellationToken cancel = default) => Household("signOut");
+
+    public Task<HouseholdOutcome> DeleteAccountAsync(CancellationToken cancel = default) => Household("deleteAccount");
+
+    private Task<HouseholdOutcome> Household(object request)
+    {
+        if (!IsConnected) return Task.FromResult(HouseholdOutcome.NotConnected);
+        HouseholdRequests.Add(request);
+        return HouseholdGate?.Task ?? Task.FromResult(HouseholdAnswer);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
