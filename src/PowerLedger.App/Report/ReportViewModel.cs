@@ -18,6 +18,7 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
     public static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(1);
 
     private readonly IRangeHistory _history;
+    private readonly IHouseholdHistory _household;
     private readonly ISleepSettings _sleep;
     private readonly IFileSaver _saver;
     private readonly Func<ReportData, byte[]> _pdf;
@@ -26,6 +27,7 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
     private double _co2KgPerKwh;
+    private bool _includeHousehold;
     private ITimer? _timer;
     private int _reads;
     private DateRange? _range;
@@ -34,10 +36,11 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
     private string? _saved;
 
     public ReportViewModel(
-        IRangeHistory history, ISleepSettings sleep, IFileSaver saver, Func<ReportData, byte[]> pdf,
+        IRangeHistory history, IHouseholdHistory household, ISleepSettings sleep, IFileSaver saver, Func<ReportData, byte[]> pdf,
         UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, double co2KgPerKwh)
     {
         _history = history;
+        _household = household;
         _sleep = sleep;
         _saver = saver;
         _pdf = pdf;
@@ -87,6 +90,18 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>"Include my household" (households design §2): adds the household's total and a page per member PC,
+    /// from household_rows, to the PDF.</summary>
+    public bool IncludeHousehold
+    {
+        get => _includeHousehold;
+        set
+        {
+            if (!SetProperty(ref _includeHousehold, value)) return;
+            if (_range is not null) Refresh();
+        }
+    }
+
     /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
     public void Show()
     {
@@ -105,10 +120,16 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
     {
         var read = ++_reads;
         var range = Range.Resolve(_clock.GetUtcNow(), _zone, _culture);
+        var includeHousehold = _includeHousehold;
         _threads.Background(() =>
         {
             var report = _history.Read(range, _zone);
-            var data = report is null ? null : ReportData.From(report, _sleep.Read(), _co2KgPerKwh, _zone, _culture);
+            var household = includeHousehold ? _household.ReadReport(range) : null;
+            var data = report is null
+                ? null
+                : ReportData.From(
+                    report, _sleep.Read(), _co2KgPerKwh, _zone, _culture,
+                    household is null ? null : HouseholdReportData.From(household.Totals, household.Devices, household.Members, _culture));
             _threads.Post(() =>
             {
                 if (read != _reads) return;

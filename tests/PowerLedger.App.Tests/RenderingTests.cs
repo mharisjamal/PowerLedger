@@ -1050,7 +1050,7 @@ public class RenderingTests
     private static ReportViewModel ReportScreen(FakeSaver saver)
     {
         var history = new FakeRangeHistory { Answer = Month };
-        return new ReportViewModel(history, new FakeSleep(), saver, _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
+        return new ReportViewModel(history, new FakeHouseholdHistory(), new FakeSleep(), saver, _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, 0.38);
     }
 

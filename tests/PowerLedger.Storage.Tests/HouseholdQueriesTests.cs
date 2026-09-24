@@ -97,4 +97,35 @@ public class HouseholdQueriesTests
         totals.ByDevice.ShouldBeEmpty();
         new HouseholdQueries(t.Db).Members().ShouldBeEmpty();
     }
+
+    [Fact]
+    public void Device_reports_sum_each_bands_energy_and_cost_per_pc_for_the_report()
+    {
+        using var t = HouseholdSchema.Create();
+        HouseholdSchema.AddRow(t, "aaaa", Rows.Ms(Fixtures.T0), 1000, 200_000, "USD", Rows.Ms(Fixtures.T0), cpuWh: 400, gpuWh: 100, displayWh: 50, restWh: 450);
+        HouseholdSchema.AddRow(t, "aaaa", Rows.Ms(Fixtures.T0.AddHours(1)), 500, 50_000, "USD", Rows.Ms(Fixtures.T0), cpuWh: 200, gpuWh: 50, displayWh: 25, restWh: 225);
+        HouseholdSchema.AddRow(t, "bbbb", Rows.Ms(Fixtures.T0), 300, 30_000, "EUR", Rows.Ms(Fixtures.T0), cpuWh: 100, gpuWh: 50, displayWh: 30, restWh: 120);
+
+        var reports = new HouseholdQueries(t.Db).DeviceReports(Fixtures.T0, Fixtures.T0.AddHours(2));
+
+        reports.Count.ShouldBe(2);
+        var a = reports.Single(r => r.DeviceId == "aaaa");
+        a.EnergyKwh.ShouldBe(1.5, 1e-9);
+        a.CpuKwh.ShouldBe(0.6, 1e-9);
+        a.GpuKwh.ShouldBe(0.15, 1e-9);
+        a.DisplayKwh.ShouldBe(0.075, 1e-9);
+        a.RestKwh.ShouldBe(0.675, 1e-9);
+        a.Costs.ShouldBe([new CurrencyCost("USD", 0.25m)]);
+
+        var b = reports.Single(r => r.DeviceId == "bbbb");
+        b.EnergyKwh.ShouldBe(0.3, 1e-9);
+        b.Costs.ShouldBe([new CurrencyCost("EUR", 0.03m)]);
+    }
+
+    [Fact]
+    public void Device_reports_over_an_empty_range_is_empty()
+    {
+        using var t = HouseholdSchema.Create();
+        new HouseholdQueries(t.Db).DeviceReports(Fixtures.T0, Fixtures.T0.AddHours(1)).ShouldBeEmpty();
+    }
 }

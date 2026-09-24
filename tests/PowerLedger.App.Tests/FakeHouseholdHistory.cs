@@ -17,4 +17,15 @@ internal sealed class FakeHouseholdHistory : IHouseholdHistory
         Reads.Add(now);
         return Answer(now);
     }
+
+    /// <summary>Every range the report asked for.</summary>
+    public List<DateRange> ReportReads { get; } = [];
+
+    public Func<DateRange, HouseholdReportSnapshot?> ReportAnswer { get; set; } = _ => new HouseholdReportSnapshot(new HouseholdRangeTotals(0, [], []), [], []);
+
+    public HouseholdReportSnapshot? ReadReport(DateRange range)
+    {
+        ReportReads.Add(range);
+        return ReportAnswer(range);
+    }
 }

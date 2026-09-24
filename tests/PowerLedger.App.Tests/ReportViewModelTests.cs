@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.IO;
 using Microsoft.Extensions.Time.Testing;
+using PowerLedger.Contracts;
+using PowerLedger.Storage;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -11,12 +13,13 @@ public sealed class ReportViewModelTests : IDisposable
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly FakeRangeHistory _history = new();
+    private readonly FakeHouseholdHistory _household = new();
     private readonly FakeSaver _saver = new();
     private readonly FakeSleep _sleep = new();
 
     public void Dispose() => _saver.Dispose();
 
-    private ReportViewModel Model() => new(_history, _sleep, _saver, _ => [1, 2, 3], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.38);
+    private ReportViewModel Model() => new(_history, _household, _sleep, _saver, _ => [1, 2, 3], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.38);
 
     [Fact]
     public void It_opens_on_this_month_and_reads_when_shown()
@@ -130,5 +133,65 @@ public sealed class ReportViewModelTests : IDisposable
 
         model.Co2KgPerKwh = 0.2;
         model.Data.Co2.ShouldBe("0.55 kg");
+    }
+
+    [Fact]
+    public void The_household_is_left_out_until_the_tick_is_on()
+    {
+        var model = Model();
+        model.Show();
+
+        model.IncludeHousehold.ShouldBeFalse();
+        model.Data.Household.ShouldBeNull();
+        _household.ReportReads.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Ticking_include_household_reads_it_for_the_shown_range_and_adds_it()
+    {
+        _household.ReportAnswer = _ => new HouseholdReportSnapshot(
+            new HouseholdRangeTotals(12.5, [new CurrencyCost("USD", 2.1m)], []),
+            [new DeviceReport("bbbb", 4.2, 1.6, 0.4, 0.2, 2.0, [new CurrencyCost("USD", 0.7m)])],
+            [new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now, null, Now)]);
+        var model = Model();
+        model.Show();
+
+        model.IncludeHousehold = true;
+
+        _household.ReportReads.Single().Title.ShouldBe("September 2026");
+        model.Data.Household.ShouldNotBeNull();
+        model.Data.Household.Energy.ShouldBe("12.5");
+        model.Data.Household.Costs.ShouldBe([new HouseholdCostLine("USD", Money.Format(2.1m, "USD", English))]);
+        var member = model.Data.Household.Members.Single();
+        member.Name.ShouldBe("Laptop-2");
+        member.Kind.ShouldBe("Laptop");
+        member.Energy.ShouldBe("4.20");
+        member.Parts.Select(p => p.Name).ShouldBe(["CPU package", "GPU", "Display", "Rest of system"]);
+    }
+
+    [Fact]
+    public void Turning_it_back_off_drops_it_and_reads_again()
+    {
+        var model = Model();
+        model.Show();
+        model.IncludeHousehold = true;
+        model.Data.Household.ShouldNotBeNull();
+
+        model.IncludeHousehold = false;
+
+        model.Data.Household.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_household_that_cannot_be_read_is_left_out_without_failing_the_rest_of_the_report()
+    {
+        _household.ReportAnswer = _ => null;
+        var model = Model();
+        model.Show();
+
+        model.IncludeHousehold = true;
+
+        model.Data.Household.ShouldBeNull();
+        model.Message.ShouldBeNull();          // the report itself still has this PC's own data
     }
 }

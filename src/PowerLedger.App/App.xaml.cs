@@ -75,7 +75,7 @@ public partial class App : Application
 
         _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
         _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture);
-        _report = new ReportViewModel(history, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
+        _report = new ReportViewModel(history, householdHistory, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
         _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture);
         _household.AddPcRequested += OpenAddPcWindow;
         var autostart = new StartWithWindows(Environment.ProcessPath!);
