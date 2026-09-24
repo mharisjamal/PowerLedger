@@ -8,11 +8,15 @@ namespace PowerLedger.Service.Households;
 /// <summary>
 /// Asks the user at the screen (households design §3, §7): a prompt goes as a pushed <see cref="HouseholdNotice"/> to the App
 /// in the console session, and waits for its <see cref="AnswerPromptRequest"/>. Nobody there means no at once; no answer
-/// in two minutes means no.
+/// in two minutes means no. A prompt whose token is cancelled, as when its connection has gone or the other side
+/// cancelled, is withdrawn: a <see cref="NoticeKind.Withdraw"/> notice names it, so the App closes it, and the answer is no.
 /// </summary>
 internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : IPromptBroker
 {
     public static readonly TimeSpan Timeout = PairingTimeouts.Prompt;
+
+    /// <summary>What a <see cref="NoticeKind.Withdraw"/> notice says.</summary>
+    internal const string Withdrawn = "That question has closed.";
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _open = new(StringComparer.Ordinal);
 
@@ -27,6 +31,10 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
         if (question.LeavesHousehold) text += " Joining leaves the household this PC is in now.";
         return AskAsync(NoticeKind.JoinPrompt, text, question.FromName, question.ComparisonCode, cancel);
     }
+
+    /// <summary>The adding PC's own check (plan 0.8), answered with Codes match or Cancel.</summary>
+    public Task<bool> ConfirmCodeAsync(string otherName, string code, CancellationToken cancel) =>
+        AskAsync(NoticeKind.ConfirmCode, $"Does {otherName} show {code}?", otherName, code, cancel);
 
     /// <summary>N2: a PC asks to join, signed in as this PC's own account when <paramref name="asYou"/>, else as another linked
     /// to the household. The server knows it only by its keys, so it has no name yet.</summary>
@@ -51,6 +59,11 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
         }
         catch (TimeoutException)
         {
+            return false;
+        }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+        {
+            if (_open.TryRemove(id, out _)) notices.Publish(new HouseholdNotice(NoticeKind.Withdraw, id, Withdrawn, fromName, null, null));
             return false;
         }
         finally

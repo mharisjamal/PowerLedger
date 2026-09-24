@@ -295,7 +295,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             try
             {
                 await using var channel = await LanConnector.ConnectAsync(pc.Address!, pc.Port, ConnectTimeout, _stopping.Token).ConfigureAwait(false);
-                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, ShowCodeAsync, WelcomeForAsync, _timeouts, _stopping.Token)
+                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, _prompts, WelcomeForAsync, _timeouts, _stopping.Token)
                     .ConfigureAwait(false);
             }
             catch (IOException)
@@ -416,14 +416,6 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             if (outcome is PairingOutcome.Refused) _pairingGate.Refused();
             else Info(outcome.Text);
         }
-    }
-
-    private Task ShowCodeAsync(MemberInfo joiner, string code)
-    {
-        _notices.Publish(new HouseholdNotice(
-            NoticeKind.PairingProgress, null, $"On {joiner.Name}, check the code is {code} and press Join.", joiner.Name, code,
-            _clock.GetUtcNow() + HouseholdPrompts.Timeout));
-        return Task.CompletedTask;
     }
 
     /// <summary>The welcome for a PC being added, making the household first when this PC is in none (households design
@@ -752,5 +744,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         public static readonly Refusing Broker = new();
 
         public Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel) => Task.FromResult(false);
+
+        public Task<bool> ConfirmCodeAsync(string otherName, string code, CancellationToken cancel) => Task.FromResult(false);
     }
 }

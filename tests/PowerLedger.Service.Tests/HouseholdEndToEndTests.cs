@@ -48,7 +48,7 @@ public sealed class HouseholdEndToEndTests(WorkerFixture worker) : IClassFixture
 
         (await desktop.Send<HouseholdReply>(new AddPcRequest(2, laptop.Worker.InstanceId))).Ok.ShouldBeTrue();
 
-        var shown = await desktop.Next(NoticeKind.PairingProgress);
+        var shown = await desktop.Next(NoticeKind.ConfirmCode);                 // both users check the one code
         var asked = await laptop.Next(NoticeKind.JoinPrompt);
         asked.ComparisonCode.ShouldNotBeNull().ShouldMatch("^[0-9]{3} [0-9]{3}$");
         asked.ComparisonCode.ShouldBe(shown.ComparisonCode);

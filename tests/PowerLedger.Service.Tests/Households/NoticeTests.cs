@@ -65,6 +65,27 @@ public sealed class NoticeTests
     }
 
     [Fact]
+    public async Task The_adders_check_asks_whether_the_other_pc_shows_the_code_and_a_question_withdrawn_is_closed_on_the_app()
+    {
+        var hub = new NoticeHub(() => 1);
+        var app = hub.Subscribe(1);
+        var prompts = new HouseholdPrompts(hub, new FakeTimeProvider());
+        using var gone = new CancellationTokenSource();
+
+        var asking = prompts.ConfirmCodeAsync("Laptop-2", "482 913", gone.Token);
+        var notice = await app.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        (notice.Kind, notice.Text, notice.FromName, notice.ComparisonCode).ShouldBe(
+            (NoticeKind.ConfirmCode, "Does Laptop-2 show 482 913?", "Laptop-2", "482 913"));
+        await gone.CancelAsync();                                                 // the connection went
+
+        (await asking.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBeFalse();
+        var withdrawn = await app.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        (withdrawn.Kind, withdrawn.PromptId, withdrawn.Text).ShouldBe((NoticeKind.Withdraw, notice.PromptId, "That question has closed."));
+        prompts.Answer(notice.PromptId!, true).ShouldBeFalse();
+        prompts.Open.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task A_prompt_nobody_answers_in_two_minutes_is_dont_join()
     {
         var clock = new FakeTimeProvider();

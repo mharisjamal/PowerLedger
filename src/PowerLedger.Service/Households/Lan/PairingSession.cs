@@ -15,12 +15,17 @@ internal sealed record Welcome(string HouseholdId, int Epoch, byte[] Key, IReadO
 /// <param name="LeavesHousehold">True when this PC is in a household that joining leaves.</param>
 internal sealed record JoinQuestion(string FromName, string? ComparisonCode, bool LeavesHousehold);
 
-/// <summary>Asks the user at the screen (households design §3, §9).</summary>
+/// <summary>Asks the user at the screen (households design §3, §9). Cancelling a question's token withdraws it: its prompt
+/// closes, and the answer is no.</summary>
 internal interface IPromptBroker
 {
-    /// <summary>True when the user pressed Join; false when they pressed Don't join, didn't answer in two minutes, or nobody
-    /// is at the screen to ask.</summary>
+    /// <summary>True when the user pressed Join; false when they pressed Don't join, didn't answer in two minutes, nobody is at
+    /// the screen to ask, or the question was withdrawn.</summary>
     Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel);
+
+    /// <summary>The adding PC's own check (plan 0.8): "Does Laptop-2 show 482 913?". True when its user pressed Codes match;
+    /// false for Cancel, no answer in two minutes, nobody at the screen, or the question withdrawn.</summary>
+    Task<bool> ConfirmCodeAsync(string otherName, string code, CancellationToken cancel);
 }
 
 /// <summary>How a pairing ended, with words the App can show.</summary>
@@ -30,44 +35,49 @@ internal abstract record PairingOutcome(string Text)
     /// the joining PC's signature over its join, which the server wants to add it.</summary>
     public sealed record Joined(MemberInfo Other, string Text, byte[]? Proof = null) : PairingOutcome(Text);
 
-    /// <summary>The user at the joining PC said no, or didn't answer.</summary>
+    /// <summary>A user said no or didn't answer, on either side, or cancelled.</summary>
     public sealed record Refused(string Text) : PairingOutcome(Text);
 
     /// <summary>The connection or the other PC went wrong.</summary>
     public sealed record Failed(string Text) : PairingOutcome(Text);
 }
 
-/// <summary>How long each step may take: a reply in the exchange, and the joining PC's answer, which waits on its user.</summary>
+/// <summary>How long each step may take: a reply in the exchange, and an answer that waits on a user.</summary>
 internal sealed record PairingTimeouts(TimeSpan Step, TimeSpan Answer)
 {
-    /// <summary>How long the user at the joining PC has to answer (households design §3).</summary>
+    /// <summary>How long a user has to answer a prompt (households design §3).</summary>
     public static readonly TimeSpan Prompt = TimeSpan.FromMinutes(2);
 
     public static PairingTimeouts Default { get; } = new(TimeSpan.FromSeconds(30), Prompt + TimeSpan.FromSeconds(30));
 }
 
 /// <summary>
-/// Pairing on the same network (households design §3, plan 0.6), over one connection. Each side sends a hello with a fresh
-/// ephemeral key and its own keys; both agree a shared secret, from which, with the two hellos as they went over the wire
-/// (plan 0.8), come the keys for the rest of the exchange and the six-digit comparison code both screens show. A PC in the
-/// middle that changes anything in either hello can't make the two codes match, except by a one-in-a-million chance, so
-/// the user who compares them and presses Join vouches for the keys. Then the joining PC
-/// answers, the adding one sends the welcome, and the joining one says it joined.
+/// Pairing on the same network (households design §3, plan 0.6 and 0.8), over one connection. Each side sends a hello with a
+/// fresh ephemeral key and its own keys; both agree a shared secret, from which, with the two hellos as they went over the
+/// wire, come the keys for the rest of the exchange and the six-digit comparison code both screens show. A PC in the
+/// middle that changes anything in either hello can't make the two codes match, except by a one-in-a-million chance. Both
+/// users check the code: the joining PC's presses Join, and the adding PC's presses Codes match on "Does Laptop-2 show
+/// 482 913?". The household's key goes in the welcome only once both have, whichever answers first; a no or a cancel on
+/// either side sends <c>{"type":"cancel"}</c> or a no, and the other side's question closes, as it does when the
+/// connection goes.
 /// </summary>
 internal static class PairingSession
 {
     /// <summary>The adding side, which connected.</summary>
     /// <param name="expectedInstance">The instance name the PC chosen was announced under; a hello under another is refused.</param>
-    /// <param name="showCode">Shows the comparison code on this PC, beside the other's name.</param>
-    /// <param name="welcomeFor">Makes the welcome for the joining PC once its user said yes, making the household if there is
-    /// none yet.</param>
+    /// <param name="broker">Asks this PC's user whether the other PC shows the same code.</param>
+    /// <param name="welcomeFor">Makes the welcome for the joining PC once both users said yes, making the household if there
+    /// is none yet.</param>
     public static async Task<PairingOutcome> AddAsync(
-        IFrameChannel channel, PairingIdentity me, string? expectedInstance, Func<MemberInfo, string, Task> showCode,
+        IFrameChannel channel, PairingIdentity me, string? expectedInstance, IPromptBroker broker,
         Func<MemberInfo, Task<Welcome>> welcomeFor, PairingTimeouts timeouts, CancellationToken cancel)
     {
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
         var talk = new LanConversation(channel, timeouts.Step);
+        using var question = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        Task<bool>? confirming = null;
+        Task<LanMessage>? pending = null;
         string name = "The other PC";
         try
         {
@@ -87,14 +97,40 @@ internal static class PairingSession
             var transcript = HouseholdCrypto.Transcript(myHello, theirHello);
             using var cipher = FrameCipher.For(adder: true, shared, transcript);
             talk.Secure(cipher);
-            await showCode(hello.From, HouseholdCrypto.ComparisonCode(shared, transcript)).ConfigureAwait(false);
 
-            var answer = await talk.ReceiveAsync("answer", cancel, timeouts.Answer).ConfigureAwait(false);
-            if (answer.Accept != true) return new PairingOutcome.Refused($"{name} didn't join.");
+            // Both users answer at once: this PC's to the code, the joining PC's with Join; the key waits for both.
+            confirming = broker.ConfirmCodeAsync(name, HouseholdCrypto.ComparisonCode(shared, transcript), question.Token);
+            pending = talk.ReceiveAsync(null, cancel, timeouts.Answer);
+            if (await Task.WhenAny(confirming, pending).ConfigureAwait(false) == confirming && !await confirming.ConfigureAwait(false))
+            {
+                await CancelAsync(talk, cancel).ConfigureAwait(false);
+                return new PairingOutcome.Refused($"Adding {name} was cancelled.");
+            }
+            var answer = await pending.ConfigureAwait(false);
+            if (answer is not { Type: "answer", Accept: true })
+            {
+                return new PairingOutcome.Refused($"{name} didn't join.");
+            }
+
+            pending = talk.ReceiveAsync(null, cancel, timeouts.Answer);       // a cancel from the other side, or its "joined"
+            if (await Task.WhenAny(confirming, pending).ConfigureAwait(false) == pending)
+            {
+                question.Cancel();
+                return (await pending.ConfigureAwait(false)).Type == "cancel"
+                    ? new PairingOutcome.Refused($"{name} stopped the pairing.")
+                    : new PairingOutcome.Failed($"The connection to {name} went wrong, so nothing was changed.");
+            }
+            if (!await confirming.ConfigureAwait(false))
+            {
+                await CancelAsync(talk, cancel).ConfigureAwait(false);
+                return new PairingOutcome.Refused($"Adding {name} was cancelled.");
+            }
 
             var welcome = await welcomeFor(hello.From).ConfigureAwait(false);
             await talk.SendAsync(WelcomeMessage(welcome), cancel).ConfigureAwait(false);
-            var joined = await talk.ReceiveAsync("joined", cancel).ConfigureAwait(false);
+            var joined = await pending.ConfigureAwait(false);
+            pending = null;
+            if (joined.Type != "joined") throw new LanException(LanProblem.Broken);
             var proof = Wire.Decode(joined.Proof);
             if (!Wire.IsJoinProof(hello.From, welcome.HouseholdId, proof))
             {
@@ -110,6 +146,10 @@ internal static class PairingSession
                 LanProblem.Closed => $"{name} closed the connection.",
                 _ => $"The connection to {name} went wrong, so nothing was changed.",
             });
+        }
+        finally
+        {
+            await CloseAsync(question, confirming, pending).ConfigureAwait(false);
         }
     }
 
@@ -127,6 +167,9 @@ internal static class PairingSession
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
         var talk = new LanConversation(channel, timeouts.Step);
         var name = hello.From.Name;
+        using var question = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        Task<bool>? asking = null;
+        Task<LanMessage>? pending = null;
         try
         {
             var myHello = LanMessages.Write(LanMessages.Hello(Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
@@ -135,13 +178,25 @@ internal static class PairingSession
             var transcript = HouseholdCrypto.Transcript(adderHello, myHello);
             using var cipher = FrameCipher.For(adder: false, shared, transcript);
             talk.Secure(cipher);
-            var code = HouseholdCrypto.ComparisonCode(shared, transcript);
 
-            var accept = await broker.AskToJoinAsync(new JoinQuestion(name, code, inHousehold), cancel).ConfigureAwait(false);
+            // The user's answer, while the connection is watched: a cancel from the adder, or the connection going, closes the question.
+            asking = broker.AskToJoinAsync(new JoinQuestion(name, HouseholdCrypto.ComparisonCode(shared, transcript), inHousehold), question.Token);
+            pending = talk.ReceiveAsync(null, cancel, timeouts.Answer);
+            if (await Task.WhenAny(asking, pending).ConfigureAwait(false) == pending)
+            {
+                question.Cancel();
+                return (await pending.ConfigureAwait(false)).Type == "cancel"
+                    ? new PairingOutcome.Refused($"{name} stopped the pairing, so nothing was changed.")
+                    : new PairingOutcome.Failed($"The connection to {name} went wrong, so nothing was changed.");
+            }
+            var accept = await asking.ConfigureAwait(false);
             await talk.SendAsync(new LanMessage { Type = "answer", Accept = accept }, cancel).ConfigureAwait(false);
             if (!accept) return new PairingOutcome.Refused($"This PC didn't join {name}'s household.");
 
-            if (ReadWelcome(await talk.ReceiveAsync("welcome", cancel).ConfigureAwait(false), hello.From) is not { } welcome)
+            var message = await pending.ConfigureAwait(false);
+            pending = null;
+            if (message.Type == "cancel") return new PairingOutcome.Refused($"{name} stopped the pairing, so nothing was changed.");
+            if (message.Type != "welcome" || ReadWelcome(message, hello.From) is not { } welcome)
             {
                 return new PairingOutcome.Failed($"{name} sent a household that wasn't a good one, so nothing was changed.");
             }
@@ -160,6 +215,39 @@ internal static class PairingSession
         {
             return new PairingOutcome.Failed($"The connection to {name} went wrong.");
         }
+        finally
+        {
+            await CloseAsync(question, asking, pending).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Tells the other side this one stopped, as far as the connection lets it.</summary>
+    private static async Task CancelAsync(LanConversation talk, CancellationToken cancel)
+    {
+        try
+        {
+            await talk.SendAsync(new LanMessage { Type = "cancel" }, cancel).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is IOException or ObjectDisposedException or LanException)
+        {
+        }
+    }
+
+    /// <summary>Withdraws a question still open, and lets go of a read still waiting, whose connection the caller closes.</summary>
+    private static async Task CloseAsync(CancellationTokenSource question, Task<bool>? asking, Task<LanMessage>? pending)
+    {
+        await question.CancelAsync().ConfigureAwait(false);
+        if (asking is not null)
+        {
+            try
+            {
+                await asking.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+        _ = pending?.ContinueWith(read => read.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
     public static LanMessage WelcomeMessage(Welcome welcome) => new()

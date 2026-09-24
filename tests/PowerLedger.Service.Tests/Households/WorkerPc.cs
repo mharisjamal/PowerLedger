@@ -11,7 +11,7 @@ using Shouldly;
 namespace PowerLedger.Service.Tests;
 
 /// <summary>One PC's household worker on loopback, with the App at its screen reading the notices when there is one. With
-/// <c>autoAnswer</c>, the App presses Join or Approve on every prompt as it comes.</summary>
+/// <c>autoAnswer</c>, the App presses Join, Approve or Codes match on every prompt as it comes.</summary>
 internal sealed class WorkerPc : IAsyncDisposable
 {
     private readonly TestDatabase _database = new();
@@ -54,13 +54,16 @@ internal sealed class WorkerPc : IAsyncDisposable
         _answering = AnswerAsync(screen, seen.Writer, _stop.Token);
     }
 
-    /// <summary>Pairs two PCs on the network, the second's user pressing Join.</summary>
+    /// <summary>Pairs two PCs on the network, the second's user pressing Join and the first's Codes match.</summary>
     public static async Task Pair(WorkerPc adder, WorkerPc joiner)
     {
         await adder.Send<FoundPcsReply>(new BrowsePcsRequest(90));
         (await adder.Send<HouseholdReply>(new AddPcRequest(91, joiner.Worker.InstanceId))).Ok.ShouldBeTrue();
         var prompt = await joiner.Next(NoticeKind.JoinPrompt);
         await joiner.Send<HouseholdReply>(new AnswerPromptRequest(92, prompt.PromptId!, true));   // answered already when automatic
+        var confirm = await adder.Next(NoticeKind.ConfirmCode);
+        confirm.ComparisonCode.ShouldBe(prompt.ComparisonCode);
+        await adder.Send<HouseholdReply>(new AnswerPromptRequest(93, confirm.PromptId!, true));
         (await adder.Next(NoticeKind.PairingProgress, text => text.EndsWith("joined your household.", StringComparison.Ordinal))).ShouldNotBeNull();
         await adder.Worker.Running;
         await joiner.Worker.Running;
@@ -107,7 +110,7 @@ internal sealed class WorkerPc : IAsyncDisposable
         {
             await foreach (var notice in screen.ReadAllAsync(stop))
             {
-                if (notice is { Kind: NoticeKind.JoinPrompt or NoticeKind.ApprovePrompt, PromptId: { } prompt })
+                if (notice is { Kind: NoticeKind.JoinPrompt or NoticeKind.ApprovePrompt or NoticeKind.ConfirmCode, PromptId: { } prompt })
                 {
                     await Worker.HandleAsync(new AnswerPromptRequest(0, prompt, true), stop);
                 }

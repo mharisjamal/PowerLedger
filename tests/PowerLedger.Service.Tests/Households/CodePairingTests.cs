@@ -149,5 +149,7 @@ public sealed class CodePairingTests : IDisposable
     private sealed class Broker(Func<JoinQuestion, bool> answer) : IPromptBroker
     {
         public Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel) => Task.FromResult(answer(question));
+
+        public Task<bool> ConfirmCodeAsync(string otherName, string code, CancellationToken cancel) => Task.FromResult(false);
     }
 }

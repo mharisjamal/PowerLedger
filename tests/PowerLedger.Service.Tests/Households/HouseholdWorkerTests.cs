@@ -52,12 +52,14 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         (await desktop.Send<HouseholdReply>(new AddPcRequest(2, laptop.Worker.InstanceId))).ShouldBe(new HouseholdReply(2, true, "Connecting to Laptop-2."));
 
-        var code = await desktop.Next(NoticeKind.PairingProgress);
-        code.Text.ShouldBe($"On Laptop-2, check the code is {code.ComparisonCode} and press Join.");
+        var confirm = await desktop.Next(NoticeKind.ConfirmCode);
+        confirm.Text.ShouldBe($"Does Laptop-2 show {confirm.ComparisonCode}?");
+        confirm.FromName.ShouldBe("Laptop-2");
         var prompt = await laptop.Next(NoticeKind.JoinPrompt);
-        prompt.ComparisonCode.ShouldBe(code.ComparisonCode);
+        prompt.ComparisonCode.ShouldBe(confirm.ComparisonCode);
         prompt.FromName.ShouldBe("Desktop-7");
         (await laptop.Send<HouseholdReply>(new AnswerPromptRequest(3, prompt.PromptId!, true))).Ok.ShouldBeTrue();
+        (await desktop.Send<HouseholdReply>(new AnswerPromptRequest(4, confirm.PromptId!, true))).Ok.ShouldBeTrue();
 
         (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Laptop-2 joined your household.");
         (await laptop.Next(NoticeKind.Info)).Text.ShouldBe("This PC joined Desktop-7's household.");
@@ -87,7 +89,8 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         await desktop.Send<HouseholdReply>(new AddPcRequest(2, laptop.Worker.InstanceId));
 
-        await desktop.Next(NoticeKind.PairingProgress);                          // the code
+        var confirm = await desktop.Next(NoticeKind.ConfirmCode);
+        (await desktop.Next(NoticeKind.Withdraw)).PromptId.ShouldBe(confirm.PromptId);   // the laptop said no: the question closes
         (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Laptop-2 didn't join.");
         (desktop.Worker.Store.HouseholdId, laptop.Worker.Store.HouseholdId).ShouldBe((null, null));
     }
