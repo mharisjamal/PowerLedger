@@ -21,6 +21,14 @@ namespace PowerLedger.Service.Households;
 [JsonSerializable(typeof(BatchPlain))]
 [JsonSerializable(typeof(ServerError))]
 [JsonSerializable(typeof(List<PendingOp>))]
+[JsonSerializable(typeof(SignInBody))]
+[JsonSerializable(typeof(SignInReply))]
+[JsonSerializable(typeof(LinkBody))]
+[JsonSerializable(typeof(RecoveryBody))]
+[JsonSerializable(typeof(RecoveryReply))]
+[JsonSerializable(typeof(RecoverBody))]
+[JsonSerializable(typeof(List<JoinRequestItem>))]
+[JsonSerializable(typeof(ApproveBody))]
 internal sealed partial class HouseholdJson : JsonSerializerContext
 {
     /// <summary>The value, or null when the text is missing or isn't one.</summary>

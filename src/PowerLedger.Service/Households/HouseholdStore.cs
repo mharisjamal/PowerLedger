@@ -35,6 +35,8 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string PendingKey = "household.pending";
     internal const string ProblemKey = "household.problem";
     internal const string WaitingKey = "household.waiting-since";
+    internal const string RecoveryKeyKey = "household.recovery-key";
+    internal const string AskedToJoinKey = "household.asked-to-join";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
@@ -67,6 +69,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         {
             LeaveHousehold();
             Session = null;
+            AskedToJoin = null;
         }
         var made = Core.Households.DeviceKeys.Create();
         var (newSign, newDh) = made.ExportPrivate();
@@ -220,6 +223,25 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     {
         get => settings.Get(ProblemKey);
         set => WriteText(ProblemKey, value);
+    }
+
+    /// <summary>N2: the key made from the recovery code, kept by the PC that made the code or recovered with it, so a new
+    /// household key can be sealed for recovery too; null when this PC has none or it can't be read.</summary>
+    public byte[]? RecoveryKey
+    {
+        get => Unprotect(settings.Get(RecoveryKeyKey));
+        set
+        {
+            if (value is null) settings.Remove(RecoveryKeyKey);
+            else settings.Set(RecoveryKeyKey, Protect(value));
+        }
+    }
+
+    /// <summary>N2: the household this PC, signed in, has asked to join and waits to be approved into; null otherwise.</summary>
+    public string? AskedToJoin
+    {
+        get => settings.Get(AskedToJoinKey);
+        set => WriteText(AskedToJoinKey, value);
     }
 
     /// <summary>N2: the session token the server gave this PC at sign-in; null while signed out.</summary>

@@ -34,7 +34,7 @@ internal interface IHouseholdRequests
 /// tell the App how they go in pushed notices; everything that changes the household goes through one gate, which the
 /// worker's own work gives way to at once, so every request is answered within <see cref="AppWait"/>.
 /// </summary>
-internal sealed class HouseholdWorker : BackgroundService, IHouseholdRequests
+internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdRequests
 {
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(15);
 
@@ -230,7 +230,8 @@ internal sealed class HouseholdWorker : BackgroundService, IHouseholdRequests
                 LeaveHouseholdRequest leave => await LeaveAsync(leave, cancel).ConfigureAwait(false),
                 RenamePcRequest rename => await RenameAsync(rename, cancel).ConfigureAwait(false),
                 SetDiscoverableRequest discoverable => await SetDiscoverableAsync(discoverable, cancel).ConfigureAwait(false),
-                SignInRequest or SignOutRequest or DeleteAccountRequest => Reply(request.Id, false, "Signing in isn't available yet."),
+                SignInRequest signIn => await SignInAsync(signIn, cancel).ConfigureAwait(false),
+                SignOutRequest or DeleteAccountRequest => Reply(request.Id, false, "That isn't available yet."),
                 _ => new ErrorReply(request.Id, "The service does not handle that request."),
             };
         }
@@ -443,31 +444,40 @@ internal sealed class HouseholdWorker : BackgroundService, IHouseholdRequests
     {
         using (await EnterGateAsync(_stopping.Token).ConfigureAwait(false))
         {
-            var now = _clock.GetUtcNow();
-            var nowMs = now.ToUnixTimeMilliseconds();
-            if (_store.HouseholdId != welcome.HouseholdId)
-            {
-                if (_store.HouseholdId is not null) LeaveLocked(now);
-                ClearOthers();
-                _store.EnterHousehold(welcome.HouseholdId, welcome.Epoch, welcome.Key);
-                _store.HistoryPosted = [.. welcome.Members.Select(member => member.Id)];
-            }
-            else
-            {
-                _store.AddKey(welcome.Epoch, welcome.Key);
-            }
-            foreach (var member in welcome.Members.Where(member => member.Id != _keys.DeviceId))
-            {
-                _household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
-            }
-            SaveSelf(now);
-            _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
-            _rowsBuiltForHour = HourOf(now);
-            Announce();
-            Publish();
+            EnterLocked(welcome.HouseholdId, welcome.Epoch, welcome.Key, welcome.Members);
             _log.LogInformation("Joined {Name}'s household", adder.Name);
         }
         Kick();
+    }
+
+    /// <summary>Takes this PC into a household with its key, inside the gate, leaving any other first (see
+    /// <see cref="EnterAsync"/>). The members given are known from then on; each has its year of rows from this PC through
+    /// its new rows, not as history.</summary>
+    private void EnterLocked(string householdId, int epoch, byte[] key, IReadOnlyList<MemberInfo> members)
+    {
+        var now = _clock.GetUtcNow();
+        var nowMs = now.ToUnixTimeMilliseconds();
+        if (_store.HouseholdId != householdId)
+        {
+            if (_store.HouseholdId is not null) LeaveLocked(now);
+            ClearOthers();
+            _store.EnterHousehold(householdId, epoch, key);
+            _store.HistoryPosted = [.. members.Select(member => member.Id)];
+        }
+        else
+        {
+            _store.AddKey(epoch, key);
+        }
+        _store.AskedToJoin = null;
+        foreach (var member in members.Where(member => member.Id != _keys.DeviceId))
+        {
+            _household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
+        }
+        SaveSelf(now);
+        _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
+        _rowsBuiltForHour = HourOf(now);
+        Announce();
+        Publish();
     }
 
     private async Task<PipeMessage> RemoveAsync(RemovePcRequest request, CancellationToken cancel)

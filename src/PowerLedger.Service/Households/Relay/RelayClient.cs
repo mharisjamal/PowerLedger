@@ -97,6 +97,51 @@ internal sealed class RelayClient : IDisposable
     public Task<RelayResult<byte[]>> GetSlotAsync(string meetingId, string slot, CancellationToken cancel) =>
         SendRawAsync(HttpMethod.Get, $"v1/meetings/{meetingId}/{slot}", null, null, null, cancel);
 
+    /// <summary>N2's <c>POST /v1/auth/signin</c>: the ID token and the nonce's salt, with this PC's keys, signed by them.</summary>
+    public Task<RelayResult<SignInReply>> SignInAsync(DeviceKeys keys, string provider, string idToken, string salt, CancellationToken cancel) =>
+        SendAsync(HttpMethod.Post, "v1/auth/signin",
+            Json(new SignInBody(provider, idToken, salt, Wire.Encode(keys.SignPublic), Wire.Encode(keys.DhPublic)), HouseholdJson.Default.SignInBody),
+            keys, HouseholdJson.Default.SignInReply, cancel);
+
+    /// <summary>N2's <c>POST /v1/account/household</c>: links the account to this PC's household.</summary>
+    public Task<RelayResult<Done>> LinkAsync(DeviceKeys keys, string session, string householdId, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, "v1/account/household", Json(new LinkBody(householdId), HouseholdJson.Default.LinkBody), keys, null, cancel,
+            session: session);
+
+    /// <summary>N2's <c>POST /v1/account/requests</c>: asks to join the account's household.</summary>
+    public Task<RelayResult<Done>> AskToJoinAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, "v1/account/requests", [], keys, null, cancel, session: session);
+
+    /// <summary>N2's <c>PUT /v1/account/recovery</c>: the household key sealed under the recovery code, and its verifier.</summary>
+    public Task<RelayResult<Done>> PutRecoveryAsync(DeviceKeys keys, string session, RecoveryBody recovery, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Put, "v1/account/recovery", Json(recovery, HouseholdJson.Default.RecoveryBody), keys, null, cancel, session: session);
+
+    /// <summary>N2's <c>GET /v1/account/recovery</c>.</summary>
+    public Task<RelayResult<RecoveryReply>> GetRecoveryAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
+        SendAsync(HttpMethod.Get, "v1/account/recovery", null, keys, HouseholdJson.Default.RecoveryReply, cancel, session: session);
+
+    /// <summary>N2's <c>POST /v1/account/recover</c>: this PC joins the account's household on a proof it opened the envelope.</summary>
+    public Task<RelayResult<Done>> RecoverAsync(DeviceKeys keys, string session, byte[] proof, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, "v1/account/recover", Json(new RecoverBody(Wire.Encode(proof)), HouseholdJson.Default.RecoverBody), keys,
+            null, cancel, session: session);
+
+    /// <summary>N2's <c>GET /v1/households/{hid}/requests</c>: the PCs signed in as the account waiting to join.</summary>
+    public Task<RelayResult<List<JoinRequestItem>>> RequestsAsync(DeviceKeys keys, string householdId, CancellationToken cancel) =>
+        SendAsync(HttpMethod.Get, $"v1/households/{householdId}/requests", null, keys, HouseholdJson.Default.ListJoinRequestItem, cancel);
+
+    /// <summary>N2's <c>POST /v1/households/{hid}/requests/{device}/approve</c>: the key sealed for the waiting PC.</summary>
+    public Task<RelayResult<Done>> ApproveAsync(DeviceKeys keys, string householdId, string deviceId, int epoch, string envelope, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, $"v1/households/{householdId}/requests/{deviceId}/approve",
+            Json(new ApproveBody(epoch, envelope), HouseholdJson.Default.ApproveBody), keys, null, cancel);
+
+    /// <summary>N2's <c>POST /v1/auth/signout</c>.</summary>
+    public Task<RelayResult<Done>> SignOutAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, "v1/auth/signout", [], keys, null, cancel, session: session);
+
+    /// <summary>N2's <c>DELETE /v1/account</c>.</summary>
+    public Task<RelayResult<Done>> DeleteAccountAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Delete, "v1/account", null, keys, null, cancel, session: session);
+
     /// <summary>A request and its JSON answer. With <paramref name="signer"/>, signed as plan 0.6 says; with
     /// <paramref name="session"/>, N2's session goes with it.</summary>
     public async Task<RelayResult<T>> SendAsync<T>(
@@ -213,6 +258,28 @@ internal sealed record BatchPage(List<BatchItem> Items, long Next, bool More);
 
 /// <summary>A batch's sealed JSON (plan 0.6): the PC it is from, its name and kind with it, and its rows.</summary>
 internal sealed record BatchPlain(int V, WireMember Device, List<WireRow> Rows);
+
+/// <summary>N2: the body of <c>POST /v1/auth/signin</c>; <see cref="Nonce"/> is the salt the App made the ID token's nonce from.</summary>
+internal sealed record SignInBody(string Provider, string IdToken, string Nonce, string Sign, string Dh);
+
+/// <summary>N2: what sign-in answers: this PC's session, the household the account is linked to, and whether it has a
+/// recovery envelope.</summary>
+internal sealed record SignInReply(string Session, string? HouseholdId, bool HasRecovery);
+
+internal sealed record LinkBody(string HouseholdId);
+
+/// <summary>N2: the recovery envelope as put: the household key sealed under the recovery code's key, the verifier the proof
+/// of recovering is checked with, and the key's epoch.</summary>
+internal sealed record RecoveryBody(string Body, string Verifier, int Epoch);
+
+internal sealed record RecoveryReply(string? HouseholdId, int? Epoch, string Body);
+
+internal sealed record RecoverBody(string Proof);
+
+/// <summary>N2: a PC signed in as the account waiting to join.</summary>
+internal sealed record JoinRequestItem(string Device, string Sign, string Dh, long Created);
+
+internal sealed record ApproveBody(int Epoch, string Body);
 
 /// <summary>What the server says when it refuses: <c>{"error": "…"}</c>.</summary>
 internal sealed record ServerError(string? Error);
