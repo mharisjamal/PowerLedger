@@ -1,0 +1,177 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:app="clr-namespace:PowerLedger.App">
+
+    <!-- Page-only styles for Midnight's History, Report, Household and Settings pages (Plan O task M2-6), merged by
+         MidnightWindow after Styles.Midnight.xaml, whose keys these build on. Cards sit on an 8 px rhythm: 24 around the
+         page, 16 between cards, 20 inside them. -->
+
+    <Thickness x:Key="M.Page.Margin">24,8,24,24</Thickness>
+    <Thickness x:Key="M.Card.Gap">0,16,0,0</Thickness>
+    <sys:Double x:Key="M.ShareTrack.Width" xmlns:sys="clr-namespace:System;assembly=System.Runtime">120</sys:Double>
+
+    <!-- A card's title: the eyebrow with room under it. -->
+    <Style x:Key="M.Card.Title" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Eyebrow}">
+        <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+
+    <!-- A wrapped note under a control, and the line that says how a save went. -->
+    <Style x:Key="M.Note" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Muted}">
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
+    <Style x:Key="M.Said" TargetType="TextBlock" BasedOn="{StaticResource M.Note}">
+        <Setter Property="Foreground" Value="{DynamicResource M.Warn}" />
+    </Style>
+
+    <!-- A settings row: the label in a fixed column, the control beside it. -->
+    <Style x:Key="M.Settings.Row" TargetType="StackPanel">
+        <Setter Property="Orientation" Value="Horizontal" />
+        <Setter Property="Margin" Value="0,6" />
+    </Style>
+    <Style x:Key="M.Settings.Label" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Secondary}">
+        <Setter Property="Width" Value="208" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="M.Settings.Aside" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Muted}">
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="10,0,0,0" />
+    </Style>
+
+    <!-- A part's colour dot in a legend or a table row. -->
+    <Style x:Key="M.Legend.Dot" TargetType="Ellipse">
+        <Setter Property="Width" Value="8" />
+        <Setter Property="Height" Value="8" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Fill" Value="{DynamicResource M.PartRest}" />
+    </Style>
+
+    <!-- The report's sheet: cards on the ground, which the PNG export paints around them too. -->
+    <Style x:Key="M.Sheet" TargetType="Grid">
+        <Setter Property="Background" Value="{DynamicResource M.Ground}" />
+    </Style>
+
+    <!-- The drawn instruments in Midnight's colours and numerals. -->
+    <Style x:Key="M.Instrument" TargetType="app:Instrument">
+        <Setter Property="LineBrush" Value="{DynamicResource M.Line}" />
+        <Setter Property="StrongLineBrush" Value="{DynamicResource M.LineStrong}" />
+        <Setter Property="LabelBrush" Value="{DynamicResource M.Ink3}" />
+        <Setter Property="InkBrush" Value="{DynamicResource M.Ink}" />
+        <Setter Property="AccentBrush" Value="{DynamicResource M.Accent}" />
+        <Setter Property="AccentSoftBrush" Value="{DynamicResource M.AccentSoft}" />
+        <Setter Property="CpuBrush" Value="{DynamicResource M.PartCpu}" />
+        <Setter Property="GpuBrush" Value="{DynamicResource M.PartGpu}" />
+        <Setter Property="DisplayBrush" Value="{DynamicResource M.PartDisplay}" />
+        <Setter Property="RestBrush" Value="{DynamicResource M.PartRest}" />
+        <Setter Property="NumberFont" Value="{StaticResource M.Font.Numbers}" />
+    </Style>
+    <Style x:Key="M.Chart" TargetType="app:StackedChart" BasedOn="{StaticResource M.Instrument}" />
+    <Style x:Key="M.DailyBars" TargetType="app:DailyBars" BasedOn="{StaticResource M.Instrument}" />
+    <Style x:Key="M.QualityBar" TargetType="app:QualityBar" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="MeasuredBrush" Value="{DynamicResource M.ChipMeasuredText}" />
+        <Setter Property="CalibratedBrush" Value="{DynamicResource M.ChipCalibratedText}" />
+        <Setter Property="EstimatedBrush" Value="{DynamicResource M.ChipEstimatedText}" />
+    </Style>
+
+    <!-- A ledger line in a card: the key, the value in numerals at the right, a note after it; the hero line set in the
+         display size. No dotted leader: the card's edges frame the line. -->
+    <Style x:Key="M.LedgerRow" TargetType="app:LedgerRow">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="app:LedgerRow">
+                    <Border x:Name="Row" BorderBrush="{DynamicResource M.Line}" BorderThickness="0,0,0,1" Padding="0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" MinWidth="12" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Style="{StaticResource M.Text.Secondary}" Text="{TemplateBinding Key}" VerticalAlignment="Bottom" />
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
+                                <TextBlock x:Name="Value" Style="{StaticResource M.Text.Number}" Text="{TemplateBinding Value}" VerticalAlignment="Bottom" />
+                                <TextBlock x:Name="Note" Style="{StaticResource M.Text.Muted}" Margin="6,0,0,1" Text="{TemplateBinding Note}" VerticalAlignment="Bottom" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHero" Value="True">
+                            <Setter TargetName="Row" Property="Padding" Value="0,4,0,12" />
+                            <Setter TargetName="Value" Property="Style" Value="{StaticResource M.Text.Display}" />
+                            <Setter TargetName="Note" Property="Style" Value="{StaticResource M.Text.Secondary}" />
+                            <Setter TargetName="Note" Property="Margin" Value="8,0,0,6" />
+                        </Trigger>
+                        <Trigger Property="Note" Value="">
+                            <Setter TargetName="Note" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A date for the custom range: WPF's picker in the field's clothes. Its calendar keeps Windows' look. -->
+    <Style x:Key="M.Field.DateButton" TargetType="Button">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Glyphs}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="Transparent" CornerRadius="6" Margin="2">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource M.Raised}" />
+                            <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="M.Field.DateText" TargetType="DatePickerTextBox">
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource M.Ink}" />
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Numbers}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DatePickerTextBox">
+                    <ScrollViewer x:Name="PART_ContentHost" Margin="10,0,4,0" VerticalAlignment="Center" Focusable="False" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="M.Field.Date" TargetType="DatePicker">
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DatePicker">
+                    <!-- The control radius (M.Radius.Control, 8) as a CornerRadius, which a sys:Double can't be. -->
+                    <Border x:Name="Frame" BorderBrush="{DynamicResource M.LineStrong}" BorderThickness="1" CornerRadius="8"
+                            Background="{DynamicResource M.Panel}">
+                        <Grid x:Name="PART_Root">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <DatePickerTextBox x:Name="PART_TextBox" Grid.Column="0" Style="{StaticResource M.Field.DateText}" />
+                            <Button x:Name="PART_Button" Grid.Column="1" Style="{StaticResource M.Field.DateButton}" Content="&#xE787;" ToolTip="Pick a date" />
+                            <Popup x:Name="PART_Popup" AllowsTransparency="True" Placement="Bottom" PlacementTarget="{Binding ElementName=PART_TextBox}" StaysOpen="False" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource M.Focus}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>
