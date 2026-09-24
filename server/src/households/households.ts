@@ -1,8 +1,8 @@
-import { deviceIdOf, DEVICE_ID, importSignKey, isDhKey, type MemberRow, verifySignedByKey } from "./auth";
+import { deviceIdOf, DEVICE_ID, importSignKey, isDhKey, type MemberRow, readSignedHeaders, verifySignedByKey } from "./auth";
 import { readBounded } from "../body";
 import { deleteBodies } from "../store";
 import { base64urlDecode } from "./encoding";
-import { errorResponse, isWholeNumber, ok, parseObject } from "./http";
+import { errorResponse, isWholeNumber, ok, overAddressLimit, parseObject } from "./http";
 
 export const HOUSEHOLD_ID = /^[0-9a-f]{32}$/;
 /** Households design §8. */
@@ -29,8 +29,14 @@ export async function readKeys(posted: Record<string, unknown> | null): Promise<
   return { sign, dh };
 }
 
-/** POST /v1/households: {"id","sign","dh"}, signed by that signing key, whose PC becomes the one member. */
+/** POST /v1/households: {"id","sign","dh"}, signed by that signing key, whose PC becomes the one member. Behind the
+ * address limit, and refused on its headers before the body is read. */
 export async function handleCreateHousehold(request: Request, env: Cloudflare.Env): Promise<Response> {
+  const limited = await overAddressLimit(request, env);
+  if (limited) return limited;
+  const headers = readSignedHeaders(request, Date.now());
+  if (headers instanceof Response) return headers;
+
   const body = await readSmall(request);
   if (body instanceof Response) return body;
 

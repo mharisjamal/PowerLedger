@@ -1,8 +1,8 @@
 import { sha256hex } from "../auth";
-import { type MemberRow, type SessionRow, sessionToken, verifySession } from "./auth";
+import { checkSession, finishSession, type MemberRow, type SessionRow, sessionToken } from "./auth";
 import { base64urlDecode } from "./encoding";
 import { addMemberStatement, HOUSEHOLD_ID, isEnvelopeBody, isEpoch, MAX_MEMBERS, readSmall } from "./households";
-import { errorResponse, ok, parseObject } from "./http";
+import { errorResponse, ok, overAddressLimit, parseObject } from "./http";
 
 /** At most this many PCs wait to join one household at a time. */
 export const MAX_WAITING = 16;
@@ -217,8 +217,8 @@ export async function handleRecover(env: Cloudflare.Env, session: SessionRow, bo
 
 /** POST /v1/auth/signout: ends this PC's session, signed by the PC it was given to. A session already ended is done. */
 export async function handleSignout(request: Request, env: Cloudflare.Env): Promise<Response> {
-  const body = await readSmall(request);
-  if (body instanceof Response) return body;
+  const limited = await overAddressLimit(request, env);
+  if (limited) return limited;
   const token = sessionToken(request);
   if (!token) return errorResponse(401, "This request needs a session.");
 
@@ -226,7 +226,11 @@ export async function handleSignout(request: Request, env: Cloudflare.Env): Prom
   const exists = await env.DB.prepare("SELECT 1 FROM sessions WHERE token_hash = ?").bind(tokenHash).first();
   if (!exists) return ok();
 
-  const session = await verifySession(request, env, body);
+  const check = await checkSession(request, env);
+  if (check instanceof Response) return check;
+  const body = await readSmall(request);
+  if (body instanceof Response) return body;
+  const session = await finishSession(request, env, check, body);
   if (session instanceof Response) return session;
   await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(tokenHash).run();
   return ok();

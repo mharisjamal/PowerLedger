@@ -9,7 +9,7 @@ import {
   handleRecover,
   handleSignout,
 } from "./account";
-import { type MemberRow, type SessionRow, verifySession, verifySigned } from "./auth";
+import { checkMember, checkSession, finishMember, finishSession, type MemberRow, type SessionRow } from "./auth";
 import { handleGetBatches, handlePostBatch, readBatch } from "./batches";
 import {
   handleAddMember,
@@ -20,6 +20,7 @@ import {
   handleRemoveMember,
   readSmall,
 } from "./households";
+import { overAddressLimit } from "./http";
 import { handleGetSlot, handlePutSlot, MEETING_SLOTS } from "./meetings";
 import { handleSignin } from "./signin";
 
@@ -36,27 +37,39 @@ const HID = "([0-9a-f]{32})";
 const DEVICE = "([0-9a-f]{32})";
 const MEETING = `^/v1/meetings/([0-9a-f]{32})/(${MEETING_SLOTS.join("|")})$`;
 
-/** A route signed by a current member of the household in the path: reads the body (16 KB at most unless `read` says
- * otherwise), checks the signature and membership, then acts. */
+/**
+ * A route signed by a current member of the household in the path. Behind the address limit; the headers and the
+ * member row are checked before the body is read (16 KB at most unless `read` says otherwise), then the signature, and
+ * only then does it act.
+ */
 function asMember(
   act: (env: Cloudflare.Env, member: MemberRow, body: Uint8Array, params: Params, request: Request) => Promise<Response>,
   read: (request: Request) => Promise<Uint8Array | Response> = readSmall,
 ): Handler {
   return async (request, env, params) => {
+    const limited = await overAddressLimit(request, env);
+    if (limited) return limited;
+    const check = await checkMember(request, env, params[0]);
+    if (check instanceof Response) return check;
     const body = await read(request);
     if (body instanceof Response) return body;
-    const member = await verifySigned(request, env, body, { household: params[0] });
+    const member = await finishMember(request, env, check, body);
     if (member instanceof Response) return member;
     return act(env, member, body, params, request);
   };
 }
 
-/** An account route (N2): a current session, and the request signed by that session's PC. */
+/** An account route (N2): behind the address limit, a current session checked before the body is read, and the request
+ * signed by that session's PC. */
 function asSession(act: (env: Cloudflare.Env, session: SessionRow, body: Uint8Array) => Promise<Response>): Handler {
   return async (request, env) => {
+    const limited = await overAddressLimit(request, env);
+    if (limited) return limited;
+    const check = await checkSession(request, env);
+    if (check instanceof Response) return check;
     const body = await readSmall(request);
     if (body instanceof Response) return body;
-    const session = await verifySession(request, env, body);
+    const session = await finishSession(request, env, check, body);
     if (session instanceof Response) return session;
     return act(env, session, body);
   };

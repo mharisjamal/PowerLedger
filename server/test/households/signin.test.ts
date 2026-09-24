@@ -4,7 +4,7 @@ import { sha256hex } from "../../src/auth";
 import { base64urlEncode } from "../../src/households/encoding";
 import { type Jwk, JwksCache, JWKS_URLS } from "../../src/households/idtoken";
 import { handleSignin } from "../../src/households/signin";
-import { newDevice, randomAddress, randomHouseholdId, signHeaders, type TestDevice } from "./support";
+import { newDevice, randomAddress, randomHouseholdId, signedRequest, signHeaders, type TestDevice } from "./support";
 
 const MS_CLIENT = "11111111-2222-3333-4444-555555555555";
 const GOOGLE_CLIENT = "test-client.apps.googleusercontent.com";
@@ -252,12 +252,16 @@ describe("POST /v1/auth/signin", () => {
     const noGoogle = { ...testEnv, GOOGLE_CLIENT_ID: "" } as Cloudflare.Env;
     expect((await handleSignin(await signinRequest(pc, "google", token), noGoogle, { jwks: cache })).status).toBe(503);
 
-    const response = await SELF.fetch("https://example.com/v1/auth/signin", {
+    const signed = await SELF.fetch(await signedRequest(pc, "POST", "/v1/auth/signin", "{}"));
+    expect(signed.status).toBe(400);
+
+    // An unsigned one is refused on its headers, before its body is read.
+    const unsigned = await SELF.fetch("https://example.com/v1/auth/signin", {
       method: "POST",
       headers: { "CF-Connecting-IP": randomAddress() },
       body: "{}",
     });
-    expect(response.status).toBe(400);
+    expect(unsigned.status).toBe(401);
   });
 
   it("gives 503 when the provider's keys can't be fetched", async () => {

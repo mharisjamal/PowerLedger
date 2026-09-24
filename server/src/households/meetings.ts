@@ -1,5 +1,5 @@
 import { readBounded } from "../body";
-import { addressOf, errorResponse, ok } from "./http";
+import { errorResponse, ok, overAddressLimit } from "./http";
 
 /** Pairing by code (households design §4, plan 0.6): the two PCs meet at /v1/meetings/{id}/{slot}, where the ID is the
  * first 16 bytes of SHA-256 of the code. Nothing is signed; the slots' contents vouch for themselves with the code's
@@ -7,11 +7,6 @@ import { addressOf, errorResponse, ok } from "./http";
 export const MEETING_SLOTS = ["adder", "joiner", "answer", "welcome"] as const;
 export const MAX_SLOT_BYTES = 8 * 1024;
 export const MEETING_LIFETIME_MS = 10 * 60 * 1000;
-
-async function overAddressLimit(request: Request, env: Cloudflare.Env): Promise<Response | null> {
-  const limited = await env.ADDRESS_LIMIT.limit({ key: addressOf(request) });
-  return limited.success ? null : errorResponse(429, "Too many requests from this address.");
-}
 
 /** PUT /v1/meetings/{id}/{slot}: 8 KB at most, written once, within 10 minutes of the meeting's first PUT. */
 export async function handlePutSlot(
