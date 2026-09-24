@@ -957,7 +957,47 @@ public class RenderingTests
                         var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
                         button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
                     }
+                    // Review round: Approve can't be pressed before the code is even read.
+                    Find<Button>(window, b => Equals(b.Content, "Approve")).ShouldNotBeNull(theme.ToString()).IsEnabled.ShouldBeFalse(theme.ToString());
                     Save(window, 420, (int)window.ActualHeight, $"approve-prompt-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Review round: the App has no name or device ID to tell requests apart by, so a prompt replacing one that
+    /// closed within the last two minutes shows a line above the code that it may have changed, in both themes.</summary>
+    [Fact]
+    public void The_approve_prompt_shows_a_warning_when_the_request_changed()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.ApprovePrompt, "p2", "A PC signed in as you asks to join your household. Approve it?", null, "482 913", Now.AddMinutes(2));
+                var model = new ApprovePromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice, requestChanged: true);
+                var window = new ApprovePromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == ApprovePromptViewModel.RequestChangedWarning).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Visible, theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    Save(window, 420, (int)window.ActualHeight, $"approve-prompt-request-changed-{theme}.png");
                 }
                 finally
                 {

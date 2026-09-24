@@ -15,6 +15,10 @@ namespace PowerLedger.App;
 /// <summary>The tray App (spec §9): one per session, living in the tray, with a window on demand.</summary>
 public partial class App : Application
 {
+    /// <summary>Review round: an Approve prompt replacing one that closed within this long is taken as the same
+    /// request, whose code may have changed since.</summary>
+    private static readonly TimeSpan ApprovePromptRecentlyClosed = TimeSpan.FromMinutes(2);
+
     private SingleInstance? _instance;
     private ThemeManager? _theme;
     private SqliteDatabase? _database;
@@ -35,6 +39,7 @@ public partial class App : Application
     private MainWindow? _window;
     private AddPcWindow? _addPcWindow;
     private ApprovePromptWindow? _approvePromptWindow;
+    private DateTimeOffset? _approvePromptClosedAt;
     private ConfirmJoinWindow? _confirmJoinWindow;
 
     /// <summary>Review finding A4, follow-up: every open Join/Approve/Confirm join/Recovery code prompt, by its
@@ -323,17 +328,22 @@ public partial class App : Application
 
     /// <summary>The Approve prompt (households design §7): modal, owned by the main window when it is open. Plan 0.9:
     /// an unanswered prompt can come back at the service's next turn, under the same or a new PromptId, while the
-    /// request is still waiting — this never shows two windows for it, replacing whichever is already open.</summary>
+    /// request is still waiting — this never shows two windows for it, replacing whichever is already open. Review
+    /// round: the App has no name or device ID to tell requests apart by, so a prompt that replaces one still open, or
+    /// one that closed within the last two minutes, is taken as the same request having changed.</summary>
     private void OpenApprovePromptWindow(HouseholdNotice notice)
     {
         if (_link is null || _threads is null) return;
+        var requestChanged = _approvePromptWindow is not null
+            || (_approvePromptClosedAt is { } closedAt && TimeProvider.System.GetUtcNow() - closedAt <= ApprovePromptRecentlyClosed);
         _approvePromptWindow?.Close();
-        var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice);
+        var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice, requestChanged);
         var window = new ApprovePromptWindow(model) { Owner = _window };
         _approvePromptWindow = window;
         window.Closed += (_, _) =>
         {
             if (_approvePromptWindow == window) _approvePromptWindow = null;
+            _approvePromptClosedAt = TimeProvider.System.GetUtcNow();
         };
         TrackPrompt(notice.PromptId, window);
         window.ShowDialog();

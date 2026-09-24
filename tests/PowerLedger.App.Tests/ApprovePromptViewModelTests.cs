@@ -48,11 +48,54 @@ public class ApprovePromptViewModelTests
         var model = Model(Notice("A PC asks to join your household. Approve it?"));
         var closed = 0;
         model.Closed += () => closed++;
+        _clock.Advance(ApprovePromptViewModel.ApproveDelay);
 
         model.Approve.Execute(null);
 
         _link.HouseholdRequests.Single().ShouldBe(("prompt-2", true));
         closed.ShouldBe(1);
+    }
+
+    /// <summary>Review round: Approve can't be pressed before the code is even read.</summary>
+    [Fact]
+    public void Approve_is_disabled_until_the_delay_passes()
+    {
+        _link.Connect(true);
+        var model = Model(Notice("A PC asks to join your household. Approve it?"));
+
+        model.Approve.CanExecute(null).ShouldBeFalse();
+        model.Approve.Execute(null);   // a click before the delay does nothing
+        _link.HouseholdRequests.ShouldBeEmpty();
+
+        _clock.Advance(ApprovePromptViewModel.ApproveDelay);
+
+        model.Approve.CanExecute(null).ShouldBeTrue();
+        model.Approve.Execute(null);
+        _link.HouseholdRequests.Single().ShouldBe(("prompt-2", true));
+    }
+
+    [Fact]
+    public void Dont_approve_needs_no_delay()
+    {
+        _link.Connect(true);
+        var model = Model(Notice("A PC asks to join your household. Approve it?"));
+
+        model.DontApprove.CanExecute(null).ShouldBeTrue();
+        model.DontApprove.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe(("prompt-2", false));
+    }
+
+    /// <summary>Review round: the App has no name or device ID to tell requests apart by, so App.xaml.cs passes this
+    /// down from timing alone.</summary>
+    [Fact]
+    public void Request_changed_shows_when_app_xaml_cs_says_so()
+    {
+        var changed = new ApprovePromptViewModel(_link, UiThreads.Inline, _clock, Notice("A PC asks to join your household. Approve it?"), requestChanged: true);
+        changed.RequestChanged.ShouldBeTrue();
+
+        var fresh = Model(Notice("A PC asks to join your household. Approve it?"));
+        fresh.RequestChanged.ShouldBeFalse();
     }
 
     [Fact]
@@ -88,6 +131,7 @@ public class ApprovePromptViewModelTests
     {
         _link.Connect(true);
         var model = Model(Notice("A PC asks to join your household. Approve it?"));
+        _clock.Advance(ApprovePromptViewModel.ApproveDelay);
 
         model.Approve.Execute(null);
         model.DontApprove.Execute(null);
