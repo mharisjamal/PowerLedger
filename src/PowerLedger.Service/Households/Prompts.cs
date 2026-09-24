@@ -48,17 +48,18 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
     /// code (plan 0.10), which the PC asking shows at the same time. Shown at once, so the caller knows it is on the screen
     /// before it lets the server learn anything more.</summary>
     /// <param name="answer">The user's answer; null when it wasn't answered, which comes back at a later turn.</param>
+    /// <param name="promptId">The prompt's ID, which its answer is to.</param>
     /// <returns>False when it couldn't be shown, as with nobody at the screen.</returns>
-    public bool TryAskToApprove(bool asYou, string code, CancellationToken cancel, out Task<bool?> answer) => TryAsk(
+    public bool TryAskToApprove(bool asYou, string code, CancellationToken cancel, out Task<bool?> answer, out string promptId) => TryAsk(
         NoticeKind.ApprovePrompt,
         asYou ? "A PC signed in as you asks to join your household. Approve it?" : "A PC asks to join your household. Approve it?",
-        null, code, cancel, out answer, ApprovalTimeout);
+        null, code, cancel, out answer, ApprovalTimeout, out promptId);
 
     /// <summary>N2: a member is about to approve this PC (plan 0.9). Before anything is sealed, its user checks that PC
     /// shows the same code: a server that put in keys of its own would make the two differ.</summary>
     /// <returns>Null when it wasn't answered: it comes back at a later turn.</returns>
     public Task<bool?> ConfirmJoinAsync(string code, CancellationToken cancel) =>
-        TryAsk(NoticeKind.ConfirmJoin, $"Does your other PC show {code}? Approve it there too.", null, code, cancel, out var answer, ApprovalTimeout)
+        TryAsk(NoticeKind.ConfirmJoin, $"Does your other PC show {code}? Approve it there too.", null, code, cancel, out var answer, ApprovalTimeout, out _)
             ? answer
             : Task.FromResult<bool?>(null);
 
@@ -71,14 +72,14 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
 
     /// <summary>The user's answer; null when nobody is at the screen, no answer came in time, or the prompt was withdrawn.</summary>
     private Task<bool?> AskOrNotAsync(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel) =>
-        TryAsk(kind, text, fromName, code, cancel, out var answer) ? answer : Task.FromResult<bool?>(null);
+        TryAsk(kind, text, fromName, code, cancel, out var answer, null, out _) ? answer : Task.FromResult<bool?>(null);
 
     /// <summary>Shows a prompt at once, up for <paramref name="timeout"/>, <see cref="Timeout"/> by default; false when it
     /// couldn't be shown.</summary>
     private bool TryAsk(
-        NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel, out Task<bool?> answer, TimeSpan? timeout = null)
+        NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel, out Task<bool?> answer, TimeSpan? timeout, out string id)
     {
-        var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+        id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         var waiting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var upFor = timeout ?? Timeout;
         _open[id] = waiting;

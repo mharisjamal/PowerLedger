@@ -448,6 +448,69 @@ public sealed class ApprovalTests : IAsyncLifetime
     /// <summary>A household with a member signed in, and a study PC signed in as the same account asking to join, both asked
     /// about the approval: its code on both screens, nothing sealed yet.</summary>
     [Fact]
+    public async Task A_yes_to_one_approval_never_counts_for_another_the_server_starts_for_the_same_pc()
+    {
+        var (desktop, study, household) = await BothAsked();
+        var approve = await desktop.Next(NoticeKind.ApprovePrompt);
+        using var server = DeviceKeys.Create();
+        var first = desktop.Worker.Store.Approving!;
+        desktop.Worker.Store.Approving = new Approving(household, study.Worker.DeviceId, first.Sign, Wire.Encode(server.DhPublic),
+            Wire.Encode(HouseholdCrypto.NewNonce()), first.Started + 1, first.TheirNonce);   // a listing ended the first and began a second, the yes on its way
+        var sent = _relay.Sent.Count;
+
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, approve.PromptId!, true));
+        await desktop.Worker.Running;
+
+        _relay.Sent.Skip(sent).ShouldNotContain(call => call.Call.EndsWith("/reveal", StringComparison.Ordinal) || call.Call.EndsWith("/approve", StringComparison.Ordinal));
+        desktop.Worker.Store.Approving.ShouldNotBeNull().Accepted.ShouldBeFalse();   // the second waits for its own prompt
+        _relay.Members(household).Keys.ShouldNotContain(study.Worker.DeviceId);
+    }
+
+    [Fact]
+    public async Task A_listing_of_requests_larger_than_the_limit_is_passed_over()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await study.Send<HouseholdReply>(SignIn(study));
+        var (sign, dh) = PublicKeys(study);
+        var waiting = $"{{\"device\":\"{study.Worker.DeviceId}\",\"sign\":\"{Wire.Encode(sign)}\",\"dh\":\"{Wire.Encode(dh)}\",\"created\":1}}";
+        var padding = Enumerable.Repeat("{\"device\":\"x\",\"sign\":\"x\",\"dh\":\"x\",\"created\":1}", 8000);   // past 256 KB in all
+        _relay.Intercept = (request, _) => request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.EndsWith("/requests", StringComparison.Ordinal)
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("[" + string.Join(",", padding.Prepend(waiting)) + "]", System.Text.Encoding.UTF8, "application/json"),
+            }
+            : null;
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        _relay.Sent.ShouldNotContain(call => call.Call.EndsWith("/commit", StringComparison.Ordinal));
+        desktop.Worker.Store.Approving.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task An_approval_after_a_removal_seals_the_new_key_the_removal_made_and_never_the_old_one_under_its_epoch()
+    {
+        var (desktop, laptop) = await Household();
+        var (_, study, _) = await BothAsked(desktop);
+        var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
+        var oldKey = desktop.Worker.Store.CurrentKey;
+        await desktop.Send<HouseholdReply>(new RemovePcRequest(8, laptop.Worker.DeviceId));   // its new key waits to go
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(9, confirm.PromptId!, true));
+        await study.Worker.Running;
+
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(10, approve.PromptId!, true));
+        await desktop.Worker.Running;
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+
+        desktop.Worker.Store.Epoch.ShouldBe(2);
+        study.Worker.Store.HouseholdId.ShouldNotBeNull();
+        study.Worker.Store.KeyFor(2).ShouldBe(desktop.Worker.Store.KeyFor(2));
+        study.Worker.Store.KeyFor(2).ShouldNotBe(oldKey);                            // the laptop holds that one
+    }
+
+    [Fact]
     public async Task Both_prompts_stay_up_for_ten_minutes_so_the_two_codes_are_on_screen_together()
     {
         var (desktop, study, _) = await BothAsked();

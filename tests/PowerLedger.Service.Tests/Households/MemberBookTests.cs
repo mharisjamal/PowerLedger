@@ -216,6 +216,24 @@ public sealed class MemberBookTests : IDisposable
         _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 1, removedAt: 1)], _self.DeviceId, Now).Gone.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void A_key_a_list_gave_for_a_pc_that_differs_from_the_one_the_server_lists_counts_for_nothing_until_a_list_gives_the_servers()
+    {
+        using var planted = DeviceKeys.Create();
+        var rogue = new WireMember(_study.DeviceId, "Study PC", "desktop", Wire.Encode(_study.SignPublic), Wire.Encode(planted.DhPublic));
+        _members.Learn([rogue], _other.DeviceId, _self.DeviceId, Now);             // before its add: its own signing key, another's key agreement
+
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 2)], _self.DeviceId, Now);   // then its add, with its own keys
+
+        _members.Current(_study.DeviceId).ShouldBeNull();                           // nothing sealed to the key a list planted
+        _members.MaySync(_study.DeviceId).ShouldBeFalse();
+        _members.MaySeal(_study.DeviceId, 3).ShouldBeFalse();
+        _members.Learn([Wire.Member(Info(_study))], _other.DeviceId, _self.DeviceId, Now);   // a list with the keys the server has
+        _members.Current(_study.DeviceId).ShouldNotBeNull().DhKey.ShouldBe(_study.DhPublic);
+        _members.Learn([rogue], _other.DeviceId, _self.DeviceId, Now);             // and no list takes them away again
+        _household.Member(_study.DeviceId).ShouldNotBeNull().DhKey.ShouldBe(_study.DhPublic);
+    }
+
     public void Dispose()
     {
         foreach (var keys in new[] { _self, _other, _study }) keys.Dispose();

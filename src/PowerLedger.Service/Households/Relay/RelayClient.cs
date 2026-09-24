@@ -168,8 +168,8 @@ internal sealed class RelayClient : IDisposable
             HouseholdJson.Default.RecoverReply, cancel, session: session);
 
     /// <summary>N2's <c>GET /v1/households/{hid}/requests</c>: the PCs signed in as the account waiting to join.</summary>
-    public Task<RelayResult<List<JoinRequestItem>>> RequestsAsync(DeviceKeys keys, string householdId, CancellationToken cancel) =>
-        SendAsync(HttpMethod.Get, $"v1/households/{householdId}/requests", null, keys, HouseholdJson.Default.ListJoinRequestItem, cancel);
+    public Task<RelayResult<List<JoinRequestItem>>> RequestsAsync(DeviceKeys keys, string householdId, CancellationToken cancel, int? maxBytes = null) =>
+        SendAsync(HttpMethod.Get, $"v1/households/{householdId}/requests", null, keys, HouseholdJson.Default.ListJoinRequestItem, cancel, maxBytes: maxBytes);
 
     /// <summary>N2's <c>POST /v1/households/{hid}/requests/{device}/approve</c>: the key and member list sealed for the waiting PC.</summary>
     public Task<RelayResult<Done>> ApproveAsync(DeviceKeys keys, string householdId, string deviceId, int epoch, string envelope, CancellationToken cancel) =>
@@ -190,11 +190,12 @@ internal sealed class RelayClient : IDisposable
 
     /// <summary>A request and its JSON answer. With <paramref name="signer"/>, signed as plan 0.6 says; with
     /// <paramref name="session"/>, N2's session goes with it.</summary>
+    /// <param name="maxBytes">The most of the answer read, <see cref="MaxReplyBytes"/> when null: past it, as no answer.</param>
     public async Task<RelayResult<T>> SendAsync<T>(
         HttpMethod method, string path, byte[]? body, DeviceKeys? signer, JsonTypeInfo<T>? reply, CancellationToken cancel,
-        string contentType = "application/json", string? session = null)
+        string contentType = "application/json", string? session = null, int? maxBytes = null)
     {
-        var raw = await SendRawAsync(method, path, body, signer, session, cancel, contentType).ConfigureAwait(false);
+        var raw = await SendRawAsync(method, path, body, signer, session, cancel, contentType, maxBytes).ConfigureAwait(false);
         if (!raw.Ok) return new RelayResult<T>(raw.Status, default, raw.Error, raw.Epoch);
         if (reply is null) return new RelayResult<T>(raw.Status, default, null);
         try
@@ -211,7 +212,7 @@ internal sealed class RelayClient : IDisposable
 
     public async Task<RelayResult<byte[]>> SendRawAsync(
         HttpMethod method, string path, byte[]? body, DeviceKeys? signer, string? session, CancellationToken cancel,
-        string contentType = "application/json")
+        string contentType = "application/json", int? maxBytes = null)
     {
         using var request = new HttpRequestMessage(method, path);
         if (body is not null)
@@ -225,7 +226,7 @@ internal sealed class RelayClient : IDisposable
         {
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancel).ConfigureAwait(false);
             if (response.Headers.Date is { } date) Skew = _clock.GetUtcNow() - date;
-            var bytes = await ReadAsync(response, cancel).ConfigureAwait(false);
+            var bytes = await ReadAsync(response, maxBytes ?? MaxReplyBytes, cancel).ConfigureAwait(false);
             var status = (int)response.StatusCode;
             if (status is >= 200 and < 300) return new RelayResult<byte[]>(status, bytes, null);
             var said = HouseholdJson.Read(bytes, HouseholdJson.Default.ServerError);
@@ -258,7 +259,7 @@ internal sealed class RelayClient : IDisposable
         request.Headers.Add("X-PL-Signature", Wire.Encode(signature));
     }
 
-    private static async Task<byte[]> ReadAsync(HttpResponseMessage response, CancellationToken cancel)
+    private static async Task<byte[]> ReadAsync(HttpResponseMessage response, int maxBytes, CancellationToken cancel)
     {
         await using var stream = await response.Content.ReadAsStreamAsync(cancel).ConfigureAwait(false);
         using var copy = new MemoryStream();
@@ -266,7 +267,7 @@ internal sealed class RelayClient : IDisposable
         int read;
         while ((read = await stream.ReadAsync(buffer, cancel).ConfigureAwait(false)) > 0)
         {
-            if (copy.Length + read > MaxReplyBytes) throw new IOException("The server's answer was too large.");
+            if (copy.Length + read > maxBytes) throw new IOException("The server's answer was too large.");
             copy.Write(buffer, 0, read);
         }
         return copy.ToArray();

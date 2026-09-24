@@ -37,6 +37,9 @@ internal sealed record MemberInfo(string Id, string Name, ChassisKind Kind, byte
 internal static partial class Wire
 {
     public const int MaxName = 40;
+
+    /// <summary>The longest a public key may be as base64url: a P-256 key is 122 characters.</summary>
+    public const int MaxKeyChars = 160;
     public const int MaxMembers = 16;
     private static readonly string P256 = ECCurve.NamedCurves.nistP256.Oid.Value!;
 

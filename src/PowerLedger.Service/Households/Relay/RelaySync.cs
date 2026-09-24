@@ -334,9 +334,9 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     /// from the list at once.</summary>
     private void Landed(PendingOp op)
     {
-        if (op.Kind == PendingOp.Add && Wire.PublicKey(op.Sign) is { } sign)
+        if (op.Kind == PendingOp.Add && Wire.PublicKey(op.Sign) is { } sign && Wire.PublicKey(op.Dh) is { } dh)
         {
-            _members.ServerAdded(HouseholdCrypto.DeviceIdOf(sign), store.Epoch);
+            _members.ServerAdded(HouseholdCrypto.DeviceIdOf(sign), store.Epoch, dh);
             store.MembersCheckedAt = null;
         }
         else if (op.Kind == PendingOp.Remove && op.Device is { } device)
@@ -425,9 +425,10 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             var staying = new List<HouseholdMember>();
             foreach (var listedMember in serverMembers.Where(member => member.Removed is null && member.Device != keys.DeviceId))
             {
-                if (household.Member(listedMember.Device) is not { } known)
+                if (_members.Introduced(listedMember.Device) is not { } known)
                 {
-                    log.LogInformation("The server lists {Device} as a member, which no introduction has brought here yet; the new key waits", listedMember.Device);
+                    log.LogInformation("The server lists {Device} as a member, which no introduction with its keys has brought here yet; the new key waits",
+                        listedMember.Device);
                     return new RelayResult<Done>(409, null, WaitingForMembers);
                 }
                 staying.Add(known);

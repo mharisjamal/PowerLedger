@@ -198,6 +198,30 @@ public sealed class RelayMembershipTests : IDisposable
         posted.ShouldAllBe(batch => batch.Epoch == 3);
     }
 
+    [Fact]
+    public async Task A_key_planted_for_a_pc_before_its_add_is_never_sealed_to_and_the_one_the_server_lists_takes_its_place()
+    {
+        var (b, m) = (NewPc("Laptop-B"), NewPc("Desktop-M"));
+        InHousehold(b, m);
+        var x = NewPc("Study-X");
+        using var rogue = DeviceKeys.Create();
+        b.Household.SaveMember(x.AsMember() with { DhKey = rogue.DhPublic });      // planted over the network before X's add
+        _relay.Seed(Household, x.Keys);                                            // X's add: the server lists its own keys
+        b.Sync.StartRotation(Household);
+
+        (await b.RunAsync()).Problem.ShouldBeNull();
+        _relay.Epoch(Household).ShouldBe(1);                                       // the new key waits rather than go to the planted one
+        m.Household.SaveMember(x.AsMember());                                      // M knows X's own keys, and its list says so
+        m.Household.Upsert([Row(m.Id, 1, 10, changed: NowMs + 1)]);
+        await m.RunAsync();
+        await b.RunAsync();
+        await b.RunAsync();
+
+        _relay.Epoch(Household).ShouldBe(2);
+        var mine = await x.Client.GetKeyAsync(x.Keys, Household, 2, CancellationToken.None);
+        KeyWrap.Open(x.Keys, b.Keys.DhPublic, mine.Value!.Body, Household, 2).ShouldBe(b.Store.KeyFor(2));
+    }
+
     public void Dispose()
     {
         foreach (var pc in _pcs) pc.Dispose();

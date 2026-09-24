@@ -399,7 +399,8 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         desktop.Worker.Store.Epoch.ShouldBe(2);
         Members(desktop).Current(laptop.Worker.DeviceId).ShouldNotBeNull();
-        Members(desktop).ServerEntryOf(laptop.Worker.DeviceId).ShouldBe(new ServerEntry(2));
+        Members(desktop).ServerEntryOf(laptop.Worker.DeviceId).ShouldNotBeNull().ShouldSatisfyAllConditions(
+            entry => entry.Added.ShouldBe(2), entry => entry.Current.ShouldBeTrue());
         laptop.Worker.Store.Epoch.ShouldBe(2);
         laptop.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);
         _relay.Members(household)[laptop.Worker.DeviceId].ShouldSatisfyAllConditions(

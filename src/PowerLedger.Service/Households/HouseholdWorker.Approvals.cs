@@ -7,11 +7,17 @@ using PowerLedger.Service.Households.Relay;
 namespace PowerLedger.Service.Households;
 
 /// <summary>N2: the approval of a waiting PC this PC runs (plan 0.10): the PC and its keys, pinned as this PC committed, and its
-/// nonce, pinned when first read; this PC's nonce and when it committed; how far it has got; and once its user approved,
-/// the body sealed at an epoch, kept so a retry is the very same request.</summary>
+/// nonce, pinned when first read; this PC's nonce and when it committed; the prompt that asked its user, how far it has got,
+/// and once that prompt was answered yes, the body sealed at an epoch, kept so a retry is the very same request.</summary>
 internal sealed record Approving(
-    string Household, string Device, string Sign, string Dh, string Nonce, long Started, string? TheirNonce = null, bool Prompted = false,
-    bool Revealed = false, bool Accepted = false, int? Epoch = null, string? Body = null);
+    string Household, string Device, string Sign, string Dh, string Nonce, long Started, string? TheirNonce = null, string? PromptId = null,
+    bool Revealed = false, bool Accepted = false, int? Epoch = null, string? Body = null)
+{
+    /// <summary>True for the very approval <paramref name="other"/> is, its prompt the same: an answer counts for it alone.</summary>
+    public bool Is(Approving other) =>
+        Household == other.Household && Device == other.Device && Sign == other.Sign && Dh == other.Dh && Nonce == other.Nonce
+        && Started == other.Started && TheirNonce == other.TheirNonce && PromptId is not null && PromptId == other.PromptId;
+}
 
 /// <summary>N2: this PC's answer to the member that committed to approving it (plan 0.9): that member's device and keys, its
 /// commitment, the nonce this PC sent back, and whether this PC's user has said the two codes match; and when it made the
@@ -98,6 +104,12 @@ internal sealed partial class HouseholdWorker
     /// <summary>1 while this PC's user is asked about the approval it runs, so it isn't asked twice.</summary>
     private int _askingApproval;
 
+    /// <summary>The most requests to join a listing is read for, and the most bytes of it read (plan 0.10): cheap checks first,
+    /// and keys looked at only for as many as a household can have.</summary>
+    internal const int MaxListed = 64;
+
+    internal const int MaxListingBytes = 256 * 1024;
+
     /// <summary>Withdraws the approve prompt that is up, when the approval ends first.</summary>
     private CancellationTokenSource? _approvePrompt;
 
@@ -125,10 +137,12 @@ internal sealed partial class HouseholdWorker
         }
         await LinkAgainIfDueAsync(householdId, cancel).ConfigureAwait(false);
         if (!_notices.AnyoneAtTheScreen) return;
-        var result = await _environment.Relay.RequestsAsync(_keys, householdId, cancel).ConfigureAwait(false);
+        var result = await _environment.Relay.RequestsAsync(_keys, householdId, cancel, MaxListingBytes).ConfigureAwait(false);
         if (!result.Ok) return;
-        var waiting = result.Value!.Where(item => item.Device != _keys.DeviceId && Wire.IsDeviceId(item.Device)
-                && Wire.PublicKey(item.Sign) is { } sign && HouseholdCrypto.DeviceIdOf(sign) == item.Device && Wire.PublicKey(item.Dh) is not null)
+        var waiting = result.Value!.Take(MaxListed)
+            .Where(item => item.Device != _keys.DeviceId && Wire.IsDeviceId(item.Device) && item.Sign is { Length: <= Wire.MaxKeyChars }
+                && item.Dh is { Length: <= Wire.MaxKeyChars })
+            .Where(item => Wire.PublicKey(item.Sign) is { } sign && HouseholdCrypto.DeviceIdOf(sign) == item.Device && Wire.PublicKey(item.Dh) is not null)
             .Take(Wire.MaxMembers)
             .ToList();
         Volatile.Write(ref _waitingApprovals, waiting.Count);
@@ -174,12 +188,13 @@ internal sealed partial class HouseholdWorker
             if (!AskToApprove(householdId, approving, item.Account)) return;  // not shown: nothing more goes to the server
             approving = _store.Approving!;
         }
-        if (approving is { Prompted: true, Revealed: false }) await RevealAsync(householdId, approving, cancel).ConfigureAwait(false);
+        if (approving is { PromptId: not null, Revealed: false }) await RevealAsync(householdId, approving, cancel).ConfigureAwait(false);
     }
 
     /// <summary>Shows the approve prompt with the code worked out from the pins alone (plan 0.10), and waits for the answer in
-    /// the background. Approve seals the key; Don't approve turns the PC away; a prompt closed unanswered comes back at a
-    /// later turn and never counts as a no.</summary>
+    /// the background. The answer is bound to this very approval, its prompt and pins and both nonces: Approve seals the key
+    /// to it, and to no approval started since, even for the same PC; Don't approve turns the PC away; a prompt closed
+    /// unanswered comes back at a later turn and never counts as a no.</summary>
     /// <returns>False when it couldn't be shown.</returns>
     private bool AskToApprove(string householdId, Approving approving, string? account)
     {
@@ -187,33 +202,33 @@ internal sealed partial class HouseholdWorker
         var code = HouseholdCrypto.ApprovalCode(Wire.Decode(approving.Sign)!, Wire.Decode(approving.Dh)!, _keys.SignPublic, _keys.DhPublic,
             Wire.Decode(approving.TheirNonce)!, Wire.Decode(approving.Nonce)!);
         var withdraw = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-        if (!_prompts.TryAskToApprove(account is not null && account == _store.Account, code, withdraw.Token, out var answer))
+        if (!_prompts.TryAskToApprove(account is not null && account == _store.Account, code, withdraw.Token, out var answer, out var promptId))
         {
             withdraw.Dispose();
             Interlocked.Exchange(ref _askingApproval, 0);
             return false;
         }
         Interlocked.Exchange(ref _approvePrompt, withdraw)?.Dispose();
-        _store.Approving = approving with { Prompted = true };
-        Track(ApproveAnsweredAsync(householdId, approving.Device, answer, withdraw));
+        var prompted = approving with { PromptId = promptId };
+        _store.Approving = prompted;
+        Track(ApproveAnsweredAsync(householdId, prompted, answer, withdraw));
         return true;
     }
 
-    private async Task ApproveAnsweredAsync(string householdId, string device, Task<bool?> answer, CancellationTokenSource withdraw)
+    private async Task ApproveAnsweredAsync(string householdId, Approving prompted, Task<bool?> answer, CancellationTokenSource withdraw)
     {
         try
         {
             if (await answer.ConfigureAwait(false) is not { } yes) return;
             using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
             {
-                if (_store.Approving is not { } approving || approving.Household != householdId || approving.Device != device
-                    || _store.HouseholdId != householdId)
+                if (_store.Approving is not { } approving || !approving.Is(prompted) || _store.HouseholdId != householdId)
                 {
-                    return;                                                    // moved on meanwhile
+                    return;                                                    // moved on meanwhile: the answer was to another approval
                 }
                 if (!yes)
                 {
-                    await DenyAsync(householdId, device).ConfigureAwait(false);
+                    await DenyAsync(householdId, approving.Device).ConfigureAwait(false);
                     _store.Approving = null;
                     return;
                 }
@@ -245,13 +260,13 @@ internal sealed partial class HouseholdWorker
     /// </summary>
     private async Task ApproveAsync(string householdId, Approving approving, CancellationToken cancel)
     {
-        if (!approving.Accepted || _store.CurrentKey is not { } key || Wire.PublicKey(approving.Sign) is not { } sign
-            || Wire.PublicKey(approving.Dh) is not { } dh)
+        if (!approving.Accepted || approving.PromptId is null || Wire.PublicKey(approving.Sign) is not { } sign || Wire.PublicKey(approving.Dh) is not { } dh)
         {
-            return;
+            return;                                                            // only an approval its own prompt was answered yes to
         }
         if (!await RotationFirstAsync(householdId, approving.Device, cancel).ConfigureAwait(false)) return;   // no old key to a newcomer
-        var epoch = _store.Epoch;
+        var epoch = _store.Epoch;                                              // the key and its epoch together, once the new one went
+        if (_store.KeyFor(epoch) is not { } key) return;
         if (!approving.Revealed)
         {
             if (!await RevealAsync(householdId, approving, cancel).ConfigureAwait(false)) return;
@@ -267,7 +282,7 @@ internal sealed partial class HouseholdWorker
         if (result.Ok)
         {
             _store.Approving = null;
-            _members.ServerAdded(approving.Device, epoch);
+            _members.ServerAdded(approving.Device, epoch, dh);
             var known = _household.Member(approving.Device);
             _members.Introduce(new MemberInfo(approving.Device, known?.Name ?? NewPcName, known?.Kind ?? ChassisKind.Desktop, sign, dh), Now);
             Volatile.Write(ref _waitingApprovals, Math.Max(0, Volatile.Read(ref _waitingApprovals) - 1));

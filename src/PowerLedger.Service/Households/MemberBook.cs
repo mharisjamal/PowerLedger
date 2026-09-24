@@ -7,7 +7,8 @@ namespace PowerLedger.Service.Households;
 /// <summary>A PC as the server's member list last gave it (plan 0.10): the household's epoch when the server added it, and the
 /// epoch and time it removed it at, if it did.</summary>
 /// <param name="Unknown">When this PC first saw it listed as current with no introduction, unix milliseconds.</param>
-internal sealed record ServerEntry(int Added, int? Removed = null, long? RemovedMs = null, long? Unknown = null)
+/// <param name="Dh">Its key-agreement key as the server lists it, which the one introduced here must be.</param>
+internal sealed record ServerEntry(int Added, int? Removed = null, long? RemovedMs = null, long? Unknown = null, string? Dh = null)
 {
     public bool Current => Removed is null;
 }
@@ -71,6 +72,9 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
     /// <summary>The PC as the server's list last gave it; null when that list didn't have it, or none was read.</summary>
     public ServerEntry? ServerEntryOf(string id) => store.ServerMembers?.GetValueOrDefault(id);
 
+    /// <summary>The PC's row while its keys were introduced here and are the ones the server lists (plan 0.10); null otherwise.</summary>
+    public HouseholdMember? Introduced(string id) => View().Introduced(id);
+
     /// <summary>The highest epoch the server's list shows, at an add or a removal; 0 when none was read.</summary>
     public int ServerEpoch => store.ServerMembers?.Values.Select(entry => Math.Max(entry.Added, entry.Removed ?? 0)).DefaultIfEmpty().Max() ?? 0;
 
@@ -80,7 +84,8 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
     /// removed another and then left is still the sealer of the key it made.
     /// </summary>
     public bool MaySeal(string sealerId, int epoch) =>
-        household.Member(sealerId) is not null && ServerEntryOf(sealerId) is { } entry && entry.Added < epoch && (entry.Removed is not { } removed || removed >= epoch);
+        View() is var view && view.Introduced(sealerId) is not null && view.Server?.GetValueOrDefault(sealerId) is { } entry && entry.Added < epoch
+        && (entry.Removed is not { } removed || removed >= epoch);
 
     /// <summary>True when the rows of a batch from <paramref name="senderId"/> under <paramref name="epoch"/> may be kept: it is
     /// current here, or the server removed it at that epoch or later.</summary>
@@ -102,12 +107,13 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
         {
             int? removed = member.Removed is null ? null : member.RemovedEpoch ?? member.AddedEpoch;
             long? since = null;
-            if (removed is null && member.Device != selfId && before.Row(member.Device) is null && !before.Adds.Contains(member.Device))
+            if (removed is null && member.Device != selfId && !before.Adds.Contains(member.Device)
+                && (before.Row(member.Device) is not { } row || Wire.Encode(row.DhKey) != member.Dh))
             {
-                since = before.Server?.GetValueOrDefault(member.Device)?.Unknown ?? nowMs;
+                since = before.Server?.GetValueOrDefault(member.Device)?.Unknown ?? nowMs;   // no introduction yet, or one with other keys
                 if (nowMs - since >= (long)IntroductionWait.TotalMilliseconds) unknown.Add(member.Device);
             }
-            taken[member.Device] = new ServerEntry(member.AddedEpoch, removed, member.Removed, since);
+            taken[member.Device] = new ServerEntry(member.AddedEpoch, removed, member.Removed, since, member.Dh);
         }
         store.ServerMembers = taken;
         var after = View();
@@ -115,19 +121,24 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
         return new ServerLearned(gone, Refresh(nowMs), unknown);
     }
 
-    /// <summary>The server took this PC's add or approval of the PC (plan 0.10): current from now on, as the next list says.</summary>
-    public void ServerAdded(string id, int epoch)
+    /// <summary>The server took this PC's add or approval of the PC, with the key-agreement key it was given (plan 0.10):
+    /// current from now on, as the next list says.</summary>
+    public void ServerAdded(string id, int epoch, byte[] dh)
     {
         if (store.ServerMembers is not { } server) return;
-        store.ServerMembers = new Dictionary<string, ServerEntry>(server, StringComparer.Ordinal) { [id] = new ServerEntry(epoch) };
+        store.ServerMembers = new Dictionary<string, ServerEntry>(server, StringComparer.Ordinal) { [id] = new ServerEntry(epoch, Dh: Wire.Encode(dh)) };
     }
 
     /// <summary>The server took a removal this PC made (plan 0.10): removed at this PC's epoch at the least, as the next list says.</summary>
     public void ServerRemoved(string id, int epoch, long nowMs)
     {
         if (store.ServerMembers is not { } server) return;
-        var added = server.GetValueOrDefault(id)?.Added ?? 0;
-        store.ServerMembers = new Dictionary<string, ServerEntry>(server, StringComparer.Ordinal) { [id] = new ServerEntry(added, Math.Max(epoch, added), nowMs) };
+        var known = server.GetValueOrDefault(id);
+        var added = known?.Added ?? 0;
+        store.ServerMembers = new Dictionary<string, ServerEntry>(server, StringComparer.Ordinal)
+        {
+            [id] = new ServerEntry(added, Math.Max(epoch, added), nowMs, Dh: known?.Dh),
+        };
         Refresh(nowMs);
     }
 
@@ -205,9 +216,10 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
 
     /// <summary>
     /// Learns from a member list (plan 0.10): a welcome's, an approval's or a recovery's, or a PC's current here. A PC this
-    /// PC doesn't know comes in with its keys, unless this PC or the server removed it; a member's keys never change. The
-    /// list's removals are kept as its PC's, in place of those its last list had, and count while that PC is current here.
-    /// The list's entry about its own PC gives its name and kind, and nothing else; nobody's list says anything about this PC.
+    /// PC doesn't know comes in with its keys, unless this PC or the server removed it; a member's keys change only when the
+    /// ones kept here aren't those the server lists and the list's are. The list's removals are kept as its PC's, in place of
+    /// those its last list had, and count while that PC is current here. The list's entry about its own PC gives its name and
+    /// kind, and nothing else; nobody's list says anything about this PC.
     /// </summary>
     /// <param name="fromId">The PC whose list it is; null for a recovery's, which the code vouches for as a whole.</param>
     /// <param name="selfId">This PC.</param>
@@ -225,8 +237,18 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
         List<string> added = [];
         foreach (var entry in list.Where(entry => entry.Id != fromId && entry.RemovedEpoch is null && entry.Removed is null))
         {
-            if (view.Row(entry.Id) is not null || Wire.Member(entry) is not { } member) continue;   // a member's keys never change
-            if (view.Server?.GetValueOrDefault(entry.Id) is { Current: false } || view.Claims.GetValueOrDefault(Own)?.ContainsKey(entry.Id) == true)
+            if (Wire.Member(entry) is not { } member) continue;
+            var listed = view.Server?.GetValueOrDefault(entry.Id);
+            if (view.Row(entry.Id) is { } row)
+            {
+                if (listed?.Dh is { } dh && Wire.Encode(row.DhKey) != dh && entry.Dh == dh)
+                {
+                    household.SaveMember(row with { Name = member.Name, Kind = member.Kind, SignKey = member.Sign, DhKey = member.Dh });   // the server's keys, at last
+                    added.Add(entry.Id);
+                }
+                continue;                                                      // otherwise a member's keys never change
+            }
+            if (listed is { Current: false } || view.Claims.GetValueOrDefault(Own)?.ContainsKey(entry.Id) == true)
             {
                 continue;                                                      // removed here: not brought back on a list's word
             }
@@ -308,10 +330,16 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
 
         public HouseholdMember? Row(string id) => rows.FirstOrDefault(row => row.DeviceId == id);
 
+        public IReadOnlyDictionary<string, ServerEntry>? ServerList => server;
+
         public bool ServerCurrent(string id) => adds.Contains(id) || server?.GetValueOrDefault(id) is { Current: true };
 
+        /// <summary>The PC's row while its keys came in an introduction and are the ones the server lists, if it lists them.</summary>
+        public HouseholdMember? Introduced(string id) =>
+            Row(id) is { } row && (server?.GetValueOrDefault(id)?.Dh is not { } dh || Wire.Encode(row.DhKey) == dh) ? row : null;
+
         /// <summary>Current here: introduced, and current by the server's list; before any list, not shown as removed.</summary>
-        public bool IsCurrent(string id) => Row(id) is not null && (server is null ? !ShownRemoved(id) : ServerCurrent(id));
+        public bool IsCurrent(string id) => Introduced(id) is not null && (server is null ? !ShownRemoved(id) : ServerCurrent(id));
 
         public bool MaySync(string id) => IsCurrent(id) && !ShownRemoved(id);
 
@@ -336,6 +364,6 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
         /// any list while this PC hasn't removed it.</summary>
         private bool Counts(string claimant) =>
             claimant == Own
-            || (Row(claimant) is not null && (server is null ? claims.GetValueOrDefault(Own)?.ContainsKey(claimant) != true : ServerCurrent(claimant)));
+            || (Introduced(claimant) is not null && (server is null ? claims.GetValueOrDefault(Own)?.ContainsKey(claimant) != true : ServerCurrent(claimant)));
     }
 }
