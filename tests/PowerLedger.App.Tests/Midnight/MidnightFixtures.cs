@@ -64,7 +64,7 @@ internal static class MidnightFixtures
         var before = app.Count;
         var manager = new ThemeManager(Application.Current, theme == Theme.Dark ? ThemeChoice.Dark : ThemeChoice.Light);
         if (app.Count == before + 1) app.RemoveAt(0);
-        var looks = new LookSwitcher(_ => throw new InvalidOperationException("No switch in a render."), manager, _ => { });
+        var looks = new LookSwitcher(_ => throw new InvalidOperationException("No switch in a render."), manager, _ => { }, _ => { });
         var window = new MidnightWindow(shell, looks, manager, updates, feedback ?? (() => { }))
         {
             WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,

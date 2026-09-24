@@ -3,7 +3,8 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace PowerLedger.App;
 
-/// <summary>The screens of spec §9's rail, and Midnight's Dashboard (plan O 0.4), which stands where Now does in Classic.</summary>
+/// <summary>The screens of spec §9's rail, and Midnight's Dashboard (Midnight look design §2), which stands in for Now
+/// there as Now stands in for it in Classic.</summary>
 internal enum Page
 {
     Now,
@@ -40,6 +41,9 @@ internal sealed class ShellViewModel : ObservableObject
 
     public NowViewModel Now { get; }
 
+    /// <summary>Midnight's landing page (Midnight look design §4); a Classic-only App has none, and shows Now for it.</summary>
+    public DashboardViewModel? Dashboard { get; }
+
     public BreakdownViewModel Breakdown { get; }
 
     public ReportViewModel Report { get; }
@@ -54,9 +58,6 @@ internal sealed class ShellViewModel : ObservableObject
 
     /// <summary>The update card in the rail (spec §13); without one the card stays hidden.</summary>
     public Updater? Updates { get; }
-
-    /// <summary>Midnight's landing page (plan O 0.4); Classic never shows it, and without one Page.Dashboard shows Now.</summary>
-    public DashboardViewModel? Dashboard { get; }
 
     /// <summary>The rail's Send feedback button.</summary>
     public IRelayCommand Feedback { get; }
@@ -91,7 +92,7 @@ internal sealed class ShellViewModel : ObservableObject
     public object Current => IsSetup ? Wizard : Page switch
     {
         Page.Now => Now,
-        Page.Dashboard => (object?)Dashboard ?? Now,
+        Page.Dashboard => Dashboard ?? (object)Now,
         Page.Breakdown => Breakdown,
         Page.Report => Report,
         Page.Household => Household,
@@ -105,10 +106,10 @@ internal sealed class ShellViewModel : ObservableObject
         IsSetup = true;
     }
 
-    /// <summary>The wizard is done: back to the Now screen.</summary>
+    /// <summary>The wizard is done: back to the landing page, Now or Midnight's Dashboard by the look in use.</summary>
     public void EndSetup()
     {
-        _page = Page.Now;
+        _page = Settings.Look == Look.Midnight && Dashboard is not null ? Page.Dashboard : Page.Now;
         OnPropertyChanged(nameof(Page));
         IsSetup = false;
     }

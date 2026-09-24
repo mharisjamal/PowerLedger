@@ -3,8 +3,9 @@ using System.Windows.Interop;
 
 namespace PowerLedger.App;
 
-/// <summary>The App's window (spec §9). Closing it hides it to the tray; the App decides that in Task 13.</summary>
-public partial class MainWindow : Window
+/// <summary>The App's window in the Classic look (spec §9). Closing it hides it to the tray; the App decides that in Task
+/// 13, and lets it go once the look switcher has moved on from it.</summary>
+public partial class MainWindow : Window, IShellWindow
 {
     private readonly Extent _size;
     private readonly Extent _minimum;
@@ -15,6 +16,44 @@ public partial class MainWindow : Window
         _size = new Extent(Width, Height);
         _minimum = new Extent(MinWidth, MinHeight);
     }
+
+    /// <summary>The bounds a switch carries over: the restored ones once shown. Setting them places the window by hand,
+    /// so it no longer fits itself to the screen it opens on.</summary>
+    Rect IShellWindow.Bounds
+    {
+        get => RestoreBounds.IsEmpty ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+        set
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = value.X;
+            Top = value.Y;
+            Width = value.Width;
+            Height = value.Height;
+        }
+    }
+
+    WindowState IShellWindow.State
+    {
+        get => WindowState;
+        set => WindowState = value;
+    }
+
+    /// <summary>Classic has no Dashboard: Midnight's landing page maps to Now.</summary>
+    Page IShellWindow.Page
+    {
+        get => Shell?.Page ?? Page.Now;
+        set
+        {
+            if (Shell is { } shell) shell.Page = value == Page.Dashboard ? Page.Now : value;
+        }
+    }
+
+    Window IShellWindow.Window => this;
+
+    private ShellViewModel? Shell => DataContext as ShellViewModel;
+
+    /// <summary>Closes for good: the App's Closing handler hides a window to the tray only while it is the current one.</summary>
+    public void CloseForSwitch() => Close();
 
     /// <summary>Sizes and places the window inside <paramref name="workArea"/>, given in the window's units (see
     /// <see cref="WindowFit"/>). The minimum goes first, so the old minimum can't hold the window at its old size.</summary>
