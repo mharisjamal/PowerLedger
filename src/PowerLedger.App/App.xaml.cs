@@ -33,6 +33,11 @@ public partial class App : Application
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
     private MainWindow? _window;
+    private AddPcWindow? _addPcWindow;
+
+    /// <summary>Review finding A4: every open Join/Approve/Confirm join prompt, by its promptId, so a pushed
+    /// <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others untouched.</summary>
+    private readonly Dictionary<string, Window> _openPrompts = new();
     private UiThreads? _threads;
     private CultureInfo? _culture;
     private string? _sentFolder;
@@ -242,15 +247,25 @@ public partial class App : Application
         new PayloadWindow(path) { Owner = _window }.Show();
     }
 
-    /// <summary>Add a PC from the Household page (households design §2), modeless and owned by the main window.</summary>
+    /// <summary>Add a PC from the Household page (households design §2), modeless and owned by the main window. Review
+    /// finding A4: reused while already open, rather than starting a second pairing gate alongside the first.</summary>
     private void OpenAddPcWindow()
     {
+        if (_addPcWindow is not null)
+        {
+            _addPcWindow.Activate();
+            return;
+        }
         if (_window is null || _link is null || _threads is null) return;
-        new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window }.Show();
+        _addPcWindow = new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window };
+        _addPcWindow.Closed += (_, _) => _addPcWindow = null;
+        _addPcWindow.Show();
     }
 
-    /// <summary>A pushed household notice (households design §9): a Join or Approve prompt opens a modal on top of
-    /// whatever is showing; anything else shows as a tray notification. Raised off the UI thread.</summary>
+    /// <summary>A pushed household notice (households design §9): a Join, Approve or Confirm join prompt opens a modal
+    /// on top of whatever is showing; a Withdraw (task 0.8) closes the one prompt it names; a pairing's own outcome
+    /// (review finding A4) shows in Add a PC while that is open, or else as a tray notification; anything else shows as
+    /// a tray notification. Raised off the UI thread.</summary>
     private void OnHouseholdNotice(HouseholdNotice notice)
     {
         switch (notice.Kind)
@@ -264,10 +279,29 @@ public partial class App : Application
             case NoticeKind.ConfirmJoin:
                 Dispatcher.InvokeAsync(() => OpenConfirmJoinWindow(notice));
                 break;
+            case NoticeKind.Withdraw:
+                Dispatcher.InvokeAsync(() => WithdrawPrompt(notice.PromptId));
+                break;
+            case NoticeKind.PairingProgress:
+                // Add a PC, while open, hears every notice itself (it subscribes on its own) and shows this there;
+                // closed, there is nowhere else for the pairing it started to say how it went.
+                Dispatcher.InvokeAsync(() =>
+                {
+                    if (_addPcWindow is null) _tray?.Notify("PowerLedger", notice.Text, null);
+                });
+                break;
             case NoticeKind.Info:
                 Dispatcher.InvokeAsync(() => _tray?.Notify("PowerLedger", notice.Text, null));
                 break;
         }
+    }
+
+    /// <summary>Review finding A4: closes the one open prompt <paramref name="promptId"/> names, if any, leaving any
+    /// other prompt open. Its connection or its pairing is gone, so nothing is sent back for it.</summary>
+    private void WithdrawPrompt(string? promptId)
+    {
+        if (promptId is null || !_openPrompts.TryGetValue(promptId, out var window)) return;
+        window.Close();
     }
 
     /// <summary>The Join prompt (households design §2, §3): modal, owned by the main window when it is open.</summary>
@@ -275,7 +309,9 @@ public partial class App : Application
     {
         if (_link is null || _threads is null) return;
         var model = new JoinPromptViewModel(_link, _threads, TimeProvider.System, notice);
-        new JoinPromptWindow(model) { Owner = _window }.ShowDialog();
+        var window = new JoinPromptWindow(model) { Owner = _window };
+        TrackPrompt(notice.PromptId, window);
+        window.ShowDialog();
     }
 
     /// <summary>The Approve prompt (households design §7): modal, owned by the main window when it is open.</summary>
@@ -283,7 +319,9 @@ public partial class App : Application
     {
         if (_link is null || _threads is null) return;
         var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice);
-        new ApprovePromptWindow(model) { Owner = _window }.ShowDialog();
+        var window = new ApprovePromptWindow(model) { Owner = _window };
+        TrackPrompt(notice.PromptId, window);
+        window.ShowDialog();
     }
 
     /// <summary>The Confirm join prompt (households design §7, task 0.8): modal, owned by the main window when it is
@@ -292,7 +330,18 @@ public partial class App : Application
     {
         if (_link is null || _threads is null) return;
         var model = new ConfirmJoinViewModel(_link, _threads, TimeProvider.System, notice);
-        new ConfirmJoinWindow(model) { Owner = _window }.ShowDialog();
+        var window = new ConfirmJoinWindow(model) { Owner = _window };
+        TrackPrompt(notice.PromptId, window);
+        window.ShowDialog();
+    }
+
+    /// <summary>Review finding A4: keeps <see cref="_openPrompts"/> current so a Withdraw can find this window by its
+    /// promptId, for as long as it stays open however it closes (answered, timed out, or withdrawn).</summary>
+    private void TrackPrompt(string? promptId, Window window)
+    {
+        if (promptId is null) return;
+        _openPrompts[promptId] = window;
+        window.Closed += (_, _) => _openPrompts.Remove(promptId);
     }
 
     /// <summary>A first sign-in that linked a household made a recovery code (households design §7): shown once, modal
