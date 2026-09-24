@@ -1,8 +1,9 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { adminAuthorized } from "../src/admin";
+import { adminAuthorized, handleAdmin } from "../src/admin";
 import { utcDateString } from "../src/day";
-import { gzipJson, randomInstallId, randomKey } from "./support";
+import { handleReport } from "../src/report";
+import { gzipJson, randomInstallId, randomKey, withoutR2 } from "./support";
 import validFull from "./fixtures/valid-full.json";
 
 const ADMIN = { Authorization: "Bearer test-admin-token" };
@@ -180,5 +181,35 @@ describe("GET /admin/list, guards", () => {
     const response = await SELF.fetch(`https://example.com/admin/list?from=${day}&to=${day}&limit=1000`, { headers: ADMIN });
     const listed = (await response.json()) as { items: { installId: string }[] };
     expect(listed.items.some((item) => item.installId === installId)).toBe(false);
+  });
+});
+
+describe("GET /admin/object, without R2 bound", () => {
+  it("serves a body stored in D1", async () => {
+    const id = randomInstallId();
+    const day = utcDateString(-6, new Date());
+    const key = randomKey();
+    const noR2 = withoutR2(env);
+    const report = { ...structuredClone(validFull), installId: id, day };
+    const body = await gzipJson(report);
+
+    const sent = await handleReport(
+      new Request("https://example.com/v1/report", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Encoding": "gzip" },
+        body,
+      }),
+      noR2,
+    );
+    expect(sent.status).toBe(200);
+
+    const r2Key = `reports/v1/${id}/${day}.json.gz`;
+    const response = await handleAdmin(
+      new Request(`https://example.com/admin/object?key=${r2Key}`, { headers: ADMIN }),
+      noR2,
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(body);
   });
 });

@@ -4,6 +4,7 @@ import { dayInRange } from "./day";
 import { gunzipBounded } from "./gzip";
 import { checkMinutes } from "./minutes";
 import { firstSchemaError } from "./schema";
+import { deleteBodies, putBody } from "./store";
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_UNPACKED_BYTES = 8 * 1024 * 1024;
@@ -89,10 +90,7 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
   const receivedAt = Date.now();
   const sections = (["diagnostics", "usage", "power"] as const).filter((name) => name in report).join(",");
 
-  await env.REPORTS.put(r2Key, body, {
-    httpMetadata: { contentType: "application/json", contentEncoding: "gzip" },
-    customMetadata: { country, receivedAt: String(receivedAt), app: report.app },
-  });
+  await putBody(env, r2Key, body, { contentType: "application/json", receivedAt });
 
   await env.DB.prepare(
     `INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key)
@@ -135,7 +133,7 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
 export async function discardIfDeleted(env: Cloudflare.Env, installId: string, day: string, r2Key: string): Promise<boolean> {
   const tombstone = await env.DB.prepare("SELECT 1 FROM tombstones WHERE id = ?").bind(installId).first();
   if (!tombstone) return false;
-  await env.REPORTS.delete(r2Key);
+  await deleteBodies(env, [r2Key]);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM reports WHERE install_id = ? AND day = ?").bind(installId, day),
     env.DB.prepare("DELETE FROM installs WHERE id = ?").bind(installId),

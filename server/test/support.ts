@@ -24,3 +24,8 @@ export function randomKey(): string {
 export function randomInstallId(): string {
   return crypto.randomUUID();
 }
+
+/** A copy of `env` as it would be before R2 is enabled on the account: no REPORTS binding. */
+export function withoutR2(env: Cloudflare.Env): Cloudflare.Env {
+  return { ...env, REPORTS: undefined };
+}

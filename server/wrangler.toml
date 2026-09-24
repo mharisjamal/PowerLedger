@@ -2,9 +2,10 @@ name = "powerledger-data"
 main = "src/index.ts"
 compatibility_date = "2026-08-22"
 
-[[r2_buckets]]
-binding = "REPORTS"
-bucket_name = "powerledger-data"
+# R2 isn't enabled on the account yet, so bodies are kept in D1 until it is (src/store.ts). Uncomment once R2 is enabled and the "powerledger-data" bucket exists; bodies then go to R2, and any kept in D1 meanwhile stay readable.
+# [[r2_buckets]]
+# binding = "REPORTS"
+# bucket_name = "powerledger-data"
 
 [[d1_databases]]
 binding = "DB"

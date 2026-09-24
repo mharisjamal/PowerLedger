@@ -1,7 +1,9 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { utcDateString } from "../src/day";
-import { gzipJson, randomInstallId, randomKey } from "./support";
+import { handleDelete } from "../src/install";
+import { handleReport } from "../src/report";
+import { gzipJson, randomInstallId, randomKey, withoutR2 } from "./support";
 import validFull from "./fixtures/valid-full.json";
 
 function consentBody(installId: string, overrides: Partial<Record<string, unknown>> = {}) {
@@ -90,7 +92,7 @@ describe("POST /v1/delete", () => {
     const deleteResponse = await postJson("/v1/delete", { installId: id }, key);
     expect(deleteResponse.status).toBe(200);
 
-    const objects = await env.REPORTS.list({ prefix: `reports/v1/${id}/` });
+    const objects = await env.REPORTS!.list({ prefix: `reports/v1/${id}/` });
     expect(objects.objects).toHaveLength(0);
 
     const reportsRow = await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(id).first();
@@ -159,5 +161,41 @@ describe("consent and delete bodies", () => {
       body,
     });
     expect(response.status).toBe(413);
+  });
+});
+
+describe("POST /v1/delete, without R2 bound", () => {
+  it("removes a report body stored in D1", async () => {
+    const id = randomInstallId();
+    const key = randomKey();
+    const day = utcDateString(-1, new Date());
+    const noR2 = withoutR2(env);
+
+    const report = { ...structuredClone(validFull), installId: id, day };
+    const reportResponse = await handleReport(
+      new Request("https://example.com/v1/report", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Encoding": "gzip" },
+        body: await gzipJson(report),
+      }),
+      noR2,
+    );
+    expect(reportResponse.status).toBe(200);
+
+    const r2Key = `reports/v1/${id}/${day}.json.gz`;
+    expect(await env.DB.prepare("SELECT 1 FROM report_bodies WHERE r2_key = ?").bind(r2Key).first()).not.toBeNull();
+
+    const deleteResponse = await handleDelete(
+      new Request("https://example.com/v1/delete", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ installId: id }),
+      }),
+      noR2,
+    );
+    expect(deleteResponse.status).toBe(200);
+
+    expect(await env.DB.prepare("SELECT 1 FROM report_bodies WHERE r2_key = ?").bind(r2Key).first()).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(id).first()).toBeNull();
   });
 });
