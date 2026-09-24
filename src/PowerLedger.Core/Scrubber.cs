@@ -38,7 +38,7 @@ public static partial class Scrubber
     {
         if (string.IsNullOrEmpty(text)) return "";
         var result = QuotedPath().Replace(text, "${quote}<path>${quote}");
-        result = LongPath().Replace(result, "<path>");
+        result = LongPath().Replace(result, PathMark);
         result = DrivePath().Replace(result, PathMark);
         result = SharePath().Replace(result, "<path>");
         result = SlashSharePath().Replace(result, "<path>");
@@ -108,9 +108,10 @@ public static partial class Scrubber
     [GeneratedRegex(@"\\\\\?\\[^\s""'<>|]+")]
     private static partial Regex DevicePath();
 
-    /// <summary>An interface path written without its <c>\\?\</c>: <c>hid#vid_1b1c&amp;pid_1c05#8&amp;2d0f1a&amp;0&amp;0000#{guid}</c>.
-    /// Tried only where a word starts after a space or quote, so text full of <c>#</c> can't make it slow.</summary>
-    [GeneratedRegex(@"(?i)(?<![^\s""'<>|])[A-Z0-9_]+#[^\s""'<>|]*#\{[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}\}")]
+    /// <summary>An interface path written without its <c>\\?\</c>: <c>hid#vid_1b1c&amp;pid_1c05#8&amp;2d0f1a&amp;0&amp;0000#{guid}</c>,
+    /// wherever a word starts. Its parts between the <c>#</c>s are bounded in number and length, so text full of <c>#</c>
+    /// can't make it slow.</summary>
+    [GeneratedRegex(@"(?i)(?<![A-Z0-9_])[A-Z0-9_]+#(?:[^\s""'<>|#]{1,128}#){1,4}\{[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}\}")]
     private static partial Regex InterfacePath();
 
     /// <summary>A device instance ID under one of Windows' bus enumerators, whatever its instance holds, which for USB
@@ -118,9 +119,9 @@ public static partial class Scrubber
     [GeneratedRegex(@"(?i)\b(?:USB|USBSTOR|USBPRINT|HID|PCI|PCIIDE|DISPLAY|MONITOR|SWD|ACPI|ROOT|BTH|BTHENUM|BTHLE|BTHLEDEVICE|HDAUDIO|INTELAUDIO|MMDEVAPI|SCSI|STORAGE|NVME|IDE|UMB|SW|WPDBUSENUM|VMBUS|TS_USB)\\[^\s\\""'<>|]+\\[^\s""'<>|]+")]
     private static partial Regex KnownInstanceId();
 
-    /// <summary>A bus, a device and an instance with an ampersand in it, under an enumerator not listed above. Tried only
-    /// where a word starts after a space, quote or bracket, so long runs of backslashes can't make it slow.</summary>
-    [GeneratedRegex(@"(?i)(?<![^\s""'<>|(\[])[A-Z0-9_]+\\[A-Z0-9_&.#-]+\\[A-Z0-9_&.#{}-]*&[A-Z0-9_&.#{}-]*")]
+    /// <summary>A bus, a device and an instance with an ampersand in it, under an enumerator not listed above, wherever a word
+    /// starts. None of its parts can hold a backslash, so each try stops at the next one and long text stays quick.</summary>
+    [GeneratedRegex(@"(?i)(?<![A-Z0-9_])[A-Z0-9_]+\\[A-Z0-9_&.#-]+\\[A-Z0-9_&.#{}-]*&[A-Z0-9_&.#{}-]*")]
     private static partial Regex InstanceId();
 
     /// <summary>A user's security ID (<c>S-1-5-21-…-1013</c>); the short well-known ones, such as SYSTEM's <c>S-1-5-18</c>, name no one.</summary>

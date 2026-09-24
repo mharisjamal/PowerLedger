@@ -78,6 +78,19 @@ public class ScrubberTests
     [InlineData(@"HID\VID_1B1C&PID_1C05&MI_00\8&2D0F1A&0&0000 failed", "<id> failed")]
     public void AWindowsDeviceInstanceIdIsTakenOut(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
 
+    [Theory]
+    [InlineData(@"PNPDeviceID=HID\VID_04F2&PID_0001\6&1a2b3c4d&0&0000", "PNPDeviceID=<id>")]
+    [InlineData(@"id:HID\VID_04F2&PID_0001\6&1a2b3c4d&0&0000", "id:<id>")]
+    [InlineData(@"dev=XYZBUS\DEV_01&REV_02\3&abc&0&1", "dev=<id>")]
+    [InlineData("(hid#vid_1b1c&pid_1c05&mi_00#8&2d0f1a&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030})", "(<device>)")]
+    [InlineData("path=usb#vid_046d&pid_c52b#5&1c2d3e4f&0&2#{a5dcbf10-6530-11d2-901f-00c04fb951ed}", "path=<device>")]
+    public void AnIdRightAfterPunctuationIsTakenOut(string text, string scrubbed) => Scrub(text).ShouldBe(scrubbed);
+
+    [Fact]
+    public void ALongPathInAStackFrameKeepsItsSourceFilesName() =>
+        Scrub(@"   at X.Y() in \\?\C:\Users\alice\repo\NowViewModel.cs:line 42")
+            .ShouldBe(@"   at X.Y() in <path>\NowViewModel.cs:line 42");
+
     [Fact]
     public void AnInterfacePathWithoutItsPrefixIsTakenOut() =>
         Scrub("open hid#vid_1b1c&pid_1c05&mi_00#8&2d0f1a&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030} failed")
