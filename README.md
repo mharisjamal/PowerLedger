@@ -87,7 +87,7 @@ the internet only through such a proxy doesn't send.
 ## Households
 
 Several PCs, one ledger. On the **Household** page, **Add a PC**:
-- **On this network:** the PCs found. Pick one; both PCs show the same six-digit code, and you confirm on the other PC.
+- **On this network:** the PCs found. Pick one; both PCs show the same six-digit code, and you confirm on both.
 - **Somewhere else:** a one-time code to type on the other PC.
 
 After that, each PC shows what the whole household used today, this week and this month, with a bar for each PC.
@@ -95,7 +95,8 @@ After that, each PC shows what the whole household used today, this week and thi
 - **How PCs sync:** directly on the network when they're together, and otherwise through PowerLedger's server. What
   they send is encrypted with a key only the household's PCs hold, so the server can't read it.
 - **Signing in** with Microsoft or Google is optional. A PC that signs in joins once another PC in the household
-  approves it, and a recovery code brings the household back if you lose every PC.
+  approves it, after both show the same code, and a recovery code brings the household back to one PC if you lose every
+  other.
 
 [PRIVACY.md](PRIVACY.md) says what the server keeps. Finding PCs on the network needs a private network; the installer
 opens the service's port there only.
