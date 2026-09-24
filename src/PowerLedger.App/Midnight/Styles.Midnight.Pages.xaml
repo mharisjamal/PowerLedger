@@ -94,6 +94,10 @@
                         <Trigger Property="Note" Value="">
                             <Setter TargetName="Note" Property="Visibility" Value="Collapsed" />
                         </Trigger>
+                        <!-- No value, no unit: "N/A", not "N/A kWh". -->
+                        <Trigger Property="Value" Value="{x:Static app:Format.Missing}">
+                            <Setter TargetName="Note" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

@@ -84,7 +84,7 @@ internal static class ReportDocument
                     hero.AutoItem().Text(text =>
                     {
                         text.Span(member.Energy).FontSize(24).Light();
-                        text.Span(" kWh").FontColor(Ink3);
+                        text.Span(UnitAfter(member.Energy, "kWh")).FontColor(Ink3);
                     });
                 });
                 if (member.Costs.Count == 0) Line(bill, "Cost", Format.Missing, "no tariff set");
@@ -110,7 +110,7 @@ internal static class ReportDocument
                     {
                         line.ConstantItem(14).AlignMiddle().AlignLeft().Width(7).Height(7).Background(PartColours[i]);
                         line.RelativeItem().Text(part.Name).FontColor(Ink2);
-                        line.AutoItem().Text(part.Energy + " kWh").SemiBold();
+                        line.AutoItem().Text(WithUnit(part.Energy, "kWh")).SemiBold();
                         line.ConstantItem(40).AlignRight().Text(part.Share).FontColor(Ink3);
                     });
                 }
@@ -150,13 +150,13 @@ internal static class ReportDocument
                     hero.AutoItem().Text(text =>
                     {
                         text.Span(data.Energy).FontSize(24).Light();
-                        text.Span(" kWh").FontColor(Ink3);
+                        text.Span(UnitAfter(data.Energy, "kWh")).FontColor(Ink3);
                     });
                 });
                 Line(bill, "Cost", data.Cost, data.CostNote);
                 Line(bill, "CO₂", data.Co2, data.Co2Note);
-                Line(bill, "Average", data.Average + " W", "while on");
-                Line(bill, "Peak", data.Peak + " W", data.PeakAt);
+                Line(bill, "Average", WithUnit(data.Average, "W"), data.Average == Format.Missing ? "" : "while on");
+                Line(bill, "Peak", WithUnit(data.Peak, "W"), data.PeakAt);
             });
             row.RelativeItem().Column(time =>
             {
@@ -193,7 +193,7 @@ internal static class ReportDocument
                     {
                         line.ConstantItem(14).AlignMiddle().AlignLeft().Width(7).Height(7).Background(colour);
                         line.RelativeItem().Text(part.Name).FontColor(Ink2);
-                        line.AutoItem().Text(part.Energy + " kWh").SemiBold();
+                        line.AutoItem().Text(WithUnit(part.Energy, "kWh")).SemiBold();
                         line.ConstantItem(40).AlignRight().Text(part.Share).FontColor(Ink3);
                     });
                 }
@@ -272,7 +272,7 @@ internal static class ReportDocument
                     hero.AutoItem().Text(text =>
                     {
                         text.Span(household.Energy).FontSize(24).Light();
-                        text.Span(" kWh").FontColor(Ink3);
+                        text.Span(UnitAfter(household.Energy, "kWh")).FontColor(Ink3);
                     });
                 });
                 if (household.Costs.Count == 0) Line(combined, "Combined cost", Format.Missing, "no tariff set on any PC");
@@ -293,4 +293,10 @@ internal static class ReportDocument
             row.AutoItem().Text(value).SemiBold();
             if (note.Length > 0) row.AutoItem().PaddingLeft(6).AlignBottom().Text(note).FontSize(7.5f).FontColor(Ink3);
         });
+
+    /// <summary>A figure with its unit after it, or <see cref="Format.Missing"/> alone: "N/A", never "N/A kWh".</summary>
+    internal static string WithUnit(string value, string unit) => value == Format.Missing ? value : $"{value} {unit}";
+
+    /// <summary>The unit to set after a figure in a smaller, quieter span: nothing after a missing one.</summary>
+    internal static string UnitAfter(string value, string unit) => value == Format.Missing ? "" : " " + unit;
 }
