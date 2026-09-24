@@ -115,12 +115,33 @@ public static class HouseholdCrypto
         return mine.DeriveRawSecretAgreement(theirs.PublicKey);
     }
 
-    /// <summary>The 6-digit comparison code both screens show (households design §3), as "482 913". It comes from the
-    /// shared secret and both ephemeral keys, the adder's first, so a PC in the middle gives each side a different one.</summary>
-    public static string ComparisonCode(byte[] shared, byte[] ephAdder, byte[] ephJoiner)
+    /// <summary>The 6-digit comparison code both screens show (households design §3), as "482 913", from the shared
+    /// secret and the hellos' transcript (<see cref="Transcript"/>). Every key in both hellos is bound: a PC in the middle
+    /// that swaps an ephemeral or a device key gives each side a different code.</summary>
+    public static string ComparisonCode(byte[] shared, byte[] transcript) =>
+        SixDigits(Hkdf(shared, transcript, "powerledger comparison code", 4));
+
+    /// <summary>The first form, over the two ephemeral keys alone. It binds too little; it goes once the service uses
+    /// <see cref="ComparisonCode(byte[], byte[])"/> with the transcript (Plan N review round 2).</summary>
+    public static string ComparisonCode(byte[] shared, byte[] ephAdder, byte[] ephJoiner) =>
+        SixDigits(Hkdf(shared, [.. ephAdder, .. ephJoiner], "powerledger comparison code", 4));
+
+    /// <summary>What a pairing's code and frame keys are bound to: SHA-256 of the adder's hello frame then the joiner's, as
+    /// the bytes that went over the wire.</summary>
+    public static byte[] Transcript(byte[] adderHello, byte[] joinerHello) => SHA256.HashData([.. adderHello, .. joinerHello]);
+
+    /// <summary>N2's approval code (households design §7): 6 digits over the waiting PC's signing and key-agreement keys and
+    /// the approving PC's key-agreement key. Both PCs show it; a server that swapped any of the three keys makes them differ.</summary>
+    public static string ApprovalCode(byte[] requesterSign, byte[] requesterDh, byte[] approverDh) =>
+        SixDigits(SHA256.HashData([.. Encoding.UTF8.GetBytes("powerledger approval code"), .. requesterSign, .. requesterDh, .. approverDh])[..4]);
+
+    /// <summary>What a batch's signature covers (households design §5): its associated data then the sealed bytes, so a
+    /// batch can't be moved to another household, device, epoch or sequence, or changed.</summary>
+    public static byte[] BatchToSign(byte[] aad, byte[] sealedBody) => [.. aad, .. sealedBody];
+
+    private static string SixDigits(byte[] four)
     {
-        var bytes = Hkdf(shared, [.. ephAdder, .. ephJoiner], "powerledger comparison code", 4);
-        var digits = (BinaryPrimitives.ReadUInt32BigEndian(bytes) % 1_000_000).ToString("D6");
+        var digits = (BinaryPrimitives.ReadUInt32BigEndian(four) % 1_000_000).ToString("D6");
         return $"{digits[..3]} {digits[3..]}";
     }
 

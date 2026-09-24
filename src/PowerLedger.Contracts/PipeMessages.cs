@@ -38,6 +38,8 @@ namespace PowerLedger.Contracts;
 [JsonDerivedType(typeof(DeleteAccountRequest), "deleteAccount")]
 [JsonDerivedType(typeof(HouseholdReply), "household")]
 [JsonDerivedType(typeof(HouseholdNotice), "householdNotice")]
+[JsonDerivedType(typeof(CancelPairingRequest), "cancelPairing")]
+[JsonDerivedType(typeof(NewRecoveryCodeRequest), "newRecoveryCode")]
 [JsonDerivedType(typeof(OkReply), "ok")]
 [JsonDerivedType(typeof(ErrorReply), "error")]
 [JsonDerivedType(typeof(StatusReply), "status")]
@@ -184,6 +186,12 @@ public sealed record SignOutRequest(long Id) : PipeRequest(Id);
 
 public sealed record DeleteAccountRequest(long Id) : PipeRequest(Id);
 
-/// <summary>What a household request did, in words the App can show; for StartCodePairing the code to show, and for a
-/// first sign-in that linked a household the recovery code, shown once.</summary>
+/// <summary>What a household request did, in words the App can show, and for StartCodePairing the code to show. A
+/// recovery code comes as a <see cref="NoticeKind.RecoveryCode"/> notice instead, kept until the App says it was seen.</summary>
 public sealed record HouseholdReply(long Id, bool Ok, string Message, string? Code = null) : PipeMessage;
+
+/// <summary>Stop the pairing this PC is part of, on either side, and free it for another (households design §3–§4).</summary>
+public sealed record CancelPairingRequest(long Id) : PipeRequest(Id);
+
+/// <summary>N2: make a new recovery code for the linked household, replacing any earlier one; it comes as a notice.</summary>
+public sealed record NewRecoveryCodeRequest(long Id) : PipeRequest(Id);
