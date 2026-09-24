@@ -1,6 +1,6 @@
 # PowerLedger privacy policy
 
-Last updated: 24 September 2026, for PowerLedger 0.6.0.
+Last updated: 24 September 2026, for PowerLedger 0.7.0.
 
 PowerLedger works fully without sending anything. It sends data only when you turn on one of the switches described
 here, and only what that switch covers. Until you choose, nothing is sent.
@@ -72,6 +72,49 @@ everything shared afterwards, but not from copies already given or sold.
   expires.
 - **Anything else:** access, correction or a question — write to the address above with your install ID.
 - **Complaints:** you can complain to the data protection authority where you live.
+
+## Households
+
+A household is a group of your PCs, or your family's, that show what they use together. It is a separate choice from
+the switches above. Nothing is shared until you add a PC and confirm it on that PC.
+
+- **What a household shares:**
+  - each PC's hourly totals: energy, cost and currency, the split by part, and idle, on-battery and measured time;
+  - each PC's name and whether it is a laptop or a desktop;
+  - nothing finer than an hour.
+- **Who can read it:** only the PCs in the household. The totals are encrypted on each PC with a key only the household's
+  PCs hold (AES-256-GCM), and the server can't read them.
+- **What the server keeps:**
+  - the household's random ID;
+  - each PC's random ID and public keys;
+  - when each PC sends and how much;
+  - the encrypted totals, for 90 days, so a PC away from home can catch up.
+
+  A pairing code's meeting place lasts 10 minutes. The server uses your IP address only to limit how often it is called,
+  and doesn't keep it.
+- **On your network:** while **Let my other PCs find this one on the network** is on (Settings → Household), this PC
+  tells other devices on a private network that it runs PowerLedger, with its name. Turn it off and it doesn't.
+- **Removing a PC or leaving:** a removed PC keeps what it already had but can read nothing new, since the household's
+  key changes. When the last PC leaves, the server deletes everything it kept for the household.
+
+## Signing in
+
+Signing in with Microsoft or Google is optional. It lets a new PC join your household once one of your other PCs
+approves it, and lets you get the household back with your recovery code if you lose every PC.
+
+- **What the server keeps:**
+  - an account ID made from the ID your provider gives it;
+  - which household your account is linked to;
+  - a sign-in session for each PC;
+  - requests from PCs waiting to join, for up to 7 days.
+
+  Your e-mail address is shown on your PC and not kept on the server.
+- **Your recovery code:**
+  - It is shown once. The server keeps the household key encrypted under a key made from that code, and it can't read
+    the code or the key.
+  - Keep the code safe: with it and your account, anyone can get into your household's totals.
+- **Deleting your account** (on the Household page) deletes the account, its link, its sessions and its recovery copy.
+  Your household carries on without sign-in.
 
 ## Changes
 
