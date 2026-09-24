@@ -436,6 +436,23 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
+    public async Task A_pc_added_to_a_household_that_already_has_16_is_told_it_couldnt_be_and_isnt_in()
+    {
+        var others = Enumerable.Range(0, 14).Select(_ => DeviceKeys.Create()).ToList();
+        _relay.Seed(Household, [.. others]);                                       // 16, with the desktop and the laptop
+        using var study = DeviceKeys.Create();
+        _desktop.Household.SaveMember(new HouseholdMember(study.DeviceId, "Study PC", ChassisKind.Desktop, study.SignPublic, study.DhPublic, 0, null, null));
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Add, Household, Sign: Wire.Encode(study.SignPublic), Dh: Wire.Encode(study.DhPublic),
+            Proof: Wire.Encode(Wire.SignJoin(study, Household))));
+
+        var run = await _desktop.RunAsync();
+
+        run.Notices.ShouldContain("The household already has 16 PCs, so Study PC couldn't be added. Remove one, then add Study PC again.");
+        _desktop.Members.Current(study.DeviceId).ShouldBeNull();
+        foreach (var keys in others) keys.Dispose();
+    }
+
+    [Fact]
     public async Task A_member_added_without_the_joiners_own_proof_is_refused_and_dropped()
     {
         using var stranger = DeviceKeys.Create();

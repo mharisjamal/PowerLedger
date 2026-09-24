@@ -267,7 +267,9 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                 log.LogWarning("The server won't take the household's {Kind} ({Status}: {Problem}); it is dropped", op.Kind, result.Status, result.Problem);
                 if (op.Kind == PendingOp.Add && result.Status == 409)
                 {
-                    run.Notices.Add("The household already has 16 PCs, so the newest one can only sync on the same network.");
+                    // Plan 0.10: a PC the server doesn't list isn't in, even on the network.
+                    var name = Wire.PublicKey(op.Sign) is { } sign && household.Member(HouseholdCrypto.DeviceIdOf(sign)) is { } added ? added.Name : "the newest PC";
+                    run.Notices.Add($"The household already has 16 PCs, so {name} couldn't be added. Remove one, then add {name} again.");
                 }
             }
             Done(op);
