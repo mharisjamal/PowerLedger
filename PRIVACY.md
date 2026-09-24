@@ -88,14 +88,17 @@ the switches above. Nothing is shared until you add a PC and confirm it on that 
   - the household's random ID;
   - each PC's random ID and public keys;
   - when each PC sends and how much;
-  - the encrypted totals, for 90 days, so a PC away from home can catch up.
+  - the encrypted totals, for 90 days, so a PC away from home can catch up. Each PC sends all its totals again about
+    once a month, still encrypted, so a new or returning PC can read the whole year.
 
   A pairing code's meeting place lasts 10 minutes. The server uses your IP address only to limit how often it is called,
   and doesn't keep it.
 - **On your network:** while **Let my other PCs find this one on the network** is on (Settings → Household), this PC
   tells other devices on a private network that it runs PowerLedger, with its name. Turn it off and it doesn't.
 - **Removing a PC or leaving:** a removed PC keeps what it already had but can read nothing new, since the household's
-  key changes. When the last PC leaves, the server deletes everything it kept for the household.
+  key changes. When the last PC leaves, the server deletes the totals, keys, requests and sign-in links it kept for the
+  household. It keeps only the household's random ID and its PCs' random IDs, public keys and when they joined and left,
+  so a PC that comes back is told it was removed.
 
 ## Signing in
 
@@ -106,12 +109,16 @@ approves it, and lets you get the household back with your recovery code if you 
   - an account ID made from the ID your provider gives it;
   - which household your account is linked to;
   - a sign-in session for each PC;
-  - requests from PCs waiting to join, for up to 7 days.
+  - requests from PCs waiting to join, for up to a day, or up to 7 days once approved.
 
   Your e-mail address is shown on your PC and not kept on the server.
+- **Approving a PC:** both PCs show the same 6-digit code before anything is handed over. Check they match. The server
+  passes the keys along, and a server that swapped them would make the codes differ.
 - **Your recovery code:**
-  - It is shown once. The server keeps the household key encrypted under a key made from that code, and it can't read
-    the code or the key.
+  - It is shown once. The server keeps the household key and its list of PCs encrypted under a key made from that code,
+    and it can't read the code, the key or the list.
+  - Signing in on a new PC with the code brings the household back to that PC alone: your other PCs are removed, the
+    code is used up, and the PC shows you a new one.
   - Keep the code safe: with it and your account, anyone can get into your household's totals.
 - **Deleting your account** (on the Household page) deletes the account, its link, its sessions and its recovery copy.
   Your household carries on without sign-in.

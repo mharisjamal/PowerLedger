@@ -1242,6 +1242,98 @@ public class RenderingTests
         });
     }
 
+    /// <summary>Security round, review: with no Google secret built in, only Microsoft is offered — no Google button,
+    /// and no "isn't set up yet" placeholder either.</summary>
+    [Fact]
+    public void With_only_a_microsoft_client_id_only_microsoft_is_offered()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var signIn = new SignIn(() => new FakeLoopbackServer(), _ => { }, new System.Net.Http.HttpClient(), new FakeTimeProvider(Now));
+                var account = new SignInViewModel(link, new FakeUiSettings(), signIn, UiThreads.Inline, "ms-client", "");
+                var model = new HouseholdViewModel(link, new FakeHouseholdHistory(), UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, account);
+                model.Show();
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    // Find walks the visual tree regardless of Visibility, so a Collapsed element is still findable —
+                    // the check that matters is its Visibility, not whether Find returns it at all.
+                    Find<Button>(window, b => Equals(b.Content, "Sign in with Microsoft")).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Visible, theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Sign in with Google")).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == SignInViewModel.Unavailable).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
+                    Save(window, 480, (int)window.ActualHeight, $"sign-in-only-microsoft-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Security round, review: with no client at all, the section explains sign-in isn't available in this
+    /// build instead of showing any button.</summary>
+    [Fact]
+    public void With_no_client_at_all_sign_in_explains_it_is_unavailable()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var signIn = new SignIn(() => new FakeLoopbackServer(), _ => { }, new System.Net.Http.HttpClient(), new FakeTimeProvider(Now));
+                var account = new SignInViewModel(link, new FakeUiSettings(), signIn, UiThreads.Inline, "", "");
+                var model = new HouseholdViewModel(link, new FakeHouseholdHistory(), UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, account);
+                model.Show();
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    // Find walks the visual tree regardless of Visibility, so a Collapsed element is still findable —
+                    // the check that matters is its Visibility, not whether Find returns it at all.
+                    Find<TextBlock>(window, t => t.Text == SignInViewModel.Unavailable).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Visible, theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Sign in with Microsoft")).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Sign in with Google")).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
+                    Save(window, 480, (int)window.ActualHeight, $"sign-in-unavailable-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();

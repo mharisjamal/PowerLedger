@@ -12,7 +12,7 @@ public class SignInViewModelTests
     private readonly FakeHttp _http = new();
     private Uri? _opened;
 
-    private SignInViewModel Model(string microsoftClientId = "ms-client", string googleClientId = "google-client", string googleClientSecret = "")
+    private SignInViewModel Model(string microsoftClientId = "ms-client", string googleClientId = "google-client", string googleClientSecret = "google-secret")
     {
         var signIn = new SignIn(() => _server, url => _opened = url, _http.Client(), TimeProvider.System);
         return new SignInViewModel(_link, _ui, signIn, UiThreads.Inline, microsoftClientId, googleClientId, googleClientSecret);
@@ -32,24 +32,40 @@ public class SignInViewModelTests
         return result;
     }
 
+    /// <summary>Security round, review: with no client ID (or, for Google, no secret) neither provider is offered, and
+    /// the section explains why instead of showing a button that would only refuse.</summary>
     [Fact]
-    public void With_no_client_id_the_button_says_sign_in_isnt_set_up_yet()
+    public void With_no_client_id_or_secret_neither_provider_is_offered()
     {
-        var model = Model(microsoftClientId: "", googleClientId: "");
+        var model = Model(microsoftClientId: "", googleClientId: "", googleClientSecret: "");
 
         model.MicrosoftAvailable.ShouldBeFalse();
-        model.MicrosoftButtonText.ShouldBe("Sign-in isn't set up yet");
         model.SignInWithMicrosoft.CanExecute(null).ShouldBeFalse();
-        model.GoogleButtonText.ShouldBe("Sign-in isn't set up yet");
+        model.GoogleAvailable.ShouldBeFalse();
+        model.SignInWithGoogle.CanExecute(null).ShouldBeFalse();
+        model.AnyAvailable.ShouldBeFalse();
+    }
+
+    /// <summary>Security round, review: a client ID alone isn't enough for Google — its installed-app flow calls for
+    /// the secret too.</summary>
+    [Fact]
+    public void With_a_google_client_id_but_no_secret_google_is_still_not_offered()
+    {
+        var model = Model(googleClientSecret: "");
+
+        model.MicrosoftAvailable.ShouldBeTrue();
+        model.GoogleAvailable.ShouldBeFalse();
+        model.AnyAvailable.ShouldBeTrue();
     }
 
     [Fact]
-    public void With_a_client_id_the_button_invites_sign_in()
+    public void With_a_client_id_and_secret_both_providers_are_offered()
     {
         var model = Model();
+
         model.MicrosoftAvailable.ShouldBeTrue();
-        model.MicrosoftButtonText.ShouldBe("Sign in with Microsoft");
-        model.GoogleButtonText.ShouldBe("Sign in with Google");
+        model.GoogleAvailable.ShouldBeTrue();
+        model.AnyAvailable.ShouldBeTrue();
     }
 
     [Fact]
@@ -125,6 +141,77 @@ public class SignInViewModelTests
 
         model.ConfirmingRecoverySignIn.ShouldBeFalse();
         _opened.ShouldNotBeNull();
+    }
+
+    /// <summary>Plan 0.10: the box is read once, when Sign in is pressed, and locked until that sign-in ends — a code
+    /// typed while the browser is up changes nothing about the attempt already under way.</summary>
+    [Fact]
+    public async Task A_code_typed_while_the_browser_is_open_is_ignored()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "device-xyz", "This-PC", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+        var model = Model();
+        model.Apply(_link.Status.Household);
+        // No code typed yet, so this goes straight through to the browser step.
+
+        model.SignInWithMicrosoft.Execute(null);
+        model.RecoveryCodeLocked.ShouldBeTrue();
+        var q = Query(_opened.ShouldNotBeNull());
+
+        model.RecoveryCodeInput = "typed-while-browser-open";
+        model.RecoveryCodeInput.ShouldBe("");   // ignored: the box is locked
+
+        _http.Reply(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(q["nonce"], "jo@example.com") }));
+        _server.Redirect.SetResult($"?code=abc&state={q["state"]}");
+
+        await WaitFor.True(() => _link.HouseholdRequests.Count > 0);
+        var (_, _, _, _, recoveryCode) = ((string, string, string, string, string?))_link.HouseholdRequests.Single();
+        recoveryCode.ShouldBeNull();   // the captured (empty) value was sent, never what got typed afterward
+        await WaitFor.True(() => !model.RecoveryCodeLocked);
+        model.RecoveryCodeInput = "now-editable-again";
+        model.RecoveryCodeInput.ShouldBe("now-editable-again");
+    }
+
+    /// <summary>Plan 0.10: the warning, and the sign-in itself, use the value captured when Sign in was pressed, even if
+    /// the box could somehow be changed before Continue.</summary>
+    [Fact]
+    public async Task The_warning_and_sign_in_use_the_value_captured_when_sign_in_was_pressed()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "device-xyz", "This-PC", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+        var model = Model();
+        model.Apply(_link.Status.Household);
+        model.RecoveryCodeInput = "original-code";
+
+        model.SignInWithMicrosoft.Execute(null);
+        model.RecoveryCodeLocked.ShouldBeTrue();
+        model.RecoveryCodeInput = "changed-code";   // ignored: captured already, box locked
+        model.RecoveryCodeInput.ShouldBe("original-code");
+
+        model.ContinueRecoverySignIn.Execute(null);
+        var q = Query(_opened.ShouldNotBeNull());
+        _http.Reply(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(q["nonce"], "jo@example.com") }));
+        _server.Redirect.SetResult($"?code=abc&state={q["state"]}");
+
+        await WaitFor.True(() => _link.HouseholdRequests.Count > 0);
+        var (_, _, _, _, recoveryCode) = ((string, string, string, string, string?))_link.HouseholdRequests.Single();
+        recoveryCode.ShouldBe("original-code");
+    }
+
+    [Fact]
+    public void Cancelling_the_recovery_warning_unlocks_the_box()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.RecoveryCodeInput = "abc";
+        model.SignInWithMicrosoft.Execute(null);
+        model.RecoveryCodeLocked.ShouldBeTrue();
+
+        model.CancelRecoverySignIn.Execute(null);
+
+        model.RecoveryCodeLocked.ShouldBeFalse();
+        model.RecoveryCodeInput = "def";
+        model.RecoveryCodeInput.ShouldBe("def");
     }
 
     /// <summary>Review finding A7: Google's client secret, configured on the view model, reaches the token exchange;
