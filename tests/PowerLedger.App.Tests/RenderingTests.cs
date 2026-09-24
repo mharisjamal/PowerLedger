@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.IO;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -10,13 +9,12 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Threading;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
+using static PowerLedger.App.Tests.UiHarness;
 
 namespace PowerLedger.App.Tests;
 
@@ -28,13 +26,9 @@ namespace PowerLedger.App.Tests;
 [Trait("Category", "UI")]
 public class RenderingTests
 {
-    public static readonly string Folder = Path.Combine(Path.GetTempPath(), "powerledger-renders");
+    public static readonly string Folder = UiHarness.Folder;
     private static readonly DateTimeOffset Now = new(2026, 9, 8, 14, 32, 7, TimeSpan.Zero);
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
-    private static readonly Lazy<Dispatcher> Ui = new(StartUi);
-    private static ResourceDictionary? _palette;
-    private static bool _working;
-    private static Exception? _stray;
 
     private static readonly (Page Page, string Name, Action<ShellViewModel> Prepare, Func<ShellViewModel, FrameworkElement> View)[] Pages =
     [
@@ -1417,91 +1411,10 @@ public class RenderingTests
         File.WriteAllBytes(Path.Combine(Folder, "report.pdf"), ReportDocument.Generate(shell.Report.Data, "0.1.0", Now, English));
     }
 
-    /// <summary>Runs <paramref name="work"/> on the application's thread, and throws here what it threw there.</summary>
-    private static void OnUi(Action work)
-    {
-        ExceptionDispatchInfo? failure = null;
-        Ui.Value.Invoke(() =>
-        {
-            _working = true;
-            try
-            {
-                if (_stray is { } stray) ExceptionDispatchInfo.Capture(stray).Throw();
-                work();
-            }
-            catch (Exception error)
-            {
-                failure = ExceptionDispatchInfo.Capture(error);
-            }
-            finally
-            {
-                _working = false;
-                _stray = null;
-            }
-        });
-        failure?.Throw();
-    }
-
-    /// <summary>
-    /// Starts the application, with the App's styles, on an STA thread that runs its dispatcher until the process ends.
-    /// A failure while no test is running is kept for the next test to throw rather than ending the process.
-    /// </summary>
-    private static Dispatcher StartUi()
-    {
-        var started = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-                application.Resources.MergedDictionaries.Add(new ResourceDictionary
-                {
-                    Source = new Uri("pack://application:,,,/PowerLedger;component/Theme/Styles.xaml", UriKind.Absolute),
-                });
-                application.DispatcherUnhandledException += (_, e) =>
-                {
-                    if (_working) return;
-                    _stray = e.Exception;
-                    e.Handled = true;
-                };
-                started.SetResult(Dispatcher.CurrentDispatcher);
-            }
-            catch (Exception error)
-            {
-                started.SetException(error);
-                return;
-            }
-            Dispatcher.Run();
-        })
-        {
-            IsBackground = true,
-        };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        return started.Task.GetAwaiter().GetResult();
-    }
-
-    /// <summary>Puts <paramref name="theme"/>'s palette first among the application's dictionaries, where the App keeps it.</summary>
-    private static void UseTheme(Theme theme)
-    {
-        var merged = Application.Current.Resources.MergedDictionaries;
-        if (_palette is not null) merged.Remove(_palette);
-        _palette = ThemeManager.Palette(theme);
-        merged.Insert(0, _palette);
-    }
-
     private static ShellViewModel Shell(FakeSaver saver)
         => new(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.1.0");
 
-    private static void Save(Visual visual, int width, int height, string name)
-    {
-        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
-        var png = new PngBitmapEncoder();
-        png.Frames.Add(BitmapFrame.Create(bitmap));
-        using var file = File.Create(Path.Combine(Folder, name));
-        png.Save(file);
-    }
+    private static void Save(Visual visual, int width, int height, string name) => UiHarness.Render(visual, width, height, name);
 
     /// <summary>A Tuesday afternoon eight days into September: asleep until 07:30, a working morning, an idle patch, a peak at
     /// 14:00; and now, on battery, the two external monitors Settings lists: the Dell, on a plug of its own, counted on top of
@@ -1665,32 +1578,6 @@ public class RenderingTests
                 });
         }
         return series;
-    }
-
-    /// <summary>The first <typeparamref name="T"/> under <paramref name="root"/>, outermost first, that <paramref name="match"/> accepts.</summary>
-    private static T? Find<T>(DependencyObject root, Func<T, bool>? match = null)
-        where T : DependencyObject
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is T found && (match is null || match(found))) return found;
-            if (Find(child, match) is { } deeper) return deeper;
-        }
-        return null;
-    }
-
-    private static void Pump(TimeSpan duration)
-    {
-        var frame = new DispatcherFrame();
-        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = duration };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            frame.Continue = false;
-        };
-        timer.Start();
-        Dispatcher.PushFrame(frame);
     }
 
     private const int NearestMonitor = 2;
