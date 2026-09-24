@@ -140,8 +140,12 @@ internal sealed class LanConversation(IFrameChannel channel, TimeSpan step)
         return channel.SendAsync(_cipher is null ? bytes : _cipher.Seal(bytes), cancel);
     }
 
-    /// <summary>The next message, which must be of <paramref name="type"/>, within <paramref name="within"/> or the usual step.</summary>
-    public async Task<LanMessage> ReceiveAsync(string type, CancellationToken cancel, TimeSpan? within = null)
+    /// <summary>The next message, whatever its type, within the usual step.</summary>
+    public Task<LanMessage> ReceiveAnyAsync(CancellationToken cancel) => ReceiveAsync(null, cancel);
+
+    /// <summary>The next message, which must be of <paramref name="type"/> unless that is null, within <paramref name="within"/>
+    /// or the usual step.</summary>
+    public async Task<LanMessage> ReceiveAsync(string? type, CancellationToken cancel, TimeSpan? within = null)
     {
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         limit.CancelAfter(within ?? step);
@@ -169,7 +173,7 @@ internal sealed class LanConversation(IFrameChannel channel, TimeSpan step)
             throw new LanException(LanProblem.Broken, error);
         }
         var message = LanMessages.Read(plaintext);
-        if (message?.Type != type) throw new LanException(LanProblem.Broken);
+        if (message?.Type is null || (type is not null && message.Type != type)) throw new LanException(LanProblem.Broken);
         return message;
     }
 }
