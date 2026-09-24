@@ -1,7 +1,8 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Midnight, light: the design's §3 tokens, laid out as the dark palette is. Ink3, LineStrong and Warn sit a little
-         past the design's first figures, where the contrast tests (text 4.5:1, borders and marks 3:1 on white) put them. -->
+         past the design's first figures, where the contrast tests (text 4.5:1, borders and marks 3:1 on white) put them;
+         Good and Bad a little darker, since the trends are text. -->
     <SolidColorBrush x:Key="Brush.Ground" Color="#F3F4FA" />
     <SolidColorBrush x:Key="Brush.Panel" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Brush.Raised" Color="#F7F8FD" />
@@ -33,8 +34,9 @@
     <SolidColorBrush x:Key="M.Accent" Color="#3A5BFF" />
     <SolidColorBrush x:Key="M.AccentSoft" Color="#243A5BFF" />
     <SolidColorBrush x:Key="M.OnAccent" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="M.Good" Color="#1E9E6C" />
-    <SolidColorBrush x:Key="M.Bad" Color="#D64545" />
+    <SolidColorBrush x:Key="M.AccentText" Color="#3A5BFF" />
+    <SolidColorBrush x:Key="M.Good" Color="#147F57" />
+    <SolidColorBrush x:Key="M.Bad" Color="#CC3B3B" />
     <SolidColorBrush x:Key="M.Warn" Color="#C28511" />
     <SolidColorBrush x:Key="M.PartCpu" Color="#3A5BFF" />
     <SolidColorBrush x:Key="M.PartGpu" Color="#7C5CE6" />
