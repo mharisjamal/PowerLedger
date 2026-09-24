@@ -163,6 +163,60 @@ public class HouseholdViewModelTests
         model.RecoveryMessage.ShouldBe("Couldn't reach the service.");
     }
 
+    /// <summary>Plan 0.9: this PC's join request ended unanswered or was refused; the page offers Ask again.</summary>
+    [Fact]
+    public void Can_ask_again_follows_the_services_status()
+    {
+        _link.Status = Statuses.Running() with
+        {
+            Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, CanAskAgain: true),
+        };
+        _link.Connect(true);
+        var model = Model();
+
+        model.Show();
+
+        model.HasHousehold.ShouldBeFalse();
+        model.CanAskAgain.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Asking_again_sends_it_and_shows_a_failure()
+    {
+        _link.Status = Statuses.Running() with
+        {
+            Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, CanAskAgain: true),
+        };
+        _link.Connect(true);
+        _link.HouseholdAnswer = new HouseholdOutcome(false, "Couldn't reach the service.");
+        var model = Model();
+        model.Show();
+
+        model.AskAgain.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe("askAgain");
+        model.AskAgainMessage.ShouldBe("Couldn't reach the service.");
+    }
+
+    [Fact]
+    public void Asking_again_successfully_re_reads_the_status_so_it_can_hide_once_the_service_says_so()
+    {
+        _link.Status = Statuses.Running() with
+        {
+            Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, CanAskAgain: true),
+        };
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+        model.CanAskAgain.ShouldBeTrue();
+
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) };
+        model.AskAgain.Execute(null);
+
+        model.CanAskAgain.ShouldBeFalse();
+        model.AskAgainMessage.ShouldBeNull();
+    }
+
     [Fact]
     public void Each_pc_shows_its_name_kind_whether_its_this_pc_and_its_share_of_this_months_energy()
     {

@@ -13,15 +13,18 @@ public class ConfirmJoinViewModelTests
     private ConfirmJoinViewModel Model(HouseholdNotice notice) => new(_link, UiThreads.Inline, _clock, notice);
 
     private static HouseholdNotice Notice(string? comparisonCode = "482 913", DateTimeOffset? expiresAt = null)
-        => new(NoticeKind.ConfirmJoin, "prompt-3", "Your household approved this PC. Does the approving PC show this code?", null, comparisonCode,
+        => new(NoticeKind.ConfirmJoin, "prompt-3", "Does your other PC show 482 913? Approve it there too.", null, comparisonCode,
             expiresAt ?? Now.AddMinutes(2));
 
+    /// <summary>Plan 0.9: ConfirmJoin now arrives before the approver has actually approved anything, so nothing here
+    /// may say this PC is approved.</summary>
     [Fact]
     public void The_heading_is_the_services_own_wording_and_the_code_shows_prominently()
     {
         var model = Model(Notice());
 
-        model.Heading.ShouldBe("Your household approved this PC. Does the approving PC show this code?");
+        model.Heading.ShouldBe("Does your other PC show 482 913? Approve it there too.");
+        model.Heading.ShouldNotContain("approved");
         model.HasComparisonCode.ShouldBeTrue();
         model.ComparisonCode.ShouldBe("482 913");
     }
@@ -40,15 +43,17 @@ public class ConfirmJoinViewModelTests
         closed.ShouldBe(1);
     }
 
+    /// <summary>Plan 0.9: "They don't match", not a plain Cancel — it deletes R's request, or makes it leave if it was
+    /// already added, the same AnswerPromptRequest(false) as before.</summary>
     [Fact]
-    public void Cancel_sends_refuse_for_this_prompt_and_closes()
+    public void They_dont_match_sends_refuse_for_this_prompt_and_closes()
     {
         _link.Connect(true);
         var model = Model(Notice());
         var closed = 0;
         model.Closed += () => closed++;
 
-        model.Cancel.Execute(null);
+        model.CodesDontMatch.Execute(null);
 
         _link.HouseholdRequests.Single().ShouldBe(("prompt-3", false));
         closed.ShouldBe(1);

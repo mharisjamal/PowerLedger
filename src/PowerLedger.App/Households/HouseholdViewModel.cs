@@ -78,6 +78,8 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private bool _recoveryMissing;
     private string? _recoveryMessage;
     private bool _hasOldRows;
+    private bool _canAskAgain;
+    private string? _askAgainMessage;
 
     public HouseholdViewModel(
         IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
@@ -108,6 +110,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         ConfirmPending = new RelayCommand(() => _ = ConfirmPendingAsync());
         CancelPending = new RelayCommand(EndConfirm);
         MakeRecoveryCode = new RelayCommand(() => _ = MakeRecoveryCodeAsync());
+        AskAgain = new RelayCommand(() => _ = AskAgainAsync());
     }
 
     /// <summary>N2's sign-in section (Plan N tasks A6, A7): works whether or not this PC is in a household.</summary>
@@ -164,6 +167,15 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     public string? RecoveryMessage { get => _recoveryMessage; private set => SetProperty(ref _recoveryMessage, value); }
 
     public IRelayCommand MakeRecoveryCode { get; }
+
+    /// <summary>N2, plan 0.9: this PC's request to join ended unanswered or was refused; only the user asks again, so
+    /// the household can't be made to answer approval after approval.</summary>
+    public bool CanAskAgain { get => _canAskAgain; private set => SetProperty(ref _canAskAgain, value); }
+
+    /// <summary>Why Ask again didn't go through, or null.</summary>
+    public string? AskAgainMessage { get => _askAgainMessage; private set => SetProperty(ref _askAgainMessage, value); }
+
+    public IRelayCommand AskAgain { get; }
 
     /// <summary>Opens Add a PC (Plan N task A2 wires the window up to this).</summary>
     public ICommand AddPc { get; }
@@ -259,6 +271,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     {
         Account.Apply(household);   // sign-in works whether or not this PC is in a household
         RecoveryMissing = household?.RecoveryMissing ?? false;   // task 0.8: can matter with or without a household
+        CanAskAgain = household?.CanAskAgain ?? false;   // plan 0.9: this PC is waiting to be let in, not a member yet
         HasHousehold = household?.HouseholdId is not null;
         Problem = HasHousehold ? household!.Problem : null;
         if (!HasHousehold)
@@ -380,5 +393,17 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     {
         var result = await _link.NewRecoveryCodeAsync().ConfigureAwait(false);
         _threads.Post(() => RecoveryMessage = result.Ok ? null : result.Message);
+    }
+
+    /// <summary>Plan 0.9: only the user asks again; a success re-reads the status at once, so CanAskAgain hides as soon
+    /// as the service says this PC has a request out again rather than waiting for the next minute's refresh.</summary>
+    private async Task AskAgainAsync()
+    {
+        var result = await _link.AskAgainAsync().ConfigureAwait(false);
+        _threads.Post(() =>
+        {
+            AskAgainMessage = result.Ok ? null : result.Message;
+            if (result.Ok) Refresh();
+        });
     }
 }
