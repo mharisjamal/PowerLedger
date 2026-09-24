@@ -12,7 +12,13 @@ and JetBrains Mono); the switch in Settings plus a title-bar toggle.
 
 - **Choosing.** Settings → Preferences gains **Look: Classic / Midnight**. Each look's title bar also has a small
   "Switch look" button. Switching is immediate: the window is replaced in place, on the same page, at the same size
-  and position. The choice is remembered in `ui.json` (`Look`, default `Classic`, so nobody's App changes on update).
+  and position. The choice is remembered in `ui.json` (`Look`).
+- **Midnight is the default** (owner's decision, 2026-09-25): new installs, and every PC updating from 0.7.x or earlier
+  (whose `ui.json` has no `Look`), open in Midnight. A PC whose user chose Classic keeps Classic.
+- **Saying so once.** The first time Midnight shows, a banner under the page header says "This is PowerLedger's new
+  look" and "Prefer the classic one? Switch back any time here, or in Settings → Preferences.", with **Switch back**
+  and **Got it**. It is not a dialog and blocks nothing. Either button, or any look switch, retires it for good
+  (`LookIntroduced` in `ui.json`). What's new for 0.8.0 says the same.
 - **Midnight's window.**
   - A 232 px sidebar: the brand mark and "PowerLedger" at the top; then groups with small eyebrow labels:
     - OVERVIEW: Dashboard, History;
