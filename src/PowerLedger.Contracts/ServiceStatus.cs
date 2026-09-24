@@ -16,6 +16,7 @@ namespace PowerLedger.Contracts;
 /// <param name="Monitors">The external monitors the service knows; null from an older service, which doesn't send them.</param>
 /// <param name="PowerDevices">The UPSes and power supplies the service reads over USB; null from an older service.</param>
 /// <param name="Sharing">What the user agreed to send and how sending is going; null from an older service.</param>
+/// <param name="Household">This PC's household, or where it stands without one; null from an older service.</param>
 public sealed record ServiceStatus(
     string Version, DateTimeOffset StartedAt, long Ticks,
     IReadOnlyList<SourceStatus> Sources, int SuspectTicks, int SensorRestarts,
@@ -23,7 +24,8 @@ public sealed record ServiceStatus(
     string? WriteProblem, string? DatabaseNotice, ReadingFrame? Last,
     IReadOnlyList<MonitorStatus>? Monitors = null,
     IReadOnlyList<PowerDeviceStatus>? PowerDevices = null,
-    SharingStatus? Sharing = null);
+    SharingStatus? Sharing = null,
+    HouseholdStatus? Household = null);
 
 /// <param name="Name">The source's name, e.g. "battery".</param>
 /// <param name="Supported">False when this machine cannot answer at all.</param>

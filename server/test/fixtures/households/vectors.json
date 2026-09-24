@@ -1,0 +1,14 @@
+{
+  "description": "Made by the .NET household code (Core/Households); the Worker checks it with WebCrypto so the two sides agree.",
+  "signSpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6mBVRqozoiPFwFls_AE_jy9LNSrgJj8-qDIasOjpjj1WrzwP00B8I8S94EkWIeRSDMx61p9rxzfdoBtiQsMMCQ",
+  "dhSpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEL0BJ8Q6sY8j_rEdcuivI4GeEWR3sECy_NKBe86G2vx8WJLTL4JKH2UmujEe_PkvJYI7EbPz0Y_w7Y3yMCQvnEw",
+  "deviceId": "0286a9b8bc26677a035350e2d177c545",
+  "request": {
+    "method": "POST",
+    "path": "/v1/households/0123456789abcdef0123456789abcdef/batches",
+    "time": 1790000000,
+    "body": "eyJkZXZpY2UiOiJ4IiwiZXBvY2giOjEsInNlcSI6MSwiYm9keSI6IkFBQUEifQ",
+    "signedText": "POST\n/v1/households/0123456789abcdef0123456789abcdef/batches\n1790000000\n5d6913a208e859955b870b06d0cf154d76af8d43b477177f2d8ec1a79cf8d2f2",
+    "signature": "dEP5MwD85XORILQJp66k8Jc1pLLuYYwxBdqReEgNHevCnRIQ8gt8aw9seQ2axM739jPRKuQl5kC6GHuzWovaXg"
+  }
+}
