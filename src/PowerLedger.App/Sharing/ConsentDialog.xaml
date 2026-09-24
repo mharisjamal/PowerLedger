@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:PowerLedger.App"
-        Title="Help make PowerLedger better" Width="620" SizeToContent="Height" MaxHeight="820"
+        Title="Help make PowerLedger better" Width="620" SizeToContent="Height"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
         Background="{DynamicResource Brush.Panel}" Foreground="{DynamicResource Brush.Ink}"
         UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
@@ -34,78 +34,87 @@
         </Style>
     </Window.Resources>
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
-        <StackPanel Margin="28,24,28,20">
-            <TextBlock Style="{StaticResource Prose}" FontSize="16" Margin="0,0,0,12" Text="Help make PowerLedger better" />
-            <TextBlock Style="{StaticResource Prose}"
-                       Text="PowerLedger works fully without sending anything. If you agree, it sends what you choose below to PowerLedger's server once a day. Nothing is sent until you choose, and you can change your mind at any time in Settings → Privacy." />
+    <!-- The buttons have a row of their own, so however short the screen, they stay in view while the text above scrolls. -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <StackPanel Margin="28,24,28,8">
+                <TextBlock Style="{StaticResource Prose}" FontSize="16" Margin="0,0,0,12" Text="Help make PowerLedger better" />
+                <TextBlock Style="{StaticResource Prose}"
+                           Text="PowerLedger works fully without sending anything. If you agree, it sends what you choose below to PowerLedger's server once a day. Nothing is sent until you choose, and you can change your mind at any time in Settings → Privacy." />
 
-            <Border Style="{StaticResource Switch}" Margin="0,16,0,0">
-                <StackPanel>
-                    <CheckBox Style="{StaticResource Tick}" IsChecked="{Binding Diagnostics}">
-                        <TextBlock Style="{StaticResource SwitchTitle}" Text="Crash and sensor reports" />
-                    </CheckBox>
-                    <TextBlock Style="{StaticResource SwitchLine}" Text="When PowerLedger crashes or a sensor fails, send what went wrong and on which hardware, so it can be fixed." />
-                    <Expander Style="{StaticResource Detail}">
-                        <TextBlock Style="{StaticResource SwitchDetail}"
-                                   Text="Error messages and stack traces, with your user, PC and folder names removed; which sensors work or fail; the graphics card, UPS or power supply they read; PowerLedger's and Windows' versions; whether this PC is a laptop or a desktop." />
-                    </Expander>
+                <Border Style="{StaticResource Switch}" Margin="0,16,0,0">
+                    <StackPanel>
+                        <CheckBox Style="{StaticResource Tick}" IsChecked="{Binding Diagnostics}">
+                            <TextBlock Style="{StaticResource SwitchTitle}" Text="Crash and sensor reports" />
+                        </CheckBox>
+                        <TextBlock Style="{StaticResource SwitchLine}" Text="When PowerLedger crashes or a sensor fails, send what went wrong and on which hardware, so it can be fixed." />
+                        <Expander Style="{StaticResource Detail}">
+                            <TextBlock Style="{StaticResource SwitchDetail}"
+                                       Text="Error messages and stack traces, with your user, PC and folder names removed; which sensors work or fail; the graphics card, UPS or power supply they read; PowerLedger's and Windows' versions; whether this PC is a laptop or a desktop." />
+                        </Expander>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Switch}">
+                    <StackPanel>
+                        <CheckBox Style="{StaticResource Tick}" IsChecked="{Binding Usage}">
+                            <TextBlock Style="{StaticResource SwitchTitle}" Text="Usage" />
+                        </CheckBox>
+                        <TextBlock Style="{StaticResource SwitchLine}" Text="Send how PowerLedger is used, so the next version works on what matters." />
+                        <Expander Style="{StaticResource Detail}">
+                            <TextBlock Style="{StaticResource SwitchDetail}"
+                                       Text="How often the window opens, which pages you open, which settings you change (never what you change them to), reports exported, updates installed, days since you started, theme and display language." />
+                        </Expander>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Switch}">
+                    <StackPanel>
+                        <CheckBox Style="{StaticResource Tick}" IsChecked="{Binding Power}">
+                            <TextBlock Style="{StaticResource SwitchTitle}" Text="Hardware and power" />
+                        </CheckBox>
+                        <TextBlock Style="{StaticResource SwitchLine}" Text="Send this PC's parts and its power, minute by minute, so PowerLedger's estimates get more accurate for everyone." />
+                        <Expander Style="{StaticResource Detail}">
+                            <TextBlock Style="{StaticResource SwitchDetail}"
+                                       Text="The models of the processor, graphics card, monitors, power supply and UPS; memory size and the machine details in Settings; your tariff's price and currency; and for each minute, the watts of each part, the loads, the brightness, whether the screen was on, idle, locked or on battery, and which figures were measured or estimated." />
+                        </Expander>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Switch}" BorderThickness="0,0,0,0">
+                    <StackPanel>
+                        <CheckBox Style="{StaticResource Tick}" IsChecked="{Binding Share}" IsEnabled="{Binding CanShare}"
+                                  ToolTipService.ShowOnDisabled="True" ToolTip="Needs Hardware and power turned on">
+                            <TextBlock Style="{StaticResource SwitchTitle}" Text="Share my detailed data" />
+                        </CheckBox>
+                        <TextBlock Style="{StaticResource SwitchLine}"
+                                   Text="Let what Hardware and power sends be given or sold, as it is, to researchers, hardware makers and energy companies. It goes under a random ID, never your name. Copies already shared can't be taken back." />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Style="{StaticResource SwitchDetail}" Margin="0,10,0,0"
+                           Text="Never sent: your name or your PC's name, serial numbers, files, folders or other programs. Your IP address is used only to find your country, then dropped." />
+
+                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button Style="{StaticResource Link}" Content="See what would be sent" Command="{Binding SeeWhatWouldBeSent}" />
+                    <Button Style="{StaticResource Link}" Content="Privacy policy" Command="{Binding OpenPrivacyPolicy}" Margin="18,0,0,0" />
                 </StackPanel>
-            </Border>
 
-            <Border Style="{StaticResource Switch}">
-                <StackPanel>
-                    <CheckBox Style="{StaticResource Tick}" IsChecked="{Binding Usage}">
-                        <TextBlock Style="{StaticResource SwitchTitle}" Text="Usage" />
-                    </CheckBox>
-                    <TextBlock Style="{StaticResource SwitchLine}" Text="Send how PowerLedger is used, so the next version works on what matters." />
-                    <Expander Style="{StaticResource Detail}">
-                        <TextBlock Style="{StaticResource SwitchDetail}"
-                                   Text="How often the window opens, which pages you open, which settings you change (never what you change them to), reports exported, updates installed, days since you started, theme and display language." />
-                    </Expander>
-                </StackPanel>
-            </Border>
-
-            <Border Style="{StaticResource Switch}">
-                <StackPanel>
-                    <CheckBox Style="{StaticResource Tick}" IsChecked="{Binding Power}">
-                        <TextBlock Style="{StaticResource SwitchTitle}" Text="Hardware and power" />
-                    </CheckBox>
-                    <TextBlock Style="{StaticResource SwitchLine}" Text="Send this PC's parts and its power, minute by minute, so PowerLedger's estimates get more accurate for everyone." />
-                    <Expander Style="{StaticResource Detail}">
-                        <TextBlock Style="{StaticResource SwitchDetail}"
-                                   Text="The models of the processor, graphics card, monitors, power supply and UPS; memory size and the machine details in Settings; your tariff's price and currency; and for each minute, the watts of each part, the loads, the brightness, whether the screen was on, idle, locked or on battery, and which figures were measured or estimated." />
-                    </Expander>
-                </StackPanel>
-            </Border>
-
-            <Border Style="{StaticResource Switch}" BorderThickness="0,0,0,0">
-                <StackPanel>
-                    <CheckBox Style="{StaticResource Tick}" IsChecked="{Binding Share}" IsEnabled="{Binding CanShare}"
-                              ToolTipService.ShowOnDisabled="True" ToolTip="Needs Hardware and power turned on">
-                        <TextBlock Style="{StaticResource SwitchTitle}" Text="Share my detailed data" />
-                    </CheckBox>
-                    <TextBlock Style="{StaticResource SwitchLine}"
-                               Text="Let what Hardware and power sends be given or sold, as it is, to researchers, hardware makers and energy companies. It goes under a random ID, never your name. Copies already shared can't be taken back." />
-                </StackPanel>
-            </Border>
-
-            <TextBlock Style="{StaticResource SwitchDetail}" Margin="0,10,0,0"
-                       Text="Never sent: your name or your PC's name, serial numbers, files, folders or other programs. Your IP address is used only to find your country, then dropped." />
-
-            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                <Button Style="{StaticResource Link}" Content="See what would be sent" Command="{Binding SeeWhatWouldBeSent}" />
-                <Button Style="{StaticResource Link}" Content="Privacy policy" Command="{Binding OpenPrivacyPolicy}" Margin="18,0,0,0" />
             </StackPanel>
-
+        </ScrollViewer>
+        <StackPanel Grid.Row="1" Margin="28,4,28,20">
             <TextBlock Style="{StaticResource SwitchDetail}" Foreground="{DynamicResource Brush.Amber}" Text="{Binding Message}"
                        Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
 
-            <UniformGrid Rows="1" Columns="3" Margin="0,20,0,0">
+            <UniformGrid Rows="1" Columns="3" Margin="0,12,0,0">
                 <Button Style="{StaticResource Quiet}" Content="Allow all" Command="{Binding AllowAll}" Margin="0,0,6,0" HorizontalContentAlignment="Center" />
                 <Button Style="{StaticResource Quiet}" Content="Allow none" Command="{Binding AllowNone}" Margin="6,0,6,0" HorizontalContentAlignment="Center" />
                 <Button Style="{StaticResource Quiet}" Content="Save choices" Command="{Binding Save}" Margin="6,0,0,0" HorizontalContentAlignment="Center" />
             </UniformGrid>
         </StackPanel>
-    </ScrollViewer>
+    </Grid>
 </Window>

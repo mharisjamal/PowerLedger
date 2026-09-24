@@ -796,6 +796,41 @@ public class RenderingTests
         shell.Wizard.Machine.Monitors.Count.ShouldBe(2);
     }
 
+    /// <summary>On a screen shorter than the dialog (a 1366 × 768 laptop's work area is about 728 pixels high), the text
+    /// scrolls and the three buttons stay in view, so the choice can always be made.</summary>
+    [Fact]
+    public void The_consent_dialogs_buttons_stay_in_view_when_the_screen_is_too_short_for_all_of_it()
+    {
+        OnUi(() =>
+        {
+            UseTheme(Theme.Light);
+            var link = new FakeLink();
+            link.Connect(true);
+            var dialog = new ConsentDialog(new ConsentViewModel(link, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { }))
+            {
+                Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                ShowInTaskbar = false, ShowActivated = false,
+            };
+            dialog.MaxHeight = 420;
+            dialog.Show();
+            try
+            {
+                Pump(TimeSpan.FromMilliseconds(300));
+                dialog.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                var content = (FrameworkElement)dialog.Content;
+                foreach (var label in new[] { "Allow all", "Allow none", "Save choices" })
+                {
+                    var button = Find<Button>(dialog, candidate => candidate.Content as string == label).ShouldNotBeNull(label);
+                    button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, label);
+                }
+            }
+            finally
+            {
+                dialog.Close();
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();
