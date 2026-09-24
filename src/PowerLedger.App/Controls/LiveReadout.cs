@@ -29,9 +29,15 @@ internal sealed class LiveReadout : Instrument
     internal override string Describe()
         => double.IsFinite(Value) ? Format.Watts(Value, CultureInfo.CurrentCulture) + " watts" : "Waiting for a reading";
 
+    /// <summary>What the readout shows: the reading, or "No reading" while there is none.</summary>
+    internal static string Figure(double shown, CultureInfo culture) => double.IsFinite(shown) ? Format.Watts(shown, culture) : Format.NoReading;
+
+    /// <summary>Without a reading, "No reading" sits smaller, muted and without the unit on the numerals' baseline, and
+    /// the readout keeps the numerals' height so nothing under it moves when the first reading comes.</summary>
     protected override Size MeasureOverride(Size availableSize)
     {
         var number = Number();
+        if (!double.IsFinite(Shown)) return new Size(Words().Width, number.Height);
         var unit = Unit();
         return new Size(number.WidthIncludingTrailingWhitespace + 8 + unit.Width, number.Height);
     }
@@ -39,12 +45,22 @@ internal sealed class LiveReadout : Instrument
     protected override void OnRender(DrawingContext dc)
     {
         var number = Number();
+        if (!double.IsFinite(Shown))
+        {
+            var words = Words();
+            dc.DrawText(words, new Point(0, number.Baseline - words.Baseline));
+            return;
+        }
         var unit = Unit();
         dc.DrawText(number, new Point(0, 0));
         dc.DrawText(unit, new Point(number.WidthIncludingTrailingWhitespace + 8, number.Baseline - unit.Baseline));
     }
 
-    private FormattedText Number() => Text(Format.Watts(Shown, CultureInfo.CurrentCulture), NumberSize, InkBrush, FontWeights.Light);
+    /// <summary>The numerals; without a reading, zero's, whose height the readout keeps.</summary>
+    private FormattedText Number()
+        => Text(Figure(double.IsFinite(Shown) ? Shown : 0, CultureInfo.CurrentCulture), NumberSize, InkBrush, FontWeights.Light);
+
+    private FormattedText Words() => Text(Figure(double.NaN, CultureInfo.CurrentCulture), NumberSize * 0.5, LabelBrush, FontWeights.Light);
 
     private FormattedText Unit() => Text("W", NumberSize * 0.31, LabelBrush);
 

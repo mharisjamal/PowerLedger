@@ -57,10 +57,10 @@ public class RangesTests
         custom.From.ShouldBe(new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero));
         custom.To.ShouldBe(Now);
         custom.Through.ShouldBe(new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
-        custom.Title.ShouldBe("1 Sep – 30 Sep 2026");
+        custom.Title.ShouldBe("1 Sep to 30 Sep 2026");
 
-        Ranges.Days(new DateOnly(2026, 9, 5), new DateOnly(2026, 9, 2), Now, Utc, English).Title.ShouldBe("2 Sep – 5 Sep 2026");
-        Ranges.Days(new DateOnly(2025, 12, 28), new DateOnly(2026, 1, 3), Now, Utc, English).Title.ShouldBe("28 Dec 2025 – 3 Jan 2026");
+        Ranges.Days(new DateOnly(2026, 9, 5), new DateOnly(2026, 9, 2), Now, Utc, English).Title.ShouldBe("2 Sep to 5 Sep 2026");
+        Ranges.Days(new DateOnly(2025, 12, 28), new DateOnly(2026, 1, 3), Now, Utc, English).Title.ShouldBe("28 Dec 2025 to 3 Jan 2026");
         Ranges.Days(new DateOnly(2026, 9, 3), new DateOnly(2026, 9, 3), Now, Utc, English).Title.ShouldBe("Thu 3 Sep 2026");
     }
 

@@ -22,7 +22,7 @@ internal sealed record UiThreads(Action<Action> Post, Action<Action> Background)
 internal sealed record BudgetRow(Part Part, string Name, string Detail, string Watts, string Percent, double Share);
 
 /// <summary>The live half of the Now screen, replaced whole on every reading. Watts is NaN while there is no reading,
-/// which the readout shows as a dash and the meter as no needle.</summary>
+/// which the readout shows as "No reading" and the meter as no needle.</summary>
 internal sealed record LivePanel(
     double Watts, string Eyebrow, Quality? Quality, string QualityNote, IReadOnlyList<SparkSample> Spark,
     MeterRange Meter, double AverageW, double PeakW, IReadOnlyList<BudgetRow> Budget, double BudgetTotalW)
@@ -35,7 +35,9 @@ internal sealed record TodayLedger(
     string Date, string Energy, string Cost, string Tariff, string Average, string Peak, string PeakAt,
     string On, string Idle, string IdleWasted, string Asleep, string Co2, string Co2Factor)
 {
-    public static TodayLedger Empty { get; } = new("", "–", "–", "", "–", "–", "", "–", "–", "", "–", "–", "");
+    public static TodayLedger Empty { get; } = new(
+        "", Format.Missing, Format.Missing, "", Format.Missing, Format.Missing, "", Format.Missing, Format.Missing, "",
+        Format.Missing, Format.Missing, "");
 }
 
 /// <summary>The month-to-date ledger, as the user reads it.</summary>
@@ -43,13 +45,15 @@ internal sealed record MonthLedger(
     string Name, string Summary, string Energy, string Cost, string Projected, string ProjectedEnergy, string DailyAverage,
     string IdleWaste, string IdleWasteCost, string Lowest, string LowestDate, string Highest, string HighestDate, string NextReport)
 {
-    public static MonthLedger Empty { get; } = new("", "", "–", "–", "–", "", "–", "–", "", "–", "", "–", "", "");
+    public static MonthLedger Empty { get; } = new(
+        "", "", Format.Missing, Format.Missing, Format.Missing, "", Format.Missing, Format.Missing, "", Format.Missing, "",
+        Format.Missing, "", "");
 }
 
 /// <summary>Today's chart legend: each band's energy so far.</summary>
 internal sealed record ChartLegend(string Cpu, string Gpu, string Display, string Rest)
 {
-    public static ChartLegend Empty { get; } = new("–", "–", "–", "–");
+    public static ChartLegend Empty { get; } = new(Format.Missing, Format.Missing, Format.Missing, Format.Missing);
 }
 
 /// <summary>The status bar and the rail's footer.</summary>

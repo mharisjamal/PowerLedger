@@ -5,7 +5,7 @@ using System.Windows.Controls;
 namespace PowerLedger.App;
 
 /// <summary>
-/// A trend (plan O M1-2): ▲ for a rise, ▼ for a fall, — for no change, each with a few words; words alone for
+/// A trend (plan O M1-2): ▲ for a rise, ▼ for a fall, ● for no change, each with a few words; words alone for
 /// <see cref="TrendKind.Text"/>; nothing for <see cref="TrendKind.Quality"/>, whose slot the view gives to a chip. The
 /// arrow says which way the figure went; the colour says whether that is good news (<see cref="Sense"/>): green or red,
 /// the other way round where <see cref="LowerIsBetter"/>, muted for neither. Its template is the implicit local:TrendMark
@@ -44,12 +44,12 @@ internal sealed class TrendMark : Control
         mark.SetValue(SenseKey, DashboardMaths.Sense(mark.Kind, mark.LowerIsBetter));
     }
 
-    /// <summary>The mark for a kind: the arrows and the dash, or nothing.</summary>
+    /// <summary>The mark for a kind: an arrowhead up or down, a dot for level, or nothing.</summary>
     internal static string MarkFor(TrendKind kind) => kind switch
     {
         TrendKind.Up => "▲",
         TrendKind.Down => "▼",
-        TrendKind.Flat => "—",
+        TrendKind.Flat => "●",
         _ => string.Empty,
     };
 

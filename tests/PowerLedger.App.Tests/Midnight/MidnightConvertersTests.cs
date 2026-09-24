@@ -21,7 +21,8 @@ public class MidnightConvertersTests
     [Theory]
     [InlineData("34.2 W", "34.2", "W")]
     [InlineData("0.284 kWh", "0.284", "kWh")]
-    [InlineData("–", "–", "")]
+    [InlineData("No reading", "No reading", "")]
+    [InlineData("N/A", "N/A", "")]
     [InlineData("", "", "")]
     public void A_figure_splits_into_its_number_and_its_unit(string figure, string number, string unit)
     {

@@ -93,13 +93,13 @@ internal static class Ranges
         return Build(first, last, now, zone, Span(first, last, culture));
     }
 
-    /// <summary>"Thu 3 Sep 2026", "1 Sep – 30 Sep 2026", "28 Dec 2025 – 3 Jan 2026".</summary>
+    /// <summary>"Thu 3 Sep 2026", "1 Sep to 30 Sep 2026", "28 Dec 2025 to 3 Jan 2026".</summary>
     public static string Span(DateOnly first, DateOnly last, CultureInfo culture)
     {
         if (first == last) return first.ToString("ddd d MMM yyyy", culture);
         return first.Year == last.Year
-            ? $"{first.ToString("d MMM", culture)} – {last.ToString("d MMM yyyy", culture)}"
-            : $"{first.ToString("d MMM yyyy", culture)} – {last.ToString("d MMM yyyy", culture)}";
+            ? $"{first.ToString("d MMM", culture)} to {last.ToString("d MMM yyyy", culture)}"
+            : $"{first.ToString("d MMM yyyy", culture)} to {last.ToString("d MMM yyyy", culture)}";
     }
 
     /// <summary>The first and last local days a range holds data for: a range under way stops at today, and an empty one keeps its days.</summary>

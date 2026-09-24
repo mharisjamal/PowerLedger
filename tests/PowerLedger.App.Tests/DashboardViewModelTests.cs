@@ -164,7 +164,7 @@ public sealed class DashboardViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Without_the_service_the_live_card_shows_a_dash_and_the_last_known_quality()
+    public void Without_the_service_the_live_card_shows_no_reading_and_the_last_known_quality()
     {
         var dashboard = Dashboard();
         dashboard.Show();
@@ -172,14 +172,14 @@ public sealed class DashboardViewModelTests : IDisposable
         _link.Connect(false);
 
         var power = dashboard.Kpis[0];
-        power.Big.ShouldBe("–");
+        power.Big.ShouldBe("No reading");
         power.Small.ShouldBe("Service not running");
         power.Trend.ShouldBe("Measured");
         power.Kind.ShouldBe(TrendKind.Quality);
         power.Fill.ShouldBe(0);
         dashboard.Kpis[1].Big.ShouldBe("0.284 kWh");         // the rest of the page stays
         dashboard.Parts.Count.ShouldBe(4);
-        dashboard.Parts[0].NowW.ShouldBe("–");
+        dashboard.Parts[0].NowW.ShouldBe("N/A");
         dashboard.Parts[0].Quality.ShouldBeNull();
     }
 
@@ -194,15 +194,15 @@ public sealed class DashboardViewModelTests : IDisposable
         dashboard.Kpis[1].Big.ShouldBe("0.284 kWh");
         dashboard.Kpis[1].Trend.ShouldBeNull();               // no average day to compare
         dashboard.Kpis[1].Fill.ShouldBe(0);
-        dashboard.Parts[0].Energy.ShouldBe("–");
+        dashboard.Parts[0].Energy.ShouldBe("N/A");
 
         _history.Answer = Reports.Empty;
         _summary.Snapshot = null;
         dashboard.Range = RangePill.Week;
         dashboard.ChartMessage.ShouldBe("No history yet");
-        dashboard.Kpis[1].Big.ShouldBe("–");
+        dashboard.Kpis[1].Big.ShouldBe("No reading");
         dashboard.Kpis[1].Small.ShouldBe("History can't be read right now");
-        dashboard.Kpis[2].Big.ShouldBe("–");
+        dashboard.Kpis[2].Big.ShouldBe("No reading");
     }
 
     [Fact]
@@ -341,7 +341,7 @@ public sealed class DashboardViewModelTests : IDisposable
 
         dashboard.ChartMessage.ShouldBe("Couldn't read the history");
         dashboard.Kpis[1].Small.ShouldBe("History can't be read right now");
-        dashboard.Kpis[1].Big.ShouldBe(Format.Missing);
+        dashboard.Kpis[1].Big.ShouldBe(Format.NoReading);
     }
 
     /// <summary>The Dashboard with its background reads held in <paramref name="queue"/> until a test runs them.</summary>

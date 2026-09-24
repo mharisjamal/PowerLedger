@@ -15,7 +15,7 @@ public class RangePickerTests
     [InlineData("ThirtyDays", "Last 30 days")]
     [InlineData("ThisMonth", "September 2026")]
     [InlineData("LastMonth", "August 2026")]
-    [InlineData("Custom", "2 Sep – 8 Sep 2026")]
+    [InlineData("Custom", "2 Sep to 8 Sep 2026")]
     [InlineData("LastHour", "Last hour")]
     [InlineData("LastYear", "Last 365 days")]
     [InlineData("All", "Since 8 Sep 2026")]
@@ -41,7 +41,7 @@ public class RangePickerTests
         picker.IsCustom.ShouldBeTrue();
         picker.To = new DateTime(2026, 9, 3);
         changes.ShouldBe(2);
-        picker.Resolve(Now, TimeZoneInfo.Utc, English).Title.ShouldBe("1 Sep – 3 Sep 2026");
+        picker.Resolve(Now, TimeZoneInfo.Utc, English).Title.ShouldBe("1 Sep to 3 Sep 2026");
     }
 
     [Fact]

@@ -55,7 +55,7 @@
                 <local:Card Style="{StaticResource M.Card}" Margin="0,0,16,16" AutomationProperties.Name="{Binding Label}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="{Binding Label, Converter={StaticResource Upper}}" />
-                        <TextBlock Style="{StaticResource M.Text.Display}" Margin="0,10,0,0" TextTrimming="CharacterEllipsis">
+                        <TextBlock x:Name="Figure" Style="{StaticResource M.Text.Display}" Margin="0,10,0,0" TextTrimming="CharacterEllipsis">
                             <Run Text="{Binding Big, Mode=OneWay, Converter={StaticResource FigurePart}, ConverterParameter=Number}" /><Run
                                  Text=" " FontSize="18" /><Run Text="{Binding Big, Mode=OneWay, Converter={StaticResource FigurePart}, ConverterParameter=Unit}"
                                  FontFamily="{StaticResource M.Font.Ui}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource M.Ink2}" />
@@ -72,6 +72,11 @@
                     </StackPanel>
                 </local:Card>
                 <DataTemplate.Triggers>
+                    <!-- Without a figure, "No reading" is a state rather than a number: regular and muted, in the figure's face and size. -->
+                    <DataTrigger Binding="{Binding Big}" Value="{x:Static local:Format.NoReading}">
+                        <Setter TargetName="Figure" Property="FontWeight" Value="Normal" />
+                        <Setter TargetName="Figure" Property="Foreground" Value="{DynamicResource M.Ink3}" />
+                    </DataTrigger>
                     <!-- What an arrow is against, for the two cards that have one; words alone ("first month") say it themselves. -->
                     <DataTrigger Binding="{Binding Label}" Value="Today">
                         <Setter TargetName="Against" Property="Text" Value="vs your average day" />
@@ -240,7 +245,7 @@
                                                 <local:ShareBar Style="{StaticResource PartShare}" Margin="0,0,8,0" Value="{Binding Share}" />
                                             </DockPanel>
                                             <local:QualityBadge Grid.Column="5" Style="{StaticResource M.Chip}" Margin="16,0,0,0" Quality="{Binding Quality}" />
-                                            <local:TrendMark Grid.Column="6" Margin="8,0,0,0" HorizontalAlignment="Left" Kind="{Binding Kind}" Text="{Binding Trend, TargetNullValue='–'}"
+                                            <local:TrendMark Grid.Column="6" Margin="8,0,0,0" HorizontalAlignment="Left" Kind="{Binding Kind}" Text="{Binding Trend, TargetNullValue='N/A'}"
                                                              LowerIsBetter="{Binding LowerIsBetter}" />
                                         </Grid>
                                     </Border>

@@ -55,7 +55,7 @@ public class MidnightControlsTests
     {
         TrendMark.MarkFor(TrendKind.Up).ShouldBe("▲");
         TrendMark.MarkFor(TrendKind.Down).ShouldBe("▼");
-        TrendMark.MarkFor(TrendKind.Flat).ShouldBe("—");
+        TrendMark.MarkFor(TrendKind.Flat).ShouldBe("●");
         TrendMark.MarkFor(TrendKind.Text).ShouldBe("");
         TrendMark.MarkFor(TrendKind.Quality).ShouldBe("");
         Sta.Run(() =>
@@ -98,6 +98,8 @@ public class MidnightControlsTests
             Of(marks[3]).ShouldBe(Ink("M.Good"), "less energy is the good news");
             Of(marks[4]).ShouldBe(Ink("M.Ink3"));
             marks[2].Describe().ShouldBe("Up 12%", "the arrow and its words still say which way the figure went");
+            // The template draws the mark MarkFor gives, a dot for no change rather than a dash.
+            marks.ShouldAllBe(mark => ((TextBlock)mark.Template.FindName("Mark", mark)).Text == TrendMark.MarkFor(mark.Kind));
         });
 
     /// <summary>
