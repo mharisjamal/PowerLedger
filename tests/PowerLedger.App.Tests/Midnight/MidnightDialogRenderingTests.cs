@@ -28,7 +28,7 @@ public class MidnightDialogRenderingTests
 
     private static readonly string[] Dialogs =
     [
-        "consent-first", "consent-open", "join-prompt", "join-prompt-code", "approve-prompt", "confirm-join", "add-pc-confirm", "recovery-code", "sent",
+        "consent", "join-prompt", "join-prompt-code", "approve-prompt", "confirm-join", "add-pc-confirm", "recovery-code", "sent",
         "feedback",
     ];
 
@@ -59,11 +59,6 @@ public class MidnightDialogRenderingTests
                     try
                     {
                         Pump(TimeSpan.FromMilliseconds(300));
-                        if (name == "consent-open")
-                        {
-                            foreach (var expander in AllOf<Expander>(window)) expander.IsExpanded = true;
-                            Pump(TimeSpan.FromMilliseconds(300));
-                        }
                         var strays = PaintedColours(window).Where(p => !colours.Contains(p.Colour) && !Allowed.Contains(p.Colour)).Distinct().ToList();
                         strays.ShouldBeEmpty($"{name} on {theme} paints outside the palette: {string.Join("; ", strays.Select(s => $"{s.Where} {s.Colour}"))}");
                         Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-{name}-{theme}.png");
@@ -88,16 +83,10 @@ public class MidnightDialogRenderingTests
     /// <summary>The dialogs as the Classic render tests set them up, in the order of <see cref="Dialogs"/>.</summary>
     private static IEnumerable<(string Name, Func<Window> Open)> Windows(string sentFolder)
     {
-        yield return ("consent-first", () =>
+        yield return ("consent", () =>
         {
             var link = Connected();
-            return new ConsentDialog(new ConsentViewModel(link, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { })) { Width = 640 };
-        });
-        yield return ("consent-open", () =>
-        {
-            var link = Connected();
-            var model = new ConsentViewModel(link, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { }) { Power = true, Share = true };
-            return new ConsentDialog(model) { Width = 640 };
+            return new ConsentDialog(new ConsentViewModel(link, UiThreads.Inline, _ => { })) { Width = 640 };
         });
         yield return ("join-prompt", () =>
         {
