@@ -8,6 +8,11 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.8.0",
+        [
+            "A new look: a dashboard with your power, today's energy and idle waste at a glance. Prefer the classic look? Switch back any time in Settings → Preferences.",
+            "The chart shows the last hour to all your history, with a tooltip for any moment.",
+        ]),
         ("0.7.1",
         [
             "Sign in with Google to add a PC to your household from anywhere: your other PC approves it after both show the same code.",

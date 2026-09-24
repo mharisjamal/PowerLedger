@@ -74,4 +74,30 @@ public class WhatsNewTests
         [
             "Optional data sharing: help improve the estimates by sharing anonymous readings; ask in Settings → Privacy.",
         ]);
+
+    /// <summary>0.8.0 is the Midnight look, and says the classic one is a switch away (Midnight look design §1).</summary>
+    [Fact]
+    public void The_0_8_0_points_match_exactly_and_come_first()
+    {
+        WhatsNew.Releases[0].Version.ShouldBe("0.8.0", "newest first");
+        PointsOf("0.8.0").ShouldBe(
+        [
+            "A new look: a dashboard with your power, today's energy and idle waste at a glance. Prefer the classic look? Switch back any time in Settings → Preferences.",
+            "The chart shows the last hour to all your history, with a tooltip for any moment.",
+        ]);
+    }
+
+    [Fact]
+    public void From_0_7_1_to_0_8_0_the_new_looks_points_come_alone()
+        => WhatsNew.Since("0.7.1", "0.8.0").ShouldBe(PointsOf("0.8.0"));
+
+    [Fact]
+    public void From_0_7_0_to_0_8_0_both_releases_come_headed_newest_first()
+    {
+        var expected = new List<string> { "0.8.0" };
+        expected.AddRange(PointsOf("0.8.0"));
+        expected.Add("0.7.1");
+        expected.AddRange(PointsOf("0.7.1"));
+        WhatsNew.Since("0.7.0", "0.8.0").ShouldBe(expected);
+    }
 }

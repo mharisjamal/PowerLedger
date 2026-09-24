@@ -12,9 +12,13 @@ internal interface IUiSettings
 
     string? Choose(ThemeChoice theme);
 
-    /// <summary>Switches the window to <paramref name="look"/>, then saves it (Midnight look design §1). When the new
-    /// window can't open, the old one stays, the choice is left as it was, and the answer says why.</summary>
+    /// <summary>Switches the window to <paramref name="look"/>, then saves it (Midnight look design §1), with the new look
+    /// counted as introduced: whoever switches knows there are two. When the new window can't open, the old one stays,
+    /// the choice is left as it was, and the answer says why.</summary>
     string? SetLook(Look look);
+
+    /// <summary>Retires the one-time banner about the new look for good (<see cref="UiPreferences.LookIntroduced"/>).</summary>
+    string? IntroduceLook();
 
     string? UseCo2(double kgPerKwh);
 
@@ -64,8 +68,10 @@ internal sealed class AppPreferences(
     public string? SetLook(Look look)
     {
         if (switchLook?.Invoke(look) is { } problem) return problem;   // the old window stays, and so does the saved choice
-        return Save(Current with { Look = look });
+        return Save(Current with { Look = look, LookIntroduced = true });
     }
+
+    public string? IntroduceLook() => Current.LookIntroduced ? null : Save(Current with { LookIntroduced = true });
 
     public string? UseCo2(double kgPerKwh)
     {

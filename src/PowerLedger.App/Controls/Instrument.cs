@@ -17,6 +17,8 @@ internal abstract class Instrument : FrameworkElement
     public static readonly DependencyProperty InkBrushProperty = BrushProperty(nameof(InkBrush));
     public static readonly DependencyProperty AccentBrushProperty = BrushProperty(nameof(AccentBrush));
     public static readonly DependencyProperty AccentSoftBrushProperty = BrushProperty(nameof(AccentSoftBrush));
+    public static readonly DependencyProperty AccentTextBrushProperty = DependencyProperty.Register(
+        nameof(AccentTextBrush), typeof(Brush), typeof(Instrument), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty CpuBrushProperty = BrushProperty(nameof(CpuBrush));
     public static readonly DependencyProperty GpuBrushProperty = BrushProperty(nameof(GpuBrush));
     public static readonly DependencyProperty DisplayBrushProperty = BrushProperty(nameof(DisplayBrush));
@@ -36,6 +38,13 @@ internal abstract class Instrument : FrameworkElement
     public Brush AccentBrush { get => (Brush)GetValue(AccentBrushProperty); set => SetValue(AccentBrushProperty, value); }
 
     public Brush AccentSoftBrush { get => (Brush)GetValue(AccentSoftBrushProperty); set => SetValue(AccentSoftBrushProperty, value); }
+
+    /// <summary>Small words in the accent's colour (the "now" by a chart's now line), where a palette's accent is too deep
+    /// to read as small text on its panel (Midnight's M.AccentText); none keeps the accent itself, as Classic does.</summary>
+    public Brush? AccentTextBrush { get => (Brush?)GetValue(AccentTextBrushProperty); set => SetValue(AccentTextBrushProperty, value); }
+
+    /// <summary>The brush for small accent-coloured words: the text tint where the style gives one, else the accent.</summary>
+    internal Brush AccentTextOrAccent => AccentTextBrush ?? AccentBrush;
 
     public Brush CpuBrush { get => (Brush)GetValue(CpuBrushProperty); set => SetValue(CpuBrushProperty, value); }
 

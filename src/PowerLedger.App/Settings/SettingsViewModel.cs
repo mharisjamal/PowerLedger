@@ -120,7 +120,19 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             if (value == _ui.Current.Look) return;
             AppMessage = _ui.SetLook(value);
             OnPropertyChanged();
+            OnPropertyChanged(nameof(LookIntroduced));   // a switch that happened retires the new look's banner
         }
+    }
+
+    /// <summary>The one-time banner about the new look is retired (Midnight look design §1): by its buttons or any switch.</summary>
+    public bool LookIntroduced => _ui.Current.LookIntroduced;
+
+    /// <summary>The banner's Got it, or its Switch back before the switch: never again, in either look.</summary>
+    public void IntroduceLook()
+    {
+        if (LookIntroduced) return;
+        AppMessage = _ui.IntroduceLook();
+        OnPropertyChanged(nameof(LookIntroduced));
     }
 
     /// <summary>Applies when ticked.</summary>

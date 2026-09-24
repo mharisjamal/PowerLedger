@@ -138,7 +138,7 @@ internal sealed class AreaChart : Instrument
         {
             var nowX = X(Math.Clamp(nowAt, 0, capacity));
             dc.DrawLine(Line(AccentBrush, 1, new DashStyle([3, 3], 0)), new Point(nowX, Top), new Point(nowX, bottom));
-            var now = Text("now", 10, AccentBrush);
+            var now = Text("now", 10, AccentTextOrAccent);
             dc.DrawText(now, new Point(nowX + 5 + now.Width <= ActualWidth ? nowX + 5 : nowX - 5 - now.Width, Top - 2));
         }
 

@@ -146,27 +146,43 @@ public sealed class AppPreferencesTests : IDisposable
     }
 
     [Fact]
-    public void A_look_switches_the_window_first_and_is_then_saved()
+    public void A_look_switches_the_window_first_and_is_then_saved_and_the_new_look_needs_no_introducing_after()
     {
         var preferences = Preferences();
+        preferences.Current.Look.ShouldBe(Look.Midnight, "the default");
 
-        preferences.SetLook(Look.Midnight).ShouldBeNull();
+        preferences.SetLook(Look.Classic).ShouldBeNull();
 
-        _looks.ShouldBe(new[] { Look.Midnight });
-        preferences.Current.Look.ShouldBe(Look.Midnight);
-        Store.Load().Look.ShouldBe(Look.Midnight);
+        _looks.ShouldBe(new[] { Look.Classic });
+        preferences.Current.Look.ShouldBe(Look.Classic);
+        preferences.Current.LookIntroduced.ShouldBeTrue("a user who has switched looks knows there are two");
+        Store.Load().Look.ShouldBe(Look.Classic);
+        Store.Load().LookIntroduced.ShouldBeTrue();
     }
 
     [Fact]
     public void A_look_whose_window_would_not_open_is_not_saved_and_the_reason_comes_back()
     {
-        _lookProblem = "Couldn't open the Midnight look: no window.";
+        _lookProblem = "Couldn't open the Classic look: no window.";
         var preferences = Preferences();
 
-        preferences.SetLook(Look.Midnight).ShouldBe("Couldn't open the Midnight look: no window.");
+        preferences.SetLook(Look.Classic).ShouldBe("Couldn't open the Classic look: no window.");
 
-        preferences.Current.Look.ShouldBe(Look.Classic);
-        Store.Load().Look.ShouldBe(Look.Classic);
+        preferences.Current.Look.ShouldBe(Look.Midnight);
+        Store.Load().Look.ShouldBe(Look.Midnight);
+    }
+
+    [Fact]
+    public void The_new_look_once_introduced_is_saved_as_such()
+    {
+        var preferences = Preferences();
+        preferences.Current.LookIntroduced.ShouldBeFalse();
+
+        preferences.IntroduceLook().ShouldBeNull();
+
+        preferences.Current.LookIntroduced.ShouldBeTrue();
+        Store.Load().LookIntroduced.ShouldBeTrue();
+        _looks.ShouldBeEmpty("introducing it switches nothing");
     }
 
     [Fact]

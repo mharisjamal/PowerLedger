@@ -22,8 +22,15 @@ internal sealed class FakeUiSettings : IUiSettings
     public string? SetLook(Look look)
     {
         if (LookProblem is not null) return LookProblem;
-        Current = Current with { Look = look };
+        Current = Current with { Look = look, LookIntroduced = true };
         Changes.Add($"look {look}");
+        return null;
+    }
+
+    public string? IntroduceLook()
+    {
+        Current = Current with { LookIntroduced = true };
+        Changes.Add("look introduced");
         return null;
     }
 
