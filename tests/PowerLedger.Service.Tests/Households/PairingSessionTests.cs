@@ -31,7 +31,7 @@ public sealed class PairingSessionTests : IDisposable
         var adding = PairingSession.AddAsync(
             adderEnd, Adder, expectedInstance: Joiner.Instance,
             showCode: (joiner, code) => { shownOnAdder = code; return Task.CompletedTask; },
-            welcomeFor: joiner => new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, household, [Member(Adder)]),
+            welcomeFor: joiner => Task.FromResult(new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, household, [Member(Adder)])),
             Quick, CancellationToken.None);
         var joining = JoinerSide(joinerEnd, new Broker(question => { asked = question; return true; }), inHousehold: false,
             enter: (welcome, adder) => { entered = welcome; return Task.CompletedTask; });
@@ -61,7 +61,7 @@ public sealed class PairingSessionTests : IDisposable
         var entered = false;
 
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, (_, _) => Task.CompletedTask,
-            joiner => { welcomed = true; return new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)]); },
+            joiner => { welcomed = true; return Task.FromResult(new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)])); },
             Quick, CancellationToken.None);
         var joining = JoinerSide(joinerEnd, new Broker(_ => false), inHousehold: false, enter: (_, _) => { entered = true; return Task.CompletedTask; });
 
@@ -77,7 +77,7 @@ public sealed class PairingSessionTests : IDisposable
         var (adderEnd, joinerEnd) = FramePipe.Create();
         var clock = new FakeTimeProvider();
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, (_, _) => Task.CompletedTask,
-            _ => throw new InvalidOperationException("never welcomed"), Quick, CancellationToken.None);
+            _ => Task.FromException<Welcome>(new InvalidOperationException("never welcomed")), Quick, CancellationToken.None);
         var joining = JoinerSide(joinerEnd, new Broker(async (_, cancel) =>
         {
             await Task.Delay(TimeSpan.FromMinutes(2), clock, cancel);   // the broker's time-out
@@ -94,7 +94,7 @@ public sealed class PairingSessionTests : IDisposable
 
         var (lonelyEnd, silentEnd) = FramePipe.Create();
         var waiting = PairingSession.AddAsync(lonelyEnd, Adder, null, (_, _) => Task.CompletedTask,
-            _ => throw new InvalidOperationException("never welcomed"), new PairingTimeouts(TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(200)),
+            _ => Task.FromException<Welcome>(new InvalidOperationException("never welcomed")), new PairingTimeouts(TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(200)),
             CancellationToken.None);
         await silentEnd.ReceiveAsync();
         await silentEnd.SendAsync(Hello(Joiner));                          // a hello, then nothing
@@ -107,7 +107,7 @@ public sealed class PairingSessionTests : IDisposable
         var (adderEnd, joinerEnd) = FramePipe.Create();
         JoinQuestion? asked = null;
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, (_, _) => Task.CompletedTask,
-            _ => new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)]), Quick, CancellationToken.None);
+            _ => Task.FromResult(new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)])), Quick, CancellationToken.None);
         var joining = JoinerSide(joinerEnd, new Broker(question => { asked = question; return false; }), inHousehold: true,
             enter: (_, _) => Task.CompletedTask);
 
@@ -126,7 +126,7 @@ public sealed class PairingSessionTests : IDisposable
         var entered = false;
 
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, (_, code) => { shownOnAdder = code; return Task.CompletedTask; },
-            _ => new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)]), Quick, CancellationToken.None);
+            _ => Task.FromResult(new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)])), Quick, CancellationToken.None);
         // The user at the joiner compares the two screens, and says no when the codes differ.
         var joining = JoinerSide(joinerEnd, new Broker(question =>
         {
@@ -159,7 +159,7 @@ public sealed class PairingSessionTests : IDisposable
         var (adderEnd, middleFromAdder) = FramePipe.Create();
         var (middleToJoiner, joinerEnd) = FramePipe.Create();
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, (_, _) => Task.CompletedTask,
-            _ => new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)]), Quick, CancellationToken.None);
+            _ => Task.FromResult(new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)])), Quick, CancellationToken.None);
         var joining = JoinerSide(joinerEnd, new Broker(_ => true), inHousehold: false, enter: (_, _) => Task.CompletedTask);
 
         await middleToJoiner.SendAsync((await middleFromAdder.ReceiveAsync())!);          // the adder's hello

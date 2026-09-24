@@ -136,7 +136,7 @@ internal sealed class RelayClient : IDisposable
             var bytes = await ReadAsync(response, cancel).ConfigureAwait(false);
             var status = (int)response.StatusCode;
             if (status is >= 200 and < 300) return new RelayResult<byte[]>(status, bytes, null);
-            var error = HouseholdJson.Read(bytes, HouseholdJson.Default.ErrorReply)?.Error is { Length: > 0 } sentence
+            var error = HouseholdJson.Read(bytes, HouseholdJson.Default.ServerError)?.Error is { Length: > 0 } sentence
                 ? sentence.Trim().TrimEnd('.')
                 : null;
             return new RelayResult<byte[]>(status, null, error);
@@ -215,4 +215,4 @@ internal sealed record BatchPage(List<BatchItem> Items, long Next, bool More);
 internal sealed record BatchPlain(int V, WireMember Device, List<WireRow> Rows);
 
 /// <summary>What the server says when it refuses: <c>{"error": "…"}</c>.</summary>
-internal sealed record ErrorReply(string? Error);
+internal sealed record ServerError(string? Error);

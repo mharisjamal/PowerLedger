@@ -16,13 +16,17 @@ public sealed class PipeServerTests : IAsyncLifetime
     private readonly LiveFeed _feed = new();
     private readonly ServiceSignals _signals = new(TimeProvider.System);
     private readonly MonitorBoard _monitors = new(MonitorBoardTests.Catalogue, TimeProvider.System);
+    private readonly Households.NoticeHub _notices;
+    private uint _console = (uint)System.Diagnostics.Process.GetCurrentProcess().SessionId;
     private PipeServer _server = null!;
+
+    public PipeServerTests() => _notices = new Households.NoticeHub(() => _console);
 
     public async Task InitializeAsync()
     {
         var handler = new PipeHandler(
             new LoopCommands(), _board, _monitors, _signals, new TariffRepository(_database.Db), TimeProvider.System, new Sharing.SharingCommands());
-        _server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, _name);
+        _server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, _name, _notices);
         await _server.StartAsync(CancellationToken.None);
         await _server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
     }
@@ -32,6 +36,24 @@ public sealed class PipeServerTests : IAsyncLifetime
         await _server.StopAsync(CancellationToken.None);
         _server.Dispose();
         _database.Dispose();
+    }
+
+    [Fact]
+    public async Task A_subscriber_in_the_console_session_gets_the_households_notices_and_one_elsewhere_doesnt()
+    {
+        var notice = new HouseholdNotice(NoticeKind.JoinPrompt, "p1", "Join Desktop-7's household?", "Desktop-7", null, null);
+        await using var client = await ConnectAsync();
+        await client.WriteAsync(new SubscribeRequest(1));
+        (await client.ReadAsync()).ShouldBe(new OkReply(1));
+        await WaitFor.True(() => _notices.AnyoneAtTheScreen);
+
+        _notices.Publish(notice).ShouldBeTrue();
+        (await client.ReadAsync()).ShouldBe(notice);
+
+        _console += 1000;                                                          // someone else is at the screen now
+        _notices.Publish(notice).ShouldBeFalse();
+        _feed.Publish(PipeProtocolTests.Frame(12));
+        (await client.ReadAsync()).ShouldBeOfType<ReadingFrame>();
     }
 
     [Fact]

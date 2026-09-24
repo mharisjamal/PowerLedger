@@ -36,6 +36,9 @@ internal sealed class RelayRun
     public int RowsIn { get; set; }
 
     public int RowsOut { get; set; }
+
+    /// <summary>True once this run has read the member list.</summary>
+    public bool MembersRead { get; set; }
 }
 
 /// <summary>Household keys sealed to members (households design §6): ECDH with each member's key-agreement key, HKDF, AES-GCM,
@@ -77,10 +80,11 @@ internal static class Membership
 
 /// <summary>
 /// Sync through the server (households design §5, plan 0.6), run every 15 minutes. First whatever the server still has to
-/// be told, in order; then, every two hours, the member list, for who was removed; then this PC's rows that changed since
+/// be told, in order; then, every six hours, the member list, for who was removed; then this PC's rows that changed since
 /// the last post, sealed with the household key as batches of at most 1 MB; its year of rows once for each member it
 /// hasn't posted it for; then the other members' batches after the cursor, each opened under its epoch's key and the
-/// associated data that ties it to its household, device, epoch and sequence number. A batch teaches its sender's name,
+/// associated data that ties it to its household, device, epoch and sequence number; a batch under a newer epoch reads the
+/// member list and this PC's envelope for it, whose sealer must be a member this PC knows. A batch teaches its sender's name,
 /// kind and keys, but a PC not yet known is taken only from a batch sealed with the current key, which a removed PC
 /// doesn't have. The server's member list only ever marks PCs as gone: members are never added on its word, so a key is
 /// never sealed to one the server made up.
@@ -91,7 +95,12 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     public const int MaxPages = 20;
     public const int MaxPostBytes = 1_048_576;
     public const int MaxPlainBytes = 32 * 1024 * 1024;
-    public static readonly TimeSpan MembersEvery = TimeSpan.FromHours(2);
+
+    /// <summary>How often the member list is read when nothing suggests a change: a newer epoch in a batch reads it at once.</summary>
+    public static readonly TimeSpan MembersEvery = TimeSpan.FromHours(6);
+
+    /// <summary>How long a batch under a newer epoch waits for this PC's envelope before it is passed over.</summary>
+    public static readonly TimeSpan KeyWait = TimeSpan.FromHours(24);
     private const int FirstChunk = 4000;
 
     /// <summary>One run. Stopping the service cancels it; a run stopped by <paramref name="cancel"/> leaves nothing half-done
@@ -173,13 +182,16 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     }
 
     /// <summary>Reads the member list for who has gone: members the server says were removed are marked as left, and this PC
-    /// itself, when it was removed, leaves.</summary>
+    /// itself, when it was removed, leaves. A PC gone means a new key (households design §6): the next epochs' envelopes are
+    /// looked for, as nothing else says there is one until a batch under it comes.</summary>
     private async Task RefreshMembersAsync(DeviceKeys keys, string householdId, RelayRun run, CancellationToken cancel)
     {
+        run.MembersRead = true;
         var result = await relay.MembersAsync(keys, householdId, cancel).ConfigureAwait(false);
         if (!Check(result, run)) return;
         store.RelayConfirmed = true;
         store.MembersCheckedAt = Now;
+        var gone = 0;
         foreach (var member in result.Value!)
         {
             if (member.Removed is not { } removed) continue;
@@ -192,7 +204,14 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             {
                 household.MarkLeft(member.Device, removed);
                 run.Notices.Add($"{known.Name} is no longer in the household.");
+                gone++;
             }
+        }
+        for (var probe = 0; gone > 0 && probe < 3; probe++)
+        {
+            var epoch = store.Epoch + 1;
+            if (await FetchKeyAsync(keys, householdId, epoch, cancel).ConfigureAwait(false) is not { } key) break;
+            store.AddKey(epoch, key);
         }
     }
 
@@ -282,7 +301,8 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     private static long PostedSize(int packed) => (packed + 28 + 2) / 3 * 4 + 256;
 
     /// <summary>Reads the other members' batches after the cursor, a page at a time, moving the cursor past each page once
-    /// it is kept.</summary>
+    /// it is kept. A batch under a newer epoch whose key can't be had yet holds the cursor where it is, so the page is read
+    /// again next time, what was kept from it being kept again; after <see cref="KeyWait"/> such a batch is passed over.</summary>
     private async Task FetchAsync(DeviceKeys keys, string householdId, RelayRun run, CancellationToken cancel)
     {
         for (var page = 0; page < MaxPages; page++)
@@ -290,31 +310,42 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             var result = await relay.BatchesAsync(keys, householdId, store.RelayCursor, PageLimit, cancel).ConfigureAwait(false);
             if (!Check(result, run)) return;
             store.RelayConfirmed = true;
+            var giveUp = store.WaitingSince is { } since && Now - since >= (long)KeyWait.TotalMilliseconds;
             foreach (var item in result.Value!.Items ?? [])
             {
-                run.RowsIn += await OpenAsync(keys, householdId, item, run, cancel).ConfigureAwait(false);
+                var opened = await OpenAsync(keys, householdId, item, run, cancel).ConfigureAwait(false);
                 if (run.Removed) return;
+                if (opened is null && !giveUp)
+                {
+                    store.WaitingSince ??= Now;
+                    return;
+                }
+                run.RowsIn += opened ?? 0;
             }
+            store.WaitingSince = null;
             store.RelayCursor = Math.Max(store.RelayCursor, result.Value.Next);
             if (!result.Value.More) return;
         }
     }
 
-    /// <summary>Opens one batch and keeps its rows; one that doesn't open, or isn't from a member, is passed over.</summary>
-    /// <returns>How many rows were newer than those kept.</returns>
-    private async Task<int> OpenAsync(DeviceKeys keys, string householdId, BatchItem item, RelayRun run, CancellationToken cancel)
+    /// <summary>Opens one batch and keeps its rows; one that doesn't open, or isn't from a member, is passed over. A newer
+    /// epoch than this PC's sends it to the member list first, for who was removed, then for its envelope.</summary>
+    /// <returns>How many rows were newer than those kept; null when the batch is under a newer epoch whose key this PC
+    /// can't have yet.</returns>
+    private async Task<int?> OpenAsync(DeviceKeys keys, string householdId, BatchItem item, RelayRun run, CancellationToken cancel)
     {
         if (!Wire.IsDeviceId(item.Device) || item.Device == keys.DeviceId || item.Epoch <= 0) return 0;
         var key = store.KeyFor(item.Epoch);
         if (key is null && item.Epoch > store.Epoch)
         {
-            key = await FetchKeyAsync(keys, householdId, item.Epoch, cancel).ConfigureAwait(false);
-            if (key is not null) store.AddKey(item.Epoch, key);
-            else if (store.RelayConfirmed)
+            if (!run.MembersRead)
             {
-                await RefreshMembersAsync(keys, householdId, run, cancel).ConfigureAwait(false);   // was this PC left out of it?
+                await RefreshMembersAsync(keys, householdId, run, cancel).ConfigureAwait(false);
                 if (run.Removed) return 0;
             }
+            key = await FetchKeyAsync(keys, householdId, item.Epoch, cancel).ConfigureAwait(false);
+            if (key is null) return null;
+            store.AddKey(item.Epoch, key);
         }
         if (key is null || Wire.Decode(item.Body) is not { } sealedBody) return 0;
         BatchPlain? batch;

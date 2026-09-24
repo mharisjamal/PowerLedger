@@ -1,0 +1,705 @@
+using System.Collections.Concurrent;
+using System.Net;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using PowerLedger.Contracts;
+using PowerLedger.Core.Households;
+using PowerLedger.Service.Households.Lan;
+using PowerLedger.Service.Households.Relay;
+using PowerLedger.Storage;
+
+namespace PowerLedger.Service.Households;
+
+/// <summary>What the household asks of the machine and the network, so tests can supply their own.</summary>
+/// <param name="ListenAddress">Where the LAN listener listens: every address for the service, loopback for tests.</param>
+/// <param name="MachineName">This PC's Windows name; null for the real one.</param>
+/// <param name="RunLoop">False for tests that drive <see cref="HouseholdWorker.RunOnceAsync"/> themselves.</param>
+/// <param name="CodeWait">How a pairing by code waits between looks at a slot; null for the clock's own.</param>
+internal sealed record HouseholdEnvironment(
+    IDiscovery Discovery, INetworkCategory Network, RelayClient Relay, IPAddress ListenAddress, Func<string>? MachineName = null,
+    bool RunLoop = true, TimeSpan? BrowseTime = null, PairingTimeouts? Timeouts = null, Func<TimeSpan, CancellationToken, Task>? CodeWait = null);
+
+/// <summary>The household's requests from the pipe (plan 0.2).</summary>
+internal interface IHouseholdRequests
+{
+    /// <summary>Answers within <see cref="HouseholdWorker.AppWait"/>: work that takes longer, a pairing say, goes on after the
+    /// answer and reports through pushed notices.</summary>
+    Task<PipeMessage> HandleAsync(PipeRequest request, CancellationToken cancel);
+}
+
+/// <summary>
+/// The household in the service (households design §9): it holds this PC's keys and the household's, announces this PC on
+/// Private networks and listens for the others, builds this PC's hour rows every hour, syncs with the members it finds on
+/// the network and through the server every 15 minutes, and carries out the App's requests. Pairings run on their own and
+/// tell the App how they go in pushed notices; everything that changes the household goes through one gate, which the
+/// worker's own work gives way to at once, so every request is answered within <see cref="AppWait"/>.
+/// </summary>
+internal sealed class HouseholdWorker : BackgroundService, IHouseholdRequests
+{
+    public static readonly TimeSpan Every = TimeSpan.FromMinutes(15);
+
+    /// <summary>The longest the pipe waits for a household request's answer.</summary>
+    public static readonly TimeSpan AppWait = TimeSpan.FromSeconds(8);
+
+    /// <summary>How long a request waits for the gate before saying the household is busy: well inside <see cref="AppWait"/>.</summary>
+    private static readonly TimeSpan GateWait = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DefaultBrowseTime = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
+
+    internal const string Busy = "The household is busy. Try again in a moment.";
+    internal const string NotInOne = "This PC isn't in a household.";
+
+    private readonly StatusBoard _board;
+    private readonly NoticeHub _notices;
+    private readonly HouseholdEnvironment _environment;
+    private readonly TimeProvider _clock;
+    private readonly ILogger<HouseholdWorker> _log;
+    private readonly HouseholdStore _store;
+    private readonly HouseholdRepository _household;
+    private readonly HourRows _rows;
+    private readonly LanSync _lanSync;
+    private readonly RelaySync _relaySync;
+    private readonly CodePairing _codePairing;
+    private readonly HouseholdPrompts _prompts;
+    private readonly PairingGate _pairingGate;
+    private readonly HouseholdGate _gate = new();
+    private readonly Announcer _announcer;
+    private readonly DeviceKeys _keys;
+    private readonly PairingTimeouts _timeouts;
+    private readonly ConcurrentDictionary<string, FoundService> _found = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<Task, byte> _running = new();
+    private readonly CancellationTokenSource _stopping = new();
+    private readonly SemaphoreSlim _kick = new(0);
+    private LanListener? _listener;
+    private long _rowsBuiltForHour = -1;
+
+    public HouseholdWorker(
+        SqliteDatabase database, StatusBoard board, NoticeHub notices, HouseholdEnvironment environment, TimeProvider clock,
+        ILogger<HouseholdWorker> log)
+    {
+        _board = board;
+        _notices = notices;
+        _environment = environment;
+        _clock = clock;
+        _log = log;
+        _store = new HouseholdStore(new SettingsRepository(database), environment.MachineName);
+        _household = new HouseholdRepository(database);
+        _rows = new HourRows(new AggregateRepository(database), new TariffRepository(database), _household);
+        _timeouts = environment.Timeouts ?? PairingTimeouts.Default;
+        _lanSync = new LanSync(_household, clock, _timeouts);
+        _relaySync = new RelaySync(_store, _household, environment.Relay, clock, log);
+        _codePairing = new CodePairing(environment.Relay, clock, environment.CodeWait);
+        _prompts = new HouseholdPrompts(notices, clock);
+        _pairingGate = new PairingGate(clock);
+        _announcer = new Announcer(environment.Discovery, environment.Network, log);
+        _keys = _store.DeviceKeys();
+    }
+
+    /// <summary>This PC's device ID.</summary>
+    public string DeviceId => _keys.DeviceId;
+
+    /// <summary>The instance name this PC is announced under.</summary>
+    public string InstanceId => _store.InstanceId;
+
+    /// <summary>The listener's port, once started.</summary>
+    public int Port => _listener?.Port ?? 0;
+
+    /// <summary>Pairings and other work still going on after their request was answered.</summary>
+    internal Task Running => Task.WhenAll(_running.Keys);
+
+    internal HouseholdStore Store => _store;
+
+    internal HouseholdPrompts Prompts => _prompts;
+
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _listener = new LanListener(_environment.ListenAddress, OnConnectionAsync, _log);
+        try
+        {
+            _listener.Start();
+        }
+        catch (System.Net.Sockets.SocketException error)
+        {
+            _log.LogWarning(error, "The household's listener couldn't start, so other PCs can't reach this one on the network");
+            _listener = null;
+        }
+        Announce();
+        Publish();
+        await base.StartAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _stopping.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _announcer.Dispose();
+            if (_listener is not null) await _listener.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await Running.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is TimeoutException or OperationCanceledException)
+            {
+            }
+        }
+    }
+
+    public override void Dispose()
+    {
+        _keys.Dispose();
+        _stopping.Dispose();
+        base.Dispose();
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stop)
+    {
+        if (!_environment.RunLoop) return;
+        using var timer = new PeriodicTimer(Every, _clock);
+        var tick = timer.WaitForNextTickAsync(stop).AsTask();
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), _clock, stop).ConfigureAwait(false);   // the service starts first
+            while (!stop.IsCancellationRequested)
+            {
+                await RunOnceSafelyAsync(stop).ConfigureAwait(false);
+                var kicked = _kick.WaitAsync(stop);
+                if (await Task.WhenAny(tick, kicked).ConfigureAwait(false) == tick)
+                {
+                    if (!await tick.ConfigureAwait(false)) break;
+                    tick = timer.WaitForNextTickAsync(stop).AsTask();
+                }
+                while (_kick.CurrentCount > 0) await _kick.WaitAsync(stop).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+        }
+    }
+
+    /// <summary>One turn of the worker's own work: the hour rows once an hour, sync with the members on the network, then
+    /// through the server. It gives way to any request that needs the gate, and goes again soon after.</summary>
+    internal async Task RunOnceAsync(CancellationToken stop)
+    {
+        using var lease = await _gate.EnterBackgroundAsync(stop).ConfigureAwait(false);
+        try
+        {
+            Announce();
+            if (_store.HouseholdId is null)
+            {
+                await _relaySync.FlushAsync(_keys, new RelayRun(), lease.Attention).ConfigureAwait(false);   // what leaving left to say
+                return;
+            }
+            BuildRowsIfDue();
+            await SyncOnNetworkAsync(lease.Attention).ConfigureAwait(false);
+            var run = await _relaySync.RunAsync(_keys, _store.Name, Kind(), lease.Attention).ConfigureAwait(false);
+            foreach (var notice in run.Notices) Info(notice);
+            Announce();                                                        // a new key, or none, changes the tag
+        }
+        catch (OperationCanceledException) when (!stop.IsCancellationRequested)
+        {
+            Kick();                                                            // gave way: again once the request is done
+        }
+        finally
+        {
+            Publish();
+        }
+    }
+
+    /// <summary>Wakes the worker for a turn soon, as after a pairing, so the server hears of it.</summary>
+    internal void Kick() => _kick.Release();
+
+    public async Task<PipeMessage> HandleAsync(PipeRequest request, CancellationToken cancel)
+    {
+        try
+        {
+            return request switch
+            {
+                BrowsePcsRequest browse => await BrowseAsync(browse, cancel).ConfigureAwait(false),
+                AddPcRequest add => await AddPcAsync(add, cancel).ConfigureAwait(false),
+                StartCodePairingRequest start => await StartCodePairingAsync(start, cancel).ConfigureAwait(false),
+                JoinByCodeRequest join => JoinByCode(join),
+                AnswerPromptRequest answer => _prompts.Answer(answer.PromptId ?? "", answer.Accept)
+                    ? Reply(answer.Id, true, answer.Accept ? "Joining." : "Not joining.")
+                    : Reply(answer.Id, false, "That question has closed."),
+                RemovePcRequest remove => await RemoveAsync(remove, cancel).ConfigureAwait(false),
+                LeaveHouseholdRequest leave => await LeaveAsync(leave, cancel).ConfigureAwait(false),
+                RenamePcRequest rename => await RenameAsync(rename, cancel).ConfigureAwait(false),
+                SetDiscoverableRequest discoverable => await SetDiscoverableAsync(discoverable, cancel).ConfigureAwait(false),
+                SignInRequest or SignOutRequest or DeleteAccountRequest => Reply(request.Id, false, "Signing in isn't available yet."),
+                _ => new ErrorReply(request.Id, "The service does not handle that request."),
+            };
+        }
+        catch (GateTimeout)
+        {
+            return Reply(request.Id, false, Busy);
+        }
+        catch (Exception error) when (error is not OperationCanceledException || !cancel.IsCancellationRequested)
+        {
+            _log.LogError(error, "{Request} failed", request.GetType().Name);
+            return Reply(request.Id, false, $"That didn't work: {error.Message}");
+        }
+        finally
+        {
+            Publish();
+        }
+    }
+
+    private async Task<PipeMessage> BrowseAsync(BrowsePcsRequest request, CancellationToken cancel)
+    {
+        var found = await _environment.Discovery.BrowseAsync(_environment.BrowseTime ?? DefaultBrowseTime, cancel).ConfigureAwait(false);
+        var mine = _store.InstanceId;
+        var key = _store.CurrentKey;
+        var pcs = new List<FoundPc>();
+        foreach (var service in found.DistinctBy(service => service.Instance))
+        {
+            if (service.Instance == mine || service.Txt.GetValueOrDefault("v") != "1" || service.Instance.Length > 64) continue;
+            _found[service.Instance] = service;
+            pcs.Add(new FoundPc(service.Instance, NameOf(service), InThisHousehold(service, key)));
+        }
+        return new FoundPcsReply(request.Id, pcs);
+    }
+
+    private async Task<PipeMessage> AddPcAsync(AddPcRequest request, CancellationToken cancel)
+    {
+        if (request.InstanceId is null || !_found.TryGetValue(request.InstanceId, out var pc) || pc.Address is null)
+        {
+            return Reply(request.Id, false, "That PC isn't on the network any more. Look again.");
+        }
+        var name = NameOf(pc);
+        if (InThisHousehold(pc, _store.CurrentKey)) return Reply(request.Id, false, $"{name} is already in this household.");
+        if (_pairingGate.TryEnter(out var refusal) is not { } entered) return Reply(request.Id, false, refusal!);
+        await Task.CompletedTask.ConfigureAwait(false);
+        Track(AddOnNetworkAsync(pc, name, entered));
+        return Reply(request.Id, true, $"Connecting to {name}.");
+    }
+
+    private async Task AddOnNetworkAsync(FoundService pc, string name, IDisposable entered)
+    {
+        using (entered)
+        {
+            PairingOutcome outcome;
+            try
+            {
+                await using var channel = await LanConnector.ConnectAsync(pc.Address!, pc.Port, ConnectTimeout, _stopping.Token).ConfigureAwait(false);
+                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, ShowCodeAsync, WelcomeForAsync, _timeouts, _stopping.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                outcome = new PairingOutcome.Failed($"Couldn't reach {name}. Check it's on and on the same network.");
+            }
+            await AddedAsync(outcome).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<PipeMessage> StartCodePairingAsync(StartCodePairingRequest request, CancellationToken cancel)
+    {
+        if (_pairingGate.TryEnter(out var refusal) is not { } entered) return Reply(request.Id, false, refusal!);
+        CodeMeeting? meeting;
+        try
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            limit.CancelAfter(GateWait);
+            meeting = await _codePairing.OpenAsync(Identity(), limit.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            meeting = null;
+        }
+        if (meeting is null)
+        {
+            entered.Dispose();
+            return Reply(request.Id, false, "Couldn't reach the server to make a code. Check this PC is online and try again.");
+        }
+        Track(AddByCodeAsync(meeting, entered));
+        return Reply(request.Id, true, "Type this code on the other PC within 10 minutes.", meeting.Code);
+    }
+
+    private async Task AddByCodeAsync(CodeMeeting meeting, IDisposable entered)
+    {
+        using (entered)
+        using (meeting)
+        {
+            await AddedAsync(await _codePairing.AddAsync(meeting, Identity(), WelcomeForAsync, _stopping.Token).ConfigureAwait(false))
+                .ConfigureAwait(false);
+        }
+    }
+
+    private PipeMessage JoinByCode(JoinByCodeRequest request)
+    {
+        if (PairingCode.Normalize(request.Code) is null)
+        {
+            return Reply(request.Id, false, "That isn't a code. A code has 16 letters and digits, like K7QM-2XHD-9PW4-R8TA.");
+        }
+        if (_pairingGate.TryEnter(out var refusal) is not { } entered) return Reply(request.Id, false, refusal!);
+        Track(JoinByCodeAsync(request.Code, entered));
+        return Reply(request.Id, true, "Looking for the PC that made that code.");
+    }
+
+    private async Task JoinByCodeAsync(string code, IDisposable entered)
+    {
+        using (entered)
+        {
+            var outcome = await _codePairing.JoinAsync(code, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _stopping.Token)
+                .ConfigureAwait(false);
+            if (outcome is PairingOutcome.Refused or PairingOutcome.Failed { Text: "That code doesn't match the other PC's, so nothing was changed." })
+            {
+                _pairingGate.Refused();
+            }
+            Progress(outcome.Text, (outcome as PairingOutcome.Joined)?.Other.Name, null);
+        }
+    }
+
+    /// <summary>A connection from another PC on the network: a pairing asks this PC's user; a sync is with a member.</summary>
+    private async Task OnConnectionAsync(IFrameChannel channel, LanMessage hello, CancellationToken cancel)
+    {
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancel, _stopping.Token);
+        if (hello.Purpose == Hello.Sync)
+        {
+            if (_store.HouseholdId is not null) await _lanSync.RespondAsync(channel, hello, Identity(), stopping.Token).ConfigureAwait(false);
+            return;
+        }
+        if (hello.Purpose != Hello.Pair) return;
+        if (_pairingGate.TryEnter(out _) is not { } entered)
+        {
+            await PairingSession.JoinAsync(channel, hello, Identity(), Refusing.Broker, false, (_, _) => Task.CompletedTask, _timeouts, stopping.Token)
+                .ConfigureAwait(false);
+            return;
+        }
+        using (entered)
+        {
+            var outcome = await PairingSession.JoinAsync(
+                channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, stopping.Token).ConfigureAwait(false);
+            if (outcome is PairingOutcome.Refused) _pairingGate.Refused();
+            else Info(outcome.Text);
+        }
+    }
+
+    private Task ShowCodeAsync(MemberInfo joiner, string code)
+    {
+        _notices.Publish(new HouseholdNotice(
+            NoticeKind.PairingProgress, null, $"On {joiner.Name}, check the code is {code} and press Join.", joiner.Name, code,
+            _clock.GetUtcNow() + HouseholdPrompts.Timeout));
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The welcome for a PC being added, making the household first when this PC is in none (households design
+    /// §1: it is made when a PC adds its first other PC).</summary>
+    private async Task<Welcome> WelcomeForAsync(MemberInfo joiner)
+    {
+        using var entered = await EnterGateAsync(_stopping.Token).ConfigureAwait(false);
+        var now = _clock.GetUtcNow();
+        if (_store.HouseholdId is null || _store.CurrentKey is null)
+        {
+            var householdId = Wire.NewHouseholdId();
+            ClearOthers();
+            _store.EnterHousehold(householdId, 1, HouseholdCrypto.NewKey());
+            SaveSelf(now);
+            _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
+            _rowsBuiltForHour = HourOf(now);
+            _store.PostedThrough = now.ToUnixTimeMilliseconds();           // the year goes to each newcomer as its history
+            _store.AddPending(new PendingOp(PendingOp.Create, householdId));
+            _log.LogInformation("Made a household to add {Name} to", joiner.Name);
+        }
+        var members = _household.Members()
+            .Where(member => member.LeftMs is null && member.DeviceId != joiner.Id)
+            .Select(member => new MemberInfo(member.DeviceId, member.Name, member.Kind, member.SignKey, member.DhKey))
+            .Take(Wire.MaxMembers)
+            .ToList();
+        return new Welcome(_store.HouseholdId!, _store.Epoch, _store.CurrentKey!, members);
+    }
+
+    /// <summary>Records a pairing this PC started: the new member here, and on the server once it can be told.</summary>
+    private async Task AddedAsync(PairingOutcome outcome)
+    {
+        if (outcome is PairingOutcome.Joined { Other: var joiner })
+        {
+            using (await EnterGateAsync(_stopping.Token).ConfigureAwait(false))
+            {
+                var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+                _household.SaveMember(new HouseholdMember(joiner.Id, joiner.Name, joiner.Kind, joiner.Sign, joiner.Dh, nowMs, null, null));
+                _store.AddPending(new PendingOp(PendingOp.Add, _store.HouseholdId!, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh)));
+                Announce();
+            }
+            Kick();
+        }
+        else if (outcome is PairingOutcome.Refused)
+        {
+            _pairingGate.Refused();
+        }
+        Progress(outcome.Text, (outcome as PairingOutcome.Joined)?.Other.Name, null);
+        Publish();
+    }
+
+    /// <summary>Takes this PC into the household in a welcome it accepted. A PC in another household leaves that one first,
+    /// as a PC removing itself does; the household's other PCs and their rows go with it, and this PC's year is built for
+    /// the new one.</summary>
+    private async Task EnterAsync(Welcome welcome, MemberInfo adder)
+    {
+        using (await EnterGateAsync(_stopping.Token).ConfigureAwait(false))
+        {
+            var now = _clock.GetUtcNow();
+            var nowMs = now.ToUnixTimeMilliseconds();
+            if (_store.HouseholdId != welcome.HouseholdId)
+            {
+                if (_store.HouseholdId is not null) LeaveLocked(now);
+                ClearOthers();
+                _store.EnterHousehold(welcome.HouseholdId, welcome.Epoch, welcome.Key);
+                _store.HistoryPosted = [.. welcome.Members.Select(member => member.Id)];
+            }
+            else
+            {
+                _store.AddKey(welcome.Epoch, welcome.Key);
+            }
+            foreach (var member in welcome.Members.Where(member => member.Id != _keys.DeviceId))
+            {
+                _household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
+            }
+            SaveSelf(now);
+            _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
+            _rowsBuiltForHour = HourOf(now);
+            Announce();
+            Publish();
+            _log.LogInformation("Joined {Name}'s household", adder.Name);
+        }
+        Kick();
+    }
+
+    private async Task<PipeMessage> RemoveAsync(RemovePcRequest request, CancellationToken cancel)
+    {
+        using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
+        if (_store.HouseholdId is null) return Reply(request.Id, false, NotInOne);
+        if (request.DeviceId == _keys.DeviceId) return Reply(request.Id, false, "To take this PC out, leave the household.");
+        if (request.DeviceId is null || _household.Member(request.DeviceId) is not { } member)
+        {
+            return Reply(request.Id, false, "That PC isn't in this household.");
+        }
+        if (member.LeftMs is not null)
+        {
+            _household.DeleteRows(member.DeviceId);
+            _household.DeleteMember(member.DeviceId);
+            return Reply(request.Id, true, $"{member.Name}'s rows were removed.");
+        }
+
+        // Households design §6: a new key under the next epoch, sealed to each member that stays, then the removal and the keys.
+        var householdId = _store.HouseholdId;
+        var epoch = _store.Epoch + 1;
+        var key = HouseholdCrypto.NewKey();
+        var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+        var staying = _household.Members().Where(other => other.LeftMs is null && other.DeviceId != member.DeviceId && other.DeviceId != _keys.DeviceId);
+        var envelopes = KeyWrap.For(_keys, householdId, epoch, key, staying);
+        _store.AddKey(epoch, key);
+        _household.MarkLeft(member.DeviceId, nowMs);
+        _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: member.DeviceId));
+        if (envelopes.Count > 0) _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch, Envelopes: envelopes));
+        Announce();
+        Kick();
+        _log.LogInformation("Removed {Name} from the household; the key is now at epoch {Epoch}", member.Name, epoch);
+        return Reply(request.Id, true, $"{member.Name} was removed from the household.");
+    }
+
+    private async Task<PipeMessage> LeaveAsync(LeaveHouseholdRequest request, CancellationToken cancel)
+    {
+        using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
+        if (_store.HouseholdId is null) return Reply(request.Id, false, NotInOne);
+        LeaveLocked(_clock.GetUtcNow());
+        Announce();
+        Kick();
+        return Reply(request.Id, true, "This PC left the household.");
+    }
+
+    /// <summary>Leaves the household, inside the gate: as removing itself (households design §6), a new key for the members
+    /// that stay goes to the server before this PC takes itself off, since only a member may post keys. This PC forgets it.</summary>
+    private void LeaveLocked(DateTimeOffset now)
+    {
+        var householdId = _store.HouseholdId!;
+        var staying = _household.Members().Where(member => member.LeftMs is null && member.DeviceId != _keys.DeviceId).ToList();
+        if (staying.Count > 0)
+        {
+            var epoch = _store.Epoch + 1;
+            _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch,
+                Envelopes: KeyWrap.For(_keys, householdId, epoch, HouseholdCrypto.NewKey(), staying)));
+        }
+        _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: _keys.DeviceId));
+        Membership.Forget(_store, _household, now.ToUnixTimeMilliseconds());
+        _log.LogInformation("Left the household {Household}", householdId);
+    }
+
+    private async Task<PipeMessage> RenameAsync(RenamePcRequest request, CancellationToken cancel)
+    {
+        var name = Wire.Name(request.Name);
+        if (name is null || request.Name!.Trim().Length > Wire.MaxName) return Reply(request.Id, false, "A name has 1 to 40 characters.");
+        using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
+        _store.Name = name;
+        if (_store.HouseholdId is not null) SaveSelf(_clock.GetUtcNow());
+        Announce();
+        return Reply(request.Id, true, $"This PC is now called {name}.");
+    }
+
+    private async Task<PipeMessage> SetDiscoverableAsync(SetDiscoverableRequest request, CancellationToken cancel)
+    {
+        using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
+        _store.Discoverable = request.On;
+        Announce();
+        return Reply(request.Id, true, request.On ? "Other PCs on your network can find this one." : "Other PCs on your network can no longer find this one.");
+    }
+
+    /// <summary>Syncs directly with each member found on the network: its tag shows it is in this household.</summary>
+    private async Task SyncOnNetworkAsync(CancellationToken cancel)
+    {
+        var key = _store.CurrentKey;
+        if (key is null) return;
+        IReadOnlyList<FoundService> found;
+        try
+        {
+            found = await _environment.Discovery.BrowseAsync(_environment.BrowseTime ?? DefaultBrowseTime, cancel).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            _log.LogDebug(error, "Browsing the network failed");
+            return;
+        }
+        foreach (var member in found.Where(service => service.Instance != _store.InstanceId && service.Address is not null && InThisHousehold(service, key)))
+        {
+            try
+            {
+                await using var channel = await LanConnector.ConnectAsync(member.Address!, member.Port, ConnectTimeout, cancel).ConfigureAwait(false);
+                var outcome = await _lanSync.SyncAsync(channel, Identity(), cancel).ConfigureAwait(false);
+                _log.LogDebug("Synced with {Instance} on the network: {Outcome}", member.Instance, outcome);
+            }
+            catch (IOException error)
+            {
+                _log.LogDebug(error, "A member on the network couldn't be reached");
+            }
+        }
+    }
+
+    private void BuildRowsIfDue()
+    {
+        var now = _clock.GetUtcNow();
+        if (HourOf(now) == _rowsBuiltForHour) return;
+        _rows.Build(_keys.DeviceId, HourRows.BackfillFrom(now), now);
+        _rowsBuiltForHour = HourOf(now);
+    }
+
+    private static long HourOf(DateTimeOffset time) => time.ToUnixTimeMilliseconds() / 3_600_000;
+
+    /// <summary>Removes every other PC and its rows, as when this PC enters another household.</summary>
+    private void ClearOthers()
+    {
+        foreach (var member in _household.Members().Where(member => member.DeviceId != _keys.DeviceId)) _household.DeleteMember(member.DeviceId);
+        foreach (var device in _household.Latest().Keys.Where(device => device != _keys.DeviceId)) _household.DeleteRows(device);
+    }
+
+    private void SaveSelf(DateTimeOffset now) => _household.SaveMember(new HouseholdMember(
+        _keys.DeviceId, _store.Name, Kind(), _keys.SignPublic, _keys.DhPublic, now.ToUnixTimeMilliseconds(), null, null));
+
+    private PairingIdentity Identity() => new(_keys, _store.Name, Kind(), _store.InstanceId);
+
+    /// <summary>Laptop or desktop, as the user's profile says, or as detected.</summary>
+    private ChassisKind Kind() => _board.Settings?.Profile.Chassis ?? _board.Facts?.Chassis ?? ChassisKind.Desktop;
+
+    private static string NameOf(FoundService service) => Wire.Name(service.Txt.GetValueOrDefault("name")) ?? "A PC";
+
+    private static bool InThisHousehold(FoundService service, byte[]? key) =>
+        key is not null && service.Txt.GetValueOrDefault("tag") is { Length: > 0 } tag && tag == HouseholdCrypto.HouseholdTag(key, service.Instance);
+
+    /// <summary>Announces this PC as it is now: its name, and the tag of its household when it is in one.</summary>
+    private void Announce()
+    {
+        if (_listener is not { Port: > 0 } listener) return;
+        var instance = _store.InstanceId;
+        var key = _store.CurrentKey;
+        var txt = new Dictionary<string, string>
+        {
+            ["v"] = "1",
+            ["name"] = _store.Name,
+            ["tag"] = key is null ? "" : HouseholdCrypto.HouseholdTag(key, instance),
+        };
+        _announcer.Update(_store.Discoverable ? new Announcement(instance, listener.Port, txt) : null);
+    }
+
+    /// <summary>How the household stands, for the status. It never throws: the status keeps what was last published.</summary>
+    private void Publish()
+    {
+        try
+        {
+            var me = _keys.DeviceId;
+            var householdId = _store.HouseholdId;
+            IReadOnlyList<MemberStatus> members = householdId is null
+                ? []
+                : [.. _household.Members().Select(member => new MemberStatus(
+                    member.DeviceId, member.Name, member.Kind, member.DeviceId == me,
+                    member.DeviceId == me || member.LastSyncedMs is not { } synced ? null : DateTimeOffset.FromUnixTimeMilliseconds(synced),
+                    member.LeftMs is not null))];
+            _board.Publish(new HouseholdStatus(
+                householdId, me, _store.Name, Kind(), _store.Discoverable, members, householdId is null ? null : _store.Problem,
+                SignedIn: _store.Session is not null));
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            _log.LogWarning(error, "How the household stands could not be read for the status");
+        }
+    }
+
+    private void Progress(string text, string? fromName, string? code) =>
+        _notices.Publish(new HouseholdNotice(NoticeKind.PairingProgress, null, text, fromName, code, null));
+
+    private void Info(string text) => _notices.Publish(new HouseholdNotice(NoticeKind.Info, null, text, null, null, null));
+
+    private async Task<IDisposable> EnterGateAsync(CancellationToken cancel)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        limit.CancelAfter(GateWait);
+        try
+        {
+            return await _gate.EnterAsync(limit.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            throw new GateTimeout();
+        }
+    }
+
+    private void Track(Task work)
+    {
+        _running[work] = 0;
+        _ = work.ContinueWith(
+            done =>
+            {
+                _running.TryRemove(done, out _);
+                if (done.Exception is { } error) _log.LogError(error, "A household pairing failed");
+            },
+            CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    private async Task RunOnceSafelyAsync(CancellationToken stop)
+    {
+        try
+        {
+            await RunOnceAsync(stop).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException || !stop.IsCancellationRequested)
+        {
+            _log.LogError(error, "The household's 15-minute run failed");
+        }
+    }
+
+    private static HouseholdReply Reply(long id, bool ok, string message, string? code = null) => new(id, ok, message, code);
+
+    /// <summary>The gate stayed shut longer than a request may wait.</summary>
+    private sealed class GateTimeout() : Exception(Busy);
+
+    /// <summary>Says no at once: for a pairing that arrives while another runs, or while pairing is paused.</summary>
+    private sealed class Refusing : IPromptBroker
+    {
+        public static readonly Refusing Broker = new();
+
+        public Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel) => Task.FromResult(false);
+    }
+}

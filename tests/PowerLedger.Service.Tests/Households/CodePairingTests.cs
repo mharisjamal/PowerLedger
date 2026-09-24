@@ -130,8 +130,8 @@ public sealed class CodePairingTests : IDisposable
         _joinerKeys.Dispose();
     }
 
-    private Welcome Welcome(MemberInfo joiner) =>
-        new(Household, 1, _key, [new MemberInfo(_adderKeys.DeviceId, "Desktop-7", ChassisKind.Desktop, _adderKeys.SignPublic, _adderKeys.DhPublic)]);
+    private Task<Welcome> Welcome(MemberInfo joiner) => Task.FromResult(
+        new Welcome(Household, 1, _key, [new MemberInfo(_adderKeys.DeviceId, "Desktop-7", ChassisKind.Desktop, _adderKeys.SignPublic, _adderKeys.DhPublic)]));
 
     /// <summary>A hello for a meeting slot, with a MAC under a key that isn't the code's.</summary>
     private static byte[] ForgedHello(PairingIdentity who, byte[] wrongKey)

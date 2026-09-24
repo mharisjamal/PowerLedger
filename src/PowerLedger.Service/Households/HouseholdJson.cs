@@ -19,7 +19,7 @@ namespace PowerLedger.Service.Households;
 [JsonSerializable(typeof(BatchPost))]
 [JsonSerializable(typeof(BatchPage))]
 [JsonSerializable(typeof(BatchPlain))]
-[JsonSerializable(typeof(ErrorReply))]
+[JsonSerializable(typeof(ServerError))]
 [JsonSerializable(typeof(List<PendingOp>))]
 internal sealed partial class HouseholdJson : JsonSerializerContext
 {

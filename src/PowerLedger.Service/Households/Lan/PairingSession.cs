@@ -61,7 +61,7 @@ internal static class PairingSession
     /// none yet.</param>
     public static async Task<PairingOutcome> AddAsync(
         IFrameChannel channel, PairingIdentity me, string? expectedInstance, Func<MemberInfo, string, Task> showCode,
-        Func<MemberInfo, Welcome> welcomeFor, PairingTimeouts timeouts, CancellationToken cancel)
+        Func<MemberInfo, Task<Welcome>> welcomeFor, PairingTimeouts timeouts, CancellationToken cancel)
     {
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
@@ -87,7 +87,7 @@ internal static class PairingSession
             var answer = await talk.ReceiveAsync("answer", cancel, timeouts.Answer).ConfigureAwait(false);
             if (answer.Accept != true) return new PairingOutcome.Refused($"{name} didn't join.");
 
-            var welcome = welcomeFor(hello.From);
+            var welcome = await welcomeFor(hello.From).ConfigureAwait(false);
             await talk.SendAsync(WelcomeMessage(welcome), cancel).ConfigureAwait(false);
             await talk.ReceiveAsync("joined", cancel).ConfigureAwait(false);
             return new PairingOutcome.Joined(hello.From, $"{name} joined your household.");

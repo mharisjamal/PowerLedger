@@ -61,7 +61,8 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
 
     /// <summary>The adding side from there: waits for a joining PC's hello and checks its MAC, then its answer, then sends
     /// the welcome, all within the meeting's 10 minutes.</summary>
-    public async Task<PairingOutcome> AddAsync(CodeMeeting meeting, PairingIdentity me, Func<MemberInfo, Welcome> welcomeFor, CancellationToken cancel)
+    public async Task<PairingOutcome> AddAsync(
+        CodeMeeting meeting, PairingIdentity me, Func<MemberInfo, Task<Welcome>> welcomeFor, CancellationToken cancel)
     {
         var deadline = meeting.Opened + Lifetime;
         var slot = await PollAsync(meeting.MeetingId, "joiner", deadline, cancel).ConfigureAwait(false);
@@ -79,7 +80,7 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         if (answer is not { Type: "answer" }) return new PairingOutcome.Failed($"{joiner.From.Name}'s answer didn't open, so it wasn't added.");
         if (answer.Accept != true) return new PairingOutcome.Refused($"{joiner.From.Name} didn't join.");
 
-        var welcome = welcomeFor(joiner.From);
+        var welcome = await welcomeFor(joiner.From).ConfigureAwait(false);
         var sealedWelcome = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(PairingSession.WelcomeMessage(welcome)), Encoding.ASCII.GetBytes("welcome"));
         var put = await relay.PutSlotAsync(meeting.MeetingId, "welcome", sealedWelcome, cancel).ConfigureAwait(false);
         if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give {joiner.From.Name} the household: {put.Problem}.");

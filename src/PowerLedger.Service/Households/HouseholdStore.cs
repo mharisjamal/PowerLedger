@@ -34,11 +34,12 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string MembersCheckedKey = "household.members-checked";
     internal const string PendingKey = "household.pending";
     internal const string ProblemKey = "household.problem";
+    internal const string WaitingKey = "household.waiting-since";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
     private static readonly string[] OfTheHousehold =
-        [IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, HistoryKey, ConfirmedKey, MembersCheckedKey, ProblemKey];
+        [IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, HistoryKey, ConfirmedKey, MembersCheckedKey, ProblemKey, WaitingKey];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
     private static readonly byte[] Entropy = "PowerLedger household keys"u8.ToArray();
@@ -205,6 +206,14 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     }
 
     public void AddPending(Relay.PendingOp op) => Pending = [.. Pending, op];
+
+    /// <summary>Since when relay sync has waited at its cursor for the key of a newer epoch, unix milliseconds; null while it
+    /// isn't waiting.</summary>
+    public long? WaitingSince
+    {
+        get => long.TryParse(settings.Get(WaitingKey), NumberStyles.None, CultureInfo.InvariantCulture, out var since) ? since : null;
+        set => WriteText(WaitingKey, value?.ToString(CultureInfo.InvariantCulture));
+    }
 
     /// <summary>The last problem syncing, in words the App can show; null while all goes well.</summary>
     public string? Problem
