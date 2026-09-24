@@ -1055,6 +1055,108 @@ public class RenderingTests
         });
     }
 
+    /// <summary>Task 0.8's removeOldRows, review follow-up: a left member offers Remove its rows, and asking shows what
+    /// will happen with Cancel and Confirm, in both themes.</summary>
+    [Fact]
+    public void Removing_a_left_members_rows_shows_its_confirm_text_and_buttons()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink
+                {
+                    Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) },
+                };
+                link.Connect(true);
+                var history = new FakeHouseholdHistory
+                {
+                    Answer = _ => new HouseholdSnapshot(
+                        new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], []),
+                        [
+                            new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-40), null, Now),
+                            new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-20), Now.AddDays(-3), Now.AddDays(-3)),
+                        ]),
+                };
+                var model = new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
+                model.Show();
+                model.AskRemove.Execute(model.Members.Single(m => m.DeviceId == "bbbb"));
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Remove Laptop-2's rows? This can't be undone.").ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Cancel")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Confirm")).ShouldNotBeNull(theme.ToString());
+                    Save(window, 480, (int)window.ActualHeight, $"remove-left-member-rows-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Task 0.8's removeOldRows with no device named, review follow-up: with no household but old rows on
+    /// file, Remove the old household's rows shows what will happen with Cancel and Confirm, in both themes.</summary>
+    [Fact]
+    public void Removing_the_old_households_rows_shows_its_confirm_text_and_buttons()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink
+                {
+                    Status = Statuses.Running() with { Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) },
+                };
+                link.Connect(true);
+                var history = new FakeHouseholdHistory
+                {
+                    Answer = _ => FakeHouseholdHistory.Empty with
+                    {
+                        Members = [new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-20), Now.AddDays(-3), Now.AddDays(-3))],
+                    },
+                };
+                var model = new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
+                model.Show();
+                model.AskRemoveAllOldRows.Execute(null);
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Remove the old household's rows? This can't be undone.").ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Cancel")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Confirm")).ShouldNotBeNull(theme.ToString());
+                    Save(window, 480, (int)window.ActualHeight, $"remove-old-household-rows-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();

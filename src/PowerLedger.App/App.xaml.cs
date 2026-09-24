@@ -35,8 +35,9 @@ public partial class App : Application
     private MainWindow? _window;
     private AddPcWindow? _addPcWindow;
 
-    /// <summary>Review finding A4: every open Join/Approve/Confirm join prompt, by its promptId, so a pushed
-    /// <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others untouched.</summary>
+    /// <summary>Review finding A4, follow-up: every open Join/Approve/Confirm join/Recovery code prompt, by its
+    /// promptId, so a pushed <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others
+    /// untouched.</summary>
     private readonly Dictionary<string, Window> _openPrompts = new();
     private UiThreads? _threads;
     private CultureInfo? _culture;
@@ -354,7 +355,9 @@ public partial class App : Application
     {
         if (_link is null) return;
         var model = new RecoveryCodeViewModel(_link, notice, new FileSaver(), CopyToClipboard);
-        new RecoveryCodeWindow(model) { Owner = _window }.ShowDialog();
+        var window = new RecoveryCodeWindow(model) { Owner = _window };
+        TrackPrompt(notice.PromptId, window);
+        window.ShowDialog();
     }
 
     /// <summary>"What's been sent…" in Settings → Privacy (data-sharing design §2).</summary>

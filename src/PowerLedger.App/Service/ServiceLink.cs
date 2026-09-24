@@ -120,6 +120,10 @@ internal interface IServiceLink : IAsyncDisposable
 
     Task<HouseholdOutcome> LeaveHouseholdAsync(CancellationToken cancel = default);
 
+    /// <summary>Deletes a left or removed PC's rows, or with no device named every such PC's (task 0.8); refused for
+    /// this PC and for a current member.</summary>
+    Task<HouseholdOutcome> RemoveOldRowsAsync(string? deviceId, CancellationToken cancel = default);
+
     /// <summary>This PC's name in the household, 1 to 40 characters.</summary>
     Task<HouseholdOutcome> RenamePcAsync(string name, CancellationToken cancel = default);
 
@@ -260,6 +264,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public Task<HouseholdOutcome> LeaveHouseholdAsync(CancellationToken cancel = default)
         => HouseholdAsync(new LeaveHouseholdRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> RemoveOldRowsAsync(string? deviceId, CancellationToken cancel = default)
+        => HouseholdAsync(new RemoveOldRowsRequest(NextId(), deviceId), cancel);
 
     public Task<HouseholdOutcome> RenamePcAsync(string name, CancellationToken cancel = default)
         => HouseholdAsync(new RenamePcRequest(NextId(), name), cancel);

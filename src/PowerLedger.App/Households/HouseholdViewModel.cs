@@ -16,16 +16,27 @@ internal sealed record HouseholdCostLine(string Currency, string Cost);
 internal sealed record HouseholdPeriod(string Title, string Energy, IReadOnlyList<HouseholdCostLine> Costs);
 
 /// <summary>One member row, ready for the page: its name and kind ("Laptop" or "Desktop"), whether it is this PC, this
-/// month's energy for its label, its share of the busiest member's energy for its bar (0 to 1), and the status words
-/// ("synced 2 minutes ago", "last seen 3 days ago", "left").</summary>
-internal sealed record HouseholdMemberDisplay(string DeviceId, string Name, string Kind, bool IsThisPc, string Energy, double Share, string Status);
+/// month's energy for its label, its share of the busiest member's energy for its bar (0 to 1), the status words
+/// ("synced 2 minutes ago", "last seen 3 days ago", "left"), and whether it has left (review finding follow-up, task
+/// 0.8: a left row offers Remove its rows).</summary>
+internal sealed record HouseholdMemberDisplay(string DeviceId, string Name, string Kind, bool IsThisPc, string Energy, double Share, string Status, bool IsLeft)
+{
+    /// <summary>Another current member: offers Remove.</summary>
+    public bool CanRemove => !IsThisPc && !IsLeft;
 
-/// <summary>What Remove or Leave is waiting to be told to go ahead with (households design §2: removing and leaving ask first).</summary>
+    /// <summary>A left row still on file: offers Remove its rows (task 0.8's removeOldRows) instead.</summary>
+    public bool CanRemoveRows => !IsThisPc && IsLeft;
+}
+
+/// <summary>What Remove, Leave or a rows-removal is waiting to be told to go ahead with (households design §2: removing
+/// and leaving ask first; task 0.8's removeOldRows the same way).</summary>
 internal enum PendingAction
 {
     None,
     RemovePc,
     LeaveHousehold,
+    RemoveOldRows,
+    RemoveAllOldRows,
 }
 
 /// <summary>
@@ -86,10 +97,14 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         SaveName = new RelayCommand(() => _ = SaveNameAsync(), () => IsValidName(_nameInput));
         AskRemove = new RelayCommand<HouseholdMemberDisplay>(member =>
         {
-            if (member is not null && !member.IsThisPc)
-                BeginConfirm(PendingAction.RemovePc, member, $"Remove {member.Name} from your household? It will need to be added again to rejoin.");
+            if (member is null || member.IsThisPc) return;
+            // Task 0.8: a left row's rows can be deleted (removeOldRows); a current member is removed instead.
+            if (member.IsLeft) BeginConfirm(PendingAction.RemoveOldRows, member, $"Remove {member.Name}'s rows? This can't be undone.");
+            else BeginConfirm(PendingAction.RemovePc, member, $"Remove {member.Name} from your household? It will need to be added again to rejoin.");
         });
         AskLeave = new RelayCommand(() => BeginConfirm(PendingAction.LeaveHousehold, null, "Leave this household? You can join or start another one later."));
+        AskRemoveAllOldRows = new RelayCommand(
+            () => BeginConfirm(PendingAction.RemoveAllOldRows, null, "Remove the old household's rows? This can't be undone."));
         ConfirmPending = new RelayCommand(() => _ = ConfirmPendingAsync());
         CancelPending = new RelayCommand(EndConfirm);
         MakeRecoveryCode = new RelayCommand(() => _ = MakeRecoveryCodeAsync());
@@ -187,11 +202,16 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     /// <summary>Why the last Remove or Leave didn't go through, or null.</summary>
     public string? ActionMessage { get => _actionMessage; private set => SetProperty(ref _actionMessage, value); }
 
-    /// <summary>Asks first: another PC's row offers this, never this PC's own.</summary>
+    /// <summary>Asks first: another PC's row offers this, never this PC's own — Remove for a current member, Remove its
+    /// rows (task 0.8's removeOldRows) for one that has left.</summary>
     public IRelayCommand<HouseholdMemberDisplay> AskRemove { get; }
 
     /// <summary>Asks first.</summary>
     public IRelayCommand AskLeave { get; }
+
+    /// <summary>Review finding follow-up, task 0.8: with no household but old rows still on file, removes them all
+    /// (removeOldRows with no device named). Asks first.</summary>
+    public IRelayCommand AskRemoveAllOldRows { get; }
 
     public IRelayCommand ConfirmPending { get; }
 
@@ -284,7 +304,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
                 var isThisPc = m.DeviceId == household.DeviceId;
                 return new HouseholdMemberDisplay(
                     m.DeviceId, m.Name, m.Kind == ChassisKind.Laptop ? "Laptop" : "Desktop", isThisPc,
-                    Format.Kwh(energy, _culture), busiest > 0 ? energy / busiest : 0, isThisPc ? "" : StatusOf(m, now));
+                    Format.Kwh(energy, _culture), busiest > 0 ? energy / busiest : 0, isThisPc ? "" : StatusOf(m, now), m.Left is not null);
             })
             .ToList();
     }
@@ -342,6 +362,8 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         {
             PendingAction.RemovePc when member is not null => await _link.RemovePcAsync(member.DeviceId).ConfigureAwait(false),
             PendingAction.LeaveHousehold => await _link.LeaveHouseholdAsync().ConfigureAwait(false),
+            PendingAction.RemoveOldRows when member is not null => await _link.RemoveOldRowsAsync(member.DeviceId).ConfigureAwait(false),
+            PendingAction.RemoveAllOldRows => await _link.RemoveOldRowsAsync(null).ConfigureAwait(false),
             _ => HouseholdOutcome.NoAnswer,
         };
         _threads.Post(() =>

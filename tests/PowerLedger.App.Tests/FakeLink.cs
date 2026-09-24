@@ -153,6 +153,8 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<HouseholdOutcome> LeaveHouseholdAsync(CancellationToken cancel = default) => Household("leave");
 
+    public Task<HouseholdOutcome> RemoveOldRowsAsync(string? deviceId, CancellationToken cancel = default) => Household(("removeOldRows", deviceId));
+
     public Task<HouseholdOutcome> RenamePcAsync(string name, CancellationToken cancel = default) => Household(("rename", name));
 
     public Task<HouseholdOutcome> SetDiscoverableAsync(bool on, CancellationToken cancel = default) => Household(("discoverable", on));

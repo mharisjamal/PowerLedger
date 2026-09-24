@@ -429,6 +429,98 @@ public class HouseholdViewModelTests
         _link.HouseholdRequests.ShouldBeEmpty();
     }
 
+    /// <summary>Task 0.8's removeOldRows: a left row offers Remove its rows instead of Remove, which is for a current
+    /// member only.</summary>
+    [Fact]
+    public void A_left_member_offers_remove_its_rows_instead_of_remove()
+    {
+        _link.Status = InHousehold("aaaa");
+        _link.Connect(true);
+        _history.Answer = _ => SnapshotWith([
+            new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-30), null, Now),
+            new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-10), Now.AddDays(-2), Now.AddDays(-2)),
+        ]);
+        var model = Model();
+        model.Show();
+
+        var left = model.Members.Single(m => m.DeviceId == "bbbb");
+        left.CanRemoveRows.ShouldBeTrue();
+        left.CanRemove.ShouldBeFalse();
+        var current = model.Members.Single(m => m.DeviceId == "aaaa");
+        current.CanRemoveRows.ShouldBeFalse();
+        current.CanRemove.ShouldBeFalse();   // this PC's own row: neither
+    }
+
+    [Fact]
+    public void Asking_to_remove_a_left_members_rows_names_it_and_sends_removeoldrows_once_confirmed()
+    {
+        _link.Status = InHousehold("aaaa");
+        _link.Connect(true);
+        _history.Answer = _ => SnapshotWith([
+            new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-30), null, Now),
+            new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-10), Now.AddDays(-2), Now.AddDays(-2)),
+        ]);
+        var model = Model();
+        model.Show();
+        var left = model.Members.Single(m => m.DeviceId == "bbbb");
+
+        model.AskRemove.Execute(left);
+
+        model.IsConfirming.ShouldBeTrue();
+        model.ConfirmText.ShouldNotBeNull().ShouldContain("Laptop-2");
+        _link.HouseholdRequests.ShouldBeEmpty();               // asked, not yet sent
+
+        model.ConfirmPending.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe(("removeOldRows", "bbbb"));
+        model.IsConfirming.ShouldBeFalse();
+    }
+
+    /// <summary>Task 0.8's removeOldRows with no device named: with no household but old rows on file, this deletes
+    /// every left PC's rows.</summary>
+    [Fact]
+    public void With_no_household_removing_the_old_households_rows_names_no_device()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+        _history.Answer = _ => FakeHouseholdHistory.Empty with
+        {
+            Members = [new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-10), Now.AddDays(-2), Now.AddDays(-2))],
+        };
+        var model = Model();
+        model.Show();
+        model.HasOldRows.ShouldBeTrue();
+
+        model.AskRemoveAllOldRows.Execute(null);
+
+        model.IsConfirming.ShouldBeTrue();
+        _link.HouseholdRequests.ShouldBeEmpty();               // asked, not yet sent
+
+        model.ConfirmPending.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe(("removeOldRows", (string?)null));
+        model.IsConfirming.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_failed_rows_removal_shows_the_message()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+        _history.Answer = _ => FakeHouseholdHistory.Empty with
+        {
+            Members = [new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-10), Now.AddDays(-2), Now.AddDays(-2))],
+        };
+        _link.HouseholdAnswer = new HouseholdOutcome(false, "Couldn't reach the service.");
+        var model = Model();
+        model.Show();
+
+        model.AskRemoveAllOldRows.Execute(null);
+        model.ConfirmPending.Execute(null);
+
+        model.ActionMessage.ShouldBe("Couldn't reach the service.");
+    }
+
     [Fact]
     public void Leaving_asks_first_then_sends_it_once_confirmed()
     {
