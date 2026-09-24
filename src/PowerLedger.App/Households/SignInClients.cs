@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace PowerLedger.App;
 
 /// <summary>
@@ -13,6 +15,13 @@ internal static class SignInClients
     public const string Google = "";
 
     /// <summary>Google's installed-app clients call for one in the token exchange (review finding A7), even though the
-    /// flow is PKCE; empty, like the client IDs above, until the lead fills it in at L6.</summary>
-    public const string GoogleSecret = "";
+    /// flow is PKCE. The repo is public, so this never sits in source: it comes from the built assembly's own
+    /// "GoogleClientSecret" metadata (<see cref="AssemblyMetadataAttribute"/>), which installer\build.ps1 sets from the
+    /// machine building it (security round, review). Empty in an ordinary build; read once and cached.</summary>
+    public static string GoogleSecret { get; } = ReadGoogleSecret(typeof(SignInClients).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>());
+
+    /// <summary>The lookup on its own, apart from the real assembly, so a test can hand it metadata directly rather than
+    /// rebuilding anything.</summary>
+    internal static string ReadGoogleSecret(IEnumerable<AssemblyMetadataAttribute> metadata)
+        => metadata.FirstOrDefault(entry => entry.Key == "GoogleClientSecret")?.Value ?? "";
 }
