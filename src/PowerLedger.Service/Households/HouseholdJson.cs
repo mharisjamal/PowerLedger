@@ -39,6 +39,7 @@ namespace PowerLedger.Service.Households;
 [JsonSerializable(typeof(AskReply))]
 [JsonSerializable(typeof(SealedKeyList))]
 [JsonSerializable(typeof(RecoverReply))]
+[JsonSerializable(typeof(Recovering))]
 internal sealed partial class HouseholdJson : JsonSerializerContext
 {
     /// <summary>The value, or null when the text is missing or isn't one.</summary>

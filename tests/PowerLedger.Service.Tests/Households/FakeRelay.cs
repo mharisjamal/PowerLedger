@@ -37,6 +37,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     private readonly Dictionary<string, string> _links = [];
     private readonly Dictionary<(string Household, string Device), JoinRequest> _requests = [];
     private readonly Dictionary<string, Recovery> _recovery = [];
+    private readonly Dictionary<(string Account, string Verifier), (string Device, string Household, int Epoch, long Used)> _recovered = [];
 
     /// <summary>While true, nothing answers.</summary>
     public bool Down { get; set; }
@@ -514,6 +515,11 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                     : Error(404, "This account has no recovery.");
             case ("POST", "/v1/account/recover"):
             {
+                var shown = (string?)JsonNode.Parse(body)!["verifier"] ?? "";
+                if (_recovered.TryGetValue((session.Account, shown), out var before) && before.Device == session.Device && Now - before.Used < 600_000)
+                {
+                    return Json(new JsonObject { ["household"] = before.Household, ["epoch"] = before.Epoch });   // a retry, its answer lost
+                }
                 if (!_recovery.TryGetValue(session.Account, out var envelope) || !_links.TryGetValue(session.Account, out var household)
                     || !_households[household].TryGetValue(envelope.Holder, out var holder) || holder.Removed is not null)
                 {
@@ -535,6 +541,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                     members[session.Device] = new Member(session.Sign, session.Dh, Now, null, current);
                 }
                 foreach (var account in _links.Where(pair => pair.Value == household).Select(pair => pair.Key).ToList()) _recovery.Remove(account);
+                _recovered[(session.Account, shown)] = (session.Device, household, current, Now);
                 return Json(new JsonObject { ["household"] = household, ["epoch"] = current });
             }
             case ("POST", "/v1/auth/signout"):

@@ -185,6 +185,77 @@ public sealed class SignInTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_recover_whose_answer_was_lost_goes_again_and_takes_this_pc_in_with_the_same_answer()
+    {
+        var (desktop, _) = await Household();
+        var household = desktop.Worker.Store.HouseholdId!;
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
+        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
+        var fresh = await Start("New laptop");
+        var lost = 0;
+        _relay.LoseAnswer = request => request.RequestUri!.AbsolutePath == "/v1/account/recover" && lost++ == 0;
+
+        var reply = await fresh.Send<HouseholdReply>(SignIn(fresh, "alice", recovery: code));
+
+        reply.ShouldBe(new HouseholdReply(7, true, "Your household is back on this PC."));
+        fresh.Worker.Store.HouseholdId.ShouldBe(household);
+        fresh.Worker.Store.Recovering.ShouldBeNull();
+        _relay.Members(household)[desktop.Worker.DeviceId].Removed.ShouldNotBeNull();
+        _relay.Posted("POST /v1/account/recover").ShouldBe(2);                     // the server answered the retry as it had the recover
+    }
+
+    [Fact]
+    public async Task A_recover_whose_answers_were_all_lost_goes_again_at_a_later_turn_and_the_member_list_shows_it_went_through()
+    {
+        var (desktop, _) = await Household();
+        var household = desktop.Worker.Store.HouseholdId!;
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
+        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
+        var fresh = await Start("New laptop");
+        _relay.LoseAnswer = request => request.RequestUri!.AbsolutePath == "/v1/account/recover";
+
+        var reply = await fresh.Send<HouseholdReply>(SignIn(fresh, "alice", recovery: code));
+
+        reply.Ok.ShouldBeFalse();
+        reply.Message.ShouldEndWith("This PC tries again.");
+        fresh.Worker.Store.HouseholdId.ShouldBeNull();
+        fresh.Worker.Store.Recovering.ShouldNotBeNull().Household.ShouldBe(household);   // kept, encrypted, to go again
+        _relay.LoseAnswer = null;
+        _clock.Advance(TimeSpan.FromMinutes(11));                                 // past the server's own window for a retry
+
+        await fresh.Worker.RunOnceAsync(CancellationToken.None);
+
+        fresh.Worker.Store.HouseholdId.ShouldBe(household);
+        (await fresh.Next(NoticeKind.Info, text => text == "Your household is back on this PC.")).ShouldNotBeNull();
+        fresh.Worker.Store.Recovering.ShouldBeNull();
+        _relay.Members(household)[fresh.Worker.DeviceId].Removed.ShouldBeNull();
+        fresh.Household.Member(desktop.Worker.DeviceId).ShouldNotBeNull().LeftMs.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task A_recover_another_pc_won_is_given_up_with_the_reason()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
+        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
+        var fresh = await Start("New laptop");
+        var other = await Start("Other laptop");
+        _relay.Intercept = (request, _) => request.RequestUri!.AbsolutePath == "/v1/account/recover"
+            && request.Headers.TryGetValues("X-PL-Device", out var from) && from.Single() == fresh.Worker.DeviceId
+            ? FakeRelay.Error(503, "The server is busy; try again later.")
+            : null;
+        (await fresh.Send<HouseholdReply>(SignIn(fresh, "alice", recovery: code))).Ok.ShouldBeFalse();
+        _relay.Intercept = null;
+        (await other.Send<HouseholdReply>(SignIn(other, "alice", salt: "o1", recovery: code))).Ok.ShouldBeTrue();   // the other PC came first
+
+        await fresh.Worker.RunOnceAsync(CancellationToken.None);
+
+        fresh.Worker.Store.HouseholdId.ShouldBeNull();
+        fresh.Worker.Store.Recovering.ShouldBeNull();
+        (await fresh.Next(NoticeKind.Info, text => text.StartsWith("Your household couldn't be recovered", StringComparison.Ordinal))).ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task A_wrong_recovery_code_is_refused_and_leaves_the_pc_as_it_was()
     {
         var (desktop, _) = await Household();

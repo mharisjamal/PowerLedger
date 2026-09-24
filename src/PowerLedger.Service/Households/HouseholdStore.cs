@@ -53,6 +53,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string AnsweringKey = "household.answering";
     internal const string CanAskAgainKey = "household.can-ask-again";
     internal const string ApprovalsStartedKey = "household.approvals-started";
+    internal const string RecoveringKey = "household.recovering";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
@@ -337,6 +338,18 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
 
     /// <summary>N2: the key made from the recovery code, kept by the PC that made the code or recovered with it, so a new
     /// household key can be sealed for recovery too; null when this PC has none or it can't be read.</summary>
+    /// <summary>N2: the recovery this PC opened and is taking the household back with (plan 0.10), kept encrypted before the
+    /// server is asked, so a recover whose answer was lost goes again; null while none is under way.</summary>
+    public Recovering? Recovering
+    {
+        get => Unprotect(settings.Get(RecoveringKey)) is { } kept ? HouseholdJson.Read(kept, HouseholdJson.Default.Recovering) : null;
+        set
+        {
+            if (value is null) settings.Remove(RecoveringKey);
+            else settings.Set(RecoveringKey, Protect(HouseholdJson.Bytes(value, HouseholdJson.Default.Recovering)));
+        }
+    }
+
     public byte[]? RecoveryKey
     {
         get => Unprotect(settings.Get(RecoveryKeyKey));

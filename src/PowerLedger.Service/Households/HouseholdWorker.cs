@@ -220,6 +220,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             Announce();
             ShowRecoveryCode();
+            await ResumeRecoveryAsync(lease.Attention).ConfigureAwait(false);
             await CheckApprovedAsync(lease.Attention).ConfigureAwait(false);  // in a household or not
             if (_store.HouseholdId is null)
             {

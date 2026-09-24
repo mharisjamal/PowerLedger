@@ -40,6 +40,10 @@ internal static class Recovery
     }
 }
 
+/// <summary>N2: the recovery this PC opened, with the key and member list sealed at <paramref name="Epoch"/>, and the verifier
+/// it shows the server, kept while it takes the household back (plan 0.10).</summary>
+internal sealed record Recovering(string Household, int Epoch, string Key, List<WireMember> Members, string Verifier);
+
 /// <summary>N2's sign-in (households design §7, plan C11, 0.8 and 0.9), on the household worker.</summary>
 internal sealed partial class HouseholdWorker
 {
@@ -139,6 +143,7 @@ internal sealed partial class HouseholdWorker
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
+            if (_store.Recovering is not null) Kick();                         // the recover goes again at once
             return Reply(request.Id, false, "The server didn't answer in time. Try again.");
         }
     }
@@ -221,11 +226,13 @@ internal sealed partial class HouseholdWorker
         return true;
     }
 
-    /// <summary>Forgets this PC's recovery code and its key, as on signing out or signing in as another account.</summary>
+    /// <summary>Forgets this PC's recovery code and its key, and any recovery under way, as on signing out or signing in as
+    /// another account.</summary>
     private void ForgetRecovery()
     {
         _store.RecoveryKey = null;
         _store.RecoveryCodeToShow = null;
+        _store.Recovering = null;
         _recoveryMissing = false;
     }
 
@@ -250,23 +257,92 @@ internal sealed partial class HouseholdWorker
     }
 
     /// <summary>
-    /// Takes the account's household back with the recovery code (households design §7, plan 0.9): opens the recovery with
-    /// the code's key, at whatever epoch it was sealed, and proves the code to the server, which makes this PC the household's
-    /// only current member, removing every other at the household's current epoch. The code is used up: this PC doesn't keep
-    /// it, makes a new key without the others, and a new code, which goes to the server once the key has.
+    /// Takes the account's household back with the recovery code (households design §7, plan 0.10): opens the recovery with
+    /// the code's key, at whatever epoch it was sealed, keeps it, and proves the code to the server, which makes this PC the
+    /// household's only current member, removing every other at the household's current epoch. A recover whose answer was
+    /// lost goes again, at once and at later turns, from what was kept (<see cref="RecoverKeptAsync"/>).
     /// </summary>
     private async Task<PipeMessage> RecoverLockedAsync(long id, string session, string householdId, string code, CancellationToken cancel)
     {
-        var codeKey = RecoveryCode.Key(code);
-        var got = await _environment.Relay.GetRecoveryAsync(_keys, session, cancel).ConfigureAwait(false);
-        if (got.Status == 404) return Reply(id, false, "Your account has no household to recover.");
-        if (!got.Ok) return Reply(id, false, $"Couldn't recover your household: {got.Problem}.");
-        if (Recovery.Open(codeKey, householdId, got.Value!) is not { } sealedList) return Reply(id, false, "That recovery code doesn't open your account's household.");
-        var recovered = await _environment.Relay.RecoverAsync(_keys, session, Recovery.Verifier(codeKey), cancel).ConfigureAwait(false);
-        if (!recovered.Ok || recovered.Value!.Household != householdId) return Reply(id, false, $"Couldn't recover your household: {recovered.Problem}.");
-        var epoch = recovered.Value.Epoch;
+        var verifier = Wire.Encode(Recovery.Verifier(RecoveryCode.Key(code)));
+        if (_store.Recovering is not { } recovering || recovering.Household != householdId || recovering.Verifier != verifier)
+        {
+            var got = await _environment.Relay.GetRecoveryAsync(_keys, session, cancel).ConfigureAwait(false);
+            if (got.Status == 404) return Reply(id, false, "Your account has no household to recover.");
+            if (!got.Ok) return Reply(id, false, $"Couldn't recover your household: {got.Problem}.");
+            if (Recovery.Open(RecoveryCode.Key(code), householdId, got.Value!) is not { } sealedList)
+            {
+                return Reply(id, false, "That recovery code doesn't open your account's household.");
+            }
+            recovering = new Recovering(householdId, got.Value!.Epoch, Wire.Encode(sealedList.Key), sealedList.Members, verifier);
+            _store.Recovering = recovering;                                    // kept before the server is asked (plan 0.10)
+        }
+        for (var attempt = 0; ; attempt++)
+        {
+            var (entered, problem) = await RecoverKeptAsync(recovering, session, cancel).ConfigureAwait(false);
+            if (entered == true) return Reply(id, true, "Your household is back on this PC.");
+            if (entered == false) return Reply(id, false, $"Couldn't recover your household: {problem}.");
+            if (_store.Session is null) return Reply(id, false, "Your session has ended. Sign in again with the recovery code.");
+            if (attempt == 2)
+            {
+                Kick();
+                return Reply(id, false, $"The server didn't answer ({problem}). This PC tries again.");
+            }
+        }
+    }
+
+    /// <summary>A recovery under way whose answer was lost goes again with each turn (plan 0.10), and says how it ended.</summary>
+    private async Task ResumeRecoveryAsync(CancellationToken cancel)
+    {
+        if (_store.Recovering is not { } recovering || _store.Session is not { } session) return;
+        if (_store.HouseholdId is { } mine && mine != recovering.Household)
+        {
+            _store.Recovering = null;                                          // in another household since: never recovered over it
+            return;
+        }
+        var (entered, problem) = await RecoverKeptAsync(recovering, session, cancel).ConfigureAwait(false);
+        if (entered == true) Info("Your household is back on this PC.");
+        else if (entered == false) Info($"Your household couldn't be recovered: {problem}.");
+    }
+
+    /// <summary>
+    /// Asks the server to make this PC the household's only current member with the recovery kept (plan 0.10). The server
+    /// answers a retry by the same PC within 10 minutes as it answered the recover; after that a 404 may still mean a
+    /// recover of this PC's went through unheard, which the member list, readable only by a member, shows: this PC is its
+    /// only current member. Then the code is used up: this PC doesn't keep it, makes a new key without the others, and a new
+    /// code, which goes to the server once the key has.
+    /// </summary>
+    /// <returns>True once this PC is in; null while the server's answer is still to come; false when it won't be.</returns>
+    private async Task<(bool? Entered, string? Problem)> RecoverKeptAsync(Recovering recovering, string session, CancellationToken cancel)
+    {
+        var recovered = await _environment.Relay.RecoverAsync(_keys, session, Wire.Decode(recovering.Verifier)!, cancel).ConfigureAwait(false);
+        int epoch;
+        if (recovered.Ok && recovered.Value!.Household == recovering.Household)
+        {
+            epoch = recovered.Value.Epoch;
+        }
+        else if (recovered.Status == 401)
+        {
+            _store.Session = null;                                             // the session has ended: signing in again goes on with it
+            return (null, recovered.Problem);
+        }
+        else if (recovered.Transient)
+        {
+            return (null, recovered.Problem);                                  // its answer maybe lost: kept, and asked again
+        }
+        else if (recovered.Status == 404 && await RecoveredUnheardAsync(recovering, cancel).ConfigureAwait(false) is { } at)
+        {
+            epoch = at;
+        }
+        else
+        {
+            _store.Recovering = null;
+            return (false, recovered.Ok ? "the server named another household" : recovered.Problem);
+        }
+        var householdId = recovering.Household;
         CancelPairingUnderWay();                                               // plan 0.9: joining by sign-in stops a pairing under way
-        EnterLocked(householdId, got.Value!.Epoch, sealedList.Key, sealedList.Members, null, null);   // the code vouches for the whole list
+        EnterLocked(householdId, recovering.Epoch, Wire.Decode(recovering.Key)!, recovering.Members, null, null);   // the code vouches for the whole list
+        _store.Recovering = null;
         _members.RemoveAllBut(_keys.DeviceId, epoch, _clock.GetUtcNow().ToUnixTimeMilliseconds());   // as the server removed them
         _store.RelayConfirmed = true;
         _relaySync.StartRotation(householdId, atLeast: epoch + 1, forRemoval: true);
@@ -278,6 +354,19 @@ internal sealed partial class HouseholdWorker
         _log.LogInformation("Recovered the household with the recovery code; the others were removed at epoch {Epoch}", epoch);
         Publish();
         Kick();
-        return Reply(id, true, "Your household is back on this PC.");
+        return (true, null);
+    }
+
+    /// <summary>The epoch a recover of this PC's took the household at, when the member list shows it went through though its
+    /// answer never came: this PC, outside the household until now, is its only current member. Null otherwise.</summary>
+    private async Task<int?> RecoveredUnheardAsync(Recovering recovering, CancellationToken cancel)
+    {
+        if (_store.HouseholdId == recovering.Household) return null;
+        var listed = await _environment.Relay.MembersAsync(_keys, recovering.Household, cancel).ConfigureAwait(false);
+        if (!listed.Ok || listed.Value!.Where(member => member.Removed is null).Select(member => member.Device).ToList() is not [var only] || only != _keys.DeviceId)
+        {
+            return null;
+        }
+        return listed.Value!.Max(member => Math.Max(member.AddedEpoch, member.RemovedEpoch ?? 0));
     }
 }
