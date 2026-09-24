@@ -29,7 +29,7 @@ describe("the households schema", () => {
     expect(await columns("account_households")).toEqual(["account", "household", "linked"]);
     expect(await columns("join_requests")).toEqual([
       "household", "device", "account", "sign_key", "dh_key", "created", "approver", "commitment", "nonce", "reveal",
-      "approved_epoch",
+      "approved_epoch", "approved_at",
     ]);
     expect(await columns("recovery")).toEqual(["account", "body", "verifier_hash", "epoch", "holder", "updated"]);
   });
