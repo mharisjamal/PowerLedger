@@ -175,7 +175,8 @@
                         <DockPanel Margin="28,0,10,0">
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True">
                                 <Button x:Name="ThemeButton" Style="{StaticResource M.IconButton}" Content="&#xE706;" Click="ThemeClick" AutomationProperties.Name="Theme" />
-                                <Button Style="{StaticResource M.IconButton}" Content="&#xE8AB;" Click="SwitchLookClick" ToolTip="Switch to the Classic look" AutomationProperties.Name="Switch look" />
+                                <!-- Switch look (Midnight look design §1): the other look, chosen as in Settings, so the choice is kept. -->
+                                <Button Style="{StaticResource M.IconButton}" Content="&#xE8AB;" Command="{Binding SwitchLook}" ToolTip="{Binding SwitchLookTip}" AutomationProperties.Name="Switch look" />
                                 <Button Style="{StaticResource M.IconButton}" Content="&#xE713;" Click="SettingsClick" ToolTip="Settings" AutomationProperties.Name="Settings" />
                                 <Border Width="1" Height="20" Margin="10,0" Background="{DynamicResource M.Line}" />
                                 <TextBlock x:Name="KindGlyph" Style="{StaticResource M.Text.Glyph}" FontSize="16" Text="&#xE7FB;" Margin="0,0,10,0" />

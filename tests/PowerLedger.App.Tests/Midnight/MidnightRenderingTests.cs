@@ -310,6 +310,51 @@ public class MidnightRenderingTests
             closed.ShouldBe(1);
         });
 
+    /// <summary>The top bar's Switch look chooses the other look as Settings does, so the choice is saved and a failure lands
+    /// on Settings' message line, rather than asking the switcher behind Settings' back.</summary>
+    [Fact]
+    public void Switch_look_in_the_top_bar_is_the_shells_own()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var shell = MidnightFixtures.Shell(saver);
+            var window = MidnightFixtures.Window(shell);
+            window.Show();
+            try
+            {
+                var button = UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Switch look")!;
+                button.Command.ShouldBeSameAs(shell.SwitchLook);
+                button.ToolTip.ShouldBe(shell.SwitchLookTip);
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
+    /// <summary>The sun and moon choose the theme through Settings too (design §1: the Theme setting applies to whichever
+    /// look is on, and the toggle sets it), so the choice is saved and Settings shows it.</summary>
+    [Fact]
+    public void The_theme_toggle_chooses_the_other_theme_through_settings()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var shell = MidnightFixtures.Shell(saver);
+            var window = MidnightFixtures.Window(shell, Theme.Dark);
+            window.Show();
+            try
+            {
+                var button = UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Theme")!;
+                button.ToolTip.ShouldBe("Light theme", "the button says what it will do");
+                button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                shell.Settings.Theme.ShouldBe(ThemeChoice.Light);
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
     /// <summary>The caption's close is an ordinary close: the App's Closing handler, not the window, turns it into a hide
     /// to the tray while the window is the current one, and lets it through once a switch has moved on.</summary>
     [Fact]

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -13,20 +14,19 @@ namespace PowerLedger.App;
 internal partial class MidnightWindow : Window, IShellWindow
 {
     private readonly ShellViewModel _shell;
-    private readonly LookSwitcher _looks;
     private readonly ThemeManager _theme;
     private readonly Action _feedback;
     private readonly Extent _size;
     private readonly Extent _minimum;
 
-    /// <param name="looks">For the top bar's Switch look button.</param>
-    /// <param name="theme">For the top bar's sun and moon.</param>
+    /// <param name="looks">The switcher the App opened this window through (plan O 0.4). The top bar's Switch look goes
+    /// through <see cref="ShellViewModel.SwitchLook"/> instead, so the choice is saved as Settings saves it.</param>
+    /// <param name="theme">For the top bar's sun and moon: which theme is on.</param>
     /// <param name="updates">For the foot's update card.</param>
     /// <param name="feedback">Opens the Send feedback window, from the sidebar's Support item and the bug button.</param>
     internal MidnightWindow(ShellViewModel shell, LookSwitcher looks, ThemeManager theme, Updater updates, Action feedback)
     {
         _shell = shell;
-        _looks = looks;
         _theme = theme;
         _feedback = feedback;
         InitializeComponent();
@@ -38,6 +38,8 @@ internal partial class MidnightWindow : Window, IShellWindow
         KindGlyph.Text = shell.Settings.Service.IsDesktop ? "" : "";
         KindGlyph.ToolTip = shell.Settings.Service.IsDesktop ? "Desktop" : "Laptop";
         ShowTheme();
+        shell.Settings.PropertyChanged += OnSettingsChanged;
+        Closed += (_, _) => shell.Settings.PropertyChanged -= OnSettingsChanged;   // Settings outlives a window a switch closes
         if (shell.Page == Page.Now) shell.Page = Page.Dashboard;   // Midnight's sidebar never selects Now
         Loaded += (_, _) => MovePill(animate: false);
         StateChanged += (_, _) => MaximizeButton.Content = WindowState == WindowState.Maximized ? "" : "";
@@ -137,13 +139,15 @@ internal partial class MidnightWindow : Window, IShellWindow
 
     private void NavChecked(object sender, RoutedEventArgs e) => MovePill(animate: true);
 
+    /// <summary>The other theme, chosen in Settings as its Theme choice is (design §1), so it is saved; Settings applies it.</summary>
     private void ThemeClick(object sender, RoutedEventArgs e)
-    {
-        _theme.Choose(_theme.Current == Theme.Dark ? ThemeChoice.Light : ThemeChoice.Dark);
-        ShowTheme();
-    }
+        => _shell.Settings.Theme = _theme.Current == Theme.Dark ? ThemeChoice.Light : ThemeChoice.Dark;
 
-    private void SwitchLookClick(object sender, RoutedEventArgs e) => _looks.Switch(Look.Classic);
+    /// <summary>A theme chosen here or in Settings: the toggle turns to offer the other.</summary>
+    private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SettingsViewModel.Theme)) ShowTheme();
+    }
 
     private void SettingsClick(object sender, RoutedEventArgs e) => _shell.Page = Page.Settings;
 
