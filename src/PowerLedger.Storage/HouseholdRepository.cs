@@ -83,6 +83,12 @@ public sealed class HouseholdRepository(SqliteDatabase db)
         ReadRows("WHERE device_id = $device AND changed_ms > $changed ORDER BY changed_ms, hour_ms",
             ("$device", deviceId), ("$changed", changedMs));
 
+    /// <summary>A device's rows after the one that changed at <paramref name="changedMs"/> for <paramref name="hourMs"/>, in the
+    /// order they changed, then by hour: where a run that stopped part way through rows changed at the same moment goes on.</summary>
+    public List<HouseholdRow> ChangedAfter(string deviceId, long changedMs, long hourMs) =>
+        ReadRows("WHERE device_id = $device AND (changed_ms > $changed OR (changed_ms = $changed AND hour_ms > $hour)) ORDER BY changed_ms, hour_ms",
+            ("$device", deviceId), ("$changed", changedMs), ("$hour", hourMs));
+
     /// <summary>For each device with rows, when its newest change was.</summary>
     public Dictionary<string, long> Latest()
     {

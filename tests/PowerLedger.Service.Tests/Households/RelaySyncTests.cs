@@ -137,6 +137,32 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
+    public async Task A_year_cut_short_by_the_servers_daily_limit_goes_on_from_the_last_batch_that_went()
+    {
+        var random = new Random(11);
+        var year = Enumerable.Range(0, 24 * 300).Select(hour => new HouseholdRow(
+            _desktop.Id, Now.AddHours(-hour - 1).ToUnixTimeMilliseconds(), random.NextDouble() * 100, random.NextDouble() * 50, random.NextDouble() * 30,
+            random.NextDouble() * 10, random.NextDouble() * 10, random.NextDouble(), random.NextDouble(), random.NextDouble() * 3600,
+            random.NextDouble() * 3600, random.NextDouble() * 600, random.NextDouble() * 3600, random.NextDouble() * 60, random.NextDouble() * 60,
+            random.NextInt64(100_000), "EUR", ChangedMs: 5_000)).ToList();
+        _desktop.Household.Upsert(year);                                         // a year built at once, as on joining
+        var posts = 0;
+        _relay.Intercept = (request, _) => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/batches", StringComparison.Ordinal)
+            && ++posts == 2 ? FakeRelay.Error(429, "Too many batches from this PC today.") : null;
+
+        var cut = await _desktop.RunAsync();
+        _relay.Intercept = null;
+        var rest = await _desktop.RunAsync();
+
+        cut.Problem.ShouldNotBeNull().ShouldContain("too much today");
+        cut.RowsOut.ShouldBeGreaterThan(0);
+        rest.Problem.ShouldBeNull();
+        (cut.RowsOut + rest.RowsOut).ShouldBe(year.Count);                        // nothing went twice
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(0);
+        (await _laptop.RunAsync()).RowsIn.ShouldBe(year.Count);
+    }
+
+    [Fact]
     public async Task A_batch_that_doesnt_open_is_passed_over_and_the_cursor_moves_on()
     {
         _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100)]);

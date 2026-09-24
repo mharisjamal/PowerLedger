@@ -305,12 +305,20 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         throw new RelayStop($"The server refused to sync: {result.Problem}.");
     }
 
+    /// <summary>This PC's rows that changed since the last post, oldest change first; a post the server stops part way
+    /// through, as at its daily limit, goes on from the last batch it took.</summary>
     private async Task PostNewRowsAsync(DeviceKeys keys, string householdId, string name, ChassisKind kind, RelayRun run, CancellationToken cancel)
     {
-        var rows = household.ChangedAfter(keys.DeviceId, store.PostedThrough);
+        var rows = store.PostedHour is { } hour
+            ? household.ChangedAfter(keys.DeviceId, store.PostedThrough, hour)
+            : household.ChangedAfter(keys.DeviceId, store.PostedThrough);
         if (rows.Count == 0) return;
-        await PostRowsAsync(keys, householdId, name, kind, rows, run, cancel).ConfigureAwait(false);
-        store.PostedThrough = rows.Max(row => row.ChangedMs);
+        await PostRowsAsync(keys, householdId, name, kind, rows, run, last =>
+        {
+            store.PostedThrough = last.ChangedMs;
+            store.PostedHour = last.HourMs;
+        }, cancel).ConfigureAwait(false);
+        store.PostedHour = null;                                               // every row changed then has gone
     }
 
     /// <summary>This PC's last 13 months of rows, once, for each member it hasn't posted them for (households design §5).</summary>
@@ -323,15 +331,18 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             .ToList();
         if (newcomers.Count == 0) return;
         var now = clock.GetUtcNow();
-        var rows = household.RowsBetween(keys.DeviceId, HourRows.BackfillFrom(now).ToUnixTimeMilliseconds(), now.ToUnixTimeMilliseconds());
-        if (rows.Count > 0) await PostRowsAsync(keys, householdId, name, kind, rows, run, cancel).ConfigureAwait(false);
+        var from = Math.Max(HourRows.BackfillFrom(now).ToUnixTimeMilliseconds(), (store.HistoryHour ?? -1) + 1);
+        var rows = household.RowsBetween(keys.DeviceId, from, now.ToUnixTimeMilliseconds());
+        if (rows.Count > 0) await PostRowsAsync(keys, householdId, name, kind, rows, run, last => store.HistoryHour = last.HourMs, cancel).ConfigureAwait(false);
         store.HistoryPosted = [.. posted, .. newcomers];
+        store.HistoryHour = null;
     }
 
     /// <summary>Posts the rows as batches under the current key, each at most 1 MB as posted: a batch that would be larger
-    /// is split in two until it fits.</summary>
+    /// is split in two until it fits. <paramref name="posted"/> hears of the last row of each batch the server took.</summary>
     private async Task PostRowsAsync(
-        DeviceKeys keys, string householdId, string name, ChassisKind kind, List<HouseholdRow> rows, RelayRun run, CancellationToken cancel)
+        DeviceKeys keys, string householdId, string name, ChassisKind kind, List<HouseholdRow> rows, RelayRun run, Action<HouseholdRow> posted,
+        CancellationToken cancel)
     {
         var epoch = store.Epoch;
         var key = store.CurrentKey ?? throw new RelayStop(null);
@@ -356,6 +367,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             store.RelayConfirmed = true;
             run.RowsOut += take;
             start += take;
+            posted(rows[start - 1]);
         }
     }
 

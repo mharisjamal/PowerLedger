@@ -89,7 +89,11 @@ public sealed class HouseholdRepositoryTests : IDisposable
         Repository.ChangedAfter(Laptop, 100).Select(row => row.HourMs).ShouldBe([2 * Hour, 0L]);
         Repository.Latest().ShouldBe(new Dictionary<string, long> { [Laptop] = 300, [Desktop] = 900 }, ignoreOrder: true);
 
-        Repository.DeleteRows(Laptop).ShouldBe(3);
+        Repository.ChangedAfter(Laptop, 100, Hour).Select(row => row.HourMs).ShouldBe([2 * Hour, 0L]);
+        Repository.Upsert([Row(Laptop, 3 * Hour, changedMs: 200)]);
+        Repository.ChangedAfter(Laptop, 200, 2 * Hour).Select(row => row.HourMs).ShouldBe([3 * Hour, 0L]);
+
+        Repository.DeleteRows(Laptop).ShouldBe(4);
         Repository.Latest().Keys.ShouldBe([Desktop]);
     }
 

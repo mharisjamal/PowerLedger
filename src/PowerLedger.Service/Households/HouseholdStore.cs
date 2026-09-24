@@ -38,11 +38,16 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string RecoveryKeyKey = "household.recovery-key";
     internal const string AskedToJoinKey = "household.asked-to-join";
     internal const string AccountKey = "household.account";
+    internal const string PostedHourKey = "household.posted-hour";
+    internal const string HistoryHourKey = "household.history-hour";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
     private static readonly string[] OfTheHousehold =
-        [IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, HistoryKey, ConfirmedKey, MembersCheckedKey, ProblemKey, WaitingKey];
+        [
+            IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, HistoryKey, HistoryHourKey, ConfirmedKey,
+            MembersCheckedKey, ProblemKey, WaitingKey,
+        ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
     private static readonly byte[] Entropy = "PowerLedger household keys"u8.ToArray();
@@ -178,6 +183,21 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     {
         get => long.TryParse(settings.Get(PostedThroughKey), NumberStyles.None, CultureInfo.InvariantCulture, out var through) ? through : 0;
         set => settings.Set(PostedThroughKey, value.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>Where a post of this PC's rows that stopped part way through goes on: after the row for this hour among those
+    /// changed at <see cref="PostedThrough"/>; null when every row changed then has gone.</summary>
+    public long? PostedHour
+    {
+        get => long.TryParse(settings.Get(PostedHourKey), NumberStyles.None, CultureInfo.InvariantCulture, out var hour) ? hour : null;
+        set => WriteText(PostedHourKey, value?.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The hour the post of this PC's year for new members has reached, when it stopped part way through; null otherwise.</summary>
+    public long? HistoryHour
+    {
+        get => long.TryParse(settings.Get(HistoryHourKey), NumberStyles.None, CultureInfo.InvariantCulture, out var hour) ? hour : null;
+        set => WriteText(HistoryHourKey, value?.ToString(CultureInfo.InvariantCulture));
     }
 
     /// <summary>The members this PC has posted its year of rows for, or that were already members when it joined.</summary>
