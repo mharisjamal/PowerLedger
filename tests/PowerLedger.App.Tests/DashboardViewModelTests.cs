@@ -24,7 +24,7 @@ public sealed class DashboardViewModelTests : IDisposable
         _history.Answer = range => range.Title switch
         {
             "Last 31 days" => Reports.Typical(range, 31 * 0.3),   // 0.3 kWh a day, today among them
-            "August 2026" => Reports.Typical(range, 2.74),        // idle: 14 % of it, 0.3836 kWh
+            "Last month to date" => Reports.Typical(range, 2.74), // 1–8 Aug 14:32; idle: 14 % of it, 0.3836 kWh
             "Before" => Reports.Typical(range, 0.2),
             _ => Reports.Typical(range),
         };
@@ -209,7 +209,7 @@ public sealed class DashboardViewModelTests : IDisposable
     public void The_first_month_has_no_last_month_to_compare_with()
     {
         var answer = _history.Answer;
-        _history.Answer = range => range.Title == "August 2026" ? Reports.Empty(range) : answer(range);
+        _history.Answer = range => range.Title == "Last month to date" ? Reports.Empty(range) : answer(range);
         var dashboard = Dashboard();
         dashboard.Show();
 
@@ -240,7 +240,115 @@ public sealed class DashboardViewModelTests : IDisposable
         dashboard.PartsRange = PartsRange.SevenDays;
         _history.Reads[^2].Title.ShouldBe("Last 7 days");
         _history.Reads[^1].Title.ShouldBe("Before");
-        (_history.Reads[^1].To - _history.Reads[^1].From).ShouldBe(_history.Reads[^2].To - _history.Reads[^2].From);
-        _history.Reads[^1].To.ShouldBe(_history.Reads[^2].From);
+        _history.Reads[^1].From.ShouldBe(_history.Reads[^2].From.AddDays(-7), "the week before, from the same hour");
+        _history.Reads[^1].To.ShouldBe(Now.AddDays(-7), "to the same moment a week ago");
+    }
+
+    /// <summary>Review 2: today so far against yesterday up to the same time, not against the hours just before midnight.</summary>
+    [Fact]
+    public void The_parts_compare_with_the_same_hours_a_period_before()
+    {
+        var dashboard = Dashboard();
+        dashboard.Show();
+        var before = _history.Reads.Last(range => range.Title == "Before");
+        before.From.ShouldBe(new DateTimeOffset(2026, 9, 7, 0, 0, 0, TimeSpan.Zero));
+        before.To.ShouldBe(Now.AddDays(-1));
+
+        dashboard.PartsRange = PartsRange.ThirtyDays;
+        before = _history.Reads.Last(range => range.Title == "Before");
+        before.From.ShouldBe(new DateTimeOffset(2026, 7, 11, 0, 0, 0, TimeSpan.Zero));   // 10 Aug, the 30 days' first, less 30
+        before.To.ShouldBe(Now.AddDays(-30));
+    }
+
+    /// <summary>Calendar days, not 24-hour blocks: the Monday after the clocks go back compares with the Sunday from its
+    /// midnight, an hour longer on the clock's face.</summary>
+    [Fact]
+    public void Across_a_clock_change_the_period_before_keeps_to_the_clock()
+    {
+        var london = TimeZoneInfo.FindSystemTimeZoneById("GMT Standard Time");
+        var monday = new DateTimeOffset(2026, 10, 26, 10, 0, 0, TimeSpan.Zero);   // the day after British Summer Time ends
+        var before = DashboardViewModel.Before(Ranges.Today(monday, london, English), 1, london);
+        before.From.ShouldBe(new DateTimeOffset(2026, 10, 25, 0, 0, 0, TimeSpan.FromHours(1)));
+        before.To.ShouldBe(new DateTimeOffset(2026, 10, 25, 10, 0, 0, TimeSpan.Zero));
+    }
+
+    /// <summary>Review 3: the month so far against last month up to the same day and time, not all of last month.</summary>
+    [Fact]
+    public void Idle_waste_compares_with_last_month_up_to_the_same_day_and_time()
+    {
+        var dashboard = Dashboard();
+        dashboard.Show();
+        var last = _history.Reads.Last(range => range.Title == "Last month to date");
+        last.From.ShouldBe(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero));
+        last.To.ShouldBe(new DateTimeOffset(2026, 8, 8, 14, 32, 7, TimeSpan.Zero));
+        _history.Reads.ShouldNotContain(range => range.Title == "August 2026", "not the whole of last month");
+
+        var endOfMarch = DashboardViewModel.LastMonthSoFar(new DateTimeOffset(2026, 3, 31, 10, 0, 0, TimeSpan.Zero), TimeZoneInfo.Utc);
+        endOfMarch.From.ShouldBe(new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero));
+        endOfMarch.To.ShouldBe(new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero), "a shorter month ends where it ends");
+    }
+
+    /// <summary>Review 1: a live reading comes every second; it redraws the cards and the parts but leaves the chart, the
+    /// same instance, so its crosshair and tooltip stay where the user put them and nothing is rebuilt each second.</summary>
+    [Fact]
+    public void A_new_reading_redraws_the_cards_but_leaves_the_chart_alone()
+    {
+        var dashboard = Dashboard();
+        dashboard.Show();
+        var chart = dashboard.Chart;
+        var raised = new List<string?>();
+        dashboard.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        _link.Push(Frames.At(Now.AddSeconds(1), totalW: 51.3));
+
+        raised.ShouldContain(nameof(DashboardViewModel.Kpis), "the cards follow the reading");
+        dashboard.Chart.ShouldBeSameAs(chart);
+        raised.ShouldNotContain(nameof(DashboardViewModel.Chart));
+        raised.ShouldNotContain(nameof(DashboardViewModel.ChartTitle));
+    }
+
+    /// <summary>Review 4: the minute's tick may start while a new range is being read and finish after it; it must read
+    /// the chart for the range now chosen, not keep the old one under the new pill.</summary>
+    [Fact]
+    public void A_minute_tick_during_a_range_change_reads_the_new_range()
+    {
+        var queue = new Queue<Action>();
+        var dashboard = Queued(queue);
+        void Drain()
+        {
+            while (queue.TryDequeue(out var work)) work();
+        }
+        dashboard.Show();
+        Drain();
+        dashboard.ChartTitle.ShouldBe("Today");
+
+        dashboard.Range = RangePill.Year;                    // its read waits…
+        _clock.Advance(DashboardViewModel.RefreshEvery);      // …and the minute's tick is read after it
+        Drain();
+
+        dashboard.ChartTitle.ShouldBe("Last 365 days");
+        dashboard.Chart.Bucket.ShouldBe(TimeSpan.FromDays(1));
+    }
+
+    /// <summary>Review 5: a read that throws off the UI thread would be lost with its task; the page says it couldn't read.</summary>
+    [Fact]
+    public void A_history_read_that_throws_says_so_on_the_page()
+    {
+        _history.Answer = _ => throw new InvalidOperationException("The history file is locked.");
+        var dashboard = Dashboard();
+
+        Should.NotThrow(dashboard.Show);
+
+        dashboard.ChartMessage.ShouldBe("Couldn't read the history");
+        dashboard.Kpis[1].Small.ShouldBe("History can't be read right now");
+        dashboard.Kpis[1].Big.ShouldBe(Format.Missing);
+    }
+
+    /// <summary>The Dashboard with its background reads held in <paramref name="queue"/> until a test runs them.</summary>
+    private DashboardViewModel Queued(Queue<Action> queue)
+    {
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+        return _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, new UiThreads(action => action(), queue.Enqueue));
     }
 }

@@ -41,10 +41,12 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private IReadOnlyList<DashboardPart> _parts = [];
 
     /// <summary>One pass over the history, read together so every card agrees on the moment.</summary>
+    /// <param name="Pill">The chart's range when it was read, so a later pass keeps its chart only for the same range.</param>
     /// <param name="Recent">The last 31 days, whose complete days make the average day.</param>
-    /// <param name="Before">The same length of time before the parts' range, for their trends.</param>
+    /// <param name="LastMonth">Last month up to the same day and time as now.</param>
+    /// <param name="Before">The parts' range a period back, for their trends.</param>
     private sealed record Reading(
-        DateTimeOffset LocalNow, HistorySnapshot? Snapshot, RangeReport? Recent, RangeReport? LastMonth,
+        RangePill Pill, DateTimeOffset LocalNow, HistorySnapshot? Snapshot, RangeReport? Recent, RangeReport? LastMonth,
         DateRange ChartRange, RangeReport? Chart, DateRange PartsWindow, RangeReport? Parts, RangeReport? Before);
 
     public DashboardViewModel(
@@ -99,6 +101,9 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <summary>The zone the ranges are cut in, so the tooltip tells the time as the axis does.</summary>
     public TimeZoneInfo Zone => _zone;
 
+    /// <summary>The culture the figures are written in, for the chart's labels and tooltip too.</summary>
+    public CultureInfo Culture => _culture;
+
     /// <summary>The parts table's range; a change reads it again at once.</summary>
     public PartsRange PartsRange
     {
@@ -134,35 +139,71 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <summary>A minute on: everything again, but the chart only while its range moves by the minute.</summary>
     private void Tick() => Refresh(chart: Range is RangePill.Hour or RangePill.Day);
 
-    /// <summary>Reads the history off the UI thread; a read a newer one overtook is dropped. Call on the UI thread.</summary>
+    /// <summary>
+    /// Reads the history off the UI thread; a read a newer one overtook is dropped. The chart is read again unless
+    /// <paramref name="chart"/> is false and the last reading's chart is of the range still chosen: a minute's tick can
+    /// start just after a pill is clicked and finish after that click's read, and must not bring the old range back. A
+    /// read that throws would go with its task; it comes back as a reading of nothing, which the page shows as unread
+    /// (design §5), and the next minute tries again. Call on the UI thread.
+    /// </summary>
     private void Refresh(bool chart = true)
     {
         var read = ++_reads;
         var pill = Range;
         var parts = PartsRange;
-        var kept = chart ? null : _read;
+        var kept = chart || _read?.Pill != pill ? null : _read;
         _threads.Background(() =>
         {
             var now = _clock.GetUtcNow();
-            var chartRange = kept?.ChartRange ?? RangeFor(pill, now);
-            var partsRange = RangeFor(parts, now);
-            var reading = new Reading(
-                TimeZoneInfo.ConvertTime(now, _zone),
-                _summary.Read(now, _zone),
-                _history.Read(Ranges.LastDays(31, now, _zone, _culture), _zone),
-                _history.Read(Ranges.LastMonth(now, _zone, _culture), _zone),
-                chartRange,
-                kept is not null ? kept.Chart : _history.Read(chartRange, _zone),
-                partsRange,
-                _history.Read(partsRange, _zone),
-                _history.Read(Before(partsRange), _zone));
+            Reading reading;
+            try
+            {
+                reading = Read(now, pill, parts, kept);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                reading = NothingRead(now, pill, parts);
+            }
             _threads.Post(() =>
             {
                 if (read != _reads) return;
                 _read = reading;
+                if (kept is null) ShowChart();
                 Rebuild();
             });
         });
+    }
+
+    private Reading Read(DateTimeOffset now, RangePill pill, PartsRange parts, Reading? kept)
+    {
+        var chartRange = kept?.ChartRange ?? RangeFor(pill, now);
+        var partsRange = RangeFor(parts, now);
+        return new Reading(
+            pill,
+            TimeZoneInfo.ConvertTime(now, _zone),
+            _summary.Read(now, _zone),
+            _history.Read(Ranges.LastDays(31, now, _zone, _culture), _zone),
+            _history.Read(LastMonthSoFar(now, _zone), _zone),
+            chartRange,
+            kept is not null ? kept.Chart : _history.Read(chartRange, _zone),
+            partsRange,
+            _history.Read(partsRange, _zone),
+            _history.Read(Before(partsRange, DaysOf(parts), _zone), _zone));
+    }
+
+    /// <summary>A reading of nothing, for a pass that threw: the chart's range as well as it can be named, and no data.</summary>
+    private Reading NothingRead(DateTimeOffset now, RangePill pill, PartsRange parts)
+    {
+        DateRange chartRange;
+        try
+        {
+            chartRange = RangeFor(pill, now);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            chartRange = Ranges.Today(now, _zone, _culture);   // All asks the history where it starts
+        }
+        return new Reading(pill, TimeZoneInfo.ConvertTime(now, _zone), null, null, null, chartRange, null, RangeFor(parts, now), null, null);
     }
 
     private DateRange RangeFor(RangePill pill, DateTimeOffset now) => pill switch
@@ -182,12 +223,38 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         _ => Ranges.LastDays(30, now, _zone, _culture),
     };
 
-    /// <summary>The same length of time as <paramref name="range"/> has run for, ending where it starts: today so far
-    /// against yesterday up to the same time, a week against the week before it.</summary>
-    private static DateRange Before(DateRange range)
+    private static int DaysOf(PartsRange range) => range switch
     {
-        var elapsed = range.To - range.From;
-        return new DateRange(range.From - elapsed, range.From, range.From, "Before", range.Bucket);
+        PartsRange.Today => 1,
+        PartsRange.SevenDays => 7,
+        _ => 30,
+    };
+
+    /// <summary>
+    /// <paramref name="range"/> a period of <paramref name="days"/> back on the local clock: today so far against yesterday
+    /// from midnight to the same time, the last 7 days against the 7 before them to the same time. Calendar days, not
+    /// 24-hour blocks, so across a clock change the period before starts at its own midnight.
+    /// </summary>
+    internal static DateRange Before(DateRange range, int days, TimeZoneInfo zone)
+    {
+        DateTimeOffset Back(DateTimeOffset instant) => Ranges.At(TimeZoneInfo.ConvertTime(instant, zone).DateTime.AddDays(-days), zone);
+        return new DateRange(Back(range.From), Back(range.To), Back(range.Through), "Before", range.Bucket);
+    }
+
+    /// <summary>
+    /// Last month from its first up to the same day of the month and time of day as now, for the idle waste's trend: a
+    /// month so far against as much of the month before. A day last month lacked (the 31st after a 30-day month) takes
+    /// all of it.
+    /// </summary>
+    internal static DateRange LastMonthSoFar(DateTimeOffset now, TimeZoneInfo zone)
+    {
+        var local = TimeZoneInfo.ConvertTime(now, zone).DateTime;
+        var thisMonth = new DateTime(local.Year, local.Month, 1);
+        var lastMonth = thisMonth.AddMonths(-1);
+        var to = lastMonth + (local - thisMonth);
+        if (to > thisMonth) to = thisMonth;
+        var (from, until) = (Ranges.At(lastMonth, zone), Ranges.At(to, zone));
+        return new DateRange(from, until, until, "Last month to date", Ranges.BucketFor(until - from));
     }
 
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
@@ -207,21 +274,25 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>The cards, the chart and the parts from the live panel and the last reading. On the UI thread.</summary>
+    /// <summary>The cards and the parts from the live panel and the last reading, on every live reading. The chart is
+    /// not among them: it changes only with the history, so a reading a second leaves its crosshair be. On the UI thread.</summary>
     private void Rebuild()
     {
         var live = _now.Live;
         if (live.Quality is { } quality) _lastQuality = quality;
         Kpis = [PowerNow(live), TodayCard(), IdleWaste()];
-        if (_read is { } read)
-        {
-            ChartTitle = read.ChartRange.Title;
-            ChartFrom = read.ChartRange.From;
-            Chart =Charts.Build(read.ChartRange, read.Chart?.Series ?? [], ChartUnit.Watts, _zone, _culture);
-            ChartMessage = read.Chart is not { } chart ? "Couldn't read the history"
-                : chart.Totals.OnHours > 0 || chart.Totals.AsleepHours > 0 ? null : "No history yet";
-        }
         Parts = PartRows(live, _read);
+    }
+
+    /// <summary>The chart from a reading that read it. On the UI thread.</summary>
+    private void ShowChart()
+    {
+        if (_read is not { } read) return;
+        ChartTitle = read.ChartRange.Title;
+        ChartFrom = read.ChartRange.From;
+        Chart = Charts.Build(read.ChartRange, read.Chart?.Series ?? [], ChartUnit.Watts, _zone, _culture);
+        ChartMessage = read.Chart is not { } chart ? "Couldn't read the history"
+            : chart.Totals.OnHours > 0 || chart.Totals.AsleepHours > 0 ? null : "No history yet";
     }
 
     /// <summary>Power now: the live watts over the meter's scale, with how the reading is got as the chip; a dash and the
