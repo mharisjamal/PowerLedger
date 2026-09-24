@@ -1,8 +1,8 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { utcDateString } from "../src/day";
-import { discardIfDeleted } from "../src/report";
-import { gzip, gzipJson, randomInstallId, randomKey } from "./support";
+import { discardIfDeleted, handleReport } from "../src/report";
+import { gzip, gzipJson, randomInstallId, randomKey, withoutR2 } from "./support";
 import validFull from "./fixtures/valid-full.json";
 import validDiagnosticsOnly from "./fixtures/valid-diagnostics-only.json";
 import validLaptopPowerOnly from "./fixtures/valid-laptop-power-only.json";
@@ -222,5 +222,34 @@ describe("POST /v1/report, limits and races", () => {
     expect(await env.REPORTS!.head(r2Key)).toBeNull();
     const row = await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(installId).first();
     expect(row).toBeNull();
+  });
+});
+
+describe("POST /v1/report, without R2 bound", () => {
+  it("stores the body in D1 and indexes it", async () => {
+    const report = freshReport(validFull);
+    const body = await gzipJson(report);
+    const request = new Request("https://example.com/v1/report", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${randomKey()}`, "Content-Encoding": "gzip" },
+      body,
+    });
+
+    const response = await handleReport(request, withoutR2(env));
+
+    expect(response.status).toBe(200);
+    const r2Key = `reports/v1/${report.installId}/${report.day}.json.gz`;
+    expect(await env.REPORTS!.get(r2Key)).toBeNull();
+
+    const stored = await env.DB.prepare("SELECT body FROM report_bodies WHERE r2_key = ?")
+      .bind(r2Key)
+      .first<{ body: ArrayBuffer }>();
+    expect(stored).not.toBeNull();
+    expect(new Uint8Array(stored!.body)).toEqual(body);
+
+    const indexed = await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ? AND day = ?")
+      .bind(report.installId, report.day)
+      .first();
+    expect(indexed).not.toBeNull();
   });
 });
