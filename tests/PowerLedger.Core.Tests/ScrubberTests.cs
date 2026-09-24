@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using PowerLedger.Core;
 using Shouldly;
 
@@ -47,19 +48,51 @@ public class ScrubberTests
         Scrub(@"HKEY_USERS\S-1-5-21-3623811015-3361044348-30300820-1013\Software as S-1-5-18")
             .ShouldBe(@"HKEY_USERS\<sid>\Software as S-1-5-18");
 
+    /// <summary>Guards against catastrophic backtracking: before 6eace44, text of one repeated unit made a pattern try
+    /// every start against every end, so its work grew with the square of the length (39 million cycles for 3,000
+    /// characters of "a#{", 606 million for 12,000). A limit on the time itself failed once on a host at 100% CPU, so
+    /// this asserts the growth instead, in the cycles this thread spends, which waiting behind other threads doesn't add
+    /// to: four times the text may cost at most eight times the cycles (about four for a linear pattern, sixteen or far
+    /// more for a backtracking one). Each count is the fewest of seven tries, taken turn about, so a garbage collection
+    /// or the compiler's tiering in one try doesn't count.</summary>
     [Theory]
     [InlineData("a#{")]
     [InlineData(@"a\")]
     [InlineData(@"'C:\")]
     [InlineData(@"\\?\")]
     [InlineData("a@b.")]
-    public void LongRepetitiveTextIsScrubbedQuickly(string unit)
+    public void LongRepetitiveTextIsScrubbedInLinearTime(string unit)
     {
-        var text = string.Concat(Enumerable.Repeat(unit, 12_000 / unit.Length));
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        Scrub(text);
-        clock.ElapsedMilliseconds.ShouldBeLessThan(200);
+        var shorter = string.Concat(Enumerable.Repeat(unit, 3_000 / unit.Length));
+        var longer = string.Concat(Enumerable.Repeat(unit, 12_000 / unit.Length));
+        Scrub(longer);   // the first call compiles the patterns
+
+        var (shorterCycles, longerCycles) = (ulong.MaxValue, ulong.MaxValue);
+        for (var i = 0; i < 7; i++)
+        {
+            shorterCycles = Math.Min(shorterCycles, Cycles(() => Scrub(shorter)));
+            longerCycles = Math.Min(longerCycles, Cycles(() => Scrub(longer)));
+        }
+
+        ((double)longerCycles / shorterCycles).ShouldBeLessThan(8,
+            $"3,000 characters cost {shorterCycles:N0} cycles at the least and 12,000 cost {longerCycles:N0}");
     }
+
+    /// <summary>The CPU cycles the current thread spends on <paramref name="work"/>.</summary>
+    private static ulong Cycles(Action work)
+    {
+        QueryThreadCycleTime(GetCurrentThread(), out var before);
+        work();
+        QueryThreadCycleTime(GetCurrentThread(), out var after);
+        return after - before;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentThread();
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryThreadCycleTime(IntPtr thread, out ulong cycles);
 
     [Fact]
     public void AStackFrameKeepsOnlyItsSourceFilesName() =>
