@@ -94,6 +94,8 @@ internal static class Membership
 /// </summary>
 internal sealed class RelaySync(HouseholdStore store, HouseholdRepository household, RelayClient relay, TimeProvider clock, ILogger log)
 {
+    private readonly MemberBook _members = new(store, household);
+
     public const int PageLimit = 100;
     public const int MaxPages = 20;
     public const int MaxPostBytes = 1_048_576;
@@ -234,7 +236,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         {
             foreach (var gone in members.Value!.Where(member => member.Removed is not null && member.Device != keys.DeviceId))
             {
-                household.MarkLeft(gone.Device, gone.Removed!.Value);
+                _members.Remove(gone.Device, gone.Removed!.Value);
             }
         }
         var next = status == 409 ? store.Epoch + 1 : refused;
@@ -267,7 +269,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             }
             if (household.Member(member.Device) is { LeftMs: null } known)
             {
-                household.MarkLeft(member.Device, removed);
+                _members.Remove(member.Device, removed);
                 run.Notices.Add($"{known.Name} is no longer in the household.");
                 gone++;
             }

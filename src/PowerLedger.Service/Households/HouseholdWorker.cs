@@ -61,6 +61,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private readonly ILogger<HouseholdWorker> _log;
     private readonly HouseholdStore _store;
     private readonly HouseholdRepository _household;
+    private readonly MemberBook _members;
     private readonly HourRows _rows;
     private readonly LanSync _lanSync;
     private readonly RelaySync _relaySync;
@@ -91,9 +92,10 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         _log = log;
         _store = new HouseholdStore(new SettingsRepository(database), environment.MachineName);
         _household = new HouseholdRepository(database);
+        _members = new MemberBook(_store, _household);
         _rows = new HourRows(new AggregateRepository(database), new TariffRepository(database), _household);
         _timeouts = environment.Timeouts ?? PairingTimeouts.Default;
-        _lanSync = new LanSync(_household, clock, _timeouts);
+        _lanSync = new LanSync(_household, _members, clock, _timeouts);
         _relaySync = new RelaySync(_store, _household, environment.Relay, clock, log);
         _codePairing = new CodePairing(environment.Relay, clock, environment.CodeWait);
         _prompts = new HouseholdPrompts(notices, clock);
@@ -464,6 +466,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
         {
             var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+            _members.Restore(joiner.Id);                                       // this PC's user added it, again if it had been removed
             _household.SaveMember(new HouseholdMember(joiner.Id, joiner.Name, joiner.Kind, joiner.Sign, joiner.Dh, nowMs, null, null));
             _store.AddPending(new PendingOp(PendingOp.Add, _store.HouseholdId!, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
                 Proof: Wire.Encode(proof)));
@@ -513,6 +516,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         _store.AskedToJoin = null;
         foreach (var member in members.Where(member => member.Id != _keys.DeviceId))
         {
+            _members.Restore(member.Id);                                       // the adding PC vouches it is in
             _household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
         }
         SaveSelf(now);
@@ -533,8 +537,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         if (member.LeftMs is not null)
         {
-            _household.DeleteRows(member.DeviceId);
-            _household.DeleteMember(member.DeviceId);
+            _members.ForgetRows(member.DeviceId);                              // its tombstone stays
             return Reply(request.Id, true, $"{member.Name}'s rows were removed.");
         }
 
@@ -547,7 +550,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         var staying = _household.Members().Where(other => other.LeftMs is null && other.DeviceId != member.DeviceId);
         var envelopes = KeyWrap.For(_keys, householdId, epoch, key, staying);
         _store.AddKey(epoch, key);
-        _household.MarkLeft(member.DeviceId, nowMs);
+        _members.Remove(member.DeviceId, nowMs);
         _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: member.DeviceId));
         _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch, Envelopes: envelopes));
         QueueRecovery(householdId);

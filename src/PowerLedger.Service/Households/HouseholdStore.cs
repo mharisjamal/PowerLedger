@@ -40,13 +40,14 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string AccountKey = "household.account";
     internal const string PostedHourKey = "household.posted-hour";
     internal const string HistoryHourKey = "household.history-hour";
+    internal const string TombstonesKey = "household.tombstones";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
     private static readonly string[] OfTheHousehold =
         [
             IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, HistoryKey, HistoryHourKey, ConfirmedKey,
-            MembersCheckedKey, ProblemKey, WaitingKey,
+            MembersCheckedKey, ProblemKey, WaitingKey, TombstonesKey,
         ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
@@ -220,6 +221,14 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     {
         get => long.TryParse(settings.Get(MembersCheckedKey), NumberStyles.None, CultureInfo.InvariantCulture, out var at) ? at : null;
         set => WriteText(MembersCheckedKey, value?.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The PCs removed from the household that this PC knows of, by device ID (plan 0.8): kept when their rows go, so
+    /// none is taken back on the word of a PC that hasn't heard.</summary>
+    public IReadOnlyDictionary<string, Tombstone> Tombstones
+    {
+        get => HouseholdJson.Read(settings.Get(TombstonesKey), HouseholdJson.Default.DictionaryStringTombstone) ?? [];
+        set => WriteText(TombstonesKey, value.Count == 0 ? null : HouseholdJson.Write(new Dictionary<string, Tombstone>(value), HouseholdJson.Default.DictionaryStringTombstone));
     }
 
     /// <summary>What the server still has to be told, oldest first: kept across leaving, since each names its household.</summary>

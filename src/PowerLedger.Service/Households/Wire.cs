@@ -7,11 +7,16 @@ using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Households;
 
-/// <summary>A PC in the household as the wire carries it: in a welcome, in a sync's <c>have</c>, and each batch's own device.</summary>
-/// <param name="Kind">"laptop" or "desktop".</param>
+/// <summary>A PC in the household as the wire carries it: in a welcome, in a sync's <c>have</c> and a batch's members, and each
+/// batch's own device.</summary>
+/// <param name="Name">Its name; absent from a removed member's entry.</param>
+/// <param name="Kind">"laptop" or "desktop"; absent from a removed member's entry.</param>
 /// <param name="Sign">Its signing key, SubjectPublicKeyInfo in base64url; absent from a batch's own device.</param>
 /// <param name="Dh">Its key-agreement key, likewise.</param>
-internal sealed record WireMember(string Id, string Name, string Kind, string? Sign = null, string? Dh = null);
+/// <param name="Added">When it was added, unix milliseconds, as the list's PC knows it.</param>
+/// <param name="Removed">For a removed member: when it was removed, unix milliseconds (plan 0.8).</param>
+internal sealed record WireMember(
+    string Id, string? Name, string? Kind, string? Sign = null, string? Dh = null, long? Added = null, long? Removed = null);
 
 /// <summary>An hour row as the wire carries it (plan 0.6); the device it is from goes with the message or batch holding it.</summary>
 internal sealed record WireRow(

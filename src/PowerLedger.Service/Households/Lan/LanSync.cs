@@ -9,7 +9,8 @@ namespace PowerLedger.Service.Households.Lan;
 /// <param name="PeerId">The other PC's device ID, once it proved it holds that key.</param>
 /// <param name="RowsIn">Rows the other PC sent that were newer than those kept here.</param>
 /// <param name="RowsOut">Rows sent to the other PC.</param>
-internal sealed record SyncOutcome(bool Ok, string? PeerId, int RowsIn, int RowsOut, string? Problem = null);
+/// <param name="Removed">Members the other PC's list said were removed, that this PC had as current until now.</param>
+internal sealed record SyncOutcome(bool Ok, string? PeerId, int RowsIn, int RowsOut, string? Problem = null, IReadOnlyList<string>? Removed = null);
 
 /// <summary>
 /// Sync on the same network (households design §5, plan 0.6). After the hellos and the key exchange each side proves its
@@ -17,9 +18,10 @@ internal sealed record SyncOutcome(bool Ok, string? PeerId, int RowsIn, int Rows
 /// has, as the newest change it holds of each member's rows and the latest hour among the rows changed then, and sends
 /// the rows the other lacks in that order, then done: a sync cut short goes on from the row after the last that came. The side that
 /// connected sends first each time, so the two never both wait to write. The <c>have</c> also carries the members each
-/// knows, so a PC added elsewhere is learned of here; only a member's own entry changes its name.
+/// knows, the removed ones among them (plan 0.8), so a PC added or removed elsewhere is learned of here, and a removed PC
+/// is never taken back on the word of one that hasn't heard (<see cref="MemberBook"/>).
 /// </summary>
-internal sealed class LanSync(HouseholdRepository household, TimeProvider clock, PairingTimeouts? timeouts = null)
+internal sealed class LanSync(HouseholdRepository household, MemberBook members, TimeProvider clock, PairingTimeouts? timeouts = null)
 {
     /// <summary>Rows in one frame: about 350 bytes each, well inside the 1 MB frame.</summary>
     public const int RowsPerFrame = 2000;
@@ -47,10 +49,10 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
             await CheckProofAsync(talk, hello, proof, cancel).ConfigureAwait(false);
             await talk.SendAsync(Have(), cancel).ConfigureAwait(false);
             var theirs = await talk.ReceiveAsync("have", cancel).ConfigureAwait(false);
-            Learn(theirs, hello.From.Id);
+            var learned = Learn(theirs, hello.From.Id, me);
             var sent = await SendRowsAsync(talk, theirs, cancel).ConfigureAwait(false);
             var received = await ReceiveRowsAsync(talk, hello.From.Id, cancel).ConfigureAwait(false);
-            return new SyncOutcome(true, hello.From.Id, received, sent);
+            return new SyncOutcome(true, hello.From.Id, received, sent, Removed: learned.Removed);
         }
         catch (LanException error)
         {
@@ -77,11 +79,11 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
             await CheckProofAsync(talk, theirHello, proof, cancel).ConfigureAwait(false);
             await talk.SendAsync(Prove(me, proof), cancel).ConfigureAwait(false);
             var theirs = await talk.ReceiveAsync("have", cancel).ConfigureAwait(false);
-            Learn(theirs, theirHello.From.Id);
+            var learned = Learn(theirs, theirHello.From.Id, me);
             await talk.SendAsync(Have(), cancel).ConfigureAwait(false);
             var received = await ReceiveRowsAsync(talk, theirHello.From.Id, cancel).ConfigureAwait(false);
             var sent = await SendRowsAsync(talk, theirs, cancel).ConfigureAwait(false);
-            return new SyncOutcome(true, theirHello.From.Id, received, sent);
+            return new SyncOutcome(true, theirHello.From.Id, received, sent, Removed: learned.Removed);
         }
         catch (LanException error)
         {
@@ -111,36 +113,20 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
 
     private LanMessage Have()
     {
-        var members = household.Members().Where(member => member.LeftMs is null).ToList();
+        var current = household.Members().Where(member => member.LeftMs is null).ToList();
         var reach = household.Reach();
         return new LanMessage
         {
             Type = "have",
-            Latest = members.ToDictionary(member => member.DeviceId, member => reach.GetValueOrDefault(member.DeviceId).Changed),
-            Hours = members.Where(member => reach.ContainsKey(member.DeviceId)).ToDictionary(member => member.DeviceId, member => reach[member.DeviceId].Hour),
-            Members = [.. members.Select(Wire.Member)],
+            Latest = current.ToDictionary(member => member.DeviceId, member => reach.GetValueOrDefault(member.DeviceId).Changed),
+            Hours = current.Where(member => reach.ContainsKey(member.DeviceId)).ToDictionary(member => member.DeviceId, member => reach[member.DeviceId].Hour),
+            Members = members.Entries(),
         };
     }
 
-    /// <summary>Adds the members the other side knows and this one doesn't, and takes the other's own name and kind. A member
-    /// this PC knows has left stays left: leaving is the leaver's, or the remover's, to say.</summary>
-    private void Learn(LanMessage have, string peerId)
-    {
-        var nowMs = clock.GetUtcNow().ToUnixTimeMilliseconds();
-        foreach (var sent in (have.Members ?? []).Take(Wire.MaxMembers))
-        {
-            if (Wire.Member(sent) is not { } member) continue;
-            var known = household.Member(member.Id);
-            if (known is null)
-            {
-                household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
-            }
-            else if (member.Id == peerId && known.LeftMs is null && (known.Name != member.Name || known.Kind != member.Kind))
-            {
-                household.SaveMember(known with { Name = member.Name, Kind = member.Kind });
-            }
-        }
-    }
+    /// <summary>Learns the members the other side knows, added and removed, and its own name and kind (<see cref="MemberBook.Learn"/>).</summary>
+    private Learned Learn(LanMessage have, string peerId, PairingIdentity me) =>
+        members.Learn(have.Members ?? [], peerId, me.Keys.DeviceId, clock.GetUtcNow().ToUnixTimeMilliseconds());
 
     /// <summary>Sends every current member's rows after the last the other side has of them, in the order they changed, then
     /// done.</summary>

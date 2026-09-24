@@ -284,6 +284,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         desktop.Household.Member(laptop.Worker.DeviceId).ShouldBeNull();
         desktop.Household.Row(laptop.Worker.DeviceId, Hour(0)).ShouldBeNull();
+        desktop.Worker.Store.Tombstones.ShouldContainKey(laptop.Worker.DeviceId);   // never taken back on another's word
         desktop.Worker.Store.Epoch.ShouldBe(1);
     }
 

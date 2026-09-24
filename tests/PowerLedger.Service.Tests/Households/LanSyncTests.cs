@@ -101,6 +101,43 @@ public sealed class LanSyncTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_pc_removed_here_isnt_taken_back_from_a_member_that_hasnt_heard_and_that_member_learns_of_the_removal()
+    {
+        using var study = DeviceKeys.Create();
+        var entry = new HouseholdMember(study.DeviceId, "Study PC", ChassisKind.Desktop, study.SignPublic, study.DhPublic, 0, null, null);
+        _desktop.Household.SaveMember(entry);
+        _laptop.Household.SaveMember(entry);                                     // the laptop hasn't heard yet
+        var removed = Now.ToUnixTimeMilliseconds() - 60_000;
+        _desktop.Members.Remove(study.DeviceId, removed).ShouldBeTrue();
+        _desktop.Members.ForgetRows(study.DeviceId);                              // and its rows went too
+
+        (await _desktop.SyncWith(_laptop)).Ok.ShouldBeTrue();
+        await WaitFor.True(() => _laptop.Household.Member(study.DeviceId)?.LeftMs is not null);
+
+        _desktop.Household.Member(study.DeviceId).ShouldBeNull();                 // not back as a current member
+        _desktop.Store.Tombstones.ShouldContainKey(study.DeviceId);
+        _laptop.Household.Member(study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBe(removed);
+        (await _laptop.SyncWith(_desktop)).ShouldSatisfyAllConditions(
+            again => again.Ok.ShouldBeTrue(), again => again.Removed.ShouldNotBeNull().ShouldBeEmpty());
+    }
+
+    [Fact]
+    public async Task A_removed_pc_added_again_after_its_removal_comes_back_and_its_removal_is_learned_with_the_time()
+    {
+        using var study = DeviceKeys.Create();
+        var entry = new HouseholdMember(study.DeviceId, "Study PC", ChassisKind.Desktop, study.SignPublic, study.DhPublic, 0, null, null);
+        _laptop.Household.SaveMember(entry);
+        _laptop.Members.Remove(study.DeviceId, 1_000);
+        _desktop.Household.SaveMember(entry with { AddedMs = 2_000 });              // the desktop's user added it again later
+
+        var outcome = await _laptop.SyncWith(_desktop);
+
+        outcome.Ok.ShouldBeTrue();
+        _laptop.Household.Member(study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBeNull();
+        _laptop.Store.Tombstones.ShouldNotContainKey(study.DeviceId);
+    }
+
+    [Fact]
     public async Task A_pc_that_isnt_a_member_is_refused_and_one_claiming_a_members_key_fails_its_prove()
     {
         var stranger = new Pc("Stranger", ChassisKind.Laptop, _clock);
@@ -188,7 +225,13 @@ public sealed class LanSyncTests : IAsyncLifetime
             Name = name;
             Kind = kind;
             Household = new HouseholdRepository(_database.Db);
+            Store = new HouseholdStore(new SettingsRepository(_database.Db), () => name);
+            Members = new MemberBook(Store, Household);
         }
+
+        public HouseholdStore Store { get; }
+
+        public MemberBook Members { get; }
 
         public string Name { get; }
 
@@ -208,7 +251,7 @@ public sealed class LanSyncTests : IAsyncLifetime
 
         public void Start()
         {
-            var sync = new LanSync(Household, _clock);
+            var sync = new LanSync(Household, Members, _clock);
             Listener = new LanListener(IPAddress.Loopback, async (call, cancel) =>
             {
                 if (call.Message.Purpose == "sync") await sync.RespondAsync(call.Channel, call.Hello, Identity, cancel);
@@ -220,7 +263,7 @@ public sealed class LanSyncTests : IAsyncLifetime
         public async Task<SyncOutcome> SyncWith(Pc other, int? cutAfter = null)
         {
             await using var channel = await LanConnector.ConnectAsync(IPAddress.Loopback, other.Listener!.Port, TimeSpan.FromSeconds(5));
-            return await new LanSync(Household, _clock).SyncAsync(cutAfter is { } frames ? new CutAfter(channel, frames) : channel, Identity, CancellationToken.None);
+            return await new LanSync(Household, Members, _clock).SyncAsync(cutAfter is { } frames ? new CutAfter(channel, frames) : channel, Identity, CancellationToken.None);
         }
 
         public async ValueTask DisposeAsync()
