@@ -1,6 +1,7 @@
 import { bearer, checkInstall, countRequest } from "./auth";
 import { readBounded } from "./body";
 import { firstConsentError, GUID_PATTERN } from "./schema";
+import { deleteBodies } from "./store";
 
 const MAX_BODY_BYTES = 4096;
 const MAX_REQUESTS_PER_DAY = 20;
@@ -99,27 +100,24 @@ async function forgetInstall(env: Cloudflare.Env, installId: string): Promise<vo
   const known = await env.DB.prepare("SELECT r2_key FROM reports WHERE install_id = ?")
     .bind(installId)
     .all<{ r2_key: string }>();
-  await deleteInBatches(env, known.results.map((row) => row.r2_key));
+  await deleteBodies(env, known.results.map((row) => row.r2_key));
 
-  // Anything left under the install's prefix that D1 didn't know about.
-  const prefix = `reports/v1/${installId}/`;
-  let cursor: string | undefined;
-  do {
-    const listed = await env.REPORTS.list({ prefix, cursor, limit: 1000 });
-    await deleteInBatches(env, listed.objects.map((object) => object.key));
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor);
+  // Anything left under the install's prefix that D1 didn't know about. Only possible with R2
+  // bound: without it, every body is in D1 and already covered by the reports rows above.
+  const reports = env.REPORTS;
+  if (reports) {
+    const prefix = `reports/v1/${installId}/`;
+    let cursor: string | undefined;
+    do {
+      const listed = await reports.list({ prefix, cursor, limit: 1000 });
+      await deleteBodies(env, listed.objects.map((object) => object.key));
+      cursor = listed.truncated ? listed.cursor : undefined;
+    } while (cursor);
+  }
 
   await env.DB.batch([
     env.DB.prepare("DELETE FROM reports WHERE install_id = ?").bind(installId),
     env.DB.prepare("DELETE FROM requests WHERE install_id = ?").bind(installId),
     env.DB.prepare("DELETE FROM installs WHERE id = ?").bind(installId),
   ]);
-}
-
-async function deleteInBatches(env: Cloudflare.Env, keys: string[]): Promise<void> {
-  for (let i = 0; i < keys.length; i += 1000) {
-    const batch = keys.slice(i, i + 1000);
-    if (batch.length > 0) await env.REPORTS.delete(batch);
-  }
 }
