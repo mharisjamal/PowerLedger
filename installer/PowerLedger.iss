@@ -41,7 +41,10 @@ ArchitecturesAllowed=x64os or arm64
 ArchitecturesInstallIn64BitMode=x64os or arm64
 OutputBaseFilename=PowerLedger-{#AppVersion}-setup
 #endif
-MinVersion=10.0.17763
+; Low on purpose: a compatibility mode (set by the user, or by Windows after an earlier failed start) makes setup see an
+; older Windows, and a Windows 10 minimum here refused Windows 11 with "does not support the version of Windows".
+; InitializeSetup checks the real build instead.
+MinVersion=6.1sp1
 ; Inno Setup doesn't count files picked per architecture (the Checks in [Files]) toward the disk space it asks for, so
 ; build.ps1 passes the bigger build's size; without it the destination page claimed a few MB.
 ExtraDiskSpaceRequired={#PayloadBytes}
@@ -214,8 +217,44 @@ begin
   Log(Format('Asked PowerLedger to exit; waited %d ms.', [Waited]));
 end;
 
-function InitializeSetup: Boolean;
+function PLSetEnvironmentVariable(Name: string; Value: string): Longint; external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
+const
+  { Windows 10 version 1809, the oldest the App and the service are built and tested for. }
+  OldestBuild = 17763;
+
+{ The Windows build as the registry has it, which a compatibility mode doesn't change; 0 when it can't be read. }
+function RealWindowsBuild: Integer;
+var
+  Root: Integer;
+  Build: string;
 begin
+  Result := 0;
+  if IsWin64 then
+    Root := HKLM64
+  else
+    Root := HKLM;
+  if RegQueryStringValue(Root, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion', 'CurrentBuildNumber', Build) then
+    Result := StrToIntDef(Build, 0);
+end;
+
+function InitializeSetup: Boolean;
+var
+  Build: Integer;
+begin
+  Build := RealWindowsBuild;
+  if (Build > 0) and (Build < OldestBuild) then
+  begin
+    SuppressibleMsgBox('PowerLedger needs Windows 10 version 1809 or later, or Windows 11. This PC has Windows build ' +
+      IntToStr(Build) + '.', mbError, MB_OK, IDOK);
+    Result := False;
+    Exit;
+  end;
+  if GetWindowsVersion < $0A000000 then
+    Log(Format('Setup runs in a compatibility mode (it sees Windows %.8x; the build is %d). Going on without it.',
+      [GetWindowsVersion, Build]));
+  { Programs setup starts (sc, net, netsh, the App) would inherit the compatibility layer through this variable. }
+  PLSetEnvironmentVariable('__COMPAT_LAYER', '');
   Result := True;
   { Setup's own AppMutex check comes next. }
   CloseApp;
