@@ -63,6 +63,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private HouseholdMemberDisplay? _pendingMember;
     private string? _confirmText;
     private string? _actionMessage;
+    private string? _problem;
 
     public HouseholdViewModel(
         IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
@@ -116,6 +117,19 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     }
 
     public bool HasMessage => Message is not null;
+
+    /// <summary>The last syncing problem, in the service's own words, shown alongside whatever totals it still has; null
+    /// while syncing goes well or before a household exists (households design §1).</summary>
+    public string? Problem
+    {
+        get => _problem;
+        private set
+        {
+            if (SetProperty(ref _problem, value)) OnPropertyChanged(nameof(HasProblem));
+        }
+    }
+
+    public bool HasProblem => Problem is not null;
 
     /// <summary>Opens Add a PC (Plan N task A2 wires the window up to this).</summary>
     public ICommand AddPc { get; }
@@ -206,6 +220,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     {
         Account.Apply(household);   // sign-in works whether or not this PC is in a household
         HasHousehold = household?.HouseholdId is not null;
+        Problem = HasHousehold ? household!.Problem : null;
         if (!HasHousehold)
         {
             Today = Empty("Today");

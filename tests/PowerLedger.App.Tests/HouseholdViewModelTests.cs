@@ -16,8 +16,8 @@ public class HouseholdViewModelTests
 
     private HouseholdViewModel Model() => new(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, FakeAccount.Model(_link));
 
-    private static ServiceStatus InHousehold(string deviceId = "aaaa", string name = "Desktop-1")
-        => Statuses.Running() with { Household = new HouseholdStatus("hh1", deviceId, name, ChassisKind.Desktop, true, [], null) };
+    private static ServiceStatus InHousehold(string deviceId = "aaaa", string name = "Desktop-1", string? problem = null)
+        => Statuses.Running() with { Household = new HouseholdStatus("hh1", deviceId, name, ChassisKind.Desktop, true, [], problem) };
 
     private static HouseholdSnapshot SnapshotWith(IReadOnlyList<HouseholdMemberRow> members, IReadOnlyList<DeviceEnergy>? month = null) => new(
         new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], month ?? []), members);
@@ -72,6 +72,33 @@ public class HouseholdViewModelTests
         model.Month.Energy.ShouldBe("40.0");
         model.Month.Costs.Count.ShouldBe(2);   // shown side by side, never converted into one
         model.Month.Costs.Select(c => c.Currency).ShouldBe(["USD", "EUR"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void A_syncing_problem_shows_alongside_whatever_totals_there_are()
+    {
+        _link.Status = InHousehold(problem: "Couldn't reach the server. Will try again.");
+        _link.Connect(true);
+        var model = Model();
+
+        model.Show();
+
+        model.HasProblem.ShouldBeTrue();
+        model.Problem.ShouldBe("Couldn't reach the server. Will try again.");
+        model.Message.ShouldBeNull();   // the problem does not stop the totals from showing
+    }
+
+    [Fact]
+    public void No_problem_is_the_normal_case()
+    {
+        _link.Status = InHousehold();
+        _link.Connect(true);
+        var model = Model();
+
+        model.Show();
+
+        model.HasProblem.ShouldBeFalse();
+        model.Problem.ShouldBeNull();
     }
 
     [Fact]

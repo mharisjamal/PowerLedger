@@ -16,6 +16,8 @@
             <StackPanel Visibility="{Binding HasHousehold, Converter={StaticResource VisibleWhen}}">
                 <TextBlock Style="{StaticResource Text.Muted}" Margin="0,0,0,14" Text="{Binding Message}"
                            Visibility="{Binding HasMessage, Converter={StaticResource VisibleWhen}}" />
+                <TextBlock Style="{StaticResource Text.Muted}" Margin="0,0,0,14" Foreground="{DynamicResource Brush.Amber}" Text="{Binding Problem}"
+                           Visibility="{Binding HasProblem, Converter={StaticResource VisibleWhen}}" />
 
                 <Grid>
                     <Grid.ColumnDefinitions>
