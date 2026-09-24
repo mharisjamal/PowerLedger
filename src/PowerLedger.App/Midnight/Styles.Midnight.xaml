@@ -7,9 +7,9 @@
          Every colour is a palette brush (Theme/Palette.Midnight.*.xaml) through DynamicResource, so the theme toggle
          repaints in place; the numbers and the motion below are the tokens of 0.2 and 0.5. -->
 
-    <!-- Type: the bundled faces (Fonts\, plan O F1), then Windows' own. The pack form resolves from the App and from a test host alike. -->
-    <FontFamily x:Key="M.Font.Ui">pack://application:,,,/PowerLedger;component/Fonts/#Manrope, Segoe UI Variable, Segoe UI</FontFamily>
-    <FontFamily x:Key="M.Font.Numbers">pack://application:,,,/PowerLedger;component/Fonts/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
+    <!-- Type: the bundled faces (a folder a family under Fonts\), then Windows' own. The pack form resolves from the App and from a test host alike. -->
+    <FontFamily x:Key="M.Font.Ui">pack://application:,,,/PowerLedger;component/Fonts/Manrope/#Manrope, Segoe UI Variable, Segoe UI</FontFamily>
+    <FontFamily x:Key="M.Font.Numbers">pack://application:,,,/PowerLedger;component/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
     <FontFamily x:Key="M.Font.Glyphs">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <!-- The numbers of 0.2. A Border wants its radius as a CornerRadius, so the card's and the control's are also here in
