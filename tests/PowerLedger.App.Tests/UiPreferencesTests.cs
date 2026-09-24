@@ -95,29 +95,59 @@ public sealed class UiPreferencesTests : IDisposable
         store.Load().ReadMonitorBrightness.ShouldBeFalse();
     }
 
+    /// <summary>Midnight is the default (the owner's decision, 2026-09-25): a new install opens in it, and a chosen Classic
+    /// survives a save and a load.</summary>
     [Fact]
-    public void The_look_is_classic_until_chosen_and_survives_a_save_and_a_load()
+    public void The_look_is_midnight_until_chosen_and_a_chosen_classic_survives_a_save_and_a_load()
     {
         var store = new UiPreferencesStore(File);
-        store.Load().Look.ShouldBe(Look.Classic);
-
-        store.Save(UiPreferences.Default with { Look = Look.Midnight });
-
         store.Load().Look.ShouldBe(Look.Midnight);
-        System.IO.File.ReadAllText(File).ShouldContain("\"Midnight\"");
+        UiPreferences.Default.Look.ShouldBe(Look.Midnight);
+
+        store.Save(UiPreferences.Default with { Look = Look.Classic });
+
+        store.Load().Look.ShouldBe(Look.Classic);
+        System.IO.File.ReadAllText(File).ShouldContain("\"Classic\"");
+    }
+
+    /// <summary>Every PC updating from 0.7.x or earlier has a ui.json with no Look: it lands on Midnight.</summary>
+    [Fact]
+    public void A_file_from_before_the_look_existed_opens_in_midnight_and_keeps_the_rest()
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, """{ "Theme": "Light", "FirstRunDone": true, "Co2KgPerKwh": 0.23 }""");
+
+        var read = new UiPreferencesStore(File).Load();
+
+        read.Look.ShouldBe(Look.Midnight);
+        read.LookIntroduced.ShouldBeFalse("so it is told of the new look once");
+        read.Theme.ShouldBe(ThemeChoice.Light);
+        read.FirstRunDone.ShouldBeTrue();
+        read.Co2KgPerKwh.ShouldBe(0.23);
     }
 
     [Fact]
-    public void A_look_this_version_does_not_know_reads_as_classic_and_keeps_the_rest_of_the_file()
+    public void A_look_this_version_does_not_know_reads_as_the_default_and_keeps_the_rest_of_the_file()
     {
         Directory.CreateDirectory(_folder);
         System.IO.File.WriteAllText(File, """{ "Theme": "Dark", "Look": "Neon", "FirstRunDone": true }""");
 
         var read = new UiPreferencesStore(File).Load();
 
-        read.Look.ShouldBe(Look.Classic);
+        read.Look.ShouldBe(Look.Midnight);
         read.Theme.ShouldBe(ThemeChoice.Dark);
         read.FirstRunDone.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void That_the_new_look_was_introduced_survives_a_save_and_a_load()
+    {
+        var store = new UiPreferencesStore(File);
+        store.Load().LookIntroduced.ShouldBeFalse();
+
+        store.Save(UiPreferences.Default with { LookIntroduced = true });
+
+        store.Load().LookIntroduced.ShouldBeTrue();
     }
 
     [Fact]

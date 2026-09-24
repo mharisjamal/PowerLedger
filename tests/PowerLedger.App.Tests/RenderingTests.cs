@@ -462,7 +462,8 @@ public class RenderingTests
             foreach (var theme in new[] { Theme.Dark, Theme.Light })
             {
                 UseTheme(theme);
-                var ui = new FakeUiSettings { LookProblem = "Couldn't open the Midnight look: no XAML" };
+                var ui = ClassicUi();
+                ui.LookProblem = "Couldn't open the Midnight look: no XAML";
                 var settings = SettingsScreen(ui: ui);
                 settings.Show();
                 var view = new SettingsView { DataContext = settings };
@@ -1808,15 +1809,18 @@ public class RenderingTests
     /// <summary>Settings against a running service, with a tariff, this laptop's detection, two external monitors — one in
     /// Energy Star's list whose brightness was read, on a plug of its own, and a portable one estimated from its size whose
     /// brightness wasn't, running off the laptop — and a UPS and a power supply read over USB. The service is
-    /// <paramref name="link"/> when it is given.</summary>
+    /// <paramref name="link"/> when it is given. Its preferences are Classic's own, as a Classic window's are, unless <paramref name="ui"/> says otherwise.</summary>
     private static SettingsViewModel SettingsScreen(FakeLink? link = null, FakeUiSettings? ui = null)
     {
         link ??= new FakeLink();
         link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) with { PowerDevices = [Statuses.Ups, Statuses.PowerSupply] };
         link.Connect(true);
-        return new SettingsViewModel(link, new FakeMachineHistory(), ui ?? new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
+        return new SettingsViewModel(link, new FakeMachineHistory(), ui ?? ClassicUi(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");
     }
+
+    /// <summary>Preferences in the Classic look: Midnight is the default, so a Classic window's user chose Classic.</summary>
+    private static FakeUiSettings ClassicUi() => new() { Current = UiPreferences.Default with { Look = Look.Classic, LookIntroduced = true } };
 
     /// <summary>The wizard against a running service that detected two external monitors: one in Energy Star's list, one
     /// estimated from its size.</summary>

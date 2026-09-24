@@ -69,17 +69,17 @@ public class ShellViewModelTests
         var shell = Shell();
         var raised = new List<string?>();
         shell.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
-        shell.SwitchLookTip.ShouldBe("Switch to the Midnight look");
+        shell.SwitchLookTip.ShouldBe("Switch to the Classic look", "Midnight is the default");
 
         shell.SwitchLook.Execute(null);
 
-        _ui.Current.Look.ShouldBe(Look.Midnight);
-        _ui.Changes.ShouldContain("look Midnight");
-        shell.SwitchLookTip.ShouldBe("Switch to the Classic look");
+        _ui.Current.Look.ShouldBe(Look.Classic);
+        _ui.Changes.ShouldContain("look Classic");
+        shell.SwitchLookTip.ShouldBe("Switch to the Midnight look");
         raised.ShouldContain(nameof(ShellViewModel.SwitchLookTip));
 
         shell.SwitchLook.Execute(null);
-        _ui.Current.Look.ShouldBe(Look.Classic);
+        _ui.Current.Look.ShouldBe(Look.Midnight);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class ShellViewModelTests
         midnight.Page.ShouldBe(Page.Dashboard);
         midnight.Current.ShouldBe(midnight.Dashboard);
 
-        _ui.Current = UiPreferences.Default;
+        _ui.Current = UiPreferences.Default with { Look = Look.Classic };
         var classic = ShellWithDashboard();
         classic.Page = Page.Report;
         classic.BeginSetup();

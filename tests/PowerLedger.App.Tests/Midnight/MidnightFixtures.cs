@@ -158,7 +158,7 @@ internal static class MidnightFixtures
         var link = new FakeLink();
         link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) with { PowerDevices = [Statuses.Ups, Statuses.PowerSupply] };
         link.Connect(true);
-        ui ??= new FakeUiSettings { Current = UiPreferences.Default with { Look = Look.Midnight } };
+        ui ??= new FakeUiSettings { Current = UiPreferences.Default with { Look = Look.Midnight, LookIntroduced = true } };   // the new look's banner told once already
         return new SettingsViewModel(link, new FakeMachineHistory(), ui, UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");
     }

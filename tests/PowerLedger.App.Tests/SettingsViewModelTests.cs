@@ -173,25 +173,51 @@ public class SettingsViewModelTests
         var model = Model();
         var changed = new List<string?>();
         model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        model.Look.ShouldBe(Look.Midnight, "the default");
+
+        model.Look = Look.Classic;
+
+        _ui.Changes.ShouldBe(["look Classic"]);
         model.Look.ShouldBe(Look.Classic);
-
-        model.Look = Look.Midnight;
-
-        _ui.Changes.ShouldBe(["look Midnight"]);
-        model.Look.ShouldBe(Look.Midnight);
         model.AppMessage.ShouldBeNull();
         changed.ShouldContain(nameof(SettingsViewModel.Look));
 
-        model.Look = Look.Midnight;
+        model.Look = Look.Classic;
         _ui.Changes.Count.ShouldBe(1);
 
-        _ui.LookProblem = "Couldn't open the Classic look: no XAML";
+        _ui.LookProblem = "Couldn't open the Midnight look: no XAML";
         changed.Clear();
-        model.Look = Look.Classic;
+        model.Look = Look.Midnight;
 
-        model.Look.ShouldBe(Look.Midnight);
-        model.AppMessage.ShouldBe("Couldn't open the Classic look: no XAML");
+        model.Look.ShouldBe(Look.Classic);
+        model.AppMessage.ShouldBe("Couldn't open the Midnight look: no XAML");
         changed.ShouldContain(nameof(SettingsViewModel.Look));
+    }
+
+    /// <summary>The one-time word about the new look (Midnight look design §1): due until retired, retired for good by
+    /// Got it or by any look switch, and a failed switch retires nothing.</summary>
+    [Fact]
+    public void The_new_look_is_introduced_until_it_is_retired_by_got_it_or_a_switch()
+    {
+        var model = Model();
+        var changed = new List<string?>();
+        model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        model.LookIntroduced.ShouldBeFalse();
+
+        _ui.LookProblem = "Couldn't open the Classic look: no XAML";
+        model.Look = Look.Classic;
+        model.LookIntroduced.ShouldBeFalse("a switch that didn't happen retires nothing");
+
+        model.IntroduceLook();
+        model.LookIntroduced.ShouldBeTrue();
+        _ui.Changes.ShouldContain("look introduced");
+        changed.ShouldContain(nameof(SettingsViewModel.LookIntroduced));
+
+        _ui.LookProblem = null;
+        _ui.Current = UiPreferences.Default;
+        var switched = Model();
+        switched.Look = Look.Classic;
+        switched.LookIntroduced.ShouldBeTrue("switching looks knows there are two");
     }
 
     [Fact]
