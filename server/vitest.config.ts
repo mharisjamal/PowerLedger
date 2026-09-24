@@ -19,6 +19,11 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
             ADMIN_TOKEN: "test-admin-token",
           },
+          // Independent of wrangler.toml, whose r2_buckets block is commented out until R2 is
+          // enabled on the account: the test Worker keeps an R2 bucket bound as REPORTS, so the
+          // R2 code paths (as opposed to the D1-fallback ones, exercised with REPORTS forced to
+          // undefined) stay covered in the meantime.
+          r2Buckets: { REPORTS: "powerledger-data" },
         },
       }),
     ],
