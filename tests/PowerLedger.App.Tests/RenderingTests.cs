@@ -1012,6 +1012,49 @@ public class RenderingTests
         });
     }
 
+    /// <summary>The recovery code (households design §7, task 0.8, review finding A6): shown once from its own pushed
+    /// notice, with Copy, Save as text file and OK fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void The_recovery_code_shows_once_with_its_buttons_fitting_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.RecoveryCode, "recovery-1", "Here's your recovery code.", null, null, null, "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE");
+                var model = new RecoveryCodeViewModel(link, notice, new FakeSaver(), _ => { });
+                var window = new RecoveryCodeWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBox>(window, t => t.Text == "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Copy", "Save as text file", "OK" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 440, (int)window.ActualHeight, $"recovery-code-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();

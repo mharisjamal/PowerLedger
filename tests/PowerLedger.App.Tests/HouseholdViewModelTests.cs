@@ -16,8 +16,11 @@ public class HouseholdViewModelTests
 
     private HouseholdViewModel Model() => new(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, FakeAccount.Model(_link));
 
-    private static ServiceStatus InHousehold(string deviceId = "aaaa", string name = "Desktop-1", string? problem = null)
-        => Statuses.Running() with { Household = new HouseholdStatus("hh1", deviceId, name, ChassisKind.Desktop, true, [], problem) };
+    private static ServiceStatus InHousehold(string deviceId = "aaaa", string name = "Desktop-1", string? problem = null, bool recoveryMissing = false)
+        => Statuses.Running() with
+        {
+            Household = new HouseholdStatus("hh1", deviceId, name, ChassisKind.Desktop, true, [], problem, RecoveryMissing: recoveryMissing),
+        };
 
     private static HouseholdSnapshot SnapshotWith(IReadOnlyList<HouseholdMemberRow> members, IReadOnlyList<DeviceEnergy>? month = null) => new(
         new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], month ?? []), members);
@@ -99,6 +102,44 @@ public class HouseholdViewModelTests
 
         model.HasProblem.ShouldBeFalse();
         model.Problem.ShouldBeNull();
+    }
+
+    /// <summary>Review finding A6, task 0.8: the account's recovery code no longer working can matter with or without a
+    /// household, so it follows the status either way.</summary>
+    [Fact]
+    public void Recovery_missing_follows_the_services_status_with_or_without_a_household()
+    {
+        _link.Status = InHousehold(recoveryMissing: true);
+        _link.Connect(true);
+        var model = Model();
+
+        model.Show();
+
+        model.RecoveryMissing.ShouldBeTrue();
+
+        _link.Status = Statuses.Running() with
+        {
+            Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, RecoveryMissing: true),
+        };
+        model.Show();
+
+        model.HasHousehold.ShouldBeFalse();
+        model.RecoveryMissing.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Make_a_new_recovery_code_asks_the_service_and_shows_a_failure()
+    {
+        _link.Status = InHousehold(recoveryMissing: true);
+        _link.Connect(true);
+        _link.HouseholdAnswer = new HouseholdOutcome(false, "Couldn't reach the service.");
+        var model = Model();
+        model.Show();
+
+        model.MakeRecoveryCode.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe("newRecoveryCode");
+        model.RecoveryMessage.ShouldBe("Couldn't reach the service.");
     }
 
     [Fact]

@@ -94,26 +94,6 @@ public class SignInViewModelTests
     }
 
     [Fact]
-    public async Task A_first_sign_in_that_links_a_household_raises_the_recovery_code_once()
-    {
-        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "device-xyz", "This-PC", ChassisKind.Desktop, true, [], null) };
-        _link.Connect(true);
-        _link.HouseholdAnswer = new HouseholdOutcome(true, "Signed in.", "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE");
-        var model = Model();
-        model.Apply(_link.Status.Household);
-        string? received = null;
-        model.RecoveryCodeReceived += code => received = code;
-
-        model.SignInWithMicrosoft.Execute(null);
-        var q = Query(_opened.ShouldNotBeNull());
-        _http.Reply(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(q["nonce"], "jo@example.com") }));
-        _server.Redirect.SetResult($"?code=abc&state={q["state"]}");
-
-        await WaitFor.True(() => received is not null);
-        received.ShouldBe("K7QM-2XHD-9PW4-R8TA-VMNP-3QWE");
-    }
-
-    [Fact]
     public void Signed_in_follows_the_services_status()
     {
         var model = Model();

@@ -161,6 +161,16 @@
                            Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
             </StackPanel>
 
+            <!-- Review finding A6, task 0.8: RecoveryMissing, whether or not this PC is in a household right now. -->
+            <StackPanel Margin="0,16,0,0" Visibility="{Binding RecoveryMissing, Converter={StaticResource VisibleWhen}}">
+                <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" MaxWidth="420" HorizontalAlignment="Left"
+                           Text="Your account's recovery code no longer works." />
+                <Button Style="{StaticResource Quiet}" Margin="0,8,0,0" Content="Make a new recovery code" Command="{Binding MakeRecoveryCode}"
+                        HorizontalAlignment="Left" />
+                <TextBlock Style="{StaticResource Text.Muted}" Margin="0,6,0,0" Foreground="{DynamicResource Brush.Amber}" Text="{Binding RecoveryMessage}"
+                           Visibility="{Binding RecoveryMessage, Converter={StaticResource VisibleWhenText}}" />
+            </StackPanel>
+
         </StackPanel>
     </ScrollViewer>
 </UserControl>

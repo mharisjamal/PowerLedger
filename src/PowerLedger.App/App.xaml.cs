@@ -90,7 +90,6 @@ public partial class App : Application
         var account = new SignInViewModel(_link, _preferences, signIn, threads, SignInClients.Microsoft, SignInClients.Google);
         _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account);
         _household.AddPcRequested += OpenAddPcWindow;
-        account.RecoveryCodeReceived += OpenRecoveryCodeWindow;   // already raised on the UI thread, via UiThreads.Post
         var http = UpdateHttp.Create(version);
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
@@ -279,6 +278,9 @@ public partial class App : Application
             case NoticeKind.ConfirmJoin:
                 Dispatcher.InvokeAsync(() => OpenConfirmJoinWindow(notice));
                 break;
+            case NoticeKind.RecoveryCode:
+                Dispatcher.InvokeAsync(() => OpenRecoveryCodeWindow(notice));
+                break;
             case NoticeKind.Withdraw:
                 Dispatcher.InvokeAsync(() => WithdrawPrompt(notice.PromptId));
                 break;
@@ -344,11 +346,12 @@ public partial class App : Application
         window.Closed += (_, _) => _openPrompts.Remove(promptId);
     }
 
-    /// <summary>A first sign-in that linked a household made a recovery code (households design §7): shown once, modal
-    /// and owned by the main window.</summary>
-    private void OpenRecoveryCodeWindow(string code)
+    /// <summary>A first sign-in that linked a household, or Make a new recovery code, made one (households design §7,
+    /// task 0.8): shown once, modal and owned by the main window.</summary>
+    private void OpenRecoveryCodeWindow(HouseholdNotice notice)
     {
-        var model = new RecoveryCodeViewModel(code, new FileSaver(), CopyToClipboard);
+        if (_link is null) return;
+        var model = new RecoveryCodeViewModel(_link, notice, new FileSaver(), CopyToClipboard);
         new RecoveryCodeWindow(model) { Owner = _window }.ShowDialog();
     }
 

@@ -64,6 +64,8 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private string? _confirmText;
     private string? _actionMessage;
     private string? _problem;
+    private bool _recoveryMissing;
+    private string? _recoveryMessage;
 
     public HouseholdViewModel(
         IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
@@ -89,6 +91,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         AskLeave = new RelayCommand(() => BeginConfirm(PendingAction.LeaveHousehold, null, "Leave this household? You can join or start another one later."));
         ConfirmPending = new RelayCommand(() => _ = ConfirmPendingAsync());
         CancelPending = new RelayCommand(EndConfirm);
+        MakeRecoveryCode = new RelayCommand(() => _ = MakeRecoveryCodeAsync());
     }
 
     /// <summary>N2's sign-in section (Plan N tasks A6, A7): works whether or not this PC is in a household.</summary>
@@ -130,6 +133,16 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     }
 
     public bool HasProblem => Problem is not null;
+
+    /// <summary>N2, task 0.8: the account's recovery code no longer works and Make a new recovery code offers a
+    /// replacement (review finding A6). The new code itself arrives as its own pushed notice, which App.xaml.cs opens a
+    /// window from; this button only starts that off.</summary>
+    public bool RecoveryMissing { get => _recoveryMissing; private set => SetProperty(ref _recoveryMissing, value); }
+
+    /// <summary>Why Make a new recovery code didn't go through, or null.</summary>
+    public string? RecoveryMessage { get => _recoveryMessage; private set => SetProperty(ref _recoveryMessage, value); }
+
+    public IRelayCommand MakeRecoveryCode { get; }
 
     /// <summary>Opens Add a PC (Plan N task A2 wires the window up to this).</summary>
     public ICommand AddPc { get; }
@@ -219,6 +232,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private void Apply(HouseholdStatus? household, HouseholdSnapshot? snapshot, DateTimeOffset now)
     {
         Account.Apply(household);   // sign-in works whether or not this PC is in a household
+        RecoveryMissing = household?.RecoveryMissing ?? false;   // task 0.8: can matter with or without a household
         HasHousehold = household?.HouseholdId is not null;
         Problem = HasHousehold ? household!.Problem : null;
         if (!HasHousehold)
@@ -326,5 +340,13 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
             ActionMessage = result.Ok ? null : result.Message;
             if (result.Ok) Refresh();
         });
+    }
+
+    /// <summary>Review finding A6: only starts the new code off — it arrives as its own pushed RecoveryCode notice,
+    /// which App.xaml.cs opens a window from once it comes back.</summary>
+    private async Task MakeRecoveryCodeAsync()
+    {
+        var result = await _link.NewRecoveryCodeAsync().ConfigureAwait(false);
+        _threads.Post(() => RecoveryMessage = result.Ok ? null : result.Message);
     }
 }

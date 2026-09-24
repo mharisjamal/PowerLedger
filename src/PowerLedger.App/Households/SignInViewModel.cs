@@ -88,10 +88,6 @@ internal sealed class SignInViewModel : ObservableObject
 
     public IRelayCommand CancelDelete { get; }
 
-    /// <summary>A first sign-in linked a household and made a recovery code (households design §7, Plan N task A7):
-    /// shown once.</summary>
-    public event Action<string>? RecoveryCodeReceived;
-
     /// <summary>Follows the service's status: whether this PC holds a session, and its device ID for the next sign-in's
     /// nonce. Call on the UI thread.</summary>
     public void Apply(HouseholdStatus? household)
@@ -128,7 +124,8 @@ internal sealed class SignInViewModel : ObservableObject
                 OnPropertyChanged(nameof(Email));
             }
             if (result.Ok) RecoveryCodeInput = "";
-            if (result.Ok && result.Code is { } code) RecoveryCodeReceived?.Invoke(code);
+            // A first sign-in that links a household makes a recovery code, but it now arrives as its own pushed
+            // RecoveryCode notice (task 0.8), not on this reply, so App.xaml.cs opens that window from the notice.
         });
     }
 
