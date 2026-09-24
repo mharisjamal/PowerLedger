@@ -56,6 +56,13 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>The most members found on the network synced with in a turn: twice the most a household has.</summary>
     internal const int MaxFound = 2 * Wire.MaxMembers;
 
+    /// <summary>At most this many PCs found on the network are kept to add, the most recently seen (plan 0.9), so what browsing
+    /// answers stays well inside the pipe's 64 KB.</summary>
+    internal const int MaxFoundKept = 64;
+
+    /// <summary>A PC found on the network and not seen again for this long is forgotten.</summary>
+    internal static readonly TimeSpan FoundFor = TimeSpan.FromMinutes(10);
+
     internal const string Busy = "The household is busy. Try again in a moment.";
     internal const string NotInOne = "This PC isn't in a household.";
     internal const string NotAtTheScreen = "Only someone at this PC's screen can change its household.";
@@ -79,7 +86,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private readonly Announcer _announcer;
     private readonly DeviceKeys _keys;
     private readonly PairingTimeouts _timeouts;
-    private readonly ConcurrentDictionary<string, FoundService> _found = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (FoundService Service, DateTimeOffset Seen)> _found = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Task, byte> _running = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _kick = new(0);
@@ -288,19 +295,34 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         var mine = _store.InstanceId;
         var key = _store.CurrentKey;
+        var now = _clock.GetUtcNow();
         var pcs = new List<FoundPc>();
-        foreach (var service in found.DistinctBy(service => service.Instance))
+        foreach (var service in found.DistinctBy(service => service.Instance)
+            .Where(service => service.Instance != mine && service.Txt.GetValueOrDefault("v") == "1" && service.Instance.Length <= 64)
+            .Take(MaxFoundKept))
         {
-            if (service.Instance == mine || service.Txt.GetValueOrDefault("v") != "1" || service.Instance.Length > 64) continue;
-            _found[service.Instance] = service;
+            _found[service.Instance] = (service, now);
             pcs.Add(new FoundPc(service.Instance, NameOf(service), InThisHousehold(service, key)));
         }
+        ForgetFound(now);
         return new FoundPcsReply(request.Id, pcs);
+    }
+
+    /// <summary>Forgets the PCs found on the network not seen for <see cref="FoundFor"/>, and beyond the
+    /// <see cref="MaxFoundKept"/> seen most recently.</summary>
+    private void ForgetFound(DateTimeOffset now)
+    {
+        var kept = _found.ToArray().OrderByDescending(pair => pair.Value.Seen).ToList();
+        foreach (var (instance, found) in kept.Skip(MaxFoundKept).Concat(kept.Take(MaxFoundKept).Where(pair => now - pair.Value.Seen >= FoundFor)))
+        {
+            _found.TryRemove(new KeyValuePair<string, (FoundService, DateTimeOffset)>(instance, found));
+        }
     }
 
     private async Task<PipeMessage> AddPcAsync(AddPcRequest request, CancellationToken cancel)
     {
-        if (request.InstanceId is null || !_found.TryGetValue(request.InstanceId, out var pc) || pc.Address is null)
+        ForgetFound(_clock.GetUtcNow());
+        if (request.InstanceId is null || !_found.TryGetValue(request.InstanceId, out var seen) || seen.Service is not { Address: not null } pc)
         {
             return Reply(request.Id, false, "That PC isn't on the network any more. Look again.");
         }

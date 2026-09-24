@@ -139,7 +139,7 @@ internal sealed class PipeServer(
             while (await channel.ReadAsync(done.Token).ConfigureAwait(false) is { } message)
             {
                 var reply = await handler.HandleAsync(message, client, done.Token, session).ConfigureAwait(false);
-                await channel.WriteAsync(reply, done.Token).ConfigureAwait(false);
+                await channel.WriteAsync(Sendable(message, reply), done.Token).ConfigureAwait(false);
                 if (message is SubscribeRequest && frames is null)
                 {
                     frames = feed.Subscribe();
@@ -168,6 +168,22 @@ internal sealed class PipeServer(
             if (householdNotices is not null) notices!.Unsubscribe(householdNotices);
             signals.ForgetClient(client);
             if (pump is not null) await pump.ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The reply, or an <see cref="ErrorReply"/> in its place when it would be over the pipe's 64 KB (plan 0.9): the
+    /// client hears why, and the connection stays.</summary>
+    private PipeMessage Sendable(PipeMessage request, PipeMessage reply)
+    {
+        try
+        {
+            PipeProtocol.Serialize(reply);
+            return reply;
+        }
+        catch (PipeProtocolException error)
+        {
+            log.LogWarning("A reply was too large to send: {Reason}", error.Message);
+            return new ErrorReply((request as PipeRequest)?.Id, "The answer was too large to send.");
         }
     }
 

@@ -107,6 +107,30 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task At_most_64_pcs_found_are_kept_and_one_not_seen_for_10_minutes_is_forgotten()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        var fakes = Enumerable.Range(0, 200).Select(_ => _network.Join()).ToList();
+        foreach (var (fake, n) in fakes.Select((fake, n) => (fake, n)))
+        {
+            fake.Register($"{n:x32}", 1000 + n, new Dictionary<string, string> { ["v"] = "1", ["name"] = $"Fake {n}", ["tag"] = "" });
+        }
+
+        var found = (await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(1))).Pcs;
+
+        found.Count.ShouldBe(HouseholdWorker.MaxFoundKept);
+        PipeProtocol.Serialize(new FoundPcsReply(1, found)).Length.ShouldBeLessThan(PipeProtocol.MaxMessageBytes);
+        foreach (var fake in fakes) fake.Dispose();
+        (await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(2))).Pcs.ShouldHaveSingleItem().Name.ShouldBe("Laptop-2");
+        laptop.Discovery.Unregister();                                            // gone from the network
+        _clock.Advance(HouseholdWorker.FoundFor);
+        await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(3));
+        (await desktop.Send<HouseholdReply>(new AddPcRequest(4, laptop.Worker.InstanceId))).ShouldBe(
+            new HouseholdReply(4, false, "That PC isn't on the network any more. Look again."));
+    }
+
+    [Fact]
     public async Task Adding_a_pc_not_found_or_already_in_the_household_is_refused()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);

@@ -177,6 +177,39 @@ public sealed class PipeServerTests : IAsyncLifetime
         return new MessageChannel(pipe);
     }
 
+    [Fact]
+    public async Task A_reply_over_64_KB_goes_as_an_error_and_the_connection_stays()
+    {
+        var huge = new FoundPcsReply(1, [.. Enumerable.Range(0, 1000).Select(n => new FoundPc(new string('a', 60) + n, new string('b', 40), false))]);
+        var handler = new PipeHandler(
+            new LoopCommands(), _board, _monitors, _signals, new TariffRepository(_database.Db), TimeProvider.System, new Sharing.SharingCommands(),
+            new Answering(request => request is BrowsePcsRequest ? huge : new HouseholdReply(request.Id, true, "Done.")));
+        var name = $"PowerLedger.test.{Guid.NewGuid():N}";
+        var server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, name, _notices);
+        await server.StartAsync(CancellationToken.None);
+        try
+        {
+            await server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
+            await using var client = await ConnectAsync(name);
+
+            await client.WriteAsync(new BrowsePcsRequest(1));
+            (await client.ReadAsync()).ShouldBeOfType<ErrorReply>().Id.ShouldBe(1);
+            await client.WriteAsync(new SetDiscoverableRequest(2, false));
+            (await client.ReadAsync()).ShouldBe(new HouseholdReply(2, true, "Done."));   // still connected
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+            server.Dispose();
+        }
+    }
+
+    /// <summary>Household requests answered as the test says.</summary>
+    private sealed class Answering(Func<PipeRequest, PipeMessage> answer) : Households.IHouseholdRequests
+    {
+        public Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel) => Task.FromResult(answer(request));
+    }
+
     /// <summary>Household requests answered at once, noting the session each came from.</summary>
     private sealed class SessionRecorder(Action<uint?> seen) : Households.IHouseholdRequests
     {

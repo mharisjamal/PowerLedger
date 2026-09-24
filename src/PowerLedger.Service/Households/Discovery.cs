@@ -417,7 +417,7 @@ internal sealed class WindowsDiscovery(ILogger log) : IDiscovery
             if (await Finished(browse.Done.Task).ConfigureAwait(false)) browse.Free();
         }
 
-        var resolving = browse.Names.Keys.Select(name => ResolveAsync(name, cancel)).ToArray();
+        var resolving = browse.Names.Keys.Take(HouseholdWorker.MaxFoundKept).Select(name => ResolveAsync(name, cancel)).ToArray();   // plan 0.9
         var found = await Task.WhenAll(resolving).ConfigureAwait(false);
         return [.. found.OfType<FoundService>()];
     }
