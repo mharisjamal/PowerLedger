@@ -143,6 +143,77 @@ public class SignInViewModelTests
         _opened.ShouldNotBeNull();
     }
 
+    /// <summary>Plan 0.10: the box is read once, when Sign in is pressed, and locked until that sign-in ends — a code
+    /// typed while the browser is up changes nothing about the attempt already under way.</summary>
+    [Fact]
+    public async Task A_code_typed_while_the_browser_is_open_is_ignored()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "device-xyz", "This-PC", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+        var model = Model();
+        model.Apply(_link.Status.Household);
+        // No code typed yet, so this goes straight through to the browser step.
+
+        model.SignInWithMicrosoft.Execute(null);
+        model.RecoveryCodeLocked.ShouldBeTrue();
+        var q = Query(_opened.ShouldNotBeNull());
+
+        model.RecoveryCodeInput = "typed-while-browser-open";
+        model.RecoveryCodeInput.ShouldBe("");   // ignored: the box is locked
+
+        _http.Reply(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(q["nonce"], "jo@example.com") }));
+        _server.Redirect.SetResult($"?code=abc&state={q["state"]}");
+
+        await WaitFor.True(() => _link.HouseholdRequests.Count > 0);
+        var (_, _, _, _, recoveryCode) = ((string, string, string, string, string?))_link.HouseholdRequests.Single();
+        recoveryCode.ShouldBeNull();   // the captured (empty) value was sent, never what got typed afterward
+        await WaitFor.True(() => !model.RecoveryCodeLocked);
+        model.RecoveryCodeInput = "now-editable-again";
+        model.RecoveryCodeInput.ShouldBe("now-editable-again");
+    }
+
+    /// <summary>Plan 0.10: the warning, and the sign-in itself, use the value captured when Sign in was pressed, even if
+    /// the box could somehow be changed before Continue.</summary>
+    [Fact]
+    public async Task The_warning_and_sign_in_use_the_value_captured_when_sign_in_was_pressed()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "device-xyz", "This-PC", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+        var model = Model();
+        model.Apply(_link.Status.Household);
+        model.RecoveryCodeInput = "original-code";
+
+        model.SignInWithMicrosoft.Execute(null);
+        model.RecoveryCodeLocked.ShouldBeTrue();
+        model.RecoveryCodeInput = "changed-code";   // ignored: captured already, box locked
+        model.RecoveryCodeInput.ShouldBe("original-code");
+
+        model.ContinueRecoverySignIn.Execute(null);
+        var q = Query(_opened.ShouldNotBeNull());
+        _http.Reply(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(q["nonce"], "jo@example.com") }));
+        _server.Redirect.SetResult($"?code=abc&state={q["state"]}");
+
+        await WaitFor.True(() => _link.HouseholdRequests.Count > 0);
+        var (_, _, _, _, recoveryCode) = ((string, string, string, string, string?))_link.HouseholdRequests.Single();
+        recoveryCode.ShouldBe("original-code");
+    }
+
+    [Fact]
+    public void Cancelling_the_recovery_warning_unlocks_the_box()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.RecoveryCodeInput = "abc";
+        model.SignInWithMicrosoft.Execute(null);
+        model.RecoveryCodeLocked.ShouldBeTrue();
+
+        model.CancelRecoverySignIn.Execute(null);
+
+        model.RecoveryCodeLocked.ShouldBeFalse();
+        model.RecoveryCodeInput = "def";
+        model.RecoveryCodeInput.ShouldBe("def");
+    }
+
     /// <summary>Review finding A7: Google's client secret, configured on the view model, reaches the token exchange;
     /// Microsoft's flow needs none.</summary>
     [Fact]

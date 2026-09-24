@@ -5,8 +5,9 @@ namespace PowerLedger.App;
 /// <summary>
 /// Public client IDs for native-app OIDC (households design §7, Plan N task L6): a public client is not a secret, since
 /// the flow is authorization code with PKCE. Filled in by the lead once the owner has made an Azure app registration (a
-/// public client with a http://localhost redirect) and a Google OAuth client of the Desktop kind. Empty until then; the
-/// sign-in buttons say sign-in isn't set up yet while they are.
+/// public client whose redirect is http://127.0.0.1, added through the manifest's replyUrlsWithType with type
+/// InstalledClient) and a Google OAuth client of the Desktop kind. Empty until then, in which case a provider with no
+/// client ID (or, for Google, no secret) is not offered at all (security round, review).
 /// </summary>
 internal static class SignInClients
 {

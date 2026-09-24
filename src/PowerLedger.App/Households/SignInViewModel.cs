@@ -24,6 +24,7 @@ internal sealed class SignInViewModel : ObservableObject
     private bool _busy;
     private string? _message;
     private string _recoveryCodeInput = "";
+    private string? _capturedRecoveryCode;
     private bool _confirmingRecoverySignIn;
     private SignInProvider? _pendingSignInProvider;
 
@@ -63,6 +64,7 @@ internal sealed class SignInViewModel : ObservableObject
         {
             ConfirmingRecoverySignIn = false;
             _pendingSignInProvider = null;
+            ReleaseRecoveryLock();
         });
         SignOut = new RelayCommand(() => _ = SignOutAsync(), () => !Busy);
         DeleteAccount = new RelayCommand(() => ConfirmingDelete = true, () => !Busy);
@@ -83,8 +85,21 @@ internal sealed class SignInViewModel : ObservableObject
     public string? Email => _ui.Current.SignedInEmail;
 
     /// <summary>Use a recovery code (households design §7): typed here, on the sign-in flow, and sent with the next
-    /// sign-in instead of waiting for another member's approval.</summary>
-    public string RecoveryCodeInput { get => _recoveryCodeInput; set => SetProperty(ref _recoveryCodeInput, value); }
+    /// sign-in instead of waiting for another member's approval. Plan 0.10: read once, when Sign in is pressed, and
+    /// locked from then until that sign-in ends — a later edit here, including while the browser is up, changes nothing
+    /// about the attempt already under way.</summary>
+    public string RecoveryCodeInput
+    {
+        get => _recoveryCodeInput;
+        set
+        {
+            if (RecoveryCodeLocked) return;
+            SetProperty(ref _recoveryCodeInput, value);
+        }
+    }
+
+    /// <summary>A sign-in has already read this box and is still under way (plan 0.10): the box is read-only until then.</summary>
+    public bool RecoveryCodeLocked => _capturedRecoveryCode is not null;
 
     public bool SignedIn { get => _signedIn; private set => SetProperty(ref _signedIn, value); }
 
@@ -134,11 +149,14 @@ internal sealed class SignInViewModel : ObservableObject
         if (household is not null) _deviceId = household.DeviceId;
     }
 
-    /// <summary>Plan 0.9: a typed recovery code warns before the browser even opens, since it removes the household's
-    /// other PCs; Continue there is what actually starts <see cref="RunAsync"/>.</summary>
+    /// <summary>Plan 0.9, 0.10: the recovery-code box is read once, right here, and locked from now until this sign-in
+    /// ends — a typed recovery code warns before the browser even opens, since it removes the household's other PCs;
+    /// Continue there is what actually starts <see cref="RunAsync"/>, still against this same captured value.</summary>
     private void BeginSignIn(SignInProvider provider)
     {
-        if (!string.IsNullOrWhiteSpace(_recoveryCodeInput))
+        _capturedRecoveryCode = _recoveryCodeInput;
+        OnPropertyChanged(nameof(RecoveryCodeLocked));
+        if (!string.IsNullOrWhiteSpace(_capturedRecoveryCode))
         {
             _pendingSignInProvider = provider;
             ConfirmingRecoverySignIn = true;
@@ -148,11 +166,13 @@ internal sealed class SignInViewModel : ObservableObject
     }
 
     /// <summary>Review finding A7: whatever goes wrong, including something <see cref="SignIn"/> itself didn't expect
-    /// and so didn't turn into a failed <see cref="SignInResult"/>, this always leaves Busy false again.</summary>
+    /// and so didn't turn into a failed <see cref="SignInResult"/>, this always leaves Busy false again. Plan 0.10: uses
+    /// the recovery code <see cref="BeginSignIn"/> already captured, never a later edit to the box.</summary>
     private async Task RunAsync(SignInProvider provider)
     {
         Busy = true;
         Message = null;
+        var capturedRecoveryCode = _capturedRecoveryCode;
         try
         {
             var clientId = provider == SignInProvider.Microsoft ? _microsoftClientId : _googleClientId;
@@ -164,11 +184,12 @@ internal sealed class SignInViewModel : ObservableObject
                 {
                     Busy = false;
                     Message = outcome.Message;
+                    ReleaseRecoveryLock();
                 });
                 return;
             }
             var providerName = provider == SignInProvider.Microsoft ? "microsoft" : "google";
-            var recoveryCode = string.IsNullOrWhiteSpace(_recoveryCodeInput) ? null : _recoveryCodeInput.Trim();
+            var recoveryCode = string.IsNullOrWhiteSpace(capturedRecoveryCode) ? null : capturedRecoveryCode.Trim();
             var result = await _link.SignInAsync(providerName, outcome.IdToken, outcome.Salt, recoveryCode).ConfigureAwait(false);
             _threads.Post(() =>
             {
@@ -179,6 +200,7 @@ internal sealed class SignInViewModel : ObservableObject
                     _ui.SetSignedInEmail(outcome.Email);
                     OnPropertyChanged(nameof(Email));
                 }
+                ReleaseRecoveryLock();
                 if (result.Ok) RecoveryCodeInput = "";
                 // A first sign-in that links a household makes a recovery code, but it now arrives as its own pushed
                 // RecoveryCode notice (task 0.8), not on this reply, so App.xaml.cs opens that window from the notice.
@@ -190,8 +212,17 @@ internal sealed class SignInViewModel : ObservableObject
             {
                 Busy = false;
                 Message = "Something went wrong signing in.";
+                ReleaseRecoveryLock();
             });
         }
+    }
+
+    /// <summary>Plan 0.10: this sign-in attempt is over, one way or another — unlocks the recovery-code box for the
+    /// next one.</summary>
+    private void ReleaseRecoveryLock()
+    {
+        _capturedRecoveryCode = null;
+        OnPropertyChanged(nameof(RecoveryCodeLocked));
     }
 
     private async Task SignOutAsync()

@@ -173,7 +173,10 @@
                         </StackPanel>
                         <DockPanel Margin="0,10,0,0" MaxWidth="420" HorizontalAlignment="Left" Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource HiddenWhen}}">
                             <TextBlock DockPanel.Dock="Left" Style="{StaticResource Text.Muted}" Text="Recovery code" Margin="0,0,10,0" VerticalAlignment="Center" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding RecoveryCodeInput, UpdateSourceTrigger=PropertyChanged}" />
+                            <!-- Plan 0.10: read once when Sign in is pressed and locked until that sign-in ends, so a
+                                 code typed while the browser is up changes nothing about the attempt already under way. -->
+                            <TextBox Style="{StaticResource Field}" Text="{Binding RecoveryCodeInput, UpdateSourceTrigger=PropertyChanged}"
+                                     IsReadOnly="{Binding RecoveryCodeLocked}" />
                         </DockPanel>
                         <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,4,0,0"
                                    Text="Have a recovery code? Type it here, then sign in, to get your household back without waiting for another PC to approve you."
