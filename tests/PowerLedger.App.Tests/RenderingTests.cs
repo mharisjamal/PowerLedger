@@ -883,6 +883,135 @@ public class RenderingTests
         });
     }
 
+    /// <summary>The Approve prompt (households design §7, review finding A2): the service's own wording, with the
+    /// approver's own check code shown prominently, and its buttons fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void The_approve_prompt_shows_the_comparison_code_prominently()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.ApprovePrompt, "p2", "A PC signed in as you asks to join your household. Approve it?", null, "482 913", Now.AddMinutes(2));
+                var model = new ApprovePromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new ApprovePromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "A PC signed in as you asks to join your household. Approve it?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Check the other PC shows this code").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Don't approve", "Approve" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 420, (int)window.ActualHeight, $"approve-prompt-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>The Confirm join prompt (households design §7, task 0.8): the approved PC's own check, its heading and
+    /// comparison code shown prominently, and its buttons fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void The_confirm_join_prompt_shows_the_heading_and_the_comparison_code()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.ConfirmJoin, "p3", "Your household approved this PC. Does the approving PC show this code?", null, "482 913",
+                    Now.AddMinutes(2));
+                var model = new ConfirmJoinViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new ConfirmJoinWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Your household approved this PC. Does the approving PC show this code?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Cancel", "Codes match" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 420, (int)window.ActualHeight, $"confirm-join-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Add a PC (households design §2, §3, §4, review findings A1/A3): once the key exchange with a PC on this
+    /// network is done, the adder's own confirm check shows its question and code prominently and fits a short screen.</summary>
+    [Fact]
+    public void Add_a_pc_shows_the_confirm_check_prominently_and_it_fits_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var model = new AddPcViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now));
+                link.PushNotice(new HouseholdNotice(NoticeKind.ConfirmCode, "confirm-1", "Does Laptop-2 show 482 913?", "Laptop-2", "482 913", Now.AddMinutes(2)));
+                var window = new AddPcWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Does Laptop-2 show 482 913?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Codes match")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Cancel pairing")).ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    Save(window, 480, (int)window.ActualHeight, $"add-pc-confirm-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();
