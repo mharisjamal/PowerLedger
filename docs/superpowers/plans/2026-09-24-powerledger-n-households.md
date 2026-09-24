@@ -528,7 +528,10 @@ and the six-part `ApprovalCode`. The Contracts already have `AskAgainRequest` ("
   - **Checks at the write.**
     - The approve's write checks the request is still as it read it.
     - It also checks the household's epoch hasn't changed.
-    - A rotation's epoch claim needs an envelope for every current member at the moment of the claim.
+    - A rotation's epoch claim needs envelopes for exactly the current members at the moment of the claim. A PC added
+      or removed in between gets 409, which asks the rotating PC to look again.
+    - That PC still never seals to a member it doesn't hold as current itself. Until the others' sealed lists tell it
+      of the member, its rotation stays queued, and nothing is posted under the old key.
   - **How long a request lasts.**
     - A waiting request expires after 24 hours.
     - An approved one stays until R deletes it, or for 7 days after the approval. Deny is refused once a request is
