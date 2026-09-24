@@ -41,6 +41,10 @@ public partial class App : Application
     private ApprovePromptWindow? _approvePromptWindow;
     private DateTimeOffset? _approvePromptClosedAt;
     private ConfirmJoinWindow? _confirmJoinWindow;
+    private SendFeedbackWindow? _feedbackWindow;
+    private FeedbackSender? _feedbackSender;
+    private ITimer? _feedbackRetryTimer;
+    private string? _dataFolder;
 
     /// <summary>Review finding A4, follow-up: every open Join/Approve/Confirm join/Recovery code prompt, by its
     /// promptId, so a pushed <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others
@@ -72,7 +76,9 @@ public partial class App : Application
         var culture = CultureInfo.CurrentCulture;
         _culture = culture;
         _sentFolder = Path.Combine(options.DataFolder, "Sent");
+        _dataFolder = options.DataFolder;
         var version = Version();
+        AppLog.Write($"PowerLedger {version} starting.");
         new CrashCatcher(CrashFolder, version, ScrubNames.Here()).Hook(this);   // data-sharing design §5: as early as the App can catch itself
         _theme = new ThemeManager(this, preferences.Theme);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
@@ -101,6 +107,7 @@ public partial class App : Application
         _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account);
         _household.AddPcRequested += OpenAddPcWindow;
         var http = UpdateHttp.Create(version);
+        _feedbackSender = new FeedbackSender(http, FeedbackQueue.DefaultFolder, TimeProvider.System);
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
             new ConnectionCost(), _preferences, threads, TimeProvider.System, zone, culture, Updater.RunningVersion(version),
@@ -120,6 +127,7 @@ public partial class App : Application
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
         _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates);
+        _shell.FeedbackRequested += OpenFeedbackWindow;
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
         _settings.PropertyChanged += OnSettingsChanged;
@@ -150,6 +158,8 @@ public partial class App : Application
         _brightness.Start();
         _updates.Start();
         _usage.Start();
+        // A minute after start, then hourly (Updater's own cadence): pending feedback goes out once the PC is online again.
+        _feedbackRetryTimer = TimeProvider.System.CreateTimer(_ => _ = _feedbackSender!.RetryPendingAsync(), null, Updater.FirstCheck, Updater.CheckEvery);
         if (!options.StartInTray) ShowWindow();
     }
 
@@ -269,6 +279,35 @@ public partial class App : Application
         _addPcWindow = new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window };
         _addPcWindow.Closed += (_, _) => _addPcWindow = null;
         _addPcWindow.Show();
+    }
+
+    /// <summary>Send feedback, from the rail's bug button: modeless, owned by the main window, single-instance like Add a PC.</summary>
+    private void OpenFeedbackWindow()
+    {
+        if (_feedbackWindow is not null)
+        {
+            _feedbackWindow.Activate();
+            return;
+        }
+        if (_window is null || _feedbackSender is null || _threads is null) return;
+        var model = new FeedbackViewModel(_feedbackSender, _threads, ReadFeedbackLog);
+        model.Closed += message =>
+        {
+            _feedbackWindow?.Close();
+            if (message is not null) _tray?.Notify("PowerLedger", message, null);
+        };
+        _feedbackWindow = new SendFeedbackWindow(model, _window, new ImagePicker()) { Owner = _window };
+        _feedbackWindow.Closed += (_, _) => _feedbackWindow = null;
+        _feedbackWindow.Show();
+    }
+
+    /// <summary>The last 300 lines of the App's own log and, if it can be read, of the service's (Send feedback's
+    /// attach-log tick), capped together at the Worker's own character limit.</summary>
+    private string? ReadFeedbackLog()
+    {
+        var appTail = FeedbackLog.TailLatestFile(AppLog.Folder, "app-*.log");
+        var serviceTail = _dataFolder is null ? null : FeedbackLog.TailLatestFile(Path.Combine(_dataFolder, "logs"), "service-*.log");
+        return FeedbackLog.Combined(appTail, serviceTail);
     }
 
     /// <summary>A pushed household notice (households design §9): a Join, Approve or Confirm join prompt opens a modal
@@ -415,6 +454,7 @@ public partial class App : Application
     private async void ExitUi()
     {
         _exiting = true;
+        AppLog.Write("Exiting.");
         try
         {
             _consentGate?.Dispose();   // data-sharing design §2: a run still awaiting the service's answer must not open a dialog now
@@ -432,6 +472,8 @@ public partial class App : Application
             _monthly?.Dispose();
             _brightness?.Dispose();
             _brightnessReader?.Dispose();
+            _feedbackRetryTimer?.Dispose();
+            _feedbackWindow?.Close();
             _window?.Close();
             _tray?.Dispose();
             if (_now is not null)
