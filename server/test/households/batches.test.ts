@@ -8,7 +8,7 @@ import { withoutR2 } from "../support";
 import { addMember, createHousehold, newDevice, signedFetch, signedRequest, type TestDevice } from "./support";
 
 interface BatchPage {
-  items: { seq: number; device: string; epoch: number; body: string }[];
+  items: { seq: number; device: string; epoch: number; body: string; sig: string }[];
   next: number;
   more: boolean;
 }
@@ -17,8 +17,13 @@ function sealed(size = 64): string {
   return base64urlEncode(crypto.getRandomValues(new Uint8Array(size)));
 }
 
-async function post(hid: string, by: TestDevice, seq: number, body = sealed(), epoch = 1): Promise<Response> {
-  return signedFetch(by, "POST", `/v1/households/${hid}/batches`, { device: by.id, epoch, seq, body });
+/** Stands for the sender's signature over BatchToSign: 64 bytes the Worker keeps and hands on, but never checks. */
+function batchSig(): string {
+  return sealed(64);
+}
+
+async function post(hid: string, by: TestDevice, seq: number, body = sealed(), epoch = 1, sig = batchSig()): Promise<Response> {
+  return signedFetch(by, "POST", `/v1/households/${hid}/batches`, { device: by.id, epoch, seq, body, sig });
 }
 
 async function page(hid: string, by: TestDevice, query = "after=0&limit=100"): Promise<BatchPage> {
@@ -36,15 +41,16 @@ async function pair(): Promise<{ hid: string; first: TestDevice; second: TestDev
 }
 
 describe("POST and GET /v1/households/{hid}/batches", () => {
-  it("gives another member each batch as posted, with the sender's own seq, and the cursor as next", async () => {
+  it("gives another member each batch as posted, its signature too, with the sender's own seq, and the cursor as next", async () => {
     const { hid, first, second } = await pair();
     const body = sealed();
+    const sig = batchSig();
 
-    const posted = await post(hid, first, 17, body, 3);
+    const posted = await post(hid, first, 17, body, 3, sig);
     expect(posted.status).toBe(200);
 
     const fetched = await page(hid, second);
-    expect(fetched.items).toEqual([{ seq: 17, device: first.id, epoch: 3, body }]);
+    expect(fetched.items).toEqual([{ seq: 17, device: first.id, epoch: 3, body, sig }]);
     expect(fetched.more).toBe(false);
 
     const row = await env.DB.prepare("SELECT seq FROM batches WHERE household = ?").bind(hid).first<{ seq: number }>();
@@ -120,22 +126,29 @@ describe("POST and GET /v1/households/{hid}/batches", () => {
 
   it("gives 413 for a batch over 1 MB, and takes one just under", async () => {
     const { hid, first } = await pair();
-    const wrapper = JSON.stringify({ device: first.id, epoch: 1, seq: 1, body: "" }).length;
+    const sig = batchSig();
+    const wrapper = JSON.stringify({ device: first.id, epoch: 1, seq: 1, body: "", sig }).length;
     const justUnder = "A".repeat(1_048_576 - wrapper);
 
-    expect((await post(hid, first, 1, justUnder)).status).toBe(200);
-    expect((await post(hid, first, 2, justUnder + "AAAA")).status).toBe(413);
+    expect((await post(hid, first, 1, justUnder, 1, sig)).status).toBe(200);
+    expect((await post(hid, first, 2, justUnder + "AAAA", 1, sig)).status).toBe(413);
   });
 
   it("gives 400 for a batch that isn't the sender's own or isn't well formed", async () => {
     const { hid, first, second } = await pair();
+    const sig = batchSig();
     for (const body of [
-      { device: second.id, epoch: 1, seq: 1, body: sealed() },
-      { device: first.id, epoch: "1", seq: 1, body: sealed() },
-      { device: first.id, epoch: 1, seq: -1, body: sealed() },
-      { device: first.id, epoch: 1, seq: 1, body: "not base64url!" },
-      { device: first.id, epoch: 1, seq: 1, body: sealed(27) },
-      { device: first.id, epoch: 1, seq: 1 },
+      { device: second.id, epoch: 1, seq: 1, body: sealed(), sig },
+      { device: first.id, epoch: "1", seq: 1, body: sealed(), sig },
+      { device: first.id, epoch: 1, seq: -1, body: sealed(), sig },
+      { device: first.id, epoch: 1, seq: 1, body: "not base64url!", sig },
+      { device: first.id, epoch: 1, seq: 1, body: sealed(27), sig },
+      { device: first.id, epoch: 1, seq: 1, sig },
+      { device: first.id, epoch: 1, seq: 1, body: sealed() },
+      { device: first.id, epoch: 1, seq: 1, body: sealed(), sig: sealed(63) },
+      { device: first.id, epoch: 1, seq: 1, body: sealed(), sig: sealed(65) },
+      { device: first.id, epoch: 1, seq: 1, body: sealed(), sig: "not base64url!" },
+      { device: first.id, epoch: 1, seq: 1, body: sealed(), sig: 42 },
     ]) {
       const response = await signedFetch(first, "POST", `/v1/households/${hid}/batches`, body);
       expect(response.status, JSON.stringify(body)).toBe(400);
@@ -146,9 +159,10 @@ describe("POST and GET /v1/households/{hid}/batches", () => {
     const { hid, first, second } = await pair();
     const noR2 = withoutR2(env);
     const body = sealed();
+    const sig = batchSig();
 
     const postRequest = await signedRequest(
-      first, "POST", `/v1/households/${hid}/batches`, JSON.stringify({ device: first.id, epoch: 1, seq: 5, body }),
+      first, "POST", `/v1/households/${hid}/batches`, JSON.stringify({ device: first.id, epoch: 1, seq: 5, body, sig }),
     );
     expect((await handleHouseholdRoutes(postRequest, noR2))!.status).toBe(200);
 
@@ -158,7 +172,7 @@ describe("POST and GET /v1/households/{hid}/batches", () => {
 
     const getRequest = await signedRequest(second, "GET", `/v1/households/${hid}/batches?after=0`);
     const fetched = (await (await handleHouseholdRoutes(getRequest, noR2))!.json()) as BatchPage;
-    expect(fetched.items).toEqual([{ seq: 5, device: first.id, epoch: 1, body }]);
+    expect(fetched.items).toEqual([{ seq: 5, device: first.id, epoch: 1, body, sig }]);
   });
 
   it("ends a page early when its bodies pass the page's size, with more still waiting", async () => {
@@ -182,7 +196,8 @@ describe("POST and GET /v1/households/{hid}/batches", () => {
     for (let seq = 1; seq <= 30; seq++) {
       const body = sealed();
       bodies.push(body);
-      const request = await signedRequest(first, "POST", `/v1/households/${hid}/batches`, JSON.stringify({ device: first.id, epoch: 1, seq, body }));
+      const posted = JSON.stringify({ device: first.id, epoch: 1, seq, body, sig: batchSig() });
+      const request = await signedRequest(first, "POST", `/v1/households/${hid}/batches`, posted);
       expect((await handleHouseholdRoutes(request, noR2))!.status).toBe(200);
     }
     const member = await env.DB.prepare("SELECT * FROM members WHERE household = ? AND device = ?")

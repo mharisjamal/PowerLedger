@@ -24,6 +24,7 @@ CREATE TABLE batches (
   bytes      INTEGER NOT NULL,                -- the sealed body's size
   received   INTEGER NOT NULL,                -- ms
   r2_key     TEXT NOT NULL,                   -- where store.ts keeps the sealed body
+  sig        TEXT NOT NULL,                   -- the sender's signature over BatchToSign, base64url: kept and handed on, checked by members
   PRIMARY KEY (household, seq)
 );
 CREATE INDEX batches_received ON batches(received);

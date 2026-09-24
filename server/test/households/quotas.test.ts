@@ -12,7 +12,8 @@ function today(): string {
 
 function post(hid: string, by: TestDevice, seq: number, size = 64): Promise<Response> {
   const body = base64urlEncode(crypto.getRandomValues(new Uint8Array(size)));
-  return signedFetch(by, "POST", `/v1/households/${hid}/batches`, { device: by.id, epoch: 1, seq, body });
+  const sig = base64urlEncode(crypto.getRandomValues(new Uint8Array(64)));
+  return signedFetch(by, "POST", `/v1/households/${hid}/batches`, { device: by.id, epoch: 1, seq, body, sig });
 }
 
 /** Sets what `device` has already posted today (its create request made the day's row). */

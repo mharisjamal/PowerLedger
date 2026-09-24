@@ -15,8 +15,8 @@ async function seedBatch(target: Cloudflare.Env, household: string, seq: number,
   const key = `batches/v1/${household}/${crypto.randomUUID()}`;
   await putBody(target, key, new Uint8Array(28), { contentType: "application/octet-stream", receivedAt: received });
   await env.DB.prepare(
-    `INSERT INTO batches (household, seq, device, epoch, device_seq, bytes, received, r2_key)
-     VALUES (?, ?, 'd', 1, ?, 28, ?, ?)`,
+    `INSERT INTO batches (household, seq, device, epoch, device_seq, bytes, received, r2_key, sig)
+     VALUES (?, ?, 'd', 1, ?, 28, ?, ?, 'sig')`,
   )
     .bind(household, seq, seq, received, key)
     .run();

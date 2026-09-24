@@ -12,6 +12,8 @@ export const MAX_PAGE_ITEMS = 100;
 export const MAX_PAGE_BYTES = 4 * 1024 * 1024;
 /** Nonce and tag: the least HouseholdCrypto.Seal gives. */
 const MIN_SEALED_BYTES = 28;
+/** An ECDSA P-256 signature in IEEE P1363 form, r ‖ s. */
+const SIGNATURE_BYTES = 64;
 const WHOLE_NUMBER = /^[0-9]{1,15}$/;
 
 /** What one PC may post in a UTC day: a year's backfill fits many times over, a flood doesn't. */
@@ -60,10 +62,12 @@ export async function readBatch(request: Request): Promise<Uint8Array | Response
 }
 
 /**
- * POST /v1/households/{hid}/batches: {"device","epoch","seq","body"} (plan 0.6), where seq is the sender's own sequence
- * number, part of the sealed body's associated data. The Worker numbers the household's batches in arrival order, max +
- * 1, which is what GET's cursor counts; the sealed body goes to the body store. Each PC may post 200 batches and 5 MB a
- * UTC day (429), and the server takes 2 GB a day in all (503).
+ * POST /v1/households/{hid}/batches: {"device","epoch","seq","body","sig"} (plan 0.6, 0.8), where seq is the sender's
+ * own sequence number, part of the sealed body's associated data, and sig is the sender's ECDSA signature (P1363, 64
+ * bytes, base64url) over BatchToSign(BatchAad(…), body). The Worker doesn't check sig, members do; it keeps it and
+ * hands it on as sent. The Worker numbers the household's batches in arrival order, max + 1, which is what GET's
+ * cursor counts; the sealed body goes to the body store. Each PC may post 200 batches and 5 MB a UTC day (429), and
+ * the server takes 2 GB a day in all (503).
  */
 export async function handlePostBatch(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
@@ -73,6 +77,10 @@ export async function handlePostBatch(env: Cloudflare.Env, member: MemberRow, bo
   const sealedBytes = typeof posted.body === "string" ? base64urlDecode(posted.body) : null;
   if (!sealedBytes || sealedBytes.byteLength < MIN_SEALED_BYTES) {
     return errorResponse(400, "body must be the sealed batch, as base64url.");
+  }
+  const sig = typeof posted.sig === "string" ? posted.sig : null;
+  if (!sig || base64urlDecode(sig)?.byteLength !== SIGNATURE_BYTES) {
+    return errorResponse(400, "sig must be the sender's signature over the batch: 64 bytes, as base64url.");
   }
 
   const received = Date.now();
@@ -84,10 +92,10 @@ export async function handlePostBatch(env: Cloudflare.Env, member: MemberRow, bo
   await putBody(env, key, sealedBytes, { contentType: "application/octet-stream", receivedAt: received });
   try {
     await env.DB.prepare(
-      `INSERT INTO batches (household, seq, device, epoch, device_seq, bytes, received, r2_key)
-       SELECT ?1, COALESCE(MAX(seq), 0) + 1, ?2, ?3, ?4, ?5, ?6, ?7 FROM batches WHERE household = ?1`,
+      `INSERT INTO batches (household, seq, device, epoch, device_seq, bytes, received, r2_key, sig)
+       SELECT ?1, COALESCE(MAX(seq), 0) + 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 FROM batches WHERE household = ?1`,
     )
-      .bind(member.household, member.device, posted.epoch, posted.seq, sealedBytes.byteLength, received, key)
+      .bind(member.household, member.device, posted.epoch, posted.seq, sealedBytes.byteLength, received, key, sig)
       .run();
   } catch (error) {
     await deleteBodies(env, [key]);
@@ -103,13 +111,14 @@ interface BatchRow {
   device_seq: number;
   bytes: number;
   r2_key: string;
+  sig: string;
 }
 
 /**
  * GET /v1/households/{hid}/batches?after=<cursor>&limit=<1..100>: the other members' batches after the cursor, oldest
- * first, as {"items":[{"seq","device","epoch","body"}],"next","more"}. Each item is its batch as posted, so seq is the
- * sender's own; next is the cursor to send as after next time (after itself when nothing new came), and more says
- * another page is already waiting.
+ * first, as {"items":[{"seq","device","epoch","body","sig"}],"next","more"}. Each item is its batch as posted, so seq is
+ * the sender's own and sig its signature, for the receiver to check; next is the cursor to send as after next time
+ * (after itself when nothing new came), and more says another page is already waiting.
  */
 export async function handleGetBatches(
   env: Cloudflare.Env,
@@ -126,7 +135,7 @@ export async function handleGetBatches(
   const limit = Math.min(Math.max(Number(limitText), 1), MAX_PAGE_ITEMS);
 
   const rows = await env.DB.prepare(
-    `SELECT seq, device, epoch, device_seq, bytes, r2_key FROM batches
+    `SELECT seq, device, epoch, device_seq, bytes, r2_key, sig FROM batches
      WHERE household = ? AND seq > ? AND device != ? ORDER BY seq LIMIT ?`,
   )
     .bind(member.household, after, member.device, limit + 1)
@@ -148,7 +157,13 @@ export async function handleGetBatches(
 
   const items = page
     .filter((row) => bodies.has(row.r2_key)) // Retention may take one between the query and now.
-    .map((row) => ({ seq: row.device_seq, device: row.device, epoch: row.epoch, body: base64urlEncode(bodies.get(row.r2_key)!) }));
+    .map((row) => ({
+      seq: row.device_seq,
+      device: row.device,
+      epoch: row.epoch,
+      body: base64urlEncode(bodies.get(row.r2_key)!),
+      sig: row.sig,
+    }));
   const next = page.length > 0 ? page[page.length - 1].seq : after;
   return Response.json({ items, next, more });
 }

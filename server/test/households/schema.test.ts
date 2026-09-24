@@ -12,7 +12,7 @@ describe("the households schema", () => {
     expect(await columns("households")).toEqual(["id", "created", "epoch"]);
     expect(await columns("members")).toEqual(["household", "device", "sign_key", "dh_key", "added", "removed"]);
     expect(await columns("batches")).toEqual([
-      "household", "seq", "device", "epoch", "device_seq", "bytes", "received", "r2_key",
+      "household", "seq", "device", "epoch", "device_seq", "bytes", "received", "r2_key", "sig",
     ]);
     expect(await columns("key_envelopes")).toEqual(["household", "epoch", "device", "from_device", "body", "created"]);
     expect(await columns("meetings")).toEqual(["id", "slot", "body", "created"]);
@@ -43,8 +43,8 @@ describe("the households schema", () => {
 
     const insertBatch = () =>
       env.DB.prepare(
-        `INSERT INTO batches (household, seq, device, epoch, device_seq, bytes, received, r2_key)
-         VALUES (?, 1, ?, 1, 1, 28, 1, 'batches/v1/x')`,
+        `INSERT INTO batches (household, seq, device, epoch, device_seq, bytes, received, r2_key, sig)
+         VALUES (?, 1, ?, 1, 1, 28, 1, 'batches/v1/x', 'sig')`,
       )
         .bind(hid, "b".repeat(32))
         .run();
