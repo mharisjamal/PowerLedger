@@ -188,6 +188,24 @@ public sealed class CodePairingTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task The_joiners_question_is_withdrawn_when_the_adding_pc_stops_while_it_is_up()
+    {
+        using var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull();
+        using var stopAdder = new CancellationTokenSource();
+        var adding = _pairing.AddAsync(meeting, Adder, Welcome, NoRecord, stopAdder.Token);
+        var asked = new Waiting();
+        var joined = _pairing.JoinAsync(meeting.Code, Joiner, asked, false, (_, _) => Task.FromResult(true), CancellationToken.None);
+        await WaitFor.True(() => asked.Asking);
+
+        await stopAdder.CancelAsync();
+
+        (await adding).ShouldBeOfType<PairingOutcome.Refused>();
+        (await joined).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("The other PC stopped the pairing, so nothing was changed.");
+        asked.Withdrawn.ShouldBeTrue();
+        _relay.Slot(meeting.MeetingId, "answer").ShouldBeNull();                   // nothing more said
+    }
+
     public void Dispose()
     {
         _client.Dispose();
@@ -222,14 +240,25 @@ public sealed class CodePairingTests : IDisposable
     /// <summary>A user who hasn't answered yet: the question stays open until it is withdrawn.</summary>
     private sealed class Waiting : IPromptBroker
     {
+        private int _asking;
+        private int _withdrawn;
+
+        /// <summary>True once the question is up.</summary>
+        public bool Asking => Volatile.Read(ref _asking) == 1;
+
+        /// <summary>True once the question was withdrawn.</summary>
+        public bool Withdrawn => Volatile.Read(ref _withdrawn) == 1;
+
         public async Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel)
         {
+            Volatile.Write(ref _asking, 1);
             try
             {
                 await Task.Delay(Timeout.Infinite, cancel);
             }
             catch (OperationCanceledException)
             {
+                Volatile.Write(ref _withdrawn, 1);
             }
             return false;
         }

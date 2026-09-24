@@ -195,7 +195,20 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
             var deadline = clock.GetUtcNow() + Lifetime;
             goodbye = (toAdder, "answer");
 
-            var accept = await broker.AskToJoinAsync(new JoinQuestion(null, null, inHousehold), cancel).ConfigureAwait(false);
+            // While its user is asked, the meeting is watched: the adding PC stopping withdraws the question (plan 0.9).
+            using var question = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            using var watching = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            var watch = WatchForGoodbyeAsync(meetingId, toJoiner, deadline, question, watching.Token);
+            bool accept;
+            try
+            {
+                accept = await broker.AskToJoinAsync(new JoinQuestion(null, null, inHousehold), question.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                await watching.CancelAsync().ConfigureAwait(false);
+            }
+            if (await watch.ConfigureAwait(false)) return new PairingOutcome.Refused("The other PC stopped the pairing, so nothing was changed.");
             cancel.ThrowIfCancellationRequested();                                // the question was withdrawn: said below
             var answer = HouseholdCrypto.Seal(toAdder, LanMessages.Write(new LanMessage
             {
@@ -234,6 +247,28 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         {
             if (goodbye is { } left) await GoodbyeAsync(meetingId, left.Slot, left.Key).ConfigureAwait(false);
             return new PairingOutcome.Refused("This PC stopped the pairing, so nothing was changed.");
+        }
+    }
+
+    /// <summary>Watches the welcome slot while the joining PC's user is asked: a goodbye there from the adding PC withdraws the
+    /// question.</summary>
+    /// <returns>True when the adding PC stopped.</returns>
+    private async Task<bool> WatchForGoodbyeAsync(string meetingId, byte[] toJoiner, DateTimeOffset deadline, CancellationTokenSource question,
+        CancellationToken watching)
+    {
+        try
+        {
+            if (await PollAsync(meetingId, "welcome", deadline, watching).ConfigureAwait(false) is not { } slot
+                || Open(toJoiner, slot, "welcome") is not { Type: "cancel" })
+            {
+                return false;
+            }
+            await question.CancelAsync().ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;                                                     // answered first
         }
     }
 
