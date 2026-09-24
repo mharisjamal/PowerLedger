@@ -64,6 +64,9 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private string? _confirmText;
     private string? _actionMessage;
     private string? _problem;
+    private bool _recoveryMissing;
+    private string? _recoveryMessage;
+    private bool _hasOldRows;
 
     public HouseholdViewModel(
         IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
@@ -89,6 +92,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         AskLeave = new RelayCommand(() => BeginConfirm(PendingAction.LeaveHousehold, null, "Leave this household? You can join or start another one later."));
         ConfirmPending = new RelayCommand(() => _ = ConfirmPendingAsync());
         CancelPending = new RelayCommand(EndConfirm);
+        MakeRecoveryCode = new RelayCommand(() => _ = MakeRecoveryCodeAsync());
     }
 
     /// <summary>N2's sign-in section (Plan N tasks A6, A7): works whether or not this PC is in a household.</summary>
@@ -96,6 +100,11 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
 
     /// <summary>False before a household exists, or once this PC has left one; the page shows the explanation instead.</summary>
     public bool HasHousehold { get => _hasHousehold; private set => SetProperty(ref _hasHousehold, value); }
+
+    /// <summary>Review finding A11: household_rows or household_members still names this PC although it is in no
+    /// household right now — from one it has since left — always false while it is in one. The App never writes these
+    /// tables, so this only points the rows out; it offers no way to remove them.</summary>
+    public bool HasOldRows { get => _hasOldRows; private set => SetProperty(ref _hasOldRows, value); }
 
     public HouseholdPeriod Today { get => _today; private set => SetProperty(ref _today, value); }
 
@@ -130,6 +139,16 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     }
 
     public bool HasProblem => Problem is not null;
+
+    /// <summary>N2, task 0.8: the account's recovery code no longer works and Make a new recovery code offers a
+    /// replacement (review finding A6). The new code itself arrives as its own pushed notice, which App.xaml.cs opens a
+    /// window from; this button only starts that off.</summary>
+    public bool RecoveryMissing { get => _recoveryMissing; private set => SetProperty(ref _recoveryMissing, value); }
+
+    /// <summary>Why Make a new recovery code didn't go through, or null.</summary>
+    public string? RecoveryMessage { get => _recoveryMessage; private set => SetProperty(ref _recoveryMessage, value); }
+
+    public IRelayCommand MakeRecoveryCode { get; }
 
     /// <summary>Opens Add a PC (Plan N task A2 wires the window up to this).</summary>
     public ICommand AddPc { get; }
@@ -206,9 +225,9 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         var household = status?.Household;
         var now = _clock.GetUtcNow();
-        // Nothing is asked of storage before there is a household to read, since old rows could linger from one this PC
-        // has since left (households design §1: a left member's rows stay until the user removes them).
-        var snapshot = household?.HouseholdId is not null ? _history.Read(now, _zone) : null;
+        // Review finding A11: read even with no current household, so old rows left behind by one this PC has since
+        // left (households design §1: a left member's rows stay until the user removes them) can still be pointed out.
+        var snapshot = _history.Read(now, _zone);
         _threads.Post(() =>
         {
             if (read != _reads) return;
@@ -219,6 +238,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private void Apply(HouseholdStatus? household, HouseholdSnapshot? snapshot, DateTimeOffset now)
     {
         Account.Apply(household);   // sign-in works whether or not this PC is in a household
+        RecoveryMissing = household?.RecoveryMissing ?? false;   // task 0.8: can matter with or without a household
         HasHousehold = household?.HouseholdId is not null;
         Problem = HasHousehold ? household!.Problem : null;
         if (!HasHousehold)
@@ -228,8 +248,12 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
             Month = Empty("This month");
             Members = [];
             Message = Explanation;
+            // Review finding A11: this PC never writes the database, so there is no Remove button here — only pointing
+            // the rows out, which a member row still on file, from a household this PC has since left, is a sign of.
+            HasOldRows = snapshot is { Members.Count: > 0 };
             return;
         }
+        HasOldRows = false;
         if (snapshot is null)
         {
             Message = CantRead;
@@ -257,15 +281,18 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
             .Select(m =>
             {
                 var energy = energyByDevice.GetValueOrDefault(m.DeviceId);
+                var isThisPc = m.DeviceId == household.DeviceId;
                 return new HouseholdMemberDisplay(
-                    m.DeviceId, m.Name, m.Kind == ChassisKind.Laptop ? "Laptop" : "Desktop", m.DeviceId == household.DeviceId,
-                    Format.Kwh(energy, _culture), busiest > 0 ? energy / busiest : 0, StatusOf(m, now));
+                    m.DeviceId, m.Name, m.Kind == ChassisKind.Laptop ? "Laptop" : "Desktop", isThisPc,
+                    Format.Kwh(energy, _culture), busiest > 0 ? energy / busiest : 0, isThisPc ? "" : StatusOf(m, now));
             })
             .ToList();
     }
 
     /// <summary>"left" once removed or gone by choice; otherwise when it last synced, worded as recent ("synced … ago")
-    /// or stale ("last seen … ago") at a day, and "not synced yet" for one that never has (households design §2).</summary>
+    /// or stale ("last seen … ago") at a day, and "not synced yet" for one that never has (households design §2). This
+    /// PC's own row shows none of this (households design §2, review finding A9): it has no "last synced" of its own to
+    /// report, and <see cref="Rows"/> never calls this for it.</summary>
     internal string StatusOf(HouseholdMemberRow member, DateTimeOffset now)
     {
         if (member.Left is not null) return "left";
@@ -323,5 +350,13 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
             ActionMessage = result.Ok ? null : result.Message;
             if (result.Ok) Refresh();
         });
+    }
+
+    /// <summary>Review finding A6: only starts the new code off — it arrives as its own pushed RecoveryCode notice,
+    /// which App.xaml.cs opens a window from once it comes back.</summary>
+    private async Task MakeRecoveryCodeAsync()
+    {
+        var result = await _link.NewRecoveryCodeAsync().ConfigureAwait(false);
+        _threads.Post(() => RecoveryMessage = result.Ok ? null : result.Message);
     }
 }

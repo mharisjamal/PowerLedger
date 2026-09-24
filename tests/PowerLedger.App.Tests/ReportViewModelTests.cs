@@ -12,6 +12,7 @@ public sealed class ReportViewModelTests : IDisposable
     private static readonly DateTimeOffset Now = new(2026, 9, 8, 14, 32, 0, TimeSpan.Zero);
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
     private readonly FakeTimeProvider _clock = new(Now);
+    private readonly FakeLink _link = new();
     private readonly FakeRangeHistory _history = new();
     private readonly FakeHouseholdHistory _household = new();
     private readonly FakeSaver _saver = new();
@@ -19,7 +20,14 @@ public sealed class ReportViewModelTests : IDisposable
 
     public void Dispose() => _saver.Dispose();
 
-    private ReportViewModel Model() => new(_history, _household, _sleep, _saver, _ => [1, 2, 3], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.38);
+    private ReportViewModel Model() => new(_link, _history, _household, _sleep, _saver, _ => [1, 2, 3], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.38);
+
+    /// <summary>This PC is in a household right now, the same way the Household page learns it (review finding A11).</summary>
+    private void ConnectInHousehold()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "This-PC", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+    }
 
     [Fact]
     public void It_opens_on_this_month_and_reads_when_shown()
@@ -149,6 +157,7 @@ public sealed class ReportViewModelTests : IDisposable
     [Fact]
     public void Ticking_include_household_reads_it_for_the_shown_range_and_adds_it()
     {
+        ConnectInHousehold();
         _household.ReportAnswer = _ => new HouseholdReportSnapshot(
             new HouseholdRangeTotals(12.5, [new CurrencyCost("USD", 2.1m)], []),
             [new DeviceReport("bbbb", 4.2, 1.6, 0.4, 0.2, 2.0, [new CurrencyCost("USD", 0.7m)])],
@@ -172,6 +181,7 @@ public sealed class ReportViewModelTests : IDisposable
     [Fact]
     public void Turning_it_back_off_drops_it_and_reads_again()
     {
+        ConnectInHousehold();
         var model = Model();
         model.Show();
         model.IncludeHousehold = true;
@@ -185,6 +195,7 @@ public sealed class ReportViewModelTests : IDisposable
     [Fact]
     public void A_household_that_cannot_be_read_is_left_out_without_failing_the_rest_of_the_report()
     {
+        ConnectInHousehold();
         _household.ReportAnswer = _ => null;
         var model = Model();
         model.Show();
@@ -193,5 +204,54 @@ public sealed class ReportViewModelTests : IDisposable
 
         model.Data.Household.ShouldBeNull();
         model.Message.ShouldBeNull();          // the report itself still has this PC's own data
+    }
+
+    /// <summary>Review finding A11: the App never writes household_rows, so Include my household offers nothing to add
+    /// while this PC is in no household right now, whatever it once held.</summary>
+    [Fact]
+    public void Not_in_a_household_right_now_include_household_adds_nothing_even_if_ticked()
+    {
+        _household.ReportAnswer = _ => new HouseholdReportSnapshot(new HouseholdRangeTotals(12.5, [], []), [], []);
+        var model = Model();
+        model.Show();
+
+        model.HasHousehold.ShouldBeFalse();
+        model.IncludeHousehold = true;
+
+        model.Data.Household.ShouldBeNull();
+        _household.ReportReads.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Has_household_follows_the_service_the_same_way_the_household_page_does()
+    {
+        var model = Model();
+        model.Show();
+        model.HasHousehold.ShouldBeFalse();
+
+        ConnectInHousehold();
+        model.Refresh();
+
+        model.HasHousehold.ShouldBeTrue();
+    }
+
+    /// <summary>Review finding A11: leaving mid-visit takes the tick down with it, since there is nothing current left
+    /// for it to add.</summary>
+    [Fact]
+    public void Losing_the_household_while_shown_turns_the_tick_back_off()
+    {
+        ConnectInHousehold();
+        _household.ReportAnswer = _ => new HouseholdReportSnapshot(new HouseholdRangeTotals(12.5, [], []), [], []);
+        var model = Model();
+        model.Show();
+        model.IncludeHousehold = true;
+        model.Data.Household.ShouldNotBeNull();
+
+        _link.Status = Statuses.Running();   // no Household: this PC left, or was removed
+        model.Refresh();
+
+        model.HasHousehold.ShouldBeFalse();
+        model.IncludeHousehold.ShouldBeFalse();
+        model.Data.Household.ShouldBeNull();
     }
 }

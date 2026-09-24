@@ -11,7 +11,10 @@
                             <Setter Property="Margin" Value="0,0,6,6" />
                         </Style>
                     </StackPanel.Resources>
-                    <CheckBox Style="{StaticResource Tick}" Content="Include my household" IsChecked="{Binding IncludeHousehold}" VerticalAlignment="Center" Margin="0,0,14,6" />
+                    <!-- Review finding A11: only while this PC is in a household right now — the App has nothing current
+                         to add otherwise, and never writes household_rows itself. -->
+                    <CheckBox Style="{StaticResource Tick}" Content="Include my household" IsChecked="{Binding IncludeHousehold}" VerticalAlignment="Center" Margin="0,0,14,6"
+                              Visibility="{Binding HasHousehold, Converter={StaticResource VisibleWhen}}" />
                     <Button Content="PDF" Command="{Binding ExportPdf}" ToolTip="Save this report as a PDF" />
                     <Button Content="PNG" Click="SavePicture" ToolTip="Save a picture of this report" />
                     <Button Content="CSV · 1 h" Command="{Binding ExportCsv}" CommandParameter="Hour" ToolTip="Hour rows for this range" />

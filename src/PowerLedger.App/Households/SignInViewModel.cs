@@ -17,6 +17,7 @@ internal sealed class SignInViewModel : ObservableObject
     private readonly UiThreads _threads;
     private readonly string _microsoftClientId;
     private readonly string _googleClientId;
+    private readonly string _googleClientSecret;
     private string _deviceId = "";
     private bool _signedIn;
     private bool _confirmingDelete;
@@ -25,9 +26,12 @@ internal sealed class SignInViewModel : ObservableObject
     private string _recoveryCodeInput = "";
 
     /// <summary><paramref name="microsoftClientId"/> and <paramref name="googleClientId"/> are <see cref="SignInClients"/>'s,
-    /// passed in so a test can use one that isn't empty; while either is empty its button says sign-in isn't set up yet.</summary>
+    /// passed in so a test can use one that isn't empty; while either is empty its button says sign-in isn't set up yet.
+    /// <paramref name="googleClientSecret"/> is <see cref="SignInClients.GoogleSecret"/>, Google's only (review finding
+    /// A7).</summary>
     public SignInViewModel(
-        IServiceLink link, IUiSettings ui, SignIn signIn, UiThreads threads, string microsoftClientId, string googleClientId)
+        IServiceLink link, IUiSettings ui, SignIn signIn, UiThreads threads, string microsoftClientId, string googleClientId,
+        string googleClientSecret = "")
     {
         _link = link;
         _ui = ui;
@@ -35,6 +39,7 @@ internal sealed class SignInViewModel : ObservableObject
         _threads = threads;
         _microsoftClientId = microsoftClientId;
         _googleClientId = googleClientId;
+        _googleClientSecret = googleClientSecret;
         SignInWithMicrosoft = new RelayCommand(() => _ = RunAsync(SignInProvider.Microsoft), () => !Busy && MicrosoftAvailable);
         SignInWithGoogle = new RelayCommand(() => _ = RunAsync(SignInProvider.Google), () => !Busy && GoogleAvailable);
         SignOut = new RelayCommand(() => _ = SignOutAsync(), () => !Busy);
@@ -88,10 +93,6 @@ internal sealed class SignInViewModel : ObservableObject
 
     public IRelayCommand CancelDelete { get; }
 
-    /// <summary>A first sign-in linked a household and made a recovery code (households design §7, Plan N task A7):
-    /// shown once.</summary>
-    public event Action<string>? RecoveryCodeReceived;
-
     /// <summary>Follows the service's status: whether this PC holds a session, and its device ID for the next sign-in's
     /// nonce. Call on the UI thread.</summary>
     public void Apply(HouseholdStatus? household)
@@ -100,36 +101,51 @@ internal sealed class SignInViewModel : ObservableObject
         if (household is not null) _deviceId = household.DeviceId;
     }
 
+    /// <summary>Review finding A7: whatever goes wrong, including something <see cref="SignIn"/> itself didn't expect
+    /// and so didn't turn into a failed <see cref="SignInResult"/>, this always leaves Busy false again.</summary>
     private async Task RunAsync(SignInProvider provider)
     {
         Busy = true;
         Message = null;
-        var clientId = provider == SignInProvider.Microsoft ? _microsoftClientId : _googleClientId;
-        var outcome = await _signIn.RunAsync(provider, clientId, _deviceId).ConfigureAwait(false);
-        if (!outcome.Ok || outcome.IdToken is null || outcome.Salt is null)
+        try
+        {
+            var clientId = provider == SignInProvider.Microsoft ? _microsoftClientId : _googleClientId;
+            var clientSecret = provider == SignInProvider.Google ? _googleClientSecret : null;
+            var outcome = await _signIn.RunAsync(provider, clientId, _deviceId, clientSecret: clientSecret).ConfigureAwait(false);
+            if (!outcome.Ok || outcome.IdToken is null || outcome.Salt is null)
+            {
+                _threads.Post(() =>
+                {
+                    Busy = false;
+                    Message = outcome.Message;
+                });
+                return;
+            }
+            var providerName = provider == SignInProvider.Microsoft ? "microsoft" : "google";
+            var recoveryCode = string.IsNullOrWhiteSpace(_recoveryCodeInput) ? null : _recoveryCodeInput.Trim();
+            var result = await _link.SignInAsync(providerName, outcome.IdToken, outcome.Salt, recoveryCode).ConfigureAwait(false);
+            _threads.Post(() =>
+            {
+                Busy = false;
+                Message = result.Message;
+                if (result.Ok && outcome.Email is not null)
+                {
+                    _ui.SetSignedInEmail(outcome.Email);
+                    OnPropertyChanged(nameof(Email));
+                }
+                if (result.Ok) RecoveryCodeInput = "";
+                // A first sign-in that links a household makes a recovery code, but it now arrives as its own pushed
+                // RecoveryCode notice (task 0.8), not on this reply, so App.xaml.cs opens that window from the notice.
+            });
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             _threads.Post(() =>
             {
                 Busy = false;
-                Message = outcome.Message;
+                Message = "Something went wrong signing in.";
             });
-            return;
         }
-        var providerName = provider == SignInProvider.Microsoft ? "microsoft" : "google";
-        var recoveryCode = string.IsNullOrWhiteSpace(_recoveryCodeInput) ? null : _recoveryCodeInput.Trim();
-        var result = await _link.SignInAsync(providerName, outcome.IdToken, outcome.Salt, recoveryCode).ConfigureAwait(false);
-        _threads.Post(() =>
-        {
-            Busy = false;
-            Message = result.Message;
-            if (result.Ok && outcome.Email is not null)
-            {
-                _ui.SetSignedInEmail(outcome.Email);
-                OnPropertyChanged(nameof(Email));
-            }
-            if (result.Ok) RecoveryCodeInput = "";
-            if (result.Ok && result.Code is { } code) RecoveryCodeReceived?.Invoke(code);
-        });
     }
 
     private async Task SignOutAsync()

@@ -1,14 +1,14 @@
-<Window x:Class="PowerLedger.App.JoinPromptWindow"
+<Window x:Class="PowerLedger.App.ConfirmJoinWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:PowerLedger.App"
-        Title="Join a household" Width="420" SizeToContent="Height"
+        Title="Confirm the code" Width="420" SizeToContent="Height"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
         Background="{DynamicResource Brush.Panel}" Foreground="{DynamicResource Brush.Ink}"
         UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
 
     <!-- The buttons have a row of their own, so however short the screen, they stay in view while the text above scrolls
-         (the same shape as the consent dialog, data-sharing design §2). -->
+         (the same shape as the Join and Approve prompts). -->
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -18,16 +18,15 @@
             <StackPanel Margin="28,24,28,8">
                 <TextBlock Style="{StaticResource Text.Body}" FontSize="16" TextWrapping="Wrap" Text="{Binding Heading}" />
                 <StackPanel Margin="0,16,0,0" Visibility="{Binding HasComparisonCode, Converter={StaticResource VisibleWhen}}">
-                    <TextBlock Style="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Text="{Binding ComparisonCaption}" />
-                    <TextBlock Style="{StaticResource Text.Body}" FontFamily="{StaticResource Font.Numbers}" FontSize="28" Margin="0,4,0,0"
+                    <TextBlock Style="{StaticResource Text.Body}" FontFamily="{StaticResource Font.Numbers}" FontSize="28"
                                HorizontalAlignment="Center" Text="{Binding ComparisonCode}" />
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>
         <StackPanel Grid.Row="1" Margin="28,4,28,20">
             <UniformGrid Rows="1" Columns="2">
-                <Button Style="{StaticResource Quiet}" Content="Don't join" Command="{Binding DontJoin}" Margin="0,0,6,0" HorizontalContentAlignment="Center" />
-                <Button Style="{StaticResource Quiet}" Content="Join" Command="{Binding Join}" Margin="6,0,0,0" HorizontalContentAlignment="Center" />
+                <Button Style="{StaticResource Quiet}" Content="Cancel" Command="{Binding Cancel}" Margin="0,0,6,0" HorizontalContentAlignment="Center" />
+                <Button Style="{StaticResource Quiet}" Content="Codes match" Command="{Binding CodesMatch}" Margin="6,0,0,0" HorizontalContentAlignment="Center" />
             </UniformGrid>
         </StackPanel>
     </Grid>

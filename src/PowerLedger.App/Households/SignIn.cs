@@ -42,7 +42,7 @@ internal static class Pkce
     public static string NonceHash(string deviceId, string salt) => Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes($"{deviceId}:{salt}")));
 }
 
-/// <summary>Starts on an OS-chosen free port on 127.0.0.1 and waits for the browser's one redirect (RFC 8252).</summary>
+/// <summary>Starts on an OS-chosen free port on localhost and waits for the browser's one redirect (RFC 8252).</summary>
 internal interface ILoopbackServer : IDisposable
 {
     int Port { get; }
@@ -63,7 +63,7 @@ internal sealed class HttpLoopbackServer : ILoopbackServer
     {
         Port = FreePort();
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
+        _listener.Prefixes.Add($"http://localhost:{Port}/");
         _listener.Start();
     }
 
@@ -110,8 +110,12 @@ internal sealed class HttpLoopbackServer : ILoopbackServer
 /// SignInRequest carries, so the service and the Worker can redo the hash and refuse a token meant for another device.
 /// The App checks the returned token's own nonce claim against that same hash before trusting it at all.
 /// </summary>
-internal sealed class SignIn(Func<ILoopbackServer> newServer, Action<Uri> openBrowser, HttpClient http)
+internal sealed class SignIn(Func<ILoopbackServer> newServer, Action<Uri> openBrowser, HttpClient http, TimeProvider clock)
 {
+    /// <summary>Review finding A7: the browser and the loopback wait don't hang forever should the user walk away or the
+    /// provider's page never come back.</summary>
+    public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(5);
+
     private static readonly Dictionary<SignInProvider, (Uri Authorize, Uri Token)> Endpoints = new()
     {
         [SignInProvider.Microsoft] = (
@@ -123,8 +127,11 @@ internal sealed class SignIn(Func<ILoopbackServer> newServer, Action<Uri> openBr
     };
 
     /// <summary>Runs the whole flow. <paramref name="clientId"/> is <see cref="SignInClients"/>'s for the provider; empty
-    /// before Plan N task L6 fills it in, which fails at once without opening anything.</summary>
-    public async Task<SignInResult> RunAsync(SignInProvider provider, string clientId, string deviceId, CancellationToken cancel = default)
+    /// before Plan N task L6 fills it in, which fails at once without opening anything. <paramref name="clientSecret"/>
+    /// is Google's only (review finding A7: <see cref="SignInClients.GoogleSecret"/>) — Google's installed-app clients
+    /// call for one in the token exchange even though the flow is PKCE; Microsoft's public client needs none.</summary>
+    public async Task<SignInResult> RunAsync(
+        SignInProvider provider, string clientId, string deviceId, CancellationToken cancel = default, string? clientSecret = null)
     {
         if (string.IsNullOrEmpty(clientId)) return SignInResult.Failed("Sign-in isn't set up yet.");
 
@@ -136,7 +143,7 @@ internal sealed class SignIn(Func<ILoopbackServer> newServer, Action<Uri> openBr
         var nonce = Pkce.NonceHash(deviceId, salt);
 
         using var server = newServer();
-        var redirectUri = $"http://127.0.0.1:{server.Port}/";
+        var redirectUri = $"http://localhost:{server.Port}/";
         var url = new UriBuilder(authorize)
         {
             Query = Encode(new Dictionary<string, string>
@@ -156,7 +163,9 @@ internal sealed class SignIn(Func<ILoopbackServer> newServer, Action<Uri> openBr
         string query;
         try
         {
-            query = await server.WaitForRedirectAsync(cancel).ConfigureAwait(false);
+            using var timeout = new CancellationTokenSource(Timeout, clock);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancel, timeout.Token);
+            query = await server.WaitForRedirectAsync(linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -168,17 +177,16 @@ internal sealed class SignIn(Func<ILoopbackServer> newServer, Action<Uri> openBr
         if (!answer.TryGetValue("state", out var gotState) || gotState != state) return SignInResult.Failed("Couldn't verify this sign-in.");
         if (!answer.TryGetValue("code", out var code)) return SignInResult.Failed("The browser didn't return a code.");
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, token)
+        var form = new Dictionary<string, string>
         {
-            Content = new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["client_id"] = clientId,
-                ["code"] = code,
-                ["redirect_uri"] = redirectUri,
-                ["code_verifier"] = verifier,
-                ["grant_type"] = "authorization_code",
-            }),
+            ["client_id"] = clientId,
+            ["code"] = code,
+            ["redirect_uri"] = redirectUri,
+            ["code_verifier"] = verifier,
+            ["grant_type"] = "authorization_code",
         };
+        if (!string.IsNullOrEmpty(clientSecret)) form["client_secret"] = clientSecret;
+        using var request = new HttpRequestMessage(HttpMethod.Post, token) { Content = new FormUrlEncodedContent(form) };
         HttpResponseMessage response;
         try
         {
@@ -194,7 +202,10 @@ internal sealed class SignIn(Func<ILoopbackServer> newServer, Action<Uri> openBr
         try
         {
             using var body = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancel).ConfigureAwait(false));
-            idToken = body.RootElement.GetProperty("id_token").GetString() ?? "";
+            // Review finding A7: TryGetProperty, not GetProperty, since a provider's answer missing this key must be a
+            // clean failure here, never a thrown KeyNotFoundException.
+            if (!body.RootElement.TryGetProperty("id_token", out var idTokenElement)) return SignInResult.Failed("The sign-in server's answer had no ID token.");
+            idToken = idTokenElement.GetString() ?? "";
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException)
         {

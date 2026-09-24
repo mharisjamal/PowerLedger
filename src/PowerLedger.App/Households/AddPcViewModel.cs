@@ -5,18 +5,22 @@ using PowerLedger.Contracts;
 
 namespace PowerLedger.App;
 
-/// <summary>Add a PC's two tabs (households design §2).</summary>
+/// <summary>Add a PC's three tabs (households design §2, review finding A3).</summary>
 internal enum AddPcTab
 {
     OnThisNetwork,
     SomewhereElse,
+    JoinWithCode,
 }
 
 /// <summary>
-/// Add a PC (households design §3, §4, Plan N task A2). On this network browses every 5 s while the page is open, each
-/// PC marked when it is already in this household; Add starts a pairing whose comparison code, then outcome, arrives as
-/// pushed <see cref="HouseholdNotice"/>s. Somewhere else makes a one-time code with a 10-minute countdown, made once and
-/// kept across a visit to the other tab and back. Join a household with a code sends the code another PC showed.
+/// Add a PC (households design §3, §4, Plan N task A2, review findings A1/A3/A4/A5). On this network browses every 5 s
+/// while the page is open, never starting a second browse while one is out and never leaving "Looking…" showing when the
+/// link can't answer; each PC marked when it is already in this household. Add starts a pairing; once the key exchange
+/// is done the adder itself must check a <see cref="NoticeKind.ConfirmCode"/> before the pairing can finish. Somewhere
+/// else makes a one-time code only when Make a code is pressed, with a 10-minute countdown, kept across a visit to
+/// another tab and back. Join with a code sends the code another PC showed. Cancel, on any pairing under way, and
+/// closing the window both give up the pairing gate the service is holding.
 /// </summary>
 internal sealed class AddPcViewModel : ObservableObject, IDisposable
 {
@@ -29,9 +33,13 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
     private readonly TimeProvider _clock;
     private ITimer? _browseTimer;
     private ITimer? _countdownTimer;
-    private int _browseReads;
-    private string? _addingName;
+    private int _browsing;
+    private int _browseAgain;
     private DateTimeOffset? _codeExpires;
+    private bool _pairingActive;
+    private string? _confirmPromptId;
+    private string? _confirmQuestion;
+    private string? _confirmCode;
 
     private AddPcTab _tab = AddPcTab.OnThisNetwork;
     private IReadOnlyList<FoundPc> _found = [];
@@ -53,6 +61,10 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
             if (pc is not null) _ = AddAsync(pc);
         });
         Join = new RelayCommand(() => _ = JoinAsync(), () => JoinCode.Trim().Length > 0 && !Busy);
+        MakeCode = new RelayCommand(() => _ = MakeCodeAsync(), () => _code is null);
+        CodesMatch = new RelayCommand(() => _ = AnswerConfirmAsync(true));
+        ConfirmCancel = new RelayCommand(() => _ = AnswerConfirmAsync(false));
+        CancelPairing = new RelayCommand(() => _ = CancelPairingAsync(), () => CanCancelPairing);
     }
 
     public AddPcTab Tab
@@ -63,7 +75,6 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
             if (!SetProperty(ref _tab, value)) return;
             if (value == AddPcTab.OnThisNetwork) StartBrowsing();
             else StopBrowsing();
-            if (value == AddPcTab.SomewhereElse && _code is null) _ = StartCodeAsync();
         }
     }
 
@@ -80,8 +91,8 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
     /// <summary>Nothing found yet: shows "Looking…" instead of an empty list.</summary>
     public bool NoneFound => Found.Count == 0;
 
-    /// <summary>A pairing under way or just finished: "Adding Laptop-2…", then "On Laptop-2, check the code is 482 913
-    /// and press Join.", then its outcome once the other PC answers. Null while none is under way.</summary>
+    /// <summary>A pairing under way or just finished: "Adding Laptop-2…", then its outcome once both sides have agreed.
+    /// Null while none is under way.</summary>
     public string? PairingText
     {
         get => _pairingText;
@@ -93,12 +104,35 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
 
     public bool HasPairingText => PairingText is not null;
 
-    /// <summary>This PC's one-time code for Somewhere else, large and copyable; null before one is made or once it expires.</summary>
-    public string? Code { get => _code; private set => SetProperty(ref _code, value); }
+    /// <summary>Review finding A1: the adder's own check, once the key exchange with a PC on this network is done.
+    /// Null until a <see cref="NoticeKind.ConfirmCode"/> notice arrives; the pairing is not done until this is answered.</summary>
+    public bool IsConfirming => _confirmPromptId is not null;
+
+    /// <summary>The service's own wording, e.g. "Does Laptop-2 show 482 913?".</summary>
+    public string? ConfirmQuestion => _confirmQuestion;
+
+    /// <summary>The same code, on its own and large, so the two PCs are easy to compare side by side.</summary>
+    public string? ConfirmCode => _confirmCode;
+
+    /// <summary>This PC's one-time code for Somewhere else, large and copyable; null before Make a code is pressed or
+    /// once it expires.</summary>
+    public string? Code
+    {
+        get => _code;
+        private set
+        {
+            if (!SetProperty(ref _code, value)) return;
+            OnPropertyChanged(nameof(HasCode));
+            MakeCode.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>Whether Somewhere else currently has a made code showing, so Make a code can hide while it does.</summary>
+    public bool HasCode => _code is not null;
 
     public TimeSpan Remaining { get => _remaining; private set => SetProperty(ref _remaining, value); }
 
-    /// <summary>The code typed under Join a household with a code.</summary>
+    /// <summary>The code typed under Join with a code.</summary>
     public string JoinCode
     {
         get => _joinCode;
@@ -108,7 +142,7 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Why the last action didn't go through, or null.</summary>
+    /// <summary>Why the last action didn't go through, or why a browse couldn't be answered, or null.</summary>
     public string? Message { get => _message; private set => SetProperty(ref _message, value); }
 
     public bool Busy
@@ -120,9 +154,21 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Review finding A3: an Add or a made code is out there, and can be called off — but not while
+    /// <see cref="IsConfirming"/>, whose own Codes match / Cancel already settles it.</summary>
+    public bool CanCancelPairing => _pairingActive && !IsConfirming;
+
     public IRelayCommand<FoundPc> Add { get; }
 
     public IRelayCommand Join { get; }
+
+    public IRelayCommand MakeCode { get; }
+
+    public IRelayCommand CodesMatch { get; }
+
+    public IRelayCommand ConfirmCancel { get; }
+
+    public IRelayCommand CancelPairing { get; }
 
     /// <summary>The window opened: browse if that is the tab showing. Call on the UI thread.</summary>
     public void Start()
@@ -130,12 +176,14 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
         if (Tab == AddPcTab.OnThisNetwork) StartBrowsing();
     }
 
+    /// <summary>The window closed: stop browsing and, review finding A3, give up a pairing gate still held.</summary>
     public void Dispose()
     {
         _link.HouseholdNoticeReceived -= OnNotice;
         StopBrowsing();
         _countdownTimer?.Dispose();
         _countdownTimer = null;
+        if (_pairingActive) _ = _link.CancelPairingAsync();
     }
 
     private void StartBrowsing()
@@ -150,52 +198,62 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
         _browseTimer = null;
     }
 
-    private void Refresh()
-    {
-        var read = ++_browseReads;
-        _threads.Background(() => _ = BrowseAsync(read));
-    }
+    private void Refresh() => _threads.Background(() => _ = BrowseAsync());
 
-    private async Task BrowseAsync(int read)
+    /// <summary>Review finding A5: a browse still out is not joined by a second one — a tick or a tab reopen that lands
+    /// while one is in flight just asks for one more right behind it, so nothing is lost and nothing overlaps. A link
+    /// that can't answer (not connected) reads as a message, never as "Looking…" forever.</summary>
+    private async Task BrowseAsync()
     {
+        if (Interlocked.CompareExchange(ref _browsing, 1, 0) != 0)
+        {
+            Volatile.Write(ref _browseAgain, 1);
+            return;
+        }
         var found = await _link.BrowsePcsAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
-            if (read != _browseReads) return;
-            Found = found ?? [];
+            if (found is null) Message = "Couldn't look for PCs right now.";
+            else
+            {
+                Found = found;
+                Message = null;
+            }
         });
+        Volatile.Write(ref _browsing, 0);
+        if (Interlocked.Exchange(ref _browseAgain, 0) == 1) _ = BrowseAsync();
     }
 
     private async Task AddAsync(FoundPc pc)
     {
-        _addingName = pc.Name;
+        SetPairingActive(true);
         PairingText = $"Adding {pc.Name}…";
         var result = await _link.AddPcAsync(pc.InstanceId).ConfigureAwait(false);
         _threads.Post(() =>
         {
             if (result.Ok) return;
+            SetPairingActive(false);
             PairingText = null;
-            _addingName = null;
             Message = result.Message;
         });
     }
 
-    private async Task StartCodeAsync()
+    private async Task MakeCodeAsync()
     {
+        if (_code is not null) return;
         var result = await _link.StartCodePairingAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
-            if (result.Ok && result.Code is { } code)
-            {
-                Code = code;
-                _codeExpires = _clock.GetUtcNow() + CodeLifetime;
-                Remaining = CodeLifetime;
-                _countdownTimer ??= _clock.CreateTimer(_ => _threads.Post(Tick), null, CountdownTick, CountdownTick);
-            }
-            else
+            if (!result.Ok)
             {
                 Message = result.Message;
+                return;
             }
+            SetPairingActive(true);
+            Code = result.Code;
+            _codeExpires = _clock.GetUtcNow() + CodeLifetime;
+            Remaining = CodeLifetime;
+            _countdownTimer ??= _clock.CreateTimer(_ => _threads.Post(Tick), null, CountdownTick, CountdownTick);
         });
     }
 
@@ -213,6 +271,7 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
         _codeExpires = null;
         _countdownTimer?.Dispose();
         _countdownTimer = null;
+        SetPairingActive(false);
     }
 
     private async Task JoinAsync()
@@ -227,22 +286,84 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
         });
     }
 
-    /// <summary>A pairing this PC started moved on (households design §9): the comparison code while it is under way, or,
-    /// once <see cref="HouseholdNotice.ComparisonCode"/> is null, its outcome in the text — at which point the browse
-    /// list is read again, since it may show a new member. Raised off the UI thread.</summary>
-    private void OnNotice(HouseholdNotice notice)
+    /// <summary>Review finding A1: answers the adder's own check, which the pairing needs before it can finish either
+    /// way. Declining it (the codes don't match) gives up the pairing from this side.</summary>
+    private async Task AnswerConfirmAsync(bool matches)
     {
-        if (notice.Kind != NoticeKind.PairingProgress) return;
+        if (_confirmPromptId is not { } promptId) return;
+        var result = await _link.AnswerPromptAsync(promptId, matches).ConfigureAwait(false);
         _threads.Post(() =>
         {
-            if (notice.ComparisonCode is { } code)
-            {
-                PairingText = $"On {_addingName ?? notice.FromName ?? "the other PC"}, check the code is {code} and press Join.";
-                return;
-            }
-            PairingText = notice.Text;
-            _addingName = null;
-            Refresh();
+            SetConfirm(null, null, null);
+            if (!matches) SetPairingActive(false);
+            if (!result.Ok) Message = result.Message;
         });
+    }
+
+    private async Task CancelPairingAsync()
+    {
+        var result = await _link.CancelPairingAsync().ConfigureAwait(false);
+        _threads.Post(() =>
+        {
+            ResetPairing();
+            Message = result.Message;
+        });
+    }
+
+    /// <summary>Back to no pairing under way: clears the confirm check, any made code and its countdown, and the
+    /// progress text. Used by Cancel, by a withdrawn confirm (review finding A4), and once an outcome notice arrives.</summary>
+    private void ResetPairing()
+    {
+        SetPairingActive(false);
+        SetConfirm(null, null, null);
+        PairingText = null;
+        Code = null;
+        _codeExpires = null;
+        Remaining = TimeSpan.Zero;
+        _countdownTimer?.Dispose();
+        _countdownTimer = null;
+    }
+
+    private void SetPairingActive(bool active)
+    {
+        _pairingActive = active;
+        OnPropertyChanged(nameof(CanCancelPairing));
+        CancelPairing.NotifyCanExecuteChanged();
+    }
+
+    private void SetConfirm(string? promptId, string? question, string? code)
+    {
+        _confirmPromptId = promptId;
+        _confirmQuestion = question;
+        _confirmCode = code;
+        OnPropertyChanged(nameof(IsConfirming));
+        OnPropertyChanged(nameof(ConfirmQuestion));
+        OnPropertyChanged(nameof(ConfirmCode));
+        OnPropertyChanged(nameof(CanCancelPairing));
+        CancelPairing.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>A pairing this PC started moved on (households design §9). Raised off the UI thread.</summary>
+    private void OnNotice(HouseholdNotice notice)
+    {
+        switch (notice.Kind)
+        {
+            case NoticeKind.ConfirmCode:
+                _threads.Post(() => SetConfirm(notice.PromptId, notice.Text, notice.ComparisonCode));
+                break;
+            case NoticeKind.Withdraw:
+                if (notice.PromptId != _confirmPromptId) return;
+                _threads.Post(ResetPairing);
+                break;
+            case NoticeKind.PairingProgress:
+            case NoticeKind.Info:
+                _threads.Post(() =>
+                {
+                    ResetPairing();
+                    PairingText = notice.Text;
+                    Refresh();
+                });
+                break;
+        }
     }
 }
