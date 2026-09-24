@@ -140,6 +140,16 @@ public class MidnightRenderingTests
                 UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Send feedback")!.IsVisible.ShouldBeTrue();
                 var scroller = UiHarness.Find<ScrollViewer>(UiHarness.Find<DashboardView>(window)!)!;
                 scroller.ViewportHeight.ShouldBeLessThan(window.ActualHeight - 56 - 60, "the page, not the shell, is what scrolls");
+                // Review 10: short as it is, every page in the sidebar shows beside the update card without scrolling it.
+                var nav = UiHarness.Find<ScrollViewer>(sidebar)!;
+                foreach (var item in new FrameworkElement[]
+                {
+                    UiHarness.Find<RadioButton>(window, button => Equals(button.Content, "Settings"))!,
+                    UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Support")!,
+                })
+                {
+                    item.TranslatePoint(new Point(0, item.ActualHeight), nav).Y.ShouldBeLessThanOrEqualTo(nav.ViewportHeight + 0.5, $"{item} in view");
+                }
                 UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-short-dashboard.png");
             }
             finally
@@ -168,11 +178,12 @@ public class MidnightRenderingTests
                 UiHarness.Find<HatchBar>(view).ShouldNotBeNull();
                 var chart = UiHarness.Find<AreaChart>(view)!;
                 chart.Model.Buckets.Count.ShouldBeGreaterThan(100, "today's readings are on the chart");
+                chart.Culture.Name.ShouldBe("en-US", "the page's culture, the ViewModel's");
                 chart.Hover(chart.Model.Capacity / 2);   // the middle of the day's width: noon
                 UiHarness.Pump(TimeSpan.FromMilliseconds(300));
                 chart.Tip.ShouldNotBeNull();
                 chart.Tip.IsOpen.ShouldBeTrue();
-                chart.Tip.Content.ShouldBeOfType<string>().ShouldMatch(@"^12:00 PM · \d+ W$");
+                chart.Tip.Content.ShouldBeOfType<string>().ShouldMatch(@"^12:00 · \d+ W$", "the time as the axis writes it");
                 UiHarness.Find<Border>(chart.Tip, border => border.Style == window.Resources["M.Glass"]).ShouldNotBeNull("the tooltip wears the glass");
                 WithTip(window, chart, "midnight-dashboard-hover-Dark.png");
                 UiHarness.Render(chart.Tip, (int)Math.Ceiling(chart.Tip.ActualWidth), (int)Math.Ceiling(chart.Tip.ActualHeight), "midnight-dashboard-tooltip-Dark.png");
@@ -232,6 +243,8 @@ public class MidnightRenderingTests
                     mark.TranslatePoint(new Point(mark.ActualWidth, 0), table).X.ShouldBeLessThanOrEqualTo(inside + 0.5, "the trend column stays inside the card");
                 foreach (var name in UiTree.Descendants<TextBlock>(table).Where(text => text.Text is "CPU package" or "Rest of system"))
                     name.DesiredSize.Width.ShouldBeLessThanOrEqualTo(name.ActualWidth + 0.5, $"{name.Text} is whole");
+                foreach (var bar in UiTree.Descendants<ShareBar>(table))
+                    bar.ActualWidth.ShouldBeGreaterThanOrEqualTo(96, "a share bar long enough to read at the narrowest");
                 foreach (var title in new[] { "Power over time", "Where the power went" })
                 {
                     var card = CardNamed(view, title);
@@ -354,10 +367,62 @@ public class MidnightRenderingTests
             window.Show();
             try
             {
-                var button = UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Theme")!;
+                var button = UiHarness.Find<Button>(window, button => button.Name == "ThemeButton")!;
                 button.ToolTip.ShouldBe("Light theme", "the button says what it will do");
+                AutomationProperties.GetName(button).ShouldBe("Light theme", "and a screen reader hears the same");
                 button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                 shell.Settings.Theme.ShouldBe(ThemeChoice.Light);
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
+    /// <summary>Review 7: an icon is named as its tooltip reads, Maximize becomes Restore while maximised, and the PC's kind
+    /// glyph says Laptop or Desktop.</summary>
+    [Fact]
+    public void The_top_bars_icons_are_named_as_their_tooltips_read()
+        => UiHarness.OnUi(() =>
+        {
+            MidnightWindow.MaximizeFace(WindowState.Normal).ShouldBe(("", "Maximize"));
+            MidnightWindow.MaximizeFace(WindowState.Maximized).ShouldBe(("", "Restore"));
+            using var saver = new FakeSaver();
+            var window = MidnightFixtures.Window(MidnightFixtures.Shell(saver));
+            window.Show();
+            try
+            {
+                var maximize = UiHarness.Find<Button>(window, button => button.Name == "MaximizeButton")!;
+                AutomationProperties.GetName(maximize).ShouldBe("Maximize");
+                maximize.ToolTip.ShouldBe("Maximize");
+                var kind = UiHarness.Find<TextBlock>(window, text => text.Name == "KindGlyph")!;
+                AutomationProperties.GetName(kind).ShouldBe((string)kind.ToolTip);
+                AutomationProperties.GetName(kind).ShouldBeOneOf("Laptop", "Desktop");
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
+    /// <summary>Review 9: building the window changes nothing in the shell, so a switch whose window then fails to show
+    /// leaves the page as it was; shown, the window takes Classic's Now as its Dashboard.</summary>
+    [Fact]
+    public void The_window_leaves_the_page_alone_until_it_shows()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var shell = MidnightFixtures.Shell(saver);
+            shell.Page = Page.Now;
+            var window = MidnightFixtures.Window(shell);
+            shell.Page.ShouldBe(Page.Now, "a window that may yet fail to show has changed nothing");
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(200));
+                shell.Page.ShouldBe(Page.Dashboard, "shown, it shows its own landing page for Now");
+                UiHarness.Find<DashboardView>(window).ShouldNotBeNull();
+                window.Pill.Opacity.ShouldBe(1, "and the pill sits on Dashboard");
             }
             finally
             {

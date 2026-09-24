@@ -149,7 +149,7 @@
                             <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,2,0,0" Text="{Binding ChartTitle}" />
                         </StackPanel>
                     </DockPanel>
-                    <local:AreaChart Style="{StaticResource M.AreaChart}" Margin="0,16,0,0" Model="{Binding Chart}" From="{Binding ChartFrom}" Zone="{Binding Zone}"
+                    <local:AreaChart Style="{StaticResource M.AreaChart}" Margin="0,16,0,0" Model="{Binding Chart}" From="{Binding ChartFrom}" Zone="{Binding Zone}" Culture="{Binding Culture}"
                                      EmptyText="{Binding ChartMessage, TargetNullValue='No history yet'}" />
                     <WrapPanel Margin="0,12,0,0">
                         <WrapPanel.Resources>
@@ -200,19 +200,19 @@
                         <Border Style="{StaticResource M.Table.Header}" Padding="8,0,8,10">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="32" />
-                                    <ColumnDefinition Width="*" MinWidth="110" />
-                                    <ColumnDefinition Width="80" />
-                                    <ColumnDefinition Width="96" />
-                                    <ColumnDefinition Width="1.4*" MinWidth="110" />
-                                    <ColumnDefinition Width="108" />
-                                    <ColumnDefinition Width="76" />
+                                    <ColumnDefinition Width="28" />
+                                    <ColumnDefinition Width="*" MinWidth="100" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="84" />
+                                    <ColumnDefinition Width="1.4*" MinWidth="164" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="68" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="1" Style="{StaticResource Head}" Text="PART" />
                                 <TextBlock Grid.Column="2" Style="{StaticResource Head}" Text="NOW" HorizontalAlignment="Right" />
                                 <TextBlock Grid.Column="3" Style="{StaticResource Head}" Text="ENERGY" HorizontalAlignment="Right" />
-                                <TextBlock Grid.Column="4" Style="{StaticResource Head}" Text="SHARE" Margin="28,0,0,0" />
-                                <TextBlock Grid.Column="5" Style="{StaticResource Head}" Text="QUALITY" Margin="20,0,0,0" />
+                                <TextBlock Grid.Column="4" Style="{StaticResource Head}" Text="SHARE" Margin="20,0,0,0" />
+                                <TextBlock Grid.Column="5" Style="{StaticResource Head}" Text="QUALITY" Margin="16,0,0,0" />
                                 <TextBlock Grid.Column="6" Style="{StaticResource Head}" Text="TREND" Margin="8,0,0,0" />
                             </Grid>
                         </Border>
@@ -222,24 +222,24 @@
                                     <Border Style="{StaticResource M.Table.Row}" Padding="8,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="32" />
-                                                <ColumnDefinition Width="*" MinWidth="110" />
-                                                <ColumnDefinition Width="80" />
-                                                <ColumnDefinition Width="96" />
-                                                <ColumnDefinition Width="1.4*" MinWidth="110" />
-                                                <ColumnDefinition Width="108" />
-                                                <ColumnDefinition Width="76" />
+                                                <ColumnDefinition Width="28" />
+                                                <ColumnDefinition Width="*" MinWidth="100" />
+                                                <ColumnDefinition Width="72" />
+                                                <ColumnDefinition Width="84" />
+                                                <ColumnDefinition Width="1.4*" MinWidth="164" />
+                                                <ColumnDefinition Width="100" />
+                                                <ColumnDefinition Width="68" />
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Grid.Column="0" Style="{StaticResource PartGlyph}" Text="{Binding Glyph}" />
                                             <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Body}" FontWeight="Medium" Text="{Binding Name}" VerticalAlignment="Center"
                                                        TextTrimming="CharacterEllipsis" />
                                             <TextBlock Grid.Column="2" Style="{StaticResource Cell}" Text="{Binding NowW}" />
                                             <TextBlock Grid.Column="3" Style="{StaticResource Cell}" Text="{Binding Energy}" />
-                                            <DockPanel Grid.Column="4" Margin="28,0,0,0" VerticalAlignment="Center">
-                                                <TextBlock DockPanel.Dock="Right" Style="{StaticResource ShareCell}" MinWidth="40" Text="{Binding Share, StringFormat={}{0:P0}}" />
-                                                <local:ShareBar Style="{StaticResource PartShare}" Margin="0,0,10,0" Value="{Binding Share}" />
+                                            <DockPanel Grid.Column="4" Margin="20,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock DockPanel.Dock="Right" Style="{StaticResource ShareCell}" MinWidth="36" Text="{Binding Share, StringFormat={}{0:P0}}" />
+                                                <local:ShareBar Style="{StaticResource PartShare}" Margin="0,0,8,0" Value="{Binding Share}" />
                                             </DockPanel>
-                                            <local:QualityBadge Grid.Column="5" Style="{StaticResource M.Chip}" Margin="20,0,0,0" Quality="{Binding Quality}" />
+                                            <local:QualityBadge Grid.Column="5" Style="{StaticResource M.Chip}" Margin="16,0,0,0" Quality="{Binding Quality}" />
                                             <local:TrendMark Grid.Column="6" Margin="8,0,0,0" HorizontalAlignment="Left" Kind="{Binding Kind}" Text="{Binding Trend, TargetNullValue='–'}"
                                                              LowerIsBetter="{Binding LowerIsBetter}" />
                                         </Grid>

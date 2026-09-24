@@ -1,8 +1,9 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Automation.Peers;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -41,17 +42,25 @@ internal partial class MidnightWindow : Window, IShellWindow
         PcName.Text = Environment.MachineName;
         KindGlyph.Text = shell.Settings.Service.IsDesktop ? "" : "";
         KindGlyph.ToolTip = shell.Settings.Service.IsDesktop ? "Desktop" : "Laptop";
+        AutomationProperties.SetName(KindGlyph, (string)KindGlyph.ToolTip);
         ShowTheme();
+        ShowState();
+        // Nothing in the shell changes until the window shows: a switch whose new window fails to show puts the page back
+        // as it was, which a window that had already mapped it here would have changed under it.
         shell.Settings.PropertyChanged += OnSettingsChanged;
+        shell.PropertyChanged += OnShellChanged;
         Closed += (_, _) =>
         {
-            shell.Settings.PropertyChanged -= OnSettingsChanged;   // Settings outlives a window a switch closes
+            shell.Settings.PropertyChanged -= OnSettingsChanged;   // Settings and the shell outlive a window a switch closes
+            shell.PropertyChanged -= OnShellChanged;
             _problemTimer.Stop();
         };
         _problemTimer.Tick += (_, _) => HideProblem();
-        if (shell.Page == Page.Now) shell.Page = Page.Dashboard;   // Midnight's sidebar never selects Now
+        IsVisibleChanged += (_, _) => ShowOwnPage();
         Loaded += (_, _) => MovePill(animate: false);
-        StateChanged += (_, _) => MaximizeButton.Content = WindowState == WindowState.Maximized ? "" : "";
+        // A short window draws its items closer; the pill follows once they have their new heights.
+        SizeChanged += (_, _) => Dispatcher.BeginInvoke(() => MovePill(animate: false), DispatcherPriority.Loaded);
+        StateChanged += (_, _) => ShowState();
     }
 
     /// <summary>The bounds a switch carries over: the restored ones once shown, so a maximised window hands on the size it
@@ -119,10 +128,34 @@ internal partial class MidnightWindow : Window, IShellWindow
         FitTo(new Bounds(topLeft.X, topLeft.Y, bottomRight.X - topLeft.X, bottomRight.Y - topLeft.Y));
     }
 
-    /// <summary>The sun for a dark window, the moon for a light one: each button says what it will do.</summary>
+    /// <summary>The maximise button's glyph and name for <paramref name="state"/>: Restore while maximised.</summary>
+    internal static (string Glyph, string Name) MaximizeFace(WindowState state)
+        => state == WindowState.Maximized ? ("", "Restore") : ("", "Maximize");
+
+    private void ShowState()
+    {
+        var (glyph, name) = MaximizeFace(WindowState);
+        MaximizeButton.Content = glyph;
+        MaximizeButton.ToolTip = name;
+        AutomationProperties.SetName(MaximizeButton, name);
+    }
+
+    /// <summary>Shown, the window shows its own page for Classic's Now; while shown, it keeps doing so.</summary>
+    private void ShowOwnPage()
+    {
+        if (IsVisible && _shell.Page == Page.Now) _shell.Page = Page.Dashboard;   // Midnight's sidebar never selects Now
+    }
+
+    private void OnShellChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ShellViewModel.Page)) ShowOwnPage();
+    }
+
+    /// <summary>The sun for a dark window, the moon for a light one: each button says what it will do, to a screen reader too.</summary>
     private void ShowTheme()
     {
         var dark = _theme.Current == Theme.Dark;
+        AutomationProperties.SetName(ThemeButton, dark ? "Light theme" : "Dark theme");
         ThemeButton.Content = dark ? "" : "";
         ThemeButton.ToolTip = dark ? "Light theme" : "Dark theme";
     }

@@ -19,6 +19,40 @@
                 <local:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <local:PageTitle x:Key="PageTitle" />
+            <local:AtLeast x:Key="AtLeast" />
+
+            <!-- A short window (under 700 px, where the full sidebar and an update card would not both fit) draws the
+                 sidebar's items and groups closer and the update card down to its title and action, so every page stays
+                 in view beside the card. -->
+            <Style x:Key="NavItem" TargetType="RadioButton" BasedOn="{StaticResource M.NavItem}">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource AtLeast}, ConverterParameter=700}" Value="False">
+                        <Setter Property="Height" Value="34" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="NavButton" TargetType="Button" BasedOn="{StaticResource M.NavButton}">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource AtLeast}, ConverterParameter=700}" Value="False">
+                        <Setter Property="Height" Value="34" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="NavGroup" TargetType="TextBlock" BasedOn="{StaticResource M.NavGroup}">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource AtLeast}, ConverterParameter=700}" Value="False">
+                        <Setter Property="Margin" Value="24,10,16,4" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="UpdateMore" TargetType="StackPanel">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource AtLeast}, ConverterParameter=700}" Value="False">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
             <DataTemplate DataType="{x:Type local:DashboardViewModel}">
                 <local:DashboardView />
             </DataTemplate>
@@ -81,12 +115,16 @@
                                     <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="UPDATE" VerticalAlignment="Center" />
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource M.Text.Body}" Margin="0,6,0,0" TextWrapping="Wrap" Text="{Binding Title}" />
-                                <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,3,0,0" TextWrapping="Wrap" Text="{Binding Detail}"
-                                           Visibility="{Binding Detail, Converter={StaticResource VisibleWhenText}}" />
+                                <StackPanel Style="{StaticResource UpdateMore}">
+                                    <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,3,0,0" TextWrapping="Wrap" Text="{Binding Detail}"
+                                               Visibility="{Binding Detail, Converter={StaticResource VisibleWhenText}}" />
+                                </StackPanel>
                                 <Button Style="{StaticResource M.Button.Primary}" Margin="0,10,0,0" HorizontalAlignment="Left" Content="{Binding ActionLabel}"
                                         Command="{Binding Act}" Visibility="{Binding ActionLabel, Converter={StaticResource VisibleWhenText}}" />
-                                <Button Style="{StaticResource M.Button.Quiet}" Margin="-12,6,0,0" HorizontalAlignment="Left" Content="What's new"
-                                        Command="{Binding OpenNotes}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
+                                <StackPanel Style="{StaticResource UpdateMore}">
+                                    <Button Style="{StaticResource M.Button.Quiet}" Margin="-12,6,0,0" HorizontalAlignment="Left" Content="What's new"
+                                            Command="{Binding OpenNotes}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                         <DockPanel Margin="12,0,0,0">
@@ -124,25 +162,25 @@
                                 <Border x:Name="NavPill" Style="{StaticResource M.NavPill}" Canvas.Left="12" Canvas.Top="0" Width="0" Opacity="0" />
                             </Canvas>
                             <StackPanel x:Name="NavItems">
-                                <TextBlock Style="{StaticResource M.NavGroup}" Text="OVERVIEW" />
-                                <RadioButton Style="{StaticResource M.NavItem}" GroupName="Nav" Content="Dashboard" Tag="&#xE80F;" Checked="NavChecked"
+                                <TextBlock Style="{StaticResource NavGroup}" Text="OVERVIEW" />
+                                <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" Content="Dashboard" Tag="&#xE80F;" Checked="NavChecked"
                                              IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Dashboard}}" />
-                                <RadioButton Style="{StaticResource M.NavItem}" GroupName="Nav" Content="History" Tag="&#xE81C;" Checked="NavChecked"
+                                <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" Content="History" Tag="&#xE81C;" Checked="NavChecked"
                                              IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Breakdown}}" />
-                                <TextBlock Style="{StaticResource M.NavGroup}" Text="INSIGHTS" />
-                                <RadioButton Style="{StaticResource M.NavItem}" GroupName="Nav" Content="Report" Tag="&#xE9F9;" Checked="NavChecked"
+                                <TextBlock Style="{StaticResource NavGroup}" Text="INSIGHTS" />
+                                <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" Content="Report" Tag="&#xE9F9;" Checked="NavChecked"
                                              IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Report}}" />
                                 <Grid>
-                                    <RadioButton Style="{StaticResource M.NavItem}" GroupName="Nav" Content="Household" Tag="&#xE716;" Checked="NavChecked"
+                                    <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" Content="Household" Tag="&#xE716;" Checked="NavChecked"
                                                  IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Household}}" />
                                     <!-- PCs waiting for approval; nothing while there are none. -->
                                     <ContentControl Style="{StaticResource M.Badge}" HorizontalAlignment="Right" Margin="0,0,26,0" IsHitTestVisible="False"
                                                     Content="{Binding Household.PendingApprovals, FallbackValue={x:Null}}" AutomationProperties.Name="Waiting for approval" />
                                 </Grid>
-                                <TextBlock Style="{StaticResource M.NavGroup}" Text="SYSTEM" />
-                                <RadioButton Style="{StaticResource M.NavItem}" GroupName="Nav" Content="Settings" Tag="&#xE713;" Checked="NavChecked"
+                                <TextBlock Style="{StaticResource NavGroup}" Text="SYSTEM" />
+                                <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" Content="Settings" Tag="&#xE713;" Checked="NavChecked"
                                              IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Settings}}" />
-                                <Button Style="{StaticResource M.NavButton}" Content="Support" Tag="&#xED15;" Click="FeedbackClick" AutomationProperties.Name="Support" />
+                                <Button Style="{StaticResource NavButton}" Content="Support" Tag="&#xED15;" Click="FeedbackClick" AutomationProperties.Name="Support" />
                             </StackPanel>
                         </Grid>
                     </ScrollViewer>
