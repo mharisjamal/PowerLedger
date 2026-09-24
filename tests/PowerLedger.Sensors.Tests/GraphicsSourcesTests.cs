@@ -6,7 +6,7 @@ namespace PowerLedger.Sensors.Tests;
 
 public class GraphicsSourcesTests
 {
-    private static readonly GpuAdapter Radeon = new("AMD Radeon RX 7800 XT", DiscreteGpu.AmdVendor, 16UL << 30, 0xD1A4, 0, false);
+    private static readonly GpuAdapter Radeon = new("AMD Radeon RX 7800 XT", DiscreteGpu.AmdVendor, 16UL << 30, 0xD1A4, 0, false, DeviceId: 0x747E);
 
     [Fact]
     public void A_working_nvidia_source_is_the_only_graphics_source_and_the_others_are_never_built()
@@ -14,7 +14,7 @@ public class GraphicsSourcesTests
         var nvidia = new FakeSource("nvidia-gpu", _ => { });
         var built = 0;
 
-        var sources = MachineSensors.Graphics(nvidia, Build, Build, Build);
+        var sources = MachineSensors.Graphics(nvidia, Build, Build, Build, otherCards: () => false, nvidiaLoadsEveryCard: () => true);
 
         sources.ShouldHaveSingleItem().ShouldBeSameAs(nvidia);
         built.ShouldBe(0);     // so neither AMD's libraries nor Level Zero nor DXGI is asked, and none wakes a switched-off card
@@ -30,15 +30,49 @@ public class GraphicsSourcesTests
     public void Without_nvidia_the_amd_library_level_zero_and_the_load_counters_all_stand_in()
     {
         var nvidia = new FakeSource("nvidia-gpu", _ => { }) { Supported = false, Unavailable = "no NVIDIA driver installed" };
+        var asked = false;
 
         var sources = MachineSensors.Graphics(
             nvidia,
             () => new FakeSource("amd-gpu", _ => { }),
             () => new FakeSource("arc-gpu", _ => { }),
-            () => new FakeSource("gpu-load", _ => { }));
+            () => new FakeSource("gpu-load", _ => { }),
+            otherCards: () => asked = true);
 
         // The vendors' libraries measure the watts and the counters fill the load, so all are wanted, and in that order.
         sources.Select(s => s.Name).ShouldBe(["nvidia-gpu", "amd-gpu", "arc-gpu", "gpu-load"]);
+        asked.ShouldBeFalse();  // WMI is not asked when there is no NVIDIA library to spare the others
+    }
+
+    [Fact]
+    public void Beside_an_nvidia_card_another_makers_card_brings_in_every_other_source()
+    {
+        var nvidia = new FakeSource("nvidia-gpu", _ => { });
+
+        var sources = MachineSensors.Graphics(
+            nvidia,
+            () => new FakeSource("amd-gpu", _ => { }),
+            () => new FakeSource("arc-gpu", _ => { }),
+            () => new FakeSource("gpu-load", _ => { }),
+            otherCards: () => true);
+
+        sources.Select(s => s.Name).ShouldBe(["nvidia-gpu", "amd-gpu", "arc-gpu", "gpu-load"]);
+    }
+
+    [Fact]
+    public void An_nvidia_card_nvml_gives_no_utilisation_for_brings_in_the_load_counters_alone()
+    {
+        // A Fermi GeForce: NVML answers, but with neither power nor utilisation.
+        var nvidia = new FakeSource("nvidia-gpu", _ => { });
+
+        var sources = MachineSensors.Graphics(
+            nvidia,
+            () => throw new InvalidOperationException("AMD's library is not wanted"),
+            () => throw new InvalidOperationException("Level Zero is not wanted"),
+            () => new FakeSource("gpu-load", _ => { }),
+            otherCards: () => false, nvidiaLoadsEveryCard: () => false);
+
+        sources.Select(s => s.Name).ShouldBe(["nvidia-gpu", "gpu-load"]);
     }
 
     [Fact]
@@ -48,7 +82,7 @@ public class GraphicsSourcesTests
         var sysman = new FakeSysman();
         var arc = new SysmanDevice(SysmanDevice.GpuType, DiscreteGpu.IntelVendor, 0x56A0, CoreFlags: 0, ExtendedFlags: 0);
         var card = sysman.Add(arc, PowerDomain.Card)[0];
-        GpuAdapter[] adapters = [new("Intel(R) Arc(TM) A770 Graphics", DiscreteGpu.IntelVendor, 16UL << 30, 0xA770, 0, false)];
+        GpuAdapter[] adapters = [new("Intel(R) Arc(TM) A770 Graphics", DiscreteGpu.IntelVendor, 16UL << 30, 0xA770, 0, false, DeviceId: 0x56A0)];
         var nvidia = new FakeSource("nvidia-gpu", _ => { }) { Supported = false, Unavailable = "no NVIDIA driver installed" };
         using var sampler = new Sampler(MachineSensors.Graphics(
             nvidia,
@@ -63,14 +97,16 @@ public class GraphicsSourcesTests
         sample.DGpuPresent.ShouldBeTrue();
         sample.DGpuW.ShouldNotBeNull().ShouldBe(190, 1e-9);
         sample.DGpuScope.ShouldBe(GpuPowerScope.Board);
+        var only = sample.Gpus.ShouldNotBeNull().ShouldHaveSingleItem();       // one card, not the library's and the counters' both
+        only.Name.ShouldBe("Intel(R) Arc(TM) A770 Graphics");
+        only.RatedW.ShouldBe(225);
     }
 
     [Fact]
-    public void An_arc_card_leaves_the_watts_amds_library_already_measured()
+    public void A_radeon_and_an_arc_card_both_count()
     {
-        // A machine with both a discrete Radeon and a discrete Arc has one field between them for the card's watts.
-        // AMD's library runs first, so Level Zero must not write over what it measured — and a sleeping Arc, which
-        // answers a flat nought, must not turn the Radeon's draw into nothing at all.
+        // A machine with both a discrete Radeon and a discrete Arc: each is a card of its own, and a sleeping Arc's nought
+        // is its own, not the Radeon's.
         var sysman = new FakeSysman();
         var arc = new SysmanDevice(SysmanDevice.GpuType, DiscreteGpu.IntelVendor, 0x56A0, CoreFlags: 0, ExtendedFlags: 0);
         var card = sysman.Add(arc, PowerDomain.Card)[0];
@@ -79,18 +115,19 @@ public class GraphicsSourcesTests
 
         var sleeping = Radeons(214.5);
         asleep.Contribute(sleeping);
+        sleeping.Gpus.Select(g => g.Watts).ShouldBe([214.5, 0]);
         sleeping.DGpuW.ShouldBe(214.5);
         sleeping.DGpuScope.ShouldBe(GpuPowerScope.ChipOnly);
-        sleeping.DGpuPresent.ShouldBeTrue();
 
-        // Nor does an Arc that is awake and measuring watts of its own.
         awake.Contribute(Radeons(214.5));
         card.Draw(watts: 190, seconds: 1);
         var reading = Radeons(214.5);
         awake.Contribute(reading);
 
-        reading.DGpuW.ShouldBe(214.5);
-        reading.DGpuScope.ShouldBe(GpuPowerScope.ChipOnly);
+        reading.Gpus.Count.ShouldBe(2);
+        reading.DGpuW.ShouldNotBeNull().ShouldBe(214.5 + 190, 1e-9);
+        reading.Gpus[1].VendorId.ShouldBe(DiscreteGpu.IntelVendor);
+        reading.Gpus[1].DeviceId.ShouldBe(0x56A0u);
     }
 
     [Fact]
@@ -128,29 +165,28 @@ public class GraphicsSourcesTests
     }
 
     [Fact]
-    public void The_assembled_set_never_has_two_sources_filling_the_discrete_gpu_watts()
+    public void The_assembled_set_reads_nvidia_first_and_builds_no_source_twice()
     {
         using var sensors = MachineSensors.Create(() => true, () => false);
-        var health = sensors.Sampler.Health;
+        var graphics = sensors.Sampler.Health.Where(h => h.Name is "nvidia-gpu" or "amd-gpu" or "arc-gpu" or "gpu-load").Select(h => h.Name).ToList();
 
-        health.Count(h => h.Name is "nvidia-gpu" or "amd-gpu" or "arc-gpu" && h.Supported).ShouldBeLessThanOrEqualTo(1);
-        if (health.Single(h => h.Name == "nvidia-gpu").Supported)
+        graphics[0].ShouldBe("nvidia-gpu");
+        graphics.ShouldBeUnique();
+        if (!sensors.Sampler.Health.Single(h => h.Name == "nvidia-gpu").Supported)
         {
-            health.ShouldNotContain(h => h.Name == "amd-gpu" || h.Name == "arc-gpu" || h.Name == "gpu-load");
+            graphics.ShouldBe(["nvidia-gpu", "amd-gpu", "arc-gpu", "gpu-load"]);
         }
-        else
+        else if (graphics.Contains("amd-gpu"))
         {
-            health.ShouldContain(h => h.Name == "amd-gpu");
-            health.ShouldContain(h => h.Name == "arc-gpu");
-            health.ShouldContain(h => h.Name == "gpu-load");
+            graphics.ShouldBe(["nvidia-gpu", "amd-gpu", "arc-gpu", "gpu-load"]);
         }
     }
 
     [Fact]
-    public void The_load_source_leaves_the_watts_the_amd_library_measured()
+    public void The_load_source_leaves_the_watts_the_amd_library_measured_and_fills_in_the_rest()
     {
-        // The load source runs after the AMD source and fills the load beside its watts, never over them.
-        var draft = new SampleDraft { DGpuPresent = true, DGpuW = 214.5, DGpuScope = GpuPowerScope.ChipOnly };
+        // The load source runs after the AMD source and fills the load, name and rating beside its watts, never over them.
+        var draft = Radeons(214.5);
         const string Busy3D = "pid_4_luid_0x00000000_0x0000D1A4_phys_0_eng_0_engtype_3D";
         var counters = new Queue<EngineSnapshot>(
         [
@@ -162,14 +198,24 @@ public class GraphicsSourcesTests
 
         load.Contribute(draft);
         now = GpuLoadSource.ReadEvery;
+        draft = Radeons(214.5);
         load.Contribute(draft);
 
-        draft.DGpuW.ShouldBe(214.5);
-        draft.DGpuScope.ShouldBe(GpuPowerScope.ChipOnly);
-        draft.DGpuLoad.ShouldBe(0.5);
+        var card = draft.Gpus.ShouldHaveSingleItem();
+        card.Watts.ShouldBe(214.5);
+        card.Scope.ShouldBe(GpuPowerScope.ChipOnly);
+        card.Load.ShouldBe(0.5);
+        card.Name.ShouldBe("AMD Radeon RX 7800 XT");
+        card.Rating.ShouldBe(new GpuRating(263, Rough: false));
     }
 
     /// <summary>A tick in which AMD's library has already measured a discrete Radeon's chip.</summary>
     private static SampleDraft Radeons(double watts)
-        => new() { DGpuPresent = true, DGpuW = watts, DGpuScope = GpuPowerScope.ChipOnly };
+    {
+        var draft = new SampleDraft();
+        var card = draft.AddGpu(DiscreteGpu.AmdVendor, 0x747E);
+        card.Watts = watts;
+        card.Scope = GpuPowerScope.ChipOnly;
+        return draft;
+    }
 }

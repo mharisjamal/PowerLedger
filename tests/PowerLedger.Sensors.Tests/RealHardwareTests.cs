@@ -52,13 +52,24 @@ public class RealHardwareTests
             return;
         }
 
-        var reading = nvml.Read();
-        reading.Present.ShouldBeTrue();
-        reading.LoadFraction.ShouldNotBeNull();
-        reading.LoadFraction!.Value.ShouldBeInRange(0, 1);
+        nvml.Devices.ShouldNotBeEmpty();
+        for (var index = 0; index < nvml.Devices.Count; index++)
+        {
+            // Every card names itself, its PCI device and its memory; the development laptop's MX330 is 10DE:1D16 with 2 GB.
+            var card = nvml.Devices[index];
+            card.Name.ShouldNotBeNullOrWhiteSpace();
+            card.DeviceId.ShouldNotBe(0u);
+            card.MemoryBytes.ShouldBeGreaterThan(256UL << 20);
 
-        // Power is null on cards with no measurement hardware, which is most low-end laptop GPUs.
-        if (reading.PowerWatts is { } watts) watts.ShouldBeInRange(0.1, 700);
+            var reading = nvml.Read(index);
+            reading.Present.ShouldBeTrue();
+            reading.LoadFraction.ShouldNotBeNull();
+            reading.LoadFraction!.Value.ShouldBeInRange(0, 1);
+
+            // Power is null on cards with no measurement hardware, which is most low-end laptop GPUs.
+            if (reading.PowerWatts is { } watts) watts.ShouldBeInRange(0.1, 700);
+        }
+        nvml.Read(nvml.Devices.Count).Present.ShouldBeFalse();
 
         // Windows can say whether the card is switched off without waking it.
         var device = DevicePowerState.FindNvidiaGpu();

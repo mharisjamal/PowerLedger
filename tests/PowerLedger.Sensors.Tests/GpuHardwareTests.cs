@@ -57,20 +57,23 @@ public class GpuHardwareTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Dxgi_lists_the_adapters_and_finds_no_amd_or_intel_card_on_the_development_laptop()
+    public void Dxgi_lists_the_adapters_and_finds_only_the_geforce_on_the_development_laptop()
     {
         using var dxgi = new DxgiAdapters();
         var adapters = dxgi.Current();
+        foreach (var adapter in adapters) output.WriteLine($"{adapter.Description} {adapter.VendorId:X4}:{adapter.DeviceId:X4} {adapter.DedicatedBytes >> 20} MB");
 
         adapters.ShouldNotBeEmpty();
         adapters.ShouldAllBe(a => a.Description.Length > 0);
-        adapters.ShouldContain(a => !a.Software && a.VendorId != 0);
+        adapters.ShouldContain(a => !a.Software && a.VendorId != 0 && a.DeviceId != 0);
 
-        // Intel Iris Xe graphics in the processor and a GeForce MX330: neither is an AMD or Intel card.
-        DiscreteGpu.Choose(adapters).ShouldBeNull();
+        // Intel Iris Xe graphics in the processor, and a GeForce MX330, which is a card like any other NVIDIA adapter.
+        var card = DiscreteGpu.Candidates(adapters).ShouldHaveSingleItem();
+        card.VendorId.ShouldBe(DiscreteGpu.NvidiaVendor);
+        card.DeviceId.ShouldBe(0x1D16u);
         var source = new GpuLoadSource();
-        source.Supported.ShouldBeFalse();
-        source.Unavailable.ShouldBe("no AMD or Intel discrete GPU");
+        source.Supported.ShouldBeTrue();
+        source.Unavailable.ShouldBeNull();
         source.Dispose();
 
         // Nothing changed, so the kept list answers without waking a switched-off card again.
@@ -122,7 +125,7 @@ public class GpuHardwareTests(ITestOutputHelper output)
         meter.Read();                          // both counters start their interval here
         integrated.Contribute(first);
         first.DGpuPresent.ShouldBeTrue();
-        first.DGpuScope.ShouldBe(GpuPowerScope.Package);
+        first.Gpus.ShouldHaveSingleItem().Scope.ShouldBe(GpuPowerScope.Package);
         first.DGpuW.ShouldBeNull();
 
         Thread.Sleep(3000);

@@ -17,6 +17,7 @@ public sealed class SampleValidator
     private readonly ValidatorOptions _options;
     private readonly Channel _cpu;
     private readonly Channel _gpu;
+    private readonly Dictionary<string, Channel> _cards = new(StringComparer.Ordinal);
     private readonly Channel _battery;
 
     private bool? _lastOnBattery;
@@ -46,7 +47,8 @@ public sealed class SampleValidator
         if ((raw.Timestamp - _transitionAt).TotalSeconds < _options.TransitionSeconds) suspect = true;
 
         var cpu = Check(raw.CpuPackageW, _options.CpuMaxW, _cpu, spikeFilter: false, ref suspect);
-        var gpu = Check(raw.DGpuW, _options.GpuMaxW, _gpu, spikeFilter: true, ref suspect);
+        var cards = raw.Gpus is { Count: > 0 } listed ? Cards(listed, ref suspect) : null;
+        var gpu = cards is null ? Check(raw.DGpuW, _options.GpuMaxW, _gpu, spikeFilter: true, ref suspect) : null;
         var battery = Check(raw.BatteryRateW, _options.BatteryMaxW, _battery, spikeFilter: true, ref suspect);
         var igpu = InRange(raw.IGpuW, _options.CpuMaxW, ref suspect);
 
@@ -59,10 +61,10 @@ public sealed class SampleValidator
 
         var brightness = Fraction(raw.Brightness, ref suspect);
         var load = Fraction(raw.CpuLoad, ref suspect) ?? 0;
-        var gpuLoad = Fraction(raw.DGpuLoad, ref suspect);
+        var gpuLoad = cards is null ? Fraction(raw.DGpuLoad, ref suspect) : null;
 
         if (suspect) SuspectCount++;
-        return raw with
+        var checkedSample = raw with
         {
             CpuPackageW = cpu,
             IGpuW = igpu,
@@ -76,6 +78,37 @@ public sealed class SampleValidator
             PsuWallW = wall,
             Suspect = suspect,
         };
+        if (cards is null) return checkedSample;
+
+        // Each card is checked on its own, and the single figures are the checked cards' together again.
+        var totals = GpuCard.Totals(cards);
+        return checkedSample with
+        {
+            Gpus = cards, DGpuW = totals.Watts, DGpuLoad = totals.Load, DGpuPresent = totals.Present, DGpuScope = totals.Scope,
+        };
+    }
+
+    /// <summary>Each card's watts range-checked and spike-filtered in a window of its own, and its load kept to 0..1. A card
+    /// is followed by its place in the list and its name, which stay put from tick to tick.</summary>
+    private List<GpuCard> Cards(IReadOnlyList<GpuCard> cards, ref bool suspect)
+    {
+        var checkedCards = new List<GpuCard>(cards.Count);
+        for (var index = 0; index < cards.Count; index++)
+        {
+            var card = cards[index];
+            var key = FormattableString.Invariant($"{index}:{card.Name}");
+            if (!_cards.TryGetValue(key, out var channel))
+            {
+                channel = new Channel(_options.MedianWindow);
+                _cards[key] = channel;
+            }
+            checkedCards.Add(card with
+            {
+                Watts = Check(card.Watts, _options.GpuMaxW, channel, spikeFilter: true, ref suspect),
+                Load = Fraction(card.Load, ref suspect),
+            });
+        }
+        return checkedCards;
     }
 
     private double? Check(double? value, double max, Channel channel, bool spikeFilter, ref bool suspect)
