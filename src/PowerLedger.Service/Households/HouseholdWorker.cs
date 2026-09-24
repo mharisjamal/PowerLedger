@@ -192,6 +192,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             if (_store.HouseholdId is null)
             {
                 await _relaySync.FlushAsync(_keys, new RelayRun(), lease.Attention).ConfigureAwait(false);   // what leaving left to say
+                await CheckApprovedAsync(lease.Attention).ConfigureAwait(false);
                 return;
             }
             BuildRowsIfDue();
@@ -199,6 +200,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             var run = await _relaySync.RunAsync(_keys, _store.Name, Kind(), lease.Attention).ConfigureAwait(false);
             foreach (var notice in run.Notices) Info(notice);
             Announce();                                                        // a new key, or none, changes the tag
+            if (!run.Removed && run.Problem is null) await PollRequestsAsync(lease.Attention).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!stop.IsCancellationRequested)
         {
@@ -224,14 +226,15 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                 StartCodePairingRequest start => await StartCodePairingAsync(start, cancel).ConfigureAwait(false),
                 JoinByCodeRequest join => JoinByCode(join),
                 AnswerPromptRequest answer => _prompts.Answer(answer.PromptId ?? "", answer.Accept)
-                    ? Reply(answer.Id, true, answer.Accept ? "Joining." : "Not joining.")
+                    ? Reply(answer.Id, true, "Answered.")
                     : Reply(answer.Id, false, "That question has closed."),
                 RemovePcRequest remove => await RemoveAsync(remove, cancel).ConfigureAwait(false),
                 LeaveHouseholdRequest leave => await LeaveAsync(leave, cancel).ConfigureAwait(false),
                 RenamePcRequest rename => await RenameAsync(rename, cancel).ConfigureAwait(false),
                 SetDiscoverableRequest discoverable => await SetDiscoverableAsync(discoverable, cancel).ConfigureAwait(false),
                 SignInRequest signIn => await SignInAsync(signIn, cancel).ConfigureAwait(false),
-                SignOutRequest or DeleteAccountRequest => Reply(request.Id, false, "That isn't available yet."),
+                SignOutRequest signOut => await SignOutAsync(signOut, cancel).ConfigureAwait(false),
+                DeleteAccountRequest delete => await DeleteAccountAsync(delete, cancel).ConfigureAwait(false),
                 _ => new ErrorReply(request.Id, "The service does not handle that request."),
             };
         }
@@ -507,6 +510,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         _household.MarkLeft(member.DeviceId, nowMs);
         _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: member.DeviceId));
         if (envelopes.Count > 0) _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch, Envelopes: envelopes));
+        QueueRecovery(householdId, epoch, key);
         Announce();
         Kick();
         _log.LogInformation("Removed {Name} from the household; the key is now at epoch {Epoch}", member.Name, epoch);
@@ -649,7 +653,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                     member.LeftMs is not null))];
             _board.Publish(new HouseholdStatus(
                 householdId, me, _store.Name, Kind(), _store.Discoverable, members, householdId is null ? null : _store.Problem,
-                SignedIn: _store.Session is not null));
+                SignedIn: _store.Session is not null, PendingApprovals: householdId is null ? 0 : Volatile.Read(ref _waitingApprovals)));
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {

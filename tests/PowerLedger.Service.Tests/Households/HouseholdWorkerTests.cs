@@ -245,11 +245,12 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Signing_in_is_answered_even_before_it_is_available()
+    public async Task Signing_out_or_deleting_the_account_while_signed_out_says_so()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);
 
-        (await desktop.Send<HouseholdReply>(new SignOutRequest(1))).Ok.ShouldBeFalse();
+        (await desktop.Send<HouseholdReply>(new SignOutRequest(1))).ShouldBe(new HouseholdReply(1, true, "This PC isn't signed in."));
+        (await desktop.Send<HouseholdReply>(new DeleteAccountRequest(2))).ShouldBe(new HouseholdReply(2, false, "Sign in first to delete your account."));
     }
 
     private static long Hour(int hour) => Now.AddDays(-1).AddHours(hour).ToUnixTimeMilliseconds();

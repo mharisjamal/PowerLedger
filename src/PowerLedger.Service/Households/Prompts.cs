@@ -28,15 +28,15 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
         return AskAsync(NoticeKind.JoinPrompt, text, question.FromName, question.ComparisonCode, cancel);
     }
 
-    /// <summary>N2: a PC signed in as this account asks to join.</summary>
-    public Task<bool> AskToApproveAsync(string fromName, CancellationToken cancel) =>
-        AskAsync(NoticeKind.ApprovePrompt, $"A PC signed in as you asks to join your household. Approve {fromName}?", fromName, null, cancel);
+    /// <summary>N2: a PC signed in as this account asks to join. The server knows it only by its keys, so it has no name yet.</summary>
+    public Task<bool> AskToApproveAsync(CancellationToken cancel) =>
+        AskAsync(NoticeKind.ApprovePrompt, "A PC signed in as you asks to join your household. Approve it?", null, null, cancel);
 
     /// <summary>The user's answer to an open prompt.</summary>
     /// <returns>False when no prompt of that ID waits: it was answered, ran out, or never was.</returns>
     public bool Answer(string promptId, bool accept) => _open.TryRemove(promptId, out var waiting) && waiting.TrySetResult(accept);
 
-    private async Task<bool> AskAsync(NoticeKind kind, string text, string fromName, string? code, CancellationToken cancel)
+    private async Task<bool> AskAsync(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel)
     {
         var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         var answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

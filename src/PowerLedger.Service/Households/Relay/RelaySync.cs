@@ -13,12 +13,15 @@ namespace PowerLedger.Service.Households.Relay;
 /// new epoch's keys. Each names its household, so what leaving asks of the server still goes after this PC has left.</summary>
 internal sealed record PendingOp(
     string Kind, string Household, string? Device = null, string? Sign = null, string? Dh = null, int? Epoch = null,
-    List<EnvelopeBody>? Envelopes = null)
+    List<EnvelopeBody>? Envelopes = null, RecoveryBody? Recovery = null)
 {
     public const string Create = "create";
     public const string Add = "add";
     public const string Remove = "remove";
     public const string Keys = "keys";
+
+    /// <summary>N2: a new household key in the account's recovery envelope, put with this PC's session.</summary>
+    public const string RecoveryEnvelope = "recovery";
 }
 
 /// <summary>What one relay run did.</summary>
@@ -151,9 +154,19 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                     await relay.RemoveMemberAsync(keys, op.Household, device, cancel).ConfigureAwait(false),
                 PendingOp.Keys when op is { Epoch: { } epoch, Envelopes: { } envelopes } =>
                     await relay.PostKeysAsync(keys, op.Household, epoch, envelopes, cancel).ConfigureAwait(false),
+                PendingOp.RecoveryEnvelope when op.Recovery is { } recovery && store.Session is { } session =>
+                    await relay.PutRecoveryAsync(keys, session, recovery, cancel).ConfigureAwait(false),
+                PendingOp.RecoveryEnvelope => new RelayResult<Done>(200, null, null),   // signed out since: nobody to put it for
                 _ => new RelayResult<Done>(400, null, "it wasn't a request this PC can make"),
             };
-            if (!result.Ok && result.Transient) throw new RelayStop($"Couldn't reach the server to update the household: {result.Problem}.");
+            if (!result.Ok && op.Kind == PendingOp.RecoveryEnvelope && result.Status == 401)
+            {
+                store.Session = null;                                          // the session has ended: signed out elsewhere
+            }
+            else if (!result.Ok && result.Transient)
+            {
+                throw new RelayStop($"Couldn't reach the server to update the household: {result.Problem}.");
+            }
             if (!result.Ok && op is { Kind: PendingOp.Remove } && result.Status == 404)
             {
                 // Already gone: removed by another member, or it left.
