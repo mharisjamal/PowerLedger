@@ -270,3 +270,57 @@ describe("a household that ends", () => {
     expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(owner.account).first()).toBeNull();
   });
 });
+
+describe("POST /v1/auth/signout", () => {
+  it("ends the session, and ending it again is done too", async () => {
+    const who = await signIn();
+
+    expect((await asAccount(who, "POST", "/v1/auth/signout")).status).toBe(200);
+    expect(await env.DB.prepare("SELECT 1 FROM sessions WHERE device = ?").bind(who.device.id).first()).toBeNull();
+    expect((await asAccount(who, "GET", "/v1/account/recovery")).status).toBe(401);
+
+    expect((await asAccount(who, "POST", "/v1/auth/signout")).status).toBe(200);
+  });
+
+  it("needs the session, signed by its own PC", async () => {
+    const who = await signIn();
+    const other = await signIn();
+
+    expect((await signedFetch(who.device, "POST", "/v1/auth/signout")).status).toBe(401);
+    expect((await asAccount({ ...other, session: who.session }, "POST", "/v1/auth/signout")).status).toBe(401);
+    expect(await env.DB.prepare("SELECT 1 FROM sessions WHERE device = ?").bind(who.device.id).first()).not.toBeNull();
+  });
+});
+
+describe("DELETE /v1/account", () => {
+  it("deletes the account, its link, sessions, requests and recovery; the household carries on", async () => {
+    const { hid, owner } = await linkedHousehold();
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)) });
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    const bystander = await signIn();
+
+    expect((await asAccount(owner, "DELETE", "/v1/account")).status).toBe(200);
+
+    for (const [table, column] of [
+      ["accounts", "id"],
+      ["sessions", "account"],
+      ["account_households", "account"],
+      ["join_requests", "account"],
+      ["recovery", "account"],
+    ]) {
+      const row = await env.DB.prepare(`SELECT 1 FROM ${table} WHERE ${column} = ?`).bind(owner.account).first();
+      expect(row, table).toBeNull();
+    }
+    expect((await asAccount(laptop, "POST", "/v1/account/requests")).status).toBe(401);
+    expect(await isMember(hid, owner.device.id)).toBe(true);
+    expect((await signedFetch(owner.device, "GET", `/v1/households/${hid}/members`)).status).toBe(200);
+    expect(await env.DB.prepare("SELECT 1 FROM accounts WHERE id = ?").bind(bystander.account).first()).not.toBeNull();
+  });
+
+  it("needs a current session", async () => {
+    const who = await signIn();
+    expect((await signedFetch(who.device, "DELETE", "/v1/account")).status).toBe(401);
+    expect(await env.DB.prepare("SELECT 1 FROM accounts WHERE id = ?").bind(who.account).first()).not.toBeNull();
+  });
+});

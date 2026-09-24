@@ -1,11 +1,13 @@
 import {
   handleApprove,
   handleAskToJoin,
+  handleDeleteAccount,
   handleGetRecovery,
   handleLink,
   handleListRequests,
   handlePutRecovery,
   handleRecover,
+  handleSignout,
 } from "./account";
 import { type MemberRow, type SessionRow, verifySession, verifySigned } from "./auth";
 import { handleGetBatches, handlePostBatch, readBatch } from "./batches";
@@ -113,6 +115,8 @@ const ROUTES: Route[] = [
   { method: "PUT", path: /^\/v1\/account\/recovery$/, handle: asSession(handlePutRecovery) },
   { method: "GET", path: /^\/v1\/account\/recovery$/, handle: asSession((env, session) => handleGetRecovery(env, session)) },
   { method: "POST", path: /^\/v1\/account\/recover$/, handle: asSession(handleRecover) },
+  { method: "POST", path: /^\/v1\/auth\/signout$/, handle: (request, env) => handleSignout(request, env) },
+  { method: "DELETE", path: /^\/v1\/account$/, handle: asSession((env, session) => handleDeleteAccount(env, session)) },
   {
     method: "GET",
     path: new RegExp(`^/v1/households/${HID}/requests$`),
