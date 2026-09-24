@@ -249,7 +249,10 @@
                             <TextBlock Style="{StaticResource Label}" Text="Processor · graphics rated power, W" />
                             <TextBox Style="{StaticResource Field}" Width="72" Text="{Binding CpuTdp, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Processor rated power" />
                             <TextBox Style="{StaticResource Field}" Width="72" Margin="8,0,0,0" Text="{Binding GpuTdp, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Graphics rated power" />
-                            <TextBlock Style="{StaticResource Aside}" Text="blank: from PowerLedger's table" />
+                            <!-- Wraps beside the boxes in a narrow page: the card less its edges and padding (42), the label (208), the boxes
+                                 and the gap between them (152) and the gap before it (10). -->
+                            <TextBlock Style="{StaticResource Aside}" Text="blank: from PowerLedger's table" TextWrapping="Wrap"
+                                       MaxWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=Border}, Converter={StaticResource M.WidthLess}, ConverterParameter=412}" />
                         </StackPanel>
                         <!-- How the last save went, at the foot of the machine card, where it can be seen while either card is edited. -->
                         <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />

@@ -77,6 +77,7 @@ public class MidnightRenderingTests
             {
                 UiHarness.Pump(TimeSpan.FromMilliseconds(300));
                 var canvas = UiHarness.Find<Grid>(window, grid => grid.Name == "Nav")!;   // the pill's canvas fills this cell
+                var lefts = new Dictionary<string, double>();
                 foreach (var (label, page, view) in new[]
                 {
                     ("History", Page.Breakdown, typeof(Midnight.HistoryView)),
@@ -95,9 +96,12 @@ public class MidnightRenderingTests
                     Canvas.GetTop(window.Pill).ShouldBe(at.Y, 0.5, $"the pill under {label}");
                     Canvas.GetLeft(window.Pill).ShouldBe(at.X, 0.5, $"the pill under {label}");
                     window.Pill.ActualWidth.ShouldBe(item.ActualWidth, 0.5);
-                    UiHarness.Find<FrameworkElement>(window, element => element.GetType() == view).ShouldNotBeNull($"the {label} page");
+                    var shown = UiHarness.Find<FrameworkElement>(window, element => element.GetType() == view).ShouldNotBeNull($"the {label} page");
+                    // Every page's content starts where the page header's title does.
+                    lefts[label] = ((FrameworkElement)UiHarness.Find<ScrollViewer>(shown)!.Content).TranslatePoint(default, window).X;
                     if (page != Page.Dashboard) UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-window-{label.ToLowerInvariant()}-Dark.png");
                 }
+                lefts.ShouldAllBe(left => Math.Abs(left.Value - lefts["Dashboard"]) < 0.5, "each page lines up with the Dashboard and the page header");
             }
             finally
             {

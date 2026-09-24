@@ -4,14 +4,15 @@
 
     <!-- Page-only styles for Midnight's History, Report, Household and Settings pages (Plan O task M2-6), merged by
          MidnightWindow after Styles.Midnight.xaml, whose keys these build on, and by each page. Cards sit on an 8 px
-         rhythm: 24 around the page, 16 between cards, 20 inside them. -->
+         rhythm: 32 at the page's sides, as the Dashboard and the page header have, 16 above and between cards, 20 inside
+         them. -->
     <ResourceDictionary.MergedDictionaries>
         <!-- The keys these build on, the one instance the window merges, so a page can merge this dictionary alone. -->
         <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
     <app:WidthLess x:Key="M.WidthLess" />
-    <Thickness x:Key="M.Page.Margin">24,8,24,24</Thickness>
+    <Thickness x:Key="M.Page.Margin">32,16,32,32</Thickness>
     <Thickness x:Key="M.Card.Gap">0,16,0,0</Thickness>
     <sys:Double x:Key="M.ShareTrack.Width" xmlns:sys="clr-namespace:System;assembly=System.Runtime">120</sys:Double>
 

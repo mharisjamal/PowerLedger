@@ -121,7 +121,7 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="PC" />
                                 <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="LAST SYNCED" HorizontalAlignment="Right" Margin="12,0,16,0" />
-                                <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Width="80" Margin="0,0,16,0" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Width="64" Margin="0,0,16,0" />
                                 <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" HorizontalAlignment="Right" />
                             </Grid>
                         </Border>
@@ -147,7 +147,7 @@
                                             </StackPanel>
                                             <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Muted}" Text="{Binding Status}" VerticalAlignment="Center" Margin="12,0,16,0"
                                                        HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" ToolTip="{Binding Status}" />
-                                            <app:ShareBar Grid.Column="2" Style="{StaticResource M.ShareBar}" Width="80" Margin="0,0,16,0" VerticalAlignment="Center"
+                                            <app:ShareBar Grid.Column="2" Style="{StaticResource M.ShareBar}" Width="64" Margin="0,0,16,0" VerticalAlignment="Center"
                                                           Value="{Binding Share}" FillBrush="{DynamicResource M.PartCpu}"
                                                           AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}" />
                                             <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Number}" Text="{Binding Energy}" HorizontalAlignment="Right" VerticalAlignment="Center" />
