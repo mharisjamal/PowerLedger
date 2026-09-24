@@ -108,6 +108,10 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     /// <summary>How long a batch under a newer epoch waits for this PC's envelope before it is passed over.</summary>
     public static readonly TimeSpan KeyWait = TimeSpan.FromHours(24);
 
+    /// <summary>How long a current member may keep posting under an older epoch before this PC makes a new key sealed to it too,
+    /// as it may never have had an envelope for this PC's (plan 0.8).</summary>
+    public static readonly TimeSpan LagWait = TimeSpan.FromHours(1);
+
     /// <summary>Runs the server may refuse a PC it hasn't taken as a member yet before the wait shows as a problem.</summary>
     public const int QuietRuns = 4;
 
@@ -485,6 +489,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             if (held.Count == 0) store.RelayCursor = after;
             if (!result.Value.More) break;
         }
+        RotateForLagging(householdId);
         if (held.Count == 0)
         {
             store.WaitingSince = null;
@@ -581,12 +586,47 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             if (household.Member(gone) is { } left) run.Notices.Add($"{left.Name} is no longer in the household.");
         }
         if (learned.Removed.Count > 0) StartRotation(householdId);
+        if (member.LeftMs is null) NoteEpoch(item.Device, item.Epoch);
         var rows = Wire.CapChanged((batch.Rows ?? []).Select(row => Wire.Row(item.Device, row)).OfType<HouseholdRow>(), Now);
         var taken = household.Upsert(rows);
         if (rows.Count > 0) household.Synced(item.Device, Math.Min(Now, rows.Max(row => row.ChangedMs)));
         return taken;
     }
 
+
+    /// <summary>Notes a current member posting under an older epoch than this PC's, or forgets that it did once it catches up.</summary>
+    private void NoteEpoch(string device, int epoch)
+    {
+        var lagging = store.Lagging;
+        if (epoch >= store.Epoch)
+        {
+            if (!lagging.ContainsKey(device)) return;
+            var caughtUp = new Dictionary<string, Lag>(lagging, StringComparer.Ordinal);
+            caughtUp.Remove(device);
+            store.Lagging = caughtUp;
+        }
+        else if (!lagging.ContainsKey(device))
+        {
+            store.Lagging = new Dictionary<string, Lag>(lagging, StringComparer.Ordinal) { [device] = new Lag(Now) };
+        }
+    }
+
+    /// <summary>A current member still behind after <see cref="LagWait"/> may have no envelope for this PC's epoch, as when it
+    /// was approved while another member made a new key without it: this PC makes a new key, which is sealed to every current
+    /// member, once for each epoch it is at.</summary>
+    private void RotateForLagging(string householdId)
+    {
+        var lagging = store.Lagging;
+        var due = lagging.Where(pair => Now - pair.Value.Since >= (long)LagWait.TotalMilliseconds && pair.Value.RotatedAt != store.Epoch
+            && household.Member(pair.Key) is { LeftMs: null }).Select(pair => pair.Key).ToList();
+        if (due.Count == 0) return;
+        log.LogInformation("{Count} members still post under an older key; making a new one sealed to them too", due.Count);
+        StartRotation(householdId);
+        var marked = new Dictionary<string, Lag>(lagging, StringComparer.Ordinal);
+        var epoch = store.RotationKey?.Epoch ?? store.Epoch + 1;
+        foreach (var device in due) marked[device] = new Lag(Now, epoch);          // time to catch up with the new key
+        store.Lagging = marked;
+    }
 
     /// <summary>True while this PC knows no member but itself, as just after a recovery or an approval.</summary>
     private bool KnowsNobody(DeviceKeys keys) => household.Members().All(member => member.DeviceId == keys.DeviceId || member.LeftMs is not null);

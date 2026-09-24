@@ -60,6 +60,13 @@ public sealed class ApprovalTests : IAsyncLifetime
         await study.Send<HouseholdReply>(new AnswerPromptRequest(10, check.PromptId!, true));
         await study.Worker.Running;
         study.Worker.Store.HouseholdId.ShouldBe(household);
+        desktop.Household.Member(study.Worker.DeviceId).ShouldNotBeNull().Name.ShouldBe(HouseholdWorker.NewPcName);   // known by its keys
+        study.Household.Upsert([new HouseholdRow(study.Worker.DeviceId, Now.AddHours(-2).ToUnixTimeMilliseconds(), 7, 1, 1, 1, 1, 0, 0,
+            3600, 0, 0, 3600, 0, 0, 1_000, "GBP", Now.ToUnixTimeMilliseconds() + 1)]);
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        desktop.Household.Row(study.Worker.DeviceId, Now.AddHours(-2).ToUnixTimeMilliseconds()).ShouldNotBeNull().EnergyWh.ShouldBe(7);
+        desktop.Household.Member(study.Worker.DeviceId)!.Name.ShouldBe("Study PC");
         study.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);
         (await study.Next(NoticeKind.Info, text => text == "This PC joined your household.")).ShouldNotBeNull();
         study.Worker.Store.AskedToJoin.ShouldBeNull();

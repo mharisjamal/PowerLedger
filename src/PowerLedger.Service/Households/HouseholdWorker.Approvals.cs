@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using PowerLedger.Contracts;
 using PowerLedger.Core.Households;
 using PowerLedger.Service.Households.Relay;
+using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Households;
 
@@ -12,6 +13,9 @@ internal sealed partial class HouseholdWorker
 {
     /// <summary>How many epochs a newly approved PC looks through for its envelope.</summary>
     private const int EpochsToLookThrough = 32;
+
+    /// <summary>What an approved PC is called here until its first batch gives its name.</summary>
+    internal const string NewPcName = "New PC";
 
     /// <summary>The PCs waiting to join that this PC's user has been asked about: true once approved, until the server has
     /// taken the approval.</summary>
@@ -93,6 +97,11 @@ internal sealed partial class HouseholdWorker
             Volatile.Write(ref _waitingApprovals, Math.Max(0, Volatile.Read(ref _waitingApprovals) - 1));
             if (result.Ok)
             {
+                // A member now, known here by the keys its user's approval vouched for: its batches check against them, and this
+                // PC's own member list introduces it to the others (plan 0.8). Its name comes with its first batch.
+                _members.Restore(item.Device);
+                _household.SaveMember(new HouseholdMember(
+                    item.Device, NewPcName, ChassisKind.Desktop, Wire.PublicKey(item.Sign)!, dh, _clock.GetUtcNow().ToUnixTimeMilliseconds(), null, null));
                 _log.LogInformation("Approved {Device} into the household", item.Device);
                 Info("The PC signed in as you is now in your household.");
                 Kick();

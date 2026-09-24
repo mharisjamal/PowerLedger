@@ -402,6 +402,33 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
+    public async Task A_member_still_posting_under_an_older_key_an_hour_on_gets_a_new_key_sealed_to_it_too()
+    {
+        var k2 = HouseholdCrypto.NewKey();
+        (await _desktop.Client.PostKeysAsync(_desktop.Keys, Household, 2, KeyWrap.For(_desktop.Keys, Household, 2, k2, [_desktop.AsMember()]),
+            CancellationToken.None)).Ok.ShouldBeTrue();                               // made without the laptop, which it didn't know yet
+        _desktop.Store.AddKey(2, k2);
+        _laptop.Household.Upsert([Row(_laptop.Id, 0, 1, changed: 100)]);
+        await _laptop.RunAsync();
+        await _desktop.RunAsync();
+        _desktop.Store.Lagging.ShouldContainKey(_laptop.Id);
+
+        _clock.Advance(RelaySync.LagWait);
+        _laptop.Household.Upsert([Row(_laptop.Id, 1, 1, changed: 200)]);
+        await _laptop.RunAsync();                                                   // still under epoch 1
+        await _desktop.RunAsync();                                                  // an hour on: a new key for it
+        await _desktop.RunAsync();
+
+        _relay.Epoch(Household).ShouldBe(3);
+        _relay.Sealed(Household, 3).ShouldBe([_desktop.Id, _laptop.Id], ignoreOrder: true);
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 3, changed: 300)]);
+        await _desktop.RunAsync();
+        await _laptop.RunAsync();
+        _laptop.Store.Epoch.ShouldBe(3);
+        _laptop.Household.Row(_desktop.Id, Hour(0)).ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task A_member_that_sees_a_removal_makes_a_new_key_without_the_pc_that_went()
     {
         using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);

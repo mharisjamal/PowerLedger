@@ -44,13 +44,14 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string TombstonesKey = "household.tombstones";
     internal const string RotationKeyKey = "household.rotation-key";
     internal const string RecoveryCodeKey = "household.recovery-code";
+    internal const string LaggingKey = "household.lagging";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
     private static readonly string[] OfTheHousehold =
         [
             IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, HistoryKey, HistoryHourKey, ConfirmedKey,
-            MembersCheckedKey, ProblemKey, WaitingKey, TombstonesKey, RotationKeyKey,
+            MembersCheckedKey, ProblemKey, WaitingKey, TombstonesKey, RotationKeyKey, LaggingKey,
         ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
@@ -253,6 +254,14 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     {
         get => HouseholdJson.Read(settings.Get(TombstonesKey), HouseholdJson.Default.DictionaryStringTombstone) ?? [];
         set => WriteText(TombstonesKey, value.Count == 0 ? null : HouseholdJson.Write(new Dictionary<string, Tombstone>(value), HouseholdJson.Default.DictionaryStringTombstone));
+    }
+
+    /// <summary>Current members whose batches still come under an older epoch than this PC's, by device ID: since when, unix
+    /// milliseconds, and the epoch this PC made a new key at for them, if it did (plan 0.8).</summary>
+    public IReadOnlyDictionary<string, Lag> Lagging
+    {
+        get => HouseholdJson.Read(settings.Get(LaggingKey), HouseholdJson.Default.DictionaryStringLag) ?? [];
+        set => WriteText(LaggingKey, value.Count == 0 ? null : HouseholdJson.Write(new Dictionary<string, Lag>(value), HouseholdJson.Default.DictionaryStringLag));
     }
 
     /// <summary>What the server still has to be told, oldest first: kept across leaving, since each names its household.</summary>

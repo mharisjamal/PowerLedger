@@ -8,6 +8,11 @@ namespace PowerLedger.Service.Households;
 /// removal, or earlier once this PC's own new key without it was taken.</param>
 internal sealed record Tombstone(long Removed, int LastEpoch);
 
+/// <summary>A current member whose batches still come under an older epoch than this PC's (plan 0.8).</summary>
+/// <param name="Since">When this PC first saw it behind, unix milliseconds.</param>
+/// <param name="RotatedAt">The epoch this PC made a new key at so it would have one; null before.</param>
+internal sealed record Lag(long Since, int? RotatedAt = null);
+
 /// <summary>What learning another PC's member list changed here.</summary>
 /// <param name="Removed">Members this PC had as current that the list says were removed: each means a new key.</param>
 /// <param name="Added">Members this PC didn't know, or knew as removed and were added again since.</param>
