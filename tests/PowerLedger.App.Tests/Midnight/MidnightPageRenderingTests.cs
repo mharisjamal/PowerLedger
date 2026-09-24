@@ -46,7 +46,7 @@ public class MidnightPageRenderingTests
                 var view = new Midnight.HistoryView { DataContext = model };
                 using var page = Page(view, 1010);
                 var pills = AllOf<RadioButton>(view).Where(p => p.Content is string && p.IsVisible).ToList();
-                pills.Select(p => p.Content).ShouldBe(["Today", "7 days", "30 days", "This month", "Last month", "Custom", "W", "Wh"], ignoreOrder: true, theme.ToString());
+                pills.Select(p => p.Content).ShouldBe(["Last hour", "Today", "7 days", "30 days", "Last year", "This month", "Last month", "Custom", "W", "Wh"], ignoreOrder: true, theme.ToString());
                 pills.Where(p => p.IsChecked == true).Select(p => p.Content).ShouldBe(["7 days", "W"], ignoreOrder: true, theme.ToString());
                 Find<StackedChart>(view).ShouldNotBeNull(theme.ToString()).ActualHeight.ShouldBe(300, theme.ToString());
 
@@ -64,6 +64,19 @@ public class MidnightPageRenderingTests
                 }
                 Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-history-{theme}.png");
 
+                // The Dashboard's hour and year, which BreakdownViewModel's range resolves as it is, in minutes and in days.
+                pills.Single(p => Equals(p.Content, "Last hour")).IsChecked = true;
+                model.Range.Choice.ShouldBe(RangeChoice.LastHour, theme.ToString());
+                Pump(TimeSpan.FromMilliseconds(300));
+                page.Host.UpdateLayout();
+                model.Heading.ShouldStartWith("Last hour · 1-min", customMessage: theme.ToString());
+                pills.Where(p => p.IsChecked == true).Select(p => p.Content).ShouldBe(["Last hour", "W"], ignoreOrder: true, theme.ToString());
+                Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-history-hour-{theme}.png");
+                pills.Single(p => Equals(p.Content, "Last year")).IsChecked = true;
+                model.Range.Choice.ShouldBe(RangeChoice.LastYear, theme.ToString());
+                Pump(TimeSpan.FromMilliseconds(300));
+                model.Heading.ShouldStartWith("Last 365 days · daily", customMessage: theme.ToString());
+
                 model.Range.Choice = RangeChoice.Custom;
                 Pump(TimeSpan.FromMilliseconds(300));
                 page.Host.UpdateLayout();
@@ -71,7 +84,7 @@ public class MidnightPageRenderingTests
                 Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-history-custom-{theme}.png");
             }
         });
-        Sizes(30_000, "history", "history-custom");
+        Sizes(30_000, "history", "history-hour", "history-custom");
     }
 
     [Fact]
@@ -90,6 +103,8 @@ public class MidnightPageRenderingTests
                 using var page = Page(view, 1010);
                 AllOf<Button>(view).Where(b => b.TemplatedParent is null).Select(b => b.Content)
                     .ShouldBe(["PDF", "PNG", "CSV · 1 h", "CSV · 1 min", "CSV · raw"], ignoreOrder: true, theme.ToString());
+                AllOf<RadioButton>(view).Where(p => p.IsVisible).Select(p => p.Content)   // the Report keeps Classic's six ranges
+                    .ShouldBe(["Today", "7 days", "30 days", "This month", "Last month", "Custom"], ignoreOrder: true, theme.ToString());
                 Find<CheckBox>(view, c => Equals(c.Content, "Include my household")).ShouldNotBeNull(theme.ToString()).Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
                 foreach (var title in new[] { "BILL", "TIME", "BY COMPONENT", "EVERYDAY EQUIVALENTS", "IDLE WASTE", "DATA QUALITY", "DAILY ENERGY" })
                 {

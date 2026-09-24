@@ -23,7 +23,7 @@
                                      IsChecked="{Binding Unit, Converter={StaticResource Is}, ConverterParameter={x:Static app:ChartUnit.WattHours}}" />
                     </StackPanel>
                 </Border>
-                <local:RangePills DataContext="{Binding Range}" />
+                <local:RangePills DataContext="{Binding Range}" ShowHourAndYear="True" />
             </DockPanel>
 
             <!-- The chart card: the range and bucket over it, the unit at the right, the legend under it. -->
