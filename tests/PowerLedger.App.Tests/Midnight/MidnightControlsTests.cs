@@ -89,9 +89,9 @@ public class MidnightControlsTests
         {
             UiHarness.OnUi(() =>
             {
-                MidnightFixtures.UsePalette(theme);
                 var host = new Border { Width = 760, Padding = new Thickness(24) };
                 host.Resources.MergedDictionaries.Add(MidnightStylesTests.Load());
+                host.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, theme));   // in the host, not the application: no other test can swap it
                 host.SetResourceReference(Border.BackgroundProperty, "M.Ground");
                 var chart = new AreaChart { Model = MidnightFixtures.DayChart(), From = MidnightFixtures.Today().From, Zone = TimeZoneInfo.Utc };
                 var column = new StackPanel();

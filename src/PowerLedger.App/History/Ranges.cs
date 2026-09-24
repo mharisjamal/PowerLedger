@@ -31,6 +31,30 @@ internal static class Ranges
         return Build(today.AddDays(1 - days), today, now, zone, $"Last {days.ToString(culture)} days");
     }
 
+    /// <summary>The Dashboard's 1H (Midnight look design §4): sixty whole minutes, the one under way last, a bucket a
+    /// minute. Whole minutes of absolute time, so a clock change inside the hour neither stretches nor cuts it.</summary>
+    public static DateRange LastHour(DateTimeOffset now, TimeZoneInfo zone, CultureInfo culture)
+    {
+        var minute = TimeSpan.FromMinutes(1);
+        var through = TimeZoneInfo.ConvertTime(new DateTimeOffset(now.UtcTicks - now.UtcTicks % minute.Ticks, TimeSpan.Zero) + minute, zone);
+        var from = TimeZoneInfo.ConvertTime(through - TimeSpan.FromMinutes(60), zone);   // converted on its own: its offset may differ
+        return new DateRange(from, now, through, "Last hour", minute);
+    }
+
+    /// <summary>The Dashboard's 1Y: the last 365 days, a bucket a day.</summary>
+    public static DateRange LastYear(DateTimeOffset now, TimeZoneInfo zone, CultureInfo culture)
+        => LastDays(365, now, zone, culture) with { Bucket = TimeSpan.FromDays(1) };
+
+    /// <summary>The Dashboard's All: from the day of the first row in the history, a bucket a day however short that is;
+    /// with no history yet, today alone.</summary>
+    public static DateRange All(DateTimeOffset? first, DateTimeOffset now, TimeZoneInfo zone, CultureInfo culture)
+    {
+        var today = LocalDay(now, zone);
+        var start = first is { } row ? LocalDay(row, zone) : today;
+        if (start > today) start = today;
+        return Build(start, today, now, zone, "Since " + start.ToString("d MMM yyyy", culture)) with { Bucket = TimeSpan.FromDays(1) };
+    }
+
     public static DateRange ThisMonth(DateTimeOffset now, TimeZoneInfo zone, CultureInfo culture)
     {
         var today = LocalDay(now, zone);
@@ -104,9 +128,10 @@ internal static class Ranges
         _ => "daily",
     };
 
-    /// <summary>What one bucket is, after "per": "15 min", "hour", "6 hours", "day".</summary>
+    /// <summary>What one bucket is, after "per": "minute", "15 min", "hour", "6 hours", "day".</summary>
     public static string BucketLength(TimeSpan bucket) => bucket.TotalMinutes switch
     {
+        1 => "minute",
         < 60 => bucket.TotalMinutes.ToString("0", CultureInfo.InvariantCulture) + " min",
         60 => "hour",
         < 1440 => bucket.TotalHours.ToString("0", CultureInfo.InvariantCulture) + " hours",
