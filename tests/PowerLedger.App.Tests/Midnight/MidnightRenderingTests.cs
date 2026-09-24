@@ -46,6 +46,9 @@ public class MidnightRenderingTests
                     Pills(view, "Where the power went").ShouldBe(["Today", "7 days", "30 days"]);
                     Checked(view, "Where the power went").ShouldBe("Today");
                     UiTree.Descendants<ShareBar>(Card(view, "Where the power went")).Count().ShouldBe(4, "a row a part");
+                    UiTree.Descendants<TrendMark>(view).Where(mark => mark.Kind is TrendKind.Up or TrendKind.Down)
+                        .ShouldAllBe(mark => mark.LowerIsBetter, "every trend on the page is of energy, where less is better");
+                    UiTree.Descendants<TrendMark>(Card(view, "Today")).Single().Sense.ShouldBe(TrendSense.Bad, "today runs above the average day");
                     UiTree.Descendants<Border>(view).ShouldNotContain(border => border.Style == window.Resources["M.Glass"], "glass stays on the top bar and tooltips");
                     UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-dashboard-{theme}.png");
                     var scroller = UiHarness.Find<ScrollViewer>(view)!;

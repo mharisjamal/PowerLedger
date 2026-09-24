@@ -68,6 +68,37 @@ public class MidnightControlsTests
         });
     }
 
+    /// <summary>The mark's colour is its sense, not its direction: where lower is better a rise is red and a fall green.</summary>
+    [Fact]
+    [Trait("Category", "UI")]
+    public void A_trend_marks_colour_follows_whether_lower_is_better()
+        => UiHarness.OnUi(() =>
+        {
+            var host = new StackPanel();
+            host.Resources.MergedDictionaries.Add(MidnightStylesTests.Load());
+            host.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, Theme.Dark));
+            var marks = new[]
+            {
+                new TrendMark { Kind = TrendKind.Up, Text = "12%" },
+                new TrendMark { Kind = TrendKind.Down, Text = "12%" },
+                new TrendMark { Kind = TrendKind.Up, Text = "12%", LowerIsBetter = true },
+                new TrendMark { Kind = TrendKind.Down, Text = "12%", LowerIsBetter = true },
+                new TrendMark { Kind = TrendKind.Flat, Text = "0%", LowerIsBetter = true },
+            };
+            foreach (var mark in marks) host.Children.Add(mark);
+            host.Measure(new Size(400, 400));
+            host.Arrange(new Rect(0, 0, 400, 400));
+            Color Ink(string key) => ((SolidColorBrush)host.FindResource(key)).Color;
+            Color Of(TrendMark mark) => ((SolidColorBrush)mark.Foreground).Color;
+            marks.Select(mark => mark.Sense.ToString()).ShouldBe(["Good", "Bad", "Bad", "Good", "Neutral"]);
+            Of(marks[0]).ShouldBe(Ink("M.Good"));
+            Of(marks[1]).ShouldBe(Ink("M.Bad"));
+            Of(marks[2]).ShouldBe(Ink("M.Bad"), "more energy is the bad news");
+            Of(marks[3]).ShouldBe(Ink("M.Good"), "less energy is the good news");
+            Of(marks[4]).ShouldBe(Ink("M.Ink3"));
+            marks[2].Describe().ShouldBe("Up 12%", "the arrow and its words still say which way the figure went");
+        });
+
     [Fact]
     public void The_bars_and_the_disc_describe_themselves()
         => Sta.Run(() =>

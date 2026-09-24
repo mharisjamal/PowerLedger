@@ -51,4 +51,17 @@ public class DashboardMathsTests
     [InlineData(-0.004, "Flat")]
     public void A_change_points_up_down_or_lies_flat(double change, string kind)
         => DashboardMaths.Kind(change).ToString().ShouldBe(kind);
+
+    /// <summary>Energy is a cost: where lower is better a fall is the good news and a rise the bad, the arrow still
+    /// pointing the way the figure went.</summary>
+    [Theory]
+    [InlineData("Up", false, "Good")]
+    [InlineData("Down", false, "Bad")]
+    [InlineData("Up", true, "Bad")]
+    [InlineData("Down", true, "Good")]
+    [InlineData("Flat", true, "Neutral")]
+    [InlineData("Text", true, "Neutral")]
+    [InlineData("Quality", false, "Neutral")]
+    public void Whether_a_change_is_good_news_depends_on_whether_lower_is_better(string kind, bool lowerIsBetter, string sense)
+        => DashboardMaths.Sense(Enum.Parse<TrendKind>(kind), lowerIsBetter).ToString().ShouldBe(sense);
 }

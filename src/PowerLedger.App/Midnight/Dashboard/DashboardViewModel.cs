@@ -252,7 +252,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             Format.Kwh(today.EnergyKwh, _culture) + " kWh",
             today.Currency is { } currency ? Money.Format(today.Cost, currency, _culture) : "no tariff set",
             Trend(change), change is { } c ? DashboardMaths.Kind(c) : TrendKind.Text,
-            DashboardMaths.Fill(today.EnergyKwh * 1000, average ?? 0));
+            DashboardMaths.Fill(today.EnergyKwh * 1000, average ?? 0)) { LowerIsBetter = true };
     }
 
     /// <summary>Idle waste this month: the month's idle energy, on and off, priced at the month's average price as the
@@ -274,7 +274,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             Format.Kwh(idle, _culture) + " kWh",
             month.Currency is { } currency ? Money.Format(decimal.Round((decimal)idle * price, 2), currency, _culture) : "no tariff set",
             trend, kind,
-            DashboardMaths.Fill(idle, month.EnergyKwh));
+            DashboardMaths.Fill(idle, month.EnergyKwh)) { LowerIsBetter = true };
     }
 
     /// <summary>The parts over the chosen range: watts now from the live budget, energy and share from the range, the
@@ -300,7 +300,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
                 row?.Fraction ?? 0,
                 frame is null ? null : QualityOf(frame, entry.Part),
                 Trend(change),
-                change is { } c ? DashboardMaths.Kind(c) : TrendKind.Text);
+                change is { } c ? DashboardMaths.Kind(c) : TrendKind.Text) { LowerIsBetter = true };
         })];
     }
 

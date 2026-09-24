@@ -30,4 +30,13 @@ internal static class DashboardMaths
 
     /// <summary>Which way a change points: up for more, down for less, flat for too little to mention.</summary>
     public static TrendKind Kind(double change) => Math.Abs(change) < FlatBelow ? TrendKind.Flat : change > 0 ? TrendKind.Up : TrendKind.Down;
+
+    /// <summary>Whether a change is the good news or the bad: a rise is good unless <paramref name="lowerIsBetter"/>, as it
+    /// is for energy, which costs; a fall the other way round; anything else is neither.</summary>
+    public static TrendSense Sense(TrendKind kind, bool lowerIsBetter) => kind switch
+    {
+        TrendKind.Up => lowerIsBetter ? TrendSense.Bad : TrendSense.Good,
+        TrendKind.Down => lowerIsBetter ? TrendSense.Good : TrendSense.Bad,
+        _ => TrendSense.Neutral,
+    };
 }

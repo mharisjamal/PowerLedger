@@ -71,6 +71,13 @@ public sealed class DashboardViewModelTests : IDisposable
         idle.Trend.ShouldBe("45%");                           // against last month's 0.3836 kWh
         idle.Kind.ShouldBe(TrendKind.Down);
         idle.Fill.ShouldBe(0.21 / 2.74, 1e-9);
+
+        // Energy is a cost: less of it is the good news, so today's rise reads as bad and the idle waste's fall as good.
+        power.LowerIsBetter.ShouldBeFalse("its slot holds the quality, not a trend");
+        today.LowerIsBetter.ShouldBeTrue();
+        idle.LowerIsBetter.ShouldBeTrue();
+        DashboardMaths.Sense(today.Kind, today.LowerIsBetter).ShouldBe(TrendSense.Bad);
+        DashboardMaths.Sense(idle.Kind, idle.LowerIsBetter).ShouldBe(TrendSense.Good);
     }
 
     [Fact]
@@ -228,6 +235,7 @@ public sealed class DashboardViewModelTests : IDisposable
         parts.All(p => p.Glyph.Length == 1).ShouldBeTrue();
         parts[0].Trend.ShouldBe("1270%");                     // 1.18 kWh against 86 Wh the same length of time before
         parts[0].Kind.ShouldBe(TrendKind.Up);
+        parts.ShouldAllBe(p => p.LowerIsBetter, "a part's energy is a cost too");
 
         dashboard.PartsRange = PartsRange.SevenDays;
         _history.Reads[^2].Title.ShouldBe("Last 7 days");

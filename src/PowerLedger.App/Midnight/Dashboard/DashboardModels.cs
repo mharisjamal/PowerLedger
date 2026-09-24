@@ -13,6 +13,14 @@ internal enum TrendKind
     Text,
 }
 
+/// <summary>Whether a trend is the good news (green), the bad (red) or neither (muted ink); see <see cref="DashboardMaths.Sense"/>.</summary>
+internal enum TrendSense
+{
+    Neutral,
+    Good,
+    Bad,
+}
+
 /// <summary>One of the Dashboard's three cards.</summary>
 /// <param name="Label">The small label over the number: "Power now".</param>
 /// <param name="Big">The number with its unit: "34.2 W", or a dash.</param>
@@ -20,7 +28,11 @@ internal enum TrendKind
 /// <param name="Trend">What the trend slot says: "12%", "Measured", "first month"; null for nothing.</param>
 /// <param name="Kind">How to draw it.</param>
 /// <param name="Fill">How much of the bar is filled, 0 to 1; the rest is hatched.</param>
-internal sealed record KpiCard(string Label, string Big, string Small, string? Trend, TrendKind Kind, double Fill);
+internal sealed record KpiCard(string Label, string Big, string Small, string? Trend, TrendKind Kind, double Fill)
+{
+    /// <summary>Whether a fall is the good news: true for energy, which costs.</summary>
+    public bool LowerIsBetter { get; init; }
+}
 
 /// <summary>One row of "Where the power went".</summary>
 /// <param name="Glyph">A Segoe Fluent glyph for the part.</param>
@@ -30,7 +42,11 @@ internal sealed record KpiCard(string Label, string Big, string Small, string? T
 /// <param name="Quality">How its live figure is got, for the chip; null without a reading.</param>
 /// <param name="Trend">Against the same length of time before the range: "12%"; null with nothing to compare.</param>
 internal sealed record DashboardPart(
-    Part Part, string Name, string Glyph, string NowW, string Energy, double Share, Quality? Quality, string? Trend, TrendKind Kind);
+    Part Part, string Name, string Glyph, string NowW, string Energy, double Share, Quality? Quality, string? Trend, TrendKind Kind)
+{
+    /// <summary>Whether a fall is the good news: true for a part's energy, which costs.</summary>
+    public bool LowerIsBetter { get; init; }
+}
 
 /// <summary>The chart's range pills: 1H · 1D · 1W · 1M · 1Y · All.</summary>
 internal enum RangePill

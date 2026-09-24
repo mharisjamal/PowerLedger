@@ -63,7 +63,7 @@
                         <TextBlock Style="{StaticResource M.Text.Secondary}" Margin="0,4,0,0" Text="{Binding Small}" TextTrimming="CharacterEllipsis" />
                         <Grid Margin="0,16,0,0" Height="22">
                             <StackPanel x:Name="Trend" Orientation="Horizontal" VerticalAlignment="Center">
-                                <local:TrendMark Kind="{Binding Kind}" Text="{Binding Trend}" />
+                                <local:TrendMark Kind="{Binding Kind}" Text="{Binding Trend}" LowerIsBetter="{Binding LowerIsBetter}" />
                                 <TextBlock x:Name="Against" Style="{StaticResource M.Text.Muted}" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" />
                             </StackPanel>
                             <ContentControl x:Name="Chip" Style="{StaticResource M.Chip.Measured}" Visibility="Collapsed" />
@@ -240,7 +240,8 @@
                                                 <local:ShareBar Style="{StaticResource PartShare}" Margin="0,0,10,0" Value="{Binding Share}" />
                                             </DockPanel>
                                             <local:QualityBadge Grid.Column="5" Style="{StaticResource M.Chip}" Margin="20,0,0,0" Quality="{Binding Quality}" />
-                                            <local:TrendMark Grid.Column="6" Margin="8,0,0,0" HorizontalAlignment="Left" Kind="{Binding Kind}" Text="{Binding Trend, TargetNullValue='–'}" />
+                                            <local:TrendMark Grid.Column="6" Margin="8,0,0,0" HorizontalAlignment="Left" Kind="{Binding Kind}" Text="{Binding Trend, TargetNullValue='–'}"
+                                                             LowerIsBetter="{Binding LowerIsBetter}" />
                                         </Grid>
                                     </Border>
                                 </DataTemplate>

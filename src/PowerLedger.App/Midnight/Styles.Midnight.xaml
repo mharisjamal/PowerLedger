@@ -756,7 +756,8 @@
     <Style TargetType="local:MeterScale" BasedOn="{StaticResource M.MeterScale}" />
     <Style TargetType="local:QualityBar" BasedOn="{StaticResource M.QualityBar}" />
 
-    <!-- A trend: the arrow and its words in green, red or muted ink; words alone for Text; nothing for Quality, whose slot holds a chip. -->
+    <!-- A trend: the arrow says which way the figure went, the colour whether that is good news (TrendMark.Sense: green,
+         red, or muted ink for neither); words alone for Text; nothing for Quality, whose slot holds a chip. -->
     <Style TargetType="local:TrendMark">
         <Setter Property="Foreground" Value="{DynamicResource M.Ink3}" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -771,10 +772,14 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="Kind" Value="Up">
                             <Setter TargetName="Mark" Property="Text" Value="&#x25B2;" />
-                            <Setter Property="Foreground" Value="{DynamicResource M.Good}" />
                         </Trigger>
                         <Trigger Property="Kind" Value="Down">
                             <Setter TargetName="Mark" Property="Text" Value="&#x25BC;" />
+                        </Trigger>
+                        <Trigger Property="Sense" Value="Good">
+                            <Setter Property="Foreground" Value="{DynamicResource M.Good}" />
+                        </Trigger>
+                        <Trigger Property="Sense" Value="Bad">
                             <Setter Property="Foreground" Value="{DynamicResource M.Bad}" />
                         </Trigger>
                         <Trigger Property="Kind" Value="Text">
