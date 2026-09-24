@@ -551,6 +551,41 @@ describe("recovery", () => {
     expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier })).status).toBe(404);
   });
 
+  it("uses up every recovery of the household, so another account's code can't bring its removed holder back", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const family = await signIn();
+    await addMember(hid, owner.device, family.device);
+    await asAccount(family, "POST", "/v1/account/household", { householdId: hid });
+    const ownerVerifier = nonce();
+    const familyVerifier = nonce();
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: ownerVerifier, epoch: 1, replace: true });
+    await asAccount(family, "PUT", "/v1/account/recovery", { body: envelope(), verifier: familyVerifier, epoch: 1, replace: true });
+
+    const newPc = await signIn(undefined, owner.account);
+    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier: ownerVerifier })).status).toBe(200);
+
+    expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(family.account).first()).toBeNull();
+    const familyPc = await signIn(undefined, family.account);
+    expect((await asAccount(familyPc, "POST", "/v1/account/recover", { verifier: familyVerifier })).status).toBe(404);
+    expect(await isMember(hid, newPc.device.id)).toBe(true);
+  });
+
+  it("won't recover through a recovery whose holder is no longer a member", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const other = await newDevice();
+    await addMember(hid, owner.device, other);
+    const verifier = nonce();
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
+    // The holder gone, its recovery left behind, as an older bug or a race could leave it.
+    await env.DB.prepare("UPDATE members SET removed = 1, removed_epoch = 1 WHERE household = ? AND device = ?")
+      .bind(hid, owner.device.id)
+      .run();
+
+    const newPc = await signIn(undefined, owner.account);
+    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier })).status).toBe(404);
+    expect(await isMember(hid, other.id)).toBe(true);
+  });
+
   it("refuses another verifier, a malformed one, and an account with nothing to recover", async () => {
     const { hid, owner } = await linkedHousehold();
     const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));

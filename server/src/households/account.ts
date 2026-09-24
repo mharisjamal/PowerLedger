@@ -391,9 +391,11 @@ export async function handleRecover(env: Cloudflare.Env, session: SessionRow, bo
   const verifier = readVerifier(parseObject(body)?.verifier);
   if (!verifier) return errorResponse(400, "verifier must be 32 bytes, as base64url.");
 
+  // Only a recovery whose holder is still a current member counts: a removed PC's code must never bring it back.
   const row = await env.DB.prepare(
     `SELECT r.verifier_hash, l.household, h.epoch AS current
      FROM recovery r JOIN account_households l ON l.account = r.account JOIN households h ON h.id = l.household
+     JOIN members m ON m.household = l.household AND m.device = r.holder AND m.removed IS NULL
      WHERE r.account = ?`,
   )
     .bind(session.account)
@@ -411,7 +413,9 @@ export async function handleRecover(env: Cloudflare.Env, session: SessionRow, bo
        WHERE household = ?3 AND device != ?4 AND removed IS NULL`,
     ).bind(now, row.current, row.household, session.device),
     ...(alreadyIn ? [] : [addMemberStatement(env, row.household, session.device, session.sign_key, session.dh_key, now)]),
-    env.DB.prepare("DELETE FROM recovery WHERE account = ?").bind(session.account),
+    // Every recovery of the household goes, not this account's alone: the others' holders were just removed.
+    env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)")
+      .bind(row.household),
     env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(row.household, session.device),
   ]);
   return Response.json({ household: row.household, epoch: row.current });
