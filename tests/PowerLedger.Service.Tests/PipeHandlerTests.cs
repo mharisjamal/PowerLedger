@@ -305,7 +305,7 @@ public sealed class PipeHandlerTests : IDisposable
         new BrowsePcsRequest(40), new AddPcRequest(41, "a1"), new StartCodePairingRequest(42), new JoinByCodeRequest(43, "K7QM-2XHD-9PW4-R8TA"),
         new AnswerPromptRequest(44, "p1", true), new RemovePcRequest(45, "0123456789abcdef0123456789abcdef"), new LeaveHouseholdRequest(46),
         new RenamePcRequest(47, "Study PC"), new SetDiscoverableRequest(48, false), new SignInRequest(49, "microsoft", "token", "salt"),
-        new SignOutRequest(50), new DeleteAccountRequest(51),
+        new SignOutRequest(50), new DeleteAccountRequest(51), new CancelPairingRequest(52), new NewRecoveryCodeRequest(53),
     ];
 
     [Theory]

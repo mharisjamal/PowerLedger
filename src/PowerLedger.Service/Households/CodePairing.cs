@@ -63,55 +63,71 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
     }
 
     /// <summary>The adding side from there: waits for a joining PC's hello and checks its MAC, then its answer, then sends
-    /// the welcome, and once the joining PC's proof comes, records it and says so, all within the meeting's 10 minutes.</summary>
+    /// the welcome, and once the joining PC's proof comes, records it and says so, all within the meeting's 10 minutes.
+    /// Cancelled, it tells the joining PC so in the next slot it would have written, as far as it has got.</summary>
     /// <param name="record">Records the joining PC as a member, with its proof for the server, before it is told it is in.</param>
     public async Task<PairingOutcome> AddAsync(
         CodeMeeting meeting, PairingIdentity me, Func<MemberInfo, Task<Welcome>> welcomeFor, Func<MemberInfo, byte[], Task> record,
         CancellationToken cancel)
     {
         var deadline = meeting.Opened + Lifetime;
-        var slot = await PollAsync(meeting.MeetingId, "joiner", deadline, cancel).ConfigureAwait(false);
-        if (slot is null) return new PairingOutcome.Failed("The code ran out before another PC used it.");
-        if (Checked(slot, meeting.CodeKey, "joiner") is not { } keys)
+        (byte[] Key, string Slot)? goodbye = null;
+        try
         {
-            return new PairingOutcome.Failed("A PC tried the code, but its keys didn't match it, so it wasn't added.");
-        }
-        if (keys.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That is this PC.");
-        var (toJoiner, toAdder) = SessionKeys(meeting.Eph, keys.Eph, meeting.EphPublic, keys.Eph);
+            var slot = await PollAsync(meeting.MeetingId, "joiner", deadline, cancel).ConfigureAwait(false);
+            if (slot is null) return new PairingOutcome.Failed("The code ran out before another PC used it.");
+            if (Checked(slot, meeting.CodeKey, "joiner") is not { } keys)
+            {
+                return new PairingOutcome.Failed("A PC tried the code, but its keys didn't match it, so it wasn't added.");
+            }
+            if (keys.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That is this PC.");
+            var (toJoiner, toAdder) = SessionKeys(meeting.Eph, keys.Eph, meeting.EphPublic, keys.Eph);
+            goodbye = (toJoiner, "welcome");
 
-        var sealedAnswer = await PollAsync(meeting.MeetingId, "answer", deadline, cancel).ConfigureAwait(false);
-        if (sealedAnswer is null) return new PairingOutcome.Failed("The other PC didn't answer before the code ran out.");
-        var answer = Open(toAdder, sealedAnswer, "answer");
-        if (answer is not { Type: "answer" }) return new PairingOutcome.Failed("The other PC's answer didn't open, so it wasn't added.");
-        if (answer.Accept != true) return new PairingOutcome.Refused("The other PC didn't join.");
-        if (Wire.Name(answer.Name) is not { } name || Wire.Kind(answer.Kind) is not { } kind)
-        {
-            return new PairingOutcome.Failed("The other PC's answer wasn't a good one, so it wasn't added.");
-        }
-        var joiner = new MemberInfo(keys.Id, name, kind, keys.Sign, keys.Dh);
+            var sealedAnswer = await PollAsync(meeting.MeetingId, "answer", deadline, cancel).ConfigureAwait(false);
+            if (sealedAnswer is null) return new PairingOutcome.Failed("The other PC didn't answer before the code ran out.");
+            var answer = Open(toAdder, sealedAnswer, "answer");
+            if (answer is { Type: "cancel" }) return new PairingOutcome.Refused("The other PC stopped the pairing.");
+            if (answer is not { Type: "answer" }) return new PairingOutcome.Failed("The other PC's answer didn't open, so it wasn't added.");
+            if (answer.Accept != true) return new PairingOutcome.Refused("The other PC didn't join.");
+            if (Wire.Name(answer.Name) is not { } name || Wire.Kind(answer.Kind) is not { } kind)
+            {
+                return new PairingOutcome.Failed("The other PC's answer wasn't a good one, so it wasn't added.");
+            }
+            var joiner = new MemberInfo(keys.Id, name, kind, keys.Sign, keys.Dh);
 
-        var welcome = await welcomeFor(joiner).ConfigureAwait(false);
-        var sealedWelcome = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(PairingSession.WelcomeMessage(welcome)), Encoding.ASCII.GetBytes("welcome"));
-        var put = await relay.PutSlotAsync(meeting.MeetingId, "welcome", sealedWelcome, cancel).ConfigureAwait(false);
-        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give {name} the household: {put.Problem}.");
+            var welcome = await welcomeFor(joiner).ConfigureAwait(false);
+            var sealedWelcome = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(PairingSession.WelcomeMessage(welcome)), Encoding.ASCII.GetBytes("welcome"));
+            var put = await relay.PutSlotAsync(meeting.MeetingId, "welcome", sealedWelcome, cancel).ConfigureAwait(false);
+            if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give {name} the household: {put.Problem}.");
+            goodbye = (toJoiner, "welcomed");
 
-        var sealedProof = await PollAsync(meeting.MeetingId, "joined", deadline, cancel).ConfigureAwait(false);
-        if (sealedProof is null) return new PairingOutcome.Failed($"{name} didn't finish joining before the code ran out.");
-        var proof = OpenBytes(toAdder, sealedProof, "joined");
-        if (!Wire.IsJoinProof(joiner, welcome.HouseholdId, proof))
-        {
-            return new PairingOutcome.Failed($"{name} didn't sign its joining, so it wasn't added.");
+            var sealedProof = await PollAsync(meeting.MeetingId, "joined", deadline, cancel).ConfigureAwait(false);
+            if (sealedProof is null) return new PairingOutcome.Failed($"{name} didn't finish joining before the code ran out.");
+            var proof = OpenBytes(toAdder, sealedProof, "joined");
+            if (proof is not null && LanMessages.Read(proof) is { Type: "cancel" }) return new PairingOutcome.Refused($"{name} stopped the pairing.");
+            if (!Wire.IsJoinProof(joiner, welcome.HouseholdId, proof))
+            {
+                return new PairingOutcome.Failed($"{name} didn't sign its joining, so it wasn't added.");
+            }
+            await record(joiner, proof!).ConfigureAwait(false);
+            goodbye = null;
+            var welcomed = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(new LanMessage { Type = "welcomed" }), Encoding.ASCII.GetBytes("welcomed"));
+            if (!await PutUntilAsync(meeting.MeetingId, "welcomed", welcomed, deadline, cancel).ConfigureAwait(false))
+            {
+                return new PairingOutcome.Failed($"Couldn't tell {name} it was added. If it doesn't show your household, remove it here and add it again.");
+            }
+            return new PairingOutcome.Joined(joiner, $"{name} joined your household.", proof);
         }
-        await record(joiner, proof!).ConfigureAwait(false);
-        var welcomed = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(new LanMessage { Type = "welcomed" }), Encoding.ASCII.GetBytes("welcomed"));
-        if (!await PutUntilAsync(meeting.MeetingId, "welcomed", welcomed, deadline, cancel).ConfigureAwait(false))
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
-            return new PairingOutcome.Failed($"Couldn't tell {name} it was added. If it doesn't show your household, remove it here and add it again.");
+            if (goodbye is { } left) await GoodbyeAsync(meeting.MeetingId, left.Slot, left.Key).ConfigureAwait(false);
+            return new PairingOutcome.Refused("Adding the other PC was cancelled.");
         }
-        return new PairingOutcome.Joined(joiner, $"{name} joined your household.", proof);
     }
 
-    /// <summary>The joining side, given the code as the user typed it.</summary>
+    /// <summary>The joining side, given the code as the user typed it. Cancelled, it tells the adding PC so in the next slot
+    /// it would have written, as far as it has got.</summary>
     /// <param name="inHousehold">True when this PC is in a household that joining leaves: the user is told so.</param>
     /// <param name="enter">Takes this PC into the household in the welcome, once the adding PC has said it recorded the joining.</param>
     public async Task<PairingOutcome> JoinAsync(
@@ -123,50 +139,79 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         }
         var meetingId = PairingCode.MeetingId(normalized);
         var codeKey = PairingCode.Key(normalized);
-        var found = await relay.GetSlotAsync(meetingId, "adder", cancel).ConfigureAwait(false);
-        if (found.Status == 404) return new PairingOutcome.Failed("No PC is waiting with that code. Check it, or make a new one on the other PC.");
-        if (!found.Ok) return new PairingOutcome.Failed($"Couldn't reach the server: {found.Problem}.");
-        if (Checked(found.Value!, codeKey, "adder") is not { } adder)
+        (byte[] Key, string Slot)? goodbye = null;
+        try
         {
-            return new PairingOutcome.Failed("That code doesn't match the other PC's, so nothing was changed.");
-        }
-        if (adder.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That code was made on this PC. Type it on the other one.");
+            var found = await relay.GetSlotAsync(meetingId, "adder", cancel).ConfigureAwait(false);
+            if (found.Status == 404) return new PairingOutcome.Failed("No PC is waiting with that code. Check it, or make a new one on the other PC.");
+            if (!found.Ok) return new PairingOutcome.Failed($"Couldn't reach the server: {found.Problem}.");
+            if (Checked(found.Value!, codeKey, "adder") is not { } adder)
+            {
+                return new PairingOutcome.Failed("That code doesn't match the other PC's, so nothing was changed.");
+            }
+            if (adder.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That code was made on this PC. Type it on the other one.");
 
-        using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ephPublic = eph.ExportSubjectPublicKeyInfo();
-        var put = await relay.PutSlotAsync(meetingId, "joiner", Keys(ephPublic, me, codeKey, "joiner"), cancel).ConfigureAwait(false);
-        if (put.Status == 409) return new PairingOutcome.Failed("Another PC has already used that code.");
-        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't reach the server: {put.Problem}.");
-        var (toJoiner, toAdder) = SessionKeys(eph, adder.Eph, adder.Eph, ephPublic);
-        var deadline = clock.GetUtcNow() + Lifetime;
+            using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            var ephPublic = eph.ExportSubjectPublicKeyInfo();
+            var put = await relay.PutSlotAsync(meetingId, "joiner", Keys(ephPublic, me, codeKey, "joiner"), cancel).ConfigureAwait(false);
+            if (put.Status == 409) return new PairingOutcome.Failed("Another PC has already used that code.");
+            if (!put.Ok) return new PairingOutcome.Failed($"Couldn't reach the server: {put.Problem}.");
+            var (toJoiner, toAdder) = SessionKeys(eph, adder.Eph, adder.Eph, ephPublic);
+            var deadline = clock.GetUtcNow() + Lifetime;
+            goodbye = (toAdder, "answer");
 
-        var accept = await broker.AskToJoinAsync(new JoinQuestion(null, null, inHousehold), cancel).ConfigureAwait(false);
-        var answer = HouseholdCrypto.Seal(toAdder, LanMessages.Write(new LanMessage
-        {
-            Type = "answer", Accept = accept, Name = me.Name, Kind = Wire.Kind(me.Kind), Instance = me.Instance,
-        }), Encoding.ASCII.GetBytes("answer"));
-        put = await relay.PutSlotAsync(meetingId, "answer", answer, cancel).ConfigureAwait(false);
-        if (!accept) return new PairingOutcome.Refused("This PC didn't join the other PC's household.");
-        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give the other PC the answer: {put.Problem}.");
+            var accept = await broker.AskToJoinAsync(new JoinQuestion(null, null, inHousehold), cancel).ConfigureAwait(false);
+            cancel.ThrowIfCancellationRequested();                                // the question was withdrawn: said below
+            var answer = HouseholdCrypto.Seal(toAdder, LanMessages.Write(new LanMessage
+            {
+                Type = "answer", Accept = accept, Name = me.Name, Kind = Wire.Kind(me.Kind), Instance = me.Instance,
+            }), Encoding.ASCII.GetBytes("answer"));
+            put = await relay.PutSlotAsync(meetingId, "answer", answer, cancel).ConfigureAwait(false);
+            if (!accept) return new PairingOutcome.Refused("This PC didn't join the other PC's household.");
+            if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give the other PC the answer: {put.Problem}.");
+            goodbye = (toAdder, "joined");
 
-        var sealedWelcome = await PollAsync(meetingId, "welcome", deadline, cancel).ConfigureAwait(false);
-        if (sealedWelcome is null) return new PairingOutcome.Failed("The other PC didn't finish adding this PC in time, so nothing was changed.");
-        var keysOnly = new MemberInfo(adder.Id, "", ChassisKind.Desktop, adder.Sign, adder.Dh);
-        if (Open(toJoiner, sealedWelcome, "welcome") is not { Type: "welcome" } message || PairingSession.ReadWelcome(message, keysOnly) is not { } welcome)
-        {
-            return new PairingOutcome.Failed("The other PC sent a household that wasn't a good one, so nothing was changed.");
+            var sealedWelcome = await PollAsync(meetingId, "welcome", deadline, cancel).ConfigureAwait(false);
+            if (sealedWelcome is null) return new PairingOutcome.Failed("The other PC didn't finish adding this PC in time, so nothing was changed.");
+            var keysOnly = new MemberInfo(adder.Id, "", ChassisKind.Desktop, adder.Sign, adder.Dh);
+            var message = Open(toJoiner, sealedWelcome, "welcome");
+            if (message is { Type: "cancel" }) return new PairingOutcome.Refused("The other PC stopped the pairing, so nothing was changed.");
+            if (message is not { Type: "welcome" } || PairingSession.ReadWelcome(message, keysOnly) is not { } welcome)
+            {
+                return new PairingOutcome.Failed("The other PC sent a household that wasn't a good one, so nothing was changed.");
+            }
+            var from = welcome.Members.First(member => member.Id == adder.Id);
+            var joined = HouseholdCrypto.Seal(toAdder, Wire.SignJoin(me.Keys, welcome.HouseholdId), Encoding.ASCII.GetBytes("joined"));
+            put = await relay.PutSlotAsync(meetingId, "joined", joined, cancel).ConfigureAwait(false);
+            if (!put.Ok) return new PairingOutcome.Failed($"Couldn't tell {from.Name} this PC is joining: {put.Problem}. Nothing was changed.");
+            goodbye = null;
+            var sealedWelcomed = await PollAsync(meetingId, "welcomed", deadline, cancel).ConfigureAwait(false);
+            var said = sealedWelcomed is null ? null : Open(toJoiner, sealedWelcomed, "welcomed");
+            if (said is { Type: "cancel" }) return new PairingOutcome.Refused($"{from.Name} stopped the pairing, so nothing was changed.");
+            if (said is not { Type: "welcomed" }) return new PairingOutcome.Failed($"{from.Name} didn't finish adding this PC in time, so nothing was changed.");
+            await enter(welcome, from).ConfigureAwait(false);
+            return new PairingOutcome.Joined(from, $"This PC joined {from.Name}'s household.");
         }
-        var from = welcome.Members.First(member => member.Id == adder.Id);
-        var joined = HouseholdCrypto.Seal(toAdder, Wire.SignJoin(me.Keys, welcome.HouseholdId), Encoding.ASCII.GetBytes("joined"));
-        put = await relay.PutSlotAsync(meetingId, "joined", joined, cancel).ConfigureAwait(false);
-        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't tell {from.Name} this PC is joining: {put.Problem}. Nothing was changed.");
-        var sealedWelcomed = await PollAsync(meetingId, "welcomed", deadline, cancel).ConfigureAwait(false);
-        if (sealedWelcomed is null || Open(toJoiner, sealedWelcomed, "welcomed") is not { Type: "welcomed" })
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
-            return new PairingOutcome.Failed($"{from.Name} didn't finish adding this PC in time, so nothing was changed.");
+            if (goodbye is { } left) await GoodbyeAsync(meetingId, left.Slot, left.Key).ConfigureAwait(false);
+            return new PairingOutcome.Refused("This PC stopped the pairing, so nothing was changed.");
         }
-        await enter(welcome, from).ConfigureAwait(false);
-        return new PairingOutcome.Joined(from, $"This PC joined {from.Name}'s household.");
+    }
+
+    /// <summary>Tells the other PC this one stopped: <c>{"type":"cancel"}</c>, sealed, in the slot it waits on next, as far as
+    /// the server can be reached in a few seconds.</summary>
+    private async Task GoodbyeAsync(string meetingId, string slot, byte[] key)
+    {
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var sealedBytes = HouseholdCrypto.Seal(key, LanMessages.Write(new LanMessage { Type = "cancel" }), Encoding.ASCII.GetBytes(slot));
+        try
+        {
+            await relay.PutSlotAsync(meetingId, slot, sealedBytes, limit.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     /// <summary>A PC's keys as its meeting slot carries them: its ephemeral key, its device keys and the MAC over them under

@@ -81,6 +81,7 @@ internal static class PairingSession
         using var question = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         Task<bool>? confirming = null;
         Task<LanMessage>? pending = null;
+        FrameCipher? cipher = null;                                            // kept to say goodbye after a cancel
         string name = "The other PC";
         try
         {
@@ -98,24 +99,24 @@ internal static class PairingSession
 
             var shared = HouseholdCrypto.Agree(eph, hello.Eph);
             var transcript = HouseholdCrypto.Transcript(myHello, theirHello);
-            using var cipher = FrameCipher.For(adder: true, shared, transcript);
+            cipher = FrameCipher.For(adder: true, shared, transcript);
             talk.Secure(cipher);
 
             // Both users answer at once: this PC's to the code, the joining PC's with Join; the key waits for both.
             confirming = broker.ConfirmCodeAsync(name, HouseholdCrypto.ComparisonCode(shared, transcript), question.Token);
-            pending = talk.ReceiveAsync(null, cancel, timeouts.Answer);
+            pending = talk.ReceiveAsync(null, CancellationToken.None, timeouts.Answer);
             if (await Task.WhenAny(confirming, pending).ConfigureAwait(false) == confirming && !await confirming.ConfigureAwait(false))
             {
-                await CancelAsync(talk, cancel).ConfigureAwait(false);
+                await CancelAsync(talk).ConfigureAwait(false);
                 return new PairingOutcome.Refused($"Adding {name} was cancelled.");
             }
-            var answer = await pending.ConfigureAwait(false);
+            var answer = await Until(pending, cancel).ConfigureAwait(false);
             if (answer is not { Type: "answer", Accept: true })
             {
-                return new PairingOutcome.Refused($"{name} didn't join.");
+                return new PairingOutcome.Refused(answer.Type == "cancel" ? $"{name} stopped the pairing." : $"{name} didn't join.");
             }
 
-            pending = talk.ReceiveAsync(null, cancel, timeouts.Answer);       // a cancel from the other side, or its "joined"
+            pending = talk.ReceiveAsync(null, CancellationToken.None, timeouts.Answer);   // a cancel from the other side, or its "joined"
             if (await Task.WhenAny(confirming, pending).ConfigureAwait(false) == pending)
             {
                 question.Cancel();
@@ -125,13 +126,13 @@ internal static class PairingSession
             }
             if (!await confirming.ConfigureAwait(false))
             {
-                await CancelAsync(talk, cancel).ConfigureAwait(false);
+                await CancelAsync(talk).ConfigureAwait(false);
                 return new PairingOutcome.Refused($"Adding {name} was cancelled.");
             }
 
             var welcome = await welcomeFor(hello.From).ConfigureAwait(false);
             await talk.SendAsync(WelcomeMessage(welcome), cancel).ConfigureAwait(false);
-            var joined = await pending.ConfigureAwait(false);
+            var joined = await Until(pending, cancel).ConfigureAwait(false);
             pending = null;
             if (joined.Type != "joined") throw new LanException(LanProblem.Broken);
             var proof = Wire.Decode(joined.Proof);
@@ -160,9 +161,15 @@ internal static class PairingSession
                 _ => $"The connection to {name} went wrong, so nothing was changed.",
             });
         }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+        {
+            await CancelAsync(talk).ConfigureAwait(false);
+            return new PairingOutcome.Refused($"Adding {name} was cancelled.");
+        }
         finally
         {
             await CloseAsync(question, confirming, pending).ConfigureAwait(false);
+            cipher?.Dispose();
         }
     }
 
@@ -184,18 +191,19 @@ internal static class PairingSession
         using var question = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         Task<bool>? asking = null;
         Task<LanMessage>? pending = null;
+        FrameCipher? cipher = null;                                            // kept to say goodbye after a cancel
         try
         {
             var myHello = LanMessages.Write(LanMessages.Hello(Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
             await talk.SendAsync(myHello, cancel).ConfigureAwait(false);
             var shared = HouseholdCrypto.Agree(eph, hello.Eph);
             var transcript = HouseholdCrypto.Transcript(adderHello, myHello);
-            using var cipher = FrameCipher.For(adder: false, shared, transcript);
+            cipher = FrameCipher.For(adder: false, shared, transcript);
             talk.Secure(cipher);
 
             // The user's answer, while the connection is watched: a cancel from the adder, or the connection going, closes the question.
             asking = broker.AskToJoinAsync(new JoinQuestion(name, HouseholdCrypto.ComparisonCode(shared, transcript), inHousehold), question.Token);
-            pending = talk.ReceiveAsync(null, cancel, timeouts.Answer);
+            pending = talk.ReceiveAsync(null, CancellationToken.None, timeouts.Answer);
             if (await Task.WhenAny(asking, pending).ConfigureAwait(false) == pending)
             {
                 question.Cancel();
@@ -204,10 +212,11 @@ internal static class PairingSession
                     : new PairingOutcome.Failed($"The connection to {name} went wrong, so nothing was changed.");
             }
             var accept = await asking.ConfigureAwait(false);
+            cancel.ThrowIfCancellationRequested();                                // the question was withdrawn: said below
             await talk.SendAsync(new LanMessage { Type = "answer", Accept = accept }, cancel).ConfigureAwait(false);
             if (!accept) return new PairingOutcome.Refused($"This PC didn't join {name}'s household.");
 
-            var message = await pending.ConfigureAwait(false);
+            var message = await Until(pending, cancel).ConfigureAwait(false);
             pending = null;
             if (message.Type == "cancel") return new PairingOutcome.Refused($"{name} stopped the pairing, so nothing was changed.");
             if (message.Type != "welcome" || ReadWelcome(message, hello.From) is not { } welcome)
@@ -216,7 +225,7 @@ internal static class PairingSession
             }
             await talk.SendAsync(new LanMessage { Type = "joined", Proof = Wire.Encode(Wire.SignJoin(me.Keys, welcome.HouseholdId)) }, cancel)
                 .ConfigureAwait(false);
-            await talk.ReceiveAsync("welcomed", cancel).ConfigureAwait(false);
+            await Until(talk.ReceiveAsync("welcomed", CancellationToken.None), cancel).ConfigureAwait(false);
             await enter(welcome, hello.From).ConfigureAwait(false);
             return new PairingOutcome.Joined(hello.From, $"This PC joined {name}'s household.");
         }
@@ -230,22 +239,49 @@ internal static class PairingSession
         {
             return new PairingOutcome.Failed($"The connection to {name} went wrong.");
         }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+        {
+            await CancelAsync(talk).ConfigureAwait(false);
+            return new PairingOutcome.Refused("This PC stopped the pairing, so nothing was changed.");
+        }
         finally
         {
             await CloseAsync(question, asking, pending).ConfigureAwait(false);
+            cipher?.Dispose();
         }
     }
 
-    /// <summary>Tells the other side this one stopped, as far as the connection lets it.</summary>
-    private static async Task CancelAsync(LanConversation talk, CancellationToken cancel)
+    /// <summary>Tells the other side this one stopped, as far as the connection lets it in a few seconds.</summary>
+    private static async Task CancelAsync(LanConversation talk)
     {
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try
         {
-            await talk.SendAsync(new LanMessage { Type = "cancel" }, cancel).ConfigureAwait(false);
+            await talk.SendAsync(new LanMessage { Type = "cancel" }, limit.Token).ConfigureAwait(false);
         }
-        catch (Exception error) when (error is IOException or ObjectDisposedException or LanException)
+        catch (Exception error) when (error is IOException or ObjectDisposedException or LanException or OperationCanceledException)
         {
         }
+    }
+
+    /// <summary>
+    /// The read's message, or <see cref="OperationCanceledException"/> once the pairing is cancelled. The read itself isn't
+    /// cancelled, only let go of: cancelling a read on a socket can leave the connection unusable, and a cancelled pairing
+    /// still says so to the other side before the caller closes the connection.
+    /// </summary>
+    private static async Task<LanMessage> Until(Task<LanMessage> read, CancellationToken cancel)
+    {
+        if (!cancel.CanBeCanceled) return await read.ConfigureAwait(false);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (cancel.Register(() => cancelled.TrySetResult()))
+        {
+            if (await Task.WhenAny(read, cancelled.Task).ConfigureAwait(false) != read)
+            {
+                _ = read.ContinueWith(done => done.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                throw new OperationCanceledException(cancel);
+            }
+        }
+        return await read.ConfigureAwait(false);
     }
 
     /// <summary>Withdraws a question still open, and lets go of a read still waiting, whose connection the caller closes.</summary>

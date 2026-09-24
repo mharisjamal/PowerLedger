@@ -230,6 +230,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                 AddPcRequest add => await AddPcAsync(add, cancel).ConfigureAwait(false),
                 StartCodePairingRequest start => await StartCodePairingAsync(start, cancel).ConfigureAwait(false),
                 JoinByCodeRequest join => JoinByCode(join),
+                CancelPairingRequest cancelPairing => CancelPairing(cancelPairing),
                 AnswerPromptRequest answer => _prompts.Answer(answer.PromptId ?? "", answer.Accept)
                     ? Reply(answer.Id, true, "Answered.")
                     : Reply(answer.Id, false, "That question has closed."),
@@ -281,21 +282,21 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         var name = NameOf(pc);
         if (InThisHousehold(pc, _store.CurrentKey)) return Reply(request.Id, false, $"{name} is already in this household.");
-        if (_pairingGate.TryEnter(out var refusal) is not { } entered) return Reply(request.Id, false, refusal!);
+        if (BeginPairing(out var refusal) is not { } pairing) return Reply(request.Id, false, refusal!);
         await Task.CompletedTask.ConfigureAwait(false);
-        Track(AddOnNetworkAsync(pc, name, entered));
+        Track(AddOnNetworkAsync(pc, name, pairing));
         return Reply(request.Id, true, $"Connecting to {name}.");
     }
 
-    private async Task AddOnNetworkAsync(FoundService pc, string name, IDisposable entered)
+    private async Task AddOnNetworkAsync(FoundService pc, string name, CurrentPairing pairing)
     {
-        using (entered)
+        using (pairing)
         {
             PairingOutcome outcome;
             try
             {
-                await using var channel = await LanConnector.ConnectAsync(pc.Address!, pc.Port, ConnectTimeout, _stopping.Token).ConfigureAwait(false);
-                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, _prompts, WelcomeForAsync, RecordAsync, _timeouts, _stopping.Token)
+                await using var channel = await LanConnector.ConnectAsync(pc.Address!, pc.Port, ConnectTimeout, pairing.Token).ConfigureAwait(false);
+                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, _prompts, WelcomeForAsync, RecordAsync, _timeouts, pairing.Token)
                     .ConfigureAwait(false);
             }
             catch (IOException)
@@ -306,17 +307,21 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             {
                 outcome = new PairingOutcome.Failed($"This PC was busy, so {name} wasn't added. Try again.");
             }
+            catch (OperationCanceledException) when (pairing.Token.IsCancellationRequested && !_stopping.IsCancellationRequested)
+            {
+                outcome = new PairingOutcome.Refused($"Adding {name} was cancelled.");
+            }
             Added(outcome);
         }
     }
 
     private async Task<PipeMessage> StartCodePairingAsync(StartCodePairingRequest request, CancellationToken cancel)
     {
-        if (_pairingGate.TryEnter(out var refusal) is not { } entered) return Reply(request.Id, false, refusal!);
+        if (BeginPairing(out var refusal, madeCode: true) is not { } pairing) return Reply(request.Id, false, refusal!);
         CodeMeeting? meeting;
         try
         {
-            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel, pairing.Token);
             limit.CancelAfter(GateWait);
             meeting = await _codePairing.OpenAsync(Identity(), limit.Token).ConfigureAwait(false);
         }
@@ -326,22 +331,22 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         if (meeting is null)
         {
-            entered.Dispose();
+            pairing.Dispose();
             return Reply(request.Id, false, "Couldn't reach the server to make a code. Check this PC is online and try again.");
         }
-        Track(AddByCodeAsync(meeting, entered));
+        Track(AddByCodeAsync(meeting, pairing));
         return Reply(request.Id, true, "Type this code on the other PC within 10 minutes.", meeting.Code);
     }
 
-    private async Task AddByCodeAsync(CodeMeeting meeting, IDisposable entered)
+    private async Task AddByCodeAsync(CodeMeeting meeting, CurrentPairing pairing)
     {
-        using (entered)
+        using (pairing)
         using (meeting)
         {
             PairingOutcome outcome;
             try
             {
-                outcome = await _codePairing.AddAsync(meeting, Identity(), WelcomeForAsync, RecordAsync, _stopping.Token).ConfigureAwait(false);
+                outcome = await _codePairing.AddAsync(meeting, Identity(), WelcomeForAsync, RecordAsync, pairing.Token).ConfigureAwait(false);
             }
             catch (GateTimeout)
             {
@@ -351,25 +356,27 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
     }
 
+    /// <summary>Joins by code; a code this PC made and still waits on is stopped first, since its user is joining instead.</summary>
     private PipeMessage JoinByCode(JoinByCodeRequest request)
     {
         if (PairingCode.Normalize(request.Code) is null)
         {
             return Reply(request.Id, false, "That isn't a code. A code has 16 letters and digits, like K7QM-2XHD-9PW4-R8TA.");
         }
-        if (_pairingGate.TryEnter(out var refusal) is not { } entered) return Reply(request.Id, false, refusal!);
-        Track(JoinByCodeAsync(request.Code, entered));
+        StopOwnCode();
+        if (BeginPairing(out var refusal) is not { } pairing) return Reply(request.Id, false, refusal!);
+        Track(JoinByCodeAsync(request.Code, pairing));
         return Reply(request.Id, true, "Looking for the PC that made that code.");
     }
 
-    private async Task JoinByCodeAsync(string code, IDisposable entered)
+    private async Task JoinByCodeAsync(string code, CurrentPairing pairing)
     {
-        using (entered)
+        using (pairing)
         {
             PairingOutcome outcome;
             try
             {
-                outcome = await _codePairing.JoinAsync(code, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _stopping.Token)
+                outcome = await _codePairing.JoinAsync(code, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, pairing.Token)
                     .ConfigureAwait(false);
             }
             catch (GateTimeout)
@@ -395,19 +402,19 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             return;
         }
         if (call.Message.Purpose != Hello.Pair) return;
-        if (_pairingGate.TryEnter(out _) is not { } entered)
+        if (BeginPairing(out _, also: stopping.Token) is not { } pairing)
         {
             await PairingSession.JoinAsync(channel, hello, Identity(), Refusing.Broker, false, (_, _) => Task.CompletedTask, _timeouts, stopping.Token)
                 .ConfigureAwait(false);
             return;
         }
-        using (entered)
+        using (pairing)
         {
             PairingOutcome outcome;
             try
             {
                 outcome = await PairingSession.JoinAsync(
-                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, stopping.Token).ConfigureAwait(false);
+                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, pairing.Token).ConfigureAwait(false);
             }
             catch (GateTimeout)
             {

@@ -127,6 +127,53 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Joining_by_code_on_a_pc_that_made_a_code_stops_that_code_first()
+    {
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+
+        var made = await laptop.Send<HouseholdReply>(new StartCodePairingRequest(1));   // the tab was opened
+        made.Ok.ShouldBeTrue();
+        var join = await laptop.Send<HouseholdReply>(new JoinByCodeRequest(2, "K7QM-2XHD-9PW4-R8TA"));   // a code typed on the same tab
+
+        join.ShouldBe(new HouseholdReply(2, true, "Looking for the PC that made that code."));
+        string[] outcomes = [(await laptop.Next(NoticeKind.PairingProgress)).Text, (await laptop.Next(NoticeKind.PairingProgress)).Text];
+        outcomes.ShouldBe(
+            ["Adding the other PC was cancelled.", "No PC is waiting with that code. Check it, or make a new one on the other PC."], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task Cancelling_stops_a_code_and_frees_pairing_for_another()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        (await desktop.Send<HouseholdReply>(new CancelPairingRequest(1))).ShouldBe(new HouseholdReply(1, true, "No pairing is under way."));
+        (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(2))).Ok.ShouldBeTrue();
+        (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(3))).Message.ShouldBe(PairingGate.Busy);
+
+        (await desktop.Send<HouseholdReply>(new CancelPairingRequest(4))).ShouldBe(new HouseholdReply(4, true, "Pairing stopped."));
+
+        (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(5))).Ok.ShouldBeTrue();
+        (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Adding the other PC was cancelled.");
+    }
+
+    [Fact]
+    public async Task Cancelling_on_the_joining_pc_closes_its_question_and_tells_the_adding_pc()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(1));
+        await desktop.Send<HouseholdReply>(new AddPcRequest(2, laptop.Worker.InstanceId));
+        var prompt = await laptop.Next(NoticeKind.JoinPrompt);
+        var confirm = await desktop.Next(NoticeKind.ConfirmCode);
+
+        (await laptop.Send<HouseholdReply>(new CancelPairingRequest(3))).ShouldBe(new HouseholdReply(3, true, "Pairing stopped."));
+
+        (await laptop.Next(NoticeKind.Withdraw)).PromptId.ShouldBe(prompt.PromptId);
+        (await desktop.Next(NoticeKind.Withdraw)).PromptId.ShouldBe(confirm.PromptId);
+        (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Laptop-2 stopped the pairing.");
+        (desktop.Worker.Store.HouseholdId, laptop.Worker.Store.HouseholdId).ShouldBe((null, null));
+    }
+
+    [Fact]
     public async Task Removing_a_pc_changes_the_key_for_those_who_stay_and_the_removed_pc_cant_read_what_comes_after()
     {
         var (desktop, laptop, study) = await Household();

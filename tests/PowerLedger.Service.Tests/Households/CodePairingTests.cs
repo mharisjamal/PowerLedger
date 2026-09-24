@@ -155,6 +155,39 @@ public sealed class CodePairingTests : IDisposable
         (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldBeNull();
     }
 
+    [Fact]
+    public async Task A_side_that_stops_says_so_in_the_slot_the_other_waits_on()
+    {
+        // The adder stops after the joiner said yes: its goodbye goes where the welcome would have.
+        using (var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull())
+        {
+            using var stopAdder = new CancellationTokenSource();
+            var adding = _pairing.AddAsync(meeting, Adder, async joiner =>
+            {
+                await stopAdder.CancelAsync();
+                stopAdder.Token.ThrowIfCancellationRequested();
+                return await Welcome(joiner);
+            }, NoRecord, stopAdder.Token);
+            var joined = await _pairing.JoinAsync(meeting.Code, Joiner, new Broker(_ => true), false, (_, _) => Task.CompletedTask, CancellationToken.None);
+
+            (await adding).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("Adding the other PC was cancelled.");
+            joined.ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("The other PC stopped the pairing, so nothing was changed.");
+        }
+
+        // The joiner stops while its user is still asked: its goodbye goes where the answer would have.
+        using (var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull())
+        {
+            using var stopJoiner = new CancellationTokenSource();
+            var adding = _pairing.AddAsync(meeting, Adder, Welcome, NoRecord, CancellationToken.None);
+            var joined = _pairing.JoinAsync(meeting.Code, Joiner, new Waiting(), false, (_, _) => Task.CompletedTask, stopJoiner.Token);
+            await WaitFor.True(() => _relay.Calls.Any(call => call.EndsWith("/joiner", StringComparison.Ordinal) && call.StartsWith("PUT", StringComparison.Ordinal)));
+            await stopJoiner.CancelAsync();
+
+            (await joined).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("This PC stopped the pairing, so nothing was changed.");
+            (await adding).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("The other PC stopped the pairing.");
+        }
+    }
+
     public void Dispose()
     {
         _client.Dispose();
@@ -184,5 +217,23 @@ public sealed class CodePairingTests : IDisposable
         public Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel) => Task.FromResult(answer(question));
 
         public Task<bool> ConfirmCodeAsync(string otherName, string code, CancellationToken cancel) => Task.FromResult(false);
+    }
+
+    /// <summary>A user who hasn't answered yet: the question stays open until it is withdrawn.</summary>
+    private sealed class Waiting : IPromptBroker
+    {
+        public async Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel)
+        {
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancel);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            return false;
+        }
+
+        public Task<bool> ConfirmCodeAsync(string otherName, string code, CancellationToken cancel) => AskToJoinAsync(null!, cancel);
     }
 }
