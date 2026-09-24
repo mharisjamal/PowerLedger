@@ -54,9 +54,10 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
 - **Add a PC** has two ways in:
   - **On this network:** the PCs found, each with its name and whether it's already in this household. Pick one.
   - **Somewhere else:** a one-time code to type on the other PC.
-- **The PC being added** shows a prompt: "Join Desktop-7's household? Its code is 482 913. Check it matches the code on
-  Desktop-7." It has **Join** and **Don't join** buttons. A PC already in another household is told that joining leaves
-  that one.
+- **The PC being added** shows a prompt: "Join Desktop-7's household?", with its comparison code, 482 913, large. It has
+  **Join** and **Don't join** buttons. A PC already in another household is told that joining leaves that one.
+- **The adding PC** asks its own user at the same time: "Does Laptop-2 show 482 913?", with **Codes match** and
+  **Cancel**. The key goes only after both users have said yes.
 - **Managing the household:** rename this PC, remove another PC, leave the household. Removing and leaving ask first.
 - **Settings → Household:** one tick, "Let my other PCs find this one on the network", on by default.
 - **The Report** can include the household. Its PDF gains a page per member PC when the user asks for it.
@@ -76,21 +77,29 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
 - **Finding.** The App asks the service to browse (`DnsServiceBrowse`, then `DnsServiceResolve`) and lists what answers
   within a few seconds, refreshing while the list is open.
 - **The exchange**, over one TCP connection:
-  1. Each side sends a fresh ephemeral ECDH P-256 public key and its device public keys.
-  2. Both derive a session key with HKDF-SHA256 and encrypt everything after this with AES-256-GCM.
-  3. Both also derive a 6-digit **comparison code** from the shared secret and both ephemeral keys, as Bluetooth's
-     numeric comparison does. A PC in the middle can't make both screens show the same code, except by a one-in-a-million
-     chance per try.
-  4. The joining PC's App shows the prompt. **Join** sends its acceptance.
-  5. The adding PC sends:
+  1. The adding PC sends a hello with a fresh ephemeral ECDH P-256 public key, its device public keys, and a
+     **commitment**: a hash of a random nonce it keeps to itself for now.
+  2. The joining PC answers with its own hello: an ephemeral key and its device keys.
+  3. Both derive per-direction keys with HKDF-SHA256 over the shared secret and a hash of both hellos, and encrypt
+     everything after this with AES-256-GCM.
+  4. The adding PC reveals its nonce; the joining PC checks it against the commitment.
+  5. Both derive a 6-digit **comparison code** from the shared secret, both hellos and the nonce, as Bluetooth's numeric
+     comparison and ZRTP do. The commitment is what makes it hold: the joining PC answered before it knew the nonce, and
+     the adding PC was bound to the nonce before it saw the answer. So neither side, and no PC in the middle, can steer
+     the code. A PC in the middle can make both screens show the same code only by a one-in-a-million chance per try,
+     and each try needs a user.
+  6. Both PCs show the code: the joining PC's prompt, and the adding PC's "Does Laptop-2 show 482 913?". Only after
+     both users have said yes does the adding PC send:
      - the household ID;
      - the key and its epoch;
-     - the member list, each member's ID, name, kind and public keys.
-  6. Both record each other, and the other members learn of the new PC at their next sync.
+     - the member list, each member's ID, name, kind, public keys and epochs.
+  7. The joining PC answers `joined`, with a proof signed by its device key. The adding PC records it, then confirms,
+     and only then does the joining PC enter. A pairing cut off before that leaves nothing behind on either side.
 - **Limits and time-outs.**
-  - A PC takes at most one pairing at a time.
+  - A PC takes at most one pairing at a time, and either side can cancel it.
   - A prompt not answered in 2 minutes is **Don't join**.
-  - 5 refused pairings in 10 minutes stop pairing for 10 minutes.
+  - Failed pairings from one address (IPv6 by /64): 3 in 10 minutes pause that address for 10 minutes. From all
+    addresses together: 20 in 10 minutes pause pairing on the network. Pairing by code isn't paused.
 - **Nobody to ask.** Pairing needs a signed-in user on the joining PC to press **Join**. With no App running there, it
   is refused.
 
@@ -124,10 +133,13 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
   - batch sizes and times.
 
   It never knows the key or anything in a batch.
-- **How long the server keeps batches:** 90 days. A PC away longer catches up from the others over the network or
-  asks them to post their history again.
-- **A new member's history.** When a PC joins, each member posts the last 13 months of its own rows once, so the newcomer
-  sees the whole year.
+- **How long the server keeps batches:** 90 days.
+- **Snapshots.** Each member posts all its own rows again, the last 13 months:
+  - after a new key takes effect;
+  - after a new member joins;
+  - at least every 30 days.
+
+  So a newcomer, or a PC away longer than 90 days, reads the whole year from the server with the current key alone.
 - **Requests** to the household endpoints are signed by a member's device key over method, path, time and body hash.
   The server checks the key is a current member and refuses a request more than 5 minutes old.
 
@@ -142,6 +154,20 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
   read older batches.
 - **Leaving** is removing yourself, done the same way by the PC that leaves, when it is online.
 - **What a removed PC keeps.** It keeps what it already had, and can read nothing new.
+- **Order without clocks.**
+  - Adds and removals are ordered by the household's epoch, not by the PCs' clocks, which can disagree.
+  - Each member entry records the epoch it was added at and, once removed, the epoch it was removed at. A PC is in
+    when it was added after its last removal.
+  - A removed PC can come back only through a new pairing or approval, made after the key has changed.
+- **Who may say who is in.**
+  - A PC learns of members:
+    - from its own pairings and approvals;
+    - from the member list it is given on joining;
+    - from the sealed, signed lists of members it already knows are current.
+  - A removed PC's word counts for nothing.
+  - The server's list can only ever take a PC out, never put one in.
+- **Who may hand over a key.** A member may seal the key for an epoch only if it was in the household before that epoch
+  and was not removed before it.
 
 ## 7. Sign-in (N2)
 
@@ -151,20 +177,43 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
   - It then keeps only the provider and the subject ID. The e-mail address is shown in the App from the token and never
     stored on the server.
 - **What an account does:** it links to one household. After that:
-  - **A PC that signs in** joins by approval. The server lists it as waiting. Any member's App shows "Approve Laptop-2 to
-    join? Signed in as you." Approving posts the household key encrypted to the new PC's ECDH key. The server never has
-    the key, as with Signal's or WhatsApp's linked devices.
+  - **A PC that signs in** joins by approval, and the two PCs check a code first, as Matrix's device verification does.
+    The server passes every key along, so the code is what keeps it honest.
+    1. The server lists the new PC as waiting.
+    2. A member commits to a random nonce.
+    3. The new PC sends its own nonce, once per request.
+    4. The member reveals its nonce.
+    5. Both PCs show the same 6-digit **approval code**, worked out from both PCs' keys and both nonces. The member's
+       App asks "A PC signed in as you asks to join your household. Approve it?"; the new PC's App asks "Does your
+       other PC show 482 913?"
+    6. Only when the user approves does the member post the household key, encrypted to the new PC's ECDH key, along
+       with the member list. The new PC enters only when its own user has also said the codes match.
+
+    Because of the commitments, a server that swaps keys makes the codes differ, except by a one-in-a-million chance
+    per request. A member takes one approval at a time and at most 5 a day. The new PC answers one per request, and
+    asks again only when its user says so.
+
+    The server never has the key, as with Signal's or WhatsApp's linked devices. An unanswered prompt comes back later;
+    it never counts as a no.
   - **A recovery code.** Shown once when an account is first linked: 24 base32 characters, "Save this code; with it and
     your account you can get your household back if you lose every PC."
-    - The household key, encrypted with a key derived from the code (PBKDF2-SHA256), is kept with the account.
-    - Signing in on a new PC with the code restores the household without approval.
+    - **What is kept with the account:** the household key and member list, encrypted with a key derived from the code
+      (PBKDF2-SHA256). The PC that made the code keeps it current; it is the only PC that holds the code's key.
+    - **Signing in on a new PC with the code** restores the household without approval, as its only PC:
+      - the others are removed, and the App says so before going ahead;
+      - the code is then used up, and the PC shows a new one.
+    - **When the recovery is gone.** If the PC holding the code is removed, the recovery is deleted, and the App offers
+      a new code.
 - **Sessions.** The Worker gives each signed-in PC a session token: 32 random bytes, kept hashed on the server and
   DPAPI-protected on the PC. The PC keeps it until it signs out or the account is deleted.
 - **Deleting an account** removes the account, its link, its sessions and its recovery envelope. The household and its
   members carry on without sign-in.
-- **What the owner sets up:** an app registration in the Azure portal (a public client with a `http://localhost`
-  redirect) and a Google OAuth client of the Desktop kind. Both client IDs are built into the App; for a native app with
-  PKCE they aren't secrets.
+- **What the owner sets up:**
+  - An app registration in the Azure portal: a public client whose redirect is `http://127.0.0.1`, added in the
+    manifest's `replyUrlsWithType` as `InstalledClient`, since the portal's text box refuses an http loopback IP.
+  - A Google OAuth client of the Desktop kind.
+
+  Both client IDs, and Google's client secret, are built into the App. For a native app with PKCE they aren't secrets.
 
 ## 8. Server
 
@@ -210,9 +259,13 @@ The daily cron clears batches past 90 days and expired meetings.
 ## 11. Tests
 
 - **Crypto.** HKDF, AES-GCM and ECDSA against known vectors. The comparison code is the same on both sides and
-  differs when a key is swapped.
-- **The pairing state machines,** with an in-memory transport: accepted, refused, timed out, a PC in the middle seen by
-  its differing codes, the rate limit, already in another household.
+  differs when a key or the nonce changes.
+- **The pairing state machines,** with an in-memory transport. The cases:
+  - accepted, refused and timed out;
+  - a PC in the middle that tries hellos on the side it answers and still can't match the codes;
+  - a wrong reveal;
+  - the rate limit;
+  - already in another household.
 - **Two real services in one process,** pairing over loopback TCP with discovery faked, then syncing directly and
   through the Worker running in Miniflare.
 - **Removing and rotating:** a removed PC can't decrypt a batch from after its removal.
@@ -232,5 +285,8 @@ The daily cron clears batches past 90 days and expired meetings.
   finds nothing there, and the code way is the answer.
 - **Without sign-in,** losing every PC loses the household. Each PC's own history is still on it while it exists.
 - **A removed PC** keeps what it had already synced.
-- **A PC away more than 90 days** needs another member to post its history again.
+- **A PC away more than 90 days** reads the others' history from their latest snapshots, posted at least every 30
+  days; rows a member changed between its last snapshot and going offline for good are lost with it.
+- **Recovery restores the key as of the recovery's last update.** If every PC is lost before the PC holding the code
+  has updated it after a key change, rows posted under the newer key can't be read.
 - **The server sees** how many PCs a household has and when they sync.
