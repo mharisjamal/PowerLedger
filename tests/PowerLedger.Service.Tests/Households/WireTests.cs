@@ -19,6 +19,23 @@ public sealed class WireTests
     }
 
     [Fact]
+    public void A_name_is_cleaned_by_unicode_scalar_so_tags_and_invisible_formatting_beyond_the_first_plane_go_too()
+    {
+        Wire.Name("Study" + "\uDB40\uDC41\uDB40\uDC7F" + " PC").ShouldBe("Study PC");   // tag characters, U+E0041 and U+E007F
+        Wire.Name("Desk" + "\uD834\uDD73" + "top").ShouldBe("Desktop");   // musical formatting, U+1D173
+        Wire.Name("Lap" + "\uD800" + "top" + "\uE000").ShouldBe("Laptop");   // a lone surrogate, private use
+    }
+
+    [Fact]
+    public void A_long_name_is_cut_at_40_units_never_between_the_halves_of_a_pair()
+    {
+        var name = new string('x', Wire.MaxName - 1) + "\uD83D\uDE42" + "yz";   // the emoji's first half is the 40th unit
+
+        Wire.Name(name).ShouldBe(new string('x', Wire.MaxName - 1));
+        Wire.Name(new string('x', Wire.MaxName - 2) + "\uD83D\uDE42").ShouldBe(new string('x', Wire.MaxName - 2) + "\uD83D\uDE42");
+    }
+
+    [Fact]
     public void A_name_of_nothing_but_hidden_characters_is_no_name()
     {
         Wire.Name("\u202E\u200B \u2066").ShouldBeNull();

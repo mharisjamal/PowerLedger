@@ -1,5 +1,8 @@
+using System.Buffers;
 using System.Buffers.Text;
+using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using PowerLedger.Contracts;
 using PowerLedger.Core.Households;
@@ -81,21 +84,29 @@ internal static partial class Wire
         _ => null,
     };
 
-    /// <summary>A name as the App may show it: trimmed, without control characters, nor the format characters that can hide
-    /// text or turn it round, such as U+202E (right-to-left override), nor line and paragraph separators; at most
-    /// <see cref="MaxName"/> characters; null when nothing is left.</summary>
+    /// <summary>A name as the App may show it (plan 0.9), cleaned by Unicode scalar: without control characters, nor the format
+    /// characters that can hide text or turn it round, such as U+202E (right-to-left override) or the tag characters, nor
+    /// surrogates on their own, private-use characters, or line and paragraph separators; trimmed, and cut at
+    /// <see cref="MaxName"/> UTF-16 units, never between the two halves of a pair; null when nothing is left.</summary>
     public static string? Name(string? name)
     {
         if (name is null) return null;
-        var clean = new string([.. name.Where(Shown)]).Trim();
-        if (clean.Length > MaxName) clean = clean[..MaxName].TrimEnd();
+        var kept = new StringBuilder(name.Length);
+        var rest = name.AsSpan();
+        while (!rest.IsEmpty)
+        {
+            var status = Rune.DecodeFromUtf16(rest, out var rune, out var used);
+            if (status == OperationStatus.Done && Shown(rune)) kept.Append(rest[..used]);
+            rest = rest[used..];
+        }
+        var clean = kept.ToString().Trim();
+        if (clean.Length > MaxName) clean = clean[..(char.IsHighSurrogate(clean[MaxName - 1]) ? MaxName - 1 : MaxName)].TrimEnd();
         return clean.Length > 0 ? clean : null;
     }
 
-    private static bool Shown(char character) =>
-        !char.IsControl(character) && char.GetUnicodeCategory(character) is not
-            (System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.LineSeparator
-            or System.Globalization.UnicodeCategory.ParagraphSeparator);
+    private static bool Shown(Rune rune) => Rune.GetUnicodeCategory(rune) is not
+        (UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.Surrogate or UnicodeCategory.PrivateUse
+        or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator);
 
     public static bool IsDeviceId(string? id) => id is not null && Hex32().IsMatch(id);
 
