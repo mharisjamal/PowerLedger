@@ -162,7 +162,7 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
             if (message.Type == "done") break;
             if (message.Type != "rows") throw new LanException(LanProblem.Broken);
             if (message.Device is not { } device || household.Member(device) is not { LeftMs: null }) continue;
-            var rows = (message.Rows ?? []).Select(row => Wire.Row(device, row)).OfType<HouseholdRow>().ToList();
+            var rows = Wire.CapChanged((message.Rows ?? []).Select(row => Wire.Row(device, row)).OfType<HouseholdRow>(), nowMs);
             taken += household.Upsert(rows);
             if (rows.Count > 0 && device != peerId) household.Synced(device, Math.Min(nowMs, rows.Max(row => row.ChangedMs)));
         }

@@ -14,7 +14,8 @@ namespace PowerLedger.Service.Tests;
 /// signature checks in their order (headers, time, member, signature, replay), 401 for a PC that isn't a member and 410 for
 /// one that was removed; a member added only with the joiner's own proof; the household's current epoch, which a rotation
 /// must follow by one and an approval must use; batches numbered as they arrive with each item carrying its sender's own
-/// sequence number; meeting slots written once for 10 minutes; and N2's accounts, sessions, links, requests and recovery.
+/// sequence number and signature, kept as sent; meeting slots written once for 10 minutes; and N2's accounts, sessions,
+/// links, requests and recovery.
 /// </summary>
 internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 {
@@ -49,12 +50,12 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         }
     }
 
-    /// <summary>The bodies of the batches posted, as posted, oldest first.</summary>
-    public List<(string Device, int Epoch, long Seq, byte[] Body)> Batches
+    /// <summary>The bodies of the batches posted, as posted, with their signatures, oldest first.</summary>
+    public List<(string Device, int Epoch, long Seq, byte[] Body, byte[] Sig)> Batches
     {
         get
         {
-            lock (_gate) return [.. _batches.Select(batch => (batch.Device, batch.Epoch, batch.DeviceSeq, batch.Body))];
+            lock (_gate) return [.. _batches.Select(batch => (batch.Device, batch.Epoch, batch.DeviceSeq, batch.Body, Decode(batch.Sig)))];
         }
     }
 
@@ -244,8 +245,12 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 if (body.Length > 1_048_576) return Error(413, "A batch is at most 1 MB.");
                 var posted = JsonNode.Parse(body)!;
                 if ((string?)posted["device"] != caller) return Error(400, "device must be this PC's own ID.");
+                if (posted["sig"] is not { } sig || Decode((string)sig!).Length != 64)
+                {
+                    return Error(400, "sig must be the sender's signature over the batch: 64 bytes, as base64url.");
+                }
                 var seq = _batches.Where(batch => batch.Household == household).Select(batch => batch.Seq).DefaultIfEmpty(0).Max() + 1;
-                _batches.Add(new Batch(household, seq, caller, (int)posted["epoch"]!, (long)posted["seq"]!, Decode((string)posted["body"]!)));
+                _batches.Add(new Batch(household, seq, caller, (int)posted["epoch"]!, (long)posted["seq"]!, Decode((string)posted["body"]!), (string)sig!));
                 return Ok();
             }
             case ("GET", "/batches"):
@@ -260,7 +265,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 {
                     ["items"] = new JsonArray([.. page.Select(batch => (JsonNode)new JsonObject
                     {
-                        ["seq"] = batch.DeviceSeq, ["device"] = batch.Device, ["epoch"] = batch.Epoch, ["body"] = Encode(batch.Body),
+                        ["seq"] = batch.DeviceSeq, ["device"] = batch.Device, ["epoch"] = batch.Epoch, ["body"] = Encode(batch.Body), ["sig"] = batch.Sig,
                     })]),
                     ["next"] = page.Count > 0 ? page[^1].Seq : after,
                     ["more"] = waiting.Count > limit,
@@ -433,7 +438,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 
     private static HttpResponseMessage Ok() => Json(new JsonObject { ["ok"] = true });
 
-    private static HttpResponseMessage Json(JsonNode node) =>
+    internal static HttpResponseMessage Json(JsonNode node) =>
         new(HttpStatusCode.OK) { Content = new StringContent(node.ToJsonString(), Encoding.UTF8, "application/json") };
 
     internal static HttpResponseMessage Error(int status, string message) =>
@@ -451,7 +456,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 
     public sealed record Member(string Sign, string Dh, long Added, long? Removed);
 
-    private sealed record Batch(string Household, long Seq, string Device, int Epoch, long DeviceSeq, byte[] Body);
+    private sealed record Batch(string Household, long Seq, string Device, int Epoch, long DeviceSeq, byte[] Body, string Sig);
 
     private sealed record Session(string Account, string Device, string Sign, string Dh);
 

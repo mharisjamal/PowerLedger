@@ -86,11 +86,12 @@ internal static class Membership
 /// be told, in order; then, every six hours, the member list, for who was removed; then this PC's rows that changed since
 /// the last post, sealed with the household key as batches of at most 1 MB; its year of rows once for each member it
 /// hasn't posted it for; then the other members' batches after the cursor, each opened under its epoch's key and the
-/// associated data that ties it to its household, device, epoch and sequence number; a batch under a newer epoch reads the
-/// member list and this PC's envelope for it, whose sealer must be a member this PC knows. A batch teaches its sender's name,
-/// kind and keys, but a PC not yet known is taken only from a batch sealed with the current key, which a removed PC
-/// doesn't have. The server's member list only ever marks PCs as gone: members are never added on its word, so a key is
-/// never sealed to one the server made up.
+/// associated data that ties it to its household, device, epoch and sequence number, once its sender's signature over it
+/// checks against the sign key this PC holds for that member (plan 0.8); a batch under a newer epoch reads the member list
+/// and this PC's envelope for it, whose sealer must be a member this PC knows. Each batch carries its sender's member list,
+/// sealed, from which PCs added or removed elsewhere are learned; a batch's own device introduces nobody. The server's
+/// member list only ever marks PCs as gone: members are never added on its word, so a key is never sealed to one the
+/// server made up.
 /// </summary>
 internal sealed class RelaySync(HouseholdStore store, HouseholdRepository household, RelayClient relay, TimeProvider clock, ILogger log)
 {
@@ -348,13 +349,14 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     {
         var epoch = store.Epoch;
         var key = store.CurrentKey ?? throw new RelayStop(null);
-        var device = new WireMember(keys.DeviceId, name, Wire.Kind(kind), Wire.Encode(keys.SignPublic), Wire.Encode(keys.DhPublic));
+        var device = new WireMember(keys.DeviceId, name, Wire.Kind(kind));
+        var members = _members.Entries();
         var start = 0;
         var size = FirstChunk;
         while (start < rows.Count)
         {
             var take = Math.Min(size, rows.Count - start);
-            var plain = HouseholdJson.Bytes(new BatchPlain(1, device, [.. rows.Skip(start).Take(take).Select(Wire.Row)]), HouseholdJson.Default.BatchPlain);
+            var plain = HouseholdJson.Bytes(new BatchPlain(1, device, [.. rows.Skip(start).Take(take).Select(Wire.Row)], members), HouseholdJson.Default.BatchPlain);
             var packed = SharingClient.Gzip(plain);
             if (PostedSize(packed.Length) > MaxPostBytes && take > 1)
             {
@@ -362,8 +364,10 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                 continue;
             }
             var seq = store.NextSequence();
-            var sealedBody = HouseholdCrypto.Seal(key, packed, HouseholdCrypto.BatchAad(householdId, keys.DeviceId, epoch, seq));
-            var result = await relay.PostBatchAsync(keys, householdId, new BatchPost(keys.DeviceId, epoch, seq, Wire.Encode(sealedBody)), cancel)
+            var aad = HouseholdCrypto.BatchAad(householdId, keys.DeviceId, epoch, seq);
+            var sealedBody = HouseholdCrypto.Seal(key, packed, aad);
+            var sig = HouseholdCrypto.SignData(keys.Sign, HouseholdCrypto.BatchToSign(aad, sealedBody));
+            var result = await relay.PostBatchAsync(keys, householdId, new BatchPost(keys.DeviceId, epoch, seq, Wire.Encode(sealedBody), Wire.Encode(sig)), cancel)
                 .ConfigureAwait(false);
             if (!Check(result, run)) throw new RelayStop(null);
             store.RelayConfirmed = true;
@@ -373,44 +377,84 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         }
     }
 
-    /// <summary>The size of a batch as posted: the sealed body in base64url and the JSON around it.</summary>
-    private static long PostedSize(int packed) => (packed + 28 + 2) / 3 * 4 + 256;
+    /// <summary>The size of a batch as posted: the sealed body and its signature in base64url, and the JSON around them.</summary>
+    private static long PostedSize(int packed) => (packed + 28 + 2) / 3 * 4 + 384;
 
-    /// <summary>Reads the other members' batches after the cursor, a page at a time, moving the cursor past each page once
-    /// it is kept. A batch under a newer epoch whose key can't be had yet holds the cursor where it is, so the page is read
-    /// again next time, what was kept from it being kept again; after <see cref="KeyWait"/> such a batch is passed over.</summary>
+    /// <summary>
+    /// Reads the other members' batches after the cursor, a page at a time. A batch that can't be opened yet, under a newer
+    /// epoch whose key isn't here or from a PC not yet introduced, holds the cursor where it is: the pages after it are still
+    /// read, for the members they introduce, and the held batches tried again at the end; the cursor moves past them only
+    /// once none is left waiting. What was kept from pages read again is kept again. After <see cref="KeyWait"/> a batch
+    /// still waiting is passed over.
+    /// </summary>
     private async Task FetchAsync(DeviceKeys keys, string householdId, RelayRun run, CancellationToken cancel)
     {
+        var after = store.RelayCursor;
+        var giveUp = store.WaitingSince is { } since && Now - since >= (long)KeyWait.TotalMilliseconds;
+        var held = new List<BatchItem>();
         for (var page = 0; page < MaxPages; page++)
         {
-            var result = await relay.BatchesAsync(keys, householdId, store.RelayCursor, PageLimit, cancel).ConfigureAwait(false);
+            var result = await relay.BatchesAsync(keys, householdId, after, PageLimit, cancel).ConfigureAwait(false);
             if (!Check(result, run)) return;
             store.RelayConfirmed = true;
-            var giveUp = store.WaitingSince is { } since && Now - since >= (long)KeyWait.TotalMilliseconds;
             foreach (var item in result.Value!.Items ?? [])
             {
                 var opened = await OpenAsync(keys, householdId, item, run, cancel).ConfigureAwait(false);
                 if (run.Removed) return;
-                if (opened is null && !giveUp)
-                {
-                    store.WaitingSince ??= Now;
-                    return;
-                }
+                if (opened is null) held.Add(item);
                 run.RowsIn += opened ?? 0;
             }
+            after = Math.Max(after, result.Value.Next);
+            if (held.Count == 0) store.RelayCursor = after;
+            if (!result.Value.More) break;
+        }
+        if (held.Count == 0)
+        {
             store.WaitingSince = null;
-            store.RelayCursor = Math.Max(store.RelayCursor, result.Value.Next);
-            if (!result.Value.More) return;
+            return;
+        }
+        var stillHeld = 0;
+        foreach (var item in held)
+        {
+            var opened = await OpenAsync(keys, householdId, item, run, cancel).ConfigureAwait(false);
+            if (run.Removed) return;
+            if (opened is null) stillHeld++;
+            run.RowsIn += opened ?? 0;
+        }
+        if (stillHeld == 0 || giveUp)
+        {
+            store.RelayCursor = after;
+            store.WaitingSince = null;
+        }
+        else
+        {
+            store.WaitingSince ??= Now;
         }
     }
 
-    /// <summary>Opens one batch and keeps its rows; one that doesn't open, or isn't from a member, is passed over. A newer
-    /// epoch than this PC's sends it to the member list first, for who was removed, then for its envelope.</summary>
-    /// <returns>How many rows were newer than those kept; null when the batch is under a newer epoch whose key this PC
-    /// can't have yet.</returns>
+    /// <summary>
+    /// Opens one batch and keeps its rows (plan 0.8). The batch must be signed by the member it says it is from, with the
+    /// sign key this PC holds for it: a PC this one doesn't know waits to be introduced, and a batch that isn't signed, or
+    /// doesn't open, is passed over. A newer epoch than this PC's sends it to the member list first, for who was removed,
+    /// then for its envelope. The sealed member list teaches the members added and removed elsewhere; the sender's own
+    /// entry, its name and kind. A row's change time is taken as no later than a day from now.
+    /// </summary>
+    /// <returns>How many rows were newer than those kept; null when the batch can't be opened yet: its epoch's key isn't
+    /// here, or its PC hasn't been introduced.</returns>
     private async Task<int?> OpenAsync(DeviceKeys keys, string householdId, BatchItem item, RelayRun run, CancellationToken cancel)
     {
         if (!Wire.IsDeviceId(item.Device) || item.Device == keys.DeviceId || item.Epoch <= 0) return 0;
+        var member = household.Member(item.Device);
+        var starting = member is null && KnowsNobody(keys);
+        if (member is null && !(starting && item.Epoch == store.Epoch)) return null;
+        if (Wire.Decode(item.Body) is not { } sealedBody || Wire.Decode(item.Sig) is not { } sig) return 0;
+        var aad = HouseholdCrypto.BatchAad(householdId, item.Device, item.Epoch, item.Seq);
+        var signed = HouseholdCrypto.BatchToSign(aad, sealedBody);
+        if (member is not null && !HouseholdCrypto.Verify(member.SignKey, signed, sig))
+        {
+            log.LogWarning("A batch said to be from {Device} isn't signed by it, so it was passed over", item.Device);
+            return 0;
+        }
         var key = store.KeyFor(item.Epoch);
         if (key is null && item.Epoch > store.Epoch)
         {
@@ -423,11 +467,11 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             if (key is null) return null;
             store.AddKey(item.Epoch, key);
         }
-        if (key is null || Wire.Decode(item.Body) is not { } sealedBody) return 0;
+        if (key is null) return 0;
         BatchPlain? batch;
         try
         {
-            var packed = HouseholdCrypto.Open(key, sealedBody, HouseholdCrypto.BatchAad(householdId, item.Device, item.Epoch, item.Seq));
+            var packed = HouseholdCrypto.Open(key, sealedBody, aad);
             batch = JsonSerializer.Deserialize(Gunzip(packed), HouseholdJson.Default.BatchPlain);
         }
         catch (Exception error) when (error is CryptographicException or InvalidDataException or JsonException or IOException)
@@ -436,23 +480,38 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             return 0;
         }
         if (batch?.Device is not { } sender || sender.Id != item.Device) return 0;
+        if (member is null)
+        {
+            // This PC knows no other member yet, as after a recovery or an approval: the first batch under the current key,
+            // which no removed PC holds, introduces its sender and the members it lists, when signed by the sender's own key.
+            if (batch.Members?.FirstOrDefault(entry => entry.Id == item.Device) is not { } own || Wire.Member(own) is not { } self
+                || !HouseholdCrypto.Verify(self.Sign, signed, sig))
+            {
+                return 0;
+            }
+            _members.Learn(batch.Members, item.Device, keys.DeviceId, Now);
+            if (household.Member(item.Device) is not { } introduced) return 0;
+            member = introduced;
+        }
 
-        var known = household.Member(item.Device);
-        if (known is null)
+        if (member.LeftMs is null && Wire.Name(sender.Name) is { } name && Wire.Kind(sender.Kind) is { } kind && (name != member.Name || kind != member.Kind))
         {
-            // A PC this one hasn't heard of: taken only from a batch under the current key, with keys that make its ID.
-            if (item.Epoch < store.Epoch || Wire.Member(sender) is not { } newcomer) return 0;
-            household.SaveMember(new HouseholdMember(newcomer.Id, newcomer.Name, newcomer.Kind, newcomer.Sign, newcomer.Dh, Now, null, null));
+            household.SaveMember(member with { Name = name, Kind = kind });
         }
-        else if (Wire.Name(sender.Name) is { } name && Wire.Kind(sender.Kind) is { } kind && (name != known.Name || kind != known.Kind))
+        var learned = _members.Learn(batch.Members ?? [], item.Device, keys.DeviceId, Now);
+        foreach (var gone in learned.Removed)
         {
-            household.SaveMember(known with { Name = name, Kind = kind });
+            if (household.Member(gone) is { } left) run.Notices.Add($"{left.Name} is no longer in the household.");
         }
-        var rows = (batch.Rows ?? []).Select(row => Wire.Row(item.Device, row)).OfType<HouseholdRow>().ToList();
+        var rows = Wire.CapChanged((batch.Rows ?? []).Select(row => Wire.Row(item.Device, row)).OfType<HouseholdRow>(), Now);
         var taken = household.Upsert(rows);
         if (rows.Count > 0) household.Synced(item.Device, Math.Min(Now, rows.Max(row => row.ChangedMs)));
         return taken;
     }
+
+
+    /// <summary>True while this PC knows no member but itself, as just after a recovery or an approval.</summary>
+    private bool KnowsNobody(DeviceKeys keys) => household.Members().All(member => member.DeviceId == keys.DeviceId || member.LeftMs is not null);
 
     /// <summary>This PC's envelope for an epoch, opened with the key of the member that sealed it; null when there is none.</summary>
     private async Task<byte[]?> FetchKeyAsync(DeviceKeys keys, string householdId, int epoch, CancellationToken cancel)

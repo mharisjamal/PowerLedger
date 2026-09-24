@@ -151,6 +151,14 @@ internal static partial class Wire
             row.OnS, row.BatteryS, row.IdleS, row.MeasuredS, row.CalibratedS, row.EstimatedS, row.CostMicro, row.Currency, row.Changed);
     }
 
+    /// <summary>The rows with each change time no later than a day after <paramref name="nowMs"/> (plan 0.8): a PC whose clock
+    /// is far ahead can't make a row that no later change replaces.</summary>
+    public static List<HouseholdRow> CapChanged(IEnumerable<HouseholdRow> rows, long nowMs)
+    {
+        var cap = nowMs + (long)TimeSpan.FromDays(1).TotalMilliseconds;
+        return [.. rows.Select(row => row.ChangedMs > cap ? row with { ChangedMs = cap } : row)];
+    }
+
     [GeneratedRegex("^[0-9a-f]{32}$")]
     private static partial Regex Hex32();
 

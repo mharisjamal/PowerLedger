@@ -258,17 +258,19 @@ internal sealed record KeyEnvelopeReply(int Epoch, string From, string Body);
 /// <summary>A member as the server lists it, times in unix milliseconds.</summary>
 internal sealed record ServerMember(string Device, string Sign, string Dh, long Added, long? Removed);
 
-/// <summary>A batch as posted (plan 0.6): <see cref="Seq"/> is this PC's own sequence number, in the sealed body's associated data.</summary>
-internal sealed record BatchPost(string Device, int Epoch, long Seq, string Body);
+/// <summary>A batch as posted (plan 0.6, 0.8): <see cref="Seq"/> is this PC's own sequence number, in the sealed body's associated
+/// data; <see cref="Sig"/> this PC's signature over <see cref="HouseholdCrypto.BatchToSign"/>.</summary>
+internal sealed record BatchPost(string Device, int Epoch, long Seq, string Body, string Sig);
 
-/// <summary>One of the other members' batches, as posted.</summary>
-internal sealed record BatchItem(long Seq, string Device, int Epoch, string Body);
+/// <summary>One of the other members' batches, as posted, with its sender's signature.</summary>
+internal sealed record BatchItem(long Seq, string Device, int Epoch, string Body, string? Sig = null);
 
 /// <summary>A page of batches: <see cref="Next"/> is the cursor to send next time, <see cref="More"/> that another page waits.</summary>
 internal sealed record BatchPage(List<BatchItem> Items, long Next, bool More);
 
-/// <summary>A batch's sealed JSON (plan 0.6): the PC it is from, its name and kind with it, and its rows.</summary>
-internal sealed record BatchPlain(int V, WireMember Device, List<WireRow> Rows);
+/// <summary>A batch's sealed JSON (plan 0.6, 0.8): the PC it is from, its name and kind with it, its rows, and the members its
+/// sender knows, the removed ones among them.</summary>
+internal sealed record BatchPlain(int V, WireMember Device, List<WireRow> Rows, List<WireMember>? Members = null);
 
 /// <summary>N2: the body of <c>POST /v1/auth/signin</c>; <see cref="Nonce"/> is the salt the App made the ID token's nonce from.</summary>
 internal sealed record SignInBody(string Provider, string IdToken, string Nonce, string Sign, string Dh);

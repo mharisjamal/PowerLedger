@@ -193,7 +193,7 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
-    public async Task A_pc_not_yet_known_is_learned_from_its_batch_under_the_current_key_only()
+    public async Task A_pc_not_yet_known_waits_until_a_members_signed_list_introduces_it_even_when_its_batch_comes_first()
     {
         using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
         study.Store.EnterHousehold(Household, 1, _key);
@@ -202,13 +202,64 @@ public sealed class RelaySyncTests : IDisposable
         study.Household.Upsert([Row(study.Id, 0, 7, changed: 500)]);
         _relay.Seed(Household, study.Keys);
 
-        await study.RunAsync();
-        await _laptop.RunAsync();
+        await study.RunAsync();                                                   // its batch comes first, and alone introduces nobody
+        (await _laptop.RunAsync()).RowsIn.ShouldBe(0);
+        _laptop.Household.Member(study.Id).ShouldBeNull();
+        _laptop.Store.RelayCursor.ShouldBe(0);                                    // held, to be read again
 
+        _desktop.Household.SaveMember(study.AsMember() with { AddedMs = 400 });    // the desktop added it
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 600)]);
+        await _desktop.RunAsync();
+        var run = await _laptop.RunAsync();
+
+        run.RowsIn.ShouldBe(2);
         var learned = _laptop.Household.Member(study.Id).ShouldNotBeNull();
-        (learned.Name, learned.Kind).ShouldBe(("Study PC", ChassisKind.Desktop));
+        (learned.Name, learned.Kind, learned.AddedMs).ShouldBe(("Study PC", ChassisKind.Desktop, 400L));
         learned.DhKey.ShouldBe(study.Keys.DhPublic);
         _laptop.Household.Row(study.Id, Hour(0)).ShouldNotBeNull().EnergyWh.ShouldBe(7);
+        _laptop.Store.RelayCursor.ShouldBe(_relay.Batches.Count);                  // past them all now
+    }
+
+    [Fact]
+    public async Task A_batch_not_signed_by_the_member_it_names_is_passed_over_though_it_opens_under_the_household_key()
+    {
+        using var removed = DeviceKeys.Create();                                  // it had the key, and was removed
+        var forged = HouseholdJson.Bytes(new BatchPlain(1, new WireMember(_desktop.Id, "Desktop-7", "desktop"),
+            [Wire.Row(Row(_desktop.Id, 0, 99_999, changed: 500))]), HouseholdJson.Default.BatchPlain);
+        var sealedBody = HouseholdCrypto.Seal(_key, PowerLedger.Service.Sharing.SharingClient.Gzip(forged), HouseholdCrypto.BatchAad(Household, _desktop.Id, 1, 7));
+        var sig = HouseholdCrypto.SignData(removed.Sign, HouseholdCrypto.BatchToSign(HouseholdCrypto.BatchAad(Household, _desktop.Id, 1, 7), sealedBody));
+        _relay.Intercept = (request, _) => request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.EndsWith("/batches", StringComparison.Ordinal)
+            ? FakeRelay.Json(new System.Text.Json.Nodes.JsonObject
+            {
+                ["items"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+                {
+                    ["seq"] = 7, ["device"] = _desktop.Id, ["epoch"] = 1, ["body"] = Wire.Encode(sealedBody), ["sig"] = Wire.Encode(sig),
+                }),
+                ["next"] = 1,
+                ["more"] = false,
+            })
+            : null;
+
+        var run = await _laptop.RunAsync();
+
+        run.RowsIn.ShouldBe(0);
+        _laptop.Household.Row(_desktop.Id, Hour(0)).ShouldBeNull();
+        _laptop.Store.RelayCursor.ShouldBe(1);                                    // passed over, not waited on
+    }
+
+    [Fact]
+    public async Task Every_batch_goes_with_its_senders_signature_and_a_change_time_far_ahead_is_taken_as_a_day_from_now()
+    {
+        var farAhead = Now.AddYears(1).ToUnixTimeMilliseconds();
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: farAhead)]);
+
+        await _desktop.RunAsync();
+        await _laptop.RunAsync();
+
+        var posted = _relay.Batches.ShouldHaveSingleItem();
+        var aad = HouseholdCrypto.BatchAad(Household, _desktop.Id, posted.Epoch, posted.Seq);
+        HouseholdCrypto.Verify(_desktop.Keys.SignPublic, HouseholdCrypto.BatchToSign(aad, posted.Body), posted.Sig).ShouldBeTrue();
+        _laptop.Household.Row(_desktop.Id, Hour(0)).ShouldNotBeNull().ChangedMs.ShouldBe(Now.AddDays(1).ToUnixTimeMilliseconds());
     }
 
     [Fact]
