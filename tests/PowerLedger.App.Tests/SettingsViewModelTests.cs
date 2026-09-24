@@ -165,6 +165,35 @@ public class SettingsViewModelTests
         changed.ShouldContain(nameof(SettingsViewModel.ReadMonitorBrightness));
     }
 
+    /// <summary>Midnight look design §1, §5: the look applies when chosen; one whose window won't open leaves the choice
+    /// as it was, says why on the preferences' message line, and tells a radio that was clicked to go back.</summary>
+    [Fact]
+    public void The_look_applies_when_chosen_and_one_that_will_not_open_stays_as_it_was_and_says_why()
+    {
+        var model = Model();
+        var changed = new List<string?>();
+        model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        model.Look.ShouldBe(Look.Classic);
+
+        model.Look = Look.Midnight;
+
+        _ui.Changes.ShouldBe(["look Midnight"]);
+        model.Look.ShouldBe(Look.Midnight);
+        model.AppMessage.ShouldBeNull();
+        changed.ShouldContain(nameof(SettingsViewModel.Look));
+
+        model.Look = Look.Midnight;
+        _ui.Changes.Count.ShouldBe(1);
+
+        _ui.LookProblem = "Couldn't open the Classic look: no XAML";
+        changed.Clear();
+        model.Look = Look.Classic;
+
+        model.Look.ShouldBe(Look.Midnight);
+        model.AppMessage.ShouldBe("Couldn't open the Classic look: no XAML");
+        changed.ShouldContain(nameof(SettingsViewModel.Look));
+    }
+
     [Fact]
     public async Task A_calibration_reset_asks_first()
     {

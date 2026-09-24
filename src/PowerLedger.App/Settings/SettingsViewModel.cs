@@ -110,6 +110,19 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Which look the window shows (Midnight look design §1). Applies when chosen: the window is replaced in
+    /// place; when the new one can't open, the old stays, the choice with it, and the message says why (design §5).</summary>
+    public Look Look
+    {
+        get => _ui.Current.Look;
+        set
+        {
+            if (value == _ui.Current.Look) return;
+            AppMessage = _ui.SetLook(value);
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>Applies when ticked.</summary>
     public bool StartWithWindows
     {
