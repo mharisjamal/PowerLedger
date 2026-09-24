@@ -40,6 +40,7 @@ namespace PowerLedger.Contracts;
 [JsonDerivedType(typeof(HouseholdNotice), "householdNotice")]
 [JsonDerivedType(typeof(CancelPairingRequest), "cancelPairing")]
 [JsonDerivedType(typeof(NewRecoveryCodeRequest), "newRecoveryCode")]
+[JsonDerivedType(typeof(RemoveOldRowsRequest), "removeOldRows")]
 [JsonDerivedType(typeof(OkReply), "ok")]
 [JsonDerivedType(typeof(ErrorReply), "error")]
 [JsonDerivedType(typeof(StatusReply), "status")]
@@ -195,3 +196,8 @@ public sealed record CancelPairingRequest(long Id) : PipeRequest(Id);
 
 /// <summary>N2: make a new recovery code for the linked household, replacing any earlier one; it comes as a notice.</summary>
 public sealed record NewRecoveryCodeRequest(long Id) : PipeRequest(Id);
+
+/// <summary>Delete the rows this PC keeps from a PC no longer in its household, one that left or was removed, named by
+/// <paramref name="DeviceId"/>; with none named, every such PC's, which after leaving is all of them (households design
+/// §6). Refused for this PC and for a current member. The PC stays known as removed, so it is never added back.</summary>
+public sealed record RemoveOldRowsRequest(long Id, string? DeviceId = null) : PipeRequest(Id);
