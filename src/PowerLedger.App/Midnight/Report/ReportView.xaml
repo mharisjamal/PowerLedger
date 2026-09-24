@@ -1,0 +1,195 @@
+<UserControl x:Class="PowerLedger.App.Midnight.ReportView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="clr-namespace:PowerLedger.App"
+             xmlns:local="clr-namespace:PowerLedger.App.Midnight">
+    <UserControl.Resources>
+        <!-- The sheet's cards sit two to a row, 16 px apart; a card's title is its eyebrow. -->
+        <Style x:Key="Left" TargetType="Border" BasedOn="{StaticResource M.Card}">
+            <Setter Property="Grid.Column" Value="0" />
+            <Setter Property="Margin" Value="0,16,8,0" />
+        </Style>
+        <Style x:Key="Right" TargetType="Border" BasedOn="{StaticResource M.Card}">
+            <Setter Property="Grid.Column" Value="1" />
+            <Setter Property="Margin" Value="8,16,0,0" />
+        </Style>
+        <Style TargetType="app:LedgerRow" BasedOn="{StaticResource M.LedgerRow}" />
+        <Style x:Key="Export" TargetType="Button" BasedOn="{StaticResource M.Button.Outline}">
+            <Setter Property="Margin" Value="0,0,6,6" />
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="{StaticResource M.Page.Margin}">
+            <!-- The ranges, then the exports, which drop to a line of their own when the page is narrow rather than squeeze the pills. -->
+            <WrapPanel>
+                <local:RangePills DataContext="{Binding Range}" Margin="0,0,16,0" />
+                <WrapPanel VerticalAlignment="Top">
+                    <!-- Review finding A11: only while this PC is in a household right now — the App has nothing current
+                         to add otherwise, and never writes household_rows itself. -->
+                    <CheckBox Style="{StaticResource M.Tick}" Content="Include my household" IsChecked="{Binding IncludeHousehold}" Margin="0,0,14,6"
+                              Visibility="{Binding HasHousehold, Converter={StaticResource VisibleWhen}}" />
+                    <Button Style="{StaticResource Export}" Content="PDF" Command="{Binding ExportPdf}" ToolTip="Save this report as a PDF" />
+                    <Button Style="{StaticResource Export}" Content="PNG" Click="SavePicture" ToolTip="Save a picture of this report" />
+                    <Button Style="{StaticResource Export}" Content="CSV · 1 h" Command="{Binding ExportCsv}" CommandParameter="Hour" ToolTip="Hour rows for this range" />
+                    <Button Style="{StaticResource Export}" Content="CSV · 1 min" Command="{Binding ExportCsv}" CommandParameter="Minute" ToolTip="Minute rows for this range" />
+                    <Button Style="{StaticResource Export}" Content="CSV · raw" Command="{Binding ExportCsv}" CommandParameter="Raw" Margin="0,0,0,6"
+                            ToolTip="Every reading; raw readings are kept for the last two days" />
+                </WrapPanel>
+            </WrapPanel>
+            <TextBlock Style="{StaticResource M.Text.Muted}" HorizontalAlignment="Right" Text="{Binding Saved}" />
+
+            <!-- The sheet: what the PNG export draws, so it holds every card and the ground between them. -->
+            <Grid x:Name="Sheet" Style="{StaticResource M.Sheet}" Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Grid.ColumnSpan="2">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Eyebrow}" VerticalAlignment="Center"
+                                   Text="{Binding Data.Period, Converter={StaticResource Upper}}" />
+                        <TextBlock Style="{StaticResource M.Text.Title}" Text="{Binding Data.Title}" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,8,0,0" Text="{Binding Message}"
+                               Visibility="{Binding HasMessage, Converter={StaticResource VisibleWhen}}" />
+                </StackPanel>
+
+                <Border Grid.Row="1" Style="{StaticResource Left}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="BILL" />
+                        <app:LedgerRow IsHero="True" Key="Energy" Value="{Binding Data.Energy}" Note="kWh" />
+                        <app:LedgerRow Key="Cost" Value="{Binding Data.Cost}" Note="{Binding Data.CostNote}" />
+                        <app:LedgerRow Key="CO₂" Value="{Binding Data.Co2}" Note="{Binding Data.Co2Note}" />
+                        <app:LedgerRow Key="Average" Value="{Binding Data.Average}" Note="W while on" />
+                        <app:LedgerRow Key="Peak" Value="{Binding Data.Peak}" Note="{Binding Data.PeakAt}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Style="{StaticResource Right}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="TIME" />
+                        <app:LedgerRow IsHero="True" Key="On" Value="{Binding Data.On}" />
+                        <app:LedgerRow Key="Idle, display on" Value="{Binding Data.IdleOn}" />
+                        <app:LedgerRow Key="Idle, display off" Value="{Binding Data.IdleOff}" />
+                        <app:LedgerRow Key="Asleep" Value="{Binding Data.Asleep}" Note="while the service ran" />
+                        <app:LedgerRow Key="Unmonitored" Value="{Binding Data.Unmonitored}" Note="no readings at all" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="2" Style="{StaticResource Left}">
+                    <!-- The header and each row are grids of their own; the shared group keeps the kWh column one width in all of them. -->
+                    <StackPanel Grid.IsSharedSizeScope="True">
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="BY COMPONENT" />
+                        <Border Style="{StaticResource M.Table.Header}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="20" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="Kwh" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="PART" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Margin="16,0,0,0" />
+                            </Grid>
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding Data.Parts}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type app:PartRow}">
+                                    <Border Style="{StaticResource M.Table.Row}" MinHeight="36">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="20" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" SharedSizeGroup="Kwh" />
+                                                <ColumnDefinition Width="72" />
+                                                <ColumnDefinition Width="48" />
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="Swatch" Style="{StaticResource M.Legend.Dot}" HorizontalAlignment="Left" />
+                                            <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Secondary}" Text="{Binding Name}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Number}" Text="{Binding Energy}" VerticalAlignment="Center" />
+                                            <Border Grid.Column="3" Style="{StaticResource M.ShareTrack}" Width="56" Margin="16,0,0,0" VerticalAlignment="Center"
+                                                    AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}">
+                                                <Border x:Name="Fill" HorizontalAlignment="Left" Background="{DynamicResource M.PartRest}" app:Rounding.Pill="True"
+                                                        Width="{Binding Fraction, Converter={StaticResource ShareWidth}, ConverterParameter=56}" />
+                                            </Border>
+                                            <TextBlock Grid.Column="4" Style="{StaticResource M.Text.Number}" Foreground="{DynamicResource M.Ink3}" Text="{Binding Share}"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding Part}" Value="Cpu">
+                                            <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartCpu}" />
+                                            <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartCpu}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Part}" Value="Gpu">
+                                            <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartGpu}" />
+                                            <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartGpu}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Part}" Value="Display">
+                                            <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartDisplay}" />
+                                            <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartDisplay}" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="2" Style="{StaticResource Right}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="EVERYDAY EQUIVALENTS" />
+                        <ItemsControl ItemsSource="{Binding Data.Equivalents}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type app:ReportLine}">
+                                    <app:LedgerRow Key="{Binding Name}" Value="{Binding Value}" Note="{Binding Note}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="3" Style="{StaticResource Left}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="IDLE WASTE" />
+                        <app:LedgerRow IsHero="True" Key="Energy while idle" Value="{Binding Data.IdleWaste}" />
+                        <TextBlock Style="{StaticResource M.Text.Secondary}" TextWrapping="Wrap" Margin="0,8,0,0" Text="{Binding Data.IdleWasteNote}" />
+                        <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" Margin="0,10,0,0" Text="{Binding Data.Advice}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="3" Style="{StaticResource Right}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="DATA QUALITY" />
+                        <app:QualityBar Style="{StaticResource M.QualityBar}" Margin="0,8,0,12" Mix="{Binding Data.Quality}" />
+                        <WrapPanel>
+                            <ContentControl Style="{StaticResource M.Chip.Measured}" Margin="0,0,6,6" />
+                            <ContentControl Style="{StaticResource M.Chip.Calibrated}" Content="Calibrated ±10%" Margin="0,0,6,6" />
+                            <ContentControl Style="{StaticResource M.Chip.Estimated}" Content="Estimated ±20%" Margin="0,0,6,6" />
+                        </WrapPanel>
+                        <TextBlock Style="{StaticResource M.Text.Secondary}" Margin="0,6,0,0" TextWrapping="Wrap" Text="{Binding Data.QualityText}" />
+                        <TextBlock Style="{StaticResource M.Note}" Margin="0,8,0,0" Text="{x:Static app:ReportData.QualityLegend}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="4" Grid.ColumnSpan="2" Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,12">
+                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" />
+                            <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="DAILY ENERGY" />
+                        </DockPanel>
+                        <app:DailyBars Style="{StaticResource M.DailyBars}" Days="{Binding Data.Days}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

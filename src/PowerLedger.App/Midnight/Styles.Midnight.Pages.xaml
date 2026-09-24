@@ -120,7 +120,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Face" Background="Transparent" CornerRadius="6" Margin="2">
+                    <Border x:Name="Face" Background="Transparent" CornerRadius="{StaticResource M.Corner.Control}" Margin="2">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
@@ -152,9 +152,8 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="DatePicker">
-                    <!-- The control radius (M.Radius.Control, 8) as a CornerRadius, which a sys:Double can't be. -->
-                    <Border x:Name="Frame" BorderBrush="{DynamicResource M.LineStrong}" BorderThickness="1" CornerRadius="8"
-                            Background="{DynamicResource M.Panel}">
+                    <Border x:Name="Frame" BorderBrush="{DynamicResource M.LineStrong}" BorderThickness="1" CornerRadius="{StaticResource M.Corner.Control}"
+                            Background="{DynamicResource M.Ground}">
                         <Grid x:Name="PART_Root">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />

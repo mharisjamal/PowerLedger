@@ -5,14 +5,18 @@ using System.Windows.Media;
 namespace PowerLedger.App.Tests;
 
 /// <summary>
-/// What the Midnight render tests add to <see cref="UiHarness"/>: a Midnight palette put last among the application's
-/// merged dictionaries, where WPF looks first, so the Classic keys it also defines win while it is in and go with it;
-/// and a walk over the colours a window paints with.
+/// What the Midnight render tests add to <see cref="UiHarness"/>: a Midnight palette, or a dictionary, put last among
+/// the application's merged dictionaries, where WPF looks first, so the Classic keys a Midnight palette also defines win
+/// while it is in and go with it; and a walk over the colours a window paints with.
 /// </summary>
 internal static class MidnightHost
 {
     /// <summary>Midnight's palette for <paramref name="theme"/> over the application's dictionaries until disposed. Call on the UI thread.</summary>
-    public static IDisposable UsePalette(Theme theme) => Use(MidnightPalettes.Of(theme));
+    public static IDisposable UsePalette(Theme theme) => Use(TempPalette.Load(theme));
+
+    /// <summary>Every colour Midnight's palette for <paramref name="theme"/> holds, opaque or not.</summary>
+    public static IReadOnlySet<Color> PaletteColours(Theme theme)
+        => TempPalette.Load(theme).Values.OfType<SolidColorBrush>().Select(brush => brush.Color).ToHashSet();
 
     /// <summary>A dictionary among the application's until disposed, after the palette. Call on the UI thread.</summary>
     public static IDisposable Use(ResourceDictionary dictionary)

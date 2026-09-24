@@ -1,0 +1,452 @@
+<UserControl x:Class="PowerLedger.App.Midnight.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="clr-namespace:PowerLedger.App"
+             xmlns:contracts="clr-namespace:PowerLedger.Contracts;assembly=PowerLedger.Contracts">
+    <UserControl.Resources>
+        <Style x:Key="Label" TargetType="TextBlock" BasedOn="{StaticResource M.Settings.Label}" />
+        <Style x:Key="Row" TargetType="StackPanel" BasedOn="{StaticResource M.Settings.Row}" />
+        <Style x:Key="Aside" TargetType="TextBlock" BasedOn="{StaticResource M.Settings.Aside}" />
+        <Style x:Key="Note" TargetType="TextBlock" BasedOn="{StaticResource M.Note}" />
+        <Style x:Key="Said" TargetType="TextBlock" BasedOn="{StaticResource M.Said}" />
+        <!-- A choice among a few: pills on one track. -->
+        <Style x:Key="Choice" TargetType="RadioButton" BasedOn="{StaticResource M.Pill}" />
+        <Style x:Key="Choices" TargetType="Border" BasedOn="{StaticResource M.PillTrack}" />
+        <Style x:Key="Field" TargetType="TextBox" BasedOn="{StaticResource M.Field}" />
+        <Style x:Key="Tick" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}" />
+        <!-- A privacy switch: the title beside the switch, the explanation under both. -->
+        <Style x:Key="Switch" TargetType="ToggleButton" BasedOn="{StaticResource M.Switch}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="SwitchNote" TargetType="TextBlock" BasedOn="{StaticResource M.Note}">
+            <Setter Property="Margin" Value="46,4,0,0" />
+        </Style>
+        <!-- A preference switch's words, which wrap in a narrow page: the switch lays its content out on one line otherwise. -->
+        <Style x:Key="SwitchText" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="MaxWidth" Value="340" />
+        </Style>
+        <!-- A monitor's "Count it". One that runs off the PC always counts, so its box shows ticked, can't be unticked, and says why. -->
+        <Style x:Key="Counts" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding OwnPlug}" Value="False">
+                    <Setter Property="ToolTip" Value="Runs off this PC, so it counts as part of what the PC draws" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- A monitor's "has its own plug", asked only on a laptop. A desktop still shows it for a monitor held to run off the PC,
+             so that can be undone, and once it has been ticked or unticked, so it doesn't go from under the pointer. -->
+        <Style x:Key="Plug" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}">
+            <Setter Property="Visibility" Value="{Binding DataContext.IsDesktop, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource HiddenWhen}}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ShowsPlug}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="{StaticResource M.Page.Margin}">
+            <Border Style="{StaticResource M.Card.Flat}" Margin="0,0,0,16" Background="{DynamicResource M.Raised}"
+                    Visibility="{Binding Notice, Converter={StaticResource VisibleWhenText}}">
+                <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" Text="{Binding Notice}" />
+            </Border>
+
+            <Border Style="{StaticResource M.Card}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="TARIFF" />
+                    <ItemsControl ItemsSource="{Binding TariffHistory}" Margin="0,0,0,8" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Style="{StaticResource M.Text.Number}" FontSize="12.5" Margin="0,2" Text="{Binding}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <WrapPanel DataContext="{Binding Tariff}">
+                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="Price per kWh" VerticalAlignment="Center" Margin="0,0,8,6" />
+                        <TextBox Style="{StaticResource Field}" Width="90" Margin="0,0,0,6" Text="{Binding Price, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Price per kWh" />
+                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="Currency" VerticalAlignment="Center" Margin="16,0,8,6" />
+                        <TextBox Style="{StaticResource Field}" Width="60" Margin="0,0,0,6" MaxLength="3" CharacterCasing="Upper" Text="{Binding Currency, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="Currency" />
+                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="From" VerticalAlignment="Center" Margin="16,0,8,6" />
+                        <DatePicker Style="{StaticResource M.Field.Date}" Width="132" Margin="0,0,0,6" SelectedDate="{Binding From}" AutomationProperties.Name="First day of the tariff" />
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Save tariff" Command="{Binding Save}" Margin="16,0,0,6" />
+                    </WrapPanel>
+                    <TextBlock Style="{StaticResource Said}" DataContext="{Binding Tariff}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+                    <TextBlock Style="{StaticResource Note}" Text="Energy already recorded is priced again from the day a tariff starts, so a tariff may start in the past." />
+                </StackPanel>
+            </Border>
+
+            <!-- The service's settings save themselves. A box gives the form what was typed in it once it is left or Enter is pressed;
+                 a tick or a choice gives it at once. -->
+            <StackPanel DataContext="{Binding Service}" IsEnabled="{Binding IsLoaded}" app:SettingsEntry.SavesOnEnter="True">
+                <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="MACHINE" />
+                        <TextBlock Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                   Text="{Binding DataContext.Detected, RelativeSource={RelativeSource AncestorType=UserControl}, StringFormat=Detected: {0}}" />
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Chassis" />
+                            <Border Style="{StaticResource Choices}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Style="{StaticResource Choice}" Content="Laptop"
+                                                 IsChecked="{Binding Chassis, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:ChassisKind.Laptop}}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="Desktop"
+                                                 IsChecked="{Binding Chassis, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:ChassisKind.Desktop}}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}" Visibility="{Binding IsDesktop, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock Style="{StaticResource Label}" Text="Power supply rating" />
+                            <Border Style="{StaticResource Choices}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Style="{StaticResource Choice}" Content="White" IsChecked="{Binding PsuTier, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:PsuTier.White}}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="Bronze" IsChecked="{Binding PsuTier, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:PsuTier.Bronze}}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="Silver" IsChecked="{Binding PsuTier, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:PsuTier.Silver}}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="Gold" IsChecked="{Binding PsuTier, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:PsuTier.Gold}}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="Platinum" IsChecked="{Binding PsuTier, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:PsuTier.Platinum}}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="Titanium" IsChecked="{Binding PsuTier, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:PsuTier.Titanium}}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Memory sticks" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Text="{Binding RamSticks, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Memory sticks" />
+                            <CheckBox Style="{StaticResource Tick}" Content="DDR5" Margin="14,0,0,0" IsChecked="{Binding RamIsDdr5}" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="SSDs · hard drives · fans" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Text="{Binding SsdCount, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="SSDs" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Margin="8,0,0,0" Text="{Binding HddCount, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Hard drives" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Margin="8,0,0,0" Text="{Binding FanCount, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Fans" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Built-in panel, inches" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Text="{Binding PanelInches, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Built-in panel, inches" />
+                            <TextBlock Style="{StaticResource Aside}" Text="0 for none" />
+                        </StackPanel>
+                        <!-- Each external monitor the service detected: its figure and where it came from, what it draws now and its
+                             brightness, a figure of the user's own, whether it counts and, on a laptop, whether it has a plug of its own. -->
+                        <ItemsControl ItemsSource="{Binding Monitors}" Focusable="False" Visibility="{Binding HasMonitors, Converter={StaticResource VisibleWhen}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type app:MonitorRow}">
+                                    <Grid Margin="0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="208" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Style="{StaticResource Label}" TextTrimming="CharacterEllipsis">
+                                            <Run Text="{Binding Name, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Size, Mode=OneWay}" FontSize="12" Foreground="{DynamicResource M.Ink3}" />
+                                        </TextBlock>
+                                        <TextBox Grid.Column="1" Style="{StaticResource Field}" Width="60" Text="{Binding Watts, UpdateSourceTrigger=LostFocus}"
+                                                 AutomationProperties.Name="{Binding Name, StringFormat=Watts for {0}}" />
+                                        <TextBlock Grid.Column="2" Style="{StaticResource Aside}" Text="W" Margin="8,0,0,0" />
+                                        <StackPanel Grid.Column="3" Margin="16,0,0,0" VerticalAlignment="Center">
+                                            <CheckBox Style="{StaticResource Counts}" Content="Count it" IsChecked="{Binding Counted}" IsEnabled="{Binding OwnPlug}"
+                                                      ToolTipService.ShowOnDisabled="True" AutomationProperties.Name="{Binding Name, StringFormat=Count {0}}" />
+                                            <CheckBox Style="{StaticResource Plug}" Content="has its own plug" Margin="0,6,0,0" IsChecked="{Binding OwnPlug}"
+                                                      AutomationProperties.Name="{Binding Name, StringFormat={}{0} has its own plug}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="4" Margin="16,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap" Text="{Binding Source}"
+                                                       Visibility="{Binding Source, Converter={StaticResource VisibleWhenText}}" />
+                                            <TextBlock Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap">
+                                                <Run Text="{Binding Now, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Brightness, Mode=OneWay}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- On a laptop, which monitors are taken to run off it, and what that means for counting them; and how a monitor that
+                             is switched off stays out where PowerLedger can't tell that it is, as when the Monitors tick under Preferences is
+                             off. -->
+                        <TextBlock Margin="0,2,0,6" Visibility="{Binding HasMonitors, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource Note}">
+                                    <Setter Property="Text" Value="A monitor of 17.3 inches or less is taken to run off this laptop, so it counts as part of what the laptop draws; tick &quot;has its own plug&quot; if it has one. Untick a monitor with its own plug to leave it out. PowerLedger reads whether each monitor is on, if allowed under Preferences; where it can't tell, unticking a monitor while it's off keeps it out. Clear a monitor's watts to go back to PowerLedger's own figure." />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsDesktop}" Value="True">
+                                            <Setter Property="Text" Value="Untick a monitor to leave it out. PowerLedger reads whether each monitor is on, if allowed under Preferences; where it can't tell, unticking a monitor while it's off keeps it out. Clear a monitor's watts to go back to PowerLedger's own figure." />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <StackPanel Style="{StaticResource Row}" Visibility="{Binding HasMonitors, Converter={StaticResource HiddenWhen}}">
+                            <TextBlock Style="{StaticResource Label}" Text="External monitors" />
+                            <TextBlock Style="{StaticResource M.Text.Muted}" VerticalAlignment="Center" Text="none detected" />
+                        </StackPanel>
+                        <!-- Each UPS the service reads over USB, and what the user says it powers, which decides whether its reading
+                             stands for this PC. Nothing shows while none is detected. -->
+                        <ItemsControl ItemsSource="{Binding Upses}" Focusable="False" Visibility="{Binding HasUps, Converter={StaticResource VisibleWhen}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" Margin="0,6" Text="{Binding}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <StackPanel Style="{StaticResource Row}" Visibility="{Binding HasUps, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock Style="{StaticResource Label}" Text="What does it power?" />
+                            <Border Style="{StaticResource Choices}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Style="{StaticResource Choice}" Content="This PC"
+                                                 IsChecked="{Binding UpsLoad, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:UpsLoad.ThisPc}}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="This PC and its monitors"
+                                                 IsChecked="{Binding UpsLoad, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:UpsLoad.ThisPcAndMonitors}}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="More"
+                                                 IsChecked="{Binding UpsLoad, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:UpsLoad.More}}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <!-- Each power supply the service reads over USB, with the tick that stops it. The tick stays while reading is
+                             off, when the service leaves the supply to its maker's program and may stop naming it. -->
+                        <ItemsControl ItemsSource="{Binding PowerSupplies}" Focusable="False" Visibility="{Binding HasPowerSupply, Converter={StaticResource VisibleWhen}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" Margin="0,6" Text="{Binding}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <StackPanel Style="{StaticResource Row}" Visibility="{Binding AsksToReadPowerSupply, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock>
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource Label}">
+                                        <Setter Property="Text" Value="" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasPowerSupply}" Value="False">
+                                                <Setter Property="Text" Value="Power supply" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <CheckBox Style="{StaticResource Tick}" Content="Read this power supply" IsChecked="{Binding ReadPowerSupply}" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Extras such as lights and pumps, W" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Text="{Binding ExtrasWatts, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Extras in watts" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Processor · graphics rated power, W" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Text="{Binding CpuTdp, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Processor rated power" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Margin="8,0,0,0" Text="{Binding GpuTdp, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Graphics rated power" />
+                            <TextBlock Style="{StaticResource Aside}" Text="blank: from PowerLedger's table" />
+                        </StackPanel>
+                        <!-- How the last save went, at the foot of the machine card, where it can be seen while either card is edited. -->
+                        <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="SAMPLING AND HISTORY" />
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Idle after, minutes" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Text="{Binding IdleMinutes, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Idle after, minutes" />
+                            <TextBlock Style="{StaticResource Aside}" Text="1 to 30" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Sample every, seconds" />
+                            <Border Style="{StaticResource Choices}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Style="{StaticResource Choice}" Content="1" IsChecked="{Binding SampleInterval, Converter={StaticResource Is}, ConverterParameter=1}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="2" IsChecked="{Binding SampleInterval, Converter={StaticResource Is}, ConverterParameter=2}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="3" IsChecked="{Binding SampleInterval, Converter={StaticResource Is}, ConverterParameter=3}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="4" IsChecked="{Binding SampleInterval, Converter={StaticResource Is}, ConverterParameter=4}" />
+                                    <RadioButton Style="{StaticResource Choice}" Content="5" IsChecked="{Binding SampleInterval, Converter={StaticResource Is}, ConverterParameter=5}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Keep every reading for, hours" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Text="{Binding RawHours, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Hours of every reading" />
+                            <TextBlock Style="{StaticResource Aside}" Text="24 to 168" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Keep minute totals for, years" />
+                            <TextBox Style="{StaticResource Field}" Width="60" Text="{Binding HistoryYears, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Years of minute totals" />
+                            <TextBlock Style="{StaticResource Aside}" Text="1 to 5; hourly totals are kept for good" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="CALIBRATION" />
+                    <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" Text="{Binding Calibration}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0" Visibility="{Binding ConfirmingReset, Converter={StaticResource HiddenWhen}}">
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Reset calibration" Command="{Binding ResetCalibration}" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0" Visibility="{Binding ConfirmingReset, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource M.Text.Body}" Text="Forget what was learned on battery?" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Keep" Command="{Binding CancelReset}" Margin="0,0,8,0" />
+                        <Button Style="{StaticResource M.Button.Primary}" Content="Reset" Command="{Binding ConfirmReset}" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Said}" Text="{Binding CalibrationMessage}" Visibility="{Binding CalibrationMessage, Converter={StaticResource VisibleWhenText}}" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="PREFERENCES" />
+                    <StackPanel Style="{StaticResource Row}">
+                        <TextBlock Style="{StaticResource Label}" Text="CO₂ per kWh, kg" />
+                        <TextBox Style="{StaticResource Field}" Width="72" Text="{Binding Co2, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Kilograms of CO2 per kWh" />
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Save" Command="{Binding SaveCo2}" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Note}" Margin="208,0,0,0" Text="Use your electricity supplier's figure for its grid; 0.40 is the world average." />
+                    <TextBlock Style="{StaticResource Said}" Text="{Binding Co2Message}" Visibility="{Binding Co2Message, Converter={StaticResource VisibleWhenText}}" />
+                    <!-- The Midnight look design §1: the look, in both looks, next to the theme. -->
+                    <StackPanel Style="{StaticResource Row}" Margin="0,14,0,6">
+                        <TextBlock Style="{StaticResource Label}" Text="Look" />
+                        <Border Style="{StaticResource Choices}">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Style="{StaticResource Choice}" Content="Classic" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Classic}}" />
+                                <RadioButton Style="{StaticResource Choice}" Content="Midnight" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Midnight}}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel Style="{StaticResource Row}">
+                        <TextBlock Style="{StaticResource Label}" Text="Theme" />
+                        <Border Style="{StaticResource Choices}">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Style="{StaticResource Choice}" Content="Like Windows" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.System}}" />
+                                <RadioButton Style="{StaticResource Choice}" Content="Dark" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Dark}}" />
+                                <RadioButton Style="{StaticResource Choice}" Content="Light" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Light}}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel Style="{StaticResource Row}">
+                        <TextBlock Style="{StaticResource Label}" Text="Start with Windows" />
+                        <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding StartWithWindows}">
+                            <TextBlock Style="{StaticResource SwitchText}" Text="In the tray, when you sign in" />
+                        </ToggleButton>
+                    </StackPanel>
+                    <StackPanel Style="{StaticResource Row}">
+                        <TextBlock Style="{StaticResource Label}" Text="Monitors" />
+                        <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding ReadMonitorBrightness}">
+                            <TextBlock Style="{StaticResource SwitchText}" Text="Read monitors' brightness and whether they're on (read-only)" />
+                        </ToggleButton>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Said}" Text="{Binding AppMessage}" Visibility="{Binding AppMessage, Converter={StaticResource VisibleWhenText}}" />
+                    <StackPanel Style="{StaticResource Row}">
+                        <TextBlock Style="{StaticResource Label}" Text="Updates" />
+                        <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding Updates.CheckAutomatically}">
+                            <TextBlock Style="{StaticResource SwitchText}" Text="Download new versions quietly, then ask" />
+                        </ToggleButton>
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Check now" Command="{Binding Updates.CheckNow}" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Note}" Margin="208,0,0,0" Text="{Binding Updates.Status}"
+                               Visibility="{Binding Updates.Status, Converter={StaticResource VisibleWhenText}, FallbackValue=Collapsed}" />
+                    <TextBlock Style="{StaticResource Said}" Text="{Binding Updates.Message}"
+                               Visibility="{Binding Updates.Message, Converter={StaticResource VisibleWhenText}, FallbackValue=Collapsed}" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" DataContext="{Binding Privacy}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="PRIVACY" />
+                    <StackPanel>
+                        <ToggleButton Style="{StaticResource Switch}" Content="Crash and sensor reports" IsChecked="{Binding Diagnostics}" />
+                        <TextBlock Style="{StaticResource SwitchNote}"
+                                   Text="When PowerLedger crashes or a sensor fails, send what went wrong and on which hardware, so it can be fixed." />
+                    </StackPanel>
+                    <StackPanel Margin="0,14,0,0">
+                        <ToggleButton Style="{StaticResource Switch}" Content="Usage" IsChecked="{Binding Usage}" />
+                        <TextBlock Style="{StaticResource SwitchNote}" Text="Send how PowerLedger is used, so the next version works on what matters." />
+                    </StackPanel>
+                    <StackPanel Margin="0,14,0,0">
+                        <ToggleButton Style="{StaticResource Switch}" Content="Hardware and power" IsChecked="{Binding Power}" />
+                        <TextBlock Style="{StaticResource SwitchNote}"
+                                   Text="Send this PC's parts and its power, minute by minute, so PowerLedger's estimates get more accurate for everyone." />
+                    </StackPanel>
+                    <StackPanel Margin="0,14,0,0">
+                        <ToggleButton Style="{StaticResource Switch}" Content="Share my detailed data" IsChecked="{Binding Share}" IsEnabled="{Binding Power}"
+                                      ToolTipService.ShowOnDisabled="True" ToolTip="Needs Hardware and power turned on" />
+                        <TextBlock Style="{StaticResource SwitchNote}"
+                                   Text="Let what Hardware and power sends be given or sold, as it is, to researchers, hardware makers and energy companies. It goes under a random ID, never your name. Copies already shared can't be taken back." />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+
+                    <StackPanel Style="{StaticResource Row}" Margin="0,16,0,0">
+                        <TextBlock Style="{StaticResource Label}" Text="Install ID" />
+                        <TextBlock Style="{StaticResource M.Text.Number}" FontSize="12.5" VerticalAlignment="Center" Text="{Binding InstallId}" />
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Copy" Command="{Binding CopyInstallId}" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Note}" Margin="208,0,0,0" Text="{Binding Status}" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0" Visibility="{Binding ConfirmingDelete, Converter={StaticResource HiddenWhen}}">
+                        <Button Style="{StaticResource M.Button.Outline}" Content="What's been sent…" Command="{Binding OpenSent}" />
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Delete my data…" Command="{Binding DeleteMyData}" Margin="8,0,0,0" />
+                        <Button Style="{StaticResource M.Button.Quiet}" Content="Privacy policy" Command="{Binding OpenPrivacyPolicy}" Margin="8,0,0,0" />
+                    </StackPanel>
+                    <StackPanel Margin="0,14,0,0" Visibility="{Binding ConfirmingDelete, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource M.Text.Heading}" Text="Delete my data" />
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="This deletes everything PowerLedger has sent from this PC from the server and turns every switch off. Data already shared with others can't be recalled." />
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Style="{StaticResource M.Button.Outline}" Content="Cancel" Command="{Binding CancelDelete}" />
+                            <Button Style="{StaticResource M.Button.Primary}" Content="Delete" Command="{Binding ConfirmDelete}" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" DataContext="{Binding Household}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="HOUSEHOLD" />
+                    <StackPanel Style="{StaticResource Row}">
+                        <TextBlock Style="{StaticResource Label}" Text="Discoverable" />
+                        <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding Discoverable}">
+                            <TextBlock Style="{StaticResource SwitchText}" Text="Let my other PCs find this one on the network" />
+                        </ToggleButton>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="ABOUT" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Image Source="{StaticResource Brand.Mark}" Width="36" Height="36" VerticalAlignment="Center" />
+                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Style="{StaticResource M.Text.Heading}" Text="PowerLedger" />
+                            <TextBlock Style="{StaticResource M.Text.Muted}" Text="How much power this PC uses, and what it costs" />
+                        </StackPanel>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource M.Text.Body}" Text="{Binding ServiceState}" />
+                    <TextBlock Style="{StaticResource M.Text.Secondary}" Margin="0,4,0,0" Text="{Binding Database, StringFormat=Database {0}}" />
+                    <TextBlock Style="{StaticResource M.Text.Secondary}" Margin="0,4,0,0" TextWrapping="Wrap" Text="No driver: readings come from interfaces Windows already provides." />
+                    <TextBlock Style="{StaticResource M.Text.Secondary}" Margin="0,4,0,12" TextWrapping="Wrap"
+                               Text="Monitor figures come from the ENERGY STAR Certified Displays list (US EPA, public domain). PowerLedger isn't endorsed by ENERGY STAR." />
+                    <ItemsControl ItemsSource="{Binding Sources}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type app:SourceLine}">
+                                <Border Style="{StaticResource M.Table.Row}" MinHeight="36">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="208" />
+                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Style="{StaticResource M.Text.Body}" Text="{Binding Name}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Secondary}" Text="{Binding State}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap" Text="{Binding Detail}" VerticalAlignment="Center" Margin="0,8" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Style="{StaticResource M.Button.Outline}" Content="Run setup again" Command="{Binding RunSetup}" HorizontalAlignment="Left" Margin="0,16,0,0" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

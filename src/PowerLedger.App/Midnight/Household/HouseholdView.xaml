@@ -1,0 +1,267 @@
+<UserControl x:Class="PowerLedger.App.Midnight.HouseholdView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="clr-namespace:PowerLedger.App">
+    <UserControl.Resources>
+        <!-- Prose and forms keep to a readable measure inside a card; a period's cost lines sit under its energy. -->
+        <Style x:Key="Measure" TargetType="StackPanel">
+            <Setter Property="MaxWidth" Value="560" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+        <Style x:Key="Prose" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <DataTemplate x:Key="Period">
+            <StackPanel>
+                <TextBlock Style="{StaticResource M.Card.Title}" Text="{Binding Title, Converter={StaticResource Upper}}" />
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource M.Text.Display}" Text="{Binding Energy}" />
+                    <TextBlock Style="{StaticResource M.Text.Secondary}" Text="kWh" Margin="8,0,0,7" VerticalAlignment="Bottom" />
+                </StackPanel>
+                <ItemsControl ItemsSource="{Binding Costs}" Focusable="False" Margin="0,4,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type app:HouseholdCostLine}">
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                <TextBlock Style="{StaticResource M.Text.Number}" Text="{Binding Cost}" />
+                                <TextBlock Style="{StaticResource M.Text.Muted}" Text="{Binding Currency}" Margin="6,0,0,0" VerticalAlignment="Bottom" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="{StaticResource M.Page.Margin}">
+
+            <!-- Before a household exists: the explanation and Add a PC (households design §2). -->
+            <Border Style="{StaticResource M.Card}" Visibility="{Binding HasHousehold, Converter={StaticResource HiddenWhen}}">
+                <StackPanel Style="{StaticResource Measure}">
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="HOUSEHOLD" />
+                    <TextBlock Style="{StaticResource Prose}" FontSize="15" Text="{Binding Message}" />
+                    <!-- Task 0.8's removeOldRows: household_rows/household_members still name this PC from one it has since
+                         left; Remove the old household's rows deletes every left PC's rows named here. -->
+                    <StackPanel Margin="0,16,0,0" Visibility="{Binding HasOldRows, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource M.Note}" Text="This PC still holds rows from a household it left."
+                                   Visibility="{Binding IsConfirming, Converter={StaticResource HiddenWhen}}" />
+                        <Button Style="{StaticResource M.Button.Quiet}" Margin="-12,4,0,0" HorizontalAlignment="Left" Content="Remove the old household's rows…"
+                                Command="{Binding AskRemoveAllOldRows}" Visibility="{Binding IsConfirming, Converter={StaticResource HiddenWhen}}" />
+                        <StackPanel Visibility="{Binding IsConfirming, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock Style="{StaticResource Prose}" Text="{Binding ConfirmText}" />
+                            <TextBlock Style="{StaticResource M.Said}" Margin="0,8,0,0" Text="{Binding ActionMessage}"
+                                       Visibility="{Binding ActionMessage, Converter={StaticResource VisibleWhenText}}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Style="{StaticResource M.Button.Outline}" Content="Cancel" Command="{Binding CancelPending}" />
+                                <Button Style="{StaticResource M.Button.Primary}" Content="Confirm" Command="{Binding ConfirmPending}" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                    <!-- N2, plan 0.9: this PC's join request ended unanswered or was refused; only the user asks again. -->
+                    <StackPanel Margin="0,16,0,0" Visibility="{Binding CanAskAgain, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource M.Note}" Text="Nobody approved this PC." />
+                        <Button Style="{StaticResource M.Button.Outline}" Margin="0,8,0,0" Content="Ask again" Command="{Binding AskAgain}" HorizontalAlignment="Left" />
+                        <TextBlock Style="{StaticResource M.Said}" Margin="0,6,0,0" Text="{Binding AskAgainMessage}"
+                                   Visibility="{Binding AskAgainMessage, Converter={StaticResource VisibleWhenText}}" />
+                    </StackPanel>
+                    <Button Style="{StaticResource M.Button.Primary}" Margin="0,20,0,0" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
+                </StackPanel>
+            </Border>
+
+            <StackPanel Visibility="{Binding HasHousehold, Converter={StaticResource VisibleWhen}}">
+                <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,0,0,12" Text="{Binding Message}"
+                           Visibility="{Binding HasMessage, Converter={StaticResource VisibleWhen}}" />
+                <TextBlock Style="{StaticResource M.Said}" Margin="0,0,0,12" Text="{Binding Problem}"
+                           Visibility="{Binding HasProblem, Converter={StaticResource VisibleWhen}}" />
+
+                <!-- The three ledgers as small cards. -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Style="{StaticResource M.Card}">
+                        <ContentControl Content="{Binding Today}" ContentTemplate="{StaticResource Period}" Focusable="False" />
+                    </Border>
+                    <Border Grid.Column="2" Style="{StaticResource M.Card}">
+                        <ContentControl Content="{Binding Week}" ContentTemplate="{StaticResource Period}" Focusable="False" />
+                    </Border>
+                    <Border Grid.Column="4" Style="{StaticResource M.Card}">
+                        <ContentControl Content="{Binding Month}" ContentTemplate="{StaticResource Period}" Focusable="False" />
+                    </Border>
+                </Grid>
+
+                <!-- The members: a row per PC with its kind, when it synced, its share of the month and its energy. -->
+                <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" Padding="20,20,20,12">
+                    <!-- The header and each row are grids of their own; the shared group keeps the actions column one width in all of them. -->
+                    <StackPanel Grid.IsSharedSizeScope="True">
+                        <DockPanel Margin="0,0,0,12">
+                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Eyebrow}" VerticalAlignment="Center" Text="SHARE OF THIS MONTH" />
+                            <TextBlock Style="{StaticResource M.Text.Heading}" Text="Your PCs" />
+                        </DockPanel>
+                        <Border Style="{StaticResource M.Table.Header}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" MinWidth="120" />
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="Actions" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="PC" />
+                                <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="LAST SYNCED" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Width="80" Margin="0,0,16,0" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" HorizontalAlignment="Right" />
+                            </Grid>
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding Members}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type app:HouseholdMemberDisplay}">
+                                    <Border Style="{StaticResource M.Table.Row}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" MinWidth="120" />
+                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="72" />
+                                                <ColumnDefinition Width="Auto" SharedSizeGroup="Actions" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock x:Name="Kind" Style="{StaticResource M.Text.Glyph}" Text="&#xE977;" ToolTip="{Binding Kind}" Margin="0,0,10,0"
+                                                           AutomationProperties.Name="{Binding Kind}" />
+                                                <TextBlock Style="{StaticResource M.Text.Body}" FontWeight="SemiBold" Text="{Binding Name}" VerticalAlignment="Center" />
+                                                <TextBlock Style="{StaticResource M.Text.Muted}" Margin="8,0,0,0" Text="this PC" VerticalAlignment="Center"
+                                                           Visibility="{Binding IsThisPc, Converter={StaticResource VisibleWhen}}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Muted}" Text="{Binding Status}" VerticalAlignment="Center" Margin="0,0,12,0"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <Border Grid.Column="2" Style="{StaticResource M.ShareTrack}" Width="80" Margin="0,0,16,0"
+                                                    AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}">
+                                                <Border HorizontalAlignment="Left" Background="{DynamicResource M.PartCpu}" app:Rounding.Pill="True"
+                                                        Width="{Binding Share, Converter={StaticResource ShareWidth}, ConverterParameter=80}" />
+                                            </Border>
+                                            <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Number}" Text="{Binding Energy}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" MinWidth="96" VerticalAlignment="Center">
+                                                <Button Style="{StaticResource M.Button.Quiet}" Content="Remove"
+                                                        Command="{Binding DataContext.AskRemove, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}" Visibility="{Binding CanRemove, Converter={StaticResource VisibleWhen}}" />
+                                                <!-- Task 0.8: a left row's rows can be deleted (removeOldRows) instead of removing a current member. -->
+                                                <Button Style="{StaticResource M.Button.Quiet}" Content="Remove its rows"
+                                                        Command="{Binding DataContext.AskRemove, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}" Visibility="{Binding CanRemoveRows, Converter={StaticResource VisibleWhen}}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding Kind}" Value="Laptop">
+                                            <Setter TargetName="Kind" Property="Text" Value="&#xE7F8;" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Style="{StaticResource M.Button.Outline}" Margin="0,12,0,4" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
+                    <StackPanel Style="{StaticResource Measure}">
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="MANAGE THIS HOUSEHOLD" />
+                        <StackPanel Visibility="{Binding IsConfirming, Converter={StaticResource HiddenWhen}}">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Secondary}" Text="This PC's name" Margin="0,0,12,0" VerticalAlignment="Center" />
+                                <Button DockPanel.Dock="Right" Style="{StaticResource M.Button.Outline}" Content="Save" Margin="8,0,0,0" Command="{Binding SaveName}" />
+                                <TextBox Style="{StaticResource M.Field}" Text="{Binding NameInput, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="This PC's name" />
+                            </DockPanel>
+                            <TextBlock Style="{StaticResource M.Said}" Margin="0,6,0,0" Text="{Binding NameMessage}"
+                                       Visibility="{Binding NameMessage, Converter={StaticResource VisibleWhenText}}" />
+                            <Button Style="{StaticResource M.Button.Quiet}" Margin="-12,12,0,0" Content="Leave this household…" Command="{Binding AskLeave}" HorizontalAlignment="Left" />
+                        </StackPanel>
+                        <StackPanel Visibility="{Binding IsConfirming, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock Style="{StaticResource Prose}" Text="{Binding ConfirmText}" />
+                            <TextBlock Style="{StaticResource M.Said}" Margin="0,8,0,0" Text="{Binding ActionMessage}"
+                                       Visibility="{Binding ActionMessage, Converter={StaticResource VisibleWhenText}}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Style="{StaticResource M.Button.Outline}" Content="Cancel" Command="{Binding CancelPending}" />
+                                <Button Style="{StaticResource M.Button.Primary}" Content="Confirm" Command="{Binding ConfirmPending}" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- N2's sign-in (Plan N tasks A6, A7): works whether or not this PC is in a household. -->
+            <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" DataContext="{Binding Account}">
+                <StackPanel Style="{StaticResource Measure}">
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="SIGN IN" />
+                    <StackPanel Visibility="{Binding SignedIn, Converter={StaticResource HiddenWhen}}">
+                        <!-- Security round, review: a provider with no client ID (or, for Google, no secret) is not offered
+                             at all; with neither available, this explains why instead of showing anything to press. -->
+                        <TextBlock Style="{StaticResource M.Note}" Margin="0" Text="{x:Static app:SignInViewModel.Unavailable}"
+                                   Visibility="{Binding AnyAvailable, Converter={StaticResource HiddenWhen}}" />
+                        <StackPanel Visibility="{Binding AnyAvailable, Converter={StaticResource VisibleWhen}}">
+                            <StackPanel Orientation="Horizontal" Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource HiddenWhen}}">
+                                <Button Style="{StaticResource M.Button.Outline}" Content="Sign in with Microsoft" Command="{Binding SignInWithMicrosoft}"
+                                        Visibility="{Binding MicrosoftAvailable, Converter={StaticResource VisibleWhen}}" />
+                                <Button Style="{StaticResource M.Button.Outline}" Content="Sign in with Google" Command="{Binding SignInWithGoogle}" Margin="8,0,0,0"
+                                        Visibility="{Binding GoogleAvailable, Converter={StaticResource VisibleWhen}}" />
+                            </StackPanel>
+                            <DockPanel Margin="0,12,0,0" Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource HiddenWhen}}">
+                                <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Secondary}" Text="Recovery code" Margin="0,0,12,0" VerticalAlignment="Center" />
+                                <!-- Plan 0.10: read once when Sign in is pressed and locked until that sign-in ends, so a
+                                     code typed while the browser is up changes nothing about the attempt already under way. -->
+                                <TextBox Style="{StaticResource M.Field}" Text="{Binding RecoveryCodeInput, UpdateSourceTrigger=PropertyChanged}"
+                                         IsReadOnly="{Binding RecoveryCodeLocked}" AutomationProperties.Name="Recovery code" />
+                            </DockPanel>
+                            <TextBlock Style="{StaticResource M.Note}" Margin="0,6,0,0"
+                                       Text="Have a recovery code? Type it here, then sign in, to get your household back without waiting for another PC to approve you."
+                                       Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource HiddenWhen}}" />
+                            <!-- Plan 0.9: a typed recovery code warns before the browser opens at all, since it removes the
+                                 household's other PCs. -->
+                            <StackPanel Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource VisibleWhen}}">
+                                <TextBlock Style="{StaticResource Prose}" Text="{x:Static app:SignInViewModel.RecoveryWarning}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <Button Style="{StaticResource M.Button.Outline}" Content="Cancel" Command="{Binding CancelRecoverySignIn}" />
+                                    <Button Style="{StaticResource M.Button.Primary}" Content="Continue" Command="{Binding ContinueRecoverySignIn}" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SignedIn, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource M.Text.Body}" Text="{Binding Email}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0" Visibility="{Binding ConfirmingDelete, Converter={StaticResource HiddenWhen}}">
+                            <Button Style="{StaticResource M.Button.Outline}" Content="Sign out" Command="{Binding SignOut}" />
+                            <Button Style="{StaticResource M.Button.Quiet}" Content="Delete account…" Command="{Binding DeleteAccount}" Margin="8,0,0,0" />
+                        </StackPanel>
+                        <StackPanel Margin="0,12,0,0" Visibility="{Binding ConfirmingDelete, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock Style="{StaticResource M.Text.Heading}" Text="Delete account" />
+                            <TextBlock Style="{StaticResource M.Note}"
+                                       Text="This removes your account and its recovery code. Your household and its members carry on without sign-in." />
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Style="{StaticResource M.Button.Outline}" Content="Cancel" Command="{Binding CancelDelete}" />
+                                <Button Style="{StaticResource M.Button.Primary}" Content="Delete" Command="{Binding ConfirmDelete}" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource M.Said}" Margin="0,10,0,0" Text="{Binding Message}"
+                               Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Review finding A6, task 0.8: RecoveryMissing, whether or not this PC is in a household right now. -->
+            <Border Style="{StaticResource M.Card.Flat}" Margin="{StaticResource M.Card.Gap}" Visibility="{Binding RecoveryMissing, Converter={StaticResource VisibleWhen}}">
+                <StackPanel Style="{StaticResource Measure}">
+                    <TextBlock Style="{StaticResource Prose}" Text="Your account's recovery code no longer works." />
+                    <Button Style="{StaticResource M.Button.Outline}" Margin="0,12,0,0" Content="Make a new recovery code" Command="{Binding MakeRecoveryCode}"
+                            HorizontalAlignment="Left" />
+                    <TextBlock Style="{StaticResource M.Said}" Margin="0,6,0,0" Text="{Binding RecoveryMessage}"
+                               Visibility="{Binding RecoveryMessage, Converter={StaticResource VisibleWhenText}}" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
