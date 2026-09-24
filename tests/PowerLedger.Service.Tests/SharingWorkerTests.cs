@@ -720,6 +720,32 @@ public sealed class SharingWorkerTests : IDisposable
             new SharingReply(2, false, "Couldn't send: the server didn't answer in time. Will try again."));
         await handling;
         (_h.Store.Problem, _h.Store.Backoff).ShouldBe((null, null));
+
+        _h.Store.LastRun.ShouldBeNull();                                      // asked but not answered in time: not the night's run
+        _h.Client.AnswerAsync = (_, _) => Task.FromResult<SendOutcome>(new SendOutcome.Accepted());
+        await _h.TickAsync();
+        _h.Outbox.Days().ShouldBeEmpty();                                     // so the five-minute run sends it the same night
+    }
+
+    [Fact]
+    public async Task A_problem_that_lasts_outlives_later_uploads_and_goes_when_the_user_answers_again()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(true, true, true);
+        var old = _h.Store.InstallId.ShouldNotBeNull();
+        new SettingsRepository(_h.Database.Db).Set(SharingStore.KeyKey, "not a key this account protected");
+        await _h.Consent(true, false, true);                                  // usage off, which the server can't be told
+        _h.Store.Problem.ShouldBe(new SendProblem(Unheard(old), Rejected: false, Lasts: true));
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(10));
+
+        _h.Clock.SetUtcNow(Local(25, 1, 1));
+        await _h.TickAsync();
+
+        _h.Client.Reports.ShouldHaveSingleItem().InstallId.ShouldNotBe(old);   // sent under the new ID
+        _h.Store.Problem.ShouldBe(new SendProblem(Unheard(old), Rejected: false, Lasts: true));
+
+        await _h.Consent(true, true, true);
+        _h.Store.Problem.ShouldBeNull();
     }
 
     [Fact]

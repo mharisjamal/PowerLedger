@@ -303,6 +303,7 @@ internal sealed class SharingWorker : BackgroundService
 
         var now = _clock.GetUtcNow();
         var nowMs = now.ToUnixTimeMilliseconds();
+        if (_store.Problem is { Lasts: true }) _store.Problem = null;       // shown until the user answers again, as now
         var before = _store.StoredConsent;
         var was = before?.Consent is { Answered: true } answered ? answered : AllOff;
         if (consent.AllowsAny) Identity(changing: true);                    // the first switch turned on makes the ID and key
@@ -701,7 +702,7 @@ internal sealed class SharingWorker : BackgroundService
                         _log.LogWarning("The server rejected {Day}: {Reason}", day, rejected.Text);
                         _outbox.DeleteDay(day);
                         Close(day);
-                        _store.Problem = new SendProblem(rejected.Text, Rejected: true);
+                        Note(new SendProblem(rejected.Text, Rejected: true));
                         result.Rejected = rejected.Text;
                         break;
                     case SendOutcome.Gone:
@@ -712,11 +713,12 @@ internal sealed class SharingWorker : BackgroundService
                     case OutOfTime late:
                         _log.LogInformation("Sending {Day} ran out of the App's time ({Reason}); it goes at the next chance", day, late.Text);
                         result.Failed = late.Text;
+                        asked = false;                                          // not the night's run: the five-minute run tries again
                         return result;
                     default:
                         var reason = outcome.Reason ?? "the server didn't take it";
                         _log.LogInformation("Sending {Day} failed ({Reason}); trying again later", day, reason);
-                        _store.Problem = new SendProblem(reason, Rejected: false);
+                        Note(new SendProblem(reason, Rejected: false));
                         _store.Backoff = SendSchedule.After(_store.Backoff, now);
                         result.Failed = reason;
                         return result;
@@ -742,10 +744,17 @@ internal sealed class SharingWorker : BackgroundService
         Close(day);
         WriteSent(day, body);
         _store.LastSent = new LastSent(now.ToUnixTimeMilliseconds(), body.Length);
-        _store.Problem = null;
+        Note(null);
         _store.Backoff = null;
         Posted();                                                              // the report carried the consent as it is now
         if (hardwareHash is not null) _store.HardwareHash = hardwareHash;
+    }
+
+    /// <summary>How the last upload went, for the status. A problem that lasts, which trying again won't clear, is kept over
+    /// it until the user answers again (<see cref="SetConsentAsync"/>), so it is there to be read.</summary>
+    private void Note(SendProblem? problem)
+    {
+        if (_store.Problem is not { Lasts: true }) _store.Problem = problem;
     }
 
     /// <summary>Marks the day, and every one before it, as done: nothing more is filed under them.</summary>
