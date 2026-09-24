@@ -311,6 +311,37 @@
         </Setter>
     </Style>
 
+    <!-- The rail's round Send-feedback button: a bug drawn as one Path (no new font, unlike CardClose's glyph font). -->
+    <Style x:Key="FeedbackButton" TargetType="Button">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink3}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="Transparent" CornerRadius="14">
+                        <Viewbox Width="15" Height="15">
+                            <Path Data="M6.5,3.5 A1.5,1.5 0 1 0 9.5,3.5 A1.5,1.5 0 1 0 6.5,3.5 Z M5,9.5 A3,4 0 1 0 11,9.5 A3,4 0 1 0 5,9.5 Z M7,2.2 L6,0.5 M9,2.2 L10,0.5 M5.3,7 L2,6 M5,9.5 L1.3,9.5 M5.3,12 L2,13 M10.7,7 L14,6 M11,9.5 L14.7,9.5 M10.7,12 L14,13"
+                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                        </Viewbox>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource Brush.Line}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Amber}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Words that act: underlined so they read as clickable at rest, brighter when hovered, amber when they have the keyboard. -->
     <Style x:Key="Link" TargetType="Button">
         <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
