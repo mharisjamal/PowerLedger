@@ -271,6 +271,32 @@ public class MidnightPageRenderingTests
         Sizes(30_000, "settings");
     }
 
+    /// <summary>
+    /// A page's buttons wear the corners and the hover wash their style names. The template reads them from the Wash
+    /// attached properties, which a Binding path can't find on an internal class (it fails with a PathError, leaving square
+    /// corners and no wash); a TemplateBinding can.
+    /// </summary>
+    [Fact]
+    public void The_pages_buttons_take_their_corners_and_wash_from_their_style()
+        => OnUi(() =>
+        {
+            using var styles = Midnight(Theme.Dark);
+            var model = HouseholdScreen();
+            model.Show();
+            var view = new Midnight.HouseholdView { DataContext = model };
+            using var page = Page(view, 1010);
+            var buttons = AllOf<Button>(view).Where(b => b.IsVisible).ToList();
+            buttons.ShouldNotBeEmpty();
+            foreach (var button in buttons)
+            {
+                var face = button.Template.FindName("Face", button).ShouldBeOfType<Border>($"{button.Content}");
+                face.CornerRadius.ShouldBe(Wash.GetCorner(button), $"{button.Content}");
+                var wash = (Border)button.Template.FindName("Wash", button).ShouldBeOfType<Border>($"{button.Content}").Child;
+                wash.Background.ShouldBe(Wash.GetBrush(button), $"{button.Content}");
+                wash.Opacity.ShouldBe(Wash.GetStrength(button), $"{button.Content}");
+            }
+        });
+
     /// <summary>The same behaviour Classic's Settings has, through the shared SettingsEntry behaviour (M2-4).</summary>
     [Fact]
     public void Settings_saves_a_typed_value_once_enter_is_pressed_and_a_tick_at_once()

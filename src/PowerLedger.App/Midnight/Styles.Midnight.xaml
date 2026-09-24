@@ -289,18 +289,18 @@
     </Style>
 
     <!-- Buttons (0.5): the pointer lights a wash over the face, a press squeezes it to 0.97 about its centre, and the
-         release springs back. The wash is a layer that fades (Wash), so no palette brush is ever animated. -->
+         release springs back. The wash is a layer that fades (Wash), so no palette brush is ever animated. The Wash values
+         come in by TemplateBinding: a Binding path can't find an attached property on an internal class. -->
     <ControlTemplate x:Key="M.Button.Face" TargetType="Button">
         <Border x:Name="Face" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                CornerRadius="{Binding (local:Wash.Corner), RelativeSource={RelativeSource TemplatedParent}}"
+                CornerRadius="{TemplateBinding local:Wash.Corner}"
                 SnapsToDevicePixels="True" RenderTransformOrigin="0.5,0.5">
             <Border.RenderTransform>
                 <ScaleTransform x:Name="Press" ScaleX="1" ScaleY="1" />
             </Border.RenderTransform>
             <Grid>
                 <Border x:Name="Wash" Opacity="0" CornerRadius="{Binding CornerRadius, ElementName=Face}">
-                    <Border Background="{Binding (local:Wash.Brush), RelativeSource={RelativeSource TemplatedParent}}"
-                            Opacity="{Binding (local:Wash.Strength), RelativeSource={RelativeSource TemplatedParent}}"
+                    <Border Background="{TemplateBinding local:Wash.Brush}" Opacity="{TemplateBinding local:Wash.Strength}"
                             CornerRadius="{Binding CornerRadius, ElementName=Face}" />
                 </Border>
                 <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
