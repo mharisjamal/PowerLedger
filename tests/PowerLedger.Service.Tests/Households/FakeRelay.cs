@@ -67,6 +67,12 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         lock (_gate) return _households.TryGetValue(household, out var members) ? new Dictionary<string, Member>(members) : [];
     }
 
+    /// <summary>The PCs the key of an epoch was sealed to.</summary>
+    public IReadOnlyList<string> Sealed(string household, int epoch)
+    {
+        lock (_gate) return [.. _envelopes.Keys.Where(key => key.Household == household && key.Epoch == epoch).Select(key => key.Device)];
+    }
+
     /// <summary>The household's current epoch as the server tracks it.</summary>
     public int Epoch(string household)
     {

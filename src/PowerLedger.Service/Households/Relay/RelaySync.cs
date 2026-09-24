@@ -10,10 +10,10 @@ using PowerLedger.Storage;
 namespace PowerLedger.Service.Households.Relay;
 
 /// <summary>Something the server still has to be told, kept until it has been: a household made, a member added or removed, a
-/// new epoch's keys. Each names its household, so what leaving asks of the server still goes after this PC has left.</summary>
+/// new epoch's keys. Each names its household, so what leaving asks of the server still goes after this PC has left. A new
+/// epoch's key waits in <see cref="HouseholdStore.RotationKey"/>, sealed only when it goes.</summary>
 internal sealed record PendingOp(
-    string Kind, string Household, string? Device = null, string? Sign = null, string? Dh = null, int? Epoch = null,
-    List<EnvelopeBody>? Envelopes = null, string? Proof = null)
+    string Kind, string Household, string? Device = null, string? Sign = null, string? Dh = null, int? Epoch = null, string? Proof = null)
 {
     public const string Create = "create";
     public const string Add = "add";
@@ -160,7 +160,6 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     /// waits for it is dropped too. A new key the server refuses is made again from where the household is now.</summary>
     public async Task FlushAsync(DeviceKeys keys, RelayRun run, CancellationToken cancel)
     {
-        var remade = 0;
         while (store.Pending is [var op, ..])
         {
             var result = op.Kind switch
@@ -170,8 +169,8 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                     await relay.AddMemberAsync(keys, op.Household, sign, dh, proof, cancel).ConfigureAwait(false),
                 PendingOp.Remove when op.Device is { } device =>
                     await relay.RemoveMemberAsync(keys, op.Household, device, cancel).ConfigureAwait(false),
-                PendingOp.Keys when op is { Epoch: { } epoch, Envelopes: { } envelopes } =>
-                    await relay.PostKeysAsync(keys, op.Household, epoch, envelopes, cancel).ConfigureAwait(false),
+                PendingOp.Keys when op.Household == store.HouseholdId => await PostRotationAsync(keys, op.Household, cancel).ConfigureAwait(false),
+                PendingOp.Keys => new RelayResult<Done>(200, null, null),       // left since: nobody to rotate for
                 PendingOp.RecoveryEnvelope when store.Session is { } session && store.RecoveryKey is { } recoveryKey
                     && op.Household == store.HouseholdId && store.CurrentKey is { } current =>
                     await relay.PutRecoveryAsync(keys, session, Recovery.Envelope(recoveryKey, op.Household, current), cancel).ConfigureAwait(false),
@@ -197,11 +196,6 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             {
                 throw new RelayStop($"Couldn't reach the server to update the household: {result.Problem}.");
             }
-            else if (op.Kind == PendingOp.Keys && result.Status is 400 or 409 && remade++ < 3
-                && await RemakeKeysAsync(keys, op, result.Status, cancel).ConfigureAwait(false))
-            {
-                continue;                                                      // a new rotation stands in its place
-            }
             else if (!(op.Kind == PendingOp.Remove && result.Status == 404))  // already gone: removed by another, or it left
             {
                 log.LogWarning("The server won't take the household's {Kind} ({Status}: {Problem}); it is dropped", op.Kind, result.Status, result.Problem);
@@ -215,43 +209,91 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     }
 
     /// <summary>
-    /// A new key the server refused: with 409, it doesn't follow the household's current epoch, as when another member
-    /// rotated first or this PC was behind; with 400, it was sealed to a PC that is no longer a member. This PC takes every
-    /// newer key it can have, marks who has gone, and rotates again from where the household is now, to the members it
-    /// knows are still in and itself, so no PC that left holds the newest key.
+    /// Starts a new key for the household (households design §6, plan 0.8), as when a PC is removed: made now and kept aside,
+    /// sealed and posted when the server can be told, to the members it then lists as current, and used here only once it
+    /// takes it. One at a time: a rotation already waiting covers every removal since, as it is sealed when it goes.
     /// </summary>
-    /// <returns>True when the new rotation took the refused one's place at the head of the queue.</returns>
-    private async Task<bool> RemakeKeysAsync(DeviceKeys keys, PendingOp op, int status, CancellationToken cancel)
+    public void StartRotation(string householdId)
     {
-        if (op.Household != store.HouseholdId || op.Epoch is not { } refused) return false;
-        if (status == 409)
+        if (store.HouseholdId != householdId || store.Pending.Any(op => op.Kind == PendingOp.Keys && op.Household == householdId)) return;
+        var epoch = store.Epoch + 1;
+        store.RotationKey = (epoch, HouseholdCrypto.NewKey());
+        store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch));
+        log.LogInformation("A new key for the household waits to go to the server at epoch {Epoch}", epoch);
+    }
+
+    /// <summary>
+    /// Posts the waiting new key: sealed to each member this PC knows as current that the server lists as current too, with
+    /// the keys this PC holds for it, and to this PC. When another member's new key got to the epoch first (409), this PC
+    /// takes the keys the server has and rotates again after them; when a member went between the list and the post (400),
+    /// the list is read again. Once the server takes it, the key becomes this PC's current one, the members removed so far
+    /// can have sealed no key from then on, and the recovery envelope goes again with it.
+    /// </summary>
+    private async Task<RelayResult<Done>> PostRotationAsync(DeviceKeys keys, string householdId, CancellationToken cancel)
+    {
+        (int Epoch, byte[] Key) rotation = store.RotationKey is { } pending && pending.Epoch > store.Epoch ? pending : (store.Epoch + 1, HouseholdCrypto.NewKey());
+        store.RotationKey = rotation;
+        for (var attempt = 0; attempt < 4; attempt++)
         {
-            for (var epoch = refused; epoch < refused + 8; epoch++)
-            {
-                if (await FetchKeyAsync(keys, op.Household, epoch, cancel).ConfigureAwait(false) is not { } key) break;
-                store.AddKey(epoch, key, replace: true);
-            }
-        }
-        var members = await relay.MembersAsync(keys, op.Household, cancel).ConfigureAwait(false);
-        if (members.Ok)
-        {
-            foreach (var gone in members.Value!.Where(member => member.Removed is not null && member.Device != keys.DeviceId))
+            var listed = await relay.MembersAsync(keys, householdId, cancel).ConfigureAwait(false);
+            if (!listed.Ok) return new RelayResult<Done>(listed.Status, null, listed.Error);
+            var serverMembers = listed.Value!;
+            foreach (var gone in serverMembers.Where(member => member.Removed is not null && member.Device != keys.DeviceId))
             {
                 _members.Remove(gone.Device, gone.Removed!.Value);
             }
+            var current = serverMembers.Where(member => member.Removed is null).ToDictionary(member => member.Device, StringComparer.Ordinal);
+            var staying = household.Members().Where(member => member.LeftMs is null && (member.DeviceId == keys.DeviceId
+                || (current.TryGetValue(member.DeviceId, out var server) && Wire.PublicKey(server.Dh) is { } dh && dh.AsSpan().SequenceEqual(member.DhKey))))
+                .ToList();
+            if (staying.All(member => member.DeviceId != keys.DeviceId)) staying.Add(new HouseholdMember(keys.DeviceId, "", default, keys.SignPublic, keys.DhPublic, 0, null, null));
+            var result = await relay.PostKeysAsync(keys, householdId, rotation.Epoch, KeyWrap.For(keys, householdId, rotation.Epoch, rotation.Key, staying), cancel)
+                .ConfigureAwait(false);
+            if (result.Ok)
+            {
+                store.AddKey(rotation.Epoch, rotation.Key);
+                store.RotationKey = null;
+                _members.Excluded(rotation.Epoch);
+                if (store.Session is not null && store.RecoveryKey is not null) store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId));
+                log.LogInformation("The server took the household's new key; it is now at epoch {Epoch}", rotation.Epoch);
+                return result;
+            }
+            if (result.Status == 409)
+            {
+                for (var probe = 0; probe < 8; probe++)
+                {
+                    if (await FetchKeyAsync(keys, householdId, store.Epoch + 1, cancel).ConfigureAwait(false) is not { } theirs) break;
+                    store.AddKey(store.Epoch + 1, theirs);
+                }
+                var after = Math.Max(store.Epoch, await ServerEpochAsync(keys, householdId, cancel).ConfigureAwait(false));
+                rotation = (after + 1, HouseholdCrypto.NewKey());
+                store.RotationKey = rotation;
+                log.LogInformation("Another member's new key came first; rotating again at epoch {Epoch}", rotation.Epoch);
+                continue;
+            }
+            if (result.Status != 400) return result;
         }
-        var next = status == 409 ? store.Epoch + 1 : refused;
-        var nextKey = status == 409 ? HouseholdCrypto.NewKey() : store.KeyFor(refused) ?? HouseholdCrypto.NewKey();
-        var staying = household.Members().Where(member => member.LeftMs is null);
-        store.AddKey(next, nextKey, replace: true);
-        store.Pending = [op with { Epoch = next, Envelopes = KeyWrap.For(keys, op.Household, next, nextKey, staying) }, .. store.Pending.Skip(1)];
-        log.LogInformation("The server refused the key for epoch {Refused} ({Status}); rotating again at epoch {Next}", refused, status, next);
-        return true;
+        return new RelayResult<Done>(503, null, "the household's key kept moving on; it goes again later");
+    }
+
+    /// <summary>The newest epoch the server holds an envelope for this PC at, from this PC's on: an envelope counts, whoever
+    /// sealed it, since it shows the epoch was taken.</summary>
+    private async Task<int> ServerEpochAsync(DeviceKeys keys, string householdId, CancellationToken cancel)
+    {
+        var epoch = store.Epoch;
+        for (var probe = 0; probe < 8; probe++)
+        {
+            var got = await relay.GetKeyAsync(keys, householdId, epoch + 1, cancel).ConfigureAwait(false);
+            if (!got.Ok) break;
+            epoch++;
+        }
+        return epoch;
     }
 
     /// <summary>Reads the member list for who has gone: members the server says were removed are marked as left, and this PC
-    /// itself, when it was removed, leaves. A PC gone means a new key (households design §6): the next epochs' envelopes are
-    /// looked for, as nothing else says there is one until a batch under it comes.</summary>
+    /// itself, when it was removed, leaves. A PC gone means a new key (households design §6, plan 0.8): the next epochs'
+    /// envelopes are looked for, as nothing else says there is one until a batch under it comes, and this PC, staying, makes
+    /// one of its own, since the PC that went may have left without one.</summary>
     private async Task RefreshMembersAsync(DeviceKeys keys, string householdId, RelayRun run, CancellationToken cancel)
     {
         run.MembersRead = true;
@@ -281,6 +323,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             if (await FetchKeyAsync(keys, householdId, epoch, cancel).ConfigureAwait(false) is not { } key) break;
             store.AddKey(epoch, key);
         }
+        if (gone > 0) StartRotation(householdId);
     }
 
     private void WasRemoved(RelayRun run)
@@ -503,6 +546,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         {
             if (household.Member(gone) is { } left) run.Notices.Add($"{left.Name} is no longer in the household.");
         }
+        if (learned.Removed.Count > 0) StartRotation(householdId);
         var rows = Wire.CapChanged((batch.Rows ?? []).Select(row => Wire.Row(item.Device, row)).OfType<HouseholdRow>(), Now);
         var taken = household.Upsert(rows);
         if (rows.Count > 0) household.Synced(item.Device, Math.Min(Now, rows.Max(row => row.ChangedMs)));
@@ -513,7 +557,9 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     /// <summary>True while this PC knows no member but itself, as just after a recovery or an approval.</summary>
     private bool KnowsNobody(DeviceKeys keys) => household.Members().All(member => member.DeviceId == keys.DeviceId || member.LeftMs is not null);
 
-    /// <summary>This PC's envelope for an epoch, opened with the key of the member that sealed it; null when there is none.</summary>
+    /// <summary>This PC's envelope for an epoch, opened with the key of the member that sealed it; null when there is none, or
+    /// when its sealer is no current member and can't have sealed that epoch (plan 0.8: a removed PC, which kept its keys,
+    /// can't hand this PC a key of its choosing).</summary>
     private async Task<byte[]?> FetchKeyAsync(DeviceKeys keys, string householdId, int epoch, CancellationToken cancel)
     {
         var result = await relay.GetKeyAsync(keys, householdId, epoch, cancel).ConfigureAwait(false);
@@ -523,7 +569,11 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             return null;
         }
         var reply = result.Value!;
-        if (reply.Epoch != epoch || household.Member(reply.From) is not { } sealer) return null;
+        if (reply.Epoch != epoch || household.Member(reply.From) is not { } sealer || !_members.MayHaveSealed(sealer, epoch))
+        {
+            log.LogWarning("The key for epoch {Epoch} came from {Sealer}, which can't have sealed it, so it wasn't taken", epoch, reply.From);
+            return null;
+        }
         return KeyWrap.Open(keys, sealer.DhKey, reply.Body, householdId, epoch);
     }
 

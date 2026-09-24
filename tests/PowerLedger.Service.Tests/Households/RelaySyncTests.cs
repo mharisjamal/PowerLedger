@@ -299,19 +299,17 @@ public sealed class RelaySyncTests : IDisposable
     [Fact]
     public async Task A_batch_under_a_new_epoch_fetches_this_pcs_envelope_for_it()
     {
-        var next = HouseholdCrypto.NewKey();
-        var envelopes = KeyWrap.For(_desktop.Keys, Household, 2, next, [_laptop.AsMember()]);
-        _desktop.Store.AddKey(2, next);
-        _desktop.Store.AddPending(new PendingOp(PendingOp.Keys, Household, Epoch: 2, Envelopes: envelopes));
+        _desktop.Sync.StartRotation(Household);
         _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100)]);
 
         await _desktop.RunAsync();
         var run = await _laptop.RunAsync();
 
+        _desktop.Store.Epoch.ShouldBe(2);
         _relay.Batches.ShouldHaveSingleItem().Epoch.ShouldBe(2);
         run.RowsIn.ShouldBe(1);
         _laptop.Store.Epoch.ShouldBe(2);
-        _laptop.Store.CurrentKey.ShouldBe(next);
+        _laptop.Store.CurrentKey.ShouldBe(_desktop.Store.CurrentKey);
         _laptop.Store.KeyFor(1).ShouldBe(_key);
     }
 
@@ -331,13 +329,10 @@ public sealed class RelaySyncTests : IDisposable
     [Fact]
     public async Task Two_rotations_to_the_same_epoch_settle_by_rotating_again_after_the_one_the_server_took()
     {
-        var mine = HouseholdCrypto.NewKey();
         var theirs = HouseholdCrypto.NewKey();
         await _laptop.Client.PostKeysAsync(_laptop.Keys, Household, 2, KeyWrap.For(_laptop.Keys, Household, 2, theirs, [_desktop.AsMember()]),
             CancellationToken.None);
-        _desktop.Store.AddKey(2, mine);
-        _desktop.Store.AddPending(new PendingOp(PendingOp.Keys, Household, Epoch: 2,
-            Envelopes: KeyWrap.For(_desktop.Keys, Household, 2, mine, [_laptop.AsMember()])));
+        _desktop.Sync.StartRotation(Household);                                   // the desktop's own new key, for epoch 2 too
 
         (await _desktop.RunAsync()).Problem.ShouldBeNull();
 
@@ -345,28 +340,107 @@ public sealed class RelaySyncTests : IDisposable
         _desktop.Store.Epoch.ShouldBe(3);
         _relay.Epoch(Household).ShouldBe(3);
         _desktop.Store.Pending.ShouldBeEmpty();
+        _desktop.Store.RotationKey.ShouldBeNull();
     }
 
     [Fact]
-    public async Task A_new_key_sealed_to_a_pc_removed_meanwhile_is_sealed_again_to_those_still_in()
+    public async Task A_new_key_is_sealed_only_to_the_members_the_server_lists_as_current_and_taken_on_only_once_the_server_has_it()
     {
         using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
         _relay.Seed(Household, study.Keys);
         _desktop.Household.SaveMember(study.AsMember());
         _laptop.Household.SaveMember(study.AsMember());
-        _relay.Remove(Household, study.Id);                                       // another member removed it
-        var next = HouseholdCrypto.NewKey();
-        _desktop.Store.AddKey(2, next);
-        _desktop.Store.AddPending(new PendingOp(PendingOp.Keys, Household, Epoch: 2,
-            Envelopes: KeyWrap.For(_desktop.Keys, Household, 2, next, [_laptop.AsMember(), study.AsMember()])));
+        _relay.Remove(Household, study.Id);                                       // another member removed it; the desktop hasn't heard
+        _desktop.Sync.StartRotation(Household);
+        _relay.Intercept = (request, _) => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/keys", StringComparison.Ordinal)
+            ? FakeRelay.Error(503, "The server is busy; try again later.")
+            : null;
 
+        (await _desktop.RunAsync()).Problem.ShouldNotBeNull();
+        _desktop.Store.Epoch.ShouldBe(1);                                         // kept aside, not used
+        _relay.Intercept = null;
         (await _desktop.RunAsync()).Problem.ShouldBeNull();
 
         _relay.Epoch(Household).ShouldBe(2);
+        _relay.Sealed(Household, 2).ShouldBe([_desktop.Id, _laptop.Id], ignoreOrder: true);
+        _desktop.Store.Epoch.ShouldBe(2);
         _desktop.Household.Member(study.Id).ShouldNotBeNull().LeftMs.ShouldNotBeNull();
         (await _laptop.RunAsync()).Problem.ShouldBeNull();
         _laptop.Store.Epoch.ShouldBe(2);                                          // the members read found the new epoch's key
-        _laptop.Store.CurrentKey.ShouldBe(next);
+        _laptop.Store.CurrentKey.ShouldBe(_desktop.Store.CurrentKey);
+    }
+
+    [Fact]
+    public async Task A_member_that_sees_a_removal_makes_a_new_key_without_the_pc_that_went()
+    {
+        using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
+        _relay.Seed(Household, study.Keys);
+        _laptop.Household.SaveMember(study.AsMember());
+        _laptop.Household.Upsert([Row(_laptop.Id, 0, 10, changed: 100)]);
+        await _laptop.RunAsync();
+        _relay.Remove(Household, study.Id);                                       // the study PC left, and made no key
+        _clock.Advance(RelaySync.MembersEvery);
+
+        (await _laptop.RunAsync()).Notices.ShouldBe(["Study PC is no longer in the household."]);
+        (await _laptop.RunAsync()).Problem.ShouldBeNull();
+
+        _laptop.Store.Epoch.ShouldBe(2);
+        _relay.Sealed(Household, 2).ShouldBe([_desktop.Id, _laptop.Id], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task A_removed_pc_with_its_old_keys_can_neither_pass_off_rows_as_a_members_nor_hand_this_pc_a_key_of_its_choosing()
+    {
+        using var removed = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
+        _laptop.Household.SaveMember(removed.AsMember());
+        _laptop.Members.Remove(removed.Id, Now.ToUnixTimeMilliseconds());           // heard of at epoch 1
+        var k2 = HouseholdCrypto.NewKey();
+        _laptop.Store.AddKey(2, k2);                                                // the new key it was left out of
+        var k3 = HouseholdCrypto.NewKey();
+
+        // (a) rows for the desktop under the old key, signed by the removed PC; (b) its own batch under an epoch of its choosing.
+        var forged = Sealed(_key, Household, _desktop.Id, 1, 7, new BatchPlain(1, new WireMember(_desktop.Id, "Desktop-7", "desktop"),
+            [Wire.Row(Row(_desktop.Id, 0, 99_999, changed: 500))]), removed.Keys);
+        var chosen = Sealed(k3, Household, removed.Id, 3, 8, new BatchPlain(1, new WireMember(removed.Id, "Study PC", "desktop"),
+            [Wire.Row(Row(removed.Id, 0, 5, changed: 500))]), removed.Keys);
+        var envelope = Wire.Encode(HouseholdCrypto.WrapFor(removed.Keys.Dh, _laptop.Keys.DhPublic, k3, KeyWrap.Context(Household, 3)));
+        _relay.Intercept = (request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path.EndsWith("/batches", StringComparison.Ordinal))
+            {
+                return FakeRelay.Json(new System.Text.Json.Nodes.JsonObject
+                {
+                    ["items"] = new System.Text.Json.Nodes.JsonArray(forged, chosen),
+                    ["next"] = 2,
+                    ["more"] = false,
+                });
+            }
+            return path.EndsWith("/keys/3", StringComparison.Ordinal)
+                ? FakeRelay.Json(new System.Text.Json.Nodes.JsonObject { ["epoch"] = 3, ["from"] = removed.Id, ["body"] = envelope })
+                : null;
+        };
+
+        await _laptop.RunAsync();
+
+        _laptop.Household.Row(_desktop.Id, Hour(0)).ShouldBeNull();                // (a) not taken
+        _laptop.Store.Epoch.ShouldBe(2);                                            // (b) not moved to its key
+        _laptop.Store.KeyFor(3).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_member_that_rotated_and_then_left_still_hands_over_the_key_it_made_before_it_went()
+    {
+        _desktop.Sync.StartRotation(Household);
+        await _desktop.RunAsync();                                                  // epoch 2, sealed to the laptop too
+        _relay.Remove(Household, _desktop.Id);                                      // then the desktop left
+        _laptop.Members.Remove(_desktop.Id, Now.ToUnixTimeMilliseconds());          // heard of while the laptop was at epoch 1
+
+        (await _laptop.Client.GetKeyAsync(_laptop.Keys, Household, 2, CancellationToken.None)).Ok.ShouldBeTrue();
+        await _laptop.Sync.CatchUpAsync(_laptop.Keys, CancellationToken.None);
+
+        _laptop.Store.Epoch.ShouldBe(2);
+        _laptop.Store.CurrentKey.ShouldBe(_desktop.Store.CurrentKey);
     }
 
     public void Dispose()
@@ -379,6 +453,18 @@ public sealed class RelaySyncTests : IDisposable
 
     private static HouseholdRow Row(string device, int hour, double energyWh, long changed) => new(
         device, Hour(hour), energyWh, 1, 1, 1, 1, 0, 0, 3600, 0, 0, 3600, 0, 0, 1_000, "GBP", changed);
+
+    /// <summary>A batch item as the server hands it on, sealed under <paramref name="key"/> and signed by <paramref name="signer"/>.</summary>
+    private static System.Text.Json.Nodes.JsonObject Sealed(byte[] key, string household, string device, int epoch, long seq, BatchPlain plain, DeviceKeys signer)
+    {
+        var aad = HouseholdCrypto.BatchAad(household, device, epoch, seq);
+        var body = HouseholdCrypto.Seal(key, PowerLedger.Service.Sharing.SharingClient.Gzip(HouseholdJson.Bytes(plain, HouseholdJson.Default.BatchPlain)), aad);
+        return new System.Text.Json.Nodes.JsonObject
+        {
+            ["seq"] = seq, ["device"] = device, ["epoch"] = epoch, ["body"] = Wire.Encode(body),
+            ["sig"] = Wire.Encode(HouseholdCrypto.SignData(signer.Sign, HouseholdCrypto.BatchToSign(aad, body))),
+        };
+    }
 
     private static PowerLedger.Core.Aggregate Aggregate(DateTimeOffset start) => new(
         start, AvgW: 50, MaxW: 90, EnergyWh: 50, CpuWh: 12, GpuWh: 8, DisplayWh: 5, RestWh: 25, IdleOnWh: 3, IdleOffWh: 1,
@@ -399,7 +485,10 @@ public sealed class RelaySyncTests : IDisposable
             Household = new HouseholdRepository(_database.Db);
             Client = new RelayClient(FakeRelay.Endpoint, clock, relay);
             Sync = new RelaySync(Store, Household, Client, clock, NullLogger.Instance);
+            Members = new MemberBook(Store, Household);
         }
+
+        public MemberBook Members { get; }
 
         public string Name { get; }
 

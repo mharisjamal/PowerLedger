@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -41,13 +42,14 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string PostedHourKey = "household.posted-hour";
     internal const string HistoryHourKey = "household.history-hour";
     internal const string TombstonesKey = "household.tombstones";
+    internal const string RotationKeyKey = "household.rotation-key";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
     private static readonly string[] OfTheHousehold =
         [
             IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, HistoryKey, HistoryHourKey, ConfirmedKey,
-            MembersCheckedKey, ProblemKey, WaitingKey, TombstonesKey,
+            MembersCheckedKey, ProblemKey, WaitingKey, TombstonesKey, RotationKeyKey,
         ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
@@ -130,6 +132,27 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         else keys.TryAdd(name, Convert.ToBase64String(key));
         WriteKeys(keys);
         if (epoch > Epoch) settings.Set(EpochKey, epoch.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>A key this PC made for the next epoch, kept until the server takes it (plan 0.8): it isn't used before, so this
+    /// PC never moves to an epoch the server doesn't have. Null while there is none.</summary>
+    public (int Epoch, byte[] Key)? RotationKey
+    {
+        get => Unprotect(settings.Get(RotationKeyKey)) is { Length: 4 + HouseholdCrypto.KeyLength } kept
+            ? (BinaryPrimitives.ReadInt32BigEndian(kept), kept[4..])
+            : null;
+        set
+        {
+            if (value is not { } pending)
+            {
+                settings.Remove(RotationKeyKey);
+                return;
+            }
+            var kept = new byte[4 + pending.Key.Length];
+            BinaryPrimitives.WriteInt32BigEndian(kept, pending.Epoch);
+            pending.Key.CopyTo(kept, 4);
+            settings.Set(RotationKeyKey, Protect(kept));
+        }
     }
 
     /// <summary>Forgets the household: its ID, its keys and the progress of relay sync. This PC's own keys stay.</summary>

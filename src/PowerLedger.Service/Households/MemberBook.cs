@@ -111,7 +111,7 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
             {
                 if (entry.Id == fromId) continue;                                   // a PC doesn't remove itself in its own list
                 var known = household.Member(entry.Id);
-                if (known is { LeftMs: null } && known.AddedMs < removedAt)
+                if (known is { LeftMs: null } && known.AddedMs <= removedAt)                // a tie counts as removed
                 {
                     Remove(entry.Id, removedAt);
                     removed.Add(entry.Id);

@@ -144,7 +144,7 @@ public sealed class ApprovalTests : IAsyncLifetime
         var household = desktop.Worker.Store.HouseholdId!;
 
         await desktop.Send<HouseholdReply>(new RemovePcRequest(3, laptop.Worker.DeviceId));
-        desktop.Worker.Store.Pending.Select(op => op.Kind).ShouldContain(PendingOp.RecoveryEnvelope);
+        desktop.Worker.Store.Pending.Select(op => op.Kind).ShouldNotContain(PendingOp.RecoveryEnvelope);   // not before the server takes the key
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
 
         var envelope = _relay.RecoveryOf("alice").ShouldNotBeNull();

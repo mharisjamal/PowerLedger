@@ -405,7 +405,11 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         var (channel, hello) = (call.Channel, call.Hello);
         if (call.Message.Purpose == Hello.Sync)
         {
-            if (_store.HouseholdId is not null) await _lanSync.RespondAsync(channel, hello, Identity(), stopping.Token).ConfigureAwait(false);
+            if (_store.HouseholdId is { } householdId)
+            {
+                var synced = await _lanSync.RespondAsync(channel, hello, Identity(), stopping.Token).ConfigureAwait(false);
+                if (synced.Removed is { Count: > 0 }) _relaySync.StartRotation(householdId);   // a member went: a new key, as this PC stays
+            }
             return;
         }
         if (call.Message.Purpose != Hello.Pair) return;
@@ -541,22 +545,16 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             return Reply(request.Id, true, $"{member.Name}'s rows were removed.");
         }
 
-        // Households design §6: a new key under the next epoch, sealed to each member that stays and to this PC, so the server
-        // moves to the epoch even when no other PC stays; then the removal and the keys.
+        // Households design §6, plan 0.8: the removal goes to the server first, then a new key under the next epoch, sealed to
+        // the members the server lists as current once the removal is in, this PC among them, so the server moves to the
+        // epoch even when no other PC stays. This PC takes the new key on once the server has taken it.
         var householdId = _store.HouseholdId;
-        var epoch = _store.Epoch + 1;
-        var key = HouseholdCrypto.NewKey();
-        var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
-        var staying = _household.Members().Where(other => other.LeftMs is null && other.DeviceId != member.DeviceId);
-        var envelopes = KeyWrap.For(_keys, householdId, epoch, key, staying);
-        _store.AddKey(epoch, key);
-        _members.Remove(member.DeviceId, nowMs);
+        _members.Remove(member.DeviceId, _clock.GetUtcNow().ToUnixTimeMilliseconds());
         _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: member.DeviceId));
-        _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch, Envelopes: envelopes));
-        QueueRecovery(householdId);
+        _relaySync.StartRotation(householdId);
         Announce();
         Kick();
-        _log.LogInformation("Removed {Name} from the household; the key is now at epoch {Epoch}", member.Name, epoch);
+        _log.LogInformation("Removed {Name} from the household; a new key waits to go to the server", member.Name);
         return Reply(request.Id, true, $"{member.Name} was removed from the household.");
     }
 
@@ -570,18 +568,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         return Reply(request.Id, true, "This PC left the household.");
     }
 
-    /// <summary>Leaves the household, inside the gate: as removing itself (households design §6), a new key for the members
-    /// that stay goes to the server before this PC takes itself off, since only a member may post keys. This PC forgets it.</summary>
+    /// <summary>Leaves the household, inside the gate: this PC takes itself off the server and forgets the household (plan
+    /// 0.8). It makes no new key: a PC leaving can't vouch for who stays, so each member that stays makes one when it sees
+    /// the removal.</summary>
     private void LeaveLocked(DateTimeOffset now)
     {
         var householdId = _store.HouseholdId!;
-        var staying = _household.Members().Where(member => member.LeftMs is null && member.DeviceId != _keys.DeviceId).ToList();
-        if (staying.Count > 0)
-        {
-            var epoch = _store.Epoch + 1;
-            _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch,
-                Envelopes: KeyWrap.For(_keys, householdId, epoch, HouseholdCrypto.NewKey(), staying)));
-        }
         _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: _keys.DeviceId));
         Membership.Forget(_store, _household, now.ToUnixTimeMilliseconds());
         _log.LogInformation("Left the household {Household}", householdId);
@@ -627,6 +619,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             {
                 await using var channel = await LanConnector.ConnectAsync(member.Address!, member.Port, ConnectTimeout, cancel).ConfigureAwait(false);
                 var outcome = await _lanSync.SyncAsync(channel, Identity(), cancel).ConfigureAwait(false);
+                if (outcome.Removed is { Count: > 0 } && _store.HouseholdId is { } householdId) _relaySync.StartRotation(householdId);
                 _log.LogDebug("Synced with {Instance} on the network: {Outcome}", member.Instance, outcome);
             }
             catch (IOException error)

@@ -160,14 +160,6 @@ internal sealed partial class HouseholdWorker
         }
     }
 
-    /// <summary>A new household key goes into the recovery envelope too, when this PC is signed in and holds the recovery
-    /// code's key (households design §7): the server is told with the rest.</summary>
-    private void QueueRecovery(string householdId)
-    {
-        if (_store.Session is null || _store.RecoveryKey is null) return;
-        _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId));
-    }
-
     private async Task<PipeMessage> SignOutAsync(SignOutRequest request, CancellationToken cancel)
     {
         using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);

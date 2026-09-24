@@ -217,22 +217,28 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         desktop.Worker.Store.HistoryPosted = [desktop.Worker.DeviceId, laptop.Worker.DeviceId, study.Worker.DeviceId];
         foreach (var pc in new[] { desktop, laptop, study }) await pc.Worker.RunOnceAsync(CancellationToken.None);
         var oldKey = study.Worker.Store.CurrentKey.ShouldNotBeNull();
+        _clock.Advance(TimeSpan.FromMinutes(1));
 
         (await desktop.Send<HouseholdReply>(new RemovePcRequest(1, study.Worker.DeviceId))).ShouldBe(
             new HouseholdReply(1, true, "Study PC was removed from the household."));
 
-        desktop.Worker.Store.Epoch.ShouldBe(2);
-        var pending = desktop.Worker.Store.Pending;
-        pending.Select(op => op.Kind).ShouldBe([PendingOp.Remove, PendingOp.Keys]);
-        pending[1].Envelopes.ShouldNotBeNull().Select(envelope => envelope.Device).ShouldBe([desktop.Worker.DeviceId, laptop.Worker.DeviceId], ignoreOrder: true);
+        desktop.Worker.Store.Pending.Select(op => op.Kind).ShouldBe([PendingOp.Remove, PendingOp.Keys]);
+        desktop.Worker.Store.RotationKey.ShouldNotBeNull().Epoch.ShouldBe(2);
         desktop.Board.Household!.Members.Single(member => member.DeviceId == study.Worker.DeviceId).Left.ShouldBeTrue();
+        _relay.Down = true;
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        desktop.Worker.Store.Epoch.ShouldBe(1);                                  // not before the server takes the new key
+        _relay.Down = false;
 
         desktop.Household.Upsert([Row(desktop.Worker.DeviceId, 1, 42, changed: Now.ToUnixTimeMilliseconds() + 1)]);
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        desktop.Worker.Store.Epoch.ShouldBe(2);
+        desktop.Worker.Store.RotationKey.ShouldBeNull();
+        _relay.Sealed(desktop.Worker.Store.HouseholdId!, 2).ShouldBe([desktop.Worker.DeviceId, laptop.Worker.DeviceId], ignoreOrder: true);
         await laptop.Worker.RunOnceAsync(CancellationToken.None);
         await study.Worker.RunOnceAsync(CancellationToken.None);
 
-        laptop.Worker.Store.Epoch.ShouldBe(2);
+        laptop.Worker.Store.Epoch.ShouldBeGreaterThanOrEqualTo(2);                // it heard of the removal too, and may have made a key of its own
         laptop.Household.Row(desktop.Worker.DeviceId, Hour(1)).ShouldNotBeNull().EnergyWh.ShouldBe(42);
         study.Worker.Store.HouseholdId.ShouldBeNull();
         (await study.Next(NoticeKind.Info, text => text != "This PC joined Desktop-7's household.")).Text.ShouldBe("This PC was removed from the household.");
@@ -244,18 +250,17 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Leaving_seals_a_new_key_for_those_who_stay_before_taking_this_pc_off_the_server()
+    public async Task Leaving_takes_only_this_pc_off_the_server_and_a_member_that_stays_makes_the_new_key()
     {
         var (desktop, laptop, study) = await Household();
         var household = laptop.Worker.Store.HouseholdId!;
+        var oldKey = laptop.Worker.Store.CurrentKey;
 
         (await laptop.Send<HouseholdReply>(new LeaveHouseholdRequest(1))).ShouldBe(new HouseholdReply(1, true, "This PC left the household."));
 
         laptop.Worker.Store.HouseholdId.ShouldBeNull();
         laptop.Board.Household.ShouldNotBeNull().Members.ShouldBeEmpty();
-        var pending = laptop.Worker.Store.Pending;
-        pending.Select(op => op.Kind).ShouldBe([PendingOp.Keys, PendingOp.Remove]);
-        pending[0].Envelopes!.Select(envelope => envelope.Device).ShouldBe([desktop.Worker.DeviceId, study.Worker.DeviceId], ignoreOrder: true);
+        laptop.Worker.Store.Pending.Select(op => op.Kind).ShouldBe([PendingOp.Remove]);  // no key of its own for those who stay
         (await laptop.Send<HouseholdReply>(new LeaveHouseholdRequest(2))).ShouldBe(new HouseholdReply(2, false, HouseholdWorker.NotInOne));
 
         await laptop.Worker.RunOnceAsync(CancellationToken.None);
@@ -264,10 +269,12 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
         _clock.Advance(RelaySync.MembersEvery);
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);               // sees the laptop gone, and makes a new key
         desktop.Board.Household!.Members.Single(member => member.DeviceId == laptop.Worker.DeviceId).Left.ShouldBeTrue();
-        desktop.Worker.Store.Epoch.ShouldBe(2);                                  // the key the laptop sealed as it left
-        desktop.Worker.Store.CurrentKey.ShouldNotBe(laptop.Worker.Store.CurrentKey);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);               // which the server takes
+        desktop.Worker.Store.Epoch.ShouldBe(2);
+        desktop.Worker.Store.CurrentKey.ShouldNotBe(oldKey);
+        _relay.Sealed(household, 2).ShouldBe([desktop.Worker.DeviceId, study.Worker.DeviceId], ignoreOrder: true);
     }
 
     [Fact]
