@@ -271,25 +271,70 @@ public class MidnightRenderingTests
             }
         });
 
+    /// <summary>Plan O 0.4, as Classic's window keeps it: placed at the bounds a switch carries rather than fitting itself to
+    /// the screen, Classic's Now shown as the Dashboard, and a close for the switch a close.</summary>
     [Fact]
-    public void Closing_hides_to_the_tray_and_the_switch_closes_for_good()
+    public void Midnights_window_takes_the_bounds_and_page_a_switch_carries_and_closes_for_it()
         => UiHarness.OnUi(() =>
         {
             using var saver = new FakeSaver();
             var shell = MidnightFixtures.Shell(saver);
-            var window = MidnightFixtures.Window(shell);
+            var midnight = MidnightFixtures.Window(shell);
+            IShellWindow window = midnight;
+            window.Window.ShouldBeSameAs(midnight);
+            var closed = 0;
+            window.Closed += (_, _) => closed++;
+
+            window.Bounds = new Rect(-20000, 10, 1000, 700);
+            window.Page = Page.Now;
+            shell.Page.ShouldBe(Page.Dashboard, "Classic's Now arrives as the Dashboard");
+            window.Page = Page.Report;
+            window.Page.ShouldBe(Page.Report);
+            try
+            {
+                window.Show();
+                midnight.UpdateLayout();
+                foreach (var bounds in new[] { new Rect(midnight.Left, midnight.Top, midnight.ActualWidth, midnight.ActualHeight), window.Bounds })
+                {
+                    bounds.X.ShouldBe(-20000, 1);
+                    bounds.Y.ShouldBe(10, 1);
+                    bounds.Width.ShouldBe(1000, 1);
+                    bounds.Height.ShouldBe(700, 1);
+                }
+                window.State.ShouldBe(WindowState.Normal);
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+            closed.ShouldBe(1);
+        });
+
+    /// <summary>The caption's close is an ordinary close: the App's Closing handler, not the window, turns it into a hide
+    /// to the tray while the window is the current one, and lets it through once a switch has moved on.</summary>
+    [Fact]
+    public void The_close_button_asks_to_close_and_leaves_the_hiding_to_the_app()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var window = MidnightFixtures.Window(MidnightFixtures.Shell(saver));
+            var current = true;
+            window.Closing += (_, args) =>
+            {
+                if (!current) return;
+                args.Cancel = true;
+                window.Hide();
+            };
             var closed = false;
             window.Closed += (_, _) => closed = true;
             window.Show();
-            window.Close();
-            window.IsVisible.ShouldBeFalse("closing hides");
-            closed.ShouldBeFalse("but the window lives on, for the tray");
-            window.Show();
-            window.IsVisible.ShouldBeTrue();
-            ((IShellWindow)window).Page = Page.Now;
-            shell.Page.ShouldBe(Page.Dashboard, "Classic's Now arrives as the Dashboard");
-            window.CloseForSwitch();
-            closed.ShouldBeTrue();
+            var close = UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Close")!;
+            close.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            window.IsVisible.ShouldBeFalse("the App hid it");
+            closed.ShouldBeFalse("and it lives on, for the tray");
+            current = false;
+            close.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            closed.ShouldBeTrue("the window itself never holds on");
         });
 
     /// <summary>The Dashboard's card that <paramref name="title"/> names for a screen reader.</summary>

@@ -65,7 +65,7 @@ internal static class MidnightFixtures
         var manager = new ThemeManager(Application.Current, theme == Theme.Dark ? ThemeChoice.Dark : ThemeChoice.Light);
         if (app.Count == before + 1) app.RemoveAt(0);
         var looks = new LookSwitcher(_ => throw new InvalidOperationException("No switch in a render."), manager, _ => { }, _ => { });
-        var window = new MidnightWindow(shell, looks, manager, updates, feedback ?? (() => { }))
+        var window = new MidnightWindow(shell, looks, manager, updates ?? IdleUpdates(), feedback ?? (() => { }))
         {
             WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
         };
@@ -77,12 +77,17 @@ internal static class MidnightFixtures
     /// <summary>0.9.0 downloaded and ready to install, so the update card shows with its Restart button.</summary>
     public static Updater ReadyUpdate()
     {
-        var feed = new FakeFeed { Latest = UpdaterTests.Release("0.9.0") };
-        var updater = new Updater(feed, new FakeDownloader(), new FakeSetup(), new FakeCost(), new FakeUiSettings(), UiThreads.Inline,
-            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 8, 0), (_, _) => { }, _ => { });
+        var updater = Updates(new FakeFeed { Latest = UpdaterTests.Release("0.9.0") });
         updater.CheckAsync().GetAwaiter().GetResult();
         return updater;
     }
+
+    /// <summary>An updater that has not looked yet, so the update card stays hidden.</summary>
+    public static Updater IdleUpdates() => Updates(new FakeFeed());
+
+    private static Updater Updates(FakeFeed feed)
+        => new(feed, new FakeDownloader(), new FakeSetup(), new FakeCost(), new FakeUiSettings(), UiThreads.Inline,
+            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 8, 0), (_, _) => { }, _ => { });
 
     /// <summary>The Now screen as RenderingTests draws it: on battery with two external monitors, a minute of readings, today's history.</summary>
     public static NowViewModel NowScreen()
