@@ -221,6 +221,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 var device = removing["/members/".Length..];
                 if (!list.TryGetValue(device, out var member) || member.Removed is not null) return Error(404, "That PC isn't a member of this household.");
                 list[device] = member with { Removed = Now };
+                foreach (var linked in _links.Where(pair => pair.Value == household).Select(pair => pair.Key).ToList()) _recovery.Remove(linked);
                 return Ok();
             }
             case ("POST", "/keys"):

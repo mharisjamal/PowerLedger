@@ -36,9 +36,14 @@ public sealed class SignInTests : IAsyncLifetime
 
         var reply = await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
 
-        (reply.Ok, reply.Message).ShouldBe((true, "Signed in, and your household is linked to your account."));
-        var code = reply.Code.ShouldNotBeNull();
+        (reply.Ok, reply.Message, reply.Code).ShouldBe((true, "Signed in, and your household is linked to your account.", (string?)null));
+        var shown = await desktop.Next(NoticeKind.RecoveryCode);                  // the code comes as a notice, shown once
+        shown.Text.ShouldBe(HouseholdWorker.KeepTheCode);
+        var code = shown.RecoveryCode.ShouldNotBeNull();
         code.ShouldMatch("^([0-9A-Z]{4}-){5}[0-9A-Z]{4}$");
+        desktop.Worker.Store.RecoveryCodeToShow.ShouldNotBeNull().Code.ShouldBe(code);   // kept, encrypted, until it was seen
+        (await desktop.Send<HouseholdReply>(new AnswerPromptRequest(8, shown.PromptId!, true))).Ok.ShouldBeTrue();
+        desktop.Worker.Store.RecoveryCodeToShow.ShouldBeNull();
         desktop.Worker.Store.Session.ShouldNotBeNull();
         desktop.Board.Household!.SignedIn.ShouldBeTrue();
         _relay.LinkOf("alice").ShouldBe(household);
@@ -71,7 +76,8 @@ public sealed class SignInTests : IAsyncLifetime
     public async Task The_recovery_code_brings_the_household_back_on_a_new_pc_without_approval()
     {
         var (desktop, _) = await Household();
-        var code = (await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"))).Code!;
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
+        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
         desktop.Household.Upsert([new HouseholdRow(desktop.Worker.DeviceId, Now.AddHours(-3).ToUnixTimeMilliseconds(), 12, 1, 1, 1, 1, 0, 0,
             3600, 0, 0, 3600, 0, 0, 3_000, "GBP", Now.ToUnixTimeMilliseconds() + 1)]);
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
@@ -116,6 +122,71 @@ public sealed class SignInTests : IAsyncLifetime
         desktop.Worker.Store.Session.ShouldBeNull();
         desktop.Board.Household!.SignedIn.ShouldBeFalse();
         (await desktop.Send<HouseholdReply>(new SignInRequest(8, "facebook", "x", "y"))).Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_pc_in_another_household_signing_in_as_an_account_linked_elsewhere_is_told_so_and_asks_nothing()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));                 // alice's account is linked to the desktop's
+        var elsewhere = await Start("Study PC");
+        var other = await Start("Other PC");
+        await WorkerPc.Pair(elsewhere, other);                                      // the study PC is in a household of its own
+
+        var reply = await elsewhere.Send<HouseholdReply>(SignIn(elsewhere, "alice"));
+
+        reply.ShouldBe(new HouseholdReply(7, false, HouseholdWorker.LinkedElsewhere));
+        _relay.Waiting(desktop.Worker.Store.HouseholdId!).ShouldBeEmpty();
+        (elsewhere.Worker.Store.Session, elsewhere.Worker.Store.AskedToJoin).ShouldBe(((string?)null, (string?)null));
+        elsewhere.Worker.Store.HouseholdId.ShouldNotBe(desktop.Worker.Store.HouseholdId);
+    }
+
+    [Fact]
+    public async Task Signing_out_or_signing_in_as_another_account_forgets_this_pcs_recovery_key()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
+        desktop.Worker.Store.RecoveryKey.ShouldNotBeNull();
+
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "bob", salt: "b1"));
+        desktop.Worker.Store.RecoveryKey.ShouldNotBeNull();                        // bob's own, made now
+        var bobs = desktop.Worker.Store.RecoveryKey;
+        (await desktop.Send<HouseholdReply>(new SignOutRequest(8))).Ok.ShouldBeTrue();
+
+        desktop.Worker.Store.RecoveryKey.ShouldBeNull();
+        desktop.Worker.Store.RecoveryCodeToShow.ShouldBeNull();
+        bobs.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task A_recovery_the_server_no_longer_has_shows_as_missing_and_a_new_code_puts_it_right()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2");
+        var study = await Start("Study PC");
+        await WorkerPc.Pair(desktop, laptop);
+        await WorkerPc.Pair(desktop, study);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        var household = desktop.Worker.Store.HouseholdId!;
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));             // the desktop makes the code and holds its key
+        await laptop.Send<HouseholdReply>(SignIn(laptop, "alice", salt: "l1"));
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);
+        laptop.Board.Household!.RecoveryMissing.ShouldBeFalse();
+
+        await desktop.Send<HouseholdReply>(new SignOutRequest(8));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        await desktop.Send<HouseholdReply>(new RemovePcRequest(9, study.Worker.DeviceId));
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                 // a removal takes the account's recovery away
+        _relay.RecoveryOf("alice").ShouldBeNull();
+        _clock.Advance(RelaySync.MembersEvery);
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);
+
+        laptop.Board.Household!.RecoveryMissing.ShouldBeTrue();
+        (await laptop.Send<HouseholdReply>(new NewRecoveryCodeRequest(10))).ShouldBe(new HouseholdReply(10, true, "A new recovery code was made."));
+        (await laptop.Next(NoticeKind.RecoveryCode)).RecoveryCode.ShouldNotBeNull();
+        laptop.Board.Household!.RecoveryMissing.ShouldBeFalse();
+        _relay.RecoveryOf("alice").ShouldNotBeNull().Epoch.ShouldBe(_relay.Epoch(household));
+        _relay.RecoveryOf("alice")!.Value.Epoch.ShouldBe(laptop.Worker.Store.Epoch);   // sealed at the key the server is at
     }
 
     [Fact]

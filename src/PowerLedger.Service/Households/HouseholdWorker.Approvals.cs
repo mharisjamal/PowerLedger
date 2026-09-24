@@ -137,6 +137,7 @@ internal sealed partial class HouseholdWorker
         }
         _linkedAt = now;                                                       // linked, or linked elsewhere: looked at again later
         if (link.Ok && _store.RecoveryKey is not null) _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId));
+        if (link.Ok) await CheckRecoveryAsync(session, householdId, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -214,6 +215,7 @@ internal sealed partial class HouseholdWorker
         _store.Session = null;
         _store.Account = null;
         _store.AskedToJoin = null;
+        ForgetRecovery();                                                      // this PC's recovery key goes with the account
         return Reply(request.Id, true, "Signed out.");
     }
 
@@ -235,7 +237,7 @@ internal sealed partial class HouseholdWorker
         _store.Session = null;
         _store.Account = null;
         _store.AskedToJoin = null;
-        _store.RecoveryKey = null;
+        ForgetRecovery();
         _log.LogInformation("Deleted the account; the household carries on without sign-in");
         return Reply(request.Id, true, "Your account was deleted. Your household carries on without sign-in.");
     }

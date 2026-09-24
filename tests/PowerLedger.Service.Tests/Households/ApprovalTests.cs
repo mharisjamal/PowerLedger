@@ -171,7 +171,8 @@ public sealed class ApprovalTests : IAsyncLifetime
     public async Task A_new_key_goes_into_the_recovery_envelope_when_this_pc_is_signed_in()
     {
         var (desktop, laptop) = await Household();
-        var code = (await desktop.Send<HouseholdReply>(SignIn(desktop))).Code!;
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
         var household = desktop.Worker.Store.HouseholdId!;
 
         await desktop.Send<HouseholdReply>(new RemovePcRequest(3, laptop.Worker.DeviceId));

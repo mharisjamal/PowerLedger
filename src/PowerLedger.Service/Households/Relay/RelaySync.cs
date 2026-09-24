@@ -183,7 +183,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                 PendingOp.Keys => new RelayResult<Done>(200, null, null),       // left since: nobody to rotate for
                 PendingOp.RecoveryEnvelope when store.Session is { } session && store.RecoveryKey is { } recoveryKey
                     && op.Household == store.HouseholdId && store.CurrentKey is { } current =>
-                    await relay.PutRecoveryAsync(keys, session, Recovery.Envelope(recoveryKey, op.Household, current), cancel).ConfigureAwait(false),
+                    await relay.PutRecoveryAsync(keys, session, Recovery.Envelope(recoveryKey, op.Household, store.Epoch, current), cancel).ConfigureAwait(false),
                 PendingOp.RecoveryEnvelope => new RelayResult<Done>(200, null, null),   // signed out since: nobody to put it for
                 _ => new RelayResult<Done>(400, null, "it wasn't a request this PC can make"),
             };

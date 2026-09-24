@@ -43,6 +43,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string HistoryHourKey = "household.history-hour";
     internal const string TombstonesKey = "household.tombstones";
     internal const string RotationKeyKey = "household.rotation-key";
+    internal const string RecoveryCodeKey = "household.recovery-code";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
@@ -287,6 +288,20 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         {
             if (value is null) settings.Remove(RecoveryKeyKey);
             else settings.Set(RecoveryKeyKey, Protect(value));
+        }
+    }
+
+    /// <summary>N2: a recovery code made on this PC that the App hasn't yet said it showed, with the ID of the notice that
+    /// shows it (plan 0.8): kept encrypted until then, and forgotten once seen.</summary>
+    public (string PromptId, string Code)? RecoveryCodeToShow
+    {
+        get => Unprotect(settings.Get(RecoveryCodeKey)) is { } kept && Encoding.UTF8.GetString(kept).Split('\n') is [var promptId, var code]
+            ? (promptId, code)
+            : null;
+        set
+        {
+            if (value is not { } waiting) settings.Remove(RecoveryCodeKey);
+            else settings.Set(RecoveryCodeKey, Protect(Encoding.UTF8.GetBytes($"{waiting.PromptId}\n{waiting.Code}")));
         }
     }
 

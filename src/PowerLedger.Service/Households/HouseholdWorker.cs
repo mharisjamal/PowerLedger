@@ -193,10 +193,11 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         try
         {
             Announce();
+            ShowRecoveryCode();
+            await CheckApprovedAsync(lease.Attention).ConfigureAwait(false);  // in a household or not
             if (_store.HouseholdId is null)
             {
                 await _relaySync.FlushAsync(_keys, new RelayRun(), lease.Attention).ConfigureAwait(false);   // what leaving left to say
-                await CheckApprovedAsync(lease.Attention).ConfigureAwait(false);
                 return;
             }
             SaveSelf(_clock.GetUtcNow());                                      // its name and kind as they are now
@@ -236,9 +237,10 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                 StartCodePairingRequest start => await StartCodePairingAsync(start, cancel).ConfigureAwait(false),
                 JoinByCodeRequest join => JoinByCode(join),
                 CancelPairingRequest cancelPairing => CancelPairing(cancelPairing),
-                AnswerPromptRequest answer => _prompts.Answer(answer.PromptId ?? "", answer.Accept)
+                AnswerPromptRequest answer => _prompts.Answer(answer.PromptId ?? "", answer.Accept) || RecoveryCodeSeen(answer.PromptId ?? "")
                     ? Reply(answer.Id, true, "Answered.")
                     : Reply(answer.Id, false, "That question has closed."),
+                NewRecoveryCodeRequest newCode => await NewRecoveryCodeAsync(newCode, cancel).ConfigureAwait(false),
                 RemovePcRequest remove => await RemoveAsync(remove, cancel).ConfigureAwait(false),
                 RemoveOldRowsRequest old => await RemoveOldRowsAsync(old, cancel).ConfigureAwait(false),
                 LeaveHouseholdRequest leave => await LeaveAsync(leave, cancel).ConfigureAwait(false),
@@ -774,7 +776,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                     member.LeftMs is not null))];
             _board.Publish(new HouseholdStatus(
                 householdId, me, _store.Name, Kind(), _store.Discoverable, members, householdId is null ? null : _store.Problem,
-                SignedIn: _store.Session is not null, PendingApprovals: householdId is null ? 0 : Volatile.Read(ref _waitingApprovals)));
+                SignedIn: _store.Session is not null, PendingApprovals: householdId is null ? 0 : Volatile.Read(ref _waitingApprovals),
+                RecoveryMissing: householdId is not null && _store.Session is not null && _recoveryMissing));
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
