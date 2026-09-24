@@ -9,6 +9,7 @@ import {
   handleRemoveMember,
   readSmall,
 } from "./households";
+import { handleGetSlot, handlePutSlot, MEETING_SLOTS } from "./meetings";
 
 type Params = string[];
 type Handler = (request: Request, env: Cloudflare.Env, params: Params) => Promise<Response>;
@@ -21,6 +22,7 @@ interface Route {
 
 const HID = "([0-9a-f]{32})";
 const DEVICE = "([0-9a-f]{32})";
+const MEETING = `^/v1/meetings/([0-9a-f]{32})/(${MEETING_SLOTS.join("|")})$`;
 
 /** A route signed by a current member of the household in the path: reads the body (16 KB at most unless `read` says
  * otherwise), checks the signature and membership, then acts. */
@@ -73,6 +75,16 @@ const ROUTES: Route[] = [
     method: "GET",
     path: new RegExp(`^/v1/households/${HID}/batches$`),
     handle: asMember((env, member, _body, _params, request) => handleGetBatches(env, member, new URL(request.url))),
+  },
+  {
+    method: "PUT",
+    path: new RegExp(MEETING),
+    handle: (request, env, params) => handlePutSlot(request, env, params[0], params[1]),
+  },
+  {
+    method: "GET",
+    path: new RegExp(MEETING),
+    handle: (request, env, params) => handleGetSlot(request, env, params[0], params[1]),
   },
 ];
 
