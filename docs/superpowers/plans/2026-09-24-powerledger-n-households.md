@@ -369,6 +369,11 @@ with 100,000 iterations, the salt `"powerledger recovery"` and 32 bytes; the cod
 - **Cancelling.** `CancelPairingRequest` stops a pairing, including a code meeting, and frees the pairing gate.
 - **Withdrawing a prompt.** A `Withdraw` notice closes a prompt whose connection has gone.
 - **Sessions.** Household changes are refused from a pipe client outside the console session.
+- **Old rows.** `RemoveOldRowsRequest(Id, DeviceId?)` ("removeOldRows") deletes the rows of a PC that left or was
+  removed, or with no device named every such PC's, which after leaving is all of them.
+  - It is refused for this PC and for a current member.
+  - The tombstone stays, so the PC is never added back.
+  - The Household page lists a left PC only while its rows remain.
 ---
 
 ## Wave 1 — three agents in parallel

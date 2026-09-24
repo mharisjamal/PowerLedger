@@ -133,6 +133,13 @@ internal interface IServiceLink : IAsyncDisposable
     Task<HouseholdOutcome> SignOutAsync(CancellationToken cancel = default);
 
     Task<HouseholdOutcome> DeleteAccountAsync(CancellationToken cancel = default);
+
+    /// <summary>Stops a pairing under way, including a code meeting, and frees the pairing gate (task 0.8).</summary>
+    Task<HouseholdOutcome> CancelPairingAsync(CancellationToken cancel = default);
+
+    /// <summary>N2: makes a new recovery code once <see cref="HouseholdStatus.RecoveryMissing"/> says the old one no
+    /// longer works (task 0.8).</summary>
+    Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -267,6 +274,10 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public Task<HouseholdOutcome> DeleteAccountAsync(CancellationToken cancel = default) => HouseholdAsync(new DeleteAccountRequest(NextId()), cancel);
 
+    public Task<HouseholdOutcome> CancelPairingAsync(CancellationToken cancel = default) => HouseholdAsync(new CancelPairingRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default) => HouseholdAsync(new NewRecoveryCodeRequest(NextId()), cancel);
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposing, 1) == 1) return;                  // once, however often it is asked
@@ -368,8 +379,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
                     Answer(reply.Id, reply);
                     break;
                 case HouseholdNotice notice:
-                    // Pushed, not a reply to anything pending: households design §9.
-                    HouseholdNoticeReceived?.Invoke(notice);
+                    // Pushed, not a reply to anything pending (households design §9); a server that failed the
+                    // installed-service check is never trusted with one, the same as it is never sent a request.
+                    if (_refusal is null) HouseholdNoticeReceived?.Invoke(notice);
                     break;
                 case ErrorReply { Id: { } id } reply:
                     Answer(id, reply);

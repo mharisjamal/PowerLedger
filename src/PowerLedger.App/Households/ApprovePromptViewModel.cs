@@ -24,6 +24,8 @@ internal sealed class ApprovePromptViewModel : ObservableObject
         _threads = threads;
         _promptId = notice.PromptId ?? "";
         Heading = notice.Text;
+        ComparisonCode = notice.ComparisonCode;
+        ComparisonCaption = notice.ComparisonCode is not null ? "Check the other PC shows this code" : null;
         Approve = new RelayCommand(() => _ = AnswerAsync(true));
         DontApprove = new RelayCommand(() => _ = AnswerAsync(false));
         if (notice.ExpiresAt is { } expires)
@@ -34,6 +36,14 @@ internal sealed class ApprovePromptViewModel : ObservableObject
     }
 
     public string Heading { get; }
+
+    /// <summary>The approver's own check (households design §7, review finding A2): "482 913", shown large, from the
+    /// approved PC's key; null should the service ever send an ApprovePrompt with none.</summary>
+    public string? ComparisonCode { get; }
+
+    public string? ComparisonCaption { get; }
+
+    public bool HasComparisonCode => ComparisonCode is not null;
 
     public IRelayCommand Approve { get; }
 

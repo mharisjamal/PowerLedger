@@ -12,8 +12,8 @@ public class ApprovePromptViewModelTests
 
     private ApprovePromptViewModel Model(HouseholdNotice notice) => new(_link, UiThreads.Inline, _clock, notice);
 
-    private static HouseholdNotice Notice(string text, DateTimeOffset? expiresAt = null)
-        => new(NoticeKind.ApprovePrompt, "prompt-2", text, null, null, expiresAt ?? Now.AddMinutes(2));
+    private static HouseholdNotice Notice(string text, DateTimeOffset? expiresAt = null, string? comparisonCode = "482 913")
+        => new(NoticeKind.ApprovePrompt, "prompt-2", text, null, comparisonCode, expiresAt ?? Now.AddMinutes(2));
 
     [Fact]
     public void The_heading_is_the_services_own_wording_when_the_pc_signed_in_as_this_account()
@@ -27,6 +27,18 @@ public class ApprovePromptViewModelTests
     {
         var model = Model(Notice("A PC asks to join your household. Approve it?"));
         model.Heading.ShouldBe("A PC asks to join your household. Approve it?");
+    }
+
+    /// <summary>Review finding A2: the approval code is shown prominently, so the user can compare it against what the
+    /// approved PC shows, before approving.</summary>
+    [Fact]
+    public void The_approval_code_shows_prominently_so_it_can_be_checked_against_the_other_pc()
+    {
+        var model = Model(Notice("A PC asks to join your household. Approve it?", comparisonCode: "482 913"));
+
+        model.HasComparisonCode.ShouldBeTrue();
+        model.ComparisonCode.ShouldBe("482 913");
+        model.ComparisonCaption.ShouldBe("Check the other PC shows this code");
     }
 
     [Fact]

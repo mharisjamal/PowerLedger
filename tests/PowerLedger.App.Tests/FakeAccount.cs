@@ -7,5 +7,5 @@ namespace PowerLedger.App.Tests;
 internal static class FakeAccount
 {
     public static SignInViewModel Model(IServiceLink link) =>
-        new(link, new FakeUiSettings(), new SignIn(() => new FakeLoopbackServer(), _ => { }, new HttpClient()), UiThreads.Inline, "", "");
+        new(link, new FakeUiSettings(), new SignIn(() => new FakeLoopbackServer(), _ => { }, new HttpClient(), TimeProvider.System), UiThreads.Inline, "", "");
 }

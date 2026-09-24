@@ -17,6 +17,11 @@
         <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
             <StackPanel Margin="28,24,28,8">
                 <TextBlock Style="{StaticResource Text.Body}" FontSize="16" TextWrapping="Wrap" Text="{Binding Heading}" />
+                <StackPanel Margin="0,16,0,0" Visibility="{Binding HasComparisonCode, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Style="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Text="{Binding ComparisonCaption}" />
+                    <TextBlock Style="{StaticResource Text.Body}" FontFamily="{StaticResource Font.Numbers}" FontSize="28" Margin="0,4,0,0"
+                               HorizontalAlignment="Center" Text="{Binding ComparisonCode}" />
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
         <StackPanel Grid.Row="1" Margin="28,4,28,20">

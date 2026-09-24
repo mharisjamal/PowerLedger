@@ -28,6 +28,11 @@ public class HouseholdContractTests
             new DeleteAccountRequest(13),
             new HouseholdReply(14, true, "Code made.", "K7QM-2XHD-9PW4-R8TA"),
             new HouseholdNotice(NoticeKind.JoinPrompt, "p1", "Join Desktop-7's household?", "Desktop-7", "482 913", at),
+            new CancelPairingRequest(15),
+            new NewRecoveryCodeRequest(16),
+            new HouseholdNotice(NoticeKind.RecoveryCode, "p2", "Keep this recovery code.", null, null, null, "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01"),
+            new RemoveOldRowsRequest(17, "0123456789abcdef0123456789abcdef"),
+            new RemoveOldRowsRequest(18),
         ];
         foreach (var message in messages)
         {
