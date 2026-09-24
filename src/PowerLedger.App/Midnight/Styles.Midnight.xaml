@@ -712,6 +712,7 @@
         <Setter Property="LabelBrush" Value="{DynamicResource M.Ink3}" />
         <Setter Property="InkBrush" Value="{DynamicResource M.Ink}" />
         <Setter Property="AccentBrush" Value="{DynamicResource M.Accent}" />
+        <Setter Property="AccentTextBrush" Value="{DynamicResource M.AccentText}" />
         <Setter Property="AccentSoftBrush" Value="{DynamicResource M.AccentSoft}" />
         <Setter Property="CpuBrush" Value="{DynamicResource M.PartCpu}" />
         <Setter Property="GpuBrush" Value="{DynamicResource M.PartGpu}" />

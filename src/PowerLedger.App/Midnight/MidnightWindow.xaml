@@ -273,7 +273,7 @@
                                         ToolTip="Back to the classic look" />
                                 <Button Style="{StaticResource M.Button.Primary}" Content="Got it" Click="GotItClick" Margin="0,2" />
                             </WrapPanel>
-                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Glyph}" Foreground="{DynamicResource M.Accent}" FontSize="16" Text="&#xE790;"
+                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Glyph}" Foreground="{DynamicResource M.AccentText}" FontSize="16" Text="&#xE790;"
                                        Margin="0,1,12,0" VerticalAlignment="Top" AutomationProperties.Name="New" />
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Style="{StaticResource M.Text.Heading}" FontSize="14" Text="This is PowerLedger's new look" TextWrapping="Wrap" />

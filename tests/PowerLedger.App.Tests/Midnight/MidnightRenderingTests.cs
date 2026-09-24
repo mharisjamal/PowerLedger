@@ -524,6 +524,8 @@ public class MidnightRenderingTests
                     var intro = Intro(window)!;
                     intro.IsVisible.ShouldBeTrue();
                     intro.BorderBrush.ShouldBe(window.FindResource("M.Accent"), "an accent edge: news, not a warning");
+                    UiHarness.Find<TextBlock>(intro, text => AutomationProperties.GetName(text) == "New")!.Foreground
+                        .ShouldBe(window.FindResource("M.AccentText"), "a small accent glyph takes the text tint, which reads on the panel");
                     UiHarness.Find<TextBlock>(intro, text => text.Text == IntroName).ShouldNotBeNull();
                     UiHarness.Find<TextBlock>(intro, text => text.Text == "Prefer the classic one? Switch back any time here, or in Settings → Preferences.").ShouldNotBeNull();
                     UiHarness.Find<Button>(intro, button => Equals(button.Content, "Switch back")).ShouldNotBeNull();

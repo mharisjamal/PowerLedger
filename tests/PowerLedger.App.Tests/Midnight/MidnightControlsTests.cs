@@ -100,6 +100,33 @@ public class MidnightControlsTests
             marks[2].Describe().ShouldBe("Up 12%", "the arrow and its words still say which way the figure went");
         });
 
+    /// <summary>
+    /// No one accent passes 4.5:1 both under white text and as small text on the dark panel, so a drawn control's small
+    /// accent-coloured words (the chart's "now") take M.AccentText under Midnight's styles, and Classic's controls, which
+    /// set no such brush, keep their accent.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "UI")]
+    public void Small_accent_words_in_a_drawn_control_take_the_accent_text_tint()
+        => UiHarness.OnUi(() =>
+        {
+            var host = new StackPanel();
+            host.Resources.MergedDictionaries.Add(MidnightStylesTests.Load());
+            host.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, Theme.Dark));
+            var chart = new AreaChart();
+            var history = new StackedChart { Style = (Style)host.FindResource("M.StackedChart") };
+            host.Children.Add(chart);
+            host.Children.Add(history);
+            host.Measure(new Size(600, 800));
+            Color Ink(string key) => ((SolidColorBrush)host.FindResource(key)).Color;
+            ((SolidColorBrush)chart.AccentTextOrAccent).Color.ShouldBe(Ink("M.AccentText"));
+            ((SolidColorBrush)history.AccentTextOrAccent).Color.ShouldBe(Ink("M.AccentText"));
+            ((SolidColorBrush)chart.AccentBrush).Color.ShouldBe(Ink("M.Accent"), "the line and the dashes keep the accent");
+
+            var classic = new StackedChart { AccentBrush = Brushes.Orange };
+            classic.AccentTextOrAccent.ShouldBeSameAs(Brushes.Orange, "without a text tint, the accent itself");
+        });
+
     /// <summary>A card's shadow, as layers: each a rounded rectangle a little larger and fainter than the one inside it,
     /// set down by a third of the depth, adding up to a soft edge rather than a line.</summary>
     [Fact]
