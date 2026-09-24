@@ -1,0 +1,78 @@
+<Window x:Class="PowerLedger.App.SendFeedbackWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:PowerLedger.App"
+        Title="Send feedback" Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{DynamicResource Brush.Panel}" Foreground="{DynamicResource Brush.Ink}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+
+    <!-- The buttons have a row of their own, so however short the screen, they stay in view while the rest scrolls
+         (the same shape as the household prompts). -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <StackPanel Margin="28,22,28,8">
+                <TextBlock Style="{StaticResource Text.Body}" FontSize="16" TextWrapping="Wrap" Text="Tell us what's wrong, or what you'd like" />
+                <!-- No sign-in, no consent dialog: this goes straight to the developer's private issue tracker on GitHub. -->
+                <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,4,0,0"
+                           Text="This goes to the developer's private issue tracker on GitHub." />
+                <TextBox Style="{StaticResource Field}" Margin="0,14,0,0" Height="120" MaxLength="10000" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Style="{StaticResource Text.Muted}" HorizontalAlignment="Right" Margin="0,4,0,0"
+                           Text="{Binding RemainingCharacters, StringFormat='{}{0} characters left'}"
+                           Visibility="{Binding ShowCounter, Converter={StaticResource VisibleWhen}}" />
+
+                <TextBlock Style="{StaticResource Text.Eyebrow}" Margin="0,18,0,8" Text="IMAGES" />
+                <ItemsControl ItemsSource="{Binding Images}" Focusable="False">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type local:FeedbackImageItem}">
+                            <Grid Margin="0,0,8,8" Width="64" Height="64">
+                                <Border BorderBrush="{DynamicResource Brush.Line}" BorderThickness="1" ClipToBounds="True">
+                                    <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+                                </Border>
+                                <Button Style="{StaticResource CardClose}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="2"
+                                        ToolTip="Remove this image"
+                                        Command="{Binding DataContext.RemoveImage, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Visibility="{Binding CanAddMoreImages, Converter={StaticResource VisibleWhen}}">
+                    <Button Style="{StaticResource Quiet}" Content="Add image…" Click="AddImageClick" />
+                    <Button Style="{StaticResource Quiet}" Content="Add a PowerLedger screenshot" Margin="8,0,0,0" Click="AddScreenshotClick" />
+                </StackPanel>
+                <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,4,0,0"
+                           Text="You can also paste an image (Ctrl+V) or drop one onto this window." />
+
+                <CheckBox Style="{StaticResource Tick}" Margin="0,18,0,0" Content="Attach the log, it helps with bugs" IsChecked="{Binding AttachLog}" />
+
+                <DockPanel Margin="0,14,0,0">
+                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource Text.Muted}" Text="Email, if you want a reply" Margin="0,0,10,0" VerticalAlignment="Center" />
+                    <TextBox Style="{StaticResource Field}" Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}" />
+                </DockPanel>
+
+                <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,14,0,0"
+                           Text="Also sent: the app version, your Windows version and whether this PC is x64, Arm64 or 32-bit." />
+
+                <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{DynamicResource Brush.Amber}"
+                           Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+            </StackPanel>
+        </ScrollViewer>
+        <StackPanel Grid.Row="1" Margin="28,4,28,20">
+            <UniformGrid Rows="1" Columns="2">
+                <Button Style="{StaticResource Quiet}" Content="Cancel" Command="{Binding Cancel}" Margin="0,0,6,0" HorizontalContentAlignment="Center" />
+                <Button Style="{StaticResource Quiet}" Content="Send" Command="{Binding Send}" Margin="6,0,0,0" HorizontalContentAlignment="Center" />
+            </UniformGrid>
+        </StackPanel>
+    </Grid>
+</Window>
