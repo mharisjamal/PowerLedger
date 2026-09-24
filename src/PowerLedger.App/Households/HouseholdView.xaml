@@ -28,6 +28,13 @@
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
+                <!-- N2, plan 0.9: this PC's join request ended unanswered or was refused; only the user asks again. -->
+                <StackPanel Visibility="{Binding CanAskAgain, Converter={StaticResource VisibleWhen}}" Margin="0,0,0,16">
+                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" MaxWidth="480" HorizontalAlignment="Left" Text="Nobody approved this PC." />
+                    <Button Style="{StaticResource Link}" Margin="0,4,0,0" Content="Ask again" Command="{Binding AskAgain}" HorizontalAlignment="Left" />
+                    <TextBlock Style="{StaticResource Text.Muted}" Margin="0,6,0,0" Foreground="{DynamicResource Brush.Amber}" Text="{Binding AskAgainMessage}"
+                               Visibility="{Binding AskAgainMessage, Converter={StaticResource VisibleWhenText}}" />
+                </StackPanel>
                 <Button Style="{StaticResource Quiet}" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
             </StackPanel>
 

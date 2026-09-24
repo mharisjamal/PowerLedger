@@ -151,6 +151,10 @@ internal interface IServiceLink : IAsyncDisposable
     /// <summary>N2: makes a new recovery code once <see cref="HouseholdStatus.RecoveryMissing"/> says the old one no
     /// longer works (task 0.8).</summary>
     Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default);
+
+    /// <summary>N2: asks the household again to let this PC in, once <see cref="HouseholdStatus.CanAskAgain"/> says its
+    /// last request ended unanswered or was refused (plan 0.9). Only the user asks again.</summary>
+    Task<HouseholdOutcome> AskAgainAsync(CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -300,6 +304,8 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public Task<HouseholdOutcome> CancelPairingAsync(CancellationToken cancel = default) => HouseholdAsync(new CancelPairingRequest(NextId()), cancel);
 
     public Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default) => HouseholdAsync(new NewRecoveryCodeRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> AskAgainAsync(CancellationToken cancel = default) => HouseholdAsync(new AskAgainRequest(NextId()), cancel);
 
     public async ValueTask DisposeAsync()
     {

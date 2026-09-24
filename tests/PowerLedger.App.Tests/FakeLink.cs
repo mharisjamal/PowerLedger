@@ -176,6 +176,8 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default) => Household("newRecoveryCode");
 
+    public Task<HouseholdOutcome> AskAgainAsync(CancellationToken cancel = default) => Household("askAgain");
+
     /// <summary>When set, a household request throws this instead of answering — for testing a caller's guard against
     /// something even <see cref="SignIn"/> itself didn't turn into a failed result (review finding A7).</summary>
     public Exception? HouseholdThrows { get; set; }
