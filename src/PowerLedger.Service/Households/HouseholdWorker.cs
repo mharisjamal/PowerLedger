@@ -74,6 +74,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private readonly ConcurrentDictionary<Task, byte> _running = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _kick = new(0);
+    private readonly Lock _listening = new();
     private LanListener? _listener;
     private long _rowsBuiltForHour = -1;
 
@@ -118,16 +119,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        _listener = new LanListener(_environment.ListenAddress, OnConnectionAsync, _log);
-        try
-        {
-            _listener.Start();
-        }
-        catch (System.Net.Sockets.SocketException error)
-        {
-            _log.LogWarning(error, "The household's listener couldn't start, so other PCs can't reach this one on the network");
-            _listener = null;
-        }
+        _environment.Network.Changed += Announce;
         Announce();
         Publish();
         await base.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -142,8 +134,11 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         finally
         {
+            _environment.Network.Changed -= Announce;
             _announcer.Dispose();
-            if (_listener is not null) await _listener.DisposeAsync().ConfigureAwait(false);
+            LanListener? listener;
+            lock (_listening) (listener, _listener) = (_listener, null);
+            if (listener is not null) await listener.DisposeAsync().ConfigureAwait(false);
             try
             {
                 await Running.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
@@ -410,9 +405,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         if (BeginPairing(out _, also: stopping.Token) is not { } pairing)
         {
             if (call.From is { } busyFrom) _strangers.Failed(busyFrom);
-            await PairingSession.JoinAsync(channel, hello, Identity(), Refusing.Broker, false, (_, _) => Task.CompletedTask, _timeouts, stopping.Token)
-                .ConfigureAwait(false);
-            return;
+            return;                                                            // closed without a word: not even this PC's hello
         }
         using (pairing)
         {
@@ -664,10 +657,17 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private static bool InThisHousehold(FoundService service, byte[]? key) =>
         key is not null && service.Txt.GetValueOrDefault("tag") is { Length: > 0 } tag && tag == HouseholdCrypto.HouseholdTag(key, service.Instance);
 
-    /// <summary>Announces this PC as it is now: its name, and the tag of its household when it is in one.</summary>
+    /// <summary>Announces this PC as it is now: its name, and the tag of its household when it is in one. Only while it may be
+    /// found, as its user lets it be and on a Private network, does it listen at all (plan 0.8); otherwise its port is shut
+    /// and nothing is announced.</summary>
     private void Announce()
     {
-        if (_listener is not { Port: > 0 } listener) return;
+        if (_stopping.IsCancellationRequested) return;
+        if (Listen() is not { Port: > 0 } listener)
+        {
+            _announcer.Update(null);
+            return;
+        }
         var instance = _store.InstanceId;
         var key = _store.CurrentKey;
         var txt = new Dictionary<string, string>
@@ -676,7 +676,52 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             ["name"] = _store.Name,
             ["tag"] = key is null ? "" : HouseholdCrypto.HouseholdTag(key, instance),
         };
-        _announcer.Update(_store.Discoverable ? new Announcement(instance, listener.Port, txt) : null);
+        _announcer.Update(new Announcement(instance, listener.Port, txt));
+    }
+
+    /// <summary>Starts the listener when this PC may be found and stops it when it may not; the listener as it is now.</summary>
+    private LanListener? Listen()
+    {
+        var wanted = _store.Discoverable && OnPrivateNetwork();
+        LanListener? stopping = null;
+        LanListener? listening;
+        lock (_listening)
+        {
+            if (wanted && _listener is null)
+            {
+                var started = new LanListener(_environment.ListenAddress, OnConnectionAsync, _log);
+                try
+                {
+                    started.Start();
+                    _listener = started;
+                }
+                catch (System.Net.Sockets.SocketException error)
+                {
+                    _log.LogWarning(error, "The household's listener couldn't start, so other PCs can't reach this one on the network");
+                    Track(started.DisposeAsync().AsTask());
+                }
+            }
+            else if (!wanted && _listener is not null)
+            {
+                (stopping, _listener) = (_listener, null);
+                _log.LogInformation("Stopped listening for the household's other PCs");
+            }
+            listening = _listener;
+        }
+        if (stopping is not null) Track(stopping.DisposeAsync().AsTask());
+        return listening;
+    }
+
+    private bool OnPrivateNetwork()
+    {
+        try
+        {
+            return _environment.Network.IsPrivate;
+        }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidCastException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>How the household stands, for the status. It never throws: the status keeps what was last published.</summary>
@@ -751,13 +796,4 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>The gate stayed shut longer than a request may wait.</summary>
     private sealed class GateTimeout() : Exception(Busy);
 
-    /// <summary>Says no at once: for a pairing that arrives while another runs, or while pairing is paused.</summary>
-    private sealed class Refusing : IPromptBroker
-    {
-        public static readonly Refusing Broker = new();
-
-        public Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel) => Task.FromResult(false);
-
-        public Task<bool> ConfirmCodeAsync(string otherName, string code, CancellationToken cancel) => Task.FromResult(false);
-    }
 }

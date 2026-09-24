@@ -302,18 +302,49 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task The_tick_turns_the_announcement_off_and_on()
+    public async Task The_tick_turns_the_announcement_and_the_listener_off_and_on()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);
-        _network.Announced.ShouldHaveSingleItem().Port.ShouldBe(desktop.Worker.Port);
+        var port = desktop.Worker.Port;
+        _network.Announced.ShouldHaveSingleItem().Port.ShouldBe(port);
 
         (await desktop.Send<HouseholdReply>(new SetDiscoverableRequest(1, false))).ShouldBe(
             new HouseholdReply(1, true, "Other PCs on your network can no longer find this one."));
         _network.Announced.ShouldBeEmpty();
         desktop.Board.Household!.Discoverable.ShouldBeFalse();
+        desktop.Worker.Port.ShouldBe(0);
+        await Should.ThrowAsync<IOException>(() => LanConnector.ConnectAsync(IPAddress.Loopback, port, TimeSpan.FromSeconds(5)));
 
         (await desktop.Send<HouseholdReply>(new SetDiscoverableRequest(2, true))).Ok.ShouldBeTrue();
+        _network.Announced.ShouldHaveSingleItem().Port.ShouldBe(desktop.Worker.Port);
+        desktop.Worker.Port.ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task Off_a_private_network_nothing_listens_and_nothing_is_announced()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+
+        desktop.Category.IsPrivate = false;                                    // joined a café's network
+
+        desktop.Worker.Port.ShouldBe(0);
+        _network.Announced.ShouldBeEmpty();
+        desktop.Category.IsPrivate = true;
+        desktop.Worker.Port.ShouldBeGreaterThan(0);
         _network.Announced.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task A_pairing_that_comes_while_another_runs_is_closed_without_this_pcs_hello()
+    {
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        (await laptop.Send<HouseholdReply>(new StartCodePairingRequest(1))).Ok.ShouldBeTrue();   // pairing under way
+
+        await using var channel = await LanConnector.ConnectAsync(IPAddress.Loopback, laptop.Worker.Port, TimeSpan.FromSeconds(5));
+        using var keys = DeviceKeys.Create();
+        await channel.SendAsync(LanMessages.Write(LanMessages.Hello("pair", keys.DhPublic, keys, "Stranger", ChassisKind.Laptop, "c3")));
+
+        (await channel.ReceiveAsync()).ShouldBeNull();
     }
 
     [Fact]
