@@ -6,8 +6,8 @@
         Title="PowerLedger" Icon="pack://application:,,,/PowerLedger;component/Brand/PowerLedger.ico" Width="1180" Height="900" MinWidth="960" MinHeight="640"
         WindowStartupLocation="CenterScreen" Background="{DynamicResource M.Ground}"
         UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
-    <!-- The Midnight shell (Midnight look design §1, plan O M1-3): a 232 px sidebar with the pages in groups, a glass top
-         bar the window is dragged by, the page header with its status pill and the household's members, and the page host.
+    <!-- The Midnight shell (Midnight look design §1, plan O M1-3): a 232 px sidebar with the pages in groups, a plain top
+         bar over a hairline that the window is dragged by, the page header with its status pill and the household's members, and the page host.
          The drag area is the top 56 px, the top bar's height. -->
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="56" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
@@ -111,7 +111,7 @@
                                 Visibility="{Binding ShowCard, Converter={StaticResource VisibleWhen}, FallbackValue=Collapsed}" AutomationProperties.Name="Update">
                             <StackPanel>
                                 <DockPanel>
-                                    <Button DockPanel.Dock="Right" Style="{StaticResource M.IconButton}" Width="24" Height="24" MinHeight="24" FontSize="9" Content="&#xE8BB;"
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource M.IconButton.Quiet}" Width="24" Height="24" MinHeight="24" FontSize="9" Content="&#xE8BB;"
                                             Command="{Binding Dismiss}" ToolTip="Later" AutomationProperties.Name="Later" Margin="0,-4,-6,0"
                                             Visibility="{Binding CanDismiss, Converter={StaticResource VisibleWhen}}" />
                                     <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="UPDATE" VerticalAlignment="Center" />
@@ -156,12 +156,12 @@
                         </DockPanel>
                     </StackPanel>
 
-                    <!-- The groups. The accent pill is one Border behind the items that the code moves to the checked one (plan O 0.5).
+                    <!-- The groups. The current page's row is one NavGlow behind the items that the code moves to the checked one (plan O 0.5).
                          A window too short for the groups and the foot scrolls the groups rather than covering them. -->
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
                         <Grid x:Name="Nav" Margin="0,4,0,8" VerticalAlignment="Top">
                             <Canvas x:Name="NavCanvas">
-                                <Border x:Name="NavPill" Style="{StaticResource M.NavPill}" Canvas.Left="12" Canvas.Top="0" Width="0" Opacity="0" />
+                                <local:NavGlow x:Name="NavPill" Style="{StaticResource M.NavPill}" Canvas.Left="0" Canvas.Top="0" Width="0" Opacity="0" />
                             </Canvas>
                             <StackPanel x:Name="NavItems">
                                 <TextBlock Style="{StaticResource NavGroup}" Text="OVERVIEW" />
@@ -176,7 +176,7 @@
                                     <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" Content="Household" Tag="&#xE716;" Checked="NavChecked"
                                                  IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Household}}" />
                                     <!-- PCs waiting for approval; nothing while there are none. -->
-                                    <ContentControl Style="{StaticResource M.Badge}" HorizontalAlignment="Right" Margin="0,0,26,0" IsHitTestVisible="False"
+                                    <ContentControl Style="{StaticResource M.Badge}" HorizontalAlignment="Right" Margin="0,0,20,0" IsHitTestVisible="False"
                                                     Content="{Binding Household.PendingApprovals, FallbackValue={x:Null}}" AutomationProperties.Name="Waiting for approval" />
                                 </Grid>
                                 <TextBlock Style="{StaticResource NavGroup}" Text="SYSTEM" />
@@ -209,32 +209,32 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <!-- The top bar: glass over the page, the page's title, and on the right the theme, the look, Settings, this PC and the caption. -->
-                <Border x:Name="TopBar" Grid.Row="0" Style="{StaticResource M.Glass}" CornerRadius="0" BorderThickness="0,0,0,1">
-                    <Grid>
-                        <Rectangle Style="{StaticResource M.Glass.Highlight}" Margin="0" />
-                        <DockPanel Margin="28,0,10,0">
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True">
-                                <Button x:Name="ThemeButton" Style="{StaticResource M.IconButton}" Content="&#xE706;" Click="ThemeClick" AutomationProperties.Name="Theme" />
-                                <!-- Switch look (Midnight look design §1): the other look, chosen as in Settings, so the choice is kept. -->
-                                <Button Style="{StaticResource M.IconButton}" Content="&#xE8AB;" Command="{Binding SwitchLook}" ToolTip="{Binding SwitchLookTip}" AutomationProperties.Name="Switch look"
-                                        Click="SwitchLookClick" />
-                                <Button Style="{StaticResource M.IconButton}" Content="&#xE713;" Click="SettingsClick" ToolTip="Settings" AutomationProperties.Name="Settings" />
-                                <Border Width="1" Height="20" Margin="10,0" Background="{DynamicResource M.Line}" />
-                                <TextBlock x:Name="KindGlyph" Style="{StaticResource M.Text.Glyph}" FontSize="16" Text="&#xE7FB;" Margin="0,0,10,0" />
-                                <StackPanel VerticalAlignment="Center" Margin="0,0,6,0">
-                                    <TextBlock x:Name="PcName" Style="{StaticResource M.Text.Body}" FontWeight="SemiBold" FontSize="12.5" />
-                                    <TextBlock Style="{StaticResource M.Text.Muted}" FontSize="11" Text="{Binding Household.Account.Email}"
-                                               Visibility="{Binding Household.Account.Email, Converter={StaticResource VisibleWhenText}}" />
-                                </StackPanel>
-                                <Border Width="1" Height="20" Margin="10,0" Background="{DynamicResource M.Line}" />
-                                <Button Style="{StaticResource M.IconButton}" FontSize="10" Content="&#xE921;" Click="MinimizeClick" ToolTip="Minimize" AutomationProperties.Name="Minimize" />
-                                <Button x:Name="MaximizeButton" Style="{StaticResource M.IconButton}" FontSize="10" Content="&#xE922;" Click="MaximizeClick" ToolTip="Maximize" AutomationProperties.Name="Maximize" />
-                                <Button Style="{StaticResource M.Caption.Close}" FontSize="10" Content="&#xE8BB;" Click="CloseClick" ToolTip="Close to the tray" AutomationProperties.Name="Close" />
+                <!-- The top bar: plain over a hairline, the page's title, and on the right the theme, the look and Settings as small
+                     framed squares, this PC as an avatar with its name, and the caption. -->
+                <Border x:Name="TopBar" Grid.Row="0" Background="{DynamicResource M.Ground}" BorderBrush="{DynamicResource M.Line}" BorderThickness="0,0,0,1">
+                    <DockPanel Margin="32,0,10,0">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True">
+                            <Button x:Name="ThemeButton" Style="{StaticResource M.IconButton}" Content="&#xE706;" Click="ThemeClick" AutomationProperties.Name="Theme" />
+                            <!-- Switch look (Midnight look design §1): the other look, chosen as in Settings, so the choice is kept. -->
+                            <Button Style="{StaticResource M.IconButton}" Margin="8,0,0,0" Content="&#xE8AB;" Command="{Binding SwitchLook}" ToolTip="{Binding SwitchLookTip}"
+                                    AutomationProperties.Name="Switch look" Click="SwitchLookClick" />
+                            <Button Style="{StaticResource M.IconButton}" Margin="8,0,0,0" Content="&#xE713;" Click="SettingsClick" ToolTip="Settings" AutomationProperties.Name="Settings" />
+                            <Border Width="1" Height="20" Margin="16,0" Background="{DynamicResource M.Line}" />
+                            <Border Width="32" Height="32" CornerRadius="16" Background="{DynamicResource M.Raised}" BorderBrush="{DynamicResource M.Line}" BorderThickness="1">
+                                <TextBlock x:Name="KindGlyph" Style="{StaticResource M.Text.Glyph}" FontSize="15" Text="&#xE7FB;" HorizontalAlignment="Center" />
+                            </Border>
+                            <StackPanel VerticalAlignment="Center" Margin="10,0,6,0">
+                                <TextBlock x:Name="PcName" Style="{StaticResource M.Text.Body}" FontWeight="SemiBold" FontSize="12.5" />
+                                <TextBlock Style="{StaticResource M.Text.Muted}" FontSize="11" Text="{Binding Household.Account.Email}"
+                                           Visibility="{Binding Household.Account.Email, Converter={StaticResource VisibleWhenText}}" />
                             </StackPanel>
-                            <TextBlock Style="{StaticResource M.Text.Heading}" VerticalAlignment="Center" Text="{Binding Page, Converter={StaticResource PageTitle}}" />
-                        </DockPanel>
-                    </Grid>
+                            <Border Width="1" Height="20" Margin="10,0" Background="{DynamicResource M.Line}" />
+                            <Button Style="{StaticResource M.IconButton.Quiet}" FontSize="10" Content="&#xE921;" Click="MinimizeClick" ToolTip="Minimize" AutomationProperties.Name="Minimize" />
+                            <Button x:Name="MaximizeButton" Style="{StaticResource M.IconButton.Quiet}" FontSize="10" Content="&#xE922;" Click="MaximizeClick" ToolTip="Maximize" AutomationProperties.Name="Maximize" />
+                            <Button Style="{StaticResource M.Caption.Close}" FontSize="10" Content="&#xE8BB;" Click="CloseClick" ToolTip="Close to the tray" AutomationProperties.Name="Close" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource M.Text.Heading}" VerticalAlignment="Center" Text="{Binding Page, Converter={StaticResource PageTitle}}" />
+                    </DockPanel>
                 </Border>
 
                 <!-- The page header: the title again, heavier, the status pill, and the household's members. -->
@@ -288,7 +288,7 @@
                     <Border x:Name="SwitchProblem" Style="{StaticResource M.Card.Flat}" BorderBrush="{DynamicResource M.Bad}" Padding="14,6,6,6"
                             Margin="0,14,0,0" Visibility="Collapsed" AutomationProperties.Name="Look switch problem" AutomationProperties.LiveSetting="Assertive">
                         <DockPanel>
-                            <Button DockPanel.Dock="Right" Style="{StaticResource M.IconButton}" Width="28" Height="28" MinHeight="28" FontSize="9" Content="&#xE8BB;"
+                            <Button DockPanel.Dock="Right" Style="{StaticResource M.IconButton.Quiet}" Width="28" Height="28" MinHeight="28" FontSize="9" Content="&#xE8BB;"
                                     Click="DismissProblem" ToolTip="Dismiss" AutomationProperties.Name="Dismiss" VerticalAlignment="Center" />
                             <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Glyph}" Foreground="{DynamicResource M.Bad}" Text="&#xE7BA;" Margin="0,0,10,0"
                                        AutomationProperties.Name="Problem" />

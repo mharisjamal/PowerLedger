@@ -129,63 +129,53 @@ public class MidnightControlsTests
             classic.AccentTextOrAccent.ShouldBeSameAs(Brushes.Orange, "without a text tint, the accent itself");
         });
 
-    /// <summary>A card's shadow, as layers: each a rounded rectangle a little larger and fainter than the one inside it,
-    /// set down by a third of the depth, adding up to a soft edge rather than a line.</summary>
-    [Fact]
-    public void A_cards_shadow_is_rings_that_grow_to_its_depth_and_sit_below_it()
-    {
-        var layers = Card.ShadowLayers(new Size(200, 100), 14, 12);
-        layers.Count.ShouldBe(6);
-        layers[0].Rect.ShouldBe(new Rect(-12, 4 - 12, 224, 124), "the outermost reaches the depth, set down by a third of it");
-        layers[0].Radius.ShouldBe(26, "the corner grows with it");
-        layers[^1].Rect.ShouldBe(new Rect(-2, 4 - 2, 204, 104));
-        layers.Zip(layers.Skip(1)).ShouldAllBe(pair => pair.First.Rect.Contains(pair.Second.Rect), "outermost first, each inside the last");
-        layers.Sum(layer => layer.Alpha).ShouldBe(Card.Peak, 1e-9, "they add up to the peak at the card's edge");
-        Card.ShadowLayers(new Size(200, 100), 14, 0).ShouldBeEmpty();
-        Card.ShadowLayers(new Size(200, 100), 14, 16).Count.ShouldBe(8, "a raised card, a longer falloff");
-    }
-
-    /// <summary>The shadow is drawn behind the card, not by an Effect on it: the card's text keeps ClearType and a redraw
-    /// inside it never goes through an effect. A plain Border in M.Card is flat. Only the card itself answers the pointer.</summary>
+    /// <summary>0.8.1, after the reference: a section is flat, framed by a hairline with a small corner; nothing lifts or
+    /// shades it, and nothing about it moves under the pointer.</summary>
     [Fact]
     [Trait("Category", "UI")]
-    public void A_card_paints_its_own_shadow_without_an_effect_and_a_plain_border_in_its_style_is_flat()
+    public void A_section_is_flat_and_framed_by_a_hairline()
         => UiHarness.OnUi(() =>
         {
             var styles = MidnightStylesTests.Load();
             var host = new Grid { Width = 360, Height = 200 };
             host.Resources.MergedDictionaries.Add(styles);
-            host.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, Theme.Light));
-            host.SetResourceReference(Panel.BackgroundProperty, "M.Ground");
-            var card = new Card { Style = (Style)styles["M.Card"], Width = 200, Height = 100, Child = new TextBlock { Text = "Card" } };
-            var plain = new Border { Style = (Style)styles["M.Card"], Width = 20, Height = 20, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
-            host.Children.Add(card);
-            host.Children.Add(plain);
+            host.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, Theme.Dark));
+            var section = new Border { Style = (Style)styles["M.Card"], Width = 200, Height = 100 };
+            host.Children.Add(section);
             host.Measure(new Size(360, 200));
             host.Arrange(new Rect(0, 0, 360, 200));
-            host.UpdateLayout();
 
-            card.Effect.ShouldBeNull();
-            plain.Effect.ShouldBeNull("M.Card on a plain Border is flat");
-            card.Depth.ShouldBe((double)styles["M.Elevation.Card"]);
-            card.Shadow.ShouldNotBeNull();
-
-            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(360, 200, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(host);
-            byte Red(int x, int y)
-            {
-                var pixel = new byte[4];
-                bitmap.CopyPixels(new Int32Rect(x, y, 1, 1), pixel, 4, 0);
-                return pixel[2];
-            }
-            var below = card.TranslatePoint(new Point(100, 100 + 3), host);
-            var far = new Point(345, 195);
-            Red((int)below.X, (int)below.Y).ShouldBeLessThan(Red((int)far.X, (int)far.Y), "the ground just under the card is shaded");
-
-            var outside = new Point(100, 100 + 6);   // in the card's own coordinates, just under it
-            VisualTreeHelper.HitTest(card, outside).ShouldBeNull("the shadow doesn't take the pointer");
-            VisualTreeHelper.HitTest(card, new Point(100, 50)).ShouldNotBeNull();
+            section.Effect.ShouldBeNull();
+            ((Style)styles["M.Card"]).Triggers.ShouldBeEmpty("no hover lift");
+            section.CornerRadius.ShouldBe(new CornerRadius(10));
+            section.BorderThickness.ShouldBe(new Thickness(1));
+            ((SolidColorBrush)section.BorderBrush).Color.ShouldBe(((SolidColorBrush)host.FindResource("M.Line")).Color, "a hairline, not the strong line");
         });
+
+    /// <summary>A KPI's bar: the stripes run to the value, and the marker stands at it, kept whole inside the bar at either end.</summary>
+    [Fact]
+    public void The_bars_marker_stands_at_the_value_inside_the_bar()
+    {
+        HatchBar.FillWidth(0.43, 200).ShouldBe(86, 1e-9);
+        HatchBar.FillWidth(1.7, 200).ShouldBe(200);
+        HatchBar.FillWidth(double.NaN, 200).ShouldBe(0);
+        HatchBar.MarkerAt(86, 200).ShouldBe(new Rect(85, 0, HatchBar.MarkerWidth, HatchBar.BarHeight + 2 * HatchBar.MarkerReach));
+        HatchBar.MarkerAt(0, 200).X.ShouldBe(0, "at nothing, flush with the start");
+        HatchBar.MarkerAt(200, 200).X.ShouldBe(200 - HatchBar.MarkerWidth, "at the whole, flush with the end");
+    }
+
+    /// <summary>The sidebar's current row runs from the accent at its left into the violet and out to nothing at its right.</summary>
+    [Fact]
+    public void The_current_rows_wash_runs_from_the_accent_into_the_violet_and_out()
+    {
+        var accent = Color.FromRgb(0x3D, 0x5C, 0xFF);
+        var violet = Color.FromRgb(0x8B, 0x5C, 0xF6);
+        var stops = NavGlow.Stops(accent, violet);
+        stops.Select(stop => stop.Offset).ShouldBe([0, 0.6, 1]);
+        stops[0].Color.ShouldBe(Color.FromArgb((byte)Math.Round(255 * NavGlow.Strength), 0x3D, 0x5C, 0xFF));
+        stops[1].Color.ShouldBe(Color.FromArgb((byte)Math.Round(255 * NavGlow.SecondStrength), 0x8B, 0x5C, 0xF6));
+        stops[2].Color.A.ShouldBe((byte)0);
+    }
 
     [Fact]
     public void The_bars_and_the_disc_describe_themselves()
@@ -250,9 +240,10 @@ public class MidnightControlsTests
                     chart.Hovered.ShouldBe(144);
                     chart.Tip.ShouldNotBeNull();
                     chart.Tip.IsOpen.ShouldBeTrue();
-                    chart.Tip.Content.ShouldBeOfType<string>().ShouldMatch(@"^12:00 · \d+ W$");
-                    chart.Describe().ShouldMatch(@"At 12:00 · \d+ W\.$");
-                    UiHarness.Find<Border>(chart.Tip, border => border.Style == host.Resources["M.Glass"]).ShouldNotBeNull("the tooltip wears the glass");
+                    chart.TipText.ShouldMatch(@"^12:00 Power: \d+ W$");
+                    chart.Describe().ShouldMatch(@"At 12:00, \d+ W\.$");
+                    var bubble = UiHarness.Find<Border>(chart.Tip, border => border.Name == "Bubble")!;
+                    ((SolidColorBrush)bubble.Background).Color.ShouldBe(((SolidColorBrush)host.FindResource("M.Tip")).Color, "a solid bubble, no glass");
                     UiHarness.Render(host, (int)host.ActualWidth, (int)host.ActualHeight, $"midnight-controls-{theme}.png");
                     UiHarness.Render(chart.Tip, (int)Math.Ceiling(chart.Tip.ActualWidth), (int)Math.Ceiling(chart.Tip.ActualHeight), $"midnight-tooltip-{theme}.png");
 
@@ -277,7 +268,7 @@ public class MidnightControlsTests
                     chart.From = week.From;
                     chart.Model = Charts.Build(week, MidnightFixtures.WeekSeries(week), ChartUnit.Watts, TimeZoneInfo.Utc, MidnightFixtures.English);
                     chart.Hover(30);
-                    chart.Tip.Content.ShouldBeOfType<string>().ShouldStartWith((week.From + TimeSpan.FromHours(30)).ToString("ddd d MMM", german), Case.Sensitive,
+                    chart.TipText.ShouldStartWith((week.From + TimeSpan.FromHours(30)).ToString("ddd d MMM", german), Case.Sensitive,
                         "the tooltip speaks the chart's culture, the page's, not the thread's");
                 }
                 finally

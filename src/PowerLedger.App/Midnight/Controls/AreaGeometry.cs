@@ -76,19 +76,30 @@ internal static class AreaGeometry
     }
 
     /// <summary>
-    /// The words for a hovered bucket, "12:00 · 92 W": the bucket's start in the zone, as a time of day within one day, as
-    /// a day and time over a longer range, as a day alone when a bucket is a day; and the value in the unit. With no start
-    /// to count from, the value alone. The time is written as the axis under it writes its ticks (Charts: 24-hour), so the
-    /// two never disagree; the day's name is the culture's.
+    /// The words for a hovered bucket, "12:00, 92 W", for a screen reader: <see cref="HoverWhen"/> and the value in the
+    /// unit; with no start to count from, the value alone.
     /// </summary>
     public static string HoverLabel(DateTimeOffset? from, TimeSpan bucket, int index, int capacity, double value, ChartUnit unit, TimeZoneInfo zone, CultureInfo culture)
     {
         var amount = $"{Format.WholeWatts(value, culture)} {Charts.Symbol(unit)}";
-        if (from is not { } start) return amount;
+        return HoverWhen(from, bucket, index, capacity, zone, culture) is { } when ? $"{when}, {amount}" : amount;
+    }
+
+    /// <summary>
+    /// When a hovered bucket starts, in the zone: a time of day within one day, a day and time over a longer range, a day
+    /// alone when a bucket is a day; null with no start to count from. The time is written as the axis under it writes its
+    /// ticks (Charts: 24-hour), so the two never disagree; the day's name is the culture's.
+    /// </summary>
+    public static string? HoverWhen(DateTimeOffset? from, TimeSpan bucket, int index, int capacity, TimeZoneInfo zone, CultureInfo culture)
+    {
+        if (from is not { } start) return null;
         var at = TimeZoneInfo.ConvertTime(start + bucket * index, zone);
         var time = at.ToString("HH:mm", culture);
         var day = at.ToString("ddd d MMM", culture);
-        var when = bucket >= TimeSpan.FromDays(1) ? day : bucket * capacity > TimeSpan.FromDays(1) ? $"{day} {time}" : time;
-        return $"{when} · {amount}";
+        return bucket >= TimeSpan.FromDays(1) ? day : bucket * capacity > TimeSpan.FromDays(1) ? $"{day} {time}" : time;
     }
+
+    /// <summary>The tooltip's figure, named as the reference names its: "Power: 92 W", "Energy: 640 Wh".</summary>
+    public static string HoverAmount(double value, ChartUnit unit, CultureInfo culture)
+        => $"{(unit == ChartUnit.Watts ? "Power" : "Energy")}: {Format.WholeWatts(value, culture)} {Charts.Symbol(unit)}";
 }

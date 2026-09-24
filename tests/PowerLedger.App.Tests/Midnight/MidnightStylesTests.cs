@@ -23,7 +23,7 @@ public class MidnightStylesTests
         {
             foreach (var key in new[] { "M.Font.Ui", "M.Font.Numbers", "M.Font.Glyphs" }) styles[key].ShouldBeOfType<FontFamily>(key);
             ((FontFamily)styles["M.Font.Ui"]).Source.ShouldContain("Manrope");
-            ((FontFamily)styles["M.Font.Numbers"]).Source.ShouldContain("JetBrains Mono");
+            ((FontFamily)styles["M.Font.Numbers"]).Source.ShouldContain("Manrope", customMessage: "figures in the text face, with tabular numerals, not a monospace one");
             ((FontFamily)styles["M.Font.Glyphs"]).Source.ShouldContain("Segoe Fluent Icons");
         });
 
@@ -31,7 +31,7 @@ public class MidnightStylesTests
     public void The_text_styles_target_text_blocks()
         => Check(styles =>
         {
-            foreach (var key in new[] { "M.Text.Display", "M.Text.Title", "M.Text.Heading", "M.Text.Body", "M.Text.Secondary", "M.Text.Muted", "M.Text.Eyebrow", "M.Text.Number" })
+            foreach (var key in new[] { "M.Text.Display", "M.Text.Title", "M.Text.Heading", "M.Text.Body", "M.Text.Secondary", "M.Text.Muted", "M.Text.Eyebrow", "M.Text.Column", "M.Text.Number" })
                 Style(styles, key).TargetType.ShouldBe(typeof(TextBlock), key);
             Setter(styles, "M.Text.Display", TextBlock.FontSizeProperty).ShouldBe(36.0);
             Setter(styles, "M.Text.Title", TextBlock.FontSizeProperty).ShouldBe(20.0);
@@ -41,6 +41,8 @@ public class MidnightStylesTests
             Setter(styles, "M.Text.Display", TextBlock.FontFamilyProperty).ShouldBeSameAs(styles["M.Font.Numbers"]);
             Setter(styles, "M.Text.Number", TextBlock.FontFamilyProperty).ShouldBeSameAs(styles["M.Font.Numbers"]);
             Setter(styles, "M.Text.Body", TextBlock.FontFamilyProperty).ShouldBeSameAs(styles["M.Font.Ui"]);
+            Setter(styles, "M.Text.Display", TextBlock.FontWeightProperty).ShouldBe(FontWeights.Normal, "the big figures are light, as the reference's");
+            Setter(styles, "M.Text.Number", System.Windows.Documents.Typography.NumeralAlignmentProperty).ShouldBe(FontNumeralAlignment.Tabular);
         });
 
     [Fact]
@@ -49,9 +51,9 @@ public class MidnightStylesTests
         {
             var expected = new (string Key, Type Target)[]
             {
-                ("M.Card", typeof(Border)), ("M.Card.Flat", typeof(Border)), ("M.Glass", typeof(Border)),
+                ("M.Card", typeof(Border)), ("M.Card.Flat", typeof(Border)), ("M.Divider", typeof(Border)),
                 ("M.NavItem", typeof(RadioButton)), ("M.NavGroup", typeof(TextBlock)), ("M.Badge", typeof(ContentControl)),
-                ("M.Button.Primary", typeof(Button)), ("M.Button.Outline", typeof(Button)), ("M.Button.Quiet", typeof(Button)), ("M.IconButton", typeof(Button)),
+                ("M.Button.Primary", typeof(Button)), ("M.Button.Outline", typeof(Button)), ("M.Button.Quiet", typeof(Button)), ("M.IconButton", typeof(Button)), ("M.IconButton.Quiet", typeof(Button)),
                 ("M.Pill", typeof(RadioButton)), ("M.Switch", typeof(ToggleButton)), ("M.Field", typeof(TextBox)), ("M.Tick", typeof(CheckBox)),
                 ("M.Chip.Measured", typeof(ContentControl)), ("M.Chip.Calibrated", typeof(ContentControl)), ("M.Chip.Estimated", typeof(ContentControl)),
                 ("M.StatusPill.Good", typeof(ContentControl)), ("M.StatusPill.Warn", typeof(ContentControl)), ("M.StatusPill.Bad", typeof(ContentControl)),
@@ -59,10 +61,12 @@ public class MidnightStylesTests
             };
             foreach (var (key, target) in expected) Style(styles, key).TargetType.ShouldBe(target, key);
             Setter(styles, "M.NavItem", FrameworkElement.HeightProperty).ShouldBe(40.0);
-            Setter(styles, "M.IconButton", FrameworkElement.WidthProperty).ShouldBe(36.0);
-            Setter(styles, "M.IconButton", FrameworkElement.HeightProperty).ShouldBe(36.0);
-            Setter(styles, "M.Pill", FrameworkElement.HeightProperty).ShouldBe(28.0);
-            Setter(styles, "M.Table.Row", FrameworkElement.MinHeightProperty).ShouldBe(44.0);
+            Setter(styles, "M.IconButton", FrameworkElement.WidthProperty).ShouldBe(32.0);
+            Setter(styles, "M.IconButton", FrameworkElement.HeightProperty).ShouldBe(32.0);
+            Setter(styles, "M.IconButton", Control.BorderThicknessProperty).ShouldBe(new Thickness(1), "a small framed square");
+            Setter(styles, "M.IconButton.Quiet", Control.BorderThicknessProperty).ShouldBe(new Thickness(0));
+            Setter(styles, "M.Pill", FrameworkElement.HeightProperty).ShouldBe(26.0);
+            Setter(styles, "M.Table.Row", FrameworkElement.MinHeightProperty).ShouldBe(48.0);
             Setter(styles, "M.Card", Border.PaddingProperty).ShouldBe(new Thickness(20));
         });
 
@@ -83,7 +87,7 @@ public class MidnightStylesTests
         {
             var numbers = new (string Key, double Value)[]
             {
-                ("M.Radius.Card", 14), ("M.Radius.Pill", 999), ("M.Radius.Control", 8), ("M.Blur.Tooltip", 12), ("M.Elevation.Card", 12), ("M.Elevation.Tooltip", 20),
+                ("M.Radius.Card", 10), ("M.Radius.Pill", 999), ("M.Radius.Control", 6), ("M.Elevation.Tooltip", 14),
             };
             foreach (var (key, value) in numbers) styles[key].ShouldBeOfType<double>(key).ShouldBe(value, key);
             styles["M.Motion.Fast"].ShouldBeOfType<Duration>().ShouldBe(Motion.Fast);

@@ -70,12 +70,25 @@ public class AreaGeometryTests
         var zone = TimeZoneInfo.Utc;
         var midnight = new DateTimeOffset(2026, 9, 8, 0, 0, 0, TimeSpan.Zero);   // a Tuesday
         // The time as the axis under it writes it (Charts: 24-hour "HH:mm"), so the two never disagree.
-        AreaGeometry.HoverLabel(midnight, TimeSpan.FromMinutes(5), 144, 288, 92.4, ChartUnit.Watts, zone, English).ShouldBe("12:00 · 92 W");
-        AreaGeometry.HoverLabel(midnight, TimeSpan.FromHours(1), 39, 168, 31, ChartUnit.Watts, zone, English).ShouldBe("Wed 9 Sep 15:00 · 31 W");
-        AreaGeometry.HoverLabel(midnight, TimeSpan.FromDays(1), 2, 365, 640, ChartUnit.WattHours, zone, English).ShouldBe("Thu 10 Sep · 640 Wh");
+        AreaGeometry.HoverLabel(midnight, TimeSpan.FromMinutes(5), 144, 288, 92.4, ChartUnit.Watts, zone, English).ShouldBe("12:00, 92 W");
+        AreaGeometry.HoverLabel(midnight, TimeSpan.FromHours(1), 39, 168, 31, ChartUnit.Watts, zone, English).ShouldBe("Wed 9 Sep 15:00, 31 W");
+        AreaGeometry.HoverLabel(midnight, TimeSpan.FromDays(1), 2, 365, 640, ChartUnit.WattHours, zone, English).ShouldBe("Thu 10 Sep, 640 Wh");
         AreaGeometry.HoverLabel(null, TimeSpan.FromMinutes(5), 144, 288, 92.4, ChartUnit.Watts, zone, English).ShouldBe("92 W");
         AreaGeometry.HoverLabel(midnight, TimeSpan.FromDays(1), 2, 365, 640, ChartUnit.WattHours, zone, CultureInfo.GetCultureInfo("de-DE"))
-            .ShouldBe("Do 10 Sept. · 640 Wh", "the day in the chart's own culture");
+            .ShouldBe("Do 10 Sept., 640 Wh", "the day in the chart's own culture");
+    }
+
+    /// <summary>The tooltip's two lines, as the reference's bubble has them: the time over "what: how much".</summary>
+    [Fact]
+    public void The_tooltip_says_when_over_what_and_how_much()
+    {
+        var zone = TimeZoneInfo.Utc;
+        var midnight = new DateTimeOffset(2026, 9, 8, 0, 0, 0, TimeSpan.Zero);
+        AreaGeometry.HoverWhen(midnight, TimeSpan.FromMinutes(5), 144, 288, zone, English).ShouldBe("12:00");
+        AreaGeometry.HoverWhen(midnight, TimeSpan.FromDays(1), 2, 365, zone, English).ShouldBe("Thu 10 Sep");
+        AreaGeometry.HoverWhen(null, TimeSpan.FromMinutes(5), 144, 288, zone, English).ShouldBeNull();
+        AreaGeometry.HoverAmount(92.4, ChartUnit.Watts, English).ShouldBe("Power: 92 W");
+        AreaGeometry.HoverAmount(640, ChartUnit.WattHours, English).ShouldBe("Energy: 640 Wh");
     }
 
     [Fact]
@@ -83,6 +96,6 @@ public class AreaGeometryTests
     {
         var zone = TimeZoneInfo.CreateCustomTimeZone("Plus two", TimeSpan.FromHours(2), "Plus two", "Plus two");
         var from = new DateTimeOffset(2026, 9, 7, 22, 0, 0, TimeSpan.Zero);   // local midnight in that zone
-        AreaGeometry.HoverLabel(from, TimeSpan.FromMinutes(1), 30, 60, 40, ChartUnit.Watts, zone, English).ShouldBe("00:30 · 40 W");
+        AreaGeometry.HoverLabel(from, TimeSpan.FromMinutes(1), 30, 60, 40, ChartUnit.Watts, zone, English).ShouldBe("00:30, 40 W");
     }
 }

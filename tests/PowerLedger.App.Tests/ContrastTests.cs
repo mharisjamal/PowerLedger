@@ -86,6 +86,18 @@ public class ContrastTests
         palette["Brush.Amber"].ShouldBe(palette["M.Accent"], theme);
     }
 
+    /// <summary>0.8.1: the sidebar's current page is its words in ink over the accent's wash, at its strongest behind them.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void The_current_pages_words_read_on_the_sidebars_wash(string theme)
+    {
+        var palette = Midnight(Enum.Parse<Theme>(theme));
+        var accent = palette["M.Accent"];
+        var wash = Contrast.Over(Color.FromArgb((byte)Math.Round(255 * NavGlow.Strength), accent.R, accent.G, accent.B), palette["M.Panel"]);
+        Contrast.Ratio(palette["M.Ink"], wash).ShouldBeGreaterThanOrEqualTo(4.5, theme);
+    }
+
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]

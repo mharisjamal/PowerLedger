@@ -49,10 +49,11 @@ public class MotionTests
         => UiHarness.OnUi(() =>
         {
             var styles = MidnightStylesTests.Load();
-            var lift = ((Style)styles["M.Card"]).Triggers.OfType<Trigger>().Single().EnterActions.OfType<BeginStoryboard>().Single()
-                .Storyboard.Children.OfType<MotionAnimation>().Single();
-            using (Motion.Force(reduced: false)) lift.CreateClock().NaturalDuration.ShouldBe(Motion.Fast);
-            using (Motion.Force(reduced: true)) lift.CreateClock().NaturalDuration.ShouldBe(new Duration(TimeSpan.Zero), "the same frozen animation, the setting now");
+            var knob = ((Style)styles["M.Switch"]).Setters.OfType<Setter>().Select(setter => setter.Value).OfType<ControlTemplate>().Single()
+                .Triggers.OfType<Trigger>().Single(trigger => trigger.Property == System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty)
+                .EnterActions.OfType<BeginStoryboard>().Single().Storyboard.Children.OfType<MotionAnimation>().Single();
+            using (Motion.Force(reduced: false)) knob.CreateClock().NaturalDuration.ShouldBe(Motion.Fast);
+            using (Motion.Force(reduced: true)) knob.CreateClock().NaturalDuration.ShouldBe(new Duration(TimeSpan.Zero), "the same frozen animation, the setting now");
             using (Motion.Force(reduced: false)) new MotionAnimation { Speed = MotionSpeed.Slow }.CreateClock().NaturalDuration.ShouldBe(Motion.Slow);
             using (Motion.Force(reduced: true)) new MotionAnimation { Speed = MotionSpeed.Fast, Fade = true }.CreateClock().NaturalDuration
                 .ShouldBe(new Duration(TimeSpan.FromMilliseconds(120)), "a fade keeps 120 ms");

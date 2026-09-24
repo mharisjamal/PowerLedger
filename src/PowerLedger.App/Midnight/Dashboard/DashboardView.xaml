@@ -2,8 +2,10 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:PowerLedger.App">
-    <!-- The Dashboard (Midnight look design §1, plan O M1-4): three KPI cards, the area chart with its range pills, and the
-         parts table with its own range. Three cards across from 1100 px of window; one under another below that. -->
+    <!-- The Dashboard (Midnight look design §1, plan O M1-4; laid out as the reference in 0.8.1): one section framed by a
+         hairline that holds the three KPIs side by side, divided by hairlines, and under a hairline the area chart with its
+         range; then the parts table as a section of its own. The KPIs sit three across from 1100 px of window, one under
+         another below that. -->
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -13,14 +15,25 @@
             <local:AtLeast x:Key="AtLeast" />
             <local:FigurePart x:Key="FigurePart" />
 
-            <!-- Page-only styles, each on a key of plan O 0.3. A part's glyph and its share bar take the part's colour. -->
+            <!-- Page-only styles, each on a key of plan O 0.3. A part's glyph, the disc behind it and its share bar take the part's colour. -->
             <Style x:Key="PartGlyph" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Glyph}">
-                <Setter Property="FontSize" Value="15" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
                 <Setter Property="Foreground" Value="{DynamicResource M.PartRest}" />
                 <Style.Triggers>
                     <DataTrigger Binding="{Binding Part}" Value="Cpu"><Setter Property="Foreground" Value="{DynamicResource M.PartCpu}" /></DataTrigger>
                     <DataTrigger Binding="{Binding Part}" Value="Gpu"><Setter Property="Foreground" Value="{DynamicResource M.PartGpu}" /></DataTrigger>
                     <DataTrigger Binding="{Binding Part}" Value="Display"><Setter Property="Foreground" Value="{DynamicResource M.PartDisplay}" /></DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <!-- The round tint behind a part's glyph, as the reference's row icons. -->
+            <Style x:Key="PartDisc" TargetType="Ellipse">
+                <Setter Property="Opacity" Value="0.16" />
+                <Setter Property="Fill" Value="{DynamicResource M.PartRest}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Part}" Value="Cpu"><Setter Property="Fill" Value="{DynamicResource M.PartCpu}" /></DataTrigger>
+                    <DataTrigger Binding="{Binding Part}" Value="Gpu"><Setter Property="Fill" Value="{DynamicResource M.PartGpu}" /></DataTrigger>
+                    <DataTrigger Binding="{Binding Part}" Value="Display"><Setter Property="Fill" Value="{DynamicResource M.PartDisplay}" /></DataTrigger>
                 </Style.Triggers>
             </Style>
             <Style x:Key="PartShare" TargetType="local:ShareBar" BasedOn="{StaticResource M.ShareBar}">
@@ -40,54 +53,90 @@
                 <Setter Property="FontSize" Value="12" />
                 <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
             </Style>
-            <Style x:Key="Head" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Eyebrow}">
+            <Style x:Key="Head" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Column}">
                 <Setter Property="VerticalAlignment" Value="Center" />
             </Style>
-            <!-- A row of range pills: one tab stop, the arrows move along it, as a radio group does. -->
+            <!-- A row of range choices: one tab stop, the arrows move along it, as a radio group does. -->
             <Style x:Key="PillRow" TargetType="StackPanel">
                 <Setter Property="Orientation" Value="Horizontal" />
                 <Setter Property="KeyboardNavigation.TabNavigation" Value="Once" />
                 <Setter Property="KeyboardNavigation.DirectionalNavigation" Value="Cycle" />
             </Style>
+            <!-- The span of time a KPI covers, beside its name: a small framed tag with a glyph, as the reference's period chips. -->
+            <Style x:Key="PeriodTag" TargetType="Border">
+                <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="{StaticResource M.Corner.Control}" />
+                <Setter Property="Padding" Value="8,3,9,3" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="SnapsToDevicePixels" Value="True" />
+            </Style>
 
-            <!-- A KPI card: the label, the figure with its unit set smaller, the line under it, the trend or the quality chip, and the hatched bar. -->
+            <!-- A KPI: its name and the time it covers, the figure with its unit set smaller and dimmer, the line under it and
+                 what the trend is against, then the striped bar with the trend or the quality chip at its end. The cell's left
+                 hairline divides it from the one before; the first has none, and one under another they divide by a top line. -->
             <DataTemplate x:Key="Kpi" DataType="{x:Type local:KpiCard}">
-                <local:Card Style="{StaticResource M.Card}" Margin="0,0,16,16" AutomationProperties.Name="{Binding Label}">
+                <Border x:Name="Cell" BorderBrush="{DynamicResource M.Line}" BorderThickness="1,0,0,0" Padding="20,18,20,20" SnapsToDevicePixels="True"
+                        AutomationProperties.Name="{Binding Label}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="{Binding Label, Converter={StaticResource Upper}}" />
-                        <TextBlock x:Name="Figure" Style="{StaticResource M.Text.Display}" Margin="0,10,0,0" TextTrimming="CharacterEllipsis">
+                        <DockPanel MinHeight="24">
+                            <Border x:Name="Period" DockPanel.Dock="Right" Style="{StaticResource PeriodTag}" Margin="12,0,0,0" Visibility="Collapsed">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="PeriodGlyph" Style="{StaticResource M.Text.Glyph}" FontSize="11" Text="&#xE787;" Foreground="{DynamicResource M.Ink3}" />
+                                    <TextBlock x:Name="PeriodText" Style="{StaticResource M.Text.Secondary}" FontSize="11.5" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <TextBlock x:Name="Measure" Style="{StaticResource M.Text.Secondary}" FontSize="13" FontWeight="Medium" Text="{Binding Label}"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                        <TextBlock x:Name="Figure" Style="{StaticResource M.Text.Display}" Margin="0,12,0,0" TextTrimming="CharacterEllipsis">
                             <Run Text="{Binding Big, Mode=OneWay, Converter={StaticResource FigurePart}, ConverterParameter=Number}" /><Run
-                                 Text=" " FontSize="18" /><Run Text="{Binding Big, Mode=OneWay, Converter={StaticResource FigurePart}, ConverterParameter=Unit}"
-                                 FontFamily="{StaticResource M.Font.Ui}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource M.Ink2}" />
+                                 Text=" " FontSize="20" /><Run Text="{Binding Big, Mode=OneWay, Converter={StaticResource FigurePart}, ConverterParameter=Unit}"
+                                 FontSize="20" Foreground="{DynamicResource M.Ink3}" />
                         </TextBlock>
-                        <TextBlock Style="{StaticResource M.Text.Secondary}" Margin="0,4,0,0" Text="{Binding Small}" TextTrimming="CharacterEllipsis" />
-                        <Grid Margin="0,16,0,0" Height="22">
-                            <StackPanel x:Name="Trend" Orientation="Horizontal" VerticalAlignment="Center">
-                                <local:TrendMark Kind="{Binding Kind}" Text="{Binding Trend}" LowerIsBetter="{Binding LowerIsBetter}" />
-                                <TextBlock x:Name="Against" Style="{StaticResource M.Text.Muted}" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" />
-                            </StackPanel>
-                            <ContentControl x:Name="Chip" Style="{StaticResource M.Chip.Measured}" Visibility="Collapsed" />
-                        </Grid>
-                        <local:HatchBar Style="{StaticResource M.HatchBar}" Margin="0,14,0,0" Value="{Binding Fill}" />
+                        <DockPanel Margin="0,2,0,0">
+                            <TextBlock x:Name="Against" DockPanel.Dock="Right" Style="{StaticResource M.Text.Muted}" Margin="12,0,0,0" Visibility="Collapsed" />
+                            <TextBlock Style="{StaticResource M.Text.Muted}" Text="{Binding Small}" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                        <DockPanel Margin="0,16,0,0">
+                            <Grid DockPanel.Dock="Right" Margin="14,0,0,0" MinHeight="22" VerticalAlignment="Center">
+                                <local:TrendMark x:Name="Trend" Kind="{Binding Kind}" Text="{Binding Trend}" LowerIsBetter="{Binding LowerIsBetter}" HorizontalAlignment="Right" />
+                                <ContentControl x:Name="Chip" Style="{StaticResource M.Chip.Measured}" Visibility="Collapsed" />
+                            </Grid>
+                            <local:HatchBar Style="{StaticResource M.HatchBar}" Value="{Binding Fill}" VerticalAlignment="Center" />
+                        </DockPanel>
                     </StackPanel>
-                </local:Card>
+                </Border>
                 <DataTemplate.Triggers>
-                    <!-- Without a figure, "No reading" is a state rather than a number: regular and muted, in the figure's face and size. -->
-                    <DataTrigger Binding="{Binding Big}" Value="{x:Static local:Format.NoReading}">
-                        <Setter TargetName="Figure" Property="FontWeight" Value="Normal" />
-                        <Setter TargetName="Figure" Property="Foreground" Value="{DynamicResource M.Ink3}" />
+                    <!-- Each KPI's name, and the time it covers in its tag. -->
+                    <DataTrigger Binding="{Binding Label}" Value="Power now">
+                        <Setter TargetName="Measure" Property="Text" Value="Power draw" />
+                        <Setter TargetName="PeriodText" Property="Text" Value="Live" />
+                        <Setter TargetName="PeriodGlyph" Property="Text" Value="&#xE823;" />
+                        <Setter TargetName="Period" Property="Visibility" Value="Visible" />
                     </DataTrigger>
-                    <!-- What an arrow is against, for the two cards that have one; words alone ("first month") say it themselves. -->
                     <DataTrigger Binding="{Binding Label}" Value="Today">
+                        <Setter TargetName="Measure" Property="Text" Value="Energy used" />
+                        <Setter TargetName="PeriodText" Property="Text" Value="Today" />
+                        <Setter TargetName="Period" Property="Visibility" Value="Visible" />
+                        <!-- What an arrow is against, for the two KPIs that have one; words alone ("first month") say it themselves. -->
                         <Setter TargetName="Against" Property="Text" Value="vs your average day" />
                         <Setter TargetName="Against" Property="Visibility" Value="Visible" />
                     </DataTrigger>
                     <DataTrigger Binding="{Binding Label}" Value="Idle waste this month">
+                        <Setter TargetName="Measure" Property="Text" Value="Idle waste" />
+                        <Setter TargetName="PeriodText" Property="Text" Value="This month" />
+                        <Setter TargetName="Period" Property="Visibility" Value="Visible" />
                         <Setter TargetName="Against" Property="Text" Value="vs last month" />
                         <Setter TargetName="Against" Property="Visibility" Value="Visible" />
                     </DataTrigger>
                     <DataTrigger Binding="{Binding Kind}" Value="Text">
                         <Setter TargetName="Against" Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                    <!-- Without a figure, "No reading" is a state rather than a number: muted, in the figure's face and size. -->
+                    <DataTrigger Binding="{Binding Big}" Value="{x:Static local:Format.NoReading}">
+                        <Setter TargetName="Figure" Property="FontWeight" Value="Normal" />
+                        <Setter TargetName="Figure" Property="Foreground" Value="{DynamicResource M.Ink3}" />
                     </DataTrigger>
                     <DataTrigger Binding="{Binding Kind}" Value="Quality">
                         <Setter TargetName="Trend" Property="Visibility" Value="Collapsed" />
@@ -99,6 +148,14 @@
                     <DataTrigger Binding="{Binding Trend}" Value="Estimated">
                         <Setter TargetName="Chip" Property="Style" Value="{StaticResource M.Chip.Estimated}" />
                     </DataTrigger>
+                    <!-- One under another, a top line divides them; the first, either way, has no line of its own. -->
+                    <DataTrigger Value="False"
+                                 Binding="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=local:DashboardView}, Converter={StaticResource AtLeast}, ConverterParameter=866}">
+                        <Setter TargetName="Cell" Property="BorderThickness" Value="0,1,0,0" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource TemplatedParent}}" Value="0">
+                        <Setter TargetName="Cell" Property="BorderThickness" Value="0" />
+                    </DataTrigger>
                 </DataTemplate.Triggers>
             </DataTemplate>
         </ResourceDictionary>
@@ -106,80 +163,84 @@
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
         <StackPanel Margin="32,16,32,32">
-            <!-- The cards. The -16 takes back the gutter the last card in a row leaves. The width is the page's: 1100 px of
-                 window less the 232 px sidebar and the 1 px frame each side. -->
-            <ItemsControl ItemsSource="{Binding Kpis}" ItemTemplate="{StaticResource Kpi}" Focusable="False" Margin="0,0,-16,0">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <UniformGrid>
-                            <UniformGrid.Style>
-                                <Style TargetType="UniformGrid">
-                                    <Setter Property="Rows" Value="1" />
-                                    <Style.Triggers>
-                                        <DataTrigger Value="False"
-                                                     Binding="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=local:DashboardView}, Converter={StaticResource AtLeast}, ConverterParameter=866}">
-                                            <Setter Property="Rows" Value="0" />
-                                            <Setter Property="Columns" Value="1" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </UniformGrid.Style>
-                        </UniformGrid>
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-            </ItemsControl>
-
-            <!-- Power over time: the range's name, the pills, the chart, the key to its colours. -->
-            <local:Card Style="{StaticResource M.Card}" Margin="0,0,0,16" AutomationProperties.Name="Power over time">
+            <!-- The overview: the KPIs and the chart in one frame. The width is the page's: 1100 px of window less the 232 px
+                 sidebar and the 1 px frame each side. -->
+            <Border Style="{StaticResource M.Card}" Padding="0">
                 <StackPanel>
-                    <DockPanel>
-                        <Border DockPanel.Dock="Right" Style="{StaticResource M.PillTrack}" Margin="16,0,0,0" VerticalAlignment="Top">
-                            <StackPanel Style="{StaticResource PillRow}">
-                                <RadioButton Style="{StaticResource M.Pill}" Content="1H" ToolTip="The last hour" AutomationProperties.Name="Last hour"
-                                             IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Hour}}" />
-                                <RadioButton Style="{StaticResource M.Pill}" Content="1D" ToolTip="Today" AutomationProperties.Name="Today"
-                                             IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Day}}" />
-                                <RadioButton Style="{StaticResource M.Pill}" Content="1W" ToolTip="The last 7 days" AutomationProperties.Name="Last 7 days"
-                                             IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Week}}" />
-                                <RadioButton Style="{StaticResource M.Pill}" Content="1M" ToolTip="The last 30 days" AutomationProperties.Name="Last 30 days"
-                                             IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Month}}" />
-                                <RadioButton Style="{StaticResource M.Pill}" Content="1Y" ToolTip="The last 365 days" AutomationProperties.Name="Last 365 days"
-                                             IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Year}}" />
-                                <RadioButton Style="{StaticResource M.Pill}" Content="All" ToolTip="Everything recorded" AutomationProperties.Name="Everything recorded"
-                                             IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.All}}" />
-                            </StackPanel>
-                        </Border>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Style="{StaticResource M.Text.Heading}" Text="Power over time" />
-                            <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,2,0,0" Text="{Binding ChartTitle}" />
+                    <ItemsControl ItemsSource="{Binding Kpis}" ItemTemplate="{StaticResource Kpi}" AlternationCount="3" Focusable="False">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid>
+                                    <UniformGrid.Style>
+                                        <Style TargetType="UniformGrid">
+                                            <Setter Property="Rows" Value="1" />
+                                            <Style.Triggers>
+                                                <DataTrigger Value="False"
+                                                             Binding="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=local:DashboardView}, Converter={StaticResource AtLeast}, ConverterParameter=866}">
+                                                    <Setter Property="Rows" Value="0" />
+                                                    <Setter Property="Columns" Value="1" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </UniformGrid.Style>
+                                </UniformGrid>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <!-- Power over time: the range's name, the range choices, the chart, the key to its colours. -->
+                    <Border Style="{StaticResource M.Divider}" Padding="20,18,20,16" AutomationProperties.Name="Power over time">
+                        <StackPanel>
+                            <DockPanel>
+                                <Border DockPanel.Dock="Right" Style="{StaticResource M.PillTrack}" Margin="16,0,0,0" VerticalAlignment="Top">
+                                    <StackPanel Style="{StaticResource PillRow}">
+                                        <RadioButton Style="{StaticResource M.Pill}" Content="1H" ToolTip="The last hour" AutomationProperties.Name="Last hour"
+                                                     IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Hour}}" />
+                                        <RadioButton Style="{StaticResource M.Pill}" Content="1D" ToolTip="Today" AutomationProperties.Name="Today"
+                                                     IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Day}}" />
+                                        <RadioButton Style="{StaticResource M.Pill}" Content="1W" ToolTip="The last 7 days" AutomationProperties.Name="Last 7 days"
+                                                     IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Week}}" />
+                                        <RadioButton Style="{StaticResource M.Pill}" Content="1M" ToolTip="The last 30 days" AutomationProperties.Name="Last 30 days"
+                                                     IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Month}}" />
+                                        <RadioButton Style="{StaticResource M.Pill}" Content="1Y" ToolTip="The last 365 days" AutomationProperties.Name="Last 365 days"
+                                                     IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.Year}}" />
+                                        <RadioButton Style="{StaticResource M.Pill}" Content="All" ToolTip="Everything recorded" AutomationProperties.Name="Everything recorded"
+                                                     IsChecked="{Binding Range, Converter={StaticResource Is}, ConverterParameter={x:Static local:RangePill.All}}" />
+                                    </StackPanel>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource M.Text.Heading}" Text="Power over time" />
+                                    <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,2,0,0" Text="{Binding ChartTitle}" />
+                                </StackPanel>
+                            </DockPanel>
+                            <local:AreaChart Style="{StaticResource M.AreaChart}" Margin="0,16,0,0" Model="{Binding Chart}" From="{Binding ChartFrom}" Zone="{Binding Zone}" Culture="{Binding Culture}"
+                                             EmptyText="{Binding ChartMessage, TargetNullValue='No history yet'}" />
+                            <WrapPanel Margin="0,10,0,0">
+                                <WrapPanel.Resources>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource M.Text.Secondary}">
+                                        <Setter Property="Margin" Value="7,0,18,0" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                    </Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Width" Value="8" />
+                                        <Setter Property="Height" Value="8" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                    </Style>
+                                </WrapPanel.Resources>
+                                <Ellipse Fill="{DynamicResource M.Accent}" /><TextBlock Text="Total" />
+                                <Ellipse Fill="{DynamicResource M.PartCpu}" /><TextBlock Text="CPU" />
+                                <Ellipse Fill="{DynamicResource M.PartGpu}" /><TextBlock Text="GPU" />
+                                <Ellipse Fill="{DynamicResource M.PartDisplay}" /><TextBlock Text="Display" />
+                                <Ellipse Fill="{DynamicResource M.PartRest}" /><TextBlock Text="Rest" />
+                                <local:HatchBar Style="{StaticResource M.SleepKey}" Width="18" VerticalAlignment="Center" /><TextBlock Text="Asleep" />
+                            </WrapPanel>
                         </StackPanel>
-                    </DockPanel>
-                    <local:AreaChart Style="{StaticResource M.AreaChart}" Margin="0,16,0,0" Model="{Binding Chart}" From="{Binding ChartFrom}" Zone="{Binding Zone}" Culture="{Binding Culture}"
-                                     EmptyText="{Binding ChartMessage, TargetNullValue='No history yet'}" />
-                    <WrapPanel Margin="0,12,0,0">
-                        <WrapPanel.Resources>
-                            <Style TargetType="TextBlock" BasedOn="{StaticResource M.Text.Secondary}">
-                                <Setter Property="Margin" Value="7,0,18,0" />
-                                <Setter Property="VerticalAlignment" Value="Center" />
-                            </Style>
-                            <Style TargetType="Ellipse">
-                                <Setter Property="Width" Value="8" />
-                                <Setter Property="Height" Value="8" />
-                                <Setter Property="VerticalAlignment" Value="Center" />
-                            </Style>
-                        </WrapPanel.Resources>
-                        <Ellipse Fill="{DynamicResource M.Accent}" /><TextBlock Text="Total" />
-                        <Ellipse Fill="{DynamicResource M.PartCpu}" /><TextBlock Text="CPU" />
-                        <Ellipse Fill="{DynamicResource M.PartGpu}" /><TextBlock Text="GPU" />
-                        <Ellipse Fill="{DynamicResource M.PartDisplay}" /><TextBlock Text="Display" />
-                        <Ellipse Fill="{DynamicResource M.PartRest}" /><TextBlock Text="Rest" />
-                        <local:HatchBar Style="{StaticResource M.HatchBar}" Width="18" Value="0" VerticalAlignment="Center" /><TextBlock Text="Asleep" />
-                    </WrapPanel>
+                    </Border>
                 </StackPanel>
-            </local:Card>
+            </Border>
 
             <!-- Where the power went: a row a part over the table's own range, each against the same length of time before it. -->
-            <local:Card Style="{StaticResource M.Card}" AutomationProperties.Name="Where the power went">
+            <Border Style="{StaticResource M.Card}" Margin="0,16,0,0" Padding="20,18,20,8" AutomationProperties.Name="Where the power went">
                 <StackPanel>
                     <DockPanel>
                         <Border DockPanel.Dock="Right" Style="{StaticResource M.PillTrack}" Margin="16,0,0,0" VerticalAlignment="Top">
@@ -201,11 +262,11 @@
                     <!-- The header and the rows share one set of columns: the glyph, the name, watts now, energy, the share,
                          the chip, the trend. The name and the share stretch; at 960 px of window the rest still fits whole.
                          The rows reach 8 px past the text each side, so a row's hover wash has room around its words. -->
-                    <StackPanel Margin="-8,18,-8,0">
+                    <StackPanel Margin="-8,16,-8,0">
                         <Border Style="{StaticResource M.Table.Header}" Padding="8,0,8,10">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="28" />
+                                    <ColumnDefinition Width="40" />
                                     <ColumnDefinition Width="*" MinWidth="100" />
                                     <ColumnDefinition Width="72" />
                                     <ColumnDefinition Width="84" />
@@ -213,12 +274,12 @@
                                     <ColumnDefinition Width="100" />
                                     <ColumnDefinition Width="68" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="1" Style="{StaticResource Head}" Text="PART" />
-                                <TextBlock Grid.Column="2" Style="{StaticResource Head}" Text="NOW" HorizontalAlignment="Right" />
-                                <TextBlock Grid.Column="3" Style="{StaticResource Head}" Text="ENERGY" HorizontalAlignment="Right" />
-                                <TextBlock Grid.Column="4" Style="{StaticResource Head}" Text="SHARE" Margin="20,0,0,0" />
-                                <TextBlock Grid.Column="5" Style="{StaticResource Head}" Text="QUALITY" Margin="16,0,0,0" />
-                                <TextBlock Grid.Column="6" Style="{StaticResource Head}" Text="TREND" Margin="8,0,0,0" />
+                                <TextBlock Grid.Column="1" Style="{StaticResource Head}" Text="Part" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource Head}" Text="Now" HorizontalAlignment="Right" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource Head}" Text="Energy" HorizontalAlignment="Right" />
+                                <TextBlock Grid.Column="4" Style="{StaticResource Head}" Text="Share" Margin="20,0,0,0" />
+                                <TextBlock Grid.Column="5" Style="{StaticResource Head}" Text="Quality" Margin="16,0,0,0" />
+                                <TextBlock Grid.Column="6" Style="{StaticResource Head}" Text="Trend" Margin="8,0,0,0" />
                             </Grid>
                         </Border>
                         <ItemsControl ItemsSource="{Binding Parts}" Focusable="False">
@@ -227,7 +288,7 @@
                                     <Border Style="{StaticResource M.Table.Row}" Padding="8,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="28" />
+                                                <ColumnDefinition Width="40" />
                                                 <ColumnDefinition Width="*" MinWidth="100" />
                                                 <ColumnDefinition Width="72" />
                                                 <ColumnDefinition Width="84" />
@@ -235,7 +296,10 @@
                                                 <ColumnDefinition Width="100" />
                                                 <ColumnDefinition Width="68" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Style="{StaticResource PartGlyph}" Text="{Binding Glyph}" />
+                                            <Grid Grid.Column="0" Width="30" Height="30" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                <Ellipse Style="{StaticResource PartDisc}" />
+                                                <TextBlock Style="{StaticResource PartGlyph}" Text="{Binding Glyph}" />
+                                            </Grid>
                                             <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Body}" FontWeight="Medium" Text="{Binding Name}" VerticalAlignment="Center"
                                                        TextTrimming="CharacterEllipsis" />
                                             <TextBlock Grid.Column="2" Style="{StaticResource Cell}" Text="{Binding NowW}" />
@@ -254,7 +318,7 @@
                         </ItemsControl>
                     </StackPanel>
                 </StackPanel>
-            </local:Card>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

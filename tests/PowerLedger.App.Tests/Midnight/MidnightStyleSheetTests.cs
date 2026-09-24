@@ -4,7 +4,6 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Shapes;
 using PowerLedger.Contracts;
 using Shouldly;
 
@@ -67,13 +66,14 @@ public class MidnightStyleSheetTests
         TextBlock Text(string style, string text) => new() { Style = S(style), Text = text, VerticalAlignment = VerticalAlignment.Center };
 
         Row(Text("M.Text.Display", "1.24"), Text("M.Text.Title", "Dashboard"), Text("M.Text.Heading", "Power over time"), Text("M.Text.Body", "Body text"),
-            Text("M.Text.Secondary", "Secondary"), Text("M.Text.Muted", "Muted"), Text("M.Text.Eyebrow", "POWER NOW"), Text("M.Text.Number", "92 W"));
-        Row(new Card { Style = S("M.Card"), Width = 200, Child = Text("M.Text.Body", "Card") },
-            new Border { Style = S("M.Card.Flat"), Width = 200, Child = Text("M.Text.Body", "Flat card") },
-            new Border { Style = S("M.Glass"), Width = 200, Padding = new Thickness(12), Child = new Grid { Children = { new Rectangle { Style = S("M.Glass.Highlight") }, Text("M.Text.Body", "Glass") } } });
+            Text("M.Text.Secondary", "Secondary"), Text("M.Text.Muted", "Muted"), Text("M.Text.Eyebrow", "OVERVIEW"), Text("M.Text.Column", "Energy"), Text("M.Text.Number", "92 W"));
+        var section = new StackPanel { Children = { Text("M.Text.Body", "Section") } };
+        section.Children.Add(new Border { Style = S("M.Divider"), Margin = new Thickness(0, 12, 0, 0), Padding = new Thickness(0, 12, 0, 0), Child = Text("M.Text.Muted", "Under a divider") });
+        Row(new Border { Style = S("M.Card"), Width = 200, Child = section },
+            new Border { Style = S("M.Card.Flat"), Width = 200, Child = Text("M.Text.Body", "Flat card") });
 
         var nav = new Grid { Width = 232 };
-        var pill = new Border { Style = S("M.NavPill"), Margin = new Thickness(12, 0, 12, 0), VerticalAlignment = VerticalAlignment.Top };
+        var pill = new NavGlow { Style = S("M.NavPill"), VerticalAlignment = VerticalAlignment.Top };
         nav.Children.Add(pill);
         var items = new StackPanel();
         items.Children.Add(new TextBlock { Style = S("M.NavGroup"), Text = "OVERVIEW" });
@@ -83,7 +83,8 @@ public class MidnightStyleSheetTests
         Row(nav, new ContentControl { Style = S("M.Badge"), Content = 2 }, new ContentControl { Style = S("M.Badge"), Content = 0 });
 
         Row(new Button { Style = S("M.Button.Primary"), Content = "Add a PC" }, new Button { Style = S("M.Button.Outline"), Content = "Export CSV" },
-            new Button { Style = S("M.Button.Quiet"), Content = "Later" }, new Button { Style = S("M.IconButton"), Content = "" });
+            new Button { Style = S("M.Button.Quiet"), Content = "Later" }, new Button { Style = S("M.IconButton"), Content = "" },
+            new Button { Style = S("M.IconButton.Quiet"), Content = "" });
 
         var track = new Border { Style = S("M.PillTrack") };
         var pills = new StackPanel { Orientation = Orientation.Horizontal };
@@ -98,7 +99,7 @@ public class MidnightStyleSheetTests
             new ContentControl { Style = S("M.StatusPill.Bad"), Content = "Service not running" });
 
         var table = new StackPanel { Width = 400 };
-        table.Children.Add(new Border { Style = S("M.Table.Header"), Child = Text("M.Text.Eyebrow", "PART") });
+        table.Children.Add(new Border { Style = S("M.Table.Header"), Child = Text("M.Text.Column", "Part") });
         foreach (var name in new[] { "CPU", "GPU" })
         {
             var cells = new DockPanel();
