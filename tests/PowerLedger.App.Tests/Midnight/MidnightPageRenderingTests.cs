@@ -58,9 +58,9 @@ public class MidnightPageRenderingTests
                     var row = rows.ItemContainerGenerator.ContainerFromItem(part).ShouldBeAssignableTo<DependencyObject>(theme.ToString());
                     Find<TextBlock>(row, t => t.Text == part.Name).ShouldNotBeNull($"{part.Name} on {theme}");
                     Find<TextBlock>(row, t => t.Text == part.Energy).ShouldNotBeNull($"{part.Name} on {theme}");
-                    var track = Find<Border>(row, b => System.Windows.Automation.AutomationProperties.GetName(b) == $"{part.Name} share").ShouldNotBeNull($"{part.Name} on {theme}");
-                    if (part.Part is null) track.Visibility.ShouldBe(Visibility.Hidden, theme.ToString());
-                    else ((FrameworkElement)track.Child).ActualWidth.ShouldBe(120 * part.Fraction, 0.5, $"{part.Name} on {theme}");
+                    var bar = Find<ShareBar>(row, b => System.Windows.Automation.AutomationProperties.GetName(b) == $"{part.Name} share").ShouldNotBeNull($"{part.Name} on {theme}");
+                    if (part.Part is null) bar.Visibility.ShouldBe(Visibility.Hidden, theme.ToString());
+                    else (bar.Value, bar.ActualWidth).ShouldBe((part.Fraction, 120.0), $"{part.Name} on {theme}");
                 }
                 Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-history-{theme}.png");
 
@@ -140,8 +140,9 @@ public class MidnightPageRenderingTests
                     Find<TextBlock>(row, t => t.Text == "this PC").ShouldNotBeNull($"{member.Name} on {theme}").IsVisible.ShouldBe(member.IsThisPc, $"{member.Name} on {theme}");
                     Find<Button>(row, b => Equals(b.Content, "Remove")).ShouldNotBeNull($"{member.Name} on {theme}").IsVisible.ShouldBe(!member.IsThisPc, $"{member.Name} on {theme}");
                     Find<Button>(row, b => Equals(b.Content, "Remove its rows")).ShouldNotBeNull($"{member.Name} on {theme}").IsVisible.ShouldBeFalse($"{member.Name} on {theme}");
-                    var track = Find<Border>(row, b => System.Windows.Automation.AutomationProperties.GetName(b) == $"{member.Name} share").ShouldNotBeNull($"{member.Name} on {theme}");
-                    ((FrameworkElement)track.Child).ActualWidth.ShouldBe(80 * member.Share, 0.5, $"{member.Name} on {theme}");
+                    Find<ShareBar>(row, b => System.Windows.Automation.AutomationProperties.GetName(b) == $"{member.Name} share").ShouldNotBeNull($"{member.Name} on {theme}")
+                        .Value.ShouldBe(member.Share, $"{member.Name} on {theme}");
+                    Find<Initials>(row).ShouldNotBeNull($"{member.Name} on {theme}").Member.ShouldBe(member.Name, $"{member.Name} on {theme}");
                 }
                 AllOf<Button>(view).Count(b => Equals(b.Content, "Add a PC") && b.IsVisible).ShouldBe(1, theme.ToString());
                 Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-household-{theme}.png");

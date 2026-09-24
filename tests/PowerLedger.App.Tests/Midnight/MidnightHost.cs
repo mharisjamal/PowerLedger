@@ -12,11 +12,11 @@ namespace PowerLedger.App.Tests;
 internal static class MidnightHost
 {
     /// <summary>Midnight's palette for <paramref name="theme"/> over the application's dictionaries until disposed. Call on the UI thread.</summary>
-    public static IDisposable UsePalette(Theme theme) => Use(TempPalette.Load(theme));
+    public static IDisposable UsePalette(Theme theme) => Use(ThemeManager.Palette(Look.Midnight, theme));
 
     /// <summary>Every colour Midnight's palette for <paramref name="theme"/> holds, opaque or not.</summary>
     public static IReadOnlySet<Color> PaletteColours(Theme theme)
-        => TempPalette.Load(theme).Values.OfType<SolidColorBrush>().Select(brush => brush.Color).ToHashSet();
+        => ThemeManager.Palette(Look.Midnight, theme).Values.OfType<SolidColorBrush>().Select(brush => brush.Color).ToHashSet();
 
     /// <summary>A dictionary among the application's until disposed, after the palette. Call on the UI thread.</summary>
     public static IDisposable Use(ResourceDictionary dictionary)

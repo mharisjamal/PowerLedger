@@ -27,7 +27,7 @@
                     </DockPanel>
                     <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,8,0,0" Text="{Binding Message}"
                                Visibility="{Binding HasMessage, Converter={StaticResource VisibleWhen}}" />
-                    <app:StackedChart Style="{StaticResource M.Chart}" Height="300" Margin="0,16,0,0" Model="{Binding Chart}" />
+                    <app:StackedChart Style="{StaticResource M.StackedChart}" Height="300" Margin="0,16,0,0" Model="{Binding Chart}" />
                     <WrapPanel Margin="0,12,0,0">
                         <WrapPanel.Resources>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource M.Text.Secondary}">
@@ -78,11 +78,9 @@
                                         <TextBlock x:Name="Label" Grid.Column="1" Style="{StaticResource M.Text.Body}" Text="{Binding Name}" VerticalAlignment="Center" />
                                         <TextBlock x:Name="Energy" Grid.Column="2" Style="{StaticResource M.Text.Number}" Text="{Binding Energy}"
                                                    HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                        <Border x:Name="Track" Grid.Column="3" Style="{StaticResource M.ShareTrack}" Width="{StaticResource M.ShareTrack.Width}"
-                                                Margin="24,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}">
-                                            <Border x:Name="Fill" HorizontalAlignment="Left" Background="{DynamicResource M.PartRest}" app:Rounding.Pill="True"
-                                                    Width="{Binding Fraction, Converter={StaticResource ShareWidth}, ConverterParameter=120}" />
-                                        </Border>
+                                        <app:ShareBar x:Name="Share" Grid.Column="3" Style="{StaticResource M.ShareBar}" Width="{StaticResource M.ShareTrack.Width}" Margin="24,0,0,0"
+                                                      VerticalAlignment="Center" Value="{Binding Fraction}" FillBrush="{DynamicResource M.PartRest}"
+                                                      AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}" />
                                         <TextBlock Grid.Column="4" Style="{StaticResource M.Text.Number}" Foreground="{DynamicResource M.Ink3}" Text="{Binding Share}"
                                                    HorizontalAlignment="Right" VerticalAlignment="Center" />
                                     </Grid>
@@ -90,19 +88,19 @@
                                 <DataTemplate.Triggers>
                                     <DataTrigger Binding="{Binding Part}" Value="Cpu">
                                         <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartCpu}" />
-                                        <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartCpu}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartCpu}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding Part}" Value="Gpu">
                                         <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartGpu}" />
-                                        <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartGpu}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartGpu}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding Part}" Value="Display">
                                         <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartDisplay}" />
-                                        <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartDisplay}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartDisplay}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding Part}" Value="{x:Null}">
                                         <Setter TargetName="Swatch" Property="Visibility" Value="Hidden" />
-                                        <Setter TargetName="Track" Property="Visibility" Value="Hidden" />
+                                        <Setter TargetName="Share" Property="Visibility" Value="Hidden" />
                                         <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
                                         <Setter TargetName="Energy" Property="FontWeight" Value="SemiBold" />
                                         <Setter TargetName="Line" Property="BorderThickness" Value="0" />

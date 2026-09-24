@@ -335,13 +335,20 @@
                         </ToggleButton>
                     </StackPanel>
                     <TextBlock Style="{StaticResource Said}" Text="{Binding AppMessage}" Visibility="{Binding AppMessage, Converter={StaticResource VisibleWhenText}}" />
-                    <StackPanel Style="{StaticResource Row}">
+                    <!-- A grid, not the row, so Check now drops under the switch in a narrow page instead of running past the card. -->
+                    <Grid Margin="0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="208" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
                         <TextBlock Style="{StaticResource Label}" Text="Updates" />
-                        <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding Updates.CheckAutomatically}">
-                            <TextBlock Style="{StaticResource SwitchText}" Text="Download new versions quietly, then ask" />
-                        </ToggleButton>
-                        <Button Style="{StaticResource M.Button.Outline}" Content="Check now" Command="{Binding Updates.CheckNow}" Margin="12,0,0,0" />
-                    </StackPanel>
+                        <WrapPanel Grid.Column="1">
+                            <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding Updates.CheckAutomatically}" Margin="0,0,12,0">
+                                <TextBlock Style="{StaticResource SwitchText}" Text="Download new versions quietly, then ask" />
+                            </ToggleButton>
+                            <Button Style="{StaticResource M.Button.Outline}" Content="Check now" Command="{Binding Updates.CheckNow}" />
+                        </WrapPanel>
+                    </Grid>
                     <TextBlock Style="{StaticResource Note}" Margin="208,0,0,0" Text="{Binding Updates.Status}"
                                Visibility="{Binding Updates.Status, Converter={StaticResource VisibleWhenText}, FallbackValue=Collapsed}" />
                     <TextBlock Style="{StaticResource Said}" Text="{Binding Updates.Message}"

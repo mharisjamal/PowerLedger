@@ -117,11 +117,9 @@
                                             <Ellipse x:Name="Swatch" Style="{StaticResource M.Legend.Dot}" HorizontalAlignment="Left" />
                                             <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Secondary}" Text="{Binding Name}" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Number}" Text="{Binding Energy}" VerticalAlignment="Center" />
-                                            <Border Grid.Column="3" Style="{StaticResource M.ShareTrack}" Width="56" Margin="16,0,0,0" VerticalAlignment="Center"
-                                                    AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}">
-                                                <Border x:Name="Fill" HorizontalAlignment="Left" Background="{DynamicResource M.PartRest}" app:Rounding.Pill="True"
-                                                        Width="{Binding Fraction, Converter={StaticResource ShareWidth}, ConverterParameter=56}" />
-                                            </Border>
+                                            <app:ShareBar x:Name="Share" Grid.Column="3" Style="{StaticResource M.ShareBar}" Width="56" Margin="16,0,0,0" VerticalAlignment="Center"
+                                                          Value="{Binding Fraction}" FillBrush="{DynamicResource M.PartRest}"
+                                                          AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}" />
                                             <TextBlock Grid.Column="4" Style="{StaticResource M.Text.Number}" Foreground="{DynamicResource M.Ink3}" Text="{Binding Share}"
                                                        HorizontalAlignment="Right" VerticalAlignment="Center" />
                                         </Grid>
@@ -129,15 +127,15 @@
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding Part}" Value="Cpu">
                                             <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartCpu}" />
-                                            <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartCpu}" />
+                                            <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartCpu}" />
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding Part}" Value="Gpu">
                                             <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartGpu}" />
-                                            <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartGpu}" />
+                                            <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartGpu}" />
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding Part}" Value="Display">
                                             <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartDisplay}" />
-                                            <Setter TargetName="Fill" Property="Background" Value="{DynamicResource M.PartDisplay}" />
+                                            <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartDisplay}" />
                                         </DataTrigger>
                                     </DataTemplate.Triggers>
                                 </DataTemplate>

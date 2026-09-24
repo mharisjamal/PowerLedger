@@ -51,28 +51,6 @@
         <Setter Property="Background" Value="{DynamicResource M.Ground}" />
     </Style>
 
-    <!-- The drawn instruments in Midnight's colours and numerals. -->
-    <Style x:Key="M.Instrument" TargetType="app:Instrument">
-        <Setter Property="LineBrush" Value="{DynamicResource M.Line}" />
-        <Setter Property="StrongLineBrush" Value="{DynamicResource M.LineStrong}" />
-        <Setter Property="LabelBrush" Value="{DynamicResource M.Ink3}" />
-        <Setter Property="InkBrush" Value="{DynamicResource M.Ink}" />
-        <Setter Property="AccentBrush" Value="{DynamicResource M.Accent}" />
-        <Setter Property="AccentSoftBrush" Value="{DynamicResource M.AccentSoft}" />
-        <Setter Property="CpuBrush" Value="{DynamicResource M.PartCpu}" />
-        <Setter Property="GpuBrush" Value="{DynamicResource M.PartGpu}" />
-        <Setter Property="DisplayBrush" Value="{DynamicResource M.PartDisplay}" />
-        <Setter Property="RestBrush" Value="{DynamicResource M.PartRest}" />
-        <Setter Property="NumberFont" Value="{StaticResource M.Font.Numbers}" />
-    </Style>
-    <Style x:Key="M.Chart" TargetType="app:StackedChart" BasedOn="{StaticResource M.Instrument}" />
-    <Style x:Key="M.DailyBars" TargetType="app:DailyBars" BasedOn="{StaticResource M.Instrument}" />
-    <Style x:Key="M.QualityBar" TargetType="app:QualityBar" BasedOn="{StaticResource M.Instrument}">
-        <Setter Property="MeasuredBrush" Value="{DynamicResource M.ChipMeasuredText}" />
-        <Setter Property="CalibratedBrush" Value="{DynamicResource M.ChipCalibratedText}" />
-        <Setter Property="EstimatedBrush" Value="{DynamicResource M.ChipEstimatedText}" />
-    </Style>
-
     <!-- A ledger line in a card: the key, the value in numerals at the right, a note after it; the hero line set in the
          display size. No dotted leader: the card's edges frame the line. -->
     <Style x:Key="M.LedgerRow" TargetType="app:LedgerRow">

@@ -130,6 +130,7 @@
                                                 <ColumnDefinition Width="Auto" SharedSizeGroup="Actions" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <app:Initials Style="{StaticResource M.Initials}" Member="{Binding Name}" Margin="0,0,10,0" VerticalAlignment="Center" />
                                                 <TextBlock x:Name="Kind" Style="{StaticResource M.Text.Glyph}" Text="&#xE977;" ToolTip="{Binding Kind}" Margin="0,0,10,0"
                                                            AutomationProperties.Name="{Binding Kind}" />
                                                 <TextBlock Style="{StaticResource M.Text.Body}" FontWeight="SemiBold" Text="{Binding Name}" VerticalAlignment="Center" />
@@ -138,11 +139,9 @@
                                             </StackPanel>
                                             <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Muted}" Text="{Binding Status}" VerticalAlignment="Center" Margin="0,0,12,0"
                                                        TextTrimming="CharacterEllipsis" />
-                                            <Border Grid.Column="2" Style="{StaticResource M.ShareTrack}" Width="80" Margin="0,0,16,0"
-                                                    AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}">
-                                                <Border HorizontalAlignment="Left" Background="{DynamicResource M.PartCpu}" app:Rounding.Pill="True"
-                                                        Width="{Binding Share, Converter={StaticResource ShareWidth}, ConverterParameter=80}" />
-                                            </Border>
+                                            <app:ShareBar Grid.Column="2" Style="{StaticResource M.ShareBar}" Width="80" Margin="0,0,16,0" VerticalAlignment="Center"
+                                                          Value="{Binding Share}" FillBrush="{DynamicResource M.PartCpu}"
+                                                          AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}" />
                                             <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Number}" Text="{Binding Energy}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                             <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0" MinWidth="96" VerticalAlignment="Center">
                                                 <Button Style="{StaticResource M.Button.Quiet}" Content="Remove"
