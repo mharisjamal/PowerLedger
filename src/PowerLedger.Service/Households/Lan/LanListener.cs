@@ -32,6 +32,7 @@ internal sealed class LanListener : IAsyncDisposable
     private readonly Dictionary<IPAddress, int> _perAddress = [];
     private TcpListener? _listener;
     private Task? _accepting;
+    private volatile bool _closed;
 
     /// <param name="address">Where to listen: every address, IPv4 and IPv6, for the service; loopback for tests.</param>
     /// <param name="handle">Carries on a connection from its hello.</param>
@@ -55,10 +56,13 @@ internal sealed class LanListener : IAsyncDisposable
         _log.LogInformation("Listening for the household's other PCs on port {Port}", Port);
     }
 
+    /// <summary>Shuts the port before the first await, so a caller that doesn't wait finds it already shut, then ends the
+    /// connections being served.</summary>
     public async ValueTask DisposeAsync()
     {
-        await _stop.CancelAsync().ConfigureAwait(false);
+        _closed = true;
         _listener?.Stop();
+        await _stop.CancelAsync().ConfigureAwait(false);
         if (_accepting is not null) await _accepting.ConfigureAwait(false);
         Task[] running;
         lock (_gate) running = [.. _connections];
@@ -75,9 +79,9 @@ internal sealed class LanListener : IAsyncDisposable
             {
                 client = await listener.AcceptTcpClientAsync(stop).ConfigureAwait(false);
             }
-            catch (Exception error) when (error is OperationCanceledException or ObjectDisposedException or SocketException)
+            catch (Exception error) when (error is OperationCanceledException or ObjectDisposedException or SocketException or InvalidOperationException)
             {
-                if (stop.IsCancellationRequested) return;
+                if (_closed || stop.IsCancellationRequested) return;                   // InvalidOperationException: shut between two accepts
                 _log.LogDebug(error, "Accepting a connection failed");
                 continue;
             }
