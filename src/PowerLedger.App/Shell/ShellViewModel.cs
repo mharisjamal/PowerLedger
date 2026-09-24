@@ -36,13 +36,24 @@ internal sealed class ShellViewModel : ObservableObject
         Dashboard = dashboard;
         Wizard.Finished += EndSetup;
         Settings.SetupRequested += BeginSetup;
+        Settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SettingsViewModel.Look)) OnPropertyChanged(nameof(SwitchLookTip));
+        };
         Feedback = new RelayCommand(() => FeedbackRequested?.Invoke());
+        SwitchLook = new RelayCommand(() => Settings.Look = Settings.Look == Look.Classic ? Look.Midnight : Look.Classic);
     }
 
     public NowViewModel Now { get; }
 
     /// <summary>Midnight's landing page (Midnight look design §4); a Classic-only App has none, and shows Now for it.</summary>
     public DashboardViewModel? Dashboard { get; }
+
+    /// <summary>The title bars' Switch look button: the other look, chosen as in Settings, so the choice is kept.</summary>
+    public IRelayCommand SwitchLook { get; }
+
+    /// <summary>What the Switch look button offers.</summary>
+    public string SwitchLookTip => Settings.Look == Look.Classic ? "Switch to the Midnight look" : "Switch to the Classic look";
 
     public BreakdownViewModel Breakdown { get; }
 

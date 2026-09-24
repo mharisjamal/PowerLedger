@@ -87,6 +87,55 @@ public class RenderingTests
         }
     }
 
+    /// <summary>Midnight look design §1, plan O 0.4: the title bar's Switch look button, Segoe Fluent's Switch glyph in the
+    /// caption buttons' style, sits just left of Minimize, offers the other look, and chooses it as Settings would, so the
+    /// choice is kept.</summary>
+    [Fact]
+    public void The_title_bar_offers_the_other_look_next_to_minimize()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                using var saver = new FakeSaver();
+                var shell = Shell(saver);
+                var window = new MainWindow
+                {
+                    DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                };
+                try
+                {
+                    window.Show();
+                    window.UpdateLayout();
+                    var @switch = Find<Button>(window, button => AutomationProperties.GetName(button) == "Switch look").ShouldNotBeNull(theme.ToString());
+                    var minimize = Find<Button>(window, button => Equals(button.ToolTip, "Minimize")).ShouldNotBeNull(theme.ToString());
+                    @switch.ToolTip.ShouldBe("Switch to the Midnight look", theme.ToString());
+                    @switch.Content.ShouldBe("", theme.ToString());
+                    @switch.Style.ShouldBeSameAs(minimize.Style, theme.ToString());
+                    var left = @switch.TranslatePoint(new Point(0, 0), window).X;
+                    minimize.TranslatePoint(new Point(0, 0), window).X.ShouldBe(left + @switch.ActualWidth, 1, theme.ToString());
+                    Save(window, (int)window.ActualWidth, 40, $"classic-switch-look-{theme}.png");
+
+                    @switch.Command.Execute(null);
+
+                    shell.Settings.Look.ShouldBe(Look.Midnight, theme.ToString());
+                    @switch.ToolTip.ShouldBe("Switch to the Classic look", theme.ToString());
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+        foreach (var theme in new[] { Theme.Dark, Theme.Light })
+        {
+            new FileInfo(Path.Combine(Folder, $"classic-switch-look-{theme}.png")).Length.ShouldBeGreaterThan(3_000);
+        }
+    }
+
     /// <summary>Plan O 0.4: Classic's window as the look switcher sees it. It is placed at the bounds it is given rather
     /// than fitting itself to the screen, shows Midnight's Dashboard as Now, and a close for the switch closes it.</summary>
     [Fact]
