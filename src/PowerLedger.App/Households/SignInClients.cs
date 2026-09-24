@@ -13,7 +13,7 @@ internal static class SignInClients
 {
     public const string Microsoft = "";
 
-    public const string Google = "";
+    public const string Google = "422411367198-3470upgqo0tubjqdpo4fuhhl00ce9qb9.apps.googleusercontent.com";
 
     /// <summary>Google's installed-app clients call for one in the token exchange (review finding A7), even though the
     /// flow is PKCE. The repo is public, so this never sits in source: it comes from the built assembly's own

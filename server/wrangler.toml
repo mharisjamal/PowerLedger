@@ -30,7 +30,7 @@ crons = ["17 3 * * *"]
 # Sign-in (households design §7): the public client IDs of the owner's Azure app registration and Google OAuth client, filled in when they exist. Empty turns that provider's sign-in off.
 [vars]
 MS_CLIENT_ID = ""
-GOOGLE_CLIENT_ID = ""
+GOOGLE_CLIENT_ID = "422411367198-3470upgqo0tubjqdpo4fuhhl00ce9qb9.apps.googleusercontent.com"
 
 # In-app feedback (src/feedback.ts): the owner's PRIVATE repo, "owner/name", that feedback is filed in as issues, with its
 # images committed. The token for it is a secret (tools/set-feedback-token.ps1). Either empty turns feedback off (503).
