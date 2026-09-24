@@ -364,6 +364,17 @@ describe("join requests", () => {
     expect(await isMember(hid, stranger.id)).toBe(false);
   });
 
+  it("take an approval's sealed key and member list up to 16384 characters", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
+
+    expect((await approveAs(hid, owner.device, laptop, 1, "A".repeat(16385))).status).toBe(400);
+    expect((await approveAs(hid, owner.device, laptop, 1, "A".repeat(16388))).status).toBe(400);
+    expect((await approveAs(hid, owner.device, laptop, 1, "A".repeat(16384))).status).toBe(200);
+  });
+
   it("give 400 for an approval without a well-formed envelope", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
@@ -481,6 +492,16 @@ describe("recovery", () => {
     expect((await put(second, true)).status).toBe(200);
     expect(((await (await asAccount(owner, "GET", "/v1/account/recovery")).json()) as { holder: string }).holder).toBe(second.device.id);
     expect((await put(owner)).status).toBe(409); // a newer code exists: the old holder forgets its key
+  });
+
+  it("takes a sealed key and member list up to 16384 characters", async () => {
+    const { owner } = await linkedHousehold();
+    const put = (body: string) =>
+      asAccount(owner, "PUT", "/v1/account/recovery", { body, verifier: base64urlEncode(new Uint8Array(32)), epoch: 1, replace: true });
+
+    expect((await put("A".repeat(16385))).status).toBe(400);
+    expect((await put("A".repeat(16388))).status).toBe(400);
+    expect((await put("A".repeat(16384))).status).toBe(200);
   });
 
   it("is only put by a current member of the linked household, well formed", async () => {

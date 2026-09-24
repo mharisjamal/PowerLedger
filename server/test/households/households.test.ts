@@ -376,6 +376,7 @@ describe("the household's keys", () => {
       { epoch: -1, envelopes: [{ device: first.id, body: envelope() }] },
       { epoch: 2, envelopes: [{ device: first.id, body: "not base64url!" }] },
       { epoch: 2, envelopes: [{ device: first.id, body: envelope() }, { device: first.id, body: envelope() }] },
+      { epoch: 2, envelopes: [{ device: first.id, body: "A".repeat(1028) }] },
     ]) {
       const response = await signedFetch(first, "POST", `/v1/households/${hid}/keys`, body);
       expect(response.status, JSON.stringify(body)).toBe(400);

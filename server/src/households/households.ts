@@ -18,7 +18,12 @@ export const HOUSEHOLD_ID = /^[0-9a-f]{32}$/;
 export const MAX_MEMBERS = 16;
 /** The body limit for every household request but a batch. */
 export const SMALL_BODY_BYTES = 16 * 1024;
+/** The body limit for an approval and a recovery put, whose sealed key and member list can be 16384 characters. */
+export const MEDIUM_BODY_BYTES = 20 * 1024;
+/** A key envelope for a rotation: the key alone. */
 const MAX_ENVELOPE_CHARS = 1024;
+/** An approval's envelope, or a recovery body: the key and the member list with its epochs (plan 0.9). */
+export const MAX_SEALED_LIST_CHARS = 16384;
 const MAX_EPOCH = 2_147_483_647;
 
 const BAD_KEYS = "sign and dh must be P-256 public keys, as base64url SubjectPublicKeyInfo.";
@@ -26,6 +31,11 @@ const BAD_KEYS = "sign and dh must be P-256 public keys, as base64url SubjectPub
 /** Reads a body of at most 16 KB, or the 413 to send back. */
 export async function readSmall(request: Request): Promise<Uint8Array | Response> {
   return (await readBounded(request, SMALL_BODY_BYTES)) ?? errorResponse(413, "The body is larger than 16 KB.");
+}
+
+/** Reads a body of at most 20 KB, or the 413 to send back. */
+export async function readMedium(request: Request): Promise<Uint8Array | Response> {
+  return (await readBounded(request, MEDIUM_BODY_BYTES)) ?? errorResponse(413, "The body is larger than 20 KB.");
 }
 
 /** A posted {"sign","dh"} pair, checked; or the 400 to send back. */
@@ -228,8 +238,8 @@ interface Envelope {
 }
 
 /** An envelope's body: base64url of what HouseholdCrypto.WrapFor sealed, 28 bytes at least. */
-export function isEnvelopeBody(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > MAX_ENVELOPE_CHARS) return false;
+export function isEnvelopeBody(value: unknown, maxChars = MAX_ENVELOPE_CHARS): value is string {
+  if (typeof value !== "string" || value.length > maxChars) return false;
   const bytes = base64urlDecode(value);
   return bytes !== null && bytes.byteLength >= 28;
 }

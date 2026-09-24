@@ -1,7 +1,16 @@
 import { sha256hex, timingSafeEqualStrings } from "../auth";
 import { checkSession, finishSession, type MemberRow, type SessionRow, sessionToken } from "./auth";
 import { base64urlDecode, hex, sha256 } from "./encoding";
-import { addMemberStatement, currentEpoch, HOUSEHOLD_ID, isEnvelopeBody, isEpoch, MAX_MEMBERS, readSmall } from "./households";
+import {
+  addMemberStatement,
+  currentEpoch,
+  HOUSEHOLD_ID,
+  isEnvelopeBody,
+  isEpoch,
+  MAX_MEMBERS,
+  MAX_SEALED_LIST_CHARS,
+  readSmall,
+} from "./households";
 import { errorResponse, ok, overAddressLimit, parseObject } from "./http";
 
 /** At most this many PCs wait to join one household at a time. */
@@ -10,7 +19,7 @@ export const MAX_WAITING = 16;
 export const MAX_WAITING_PER_ACCOUNT = 2;
 /** A join request lasts this long, approved or not (the daily cron clears it). */
 export const JOIN_REQUEST_LIFETIME_MS = 24 * 60 * 60 * 1000;
-const MAX_RECOVERY_CHARS = 4096;
+const MAX_RECOVERY_CHARS = MAX_SEALED_LIST_CHARS;
 const VERIFIER_BYTES = 32;
 /** An approval's commit, nonce and reveal (plan 0.9). */
 const NONCE_BYTES = 32;
@@ -262,8 +271,8 @@ export async function handleOwnRequests(env: Cloudflare.Env, session: SessionRow
  */
 export async function handleApprove(env: Cloudflare.Env, member: MemberRow, device: string, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
-  if (!isEpoch(posted?.epoch) || !isEnvelopeBody(posted?.body)) {
-    return errorResponse(400, 'The body must be {"epoch","body"}: the household key sealed for that PC.');
+  if (!isEpoch(posted?.epoch) || !isEnvelopeBody(posted?.body, MAX_SEALED_LIST_CHARS)) {
+    return errorResponse(400, 'The body must be {"epoch","body"}: the key and member list sealed for that PC, 16384 characters at most.');
   }
 
   const request = await waitingRequest(env, member.household, device);
