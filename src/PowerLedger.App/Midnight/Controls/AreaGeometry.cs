@@ -42,6 +42,45 @@ internal static class AreaGeometry
         return points;
     }
 
+    /// <summary>
+    /// <paramref name="line"/> as one smooth curve: a cubic Bézier from each point to the next, its control points a third
+    /// of the way along on the tangents Fritsch and Butland's rule gives (level at a peak or a trough, a weighted harmonic
+    /// mean of the slopes either side elsewhere, the end slopes at the ends). Monotone: each segment's control points stay
+    /// between its ends, so the curve never swings above a peak or below the baseline, and it passes through every point,
+    /// where the hover's dot sits.
+    /// </summary>
+    public static IReadOnlyList<(Point C1, Point C2, Point End)> Smooth(IReadOnlyList<Point> line)
+    {
+        var n = line.Count;
+        if (n < 2) return [];
+        var slopes = new double[n - 1];
+        for (var i = 0; i < n - 1; i++)
+        {
+            var h = line[i + 1].X - line[i].X;
+            slopes[i] = h > 0 ? (line[i + 1].Y - line[i].Y) / h : 0;
+        }
+        var tangents = new double[n];
+        tangents[0] = slopes[0];
+        tangents[n - 1] = slopes[n - 2];
+        for (var i = 1; i < n - 1; i++)
+        {
+            var (before, after) = (slopes[i - 1], slopes[i]);
+            var (h0, h1) = (line[i].X - line[i - 1].X, line[i + 1].X - line[i].X);
+            tangents[i] = before * after <= 0 ? 0 : 3 * (h0 + h1) / ((2 * h1 + h0) / before + (h1 + 2 * h0) / after);
+        }
+        var segments = new (Point, Point, Point)[n - 1];
+        for (var i = 0; i < n - 1; i++)
+        {
+            var (from, to) = (line[i], line[i + 1]);
+            var third = (to.X - from.X) / 3;
+            var (low, high) = (Math.Min(from.Y, to.Y), Math.Max(from.Y, to.Y));
+            var c1 = Math.Clamp(from.Y + tangents[i] * third, low, high);
+            var c2 = Math.Clamp(to.Y - tangents[i + 1] * third, low, high);
+            segments[i] = (new Point(from.X + third, c1), new Point(to.X - third, c2), to);
+        }
+        return segments;
+    }
+
     /// <summary>The y axis: "0", then each step with the unit, "40 W", up to the top, with the decimals the step needs.</summary>
     public static IReadOnlyList<(double Value, string Label)> YLabels(double max, double step, string unit, CultureInfo culture)
     {

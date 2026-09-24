@@ -45,6 +45,31 @@ public class AreaGeometryTests
         AreaGeometry.Area([], 210).ShouldBeEmpty();
     }
 
+    /// <summary>0.8.1, after the reference: the line is one smooth curve through every bucket's point. Monotone (Fritsch and
+    /// Butland's tangents), so it never swings past its points: no bump above a peak, no dip below the baseline.</summary>
+    [Fact]
+    public void The_smooth_line_passes_through_every_point_and_never_overshoots()
+    {
+        var line = new[] { new Point(0, 100), new Point(10, 100), new Point(20, 40), new Point(30, 10), new Point(40, 60), new Point(50, 60) };
+        var curve = AreaGeometry.Smooth(line);
+        curve.Count.ShouldBe(line.Length - 1, "a segment between each two points");
+        for (var i = 0; i < curve.Count; i++)
+        {
+            curve[i].End.ShouldBe(line[i + 1]);
+            var (low, high) = (Math.Min(line[i].Y, line[i + 1].Y), Math.Max(line[i].Y, line[i + 1].Y));
+            foreach (var control in new[] { curve[i].C1, curve[i].C2 })
+            {
+                control.Y.ShouldBeInRange(low - 1e-9, high + 1e-9, $"segment {i} stays between its ends");
+                control.X.ShouldBeInRange(line[i].X, line[i + 1].X);
+            }
+        }
+        curve[0].C1.Y.ShouldBe(100, "flat stays flat");
+        curve[2].C2.Y.ShouldBe(10, 1e-9, "level at a trough");
+        curve[3].C1.Y.ShouldBe(10, 1e-9);
+        AreaGeometry.Smooth([new Point(0, 5)]).ShouldBeEmpty();
+        AreaGeometry.Smooth([new Point(0, 0), new Point(30, 30)]).Single().C1.ShouldBe(new Point(10, 10), "two points: a straight line");
+    }
+
     [Fact]
     public void The_y_axis_reads_zero_then_each_step_with_its_unit()
     {
