@@ -8,6 +8,7 @@ using PowerLedger.Contracts;
 using PowerLedger.Core;
 using Shouldly;
 using static PowerLedger.App.Tests.MidnightHost;
+using static PowerLedger.App.Tests.UiHarness;
 
 namespace PowerLedger.App.Tests;
 
@@ -28,11 +29,13 @@ public class MidnightDialogRenderingTests
     private static readonly string[] Dialogs =
     [
         "consent-first", "consent-open", "join-prompt", "join-prompt-code", "approve-prompt", "confirm-join", "add-pc-confirm", "recovery-code", "sent",
+        "feedback",
     ];
 
     [Fact]
     public void The_shared_dialogs_draw_in_both_midnight_palettes_with_no_colour_outside_them()
     {
+        Directory.CreateDirectory(Folder);
         var sentFolder = Path.Combine(Path.GetTempPath(), "powerledger-renders-midnight-sent");
         Directory.CreateDirectory(sentFolder);
         File.WriteAllBytes(Path.Combine(sentFolder, "2026-09-07.json.gz"), new byte[8_192]);
@@ -63,7 +66,7 @@ public class MidnightDialogRenderingTests
                         }
                         var strays = PaintedColours(window).Where(p => !colours.Contains(p.Colour) && !Allowed.Contains(p.Colour)).Distinct().ToList();
                         strays.ShouldBeEmpty($"{name} on {theme} paints outside the palette: {string.Join("; ", strays.Select(s => $"{s.Where} {s.Colour}"))}");
-                        Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-{name}-{theme}.png");
+                        Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-{name}-{theme}.png");
                     }
                     finally
                     {
@@ -140,6 +143,11 @@ public class MidnightDialogRenderingTests
             return new RecoveryCodeWindow(new RecoveryCodeViewModel(Connected(), notice, new FakeSaver(), _ => { })) { MaxHeight = 420 };
         });
         yield return ("sent", () => new SentWindow(new SentViewModel(Connected(), UiThreads.Inline, sentFolder, English, _ => { })));
+        yield return ("feedback", () =>
+        {
+            var sender = new FeedbackSender(new FakeHttp().Client(), Path.Combine(Path.GetTempPath(), "pl-feedback-midnight-render-tests"), new FakeTimeProvider(Now));
+            return new SendFeedbackWindow(new FeedbackViewModel(sender, UiThreads.Inline, () => null), null, new FakeImagePicker()) { MaxHeight = 560 };
+        });
     }
 
     private static FakeLink Connected()
