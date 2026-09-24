@@ -251,8 +251,7 @@ begin
     Exit;
   end;
   if GetWindowsVersion < $0A000000 then
-    Log(Format('Setup runs in a compatibility mode (it sees Windows %.8x; the build is %d). Going on without it.',
-      [GetWindowsVersion, Build]));
+    Log(Format('Setup runs in a compatibility mode (it sees Windows %.8x; the build is %d). Going on without it.', [GetWindowsVersion, Build]));
   { Programs setup starts (sc, net, netsh, the App) would inherit the compatibility layer through this variable. }
   PLSetEnvironmentVariable('__COMPAT_LAYER', '');
   Result := True;
