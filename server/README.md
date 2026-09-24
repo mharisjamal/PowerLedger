@@ -26,32 +26,54 @@ for the design.
 
 - **Signed requests.** Every household and account request carries `X-PL-Device`, `X-PL-Time` (unix seconds, within
   300 s) and `X-PL-Signature`: base64url ECDSA P-256 (r ‖ s) over `METHOD\npath?query\ntime\nhex SHA-256(body)`, the
-  path and query as sent. A signature is taken once, and a PC makes at most 1000 requests a UTC day.
-- **Households.** `POST /v1/households` (`{"id","sign","dh"}`, signed by that key); `GET`/`POST …/{hid}/members`;
-  `DELETE …/{hid}/members/{device}` (the household ends with its last member); `POST …/{hid}/keys`
-  (`{"epoch","envelopes":[{"device","body"}]}`, once an epoch, each epoch later than the last) and
-  `GET …/{hid}/keys/{epoch}` (`{"epoch","from","body"}`, the caller's own). At most 16 members.
-- **Batches.** `POST …/{hid}/batches` (`{"device","epoch","seq","body"}`, at most 1 MB, `seq` the sender's own);
-  `GET …/{hid}/batches?after=&limit=` gives `{"items":[{"seq","device","epoch","body"}],"next","more"}`: the others'
-  batches as posted, `next` the cursor to send as `after` next time, `more` when another page waits.
-- **Meetings**, for pairing by code: `PUT`/`GET /v1/meetings/{id}/{adder|joiner|answer|welcome}`, unsigned and behind
-  the address limit; each slot written once, 8 KB at most, for 10 minutes from the meeting's first `PUT`.
-- **Sign-in.** `POST /v1/auth/signin` (`{"provider","idToken","nonce","sign","dh"}`) checks the ID token against the
-  provider's JWKS and gives `{"session","householdId","hasRecovery"}`. The posted `nonce` is a salt: the token's nonce
-  claim must be base64url(SHA-256(UTF-8(`<device ID>:<salt>`))) for the PC that signed the request, so a token only
-  signs in the PC that asked for it. Removing a PC, or its leaving, ends its session. With
-  `Authorization: Session <token>` as well as the signature: `POST /v1/account/household` (link),
-  `POST /v1/account/requests` (ask to join),
-  `PUT`/`GET /v1/account/recovery` (`{"body","verifier","epoch"}`; `GET` never gives the verifier),
-  `POST /v1/account/recover` (`{"proof"}`: HMAC-SHA256 of the device ID under the verifier), `POST /v1/auth/signout`
-  and `DELETE /v1/account`. Members see and approve waiting PCs at `GET …/{hid}/requests` and
-  `POST …/{hid}/requests/{device}/approve` (`{"epoch","body"}`).
+  path and query as sent. The headers and the signer (member row or session) are checked before the body is read.
+  A signature is taken once, and a replay doesn't count against the PC's 1000 requests a UTC day. On household
+  routes, no member row and a bad signature get the same 401; a removed PC gets 410 ("This PC was removed from the
+  household."), and only once its signature is good. Keys are taken only in canonical SPKI (DER, point uncompressed).
+- **Households.** `POST /v1/households` (`{"id","sign","dh"}`, signed by that key); `GET …/{hid}/members`;
+  `POST …/{hid}/members` (`{"sign","dh","proof"}`, where the proof is the joining PC's ECDSA P-256 signature, P1363,
+  over UTF-8 `powerledger join|{hid}|{sign}|{dh}` with the keys as posted: 400 without one, 403 when it doesn't
+  verify; a current member with the same keys is 200, with another dh key 409); `DELETE …/{hid}/members/{device}`
+  (the household ends with its last member). At most 16 members.
+- **Keys.** The server keeps each household's epoch, 1 at creation. `POST …/{hid}/keys`
+  (`{"epoch","envelopes":[{"device","body"}]}`) takes only the current epoch + 1, which then becomes current (409
+  otherwise, a retry included); `GET …/{hid}/keys/{epoch}` gives `{"epoch","from","body"}`, the caller's own.
+- **Removing a PC**, or its leaving, also deletes the recovery of every account linked to the household; unlinks the
+  accounts the removed PC was signed in as, if linked to this household, and ends those sessions of it; and clears
+  its request to join. Accounts linked to another household are left alone.
+- **Batches.** `POST …/{hid}/batches` (`{"device","epoch","seq","body"}`, at most 1 MB, `seq` the sender's own); a PC
+  posts at most 200 batches and 5 MB of them a UTC day (429), and the server takes at most 2 GB a day in all (503,
+  "The server is busy; try again later."). `GET …/{hid}/batches?after=&limit=` gives
+  `{"items":[{"seq","device","epoch","body"}],"next","more"}`: the others' batches as posted, `next` the cursor to
+  send as `after` next time, `more` when another page waits.
+- **Meetings**, for pairing by code: `PUT`/`GET /v1/meetings/{id}/{adder|joiner|answer|welcome|joined}`, unsigned;
+  each slot written once, 8 KB at most, for 10 minutes from the meeting's first `PUT`. Every `PUT` clears ended
+  meetings; starting one has its own per-address limit (`MEETING_LIMIT`, 10 a minute, 429), and at most 5000 are live
+  (503).
+- **Sign-in.** `POST /v1/auth/signin` (`{"provider","idToken","nonce","sign","dh"}`) checks the ID token (RS256 only;
+  issuer, a Microsoft key's own issuer, audience with azp for several, expiry, issue time, not-before) and gives
+  `{"session","account","householdId","hasRecovery"}`, `account` being the account's opaque ID. The posted `nonce` is
+  a salt: the token's nonce claim must be base64url(SHA-256(UTF-8(`<device ID>:<salt>`))) for the PC that signed the
+  request, so a token only signs in the PC that asked for it. A Microsoft account is its tenant and subject.
+- **Accounts**, with `Authorization: Session <token>` as well as the signature: `POST /v1/account/household`
+  (`{"householdId"}`, required, a household the PC is a current member of); `POST /v1/account/requests` (ask to join:
+  16 waiting a household, 2 an account, lapsing after 7 days); `PUT /v1/account/recovery` (`{"body","verifier"}`, a
+  32-byte verifier of which only SHA-256 is kept, with the household's current epoch) and `GET` (`{"householdId",
+  "epoch","body"}`); `POST /v1/account/recover` (`{"verifier"}`: 403 when it isn't the one put, 409 when the epoch has
+  moved on since); `POST /v1/auth/signout` (the session and the PC's own requests); `DELETE /v1/account`.
+- **Requests, for members.** `GET …/{hid}/requests` gives `[{"device","account","sign","dh","created"}]`;
+  `POST …/{hid}/requests/{device}/approve` (`{"epoch","body"}`, the current epoch only; an envelope the PC already
+  has there is never overwritten, 409); `DELETE …/{hid}/requests/{device}` denies.
+- **Address limit.** Every household, account, sign-in and meeting route, and the reports ones, are behind
+  `ADDRESS_LIMIT` (60 a minute), an IPv6 address counted by its /64.
 - **Retention.** The daily cron also drops batches past 90 days, ended meetings, join requests past 7 days, per-PC
-  request counts past 2 days and seen signatures past 10 minutes.
+  counts and daily totals past 2 days and seen signatures past 10 minutes. Backlogs are worked through for up to
+  20 s a run, and each part runs on its own, so one failing doesn't stop the others.
 
 Sign-in needs the public client IDs in `wrangler.toml`'s `[vars]`, `MS_CLIENT_ID` and `GOOGLE_CLIENT_ID`; while one is
-empty, that provider's sign-in answers 503. Migrations `0003_households.sql` and `0004_accounts.sql` go out with the
-usual `npx wrangler d1 migrations apply powerledger-index --remote`.
+empty, that provider's sign-in answers 503. `wrangler.toml` also binds `MEETING_LIMIT`. Migrations
+`0003_households.sql` and `0004_accounts.sql` go out with the usual
+`npx wrangler d1 migrations apply powerledger-index --remote`.
 
 ## Storage
 
