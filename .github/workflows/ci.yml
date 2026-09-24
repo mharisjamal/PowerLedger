@@ -1,5 +1,5 @@
-# Build, test outside the Hardware, UI and Installed categories, then make the installer and test it on x64 and on
-# Arm64 (spec §13).
+# Build, test outside the Hardware, UI, Installed and Worker categories, then make the installer and test it on x64 and
+# on Arm64 (spec §13). The Worker category runs the households Worker locally with wrangler, which the lead runs by hand.
 name: CI
 
 on:
@@ -21,7 +21,7 @@ jobs:
         run: dotnet build -c Release
 
       - name: Test
-        run: dotnet test -c Release --no-build --filter "Category!=Hardware&Category!=UI&Category!=Installed"
+        run: dotnet test -c Release --no-build --filter "Category!=Hardware&Category!=UI&Category!=Installed&Category!=Worker"
 
       - name: Install Inno Setup
         shell: pwsh
