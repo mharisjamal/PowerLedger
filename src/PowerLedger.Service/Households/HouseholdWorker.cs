@@ -385,15 +385,16 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     }
 
     /// <summary>A connection from another PC on the network: a pairing asks this PC's user; a sync is with a member.</summary>
-    private async Task OnConnectionAsync(IFrameChannel channel, LanMessage hello, CancellationToken cancel)
+    private async Task OnConnectionAsync(LanCall call, CancellationToken cancel)
     {
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancel, _stopping.Token);
-        if (hello.Purpose == Hello.Sync)
+        var (channel, hello) = (call.Channel, call.Hello);
+        if (call.Message.Purpose == Hello.Sync)
         {
             if (_store.HouseholdId is not null) await _lanSync.RespondAsync(channel, hello, Identity(), stopping.Token).ConfigureAwait(false);
             return;
         }
-        if (hello.Purpose != Hello.Pair) return;
+        if (call.Message.Purpose != Hello.Pair) return;
         if (_pairingGate.TryEnter(out _) is not { } entered)
         {
             await PairingSession.JoinAsync(channel, hello, Identity(), Refusing.Broker, false, (_, _) => Task.CompletedTask, _timeouts, stopping.Token)

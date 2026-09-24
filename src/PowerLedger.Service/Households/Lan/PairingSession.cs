@@ -48,9 +48,10 @@ internal sealed record PairingTimeouts(TimeSpan Step, TimeSpan Answer)
 
 /// <summary>
 /// Pairing on the same network (households design §3, plan 0.6), over one connection. Each side sends a hello with a fresh
-/// ephemeral key and its own keys; both agree a shared secret, from which come the keys for the rest of the exchange and
-/// the six-digit comparison code both screens show. A PC in the middle can't make the two codes match, except by a
-/// one-in-a-million chance, so the user who compares them and presses Join vouches for the keys. Then the joining PC
+/// ephemeral key and its own keys; both agree a shared secret, from which, with the two hellos as they went over the wire
+/// (plan 0.8), come the keys for the rest of the exchange and the six-digit comparison code both screens show. A PC in the
+/// middle that changes anything in either hello can't make the two codes match, except by a one-in-a-million chance, so
+/// the user who compares them and presses Join vouches for the keys. Then the joining PC
 /// answers, the adding one sends the welcome, and the joining one says it joined.
 /// </summary>
 internal static class PairingSession
@@ -70,8 +71,10 @@ internal static class PairingSession
         string name = "The other PC";
         try
         {
-            await talk.SendAsync(LanMessages.Hello(Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance), cancel).ConfigureAwait(false);
-            var hello = Hello.Of(await talk.ReceiveAsync("hello", cancel).ConfigureAwait(false));
+            var myHello = LanMessages.Write(LanMessages.Hello(Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
+            await talk.SendAsync(myHello, cancel).ConfigureAwait(false);
+            var (theirMessage, theirHello) = await talk.ReceiveWithBytesAsync("hello", cancel).ConfigureAwait(false);
+            var hello = Hello.Of(theirMessage);
             if (hello is not { Purpose: Hello.Pair }) return new PairingOutcome.Failed("The other PC didn't answer as a PowerLedger PC should.");
             name = hello.From.Name;
             if (expectedInstance is not null && hello.Instance != expectedInstance)
@@ -81,9 +84,10 @@ internal static class PairingSession
             if (hello.From.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That is this PC.");
 
             var shared = HouseholdCrypto.Agree(eph, hello.Eph);
-            using var cipher = FrameCipher.For(adder: true, shared, ephPublic, hello.Eph);
+            var transcript = HouseholdCrypto.Transcript(myHello, theirHello);
+            using var cipher = FrameCipher.For(adder: true, shared, transcript);
             talk.Secure(cipher);
-            await showCode(hello.From, HouseholdCrypto.ComparisonCode(shared, ephPublic, hello.Eph)).ConfigureAwait(false);
+            await showCode(hello.From, HouseholdCrypto.ComparisonCode(shared, transcript)).ConfigureAwait(false);
 
             var answer = await talk.ReceiveAsync("answer", cancel, timeouts.Answer).ConfigureAwait(false);
             if (answer.Accept != true) return new PairingOutcome.Refused($"{name} didn't join.");
@@ -110,13 +114,14 @@ internal static class PairingSession
     }
 
     /// <summary>The joining side, which was connected to and has read the adder's hello.</summary>
+    /// <param name="adderHello">The adder's hello as it came, which the transcript takes.</param>
     /// <param name="inHousehold">True when this PC is in a household, which joining leaves: the user is told so.</param>
     /// <param name="enter">Takes this PC into the household in the welcome, from the adding PC.</param>
     public static async Task<PairingOutcome> JoinAsync(
-        IFrameChannel channel, LanMessage adderHello, PairingIdentity me, IPromptBroker broker, bool inHousehold,
+        IFrameChannel channel, byte[] adderHello, PairingIdentity me, IPromptBroker broker, bool inHousehold,
         Func<Welcome, MemberInfo, Task> enter, PairingTimeouts timeouts, CancellationToken cancel)
     {
-        if (Hello.Of(adderHello) is not { Purpose: Hello.Pair } hello) return new PairingOutcome.Failed("The other PC's hello wasn't a good one.");
+        if (Hello.Of(LanMessages.Read(adderHello)) is not { Purpose: Hello.Pair } hello) return new PairingOutcome.Failed("The other PC's hello wasn't a good one.");
         if (hello.From.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That is this PC.");
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
@@ -124,11 +129,13 @@ internal static class PairingSession
         var name = hello.From.Name;
         try
         {
-            await talk.SendAsync(LanMessages.Hello(Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance), cancel).ConfigureAwait(false);
+            var myHello = LanMessages.Write(LanMessages.Hello(Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
+            await talk.SendAsync(myHello, cancel).ConfigureAwait(false);
             var shared = HouseholdCrypto.Agree(eph, hello.Eph);
-            using var cipher = FrameCipher.For(adder: false, shared, hello.Eph, ephPublic);
+            var transcript = HouseholdCrypto.Transcript(adderHello, myHello);
+            using var cipher = FrameCipher.For(adder: false, shared, transcript);
             talk.Secure(cipher);
-            var code = HouseholdCrypto.ComparisonCode(shared, hello.Eph, ephPublic);
+            var code = HouseholdCrypto.ComparisonCode(shared, transcript);
 
             var accept = await broker.AskToJoinAsync(new JoinQuestion(name, code, inHousehold), cancel).ConfigureAwait(false);
             await talk.SendAsync(new LanMessage { Type = "answer", Accept = accept }, cancel).ConfigureAwait(false);

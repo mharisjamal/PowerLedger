@@ -155,6 +155,32 @@ public sealed class PairingSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_hello_changed_on_the_way_gives_each_side_its_own_code_and_no_frame_opens()
+    {
+        var (adderEnd, middleFromAdder) = FramePipe.Create();
+        var (middleToJoiner, joinerEnd) = FramePipe.Create();
+        string? shownOnAdder = null;
+        string? shownOnJoiner = null;
+        var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, (_, code) => { shownOnAdder = code; return Task.CompletedTask; },
+            _ => Task.FromResult(new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)])), Quick, CancellationToken.None);
+        var joining = JoinerSide(joinerEnd, new Broker(question => { shownOnJoiner = question.ComparisonCode; return true; }), inHousehold: false,
+            enter: (_, _) => throw new InvalidOperationException("never entered"));
+
+        // The middle keeps every key as it is and changes only the name in the joiner's hello.
+        await middleToJoiner.SendAsync((await middleFromAdder.ReceiveAsync())!);
+        var joinerHello = LanMessages.Read(await middleToJoiner.ReceiveAsync()).ShouldNotBeNull();
+        await middleFromAdder.SendAsync(LanMessages.Write(joinerHello with { Name = "Laptop-3" }));
+        var relaying = Task.WhenAll(Relay(middleFromAdder, middleToJoiner), Relay(middleToJoiner, middleFromAdder));
+
+        (await adding).ShouldBeOfType<PairingOutcome.Failed>();
+        await adderEnd.DisposeAsync();
+        (await joining).ShouldBeOfType<PairingOutcome.Failed>();
+        shownOnAdder.ShouldNotBeNull().ShouldNotBe(shownOnJoiner.ShouldNotBeNull());
+        await joinerEnd.DisposeAsync();
+        await relaying;
+    }
+
+    [Fact]
     public async Task A_frame_replayed_out_of_order_ends_the_connection()
     {
         var (adderEnd, middleFromAdder) = FramePipe.Create();
@@ -183,11 +209,13 @@ public sealed class PairingSessionTests : IDisposable
             _ => Task.FromResult(new Welcome("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey(), [Member(Adder)])), Quick, CancellationToken.None);
 
         // A hand-made joiner that says yes and takes the welcome, then signs its joining with a key that isn't its own.
-        var hello = PowerLedger.Service.Households.Lan.Hello.Of(LanMessages.Read(await joinerEnd.ReceiveAsync())).ShouldNotBeNull();
+        var adderHello = (await joinerEnd.ReceiveAsync()).ShouldNotBeNull();
+        var hello = PowerLedger.Service.Households.Lan.Hello.Of(LanMessages.Read(adderHello)).ShouldNotBeNull();
         using var eph = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
-        await joinerEnd.SendAsync(LanMessages.Write(LanMessages.Hello("pair", ephPublic, Joiner.Keys, Joiner.Name, Joiner.Kind, Joiner.Instance)));
-        using var cipher = FrameCipher.For(adder: false, HouseholdCrypto.Agree(eph, hello.Eph), hello.Eph, ephPublic);
+        var joinerHello = LanMessages.Write(LanMessages.Hello("pair", ephPublic, Joiner.Keys, Joiner.Name, Joiner.Kind, Joiner.Instance));
+        await joinerEnd.SendAsync(joinerHello);
+        using var cipher = FrameCipher.For(adder: false, HouseholdCrypto.Agree(eph, hello.Eph), HouseholdCrypto.Transcript(adderHello, joinerHello));
         await joinerEnd.SendAsync(cipher.Seal(LanMessages.Write(new LanMessage { Type = "answer", Accept = true })));
         cipher.Open((await joinerEnd.ReceiveAsync())!);
         using var other = DeviceKeys.Create();
@@ -208,7 +236,7 @@ public sealed class PairingSessionTests : IDisposable
     private async Task<PairingOutcome> JoinerSide(
         FramePipe end, IPromptBroker broker, bool inHousehold, Func<Welcome, MemberInfo, Task> enter)
     {
-        var hello = LanMessages.Read(await end.ReceiveAsync()).ShouldNotBeNull();
+        var hello = (await end.ReceiveAsync()).ShouldNotBeNull();
         return await PairingSession.JoinAsync(end, hello, Joiner, broker, inHousehold, enter, Quick, CancellationToken.None);
     }
 

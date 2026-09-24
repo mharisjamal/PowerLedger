@@ -132,10 +132,12 @@ public sealed class LanSyncTests : IAsyncLifetime
         await using var channel = await LanConnector.ConnectAsync(IPAddress.Loopback, port, TimeSpan.FromSeconds(5));
         using var eph = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
-        await channel.SendAsync(LanMessages.Write(LanMessages.Hello("sync", ephPublic, claimed, "Desktop-7", ChassisKind.Desktop, "i1")));
-        var theirs = Hello.Of(LanMessages.Read(await channel.ReceiveAsync())).ShouldNotBeNull();
+        var mine = LanMessages.Write(LanMessages.Hello("sync", ephPublic, claimed, "Desktop-7", ChassisKind.Desktop, "i1"));
+        await channel.SendAsync(mine);
+        var theirHello = (await channel.ReceiveAsync()).ShouldNotBeNull();
+        var theirs = Hello.Of(LanMessages.Read(theirHello)).ShouldNotBeNull();
         var shared = HouseholdCrypto.Agree(eph, theirs.Eph);
-        using var cipher = FrameCipher.For(adder: true, shared, ephPublic, theirs.Eph);
+        using var cipher = FrameCipher.For(adder: true, shared, HouseholdCrypto.Transcript(mine, theirHello));
         var signature = HouseholdCrypto.SignData(signingWith.Sign, [.. "sync"u8, .. ephPublic, .. theirs.Eph]);
         await channel.SendAsync(cipher.Seal(LanMessages.Write(new LanMessage { Type = "prove", Sig = Wire.Encode(signature) })));
         try
@@ -181,9 +183,9 @@ public sealed class LanSyncTests : IAsyncLifetime
         public void Start()
         {
             var sync = new LanSync(Household, _clock);
-            Listener = new LanListener(IPAddress.Loopback, async (channel, hello, cancel) =>
+            Listener = new LanListener(IPAddress.Loopback, async (call, cancel) =>
             {
-                if (hello.Purpose == "sync") await sync.RespondAsync(channel, hello, Identity, cancel);
+                if (call.Message.Purpose == "sync") await sync.RespondAsync(call.Channel, call.Hello, Identity, cancel);
             }, NullLogger.Instance);
             Listener.Start();
         }

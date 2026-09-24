@@ -4,6 +4,10 @@ using Microsoft.Extensions.Logging;
 
 namespace PowerLedger.Service.Households.Lan;
 
+/// <summary>A connection from another PC, once its first frame came: that frame as it came, which a pairing's transcript
+/// takes, the hello read from it, and the address it came from.</summary>
+internal sealed record LanCall(IFrameChannel Channel, byte[] Hello, LanMessage Message, IPAddress? From);
+
 /// <summary>
 /// The household's TCP listener on the network (households design §3), on a port Windows chooses, which the DNS-SD
 /// announcement gives. Each connection starts with a hello; the handler takes it from there, pairing or syncing. A few
@@ -16,7 +20,7 @@ internal sealed class LanListener : IAsyncDisposable
     private static readonly TimeSpan HelloTimeout = TimeSpan.FromSeconds(10);
 
     private readonly IPAddress _address;
-    private readonly Func<IFrameChannel, LanMessage, CancellationToken, Task> _handle;
+    private readonly Func<LanCall, CancellationToken, Task> _handle;
     private readonly ILogger _log;
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _slots = new(MaxConnections, MaxConnections);
@@ -27,7 +31,7 @@ internal sealed class LanListener : IAsyncDisposable
 
     /// <param name="address">Where to listen: every address, IPv4 and IPv6, for the service; loopback for tests.</param>
     /// <param name="handle">Carries on a connection from its hello.</param>
-    public LanListener(IPAddress address, Func<IFrameChannel, LanMessage, CancellationToken, Task> handle, ILogger log)
+    public LanListener(IPAddress address, Func<LanCall, CancellationToken, Task> handle, ILogger log)
     {
         _address = address;
         _handle = handle;
@@ -104,8 +108,9 @@ internal sealed class LanListener : IAsyncDisposable
                     limit.CancelAfter(HelloTimeout);
                     first = await channel.ReceiveAsync(limit.Token).ConfigureAwait(false);
                 }
-                if (LanMessages.Read(first) is not { Type: "hello" } hello) return;
-                await _handle(channel, hello, stop).ConfigureAwait(false);
+                if (first is null || LanMessages.Read(first) is not { Type: "hello" } hello) return;
+                var from = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
+                await _handle(new LanCall(channel, first, hello, from is { IsIPv4MappedToIPv6: true } ? from.MapToIPv4() : from), stop).ConfigureAwait(false);
             }
             catch (Exception error) when (error is OperationCanceledException or IOException or InvalidDataException or ObjectDisposedException or SocketException)
             {

@@ -33,10 +33,12 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
         var talk = new LanConversation(channel, _step);
         try
         {
-            await talk.SendAsync(LanMessages.Hello(Hello.Sync, ephPublic, me.Keys, me.Name, me.Kind, me.Instance), cancel).ConfigureAwait(false);
-            if (Hello.Of(await talk.ReceiveAsync("hello", cancel).ConfigureAwait(false)) is not { Purpose: Hello.Sync } hello) return Refused("its hello wasn't a good one");
+            var myHello = LanMessages.Write(LanMessages.Hello(Hello.Sync, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
+            await talk.SendAsync(myHello, cancel).ConfigureAwait(false);
+            var (theirMessage, theirHello) = await talk.ReceiveWithBytesAsync("hello", cancel).ConfigureAwait(false);
+            if (Hello.Of(theirMessage) is not { Purpose: Hello.Sync } hello) return Refused("its hello wasn't a good one");
             if (Member(hello) is null) return Refused("it isn't in this household");
-            using var cipher = FrameCipher.For(adder: true, HouseholdCrypto.Agree(eph, hello.Eph), ephPublic, hello.Eph);
+            using var cipher = FrameCipher.For(adder: true, HouseholdCrypto.Agree(eph, hello.Eph), HouseholdCrypto.Transcript(myHello, theirHello));
             talk.Secure(cipher);
             var proof = Proof(ephPublic, hello.Eph);
 
@@ -55,18 +57,19 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
         }
     }
 
-    /// <summary>The side that was connected to and has read the other's hello.</summary>
-    public async Task<SyncOutcome> RespondAsync(IFrameChannel channel, LanMessage hello, PairingIdentity me, CancellationToken cancel)
+    /// <summary>The side that was connected to and has read the other's hello, <paramref name="hello"/> as it came.</summary>
+    public async Task<SyncOutcome> RespondAsync(IFrameChannel channel, byte[] hello, PairingIdentity me, CancellationToken cancel)
     {
-        if (Hello.Of(hello) is not { Purpose: Hello.Sync } theirHello) return Refused("its hello wasn't a good one");
+        if (Hello.Of(LanMessages.Read(hello)) is not { Purpose: Hello.Sync } theirHello) return Refused("its hello wasn't a good one");
         if (Member(theirHello) is null) return Refused("it isn't in this household");
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
         var talk = new LanConversation(channel, _step);
         try
         {
-            await talk.SendAsync(LanMessages.Hello(Hello.Sync, ephPublic, me.Keys, me.Name, me.Kind, me.Instance), cancel).ConfigureAwait(false);
-            using var cipher = FrameCipher.For(adder: false, HouseholdCrypto.Agree(eph, theirHello.Eph), theirHello.Eph, ephPublic);
+            var myHello = LanMessages.Write(LanMessages.Hello(Hello.Sync, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
+            await talk.SendAsync(myHello, cancel).ConfigureAwait(false);
+            using var cipher = FrameCipher.For(adder: false, HouseholdCrypto.Agree(eph, theirHello.Eph), HouseholdCrypto.Transcript(hello, myHello));
             talk.Secure(cipher);
             var proof = Proof(theirHello.Eph, ephPublic);
 

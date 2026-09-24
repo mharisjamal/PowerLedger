@@ -85,12 +85,13 @@ internal sealed class FrameCipher(byte[] send, byte[] receive) : IDisposable
     private ulong _sent;
     private ulong _received;
 
-    /// <summary>The keys each way for the side that connected, the adder, and for the side that answered (plan 0.6).</summary>
-    public static FrameCipher For(bool adder, byte[] shared, byte[] ephAdder, byte[] ephJoiner)
+    /// <summary>The keys each way for the side that connected, the adder, and for the side that answered (plan 0.6), bound
+    /// to the two hellos as they went over the wire (<see cref="HouseholdCrypto.Transcript"/>, plan 0.8): a hello changed on
+    /// the way gives the two sides different keys, so no frame opens.</summary>
+    public static FrameCipher For(bool adder, byte[] shared, byte[] transcript)
     {
-        byte[] salt = [.. ephAdder, .. ephJoiner];
-        var a2j = HouseholdCrypto.Hkdf(shared, salt, "powerledger lan a2j");
-        var j2a = HouseholdCrypto.Hkdf(shared, salt, "powerledger lan j2a");
+        var a2j = HouseholdCrypto.Hkdf(shared, transcript, "powerledger lan a2j");
+        var j2a = HouseholdCrypto.Hkdf(shared, transcript, "powerledger lan j2a");
         return adder ? new FrameCipher(a2j, j2a) : new FrameCipher(j2a, a2j);
     }
 
@@ -134,18 +135,21 @@ internal sealed class LanConversation(IFrameChannel channel, TimeSpan step)
 
     public void Secure(FrameCipher cipher) => _cipher = cipher;
 
-    public Task SendAsync(LanMessage message, CancellationToken cancel)
-    {
-        var bytes = LanMessages.Write(message);
-        return channel.SendAsync(_cipher is null ? bytes : _cipher.Seal(bytes), cancel);
-    }
+    public Task SendAsync(LanMessage message, CancellationToken cancel) => SendAsync(LanMessages.Write(message), cancel);
+
+    /// <summary>Sends a message already written, as a hello is, whose bytes go into the transcript.</summary>
+    public Task SendAsync(byte[] message, CancellationToken cancel) => channel.SendAsync(_cipher is null ? message : _cipher.Seal(message), cancel);
 
     /// <summary>The next message, whatever its type, within the usual step.</summary>
     public Task<LanMessage> ReceiveAnyAsync(CancellationToken cancel) => ReceiveAsync(null, cancel);
 
     /// <summary>The next message, which must be of <paramref name="type"/> unless that is null, within <paramref name="within"/>
     /// or the usual step.</summary>
-    public async Task<LanMessage> ReceiveAsync(string? type, CancellationToken cancel, TimeSpan? within = null)
+    public async Task<LanMessage> ReceiveAsync(string? type, CancellationToken cancel, TimeSpan? within = null) =>
+        (await ReceiveWithBytesAsync(type, cancel, within).ConfigureAwait(false)).Message;
+
+    /// <summary>As <see cref="ReceiveAsync"/>, with the message's bytes as they came: a hello's go into the transcript.</summary>
+    public async Task<(LanMessage Message, byte[] Bytes)> ReceiveWithBytesAsync(string? type, CancellationToken cancel, TimeSpan? within = null)
     {
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         limit.CancelAfter(within ?? step);
@@ -174,7 +178,7 @@ internal sealed class LanConversation(IFrameChannel channel, TimeSpan step)
         }
         var message = LanMessages.Read(plaintext);
         if (message?.Type is null || (type is not null && message.Type != type)) throw new LanException(LanProblem.Broken);
-        return message;
+        return (message, plaintext);
     }
 }
 
