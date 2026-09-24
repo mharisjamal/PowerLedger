@@ -2,8 +2,9 @@ import { sha256hex } from "../auth";
 import { base64urlDecode, hex, sha256 } from "./encoding";
 import { errorResponse } from "./http";
 
-/** Per PC and UTC day, counting every signed request (households design §8). */
-export const MAX_REQUESTS_PER_DAY = 200;
+/** Per PC and UTC day, counting every signed request. The design's 200 (§8) is below what syncing every 15 minutes takes
+ * (a fetch, the member list and, signed in, the join requests, 96 times a day, and a post an hour), so 1000. */
+export const MAX_REQUESTS_PER_DAY = 1000;
 /** How far a signed request's X-PL-Time may be from the Worker's clock, either way. */
 export const TIME_WINDOW_SECONDS = 300;
 
@@ -88,7 +89,7 @@ type KeyLookup<T> = (device: string) => Promise<{ signKey: string; signer: T } |
  * The checks every signed request passes (households design §5, plan 0.6), in order: the three X-PL headers are there
  * and well formed (401), the time is within 300 s (401), the device is one `keyFor` knows (its refusal, 403 for a
  * non-member), the signature verifies over RequestToSign (401), the signature hasn't been taken before (401), and the
- * device is within its 200 requests today (429).
+ * device is within its 1000 requests today (429).
  */
 async function authenticate<T>(
   request: Request,

@@ -26,7 +26,7 @@ for the design.
 
 - **Signed requests.** Every household and account request carries `X-PL-Device`, `X-PL-Time` (unix seconds, within
   300 s) and `X-PL-Signature`: base64url ECDSA P-256 (r ‖ s) over `METHOD\npath?query\ntime\nhex SHA-256(body)`, the
-  path and query as sent. A signature is taken once, and a PC makes at most 200 requests a UTC day.
+  path and query as sent. A signature is taken once, and a PC makes at most 1000 requests a UTC day.
 - **Households.** `POST /v1/households` (`{"id","sign","dh"}`, signed by that key); `GET`/`POST …/{hid}/members`;
   `DELETE …/{hid}/members/{device}` (the household ends with its last member); `POST …/{hid}/keys`
   (`{"epoch","envelopes":[{"device","body"}]}`, once an epoch, each epoch later than the last) and

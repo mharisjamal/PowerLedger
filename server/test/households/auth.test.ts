@@ -188,6 +188,17 @@ describe("verifySigned", () => {
     const over = await signedRequest(device, "GET", `/v1/households/${hid}/members`);
     expect((await verifySigned(over, env, new Uint8Array(0)) as Response).status).toBe(429);
   });
+
+  it("takes a day of 15-minute syncs: a PC's 400th request today is still fine", async () => {
+    const device = await newDevice();
+    const hid = randomHouseholdId();
+    await seedMember(hid, device.id, device.sign);
+    const today = new Date().toISOString().slice(0, 10);
+    await env.DB.prepare("INSERT INTO device_requests (device, utc_day, count) VALUES (?, ?, 399)").bind(device.id, today).run();
+
+    const request = await signedRequest(device, "GET", `/v1/households/${hid}/members`);
+    expect(await verifySigned(request, env, new Uint8Array(0))).not.toBeInstanceOf(Response);
+  });
 });
 
 describe("verifySignedByKey", () => {
