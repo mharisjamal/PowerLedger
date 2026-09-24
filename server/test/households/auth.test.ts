@@ -206,6 +206,24 @@ describe("verifySigned", () => {
     expect((await verifySigned(over, env, new Uint8Array(0)) as Response).status).toBe(429);
   });
 
+  it("doesn't count a replayed request against the PC's day", async () => {
+    const device = await newDevice();
+    const hid = randomHouseholdId();
+    await seedMember(hid, device.id, device.sign);
+    const request = await signedRequest(device, "GET", `/v1/households/${hid}/members`);
+    expect(await verifySigned(request.clone(), env, new Uint8Array(0))).not.toBeInstanceOf(Response);
+
+    for (let i = 0; i < 3; i++) {
+      expect(((await verifySigned(request.clone(), env, new Uint8Array(0))) as Response).status).toBe(401);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const row = await env.DB.prepare("SELECT count FROM device_requests WHERE device = ? AND utc_day = ?")
+      .bind(device.id, today)
+      .first<{ count: number }>();
+    expect(row?.count).toBe(1);
+  });
+
   it("takes a day of 15-minute syncs: a PC's 400th request today is still fine", async () => {
     const device = await newDevice();
     const hid = randomHouseholdId();

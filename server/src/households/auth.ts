@@ -133,19 +133,22 @@ async function signatureMatches(request: Request, headers: SignedHeaders, body: 
  * can't dodge this by that.
  */
 async function takeSignature(env: Cloudflare.Env, headers: SignedHeaders, now: number): Promise<Response | null> {
-  const [seen, counted] = await env.DB.batch([
-    env.DB.prepare("INSERT INTO seen_signatures (device, r, seen) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING 1 AS fresh")
-      .bind(headers.device, hex(headers.signature.slice(0, 32)), now),
-    env.DB.prepare(
-      `INSERT INTO device_requests (device, utc_day, count) VALUES (?, ?, 1)
-       ON CONFLICT (device, utc_day) DO UPDATE SET count = count + 1
-       RETURNING count`,
-    ).bind(headers.device, new Date(now).toISOString().slice(0, 10)),
-  ]);
-  if (seen.results.length === 0) return errorResponse(401, "This request has already been made.");
-  if ((counted.results[0] as { count: number }).count > MAX_REQUESTS_PER_DAY) {
-    return errorResponse(429, "Too many requests from this PC today.");
-  }
+  const seen = await env.DB.prepare(
+    "INSERT INTO seen_signatures (device, r, seen) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING 1 AS fresh",
+  )
+    .bind(headers.device, hex(headers.signature.slice(0, 32)), now)
+    .first();
+  // A replay stops here, before the count: someone replaying a PC's requests can't use up its day.
+  if (!seen) return errorResponse(401, "This request has already been made.");
+
+  const counted = await env.DB.prepare(
+    `INSERT INTO device_requests (device, utc_day, count) VALUES (?, ?, 1)
+     ON CONFLICT (device, utc_day) DO UPDATE SET count = count + 1
+     RETURNING count`,
+  )
+    .bind(headers.device, new Date(now).toISOString().slice(0, 10))
+    .first<{ count: number }>();
+  if (counted!.count > MAX_REQUESTS_PER_DAY) return errorResponse(429, "Too many requests from this PC today.");
   return null;
 }
 
