@@ -42,8 +42,32 @@ export async function getBody(env: Cloudflare.Env, key: string): Promise<Uint8Ar
   return row ? new Uint8Array(row.body) : null;
 }
 
+/** Reads many bodies at once, by key: from R2 when bound, and from D1 in one query for all
+ * R2 doesn't have (every key, unbound). A key neither store has is left out of the map. */
+export async function getBodies(env: Cloudflare.Env, keys: string[]): Promise<Map<string, Uint8Array>> {
+  const found = new Map<string, Uint8Array>();
+  const reports = env.REPORTS;
+  if (reports) {
+    await Promise.all(
+      keys.map(async (key) => {
+        const object = await reports.get(key);
+        if (object) found.set(key, new Uint8Array(await object.arrayBuffer()));
+      }),
+    );
+  }
+
+  const missing = keys.filter((key) => !found.has(key));
+  if (missing.length === 0) return found;
+  const rows = await env.DB.prepare("SELECT r2_key, body FROM report_bodies WHERE r2_key IN (SELECT value FROM json_each(?))")
+    .bind(JSON.stringify(missing))
+    .all<{ r2_key: string; body: ArrayBuffer }>();
+  for (const row of rows.results) found.set(row.r2_key, new Uint8Array(row.body));
+  return found;
+}
+
 /** Deletes bodies from both R2 and D1 when bound (cleaning up any leftover from before R2 was
- * enabled too), or D1 alone when unbound. Safe to call with keys that don't exist. */
+ * enabled too), or D1 alone when unbound: one statement a thousand keys, not one a key. Safe to
+ * call with keys that don't exist. */
 export async function deleteBodies(env: Cloudflare.Env, keys: string[]): Promise<void> {
   if (keys.length === 0) return;
 
@@ -55,7 +79,8 @@ export async function deleteBodies(env: Cloudflare.Env, keys: string[]): Promise
   }
 
   for (let i = 0; i < keys.length; i += D1_BATCH_SIZE) {
-    const batch = keys.slice(i, i + D1_BATCH_SIZE);
-    await env.DB.batch(batch.map((key) => env.DB.prepare("DELETE FROM report_bodies WHERE r2_key = ?").bind(key)));
+    await env.DB.prepare("DELETE FROM report_bodies WHERE r2_key IN (SELECT value FROM json_each(?))")
+      .bind(JSON.stringify(keys.slice(i, i + D1_BATCH_SIZE)))
+      .run();
   }
 }

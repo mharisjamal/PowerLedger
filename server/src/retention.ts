@@ -29,9 +29,12 @@ export async function runRetention(env: Cloudflare.Env, now: Date = new Date(), 
           .all<ReportKeyRow>()).results,
       async (rows) => {
         await deleteBodies(env, rows.map((row) => row.r2_key));
-        await env.DB.batch(
-          rows.map((row) => env.DB.prepare("DELETE FROM reports WHERE install_id = ? AND day = ?").bind(row.install_id, row.day)),
-        );
+        await env.DB.prepare(
+          `DELETE FROM reports WHERE (install_id, day) IN
+             (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))`,
+        )
+          .bind(JSON.stringify(rows.map((row) => [row.install_id, row.day])))
+          .run();
       },
       options,
       deadline,

@@ -1,5 +1,5 @@
 import { readBounded } from "../body";
-import { deleteBodies, getBody, putBody } from "../store";
+import { deleteBodies, getBodies, putBody } from "../store";
 import { type MemberRow } from "./auth";
 import { base64urlDecode, base64urlEncode } from "./encoding";
 import { isEpoch } from "./households";
@@ -132,21 +132,23 @@ export async function handleGetBatches(
     .bind(member.household, after, member.device, limit + 1)
     .all<BatchRow>();
 
-  const items: { seq: number; device: string; epoch: number; body: string }[] = [];
-  let next = after;
+  // The page is settled from the rows' sizes, then its bodies are read in one go.
+  const page: BatchRow[] = [];
   let more = rows.results.length > limit;
   let total = 0;
   for (const row of rows.results.slice(0, limit)) {
-    if (items.length > 0 && total + row.bytes > pageBytes) {
+    if (page.length > 0 && total + row.bytes > pageBytes) {
       more = true;
       break;
     }
-    next = row.seq;
-    const sealedBytes = await getBody(env, row.r2_key);
-    if (!sealedBytes) continue; // Retention took it between the query and now.
-    total += sealedBytes.byteLength;
-    items.push({ seq: row.device_seq, device: row.device, epoch: row.epoch, body: base64urlEncode(sealedBytes) });
+    page.push(row);
+    total += row.bytes;
   }
+  const bodies = await getBodies(env, page.map((row) => row.r2_key));
 
+  const items = page
+    .filter((row) => bodies.has(row.r2_key)) // Retention may take one between the query and now.
+    .map((row) => ({ seq: row.device_seq, device: row.device, epoch: row.epoch, body: base64urlEncode(bodies.get(row.r2_key)!) }));
+  const next = page.length > 0 ? page[page.length - 1].seq : after;
   return Response.json({ items, next, more });
 }

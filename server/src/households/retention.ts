@@ -77,9 +77,12 @@ export async function runHouseholdRetention(
           .all<BatchKeyRow>()).results,
       async (rows) => {
         await deleteBodies(env, rows.map((row) => row.r2_key));
-        await env.DB.batch(
-          rows.map((row) => env.DB.prepare("DELETE FROM batches WHERE household = ? AND seq = ?").bind(row.household, row.seq)),
-        );
+        await env.DB.prepare(
+          `DELETE FROM batches WHERE (household, seq) IN
+             (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))`,
+        )
+          .bind(JSON.stringify(rows.map((row) => [row.household, row.seq])))
+          .run();
       },
       options,
       deadline,
