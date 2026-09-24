@@ -118,5 +118,57 @@ public sealed class HistoryReaderTests : IDisposable
         reader.Read(range, TimeZoneInfo.Utc).ShouldBeNull();
         reader.Csv(range, ExportGrain.Hour).ShouldBeNull();
         reader.FirstDay(TimeZoneInfo.Utc).ShouldBeNull();
+        reader.FirstRow().ShouldBeNull();
+    }
+
+    /// <summary>The Dashboard's 1H pill (Midnight look design §4): a minute-bucket range reads the minute rows, one to a bucket.</summary>
+    [Fact]
+    public void A_minute_bucket_read_returns_the_minute_rows_one_to_a_bucket()
+    {
+        var minutes = new AggregateRepository(_writer);
+        minutes.UpsertMinute(Minute(Now.AddMinutes(-30), wh: 0.5));
+        minutes.UpsertMinute(Minute(Now.AddMinutes(-29), wh: 0.7));
+        minutes.UpsertMinute(Minute(Now.AddMinutes(-2), wh: 0.9));
+
+        using var readOnly = new SqliteDatabase(_path, readOnly: true);
+        var range = Ranges.LastHour(Now, TimeZoneInfo.Utc, System.Globalization.CultureInfo.InvariantCulture);
+        var report = new HistoryReader(readOnly).Read(range, TimeZoneInfo.Utc).ShouldNotBeNull();
+
+        report.Series.Count.ShouldBe(59);                 // 13:31 up to now, on the minute; the sixtieth bucket is the one about to start
+        report.Series[29].EnergyWh.ShouldBe(0.5, 1e-9);   // 14:00, 30 minutes before now, is the 30th bucket from 13:31
+        report.Series[30].EnergyWh.ShouldBe(0.7, 1e-9);
+        report.Series[57].EnergyWh.ShouldBe(0.9, 1e-9);
+        report.Series[57].AvgW.ShouldBe(54, 1e-9);        // 0.9 Wh over a minute on
+        report.Series.Count(b => b.OnSeconds > 0).ShouldBe(3);
+        report.Totals.EnergyKwh.ShouldBe(0.0021, 1e-12);
+    }
+
+    /// <summary>The 1Y and All pills: a day-bucket range sums each day's hour rows into its bucket, and All starts at the first row.</summary>
+    [Fact]
+    public void A_day_bucket_read_sums_each_day_and_all_starts_at_the_first_row()
+    {
+        var aggregates = new AggregateRepository(_writer);
+        var first = new DateTimeOffset(2026, 9, 3, 9, 0, 0, TimeSpan.Zero);
+        foreach (var (start, wh) in new[] { (first, 30.0), (first.AddHours(1), 20.0), (first.AddDays(2), 45.0), (Now.AddMinutes(-90), 12.0) })
+        {
+            var minute = Minute(start, wh);
+            aggregates.UpsertMinute(minute);
+            aggregates.UpsertHour(Downsampler.ToHour(start, [minute]));
+        }
+
+        using var readOnly = new SqliteDatabase(_path, readOnly: true);
+        var reader = new HistoryReader(readOnly);
+        reader.FirstRow().ShouldBe(first);
+        var range = Ranges.All(reader.FirstRow(), Now, TimeZoneInfo.Utc, System.Globalization.CultureInfo.InvariantCulture);
+        var report = reader.Read(range, TimeZoneInfo.Utc).ShouldNotBeNull();
+
+        range.From.ShouldBe(new DateTimeOffset(2026, 9, 3, 0, 0, 0, TimeSpan.Zero));
+        report.Series.Count.ShouldBe(13);                                    // 3 to 15 September, a bucket a day
+        report.Series[0].EnergyWh.ShouldBe(50, 1e-9);                        // the 3rd: two hours summed
+        report.Series[2].EnergyWh.ShouldBe(45, 1e-9);                        // the 5th
+        report.Series[12].EnergyWh.ShouldBe(12, 1e-9);                       // today
+        report.Series.Sum(b => b.EnergyWh).ShouldBe(107, 1e-9);
+        report.Days.Count.ShouldBe(3);
+        report.Totals.EnergyKwh.ShouldBe(0.107, 1e-12);
     }
 }

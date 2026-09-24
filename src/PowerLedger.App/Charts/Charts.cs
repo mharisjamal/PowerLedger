@@ -34,7 +34,7 @@ internal static class Charts
     /// <summary>
     /// The time axis. A single day is marked every six hours. Longer ranges mark local midnights: every day up to eight
     /// days, every second day up to sixteen, every week up to eight weeks, every fortnight up to four months, and month
-    /// starts beyond that.
+    /// starts beyond that. A range of a few hours, the Dashboard's last hour, is marked at each quarter hour inside it.
     /// </summary>
     public static IReadOnlyList<AxisTick> Ticks(DateRange range, TimeZoneInfo zone, CultureInfo culture)
     {
@@ -42,6 +42,14 @@ internal static class Charts
         var last = Ranges.LocalDay(range.Through.AddTicks(-1), zone);
         var days = last.DayNumber - first.DayNumber + 1;
         var ticks = new List<AxisTick>();
+        if (range.Through - range.From <= TimeSpan.FromHours(3))
+        {
+            var quarter = TimeSpan.FromMinutes(15);
+            var wall = TimeZoneInfo.ConvertTime(range.From, zone).DateTime;
+            for (wall = wall.AddTicks(-(wall.Ticks % quarter.Ticks)) + quarter; Ranges.At(wall, zone) < range.Through; wall += quarter)
+                ticks.Add(Tick(range, Ranges.At(wall, zone), wall.ToString("HH:mm", culture)));
+            return ticks;
+        }
         if (days <= 1)
         {
             for (var hour = 0; hour < 24; hour += 6)
