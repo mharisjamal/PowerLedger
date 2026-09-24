@@ -163,6 +163,10 @@ public class SharingClientTests
     public void A_registry_that_cannot_be_read_leaves_the_built_in_server() =>
         SharingEndpoint.Resolve(() => throw new UnauthorizedAccessException()).ShouldBe(SharingEndpoint.BuiltIn);
 
+    [Fact]
+    public void The_built_in_server_is_the_deployed_worker_over_https() =>
+        SharingEndpoint.BuiltIn.ShouldBe(new Uri("https://powerledger-data.powerledger-data.workers.dev/"));
+
     private static HttpResponseMessage Answer(HttpStatusCode status, string json) =>
         new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 

@@ -10,8 +10,8 @@ namespace PowerLedger.Service.Sharing;
 /// </summary>
 internal static class SharingEndpoint
 {
-    /// <summary>The deployed Worker; the lead sets the real address once it is deployed.</summary>
-    public static Uri BuiltIn { get; } = new("https://powerledger-data.example.invalid/");
+    /// <summary>The deployed Worker (server/, on Cloudflare).</summary>
+    public static Uri BuiltIn { get; } = new("https://powerledger-data.powerledger-data.workers.dev/");
 
     internal const string ParametersKey = @"SYSTEM\CurrentControlSet\Services\" + ServiceHost.ServiceName + @"\Parameters";
     internal const string ValueName = "SharingEndpoint";
