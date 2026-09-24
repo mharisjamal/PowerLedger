@@ -57,6 +57,22 @@ public class JoinPromptViewModelTests
         model.ComparisonCaption.ShouldBe("Check the other PC shows this code");
     }
 
+    /// <summary>Service gap C reported: a code pairing's JoinPrompt has no FromName at all (Prompts.cs words Text for
+    /// this itself); the heading must show the service's own no-name sentence with no "null" or empty quotes anywhere,
+    /// and there is no comparison code to show either.</summary>
+    [Fact]
+    public void A_code_pairings_join_prompt_has_no_name_and_shows_no_null_or_empty_quotes()
+    {
+        var model = Model(Notice(text: "Join the household of the PC that made this code?", comparisonCode: null, fromName: null));
+
+        model.Heading.ShouldBe("Join the household of the PC that made this code?");
+        model.Heading.ShouldNotContain("null");
+        model.Heading.ShouldNotContain("\"\"");
+        model.HasComparisonCode.ShouldBeFalse();
+        model.ComparisonCode.ShouldBeNull();
+        model.ComparisonCaption.ShouldBeNull();
+    }
+
     [Fact]
     public void Join_sends_accept_for_this_prompt_and_closes()
     {

@@ -48,7 +48,7 @@ public class AddPcViewModelTests
     public async Task A_browse_still_in_flight_is_not_joined_by_a_second_one()
     {
         _link.Connect(true);
-        _link.BrowseGate = new TaskCompletionSource<IReadOnlyList<FoundPc>?>();
+        _link.BrowseGate = new TaskCompletionSource<BrowseOutcome>();
         var model = Model();
         model.Start();
         _link.BrowseCalls.ShouldBe(1);
@@ -56,7 +56,7 @@ public class AddPcViewModelTests
         _clock.Advance(AddPcViewModel.BrowseEvery);   // the tick while the first browse is still out
         _link.BrowseCalls.ShouldBe(1);                // not started again yet
 
-        _link.BrowseGate.SetResult([new FoundPc("inst-1", "Laptop-2", false)]);
+        _link.BrowseGate.SetResult(new BrowseOutcome([new FoundPc("inst-1", "Laptop-2", false)], null));
         await WaitFor.True(() => _link.BrowseCalls == 2);   // the missed tick's browse follows right behind
         model.Found.Count.ShouldBe(1);
     }
@@ -71,6 +71,22 @@ public class AddPcViewModelTests
 
         model.NoneFound.ShouldBeTrue();
         model.Message.ShouldBe("Couldn't look for PCs right now.");
+    }
+
+    /// <summary>Service gap: the service's own reason (an ErrorReply, such as Windows being too old for network
+    /// discovery) used to be dropped along with every other reply that wasn't FoundPcsReply; it now reaches the page
+    /// instead of the generic message.</summary>
+    [Fact]
+    public void A_browse_the_service_refuses_shows_its_own_reason()
+    {
+        _link.Connect(true);
+        _link.BrowseError = "Finding PCs on the network needs Windows 10 version 1903 or later.";
+        var model = Model();
+
+        model.Start();
+
+        model.NoneFound.ShouldBeTrue();
+        model.Message.ShouldBe("Finding PCs on the network needs Windows 10 version 1903 or later.");
     }
 
     [Fact]

@@ -39,6 +39,13 @@ internal sealed record HouseholdOutcome(bool Ok, string Message, string? Code = 
     public static HouseholdOutcome NoAnswer { get; } = new(false, "The service didn't answer, so the change may not have been made.");
 }
 
+/// <summary>What a browse came back with (service gap: an <see cref="ErrorReply"/>, such as "Finding PCs on the network
+/// needs Windows 10 version 1903 or later.", used to be dropped along with every other reply that wasn't
+/// <see cref="FoundPcsReply"/>). <see cref="Error"/> is null for "not connected" or "no answer" too, which
+/// <see cref="AddPcViewModel"/> already words its own way; it is set only when the service had something specific to
+/// say.</summary>
+internal sealed record BrowseOutcome(IReadOnlyList<FoundPc>? Pcs, string? Error);
+
 /// <summary>What the App needs from the service (spec §8). Events are raised on a background thread; a handler must not
 /// throw and must hand its work to the UI thread itself.</summary>
 internal interface IServiceLink : IAsyncDisposable
@@ -97,9 +104,9 @@ internal interface IServiceLink : IAsyncDisposable
     /// <summary>Asks the server to delete everything sent from this PC.</summary>
     Task<SharingOutcome> DeleteMyDataAsync(CancellationToken cancel = default);
 
-    /// <summary>PowerLedger PCs found on this network (households design §3); null when not connected or the service did
-    /// not answer.</summary>
-    Task<IReadOnlyList<FoundPc>?> BrowsePcsAsync(CancellationToken cancel = default);
+    /// <summary>PowerLedger PCs found on this network (households design §3); its Pcs is null when not connected, the
+    /// service did not answer, or it refused with a reason of its own, which then reaches Error.</summary>
+    Task<BrowseOutcome> BrowsePcsAsync(CancellationToken cancel = default);
 
     /// <summary>Starts adding a PC found on this network. How it goes is pushed as <see cref="HouseholdNoticeReceived"/>
     /// events, its comparison code first.</summary>
@@ -244,8 +251,17 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public Task<SharingOutcome> DeleteMyDataAsync(CancellationToken cancel = default)
         => SharingAsync(new DeleteMyDataRequest(NextId()), cancel);
 
-    public async Task<IReadOnlyList<FoundPc>?> BrowsePcsAsync(CancellationToken cancel = default)
-        => await SendAsync(new BrowsePcsRequest(NextId()), cancel).ConfigureAwait(false) is FoundPcsReply reply ? reply.Pcs : null;
+    public async Task<BrowseOutcome> BrowsePcsAsync(CancellationToken cancel = default)
+    {
+        if (_channel is null) return new BrowseOutcome(null, null);
+        if (_refusal is { } refusal) return new BrowseOutcome(null, refusal);
+        return await SendAsync(new BrowsePcsRequest(NextId()), cancel).ConfigureAwait(false) switch
+        {
+            FoundPcsReply reply => new BrowseOutcome(reply.Pcs, null),
+            ErrorReply error => new BrowseOutcome(null, error.Message),
+            _ => new BrowseOutcome(null, null),
+        };
+    }
 
     public Task<HouseholdOutcome> AddPcAsync(string instanceId, CancellationToken cancel = default)
         => HouseholdAsync(new AddPcRequest(NextId(), instanceId), cancel);

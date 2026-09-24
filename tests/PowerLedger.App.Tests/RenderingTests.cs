@@ -883,6 +883,45 @@ public class RenderingTests
         });
     }
 
+    /// <summary>Service gap C reported: a code pairing's Join prompt has no FromName and no comparison code — the
+    /// window shows the service's own no-name wording, nothing that reads "null" or empty quotes, and fits a short
+    /// screen, in both themes.</summary>
+    [Fact]
+    public void The_join_prompt_for_a_code_pairing_shows_no_name_and_no_null_or_empty_quotes()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.JoinPrompt, "p1", "Join the household of the PC that made this code?", null, null, Now.AddMinutes(2));
+                var model = new JoinPromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new JoinPromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Join the household of the PC that made this code?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text != null && t.Text.Contains("null")).ShouldBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    Save(window, 420, (int)window.ActualHeight, $"join-prompt-code-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     /// <summary>The Approve prompt (households design §7, review finding A2): the service's own wording, with the
     /// approver's own check code shown prominently, and its buttons fitting a short screen, in both themes.</summary>
     [Fact]

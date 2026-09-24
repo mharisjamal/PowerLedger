@@ -122,7 +122,11 @@ internal sealed class FakeLink : IServiceLink
 
     /// <summary>When set, a browse completes only once the test resolves this, to test what a still-running browse does
     /// about a timer tick or a second call (review finding A5).</summary>
-    public TaskCompletionSource<IReadOnlyList<FoundPc>?>? BrowseGate { get; set; }
+    public TaskCompletionSource<BrowseOutcome>? BrowseGate { get; set; }
+
+    /// <summary>When set, a browse "fails" with this instead of answering with <see cref="FoundPcs"/> (service gap: an
+    /// ErrorReply, such as Windows too old for network discovery).</summary>
+    public string? BrowseError { get; set; }
 
     /// <summary>Every household request the App asked for, in order: the instance id for Add a PC, the code for Join by
     /// code, or "startCodePairing" for the rest.</summary>
@@ -134,11 +138,13 @@ internal sealed class FakeLink : IServiceLink
     /// <summary>When set, a household request completes only once the test resolves this, to test what happens meanwhile.</summary>
     public TaskCompletionSource<HouseholdOutcome>? HouseholdGate { get; set; }
 
-    public Task<IReadOnlyList<FoundPc>?> BrowsePcsAsync(CancellationToken cancel = default)
+    public Task<BrowseOutcome> BrowsePcsAsync(CancellationToken cancel = default)
     {
         BrowseCalls++;
         if (BrowseGate is { } gate) return gate.Task;
-        return Task.FromResult(IsConnected ? FoundPcs : null);
+        if (!IsConnected) return Task.FromResult(new BrowseOutcome(null, null));
+        if (BrowseError is { } error) return Task.FromResult(new BrowseOutcome(null, error));
+        return Task.FromResult(new BrowseOutcome(FoundPcs, null));
     }
 
     public Task<HouseholdOutcome> AddPcAsync(string instanceId, CancellationToken cancel = default) => Household(instanceId);
