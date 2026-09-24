@@ -83,6 +83,111 @@ public sealed class ApprovalTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_nonce_the_server_lists_after_the_reveal_ends_the_approval_and_nothing_is_sealed()
+    {
+        var (desktop, study, household) = await BothAsked();
+        var approve = await desktop.Next(NoticeKind.ApprovePrompt);
+        _relay.Rewrite(household, study.Worker.DeviceId, request => request with { Nonce = Wire.Encode(HouseholdCrypto.NewNonce()) });   // one it searched for
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        (await desktop.Next(NoticeKind.Withdraw)).PromptId.ShouldBe(approve.PromptId);
+        (await desktop.Next(NoticeKind.Info, text => text.StartsWith("An approval was stopped", StringComparison.Ordinal))).ShouldNotBeNull();
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldBeNull();         // turned away
+        desktop.Worker.Store.Approving.ShouldBeNull();
+        (await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, approve.PromptId!, true))).Ok.ShouldBeFalse();
+        _relay.Members(household).Keys.ShouldNotContain(study.Worker.DeviceId);
+    }
+
+    [Fact]
+    public async Task A_key_the_server_lists_after_the_commit_ends_the_approval_and_nothing_is_sealed()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await study.Send<HouseholdReply>(SignIn(study));
+        var household = desktop.Worker.Store.HouseholdId!;
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                  // commits, the study PC's keys as listed then
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        using var server = DeviceKeys.Create();
+        _relay.Rewrite(household, study.Worker.DeviceId, request => request with { Dh = Wire.Encode(server.DhPublic) });   // a key of its own
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        (await desktop.Next(NoticeKind.Info, text => text.StartsWith("An approval was stopped", StringComparison.Ordinal))).ShouldNotBeNull();
+        desktop.Drain().ShouldNotContain(notice => notice.Kind == NoticeKind.ApprovePrompt);
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldBeNull();
+        _relay.RequestOf(household, study.Worker.DeviceId)?.Reveal.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task An_approval_the_server_refuses_goes_again_only_to_the_keys_pinned_at_the_commit()
+    {
+        var (desktop, study, household) = await BothAsked();
+        var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(9, confirm.PromptId!, true));
+        await study.Worker.Running;
+        var refused = 0;
+        _relay.Intercept = (request, _) => request.RequestUri!.AbsolutePath.EndsWith("/approve", StringComparison.Ordinal) && refused++ == 0
+            ? FakeRelay.Error(409, "The request or the household's key changed meanwhile; look again.")
+            : null;
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(10, approve.PromptId!, true));
+        await desktop.Worker.Running;
+        using var server = DeviceKeys.Create();
+        _relay.Rewrite(household, study.Worker.DeviceId, request => request with { Dh = Wire.Encode(server.DhPublic) });   // then swaps the key
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        _relay.Members(household).Keys.ShouldNotContain(study.Worker.DeviceId);    // never sealed to the swapped key
+        (await desktop.Next(NoticeKind.Info, text => text.StartsWith("An approval was stopped", StringComparison.Ordinal))).ShouldNotBeNull();
+        var posted = _relay.Sent.Where(sent => sent.Call.EndsWith("/approve", StringComparison.Ordinal)).ToList();
+        posted.ShouldHaveSingleItem();                                              // the one refused, sealed to the pinned key
+        var body = System.Text.Json.Nodes.JsonNode.Parse(posted[0].Body)!["body"]!.GetValue<string>();
+        Approval.Open(StudyKeys(study), PublicKeys(desktop).Dh, body, household, 1).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task The_approve_prompt_is_on_screen_before_the_reveal_goes_so_every_code_the_server_can_learn_was_shown()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await study.Send<HouseholdReply>(SignIn(study));
+        int? promptsAtReveal = null;
+        _relay.Intercept = (request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/reveal", StringComparison.Ordinal)) promptsAtReveal ??= desktop.Worker.Prompts.Open;
+            return null;
+        };
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        promptsAtReveal.ShouldBe(1);
+        (await desktop.Next(NoticeKind.ApprovePrompt)).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Each_commit_counts_toward_the_five_a_day_whatever_the_server_answers()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var household = desktop.Worker.Store.HouseholdId!;
+        _relay.Link("another-account", household);
+        var waiting = Enumerable.Range(0, 7).Select(_ => DeviceKeys.Create()).ToList();
+        foreach (var pc in waiting) _relay.Ask(household, pc, "another-account");
+        _relay.Intercept = (request, _) => request.RequestUri!.AbsolutePath.EndsWith("/commit", StringComparison.Ordinal)
+            ? FakeRelay.Error(503, "The server is busy; try again later.")
+            : null;
+
+        for (var turn = 0; turn < 8; turn++) await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        _relay.Posted($"POST /v1/households/{household}/requests/").ShouldBe(HouseholdWorker.ApprovalsADay);
+        foreach (var pc in waiting) pc.Dispose();
+    }
+
+    [Fact]
     public async Task They_dont_match_takes_the_request_off_the_server_before_the_approval_so_nothing_is_sealed()
     {
         var (desktop, study, household) = await BothAsked();
@@ -310,6 +415,8 @@ public sealed class ApprovalTests : IAsyncLifetime
         (desktop.Worker.Store.Session, desktop.Worker.Store.RecoveryKey).ShouldBe((null, null));
         desktop.Worker.Store.HouseholdId.ShouldNotBeNull();
     }
+
+    private static DeviceKeys StudyKeys(WorkerPc pc) => pc.Worker.Store.DeviceKeys();
 
     private static (byte[] Sign, byte[] Dh) PublicKeys(WorkerPc pc)
     {

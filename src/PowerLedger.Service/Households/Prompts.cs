@@ -40,12 +40,14 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
 
     /// <summary>N2: a PC asks to join, signed in as this PC's own account when <paramref name="asYou"/>, else as another linked
     /// to the household. The server knows it only by its keys, so it has no name yet; <paramref name="code"/> is the approval
-    /// code (plan 0.9), which the PC asking shows at the same time.</summary>
-    /// <returns>Null when it wasn't answered: it comes back at a later turn.</returns>
-    public Task<bool?> AskToApproveAsync(bool asYou, string code, CancellationToken cancel) => AskOrNotAsync(
+    /// code (plan 0.10), which the PC asking shows at the same time. Shown at once, so the caller knows it is on the screen
+    /// before it lets the server learn anything more.</summary>
+    /// <param name="answer">The user's answer; null when it wasn't answered, which comes back at a later turn.</param>
+    /// <returns>False when it couldn't be shown, as with nobody at the screen.</returns>
+    public bool TryAskToApprove(bool asYou, string code, CancellationToken cancel, out Task<bool?> answer) => TryAsk(
         NoticeKind.ApprovePrompt,
         asYou ? "A PC signed in as you asks to join your household. Approve it?" : "A PC asks to join your household. Approve it?",
-        null, code, cancel);
+        null, code, cancel, out answer);
 
     /// <summary>N2: a member is about to approve this PC (plan 0.9). Before anything is sealed, its user checks that PC
     /// shows the same code: a server that put in keys of its own would make the two differ.</summary>
@@ -61,15 +63,30 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
         await AskOrNotAsync(kind, text, fromName, code, cancel).ConfigureAwait(false) ?? false;
 
     /// <summary>The user's answer; null when nobody is at the screen, no answer came in time, or the prompt was withdrawn.</summary>
-    private async Task<bool?> AskOrNotAsync(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel)
+    private Task<bool?> AskOrNotAsync(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel) =>
+        TryAsk(kind, text, fromName, code, cancel, out var answer) ? answer : Task.FromResult<bool?>(null);
+
+    /// <summary>Shows a prompt at once; false when it couldn't be shown.</summary>
+    private bool TryAsk(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel, out Task<bool?> answer)
     {
         var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
-        var answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _open[id] = answer;
+        var waiting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _open[id] = waiting;
+        if (!notices.Publish(new HouseholdNotice(kind, id, text, fromName, code, clock.GetUtcNow() + Timeout)))
+        {
+            _open.TryRemove(id, out _);
+            answer = Task.FromResult<bool?>(null);
+            return false;
+        }
+        answer = AnswerAsync(id, waiting, fromName, cancel);
+        return true;
+    }
+
+    private async Task<bool?> AnswerAsync(string id, TaskCompletionSource<bool> waiting, string? fromName, CancellationToken cancel)
+    {
         try
         {
-            if (!notices.Publish(new HouseholdNotice(kind, id, text, fromName, code, clock.GetUtcNow() + Timeout))) return null;
-            return await answer.Task.WaitAsync(Timeout, clock, cancel).ConfigureAwait(false);
+            return await waiting.Task.WaitAsync(Timeout, clock, cancel).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

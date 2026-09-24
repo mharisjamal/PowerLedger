@@ -189,6 +189,12 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         lock (_gate) _requests[(household, device)] = _requests[(household, device)] with { Nonce = Encode(nonce) };
     }
 
+    /// <summary>N2: the server changes what it keeps, and so lists, of a waiting PC's request.</summary>
+    public void Rewrite(string household, string device, Func<JoinRequest, JoinRequest> change)
+    {
+        lock (_gate) _requests[(household, device)] = change(_requests[(household, device)]);
+    }
+
     /// <summary>N2: another member turns a waiting PC away.</summary>
     public void Deny(string household, string device)
     {

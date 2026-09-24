@@ -6,9 +6,12 @@ using PowerLedger.Service.Households.Relay;
 
 namespace PowerLedger.Service.Households;
 
-/// <summary>N2: the approval of a waiting PC this PC runs (plan 0.9): the PC, this PC's nonce, committed to on the server, and
-/// once its user approved, the body sealed at an epoch, kept so a retry is the very same request.</summary>
-internal sealed record Approving(string Household, string Device, string Nonce, bool Accepted = false, int? Epoch = null, string? Body = null);
+/// <summary>N2: the approval of a waiting PC this PC runs (plan 0.10): the PC and its keys, pinned as this PC committed, and its
+/// nonce, pinned when first read; this PC's nonce and when it committed; how far it has got; and once its user approved,
+/// the body sealed at an epoch, kept so a retry is the very same request.</summary>
+internal sealed record Approving(
+    string Household, string Device, string Sign, string Dh, string Nonce, long Started, string? TheirNonce = null, bool Prompted = false,
+    bool Revealed = false, bool Accepted = false, int? Epoch = null, string? Body = null);
 
 /// <summary>N2: this PC's answer to the member that committed to approving it (plan 0.9): that member's device and keys, its
 /// commitment, the nonce this PC sent back, and whether this PC's user has said the two codes match.</summary>
@@ -85,10 +88,16 @@ internal sealed partial class HouseholdWorker
 
     internal const string AskedAgainButIn = "This PC is already in a household.";
 
+    internal const string ApprovalStopped =
+        "An approval was stopped because the server changed what it showed of the PC asking to join. That PC can ask again.";
+
     private int _waitingApprovals;
 
     /// <summary>1 while this PC's user is asked about the approval it runs, so it isn't asked twice.</summary>
     private int _askingApproval;
+
+    /// <summary>Withdraws the approve prompt that is up, when the approval ends first.</summary>
+    private CancellationTokenSource? _approvePrompt;
 
     /// <summary>1 while this PC's user is asked to check the approval code, so it isn't asked twice.</summary>
     private int _confirmingJoin;
@@ -97,10 +106,13 @@ internal sealed partial class HouseholdWorker
     private DateTimeOffset? _linkedAt;
 
     /// <summary>
-    /// With its sync, a member signed in follows the PCs waiting to join (plan 0.9), one approval at a time and at most
-    /// <see cref="ApprovalsADay"/> new ones a day: it commits to a nonce for the first no member has committed to; once that
-    /// PC answers with its own, it reveals its nonce and asks its user, showing the code both PCs work out; an approval its
-    /// user made that didn't go yet goes again. With nobody at the screen to ask, it doesn't look.
+    /// With its sync, a member signed in follows the PCs waiting to join (plan 0.9, 0.10), one approval at a time and at most
+    /// <see cref="ApprovalsADay"/> a day, each counted as it commits, whatever the server answers. It pins the waiting PC's
+    /// device and keys as it commits to a nonce for the first no member has committed to, and that PC's nonce when it first
+    /// reads it: the code and the sealing use only the pins, and a listing that differs from them ends the approval. Once
+    /// the waiting PC has answered, its user is asked, showing the code, before this PC reveals its nonce, so every code the
+    /// server can learn was shown already; an approval its user made that didn't go yet goes again. With nobody at the
+    /// screen to ask, it doesn't look.
     /// </summary>
     private async Task PollRequestsAsync(CancellationToken cancel)
     {
@@ -122,91 +134,130 @@ internal sealed partial class HouseholdWorker
         {
             if (waiting.FirstOrDefault(item => item.Device == approving.Device) is { } item && item.Approver == _keys.DeviceId && item.Commit == Commit(approving.Nonce))
             {
+                if (item.Sign != approving.Sign || item.Dh != approving.Dh || (approving.TheirNonce is { } pinned && item.Nonce != pinned))
+                {
+                    await StopApprovalAsync(householdId, approving).ConfigureAwait(false);   // the server changed what it showed
+                    return;
+                }
                 await MoveApprovalOnAsync(householdId, item, approving, cancel).ConfigureAwait(false);
                 return;                                                        // one at a time
             }
-            _store.Approving = null;                                           // approved, turned away, lapsed or asked again since
+            EndApproval();                                                     // approved, turned away, lapsed or asked again since
         }
         if (waiting.FirstOrDefault(item => item.Approver is null) is not { } next || !MayStartApproval()) return;
+        StartedApproval();                                                     // counted as it commits (plan 0.10)
         var nonce = Wire.Encode(HouseholdCrypto.NewNonce());
-        _store.Approving = new Approving(householdId, next.Device, nonce);    // kept before it goes: a commit is never left without its nonce
+        _store.Approving = new Approving(householdId, next.Device, next.Sign, next.Dh, nonce, Now);   // kept, with the pins, before it goes
         var committed = await _environment.Relay.CommitAsync(_keys, householdId, next.Device, Commit(nonce), cancel).ConfigureAwait(false);
-        if (committed.Ok) StartedApproval();
-        else if (!committed.Transient) _store.Approving = null;               // another member came first, or it no longer waits
+        if (!committed.Ok && !committed.Transient) _store.Approving = null;   // another member came first, or it no longer waits
     }
 
-    /// <summary>The approval under way, one step on: reveal once the waiting PC's nonce is in, then ask the user, or approve
-    /// again when the user already did.</summary>
+    /// <summary>The approval under way, one step on: the waiting PC's nonce pinned once it has answered; the user asked, then
+    /// the reveal; or the approval again when the user already said yes.</summary>
     private async Task MoveApprovalOnAsync(string householdId, JoinRequestItem item, Approving approving, CancellationToken cancel)
     {
-        if (Wire.Decode(item.Nonce) is not { Length: 32 }) return;              // the waiting PC hasn't answered yet
-        if (item.Reveal is null)
+        if (approving.TheirNonce is null)
         {
-            if (!(await _environment.Relay.RevealAsync(_keys, householdId, item.Device, approving.Nonce, cancel).ConfigureAwait(false)).Ok) return;
-        }
-        else if (item.Reveal != approving.Nonce)
-        {
-            _store.Approving = null;
-            return;
+            if (Wire.Decode(item.Nonce) is not { Length: 32 }) return;          // the waiting PC hasn't answered yet
+            approving = approving with { TheirNonce = item.Nonce };            // pinned at the first read
+            _store.Approving = approving;
         }
         if (approving.Accepted)
         {
-            await ApproveAsync(householdId, item, cancel).ConfigureAwait(false);
+            await ApproveAsync(householdId, approving, cancel).ConfigureAwait(false);
             return;
         }
-        if (Interlocked.CompareExchange(ref _askingApproval, 1, 0) != 0) return;
-        Track(AskToApproveAsync(householdId, item, approving));
+        if (Volatile.Read(ref _askingApproval) == 0)
+        {
+            if (!AskToApprove(householdId, approving, item.Account)) return;  // not shown: nothing more goes to the server
+            approving = _store.Approving!;
+        }
+        if (approving is { Prompted: true, Revealed: false }) await RevealAsync(householdId, approving, cancel).ConfigureAwait(false);
     }
 
-    /// <summary>Asks the user whether to let the waiting PC in, showing the approval code over both PCs' keys and nonces, which
-    /// the waiting PC shows too (plan 0.9). Approve seals the key; Don't approve turns the PC away; a prompt closed unanswered
-    /// comes back at a later turn and never counts as a no.</summary>
-    private async Task AskToApproveAsync(string householdId, JoinRequestItem item, Approving approving)
+    /// <summary>Shows the approve prompt with the code worked out from the pins alone (plan 0.10), and waits for the answer in
+    /// the background. Approve seals the key; Don't approve turns the PC away; a prompt closed unanswered comes back at a
+    /// later turn and never counts as a no.</summary>
+    /// <returns>False when it couldn't be shown.</returns>
+    private bool AskToApprove(string householdId, Approving approving, string? account)
+    {
+        if (Interlocked.CompareExchange(ref _askingApproval, 1, 0) != 0) return false;
+        var code = HouseholdCrypto.ApprovalCode(Wire.Decode(approving.Sign)!, Wire.Decode(approving.Dh)!, _keys.SignPublic, _keys.DhPublic,
+            Wire.Decode(approving.TheirNonce)!, Wire.Decode(approving.Nonce)!);
+        var withdraw = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+        if (!_prompts.TryAskToApprove(account is not null && account == _store.Account, code, withdraw.Token, out var answer))
+        {
+            withdraw.Dispose();
+            Interlocked.Exchange(ref _askingApproval, 0);
+            return false;
+        }
+        Interlocked.Exchange(ref _approvePrompt, withdraw)?.Dispose();
+        _store.Approving = approving with { Prompted = true };
+        Track(ApproveAnsweredAsync(householdId, approving.Device, answer, withdraw));
+        return true;
+    }
+
+    private async Task ApproveAnsweredAsync(string householdId, string device, Task<bool?> answer, CancellationTokenSource withdraw)
     {
         try
         {
-            var asYou = item.Account is not null && item.Account == _store.Account;
-            var code = HouseholdCrypto.ApprovalCode(Wire.PublicKey(item.Sign)!, Wire.PublicKey(item.Dh)!, _keys.SignPublic, _keys.DhPublic,
-                Wire.Decode(item.Nonce)!, Wire.Decode(approving.Nonce)!);
-            var answer = await _prompts.AskToApproveAsync(asYou, code, _stopping.Token).ConfigureAwait(false);
-            if (answer is null) return;
+            if (await answer.ConfigureAwait(false) is not { } yes) return;
             using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
             {
-                if (_store.Approving != approving || _store.HouseholdId != householdId) return;   // moved on meanwhile
-                if (answer == false)
+                if (_store.Approving is not { } approving || approving.Household != householdId || approving.Device != device
+                    || _store.HouseholdId != householdId)
                 {
-                    await DenyAsync(householdId, item).ConfigureAwait(false);
+                    return;                                                    // moved on meanwhile
+                }
+                if (!yes)
+                {
+                    await DenyAsync(householdId, device).ConfigureAwait(false);
                     _store.Approving = null;
                     return;
                 }
                 _store.Approving = approving with { Accepted = true };
-                await ApproveAsync(householdId, item, _stopping.Token).ConfigureAwait(false);
+                await ApproveAsync(householdId, _store.Approving, _stopping.Token).ConfigureAwait(false);
             }
         }
         finally
         {
+            if (Interlocked.CompareExchange(ref _approvePrompt, null, withdraw) == withdraw) withdraw.Dispose();
             Interlocked.Exchange(ref _askingApproval, 0);
             Publish();
         }
     }
 
-    /// <summary>
-    /// Seals the current key and this PC's member list to the waiting PC and posts the approval, which makes it a member,
-    /// added here at this PC's epoch (plan 0.9). The body sealed at an epoch is kept, so a retry is the very same request;
-    /// when the request or the key changed meanwhile, this PC catches up, and the approval is sealed again at a later turn.
-    /// </summary>
-    private async Task ApproveAsync(string householdId, JoinRequestItem item, CancellationToken cancel)
+    /// <summary>Reveals this PC's nonce, once its user has been shown the code.</summary>
+    /// <returns>True once it is revealed.</returns>
+    private async Task<bool> RevealAsync(string householdId, Approving approving, CancellationToken cancel)
     {
-        if (_store.Approving is not { Accepted: true } approving || _store.CurrentKey is not { } key
-            || Wire.PublicKey(item.Sign) is not { } sign || Wire.PublicKey(item.Dh) is not { } dh)
+        if (!(await _environment.Relay.RevealAsync(_keys, householdId, approving.Device, approving.Nonce, cancel).ConfigureAwait(false)).Ok) return false;
+        _store.Approving = approving with { Revealed = true };
+        return true;
+    }
+
+    /// <summary>
+    /// Seals the current key and this PC's member list to the waiting PC's pinned key-agreement key, and to no other, and
+    /// posts the approval, which makes it a member (plan 0.10). The sealed body is kept until the server takes it, so a retry
+    /// posts the very same body; it is sealed again, to the same pinned key, only once the household's key has moved on.
+    /// </summary>
+    private async Task ApproveAsync(string householdId, Approving approving, CancellationToken cancel)
+    {
+        if (!approving.Accepted || _store.CurrentKey is not { } key || Wire.PublicKey(approving.Sign) is not { } sign
+            || Wire.PublicKey(approving.Dh) is not { } dh)
         {
             return;
         }
         var epoch = _store.Epoch;
-        if (_members.EpochsOf(item.Device)?.Removed >= epoch)
+        if (_members.EpochsOf(approving.Device)?.Removed >= epoch)
         {
             await _relaySync.FinishRotationAsync(_keys, cancel).ConfigureAwait(false);   // removed at this epoch: back only at a newer one
             return;
+        }
+        if (!approving.Revealed)
+        {
+            if (!await RevealAsync(householdId, approving, cancel).ConfigureAwait(false)) return;
+            approving = _store.Approving!;
         }
         if (approving.Epoch != epoch || approving.Body is null)
         {
@@ -214,13 +265,13 @@ internal sealed partial class HouseholdWorker
             approving = approving with { Epoch = epoch, Body = body };
             _store.Approving = approving;
         }
-        var result = await _environment.Relay.ApproveAsync(_keys, householdId, item.Device, epoch, approving.Body!, cancel).ConfigureAwait(false);
+        var result = await _environment.Relay.ApproveAsync(_keys, householdId, approving.Device, epoch, approving.Body!, cancel).ConfigureAwait(false);
         if (result.Ok)
         {
             _store.Approving = null;
-            _members.Add(new MemberInfo(item.Device, NewPcName, ChassisKind.Desktop, sign, dh), epoch, _clock.GetUtcNow().ToUnixTimeMilliseconds());
+            _members.Add(new MemberInfo(approving.Device, NewPcName, ChassisKind.Desktop, sign, dh), epoch, Now);
             Volatile.Write(ref _waitingApprovals, Math.Max(0, Volatile.Read(ref _waitingApprovals) - 1));
-            _log.LogInformation("Approved {Device} into the household", item.Device);
+            _log.LogInformation("Approved {Device} into the household", approving.Device);
             Info("The PC signed in as you is now in your household.");
             Kick();
             return;
@@ -230,28 +281,52 @@ internal sealed partial class HouseholdWorker
             _store.Approving = null;                                           // not this PC's to approve, or no longer waiting
             return;
         }
-        _log.LogInformation("The approval of {Device} didn't go ({Status}: {Problem}); it goes again at a later turn", item.Device, result.Status,
-            result.Problem);
-        if (result.Status == 409)
+        _log.LogInformation("The approval of {Device} didn't go ({Status}: {Problem}); the same goes again at a later turn", approving.Device,
+            result.Status, result.Problem);
+        if (result.Status == 409) await _relaySync.CatchUpAsync(_keys, cancel).ConfigureAwait(false);   // the key may have moved on
+    }
+
+    /// <summary>The server listed the waiting PC otherwise than as pinned (plan 0.10): the approval ends, its request is taken
+    /// off the server, and the user told.</summary>
+    private async Task StopApprovalAsync(string householdId, Approving approving)
+    {
+        _log.LogWarning("The server listed {Device} otherwise than when this PC committed to approving it; the approval stops", approving.Device);
+        EndApproval();
+        await DenyAsync(householdId, approving.Device).ConfigureAwait(false);
+        Info(ApprovalStopped);
+    }
+
+    /// <summary>Forgets the approval under way, closing its prompt if it is up.</summary>
+    private void EndApproval()
+    {
+        _store.Approving = null;
+        if (Interlocked.Exchange(ref _approvePrompt, null) is { } prompt)
         {
-            _store.Approving = approving with { Epoch = null, Body = null };  // sealed again, at the key the household is at
-            await _relaySync.CatchUpAsync(_keys, cancel).ConfigureAwait(false);
+            try
+            {
+                prompt.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
     }
 
     /// <summary>The user said not to let the PC in: its request is taken off the server.</summary>
-    private async Task DenyAsync(string householdId, JoinRequestItem item)
+    private async Task DenyAsync(string householdId, string device)
     {
-        var result = await _environment.Relay.DenyAsync(_keys, householdId, item.Device, _stopping.Token).ConfigureAwait(false);
+        var result = await _environment.Relay.DenyAsync(_keys, householdId, device, _stopping.Token).ConfigureAwait(false);
         if (result.Ok || result.Status is 404 or 409)
         {
             Volatile.Write(ref _waitingApprovals, Math.Max(0, Volatile.Read(ref _waitingApprovals) - 1));
         }
         else
         {
-            _log.LogInformation("Turning {Device} away didn't reach the server ({Problem})", item.Device, result.Problem);
+            _log.LogInformation("Turning {Device} away didn't reach the server ({Problem})", device, result.Problem);
         }
     }
+
+    private long Now => _clock.GetUtcNow().ToUnixTimeMilliseconds();
 
     private static string Commit(string nonce) => Wire.Decode(nonce) is { } bytes ? Wire.Encode(HouseholdCrypto.Commitment(bytes)) : "";
 
