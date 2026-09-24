@@ -38,11 +38,17 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
         AskAsync(NoticeKind.ConfirmCode, $"Does {otherName} show {code}?", otherName, code, cancel);
 
     /// <summary>N2: a PC asks to join, signed in as this PC's own account when <paramref name="asYou"/>, else as another linked
-    /// to the household. The server knows it only by its keys, so it has no name yet.</summary>
-    public Task<bool> AskToApproveAsync(bool asYou, CancellationToken cancel) => AskAsync(
+    /// to the household. The server knows it only by its keys, so it has no name yet; <paramref name="code"/> is the approval
+    /// code (plan 0.8), which the App shows beside the question and the PC asking shows once approved.</summary>
+    public Task<bool> AskToApproveAsync(bool asYou, string code, CancellationToken cancel) => AskAsync(
         NoticeKind.ApprovePrompt,
         asYou ? "A PC signed in as you asks to join your household. Approve it?" : "A PC asks to join your household. Approve it?",
-        null, null, cancel);
+        null, code, cancel);
+
+    /// <summary>N2: this PC was approved (plan 0.8). Before it joins, its user checks the PC that approved it showed the same
+    /// code: a server that put in keys of its own would make the two differ.</summary>
+    public Task<bool> ConfirmJoinAsync(string code, CancellationToken cancel) =>
+        AskAsync(NoticeKind.ConfirmJoin, $"Did the PC that approved this one show {code}?", null, code, cancel);
 
     /// <summary>The user's answer to an open prompt.</summary>
     /// <returns>False when no prompt of that ID waits: it was answered, ran out, or never was.</returns>

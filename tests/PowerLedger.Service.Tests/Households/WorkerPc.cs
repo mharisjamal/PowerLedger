@@ -125,7 +125,7 @@ internal sealed class WorkerPc : IAsyncDisposable
         {
             await foreach (var notice in screen.ReadAllAsync(stop))
             {
-                if (notice is { Kind: NoticeKind.JoinPrompt or NoticeKind.ApprovePrompt or NoticeKind.ConfirmCode, PromptId: { } prompt })
+                if (notice is { Kind: NoticeKind.JoinPrompt or NoticeKind.ApprovePrompt or NoticeKind.ConfirmCode or NoticeKind.ConfirmJoin, PromptId: { } prompt })
                 {
                     await Worker.HandleAsync(new AnswerPromptRequest(0, prompt, true), Screen, stop);
                 }
