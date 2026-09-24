@@ -8,6 +8,11 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.7.1",
+        [
+            "Sign in with Google to add a PC to your household from anywhere: your other PC approves it after both show the same code.",
+            "A recovery code gets your household back if you ever lose every PC.",
+        ]),
         ("0.7.0",
         [
             "See all your PCs together: add a PC on your network or with a code, and the Household page shows their total.",
