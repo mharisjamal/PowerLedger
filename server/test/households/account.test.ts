@@ -653,7 +653,7 @@ describe("recovery", () => {
     await addMember(hid, owner.device, other);
     const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
     await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
-    await rotate(hid, owner.device, 2);
+    await rotate(hid, owner.device, 2, [owner.device, other]);
     const newPc = await signIn(undefined, owner.account);
     await asAccount(newPc, "POST", "/v1/account/requests");
 

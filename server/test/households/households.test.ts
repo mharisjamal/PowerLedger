@@ -1,14 +1,17 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { handleHouseholdRoutes } from "../../src/households/routes";
 import {
   addMember,
   aliasedDevice,
   compressedSpki,
   createHousehold,
+  hookBefore,
   joinProof,
   newDevice,
   randomHouseholdId,
   signedFetch,
+  signedRequest,
   type TestDevice,
 } from "./support";
 
@@ -321,11 +324,35 @@ describe("the household's keys", () => {
     const first = await newDevice();
     const second = await newDevice();
     const hid = await createHousehold(first);
+    await rotate(hid, first, 2);
     await addMember(hid, first, second);
-    await signedFetch(first, "POST", `/v1/households/${hid}/keys`, { epoch: 2, envelopes: [{ device: first.id, body: envelope() }] });
 
     expect((await signedFetch(second, "GET", `/v1/households/${hid}/keys/2`)).status).toBe(404);
     expect((await signedFetch(first, "GET", `/v1/households/${hid}/keys/3`)).status).toBe(404);
+  });
+
+  it("takes new keys only sealed to every current member, and to no other, as the members are when the epoch moves", async () => {
+    const first = await newDevice();
+    const second = await newDevice();
+    const joining = await newDevice();
+    const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    const post = (hook: () => Promise<unknown>) => async () => {
+      const body = JSON.stringify({ epoch: 2, envelopes: [first, second].map((pc) => ({ device: pc.id, body: envelope() })) });
+      const request = await signedRequest(first, "POST", `/v1/households/${hid}/keys`, body);
+      return (await handleHouseholdRoutes(request, hookBefore(env, /INSERT INTO key_envelopes|UPDATE households SET epoch/, hook)))!.status;
+    };
+    const epoch = async () => (await env.DB.prepare("SELECT epoch FROM households WHERE id = ?").bind(hid).first<{ epoch: number }>())!.epoch;
+
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, { epoch: 2, envelopes: [{ device: first.id, body: envelope() }] })).status).toBe(409);
+
+    expect(await post(() => addMember(hid, second, joining))()).toBe(409);
+    expect(await epoch()).toBe(1);
+    await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${joining.id}`);
+
+    expect(await post(() => signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`))()).toBe(409);
+    expect(await epoch()).toBe(1);
+    expect(await env.DB.prepare("SELECT 1 FROM key_envelopes WHERE household = ? AND epoch = 2").bind(hid).first()).toBeNull();
   });
 
   it("takes only the household's next epoch, current + 1, which then becomes current", async () => {
