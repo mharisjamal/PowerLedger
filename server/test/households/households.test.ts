@@ -1,6 +1,15 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { addMember, createHousehold, newDevice, randomHouseholdId, signedFetch, type TestDevice } from "./support";
+import {
+  addMember,
+  aliasedDevice,
+  compressedSpki,
+  createHousehold,
+  newDevice,
+  randomHouseholdId,
+  signedFetch,
+  type TestDevice,
+} from "./support";
 
 interface MemberJson {
   device: string;
@@ -69,6 +78,17 @@ describe("POST /v1/households", () => {
       const response = await signedFetch(pc, "POST", "/v1/households", body);
       expect(response.status, JSON.stringify(body)).toBe(400);
     }
+  });
+
+  it("gives 400 for a key in a compressed or other aliased encoding, which would give one key two device IDs", async () => {
+    const pc = await newDevice();
+    const aliased = await aliasedDevice(pc);
+
+    const aliasedSign = await signedFetch(aliased, "POST", "/v1/households", { id: randomHouseholdId(), sign: aliased.sign, dh: pc.dh });
+    expect(aliasedSign.status).toBe(400);
+
+    const aliasedDh = await signedFetch(pc, "POST", "/v1/households", { id: randomHouseholdId(), sign: pc.sign, dh: compressedSpki(pc.dh) });
+    expect(aliasedDh.status).toBe(400);
   });
 
   it("gives 413 for a body over 16 KB", async () => {

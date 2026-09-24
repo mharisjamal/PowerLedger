@@ -40,27 +40,33 @@ export function requestToSign(method: string, pathAndQuery: string, unixSeconds:
   return new TextEncoder().encode(`${method.toUpperCase()}\n${pathAndQuery}\n${unixSeconds}\n${bodySha256Hex}`);
 }
 
-/** An ECDSA P-256 public key from base64url SPKI, or null when it isn't one. */
-export async function importSignKey(spki: string): Promise<CryptoKey | null> {
+/**
+ * A P-256 public key from base64url SPKI, only in its canonical encoding: DER with the point uncompressed, as .NET's
+ * ExportSubjectPublicKeyInfo and WebCrypto's exportKey give it. WebCrypto also takes a compressed point, but a device ID
+ * is a hash of these bytes, so one key must have one encoding: the key is re-exported and must come back byte for byte.
+ */
+async function importCanonical(spki: string, algorithm: "ECDSA" | "ECDH"): Promise<CryptoKey | null> {
   const bytes = spki.length <= MAX_KEY_CHARS ? base64urlDecode(spki) : null;
   if (!bytes) return null;
   try {
-    return await crypto.subtle.importKey("spki", bytes, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    const usages: string[] = algorithm === "ECDSA" ? ["verify"] : [];
+    const key = await crypto.subtle.importKey("spki", bytes, { name: algorithm, namedCurve: "P-256" }, true, usages);
+    const exported = new Uint8Array((await crypto.subtle.exportKey("spki", key)) as ArrayBuffer);
+    const same = exported.byteLength === bytes.byteLength && exported.every((byte, i) => byte === bytes[i]);
+    return same ? key : null;
   } catch {
     return null;
   }
 }
 
-/** Whether `spki` is a base64url ECDH P-256 public key. */
+/** An ECDSA P-256 public key from canonical base64url SPKI, or null when it isn't one. */
+export async function importSignKey(spki: string): Promise<CryptoKey | null> {
+  return importCanonical(spki, "ECDSA");
+}
+
+/** Whether `spki` is an ECDH P-256 public key in canonical base64url SPKI. */
 export async function isDhKey(spki: string): Promise<boolean> {
-  const bytes = spki.length <= MAX_KEY_CHARS ? base64urlDecode(spki) : null;
-  if (!bytes) return false;
-  try {
-    await crypto.subtle.importKey("spki", bytes, { name: "ECDH", namedCurve: "P-256" }, false, []);
-    return true;
-  } catch {
-    return false;
-  }
+  return (await importCanonical(spki, "ECDH")) !== null;
 }
 
 /** ECDSA P-256 over SHA-256, the signature in IEEE P1363 form (r ‖ s), as HouseholdCrypto.SignData makes it. False, not an

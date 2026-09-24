@@ -11,7 +11,7 @@ import {
 } from "../../src/households/auth";
 import { base64urlDecode } from "../../src/households/encoding";
 import vectors from "../fixtures/households/vectors.json";
-import { newDevice, randomHouseholdId, signedRequest } from "./support";
+import { aliasedDevice, newDevice, randomHouseholdId, signedRequest } from "./support";
 
 const vectorBody = base64urlDecode(vectors.request.body)!;
 const vectorNow = vectors.request.time * 1000;
@@ -212,6 +212,13 @@ describe("verifySignedByKey", () => {
   it("refuses a signature over another path, even by the right key", async () => {
     const { request, body } = vectorRequest({ path: "/v1/households" });
     const result = await verifySignedByKey(request, env, body, vectors.signSpki, { now: vectorNow });
+    expect((result as Response).status).toBe(401);
+  });
+
+  it("refuses a key posted in an aliased encoding, even signed by it and naming the ID its bytes give", async () => {
+    const aliased = await aliasedDevice(await newDevice());
+    const request = await signedRequest(aliased, "POST", "/v1/households", "{}");
+    const result = await verifySignedByKey(request, env, await bodyOf(request), aliased.sign);
     expect((result as Response).status).toBe(401);
   });
 
