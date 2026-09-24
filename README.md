@@ -16,8 +16,8 @@ It is two programs:
 - **The service** (`PowerLedger.Service`) runs as a Windows service, samples the machine every second through
   interfaces Windows already provides (no kernel driver), and keeps the history in SQLite under
   `C:\ProgramData\PowerLedger`.
-- **The App** (`PowerLedger.exe`) lives in the tray and opens a window with four screens: Now, Breakdown, Report and
-  Settings. It reads the history, talks to the service over a local named pipe, and writes a PDF report for each
+- **The App** (`PowerLedger.exe`) lives in the tray and opens a window with five screens: Now, Breakdown, Report,
+  Household and Settings. It reads the history, talks to the service over a local named pipe, and writes a PDF report for each
   finished month to `Documents\PowerLedger`.
 
 Readings say how they were known: *measured* on battery from Windows' battery report, *calibrated* when plugged in
