@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -51,9 +52,10 @@ public class SignInTests
 {
     private readonly FakeLoopbackServer _server = new();
     private readonly FakeHttp _http = new();
+    private readonly FakeTimeProvider _clock = new();
     private Uri? _opened;
 
-    private SignIn Model() => new(() => _server, url => _opened = url, _http.Client());
+    private SignIn Model() => new(() => _server, url => _opened = url, _http.Client(), _clock);
 
     private static Dictionary<string, string> Query(Uri uri)
     {
@@ -83,7 +85,7 @@ public class SignInTests
         q["client_id"].ShouldBe("test-client");
         q["response_type"].ShouldBe("code");
         q["scope"].ShouldBe("openid email");
-        q["redirect_uri"].ShouldBe($"http://127.0.0.1:{_server.Port}/");
+        q["redirect_uri"].ShouldBe($"http://localhost:{_server.Port}/");
         q["code_challenge_method"].ShouldBe("S256");
         q["state"].Length.ShouldBeGreaterThan(10);
         q["code_challenge"].Length.ShouldBeGreaterThan(10);
@@ -136,7 +138,7 @@ public class SignInTests
         form["client_id"].ShouldBe("test-client");
         form["code"].ShouldBe("auth-code-1");
         form["grant_type"].ShouldBe("authorization_code");
-        form["redirect_uri"].ShouldBe($"http://127.0.0.1:{_server.Port}/");
+        form["redirect_uri"].ShouldBe($"http://localhost:{_server.Port}/");
         Pkce.Challenge(form["code_verifier"]).ShouldBe(q["code_challenge"]);
     }
 
@@ -194,5 +196,84 @@ public class SignInTests
 
         result.Ok.ShouldBeFalse();
         _opened.ShouldBeNull();
+    }
+
+    /// <summary>Review finding A7: Google's installed-app clients call for a client secret in the token exchange, even
+    /// under PKCE; a provider given none, Microsoft's public client, sends none.</summary>
+    [Fact]
+    public async Task A_client_secret_when_given_reaches_the_token_exchange()
+    {
+        var model = Model();
+        var task = model.RunAsync(SignInProvider.Google, "test-client", "device-abc", clientSecret: "google-secret-xyz");
+        var q = Query(_opened.ShouldNotBeNull());
+
+        string? sentBody = null;
+        _http.Answer = async (request, cancel) =>
+        {
+            sentBody = await request.Content!.ReadAsStringAsync(cancel);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(new { nonce = q["nonce"], email = "jo@example.com" }) })),
+            };
+        };
+        _server.Redirect.SetResult($"?code=auth-code-1&state={q["state"]}");
+        await task;
+
+        Query(new Uri("http://x/?" + sentBody))["client_secret"].ShouldBe("google-secret-xyz");
+    }
+
+    [Fact]
+    public async Task With_no_client_secret_none_is_sent()
+    {
+        var model = Model();
+        var task = model.RunAsync(SignInProvider.Microsoft, "test-client", "device-abc");
+        var q = Query(_opened.ShouldNotBeNull());
+
+        string? sentBody = null;
+        _http.Answer = async (request, cancel) =>
+        {
+            sentBody = await request.Content!.ReadAsStringAsync(cancel);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(new { nonce = q["nonce"], email = "jo@example.com" }) })),
+            };
+        };
+        _server.Redirect.SetResult($"?code=auth-code-1&state={q["state"]}");
+        await task;
+
+        Query(new Uri("http://x/?" + sentBody)).ShouldNotContainKey("client_secret");
+    }
+
+    /// <summary>Review finding A7: the browser and the loopback wait don't hang forever.</summary>
+    [Fact]
+    public async Task Waiting_more_than_five_minutes_for_the_browser_times_out()
+    {
+        var model = Model();
+        var task = model.RunAsync(SignInProvider.Microsoft, "test-client", "device-abc");
+        _opened.ShouldNotBeNull();
+
+        _clock.Advance(SignIn.Timeout);
+        var result = await task;
+
+        result.Ok.ShouldBeFalse();
+        result.Message.ShouldBe("Timed out waiting for the browser.");
+    }
+
+    /// <summary>Review finding A7: TryGetProperty, not GetProperty, so a provider's answer missing this key is a clean
+    /// failure rather than a thrown exception.</summary>
+    [Fact]
+    public async Task An_answer_with_no_id_token_is_a_clean_failure()
+    {
+        var model = Model();
+        var task = model.RunAsync(SignInProvider.Microsoft, "test-client", "device-abc");
+        var q = Query(_opened.ShouldNotBeNull());
+
+        _http.Reply(HttpStatusCode.OK, JsonSerializer.SerializeToUtf8Bytes(new { access_token = "not-what-we-asked-for" }));
+        _server.Redirect.SetResult($"?code=auth-code-1&state={q["state"]}");
+
+        var result = await task;
+
+        result.Ok.ShouldBeFalse();
+        result.Message.ShouldBe("The sign-in server's answer had no ID token.");
     }
 }

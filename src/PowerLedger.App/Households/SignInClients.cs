@@ -11,4 +11,8 @@ internal static class SignInClients
     public const string Microsoft = "";
 
     public const string Google = "";
+
+    /// <summary>Google's installed-app clients call for one in the token exchange (review finding A7), even though the
+    /// flow is PKCE; empty, like the client IDs above, until the lead fills it in at L6.</summary>
+    public const string GoogleSecret = "";
 }

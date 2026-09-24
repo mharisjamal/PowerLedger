@@ -86,8 +86,9 @@ public partial class App : Application
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _preferences.ApplyFirstRunDefaults();
         _preferences.EnsureFirstRunAt();   // data-sharing design §3: backfills an install from before this field existed
-        var signIn = new SignIn(() => new HttpLoopbackServer(), OpenPage, new HttpClient());
-        var account = new SignInViewModel(_link, _preferences, signIn, threads, SignInClients.Microsoft, SignInClients.Google);
+        var signIn = new SignIn(() => new HttpLoopbackServer(), OpenPage, new HttpClient(), TimeProvider.System);
+        var account = new SignInViewModel(
+            _link, _preferences, signIn, threads, SignInClients.Microsoft, SignInClients.Google, SignInClients.GoogleSecret);
         _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account);
         _household.AddPcRequested += OpenAddPcWindow;
         var http = UpdateHttp.Create(version);

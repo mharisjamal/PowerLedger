@@ -12,10 +12,10 @@ public class SignInViewModelTests
     private readonly FakeHttp _http = new();
     private Uri? _opened;
 
-    private SignInViewModel Model(string microsoftClientId = "ms-client", string googleClientId = "google-client")
+    private SignInViewModel Model(string microsoftClientId = "ms-client", string googleClientId = "google-client", string googleClientSecret = "")
     {
-        var signIn = new SignIn(() => _server, url => _opened = url, _http.Client());
-        return new SignInViewModel(_link, _ui, signIn, UiThreads.Inline, microsoftClientId, googleClientId);
+        var signIn = new SignIn(() => _server, url => _opened = url, _http.Client(), TimeProvider.System);
+        return new SignInViewModel(_link, _ui, signIn, UiThreads.Inline, microsoftClientId, googleClientId, googleClientSecret);
     }
 
     private static string Jwt(string nonce, string email)
@@ -91,6 +91,53 @@ public class SignInViewModelTests
         provider.ShouldBe("microsoft");
         recoveryCode.ShouldBe("K7QM-2XHD-9PW4-R8TA-VMNP-3QWE");
         await WaitFor.True(() => model.RecoveryCodeInput == "");
+    }
+
+    /// <summary>Review finding A7: Google's client secret, configured on the view model, reaches the token exchange;
+    /// Microsoft's flow needs none.</summary>
+    [Fact]
+    public async Task Signing_in_with_google_sends_the_configured_client_secret()
+    {
+        _link.Connect(true);
+        var model = Model(googleClientSecret: "google-secret-xyz");
+
+        model.SignInWithGoogle.Execute(null);
+        var q = Query(_opened.ShouldNotBeNull());
+        string? sentBody = null;
+        _http.Answer = async (request, cancel) =>
+        {
+            sentBody = await request.Content!.ReadAsStringAsync(cancel);
+            return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new System.Net.Http.ByteArrayContent(
+                    System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(q["nonce"], "jo@example.com") })),
+            };
+        };
+        _server.Redirect.SetResult($"?code=abc&state={q["state"]}");
+
+        await WaitFor.True(() => sentBody is not null);
+        var form = Query(new Uri("http://x/?" + sentBody));
+        form["client_secret"].ShouldBe("google-secret-xyz");
+    }
+
+    /// <summary>Review finding A7: something even <see cref="SignIn"/> itself didn't turn into a failed result must
+    /// still leave the button usable again, rather than stuck Busy for good.</summary>
+    [Fact]
+    public async Task An_exception_from_the_service_still_leaves_busy_false()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "device-xyz", "This-PC", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+        _link.HouseholdThrows = new InvalidOperationException("boom");
+        var model = Model();
+        model.Apply(_link.Status.Household);
+
+        model.SignInWithMicrosoft.Execute(null);
+        var q = Query(_opened.ShouldNotBeNull());
+        _http.Reply(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(q["nonce"], "jo@example.com") }));
+        _server.Redirect.SetResult($"?code=abc&state={q["state"]}");
+
+        await WaitFor.True(() => !model.Busy);
+        model.Message.ShouldBe("Something went wrong signing in.");
     }
 
     [Fact]
