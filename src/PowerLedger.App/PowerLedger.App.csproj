@@ -35,6 +35,13 @@
     <InternalsVisibleTo Include="PowerLedger.App.Tests" />
   </ItemGroup>
 
+  <!-- The repo is public: Google's Desktop client secret never lands in source or in this file's own value, only in the
+       built assembly's metadata, from a property installer\build.ps1 passes on the command line. Empty when nobody
+       passes it, which SignInClients.GoogleSecret then reads as "not configured" (review: security round). -->
+  <ItemGroup>
+    <AssemblyMetadata Include="GoogleClientSecret" Value="$(PowerLedgerGoogleClientSecret)" />
+  </ItemGroup>
+
   <!-- WinForms is here only for the tray icon and a screen's work area; its global usings would collide with WPF's Application, Color and more. -->
   <Target Name="DropWinFormsGlobalUsings" BeforeTargets="GenerateGlobalUsings">
     <ItemGroup>

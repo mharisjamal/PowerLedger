@@ -15,10 +15,17 @@ The configuration to publish; Release by default.
 
 .PARAMETER Runtime
 The runtimes to publish for; win-x64 and win-arm64 by default. The installer needs both.
+
+.PARAMETER GoogleClientSecret
+Google's Desktop OAuth client secret (households design §7), built into the App's own assembly metadata
+(PowerLedgerGoogleClientSecret) so it never sits in source, since the repo is public. Empty by default: Google sign-in
+is then unavailable in the build, Microsoft sign-in is not affected. installer\build.ps1 is what reads it from the
+machine building; this script never prints it.
 #>
 param(
     [string]$Configuration = 'Release',
-    [string[]]$Runtime = @('win-x64', 'win-arm64')
+    [string[]]$Runtime = @('win-x64', 'win-arm64'),
+    [string]$GoogleClientSecret = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,7 +40,7 @@ $programs = @(
 foreach ($rid in $Runtime) {
     foreach ($program in $programs) {
         dotnet publish (Join-Path $root $program.Project) -c $Configuration -r $rid --self-contained true `
-            -o (Join-Path $out "$rid\$($program.Folder)") --nologo
+            -o (Join-Path $out "$rid\$($program.Folder)") --nologo "-p:PowerLedgerGoogleClientSecret=$GoogleClientSecret"
         if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $($program.Project) ($rid)." }
     }
 }
