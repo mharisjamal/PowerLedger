@@ -261,6 +261,9 @@ public partial class App : Application
             case NoticeKind.ApprovePrompt:
                 Dispatcher.InvokeAsync(() => OpenApprovePromptWindow(notice));
                 break;
+            case NoticeKind.ConfirmJoin:
+                Dispatcher.InvokeAsync(() => OpenConfirmJoinWindow(notice));
+                break;
             case NoticeKind.Info:
                 Dispatcher.InvokeAsync(() => _tray?.Notify("PowerLedger", notice.Text, null));
                 break;
@@ -281,6 +284,15 @@ public partial class App : Application
         if (_link is null || _threads is null) return;
         var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice);
         new ApprovePromptWindow(model) { Owner = _window }.ShowDialog();
+    }
+
+    /// <summary>The Confirm join prompt (households design §7, task 0.8): modal, owned by the main window when it is
+    /// open.</summary>
+    private void OpenConfirmJoinWindow(HouseholdNotice notice)
+    {
+        if (_link is null || _threads is null) return;
+        var model = new ConfirmJoinViewModel(_link, _threads, TimeProvider.System, notice);
+        new ConfirmJoinWindow(model) { Owner = _window }.ShowDialog();
     }
 
     /// <summary>A first sign-in that linked a household made a recovery code (households design §7): shown once, modal
