@@ -107,6 +107,30 @@ public sealed class HouseholdStoreTests : IDisposable
     }
 
     [Fact]
+    public void Relay_progress_goes_with_the_household_but_what_the_server_still_has_to_hear_stays()
+    {
+        var store = Store();
+        store.EnterHousehold("5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", 1, HouseholdCrypto.NewKey());
+        store.PostedThrough = 1_234;
+        store.HistoryPosted = ["a", "b"];
+        store.RelayConfirmed = true;
+        store.MembersCheckedAt = 5_678;
+        store.Problem = "Couldn't sync through the server: it was down.";
+        store.AddPending(new Households.Relay.PendingOp(Households.Relay.PendingOp.Remove, "5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f", Device: "c"));
+
+        var again = Store();
+        (again.PostedThrough, again.RelayConfirmed, again.MembersCheckedAt, again.Problem)
+            .ShouldBe((1_234L, true, (long?)5_678, "Couldn't sync through the server: it was down."));
+        again.HistoryPosted.ShouldBe(["a", "b"]);
+
+        again.LeaveHousehold();
+        var left = Store();
+        (left.PostedThrough, left.RelayConfirmed, left.MembersCheckedAt, left.Problem).ShouldBe((0L, false, (long?)null, (string?)null));
+        left.HistoryPosted.ShouldBeEmpty();
+        left.Pending.ShouldHaveSingleItem().Device.ShouldBe("c");
+    }
+
+    [Fact]
     public void What_cant_be_decrypted_counts_as_none()
     {
         var store = Store();

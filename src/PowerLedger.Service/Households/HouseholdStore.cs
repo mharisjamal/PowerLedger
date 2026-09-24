@@ -28,9 +28,17 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string CursorKey = "household.relay-cursor";
     internal const string SequenceKey = "household.next-seq";
     internal const string SessionKey = "household.session";
+    internal const string PostedThroughKey = "household.posted-through";
+    internal const string HistoryKey = "household.history-posted";
+    internal const string ConfirmedKey = "household.relay-confirmed";
+    internal const string MembersCheckedKey = "household.members-checked";
+    internal const string PendingKey = "household.pending";
+    internal const string ProblemKey = "household.problem";
 
-    /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another.</summary>
-    private static readonly string[] OfTheHousehold = [IdKey, EpochKey, KeysKey, CursorKey, SequenceKey];
+    /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
+    /// server still has to be told stays: it names its household.</summary>
+    private static readonly string[] OfTheHousehold =
+        [IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, HistoryKey, ConfirmedKey, MembersCheckedKey, ProblemKey];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
     private static readonly byte[] Entropy = "PowerLedger household keys"u8.ToArray();
@@ -101,11 +109,14 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         settings.Set(IdKey, householdId);
     }
 
-    /// <summary>Keeps the key of another epoch; the current epoch becomes the newest this PC holds.</summary>
-    public void AddKey(int epoch, byte[] key)
+    /// <summary>Keeps the key of another epoch; the current epoch becomes the newest this PC holds. A key already kept for the
+    /// epoch stays, unless <paramref name="replace"/>: another member's rotation to the same epoch reached the server first.</summary>
+    public void AddKey(int epoch, byte[] key, bool replace = false)
     {
         var keys = Keys();
-        keys.TryAdd(epoch.ToString(CultureInfo.InvariantCulture), Convert.ToBase64String(key));
+        var name = epoch.ToString(CultureInfo.InvariantCulture);
+        if (replace) keys[name] = Convert.ToBase64String(key);
+        else keys.TryAdd(name, Convert.ToBase64String(key));
         WriteKeys(keys);
         if (epoch > Epoch) settings.Set(EpochKey, epoch.ToString(CultureInfo.InvariantCulture));
     }
@@ -157,6 +168,51 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         return next;
     }
 
+    /// <summary>This PC's rows that changed up to this time, unix milliseconds, have gone to the server.</summary>
+    public long PostedThrough
+    {
+        get => long.TryParse(settings.Get(PostedThroughKey), NumberStyles.None, CultureInfo.InvariantCulture, out var through) ? through : 0;
+        set => settings.Set(PostedThroughKey, value.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The members this PC has posted its year of rows for, or that were already members when it joined.</summary>
+    public IReadOnlyList<string> HistoryPosted
+    {
+        get => HouseholdJson.Read(settings.Get(HistoryKey), HouseholdJson.Default.ListString) ?? [];
+        set => settings.Set(HistoryKey, HouseholdJson.Write([.. value], HouseholdJson.Default.ListString));
+    }
+
+    /// <summary>True once the server has taken a request from this PC as a member of this household: a refusal after that
+    /// means this PC was removed, where before it only means it hasn't been added yet.</summary>
+    public bool RelayConfirmed
+    {
+        get => settings.Get(ConfirmedKey) == "1";
+        set => WriteText(ConfirmedKey, value ? "1" : null);
+    }
+
+    /// <summary>When the server's member list was last read, unix milliseconds.</summary>
+    public long? MembersCheckedAt
+    {
+        get => long.TryParse(settings.Get(MembersCheckedKey), NumberStyles.None, CultureInfo.InvariantCulture, out var at) ? at : null;
+        set => WriteText(MembersCheckedKey, value?.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>What the server still has to be told, oldest first: kept across leaving, since each names its household.</summary>
+    public IReadOnlyList<Relay.PendingOp> Pending
+    {
+        get => HouseholdJson.Read(settings.Get(PendingKey), HouseholdJson.Default.ListPendingOp) ?? [];
+        set => WriteText(PendingKey, value.Count == 0 ? null : HouseholdJson.Write([.. value], HouseholdJson.Default.ListPendingOp));
+    }
+
+    public void AddPending(Relay.PendingOp op) => Pending = [.. Pending, op];
+
+    /// <summary>The last problem syncing, in words the App can show; null while all goes well.</summary>
+    public string? Problem
+    {
+        get => settings.Get(ProblemKey);
+        set => WriteText(ProblemKey, value);
+    }
+
     /// <summary>N2: the session token the server gave this PC at sign-in; null while signed out.</summary>
     public string? Session
     {
@@ -179,6 +235,12 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         {
             return new(StringComparer.Ordinal);
         }
+    }
+
+    private void WriteText(string key, string? value)
+    {
+        if (value is null) settings.Remove(key);
+        else settings.Set(key, value);
     }
 
     private void WriteKeys(Dictionary<string, string> keys) =>

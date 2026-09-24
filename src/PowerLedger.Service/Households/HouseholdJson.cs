@@ -2,13 +2,25 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using PowerLedger.Service.Households.Lan;
+using PowerLedger.Service.Households.Relay;
 
 namespace PowerLedger.Service.Households;
 
 /// <summary>The JSON households keep in the settings, send between PCs and post to the server, generated at build time.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(LanMessage))]
+[JsonSerializable(typeof(CreateHouseholdBody))]
+[JsonSerializable(typeof(MemberKeysBody))]
+[JsonSerializable(typeof(PostKeysBody))]
+[JsonSerializable(typeof(KeyEnvelopeReply))]
+[JsonSerializable(typeof(List<ServerMember>))]
+[JsonSerializable(typeof(BatchPost))]
+[JsonSerializable(typeof(BatchPage))]
+[JsonSerializable(typeof(BatchPlain))]
+[JsonSerializable(typeof(ErrorReply))]
+[JsonSerializable(typeof(List<PendingOp>))]
 internal sealed partial class HouseholdJson : JsonSerializerContext
 {
     /// <summary>The value, or null when the text is missing or isn't one.</summary>
