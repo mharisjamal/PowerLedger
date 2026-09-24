@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media.Animation;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -39,18 +41,44 @@ public class MotionTests
         Motion.Reduced.ShouldBe(!SystemParameters.ClientAreaAnimation);
     }
 
+    /// <summary>Review 6: a style's storyboard is frozen when the style loads, so a length fixed then would ignore Windows'
+    /// setting changed later in the session. A MotionAnimation asks Motion each time it starts.</summary>
     [Fact]
-    public void The_markup_extension_hands_the_styles_the_same_lengths()
+    [Trait("Category", "UI")]
+    public void A_styles_animation_asks_motion_each_time_it_starts()
+        => UiHarness.OnUi(() =>
+        {
+            var styles = MidnightStylesTests.Load();
+            var lift = ((Style)styles["M.Card"]).Triggers.OfType<Trigger>().Single().EnterActions.OfType<BeginStoryboard>().Single()
+                .Storyboard.Children.OfType<MotionAnimation>().Single();
+            using (Motion.Force(reduced: false)) lift.CreateClock().NaturalDuration.ShouldBe(Motion.Fast);
+            using (Motion.Force(reduced: true)) lift.CreateClock().NaturalDuration.ShouldBe(new Duration(TimeSpan.Zero), "the same frozen animation, the setting now");
+            using (Motion.Force(reduced: false)) new MotionAnimation { Speed = MotionSpeed.Slow }.CreateClock().NaturalDuration.ShouldBe(Motion.Slow);
+            using (Motion.Force(reduced: true)) new MotionAnimation { Speed = MotionSpeed.Fast, Fade = true }.CreateClock().NaturalDuration
+                .ShouldBe(new Duration(TimeSpan.FromMilliseconds(120)), "a fade keeps 120 ms");
+
+            var animations = Animations(styles).ToList();
+            animations.Count.ShouldBeGreaterThan(10);
+            animations.ShouldAllBe(animation => animation is MotionAnimation && animation.Duration == Duration.Automatic, "every one of the sheet's asks Motion");
+        });
+
+    /// <summary>Every animation in the sheet's styles and templates: their triggers' storyboards.</summary>
+    private static IEnumerable<Timeline> Animations(ResourceDictionary styles)
     {
-        using (Motion.Force(reduced: true))
+        static IEnumerable<TriggerAction> Actions(TriggerBase trigger) => trigger switch
         {
-            ((Duration)new MotionExtension(MotionSpeed.Base).ProvideValue(null!)).ShouldBe(new Duration(TimeSpan.Zero));
-            ((Duration)new MotionExtension(MotionSpeed.Fast) { Fade = true }.ProvideValue(null!)).ShouldBe(new Duration(TimeSpan.FromMilliseconds(120)));
-        }
-        using (Motion.Force(reduced: false))
+            EventTrigger events => events.Actions,
+            _ => trigger.EnterActions.Concat(trigger.ExitActions),
+        };
+        static IEnumerable<Timeline> From(IEnumerable<TriggerBase> triggers)
+            => triggers.SelectMany(Actions).OfType<BeginStoryboard>().SelectMany(begin => begin.Storyboard.Children);
+        foreach (var value in styles.Values)
         {
-            ((Duration)new MotionExtension(MotionSpeed.Fast).ProvideValue(null!)).ShouldBe(Motion.Fast);
-            ((Duration)new MotionExtension(MotionSpeed.Slow).ProvideValue(null!)).ShouldBe(Motion.Slow);
+            IEnumerable<TriggerBase> triggers = value is Style style ? style.Triggers : [];
+            var template = value as ControlTemplate
+                ?? (value as Style)?.Setters.OfType<Setter>().Select(setter => setter.Value).OfType<ControlTemplate>().FirstOrDefault();
+            foreach (var animation in From(triggers)) yield return animation;
+            if (template is not null) foreach (var animation in From(template.Triggers)) yield return animation;
         }
     }
 }

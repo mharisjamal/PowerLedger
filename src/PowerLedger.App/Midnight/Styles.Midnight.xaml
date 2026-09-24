@@ -25,7 +25,10 @@
     <CornerRadius x:Key="M.Corner.Card">14</CornerRadius>
     <CornerRadius x:Key="M.Corner.Control">8</CornerRadius>
 
-    <!-- Motion (0.5), the lengths Motion.cs keeps. A storyboard asks {local:Motion Fast} for its Duration, so reduced motion makes the travel zero. -->
+    <!-- Motion (0.5), the lengths Motion.cs keeps. A storyboard's animation is a local:MotionAnimation with a Speed (and
+         Fade for an opacity fade) that asks Motion each time it starts, so reduced motion, turned on even mid-session, makes
+         the travel zero. -->
+
     <Duration x:Key="M.Motion.Fast">0:0:0.15</Duration>
     <Duration x:Key="M.Motion.Base">0:0:0.22</Duration>
     <Duration x:Key="M.Motion.Slow">0:0:0.32</Duration>
@@ -110,14 +113,14 @@
                 <Trigger.EnterActions>
                     <BeginStoryboard>
                         <Storyboard>
-                            <DoubleAnimation Storyboard.TargetProperty="(local:Card.Depth)" To="{StaticResource M.Elevation.Card.Hover}" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.In}" />
+                            <local:MotionAnimation Storyboard.TargetProperty="(local:Card.Depth)" To="{StaticResource M.Elevation.Card.Hover}" Speed="Fast" EasingFunction="{StaticResource M.Ease.In}" />
                         </Storyboard>
                     </BeginStoryboard>
                 </Trigger.EnterActions>
                 <Trigger.ExitActions>
                     <BeginStoryboard>
                         <Storyboard>
-                            <DoubleAnimation Storyboard.TargetProperty="(local:Card.Depth)" To="{StaticResource M.Elevation.Card}" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.Out}" />
+                            <local:MotionAnimation Storyboard.TargetProperty="(local:Card.Depth)" To="{StaticResource M.Elevation.Card}" Speed="Fast" EasingFunction="{StaticResource M.Ease.Out}" />
                         </Storyboard>
                     </BeginStoryboard>
                 </Trigger.ExitActions>
@@ -187,14 +190,14 @@
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Speed="Fast" Fade="True" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Speed="Fast" Fade="True" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
@@ -204,16 +207,16 @@
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Active" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Base, Fade=True}" EasingFunction="{StaticResource M.Ease.In}" />
-                                        <DoubleAnimation Storyboard.TargetName="Rest" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Base, Fade=True}" EasingFunction="{StaticResource M.Ease.In}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Active" Storyboard.TargetProperty="Opacity" To="1" Speed="Base" Fade="True" EasingFunction="{StaticResource M.Ease.In}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Rest" Storyboard.TargetProperty="Opacity" To="0" Speed="Base" Fade="True" EasingFunction="{StaticResource M.Ease.In}" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Active" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
-                                        <DoubleAnimation Storyboard.TargetName="Rest" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Active" Storyboard.TargetProperty="Opacity" To="0" Speed="Fast" Fade="True" />
+                                        <local:MotionAnimation Storyboard.TargetName="Rest" Storyboard.TargetProperty="Opacity" To="1" Speed="Fast" Fade="True" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
@@ -250,14 +253,14 @@
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Speed="Fast" Fade="True" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Speed="Fast" Fade="True" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
@@ -315,14 +318,14 @@
                 <Trigger.EnterActions>
                     <BeginStoryboard>
                         <Storyboard>
-                            <DoubleAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                            <local:MotionAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="1" Speed="Fast" Fade="True" />
                         </Storyboard>
                     </BeginStoryboard>
                 </Trigger.EnterActions>
                 <Trigger.ExitActions>
                     <BeginStoryboard>
                         <Storyboard>
-                            <DoubleAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                            <local:MotionAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="0" Speed="Fast" Fade="True" />
                         </Storyboard>
                     </BeginStoryboard>
                 </Trigger.ExitActions>
@@ -331,16 +334,16 @@
                 <Trigger.EnterActions>
                     <BeginStoryboard>
                         <Storyboard>
-                            <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.Out}" />
-                            <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.Out}" />
+                            <local:MotionAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleX" To="0.97" Speed="Fast" EasingFunction="{StaticResource M.Ease.Out}" />
+                            <local:MotionAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleY" To="0.97" Speed="Fast" EasingFunction="{StaticResource M.Ease.Out}" />
                         </Storyboard>
                     </BeginStoryboard>
                 </Trigger.EnterActions>
                 <Trigger.ExitActions>
                     <BeginStoryboard>
                         <Storyboard>
-                            <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleX" To="1" Duration="{local:Motion Base}" EasingFunction="{StaticResource M.Ease.Pill}" />
-                            <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleY" To="1" Duration="{local:Motion Base}" EasingFunction="{StaticResource M.Ease.Pill}" />
+                            <local:MotionAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleX" To="1" Speed="Base" EasingFunction="{StaticResource M.Ease.Pill}" />
+                            <local:MotionAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleY" To="1" Speed="Base" EasingFunction="{StaticResource M.Ease.Pill}" />
                         </Storyboard>
                     </BeginStoryboard>
                 </Trigger.ExitActions>
@@ -440,14 +443,14 @@
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Speed="Fast" Fade="True" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Speed="Fast" Fade="True" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
@@ -492,14 +495,14 @@
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="X" To="16" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.In}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="X" To="16" Speed="Fast" EasingFunction="{StaticResource M.Ease.In}" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="X" To="0" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.In}" />
+                                        <local:MotionAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="X" To="0" Speed="Fast" EasingFunction="{StaticResource M.Ease.In}" />
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
@@ -897,7 +900,7 @@
                         <EventTrigger RoutedEvent="Loaded">
                             <BeginStoryboard>
                                 <Storyboard>
-                                    <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="{local:Motion Fast, Fade=True}" EasingFunction="{StaticResource M.Ease.In}" />
+                                    <local:MotionAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="Opacity" From="0" To="1" Speed="Fast" Fade="True" EasingFunction="{StaticResource M.Ease.In}" />
                                 </Storyboard>
                             </BeginStoryboard>
                         </EventTrigger>
