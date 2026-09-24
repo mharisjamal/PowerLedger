@@ -34,7 +34,8 @@
     "arch": {
       "enum": [
         "x64",
-        "arm64"
+        "arm64",
+        "x86"
       ]
     },
     "chassis": {
