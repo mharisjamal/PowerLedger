@@ -28,6 +28,17 @@ internal sealed record SharingOutcome(bool Ok, string Message, string? Path = nu
     public static SharingOutcome NoAnswer { get; } = new(false, "The service didn't answer, so the change may not have been made.");
 }
 
+/// <summary>What a household request did, in words the App can show (households design §2): the same shape as
+/// <see cref="HouseholdReply"/> without its pipe id, plus what "not connected" and "no answer" say. For
+/// <see cref="IServiceLink.StartCodePairingAsync"/> and a first sign-in that linked a household, <see cref="Code"/>
+/// carries the code to show.</summary>
+internal sealed record HouseholdOutcome(bool Ok, string Message, string? Code = null)
+{
+    public static HouseholdOutcome NotConnected { get; } = new(false, "The service isn't running, so nothing was changed.");
+
+    public static HouseholdOutcome NoAnswer { get; } = new(false, "The service didn't answer, so the change may not have been made.");
+}
+
 /// <summary>What the App needs from the service (spec §8). Events are raised on a background thread; a handler must not
 /// throw and must hand its work to the UI thread itself.</summary>
 internal interface IServiceLink : IAsyncDisposable
@@ -37,6 +48,10 @@ internal interface IServiceLink : IAsyncDisposable
 
     /// <summary>True once connected and subscribed; false when the connection is lost.</summary>
     event Action<bool>? ConnectionChanged;
+
+    /// <summary>A household notice the service pushed (households design §9): a join or approve prompt, pairing
+    /// progress, or information to show, only for an App in the console session.</summary>
+    event Action<HouseholdNotice>? HouseholdNoticeReceived;
 
     bool IsConnected { get; }
 
@@ -81,6 +96,21 @@ internal interface IServiceLink : IAsyncDisposable
 
     /// <summary>Asks the server to delete everything sent from this PC.</summary>
     Task<SharingOutcome> DeleteMyDataAsync(CancellationToken cancel = default);
+
+    /// <summary>PowerLedger PCs found on this network (households design §3); null when not connected or the service did
+    /// not answer.</summary>
+    Task<IReadOnlyList<FoundPc>?> BrowsePcsAsync(CancellationToken cancel = default);
+
+    /// <summary>Starts adding a PC found on this network. How it goes is pushed as <see cref="HouseholdNoticeReceived"/>
+    /// events, its comparison code first.</summary>
+    Task<HouseholdOutcome> AddPcAsync(string instanceId, CancellationToken cancel = default);
+
+    /// <summary>Makes a one-time code for adding a PC that isn't on this network (households design §4); the outcome
+    /// carries the code.</summary>
+    Task<HouseholdOutcome> StartCodePairingAsync(CancellationToken cancel = default);
+
+    /// <summary>Joins a household with the code another PC showed.</summary>
+    Task<HouseholdOutcome> JoinByCodeAsync(string code, CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -138,6 +168,8 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public event Action<bool>? ConnectionChanged;
 
+    public event Action<HouseholdNotice>? HouseholdNoticeReceived;
+
     public bool IsConnected => _channel is not null;
 
     public void Start() => _run ??= Task.Run(() => RunAsync(_stop.Token));
@@ -178,6 +210,18 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public Task<SharingOutcome> DeleteMyDataAsync(CancellationToken cancel = default)
         => SharingAsync(new DeleteMyDataRequest(NextId()), cancel);
+
+    public async Task<IReadOnlyList<FoundPc>?> BrowsePcsAsync(CancellationToken cancel = default)
+        => await SendAsync(new BrowsePcsRequest(NextId()), cancel).ConfigureAwait(false) is FoundPcsReply reply ? reply.Pcs : null;
+
+    public Task<HouseholdOutcome> AddPcAsync(string instanceId, CancellationToken cancel = default)
+        => HouseholdAsync(new AddPcRequest(NextId(), instanceId), cancel);
+
+    public Task<HouseholdOutcome> StartCodePairingAsync(CancellationToken cancel = default)
+        => HouseholdAsync(new StartCodePairingRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> JoinByCodeAsync(string code, CancellationToken cancel = default)
+        => HouseholdAsync(new JoinByCodeRequest(NextId(), code), cancel);
 
     public async ValueTask DisposeAsync()
     {
@@ -273,6 +317,16 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
                 case SharingReply reply:
                     Answer(reply.Id, reply);
                     break;
+                case FoundPcsReply reply:
+                    Answer(reply.Id, reply);
+                    break;
+                case HouseholdReply reply:
+                    Answer(reply.Id, reply);
+                    break;
+                case HouseholdNotice notice:
+                    // Pushed, not a reply to anything pending: households design §9.
+                    HouseholdNoticeReceived?.Invoke(notice);
+                    break;
                 case ErrorReply { Id: { } id } reply:
                     Answer(id, reply);
                     break;
@@ -342,6 +396,22 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         {
             _sharingGate.Release();
         }
+    }
+
+    /// <summary>A household request (households design §2): sent only while connected to a server that passed the check,
+    /// and answered in words. Unlike a sharing request, these are not serialised against one another: the service
+    /// answers each within 8 s (households design §9), and the App may have more than one outstanding, such as browsing
+    /// while a pairing is under way.</summary>
+    private async Task<HouseholdOutcome> HouseholdAsync(PipeRequest request, CancellationToken cancel)
+    {
+        if (_channel is null) return HouseholdOutcome.NotConnected;
+        if (_refusal is { } refusal) return new HouseholdOutcome(false, refusal);
+        return await SendAsync(request, cancel).ConfigureAwait(false) switch
+        {
+            HouseholdReply reply => new HouseholdOutcome(reply.Ok, reply.Message, reply.Code),
+            ErrorReply error => new HouseholdOutcome(false, error.Message),
+            _ => HouseholdOutcome.NoAnswer,
+        };
     }
 
     private async Task<PipeMessage> RequestAsync(MessageChannel channel, PipeRequest request, CancellationToken cancel)

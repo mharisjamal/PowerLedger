@@ -77,6 +77,7 @@ public partial class App : Application
         _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture);
         _report = new ReportViewModel(history, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
         _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture);
+        _household.AddPcRequested += OpenAddPcWindow;
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _preferences.ApplyFirstRunDefaults();
@@ -234,6 +235,13 @@ public partial class App : Application
     {
         if (_window is null) return;
         new PayloadWindow(path) { Owner = _window }.Show();
+    }
+
+    /// <summary>Add a PC from the Household page (households design §2), modeless and owned by the main window.</summary>
+    private void OpenAddPcWindow()
+    {
+        if (_window is null || _link is null || _threads is null) return;
+        new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window }.Show();
     }
 
     /// <summary>"What's been sent…" in Settings → Privacy (data-sharing design §2).</summary>
