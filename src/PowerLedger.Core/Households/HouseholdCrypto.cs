@@ -121,11 +121,6 @@ public static class HouseholdCrypto
     public static string ComparisonCode(byte[] shared, byte[] transcript) =>
         SixDigits(Hkdf(shared, transcript, "powerledger comparison code", 4));
 
-    /// <summary>The first form, over the two ephemeral keys alone. It binds too little; it goes once the service uses
-    /// <see cref="ComparisonCode(byte[], byte[])"/> with the transcript (Plan N review round 2).</summary>
-    public static string ComparisonCode(byte[] shared, byte[] ephAdder, byte[] ephJoiner) =>
-        SixDigits(Hkdf(shared, [.. ephAdder, .. ephJoiner], "powerledger comparison code", 4));
-
     /// <summary>What a pairing's code and frame keys are bound to: SHA-256 of the adder's hello frame then the joiner's, as
     /// the bytes that went over the wire.</summary>
     public static byte[] Transcript(byte[] adderHello, byte[] joinerHello) => SHA256.HashData([.. adderHello, .. joinerHello]);

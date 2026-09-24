@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -40,13 +41,17 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string AccountKey = "household.account";
     internal const string PostedHourKey = "household.posted-hour";
     internal const string HistoryHourKey = "household.history-hour";
+    internal const string TombstonesKey = "household.tombstones";
+    internal const string RotationKeyKey = "household.rotation-key";
+    internal const string RecoveryCodeKey = "household.recovery-code";
+    internal const string LaggingKey = "household.lagging";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
     private static readonly string[] OfTheHousehold =
         [
             IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, HistoryKey, HistoryHourKey, ConfirmedKey,
-            MembersCheckedKey, ProblemKey, WaitingKey,
+            MembersCheckedKey, ProblemKey, WaitingKey, TombstonesKey, RotationKeyKey, LaggingKey,
         ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
@@ -129,6 +134,27 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         else keys.TryAdd(name, Convert.ToBase64String(key));
         WriteKeys(keys);
         if (epoch > Epoch) settings.Set(EpochKey, epoch.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>A key this PC made for the next epoch, kept until the server takes it (plan 0.8): it isn't used before, so this
+    /// PC never moves to an epoch the server doesn't have. Null while there is none.</summary>
+    public (int Epoch, byte[] Key)? RotationKey
+    {
+        get => Unprotect(settings.Get(RotationKeyKey)) is { Length: 4 + HouseholdCrypto.KeyLength } kept
+            ? (BinaryPrimitives.ReadInt32BigEndian(kept), kept[4..])
+            : null;
+        set
+        {
+            if (value is not { } pending)
+            {
+                settings.Remove(RotationKeyKey);
+                return;
+            }
+            var kept = new byte[4 + pending.Key.Length];
+            BinaryPrimitives.WriteInt32BigEndian(kept, pending.Epoch);
+            pending.Key.CopyTo(kept, 4);
+            settings.Set(RotationKeyKey, Protect(kept));
+        }
     }
 
     /// <summary>Forgets the household: its ID, its keys and the progress of relay sync. This PC's own keys stay.</summary>
@@ -222,6 +248,22 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         set => WriteText(MembersCheckedKey, value?.ToString(CultureInfo.InvariantCulture));
     }
 
+    /// <summary>The PCs removed from the household that this PC knows of, by device ID (plan 0.8): kept when their rows go, so
+    /// none is taken back on the word of a PC that hasn't heard.</summary>
+    public IReadOnlyDictionary<string, Tombstone> Tombstones
+    {
+        get => HouseholdJson.Read(settings.Get(TombstonesKey), HouseholdJson.Default.DictionaryStringTombstone) ?? [];
+        set => WriteText(TombstonesKey, value.Count == 0 ? null : HouseholdJson.Write(new Dictionary<string, Tombstone>(value), HouseholdJson.Default.DictionaryStringTombstone));
+    }
+
+    /// <summary>Current members whose batches still come under an older epoch than this PC's, by device ID: since when, unix
+    /// milliseconds, and the epoch this PC made a new key at for them, if it did (plan 0.8).</summary>
+    public IReadOnlyDictionary<string, Lag> Lagging
+    {
+        get => HouseholdJson.Read(settings.Get(LaggingKey), HouseholdJson.Default.DictionaryStringLag) ?? [];
+        set => WriteText(LaggingKey, value.Count == 0 ? null : HouseholdJson.Write(new Dictionary<string, Lag>(value), HouseholdJson.Default.DictionaryStringLag));
+    }
+
     /// <summary>What the server still has to be told, oldest first: kept across leaving, since each names its household.</summary>
     public IReadOnlyList<Relay.PendingOp> Pending
     {
@@ -255,6 +297,20 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         {
             if (value is null) settings.Remove(RecoveryKeyKey);
             else settings.Set(RecoveryKeyKey, Protect(value));
+        }
+    }
+
+    /// <summary>N2: a recovery code made on this PC that the App hasn't yet said it showed, with the ID of the notice that
+    /// shows it (plan 0.8): kept encrypted until then, and forgotten once seen.</summary>
+    public (string PromptId, string Code)? RecoveryCodeToShow
+    {
+        get => Unprotect(settings.Get(RecoveryCodeKey)) is { } kept && Encoding.UTF8.GetString(kept).Split('\n') is [var promptId, var code]
+            ? (promptId, code)
+            : null;
+        set
+        {
+            if (value is not { } waiting) settings.Remove(RecoveryCodeKey);
+            else settings.Set(RecoveryCodeKey, Protect(Encoding.UTF8.GetBytes($"{waiting.PromptId}\n{waiting.Code}")));
         }
     }
 

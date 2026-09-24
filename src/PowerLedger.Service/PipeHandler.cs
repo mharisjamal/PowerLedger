@@ -28,7 +28,8 @@ internal sealed partial class PipeHandler(
     private static readonly DateTimeOffset EarliestTariff = new(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     /// <param name="client">The connection the request came on, so idle reports stay per client.</param>
-    public async Task<PipeMessage> HandleAsync(PipeMessage message, string client, CancellationToken cancel)
+    /// <param name="session">The Windows session of the client, for the household's requests; null when Windows wouldn't say.</param>
+    public async Task<PipeMessage> HandleAsync(PipeMessage message, string client, CancellationToken cancel, uint? session = null)
     {
         switch (message)
         {
@@ -74,8 +75,9 @@ internal sealed partial class PipeHandler(
             case DeleteMyDataRequest request:
                 return await ShareAsync(new DeleteMyDataCommand(request.Id), cancel).ConfigureAwait(false);
             case BrowsePcsRequest or AddPcRequest or StartCodePairingRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest
-                or LeaveHouseholdRequest or RenamePcRequest or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest:
-                return await HouseholdAsync((PipeRequest)message, cancel).ConfigureAwait(false);
+                or LeaveHouseholdRequest or RenamePcRequest or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest
+                or CancelPairingRequest or NewRecoveryCodeRequest or RemoveOldRowsRequest:
+                return await HouseholdAsync((PipeRequest)message, session, cancel).ConfigureAwait(false);
             case PipeRequest request:
                 return new ErrorReply(request.Id, "The service does not handle that request.");
             default:
@@ -125,12 +127,13 @@ internal sealed partial class PipeHandler(
     }
 
     /// <summary>Hands the request to the household worker and answers with what it did, or says it didn't answer in time.</summary>
-    private async Task<PipeMessage> HouseholdAsync(PipeRequest request, CancellationToken cancel)
+    private async Task<PipeMessage> HouseholdAsync(PipeRequest request, uint? session, CancellationToken cancel)
     {
         if (households is null) return new ErrorReply(request.Id, "The service does not handle that request.");
         try
         {
-            return await households.HandleAsync(request, cancel).WaitAsync(Households.HouseholdWorker.AppWait, clock, cancel).ConfigureAwait(false);
+            return await households.HandleAsync(request, session, cancel).WaitAsync(Households.HouseholdWorker.AppWait, clock, cancel)
+                .ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

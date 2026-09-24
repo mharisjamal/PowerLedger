@@ -9,16 +9,19 @@ namespace PowerLedger.Service.Households.Lan;
 /// <param name="PeerId">The other PC's device ID, once it proved it holds that key.</param>
 /// <param name="RowsIn">Rows the other PC sent that were newer than those kept here.</param>
 /// <param name="RowsOut">Rows sent to the other PC.</param>
-internal sealed record SyncOutcome(bool Ok, string? PeerId, int RowsIn, int RowsOut, string? Problem = null);
+/// <param name="Removed">Members the other PC's list said were removed, that this PC had as current until now.</param>
+internal sealed record SyncOutcome(bool Ok, string? PeerId, int RowsIn, int RowsOut, string? Problem = null, IReadOnlyList<string>? Removed = null);
 
 /// <summary>
 /// Sync on the same network (households design §5, plan 0.6). After the hellos and the key exchange each side proves its
 /// device key by signing <c>"sync" ‖ eph_a ‖ eph_b</c>, which only a member's key checks against; then each says what it
-/// has, as the newest change it holds of each member's rows, and sends the rows the other lacks, then done. The side that
+/// has, as the newest change it holds of each member's rows and the latest hour among the rows changed then, and sends
+/// the rows the other lacks in that order, then done: a sync cut short goes on from the row after the last that came. The side that
 /// connected sends first each time, so the two never both wait to write. The <c>have</c> also carries the members each
-/// knows, so a PC added elsewhere is learned of here; only a member's own entry changes its name.
+/// knows, the removed ones among them (plan 0.8), so a PC added or removed elsewhere is learned of here, and a removed PC
+/// is never taken back on the word of one that hasn't heard (<see cref="MemberBook"/>).
 /// </summary>
-internal sealed class LanSync(HouseholdRepository household, TimeProvider clock, PairingTimeouts? timeouts = null)
+internal sealed class LanSync(HouseholdRepository household, MemberBook members, TimeProvider clock, PairingTimeouts? timeouts = null)
 {
     /// <summary>Rows in one frame: about 350 bytes each, well inside the 1 MB frame.</summary>
     public const int RowsPerFrame = 2000;
@@ -33,10 +36,12 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
         var talk = new LanConversation(channel, _step);
         try
         {
-            await talk.SendAsync(LanMessages.Hello(Hello.Sync, ephPublic, me.Keys, me.Name, me.Kind, me.Instance), cancel).ConfigureAwait(false);
-            if (Hello.Of(await talk.ReceiveAsync("hello", cancel).ConfigureAwait(false)) is not { Purpose: Hello.Sync } hello) return Refused("its hello wasn't a good one");
+            var myHello = LanMessages.Write(LanMessages.Hello(Hello.Sync, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
+            await talk.SendAsync(myHello, cancel).ConfigureAwait(false);
+            var (theirMessage, theirHello) = await talk.ReceiveWithBytesAsync("hello", cancel).ConfigureAwait(false);
+            if (Hello.Of(theirMessage) is not { Purpose: Hello.Sync } hello) return Refused("its hello wasn't a good one");
             if (Member(hello) is null) return Refused("it isn't in this household");
-            using var cipher = FrameCipher.For(adder: true, HouseholdCrypto.Agree(eph, hello.Eph), ephPublic, hello.Eph);
+            using var cipher = FrameCipher.For(adder: true, HouseholdCrypto.Agree(eph, hello.Eph), HouseholdCrypto.Transcript(myHello, theirHello));
             talk.Secure(cipher);
             var proof = Proof(ephPublic, hello.Eph);
 
@@ -44,10 +49,10 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
             await CheckProofAsync(talk, hello, proof, cancel).ConfigureAwait(false);
             await talk.SendAsync(Have(), cancel).ConfigureAwait(false);
             var theirs = await talk.ReceiveAsync("have", cancel).ConfigureAwait(false);
-            Learn(theirs, hello.From.Id);
+            var learned = Learn(theirs, hello.From.Id, me);
             var sent = await SendRowsAsync(talk, theirs, cancel).ConfigureAwait(false);
-            var received = await ReceiveRowsAsync(talk, hello.From.Id, cancel).ConfigureAwait(false);
-            return new SyncOutcome(true, hello.From.Id, received, sent);
+            var received = await ReceiveRowsAsync(talk, hello.From.Id, null, cancel).ConfigureAwait(false);
+            return new SyncOutcome(true, hello.From.Id, received, sent, Removed: learned.Removed);
         }
         catch (LanException error)
         {
@@ -55,29 +60,33 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
         }
     }
 
-    /// <summary>The side that was connected to and has read the other's hello.</summary>
-    public async Task<SyncOutcome> RespondAsync(IFrameChannel channel, LanMessage hello, PairingIdentity me, CancellationToken cancel)
+    /// <summary>The side that was connected to and has read the other's hello, <paramref name="hello"/> as it came.</summary>
+    /// <param name="stillIn">Asked again before anything the other side sent is kept, since a sync that came in runs beside
+    /// the household's changes (plan 0.8): false when this PC has since left the household the sync began in.</param>
+    public async Task<SyncOutcome> RespondAsync(IFrameChannel channel, byte[] hello, PairingIdentity me, CancellationToken cancel, Func<bool>? stillIn = null)
     {
-        if (Hello.Of(hello) is not { Purpose: Hello.Sync } theirHello) return Refused("its hello wasn't a good one");
+        if (Hello.Of(LanMessages.Read(hello)) is not { Purpose: Hello.Sync } theirHello) return Refused("its hello wasn't a good one");
         if (Member(theirHello) is null) return Refused("it isn't in this household");
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
         var talk = new LanConversation(channel, _step);
         try
         {
-            await talk.SendAsync(LanMessages.Hello(Hello.Sync, ephPublic, me.Keys, me.Name, me.Kind, me.Instance), cancel).ConfigureAwait(false);
-            using var cipher = FrameCipher.For(adder: false, HouseholdCrypto.Agree(eph, theirHello.Eph), theirHello.Eph, ephPublic);
+            var myHello = LanMessages.Write(LanMessages.Hello(Hello.Sync, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
+            await talk.SendAsync(myHello, cancel).ConfigureAwait(false);
+            using var cipher = FrameCipher.For(adder: false, HouseholdCrypto.Agree(eph, theirHello.Eph), HouseholdCrypto.Transcript(hello, myHello));
             talk.Secure(cipher);
             var proof = Proof(theirHello.Eph, ephPublic);
 
             await CheckProofAsync(talk, theirHello, proof, cancel).ConfigureAwait(false);
             await talk.SendAsync(Prove(me, proof), cancel).ConfigureAwait(false);
             var theirs = await talk.ReceiveAsync("have", cancel).ConfigureAwait(false);
-            Learn(theirs, theirHello.From.Id);
+            StillIn(theirHello.From.Id, stillIn);
+            var learned = Learn(theirs, theirHello.From.Id, me);
             await talk.SendAsync(Have(), cancel).ConfigureAwait(false);
-            var received = await ReceiveRowsAsync(talk, theirHello.From.Id, cancel).ConfigureAwait(false);
+            var received = await ReceiveRowsAsync(talk, theirHello.From.Id, stillIn, cancel).ConfigureAwait(false);
             var sent = await SendRowsAsync(talk, theirs, cancel).ConfigureAwait(false);
-            return new SyncOutcome(true, theirHello.From.Id, received, sent);
+            return new SyncOutcome(true, theirHello.From.Id, received, sent, Removed: learned.Removed);
         }
         catch (LanException error)
         {
@@ -107,44 +116,33 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
 
     private LanMessage Have()
     {
-        var members = household.Members().Where(member => member.LeftMs is null).ToList();
-        var latest = household.Latest();
+        var current = household.Members().Where(member => member.LeftMs is null).ToList();
+        var reach = household.Reach();
         return new LanMessage
         {
             Type = "have",
-            Latest = members.ToDictionary(member => member.DeviceId, member => latest.GetValueOrDefault(member.DeviceId)),
-            Members = [.. members.Select(Wire.Member)],
+            Latest = current.ToDictionary(member => member.DeviceId, member => reach.GetValueOrDefault(member.DeviceId).Changed),
+            Hours = current.Where(member => reach.ContainsKey(member.DeviceId)).ToDictionary(member => member.DeviceId, member => reach[member.DeviceId].Hour),
+            Members = members.Entries(),
         };
     }
 
-    /// <summary>Adds the members the other side knows and this one doesn't, and takes the other's own name and kind. A member
-    /// this PC knows has left stays left: leaving is the leaver's, or the remover's, to say.</summary>
-    private void Learn(LanMessage have, string peerId)
-    {
-        var nowMs = clock.GetUtcNow().ToUnixTimeMilliseconds();
-        foreach (var sent in (have.Members ?? []).Take(Wire.MaxMembers))
-        {
-            if (Wire.Member(sent) is not { } member) continue;
-            var known = household.Member(member.Id);
-            if (known is null)
-            {
-                household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
-            }
-            else if (member.Id == peerId && known.LeftMs is null && (known.Name != member.Name || known.Kind != member.Kind))
-            {
-                household.SaveMember(known with { Name = member.Name, Kind = member.Kind });
-            }
-        }
-    }
+    /// <summary>Learns the members the other side knows, added and removed, and its own name and kind (<see cref="MemberBook.Learn"/>).</summary>
+    private Learned Learn(LanMessage have, string peerId, PairingIdentity me) =>
+        members.Learn(have.Members ?? [], peerId, me.Keys.DeviceId, clock.GetUtcNow().ToUnixTimeMilliseconds());
 
-    /// <summary>Sends every current member's rows that changed after the newest the other side has of them, then done.</summary>
+    /// <summary>Sends every current member's rows after the last the other side has of them, in the order they changed, then
+    /// done.</summary>
     private async Task<int> SendRowsAsync(LanConversation talk, LanMessage theirs, CancellationToken cancel)
     {
         var sent = 0;
         foreach (var member in household.Members().Where(member => member.LeftMs is null))
         {
             var after = theirs.Latest?.GetValueOrDefault(member.DeviceId) ?? 0;
-            foreach (var chunk in household.ChangedAfter(member.DeviceId, after).Chunk(RowsPerFrame))
+            var rows = theirs.Hours?.TryGetValue(member.DeviceId, out var hour) == true
+                ? household.ChangedAfter(member.DeviceId, after, hour)
+                : household.ChangedAfter(member.DeviceId, after);
+            foreach (var chunk in rows.Chunk(RowsPerFrame))
             {
                 await talk.SendAsync(new LanMessage { Type = "rows", Device = member.DeviceId, Rows = [.. chunk.Select(Wire.Row)] }, cancel)
                     .ConfigureAwait(false);
@@ -157,7 +155,7 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
 
     /// <summary>Takes rows until done: each for a current member, checked, and kept when newer than the one here. The PC
     /// synced with was heard from now; any other member as of the newest change among its rows.</summary>
-    private async Task<int> ReceiveRowsAsync(LanConversation talk, string peerId, CancellationToken cancel)
+    private async Task<int> ReceiveRowsAsync(LanConversation talk, string peerId, Func<bool>? stillIn, CancellationToken cancel)
     {
         var nowMs = clock.GetUtcNow().ToUnixTimeMilliseconds();
         var taken = 0;
@@ -167,7 +165,8 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
             if (message.Type == "done") break;
             if (message.Type != "rows") throw new LanException(LanProblem.Broken);
             if (message.Device is not { } device || household.Member(device) is not { LeftMs: null }) continue;
-            var rows = (message.Rows ?? []).Select(row => Wire.Row(device, row)).OfType<HouseholdRow>().ToList();
+            StillIn(peerId, stillIn);
+            var rows = Wire.CapChanged((message.Rows ?? []).Select(row => Wire.Row(device, row)).OfType<HouseholdRow>(), nowMs);
             taken += household.Upsert(rows);
             if (rows.Count > 0 && device != peerId) household.Synced(device, Math.Min(nowMs, rows.Max(row => row.ChangedMs)));
         }
@@ -176,4 +175,10 @@ internal sealed class LanSync(HouseholdRepository household, TimeProvider clock,
     }
 
     private static SyncOutcome Refused(string problem) => new(false, null, 0, 0, problem);
+
+    /// <summary>Ends a sync that came in once this PC has left the household it began in, or the other PC has gone from it.</summary>
+    private void StillIn(string peerId, Func<bool>? stillIn)
+    {
+        if (stillIn?.Invoke() == false || household.Member(peerId) is not { LeftMs: null }) throw new LanException(LanProblem.NotAMember);
+    }
 }

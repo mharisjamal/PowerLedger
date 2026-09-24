@@ -48,11 +48,12 @@ public sealed class HouseholdEndToEndTests(WorkerFixture worker) : IClassFixture
 
         (await desktop.Send<HouseholdReply>(new AddPcRequest(2, laptop.Worker.InstanceId))).Ok.ShouldBeTrue();
 
-        var shown = await desktop.Next(NoticeKind.PairingProgress);
+        var shown = await desktop.Next(NoticeKind.ConfirmCode);                 // both users check the one code
         var asked = await laptop.Next(NoticeKind.JoinPrompt);
         asked.ComparisonCode.ShouldNotBeNull().ShouldMatch("^[0-9]{3} [0-9]{3}$");
         asked.ComparisonCode.ShouldBe(shown.ComparisonCode);
         (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Laptop-2 joined your household.");
+        (await laptop.Next(NoticeKind.Info, text => text.StartsWith("This PC joined", StringComparison.Ordinal))).ShouldNotBeNull();   // once told
         var household = desktop.Worker.Store.HouseholdId.ShouldNotBeNull();
         laptop.Worker.Store.HouseholdId.ShouldBe(household);
 
@@ -141,7 +142,7 @@ public sealed class HouseholdEndToEndTests(WorkerFixture worker) : IClassFixture
     }
 
     [Fact]
-    public async Task Pairing_by_code_goes_through_the_workers_meeting_slots_up_to_joined()
+    public async Task Pairing_by_code_goes_through_the_workers_meeting_slots_up_to_welcomed_with_no_names_in_the_open()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);
         var laptop = await Start("Laptop-2", ChassisKind.Laptop);
@@ -150,8 +151,16 @@ public sealed class HouseholdEndToEndTests(WorkerFixture worker) : IClassFixture
         (await laptop.Send<HouseholdReply>(new JoinByCodeRequest(2, code))).Ok.ShouldBeTrue();
 
         (await laptop.Next(NoticeKind.JoinPrompt)).ComparisonCode.ShouldBeNull();
-        (await laptop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("This PC joined Desktop-7's household.");
-        (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Laptop-2 joined your household.");   // after the joined slot
+        (await laptop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("This PC joined Desktop-7's household.");   // after the welcomed slot
+        (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Laptop-2 joined your household.");      // after the joined slot
+        var meeting = PairingCode.MeetingId(PairingCode.Normalize(code)!);
+        foreach (var slot in new[] { "adder", "joiner", "answer", "welcome", "joined", "welcomed" })
+        {
+            var held = await AsPc(desktop, client => client.GetSlotAsync(meeting, slot, CancellationToken.None));
+            held.Ok.ShouldBeTrue(slot);
+            Encoding.UTF8.GetString(held.Value!).ShouldNotContain("Desktop-7");
+            Encoding.UTF8.GetString(held.Value!).ShouldNotContain("Laptop-2");
+        }
         var household = desktop.Worker.Store.HouseholdId.ShouldNotBeNull();
         laptop.Worker.Store.HouseholdId.ShouldBe(household);
         laptop.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);

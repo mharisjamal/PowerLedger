@@ -93,6 +93,18 @@ public sealed class HourRowsTests : IDisposable
     }
 
     [Fact]
+    public void After_the_clock_goes_back_a_new_hour_is_still_newer_than_every_row_kept()
+    {
+        Aggregates.UpsertHour(Hour(0, energyWh: 10));
+        Rows.Build(Me, Midnight.AddDays(-1), Midnight.AddHours(5));             // built while the clock was 3 h fast
+        Aggregates.UpsertHour(Hour(1, energyWh: 20));
+
+        Rows.Build(Me, Midnight.AddDays(-1), Midnight.AddHours(2)).ShouldBe(1);  // the clock put right
+
+        Changed(1).ShouldBe(Midnight.AddHours(5).AddMilliseconds(1));
+    }
+
+    [Fact]
     public void Only_the_hours_from_the_start_are_built_and_the_backfill_reaches_back_13_months()
     {
         var now = Midnight.AddHours(5);

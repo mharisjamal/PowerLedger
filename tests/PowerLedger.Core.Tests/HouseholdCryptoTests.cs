@@ -70,21 +70,6 @@ public class HouseholdCryptoTests
     }
 
     [Fact]
-    public void Both_sides_see_the_same_comparison_code_and_a_swapped_key_changes_it()
-    {
-        using var adder = DeviceKeys.Create();
-        using var joiner = DeviceKeys.Create();
-        var shared = HouseholdCrypto.Agree(adder.Dh, joiner.DhPublic);
-        var code = HouseholdCrypto.ComparisonCode(shared, adder.DhPublic, joiner.DhPublic);
-
-        code.ShouldMatch("^[0-9]{3} [0-9]{3}$");
-        HouseholdCrypto.ComparisonCode(HouseholdCrypto.Agree(joiner.Dh, adder.DhPublic), adder.DhPublic, joiner.DhPublic).ShouldBe(code);
-
-        using var middle = DeviceKeys.Create();
-        HouseholdCrypto.ComparisonCode(HouseholdCrypto.Agree(middle.Dh, joiner.DhPublic), middle.DhPublic, joiner.DhPublic).ShouldNotBe(code);
-    }
-
-    [Fact]
     public void The_code_over_the_transcript_is_the_same_both_sides_and_changes_with_any_byte_of_either_hello()
     {
         using var adder = DeviceKeys.Create();

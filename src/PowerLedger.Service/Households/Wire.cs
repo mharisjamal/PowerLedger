@@ -7,11 +7,16 @@ using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Households;
 
-/// <summary>A PC in the household as the wire carries it: in a welcome, in a sync's <c>have</c>, and each batch's own device.</summary>
-/// <param name="Kind">"laptop" or "desktop".</param>
+/// <summary>A PC in the household as the wire carries it: in a welcome, in a sync's <c>have</c> and a batch's members, and each
+/// batch's own device.</summary>
+/// <param name="Name">Its name; absent from a removed member's entry.</param>
+/// <param name="Kind">"laptop" or "desktop"; absent from a removed member's entry.</param>
 /// <param name="Sign">Its signing key, SubjectPublicKeyInfo in base64url; absent from a batch's own device.</param>
 /// <param name="Dh">Its key-agreement key, likewise.</param>
-internal sealed record WireMember(string Id, string Name, string Kind, string? Sign = null, string? Dh = null);
+/// <param name="Added">When it was added, unix milliseconds, as the list's PC knows it.</param>
+/// <param name="Removed">For a removed member: when it was removed, unix milliseconds (plan 0.8).</param>
+internal sealed record WireMember(
+    string Id, string? Name, string? Kind, string? Sign = null, string? Dh = null, long? Added = null, long? Removed = null);
 
 /// <summary>An hour row as the wire carries it (plan 0.6); the device it is from goes with the message or batch holding it.</summary>
 internal sealed record WireRow(
@@ -73,15 +78,21 @@ internal static partial class Wire
         _ => null,
     };
 
-    /// <summary>A name as the App may show it: trimmed, without control characters, at most <see cref="MaxName"/> characters;
-    /// null when nothing is left.</summary>
+    /// <summary>A name as the App may show it: trimmed, without control characters, nor the format characters that can hide
+    /// text or turn it round, such as U+202E (right-to-left override), nor line and paragraph separators; at most
+    /// <see cref="MaxName"/> characters; null when nothing is left.</summary>
     public static string? Name(string? name)
     {
         if (name is null) return null;
-        var clean = new string([.. name.Where(character => !char.IsControl(character))]).Trim();
+        var clean = new string([.. name.Where(Shown)]).Trim();
         if (clean.Length > MaxName) clean = clean[..MaxName].TrimEnd();
         return clean.Length > 0 ? clean : null;
     }
+
+    private static bool Shown(char character) =>
+        !char.IsControl(character) && char.GetUnicodeCategory(character) is not
+            (System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.LineSeparator
+            or System.Globalization.UnicodeCategory.ParagraphSeparator);
 
     public static bool IsDeviceId(string? id) => id is not null && Hex32().IsMatch(id);
 
@@ -138,6 +149,14 @@ internal static partial class Wire
         return new HouseholdRow(
             deviceId, row.Hour, row.EnergyWh, row.CpuWh, row.GpuWh, row.DisplayWh, row.RestWh, row.IdleOnWh, row.IdleOffWh,
             row.OnS, row.BatteryS, row.IdleS, row.MeasuredS, row.CalibratedS, row.EstimatedS, row.CostMicro, row.Currency, row.Changed);
+    }
+
+    /// <summary>The rows with each change time no later than a day after <paramref name="nowMs"/> (plan 0.8): a PC whose clock
+    /// is far ahead can't make a row that no later change replaces.</summary>
+    public static List<HouseholdRow> CapChanged(IEnumerable<HouseholdRow> rows, long nowMs)
+    {
+        var cap = nowMs + (long)TimeSpan.FromDays(1).TotalMilliseconds;
+        return [.. rows.Select(row => row.ChangedMs > cap ? row with { ChangedMs = cap } : row)];
     }
 
     [GeneratedRegex("^[0-9a-f]{32}$")]

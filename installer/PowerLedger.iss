@@ -146,13 +146,13 @@ begin
 end;
 
 { Households (design §3): the other PCs in a household reach the service's listener, inbound TCP to the service's program,
-  on Private networks only. Deleting it first replaces the rule an earlier install added, so an update never doubles it. A
-  failure is only logged: the PCs can still pair and sync through the server. }
+  on Private networks only and from the local subnet only (plan 0.8). Deleting it first replaces the rule an earlier install
+  added, so an update never doubles it. A failure is only logged: the PCs can still pair and sync through the server. }
 procedure AddFirewallRule;
 begin
   Netsh('advfirewall firewall delete rule name="PowerLedger households"');
   if Netsh('advfirewall firewall add rule name="PowerLedger households" dir=in action=allow program="' + ServiceExecutable +
-      '" protocol=TCP profile=private') <> 0 then
+      '" protocol=TCP profile=private remoteip=localsubnet') <> 0 then
     Log('The households firewall rule could not be added.');
 end;
 

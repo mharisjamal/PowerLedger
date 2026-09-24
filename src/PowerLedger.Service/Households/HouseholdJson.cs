@@ -9,6 +9,8 @@ namespace PowerLedger.Service.Households;
 /// <summary>The JSON households keep in the settings, send between PCs and post to the server, generated at build time.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(Dictionary<string, Tombstone>))]
+[JsonSerializable(typeof(Dictionary<string, Lag>))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(LanMessage))]
 [JsonSerializable(typeof(CreateHouseholdBody))]

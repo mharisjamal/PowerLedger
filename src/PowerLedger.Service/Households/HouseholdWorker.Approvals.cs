@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using PowerLedger.Contracts;
 using PowerLedger.Core.Households;
 using PowerLedger.Service.Households.Relay;
+using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Households;
 
@@ -13,10 +14,16 @@ internal sealed partial class HouseholdWorker
     /// <summary>How many epochs a newly approved PC looks through for its envelope.</summary>
     private const int EpochsToLookThrough = 32;
 
+    /// <summary>What an approved PC is called here until its first batch gives its name.</summary>
+    internal const string NewPcName = "New PC";
+
     /// <summary>The PCs waiting to join that this PC's user has been asked about: true once approved, until the server has
     /// taken the approval.</summary>
     private readonly ConcurrentDictionary<string, bool> _asked = new(StringComparer.Ordinal);
     private int _waitingApprovals;
+
+    /// <summary>1 while this PC's user is asked to check the approval code, so it isn't asked twice.</summary>
+    private int _confirmingJoin;
 
     /// <summary>When this PC last linked the account to its household, as a check that the link is still there.</summary>
     private DateTimeOffset? _linkedAt;
@@ -53,10 +60,13 @@ internal sealed partial class HouseholdWorker
         }
     }
 
+    /// <summary>Asks the user whether to let the waiting PC in, showing the approval code over its keys and this PC's
+    /// key-agreement key, which the PC asking shows too once approved (plan 0.8).</summary>
     private async Task AskToApproveAsync(string householdId, JoinRequestItem item)
     {
         var asYou = item.Account is not null && item.Account == _store.Account;
-        if (!await _prompts.AskToApproveAsync(asYou, _stopping.Token).ConfigureAwait(false))
+        var code = HouseholdCrypto.ApprovalCode(Wire.PublicKey(item.Sign)!, Wire.PublicKey(item.Dh)!, _keys.DhPublic);
+        if (!await _prompts.AskToApproveAsync(asYou, code, _stopping.Token).ConfigureAwait(false))
         {
             if (!_notices.AnyoneAtTheScreen)
             {
@@ -87,6 +97,11 @@ internal sealed partial class HouseholdWorker
             Volatile.Write(ref _waitingApprovals, Math.Max(0, Volatile.Read(ref _waitingApprovals) - 1));
             if (result.Ok)
             {
+                // A member now, known here by the keys its user's approval vouched for: its batches check against them, and this
+                // PC's own member list introduces it to the others (plan 0.8). Its name comes with its first batch.
+                _members.Restore(item.Device);
+                _household.SaveMember(new HouseholdMember(
+                    item.Device, NewPcName, ChassisKind.Desktop, Wire.PublicKey(item.Sign)!, dh, _clock.GetUtcNow().ToUnixTimeMilliseconds(), null, null));
                 _log.LogInformation("Approved {Device} into the household", item.Device);
                 Info("The PC signed in as you is now in your household.");
                 Kick();
@@ -131,15 +146,21 @@ internal sealed partial class HouseholdWorker
         }
         _linkedAt = now;                                                       // linked, or linked elsewhere: looked at again later
         if (link.Ok && _store.RecoveryKey is not null) _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId));
+        if (link.Ok) await CheckRecoveryAsync(session, householdId, cancel).ConfigureAwait(false);
     }
 
-    /// <summary>A PC signed in and waiting to join looks, with each turn, whether it has been approved: once the server lists
-    /// it as a member, it finds the envelope the approving member sealed for it and enters the household.</summary>
+    /// <summary>
+    /// A PC signed in and waiting to join looks, with each turn, whether it has been approved: once the server lists it as a
+    /// member, it finds the envelope the approving member sealed for it. It joins only once its user has checked the
+    /// approving PC showed the approval code this PC works out from the key that envelope opens with (plan 0.8); with
+    /// nobody at the screen to ask, it asks at a later turn.
+    /// </summary>
     private async Task CheckApprovedAsync(CancellationToken cancel)
     {
-        if (_store.AskedToJoin is not { } householdId || _store.Session is null) return;
+        if (_store.AskedToJoin is not { } householdId || _store.Session is null || Volatile.Read(ref _confirmingJoin) != 0) return;
+        if (!_notices.AnyoneAtTheScreen) return;
         var members = await _environment.Relay.MembersAsync(_keys, householdId, cancel).ConfigureAwait(false);
-        if (!members.Ok) return;                                                // 403 while it waits
+        if (!members.Ok) return;                                                // 401 while it waits
         for (var epoch = 1; epoch <= EpochsToLookThrough; epoch++)
         {
             var got = await _environment.Relay.GetKeyAsync(_keys, householdId, epoch, cancel).ConfigureAwait(false);
@@ -151,21 +172,45 @@ internal sealed partial class HouseholdWorker
                 _log.LogWarning("The envelope sealed for this PC at epoch {Epoch} didn't open", epoch);
                 return;
             }
-            EnterLocked(householdId, epoch, key, []);
-            _store.RelayConfirmed = true;
-            _log.LogInformation("Approved into the household at epoch {Epoch}", epoch);
-            Info("This PC joined your household.");
-            Kick();
+            Interlocked.Exchange(ref _confirmingJoin, 1);
+            Track(ConfirmJoinAsync(householdId, epoch, key, sealerDh));
             return;
         }
     }
 
-    /// <summary>A new household key goes into the recovery envelope too, when this PC is signed in and holds the recovery
-    /// code's key (households design §7): the server is told with the rest.</summary>
-    private void QueueRecovery(string householdId)
+    /// <summary>Asks this PC's user to check the approval code, and joins on yes. On no, the codes differed: the keys came from
+    /// someone else, so this PC doesn't join and takes itself off the server's list.</summary>
+    private async Task ConfirmJoinAsync(string householdId, int epoch, byte[] key, byte[] sealerDh)
     {
-        if (_store.Session is null || _store.RecoveryKey is null) return;
-        _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId));
+        try
+        {
+            var code = HouseholdCrypto.ApprovalCode(_keys.SignPublic, _keys.DhPublic, sealerDh);
+            var yes = await _prompts.ConfirmJoinAsync(code, _stopping.Token).ConfigureAwait(false);
+            using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
+            {
+                if (_store.AskedToJoin != householdId) return;
+                if (yes)
+                {
+                    EnterLocked(householdId, epoch, key, []);
+                    _store.RelayConfirmed = true;
+                    _log.LogInformation("Approved into the household at epoch {Epoch}", epoch);
+                    Info("This PC joined your household.");
+                }
+                else if (_notices.AnyoneAtTheScreen)
+                {
+                    _store.AskedToJoin = null;
+                    _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: _keys.DeviceId));
+                    _log.LogWarning("The approval code didn't match, so this PC didn't join");
+                    Info("This PC didn't join: the codes didn't match. Sign in again to ask once more.");
+                }
+            }
+            Publish();
+            Kick();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _confirmingJoin, 0);
+        }
     }
 
     private async Task<PipeMessage> SignOutAsync(SignOutRequest request, CancellationToken cancel)
@@ -179,6 +224,7 @@ internal sealed partial class HouseholdWorker
         _store.Session = null;
         _store.Account = null;
         _store.AskedToJoin = null;
+        ForgetRecovery();                                                      // this PC's recovery key goes with the account
         return Reply(request.Id, true, "Signed out.");
     }
 
@@ -200,7 +246,7 @@ internal sealed partial class HouseholdWorker
         _store.Session = null;
         _store.Account = null;
         _store.AskedToJoin = null;
-        _store.RecoveryKey = null;
+        ForgetRecovery();
         _log.LogInformation("Deleted the account; the household carries on without sign-in");
         return Reply(request.Id, true, "Your account was deleted. Your household carries on without sign-in.");
     }

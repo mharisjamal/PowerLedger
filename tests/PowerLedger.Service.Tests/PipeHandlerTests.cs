@@ -305,7 +305,8 @@ public sealed class PipeHandlerTests : IDisposable
         new BrowsePcsRequest(40), new AddPcRequest(41, "a1"), new StartCodePairingRequest(42), new JoinByCodeRequest(43, "K7QM-2XHD-9PW4-R8TA"),
         new AnswerPromptRequest(44, "p1", true), new RemovePcRequest(45, "0123456789abcdef0123456789abcdef"), new LeaveHouseholdRequest(46),
         new RenamePcRequest(47, "Study PC"), new SetDiscoverableRequest(48, false), new SignInRequest(49, "microsoft", "token", "salt"),
-        new SignOutRequest(50), new DeleteAccountRequest(51),
+        new SignOutRequest(50), new DeleteAccountRequest(51), new CancelPairingRequest(52), new NewRecoveryCodeRequest(53),
+        new RemoveOldRowsRequest(54, "0123456789abcdef0123456789abcdef"),
     ];
 
     [Theory]
@@ -315,8 +316,9 @@ public sealed class PipeHandlerTests : IDisposable
         var households = new FakeHouseholds(request => Task.FromResult<PipeMessage>(new HouseholdReply(request.Id, true, "Done.")));
         var handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock, _sharing, households);
 
-        (await handler.HandleAsync(request, "client-1", CancellationToken.None)).ShouldBe(new HouseholdReply(request.Id, true, "Done."));
+        (await handler.HandleAsync(request, "client-1", CancellationToken.None, session: 3)).ShouldBe(new HouseholdReply(request.Id, true, "Done."));
         households.Received.ShouldBe([request]);
+        households.Sessions.ShouldBe([(uint?)3]);                              // the client's session goes with it
         (await Send(request)).ShouldBe(new ErrorReply(request.Id, "The service does not handle that request."));
     }
 
@@ -340,6 +342,7 @@ public sealed class PipeHandlerTests : IDisposable
     private sealed class FakeHouseholds(Func<PipeRequest, Task<PipeMessage>> answer) : Households.IHouseholdRequests
     {
         private readonly List<PipeRequest> _received = [];
+        private readonly List<uint?> _sessions = [];
 
         public List<PipeRequest> Received
         {
@@ -349,9 +352,21 @@ public sealed class PipeHandlerTests : IDisposable
             }
         }
 
-        public Task<PipeMessage> HandleAsync(PipeRequest request, CancellationToken cancel)
+        public List<uint?> Sessions
         {
-            lock (_received) _received.Add(request);
+            get
+            {
+                lock (_received) return [.. _sessions];
+            }
+        }
+
+        public Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel)
+        {
+            lock (_received)
+            {
+                _received.Add(request);
+                _sessions.Add(session);
+            }
             return answer(request);
         }
     }
