@@ -79,7 +79,7 @@
             <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,0,0,6" Text="{Binding Detected, StringFormat=Detected: {0}}" />
             <!-- The service's settings save themselves. A box gives the form what was typed in it once it is left or Enter is pressed;
                  a tick or a choice gives it at once. -->
-            <StackPanel DataContext="{Binding Service}" IsEnabled="{Binding IsLoaded}" KeyDown="TakeTyped">
+            <StackPanel DataContext="{Binding Service}" IsEnabled="{Binding IsLoaded}" local:SettingsEntry.SavesOnEnter="True">
                 <StackPanel Style="{StaticResource Row}">
                     <TextBlock Style="{StaticResource Label}" Text="Chassis" />
                     <RadioButton Style="{StaticResource Choice}" Content="Laptop"

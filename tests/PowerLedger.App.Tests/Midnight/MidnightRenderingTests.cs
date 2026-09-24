@@ -87,12 +87,13 @@ public class MidnightRenderingTests
             {
                 UiHarness.Pump(TimeSpan.FromMilliseconds(300));
                 var canvas = UiHarness.Find<Grid>(window, grid => grid.Name == "Nav")!;   // the pill's canvas fills this cell
+                var lefts = new Dictionary<string, double>();
                 foreach (var (label, page, view) in new[]
                 {
-                    ("History", Page.Breakdown, typeof(BreakdownView)),
-                    ("Report", Page.Report, typeof(ReportView)),
-                    ("Household", Page.Household, typeof(HouseholdView)),
-                    ("Settings", Page.Settings, typeof(SettingsView)),
+                    ("History", Page.Breakdown, typeof(Midnight.HistoryView)),
+                    ("Report", Page.Report, typeof(Midnight.ReportView)),
+                    ("Household", Page.Household, typeof(Midnight.HouseholdView)),
+                    ("Settings", Page.Settings, typeof(Midnight.SettingsView)),
                     ("Dashboard", Page.Dashboard, typeof(DashboardView)),
                 })
                 {
@@ -105,9 +106,12 @@ public class MidnightRenderingTests
                     Canvas.GetTop(window.Pill).ShouldBe(at.Y, 0.5, $"the pill under {label}");
                     Canvas.GetLeft(window.Pill).ShouldBe(at.X, 0.5, $"the pill under {label}");
                     window.Pill.ActualWidth.ShouldBe(item.ActualWidth, 0.5);
-                    UiHarness.Find<FrameworkElement>(window, element => element.GetType() == view).ShouldNotBeNull($"the {label} page");
-                    if (page == Page.Household) UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-household-classic-view-Dark.png");
+                    var shown = UiHarness.Find<FrameworkElement>(window, element => element.GetType() == view).ShouldNotBeNull($"the {label} page");
+                    // Every page's content starts where the page header's title does.
+                    lefts[label] = ((FrameworkElement)UiHarness.Find<ScrollViewer>(shown)!.Content).TranslatePoint(default, window).X;
+                    if (page != Page.Dashboard) UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-window-{label.ToLowerInvariant()}-Dark.png");
                 }
+                lefts.ShouldAllBe(left => Math.Abs(left.Value - lefts["Dashboard"]) < 0.5, "each page lines up with the Dashboard and the page header");
             }
             finally
             {
