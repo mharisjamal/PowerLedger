@@ -5,14 +5,52 @@ namespace PowerLedger.App;
 /// the old one's bounds, state and page, shown before the old one closes, so the switch reads as the window changing its
 /// clothes. <paramref name="open"/> makes a look's window; <paramref name="retarget"/> tells the App the window the tray
 /// and the dialogs' owner now are; <paramref name="log"/> takes a line when a window fails to open. The first window opens
-/// in the look whose palette <paramref name="theme"/> has on, the first time <see cref="Current"/> is asked for.
+/// in the look whose palette <paramref name="theme"/> has on, the first time <see cref="Current"/> is asked for or
+/// <see cref="Show"/> called; <paramref name="fellBack"/> hears when that first window had to be Classic's instead.
 /// </summary>
-internal sealed class LookSwitcher(Func<Look, IShellWindow> open, ThemeManager theme, Action<IShellWindow> retarget, Action<string> log)
+internal sealed class LookSwitcher(
+    Func<Look, IShellWindow> open, ThemeManager theme, Action<IShellWindow> retarget, Action<string> log, Action<Look>? fellBack = null)
 {
     private IShellWindow? _current;
 
     /// <summary>The window of the look in use, opened (not shown) the first time it is asked for.</summary>
     public IShellWindow Current => _current ??= open(Look);
+
+    /// <summary>
+    /// Shows the window of the look in use, opening it the first time. Review 6: a saved look other than Classic whose
+    /// window won't open or show would leave the App with no window at all, so Classic opens instead, with its palette
+    /// and on its own page; why goes to the log, and <c>fellBack</c> hears it, for the App to save Classic so the next
+    /// start doesn't fail the same way. Classic failing, on its own or as the fallback, is not caught: there is nothing
+    /// left to fall back to.
+    /// </summary>
+    public IShellWindow Show()
+    {
+        if (_current is { } shown)
+        {
+            shown.Show();
+            return shown;
+        }
+        var look = Look;
+        IShellWindow? window = null;
+        try
+        {
+            _current = window = open(look);   // current as it shows, so the App counts it as the window on screen
+            window.Show();
+            return window;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException && look != Look.Classic)
+        {
+            _current = null;   // no longer the current one, so the App's hide-to-tray lets its close through
+            log($"The {look} look didn't open at start, so Classic opens instead: {error}");
+            TryClose(window);
+            theme.Apply(Look.Classic);
+            var classic = _current = open(Look.Classic);
+            classic.Page = classic.Page;   // the failed window may have moved the shell to a page only it has
+            classic.Show();
+            fellBack?.Invoke(Look.Classic);
+            return classic;
+        }
+    }
 
     /// <summary>Whether a window has been opened yet: the App's dialogs want an owner that has shown, or none at all.</summary>
     public bool IsOpen => _current is not null;

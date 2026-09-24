@@ -136,7 +136,10 @@ public partial class App : Application
         _dashboard = new DashboardViewModel(_now, history, history, TimeProvider.System, zone, culture, threads);
         _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard);
         _shell.FeedbackRequested += OpenFeedbackWindow;
-        _looks = new LookSwitcher(OpenWindow, _theme, Retarget, line => AppLog.Write(line));
+        // Review 6: a saved look that won't open at start opens Classic instead, which is then saved, through Settings as
+        // any choice of look is, so the next start doesn't fail the same way; the switcher logs why.
+        var settings = _settings;
+        _looks = new LookSwitcher(OpenWindow, _theme, Retarget, line => AppLog.Write(line), look => settings.Look = look);
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
         _settings.PropertyChanged += OnSettingsChanged;
@@ -245,8 +248,7 @@ public partial class App : Application
         _usage?.CountAppOpen();   // data-sharing design §3: every time the main window is shown
         if (_preferences is { Current.FirstRunDone: false } && !_shell.IsSetup) _shell.BeginSetup();   // spec §9: the first window is the wizard
         if (_looks is null) return;
-        var window = _looks.Current;   // opened in the saved look the first time
-        window.Show();
+        var window = _looks.Show();   // opened in the saved look the first time, or in Classic when that one won't open
         if (window.State == WindowState.Minimized) window.State = WindowState.Normal;
         window.Window.Activate();
         // spec §2: an existing install is asked the first time the main window opens; a new install waits for the wizard.

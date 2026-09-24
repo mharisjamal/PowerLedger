@@ -116,14 +116,14 @@ public class LookSwitcherTests
             }
         });
 
-    private LookSwitcher Switcher(ThemeManager theme, Func<Look, IShellWindow>? open = null) => new(
+    private LookSwitcher Switcher(ThemeManager theme, Func<Look, IShellWindow>? open = null, Action<Look>? fellBack = null) => new(
         open ?? (look =>
         {
             var window = new FakeWindow(look, _events);
             _opened.Add(window);
             return window;
         }),
-        theme, window => _events.Add($"retarget {((FakeWindow)window).Look}"), _log.Add);
+        theme, window => _events.Add($"retarget {((FakeWindow)window).Look}"), _log.Add, fellBack);
 
     /// <summary>The App's one shell, with Midnight's Dashboard, over <see cref="_history"/> and <see cref="_clock"/>.</summary>
     private ShellViewModel Shell()
@@ -270,5 +270,81 @@ public class LookSwitcherTests
             merged[0].Source.ShouldBe(LookRules.PaletteFor(Look.Midnight, Theme.Dark));
             ((FakeWindow)looks.Current).Look.ShouldBe(Look.Midnight);
             _events.ShouldBeEmpty();   // opened, not shown: the App shows it
+        });
+
+    [Fact]
+    public void Show_opens_the_saved_looks_window_the_first_time_and_shows_the_same_one_after()
+        => WithTheme((theme, _) =>
+        {
+            theme.Apply(Look.Midnight);
+            var fellBack = new List<Look>();
+            var looks = Switcher(theme, fellBack: fellBack.Add);
+
+            var first = (FakeWindow)looks.Show();
+            looks.Show().ShouldBeSameAs(first);
+
+            first.Look.ShouldBe(Look.Midnight);
+            looks.Current.ShouldBeSameAs(first);
+            _events.ShouldBe(["show Midnight", "show Midnight"]);
+            (_log.Count, fellBack.Count).ShouldBe((0, 0));
+        });
+
+    /// <summary>Review 6: a saved look whose window won't open at start doesn't leave the App with no window. Classic
+    /// opens instead, with its palette, the reason goes to the log, and the App is told, so it saves Classic and the
+    /// next start doesn't fail the same way.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void At_start_a_look_that_will_not_open_falls_back_to_classic_and_says_so(bool opensButWillNotShow)
+        => WithTheme((theme, merged) =>
+        {
+            theme.Apply(Look.Midnight);
+            var fellBack = new List<Look>();
+            var looks = Switcher(theme, look =>
+            {
+                if (look == Look.Midnight && !opensButWillNotShow) throw new InvalidOperationException("no XAML");
+                var window = new FakeWindow(look, _events, showFails: look == Look.Midnight);
+                _opened.Add(window);
+                return window;
+            }, fellBack.Add);
+
+            var shown = (FakeWindow)looks.Show();
+
+            shown.Look.ShouldBe(Look.Classic);
+            looks.Current.ShouldBeSameAs(shown);
+            (looks.Look, theme.Look).ShouldBe((Look.Classic, Look.Classic));
+            merged[0].Source.ShouldBe(LookRules.PaletteFor(Look.Classic, Theme.Dark));
+            _events.ShouldBe(opensButWillNotShow ? ["close Midnight", "show Classic"] : ["show Classic"]);
+            _log.Single().ShouldContain(opensButWillNotShow ? "the window would not show" : "no XAML");
+            _log.Single().ShouldStartWith("The Midnight look didn't open at start");
+            fellBack.ShouldBe([Look.Classic]);
+        });
+
+    /// <summary>Review 6: the Midnight window that failed may already have moved the shell to the Dashboard; Classic has
+    /// no Dashboard, so it opens on Now, as a switch to it would.</summary>
+    [Fact]
+    public void At_start_the_classic_fallback_opens_on_its_own_page()
+        => WithTheme((theme, _) =>
+        {
+            theme.Apply(Look.Midnight);
+            var shell = Shell();
+            var looks = Switcher(theme, look => new ShellWindowFake(look, shell, showFails: look == Look.Midnight), _ => { });
+
+            looks.Show();
+
+            looks.Look.ShouldBe(Look.Classic);
+            shell.Page.ShouldBe(Page.Now);
+            shell.Current.ShouldBe(shell.Now);
+        });
+
+    /// <summary>Classic is the fallback; with nothing to fall back to, its failure is the App's to meet.</summary>
+    [Fact]
+    public void At_start_a_classic_window_that_will_not_open_is_not_caught()
+        => WithTheme((theme, _) =>
+        {
+            var looks = Switcher(theme, _ => throw new InvalidOperationException("no XAML"));
+
+            Should.Throw<InvalidOperationException>(() => looks.Show());
+            looks.IsOpen.ShouldBeFalse();
         });
 }
