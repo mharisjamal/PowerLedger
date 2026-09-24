@@ -26,7 +26,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Fonts\*.ttf" />
+    <!-- Spec §9's faces, a folder a family, static instances only: WPF reads no variable font's axes. Each folder's OFL.txt is
+         its licence; THIRD-PARTY-NOTICES.md at the repo root lists them. A FontFamily names the folder: /Fonts/Archivo/#Archivo. -->
+    <Resource Include="Fonts\**\*.ttf" />
+    <None Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
     <!-- The window's icon: its taskbar button and Alt+Tab. -->
     <Resource Include="..\..\assets\brand\PowerLedger.ico" Link="Brand\PowerLedger.ico" />
   </ItemGroup>

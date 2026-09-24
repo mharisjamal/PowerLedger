@@ -1500,7 +1500,7 @@ public class RenderingTests
     }
 
     /// <summary>Runs <paramref name="work"/> on the application's thread, and throws here what it threw there.</summary>
-    private static void OnUi(Action work)
+    internal static void OnUi(Action work)
     {
         ExceptionDispatchInfo? failure = null;
         Ui.Value.Invoke(() =>
