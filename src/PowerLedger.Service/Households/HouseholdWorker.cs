@@ -234,6 +234,10 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             if (run.Notices.Count > 0) Publish();                              // the status first, then the App is told
             foreach (var notice in run.Notices) Info(notice);
             Announce();                                                        // a new key, or none, changes the tag
+            if (!run.Removed && _store.Session is { } session && _store.RecoveryPut is not null)
+            {
+                await PutRecoveryCodeAsync(session, lease.Attention).ConfigureAwait(false);   // a new code whose put was lost, or waited
+            }
             if (!run.Removed && run.Problem is null) await PollRequestsAsync(lease.Attention).ConfigureAwait(false);
             if (!run.Removed) await SyncOnNetworkAsync(lease.Attention).ConfigureAwait(false);
         }

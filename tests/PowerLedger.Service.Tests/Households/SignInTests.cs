@@ -96,12 +96,12 @@ public sealed class SignInTests : IAsyncLifetime
         members[desktop.Worker.DeviceId].Removed.ShouldNotBeNull();                  // every other removed
         members[laptop.Worker.DeviceId].Removed.ShouldNotBeNull();
         fresh.Household.Member(desktop.Worker.DeviceId).ShouldNotBeNull().LeftMs.ShouldNotBeNull();   // known from the recovery's list
-        var newCode = (await fresh.Next(NoticeKind.RecoveryCode)).RecoveryCode.ShouldNotBeNull();      // the code is used up: a new one
-        newCode.ShouldNotBe(code);
-        fresh.Worker.Store.RecoveryKey.ShouldNotBe(RecoveryCode.Key(RecoveryCode.Normalize(code)!));   // the old one isn't kept
+        fresh.Worker.Store.RecoveryKey.ShouldBeNull();                               // the old code isn't kept; the new one waits for the new key
 
         await fresh.Worker.RunOnceAsync(CancellationToken.None);
 
+        var newCode = (await fresh.Next(NoticeKind.RecoveryCode)).RecoveryCode.ShouldNotBeNull();      // the code is used up: a new one
+        newCode.ShouldNotBe(code);
         fresh.Worker.Store.Epoch.ShouldBe(2);                                        // a new key, without the others
         fresh.Worker.Store.CurrentKey.ShouldNotBe(oldKey);
         _relay.Sealed(household, 2).ShouldBe([fresh.Worker.DeviceId]);
@@ -253,6 +253,49 @@ public sealed class SignInTests : IAsyncLifetime
         fresh.Worker.Store.HouseholdId.ShouldBeNull();
         fresh.Worker.Store.Recovering.ShouldBeNull();
         (await fresh.Next(NoticeKind.Info, text => text.StartsWith("Your household couldn't be recovered", StringComparison.Ordinal))).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task A_new_code_whose_put_got_no_answer_goes_again_as_the_same_put_and_shows_once_the_server_has_it()
+    {
+        var (desktop, _) = await Household();
+        var household = desktop.Worker.Store.HouseholdId!;
+        var lost = 0;
+        _relay.LoseAnswer = request => request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath == "/v1/account/recovery" && lost++ == 0;
+
+        (await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"))).Ok.ShouldBeTrue();
+
+        desktop.Drain().ShouldNotContain(notice => notice.Kind == NoticeKind.RecoveryCode);   // not shown before the server has it
+        desktop.Worker.Store.RecoveryKey.ShouldBeNull();
+        var kept = desktop.Worker.Store.RecoveryPut.ShouldNotBeNull();                // kept, encrypted, before it went
+        _relay.RecoveryOf("alice").ShouldNotBeNull().Holder.ShouldBe(desktop.Worker.DeviceId);   // the server took it; its answer was lost
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode.ShouldNotBeNull();
+        code.ShouldBe(kept.Code);
+        desktop.Worker.Store.RecoveryPut.ShouldBeNull();
+        desktop.Worker.Store.RecoveryKey.ShouldBe(RecoveryCode.Key(RecoveryCode.Normalize(code)!));
+        var puts = _relay.Sent.Where(sent => sent.Call == "PUT /v1/account/recovery").Select(sent => sent.Body).ToList();
+        puts.Count.ShouldBe(2);
+        puts[1].ShouldBe(puts[0]);                                                  // the very same put
+        var envelope = _relay.RecoveryOf("alice")!;
+        Recovery.Open(RecoveryCode.Key(RecoveryCode.Normalize(code)!), household, new RecoveryReply(envelope.Body, envelope.Epoch, envelope.Holder))
+            .ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task A_pc_the_server_names_as_the_holder_that_has_no_key_for_the_code_shows_the_recovery_as_missing()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
+        desktop.Board.Household!.RecoveryMissing.ShouldBeFalse();
+        desktop.Worker.Store.RecoveryKey = null;                                   // its key lost, as when Windows can't read it back
+
+        _clock.Advance(RelaySync.MembersEvery);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        desktop.Board.Household!.RecoveryMissing.ShouldBeTrue();
     }
 
     [Fact]

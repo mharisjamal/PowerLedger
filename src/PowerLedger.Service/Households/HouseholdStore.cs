@@ -54,6 +54,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string CanAskAgainKey = "household.can-ask-again";
     internal const string ApprovalsStartedKey = "household.approvals-started";
     internal const string RecoveringKey = "household.recovering";
+    internal const string RecoveryPutKey = "household.recovery-put";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
@@ -347,6 +348,18 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         {
             if (value is null) settings.Remove(RecoveringKey);
             else settings.Set(RecoveringKey, Protect(HouseholdJson.Bytes(value, HouseholdJson.Default.Recovering)));
+        }
+    }
+
+    /// <summary>N2: a new recovery code this PC made, kept encrypted before it is put (plan 0.10), with the body as last put,
+    /// so a put whose answer was lost goes again as it was; null while none waits.</summary>
+    public RecoveryPut? RecoveryPut
+    {
+        get => Unprotect(settings.Get(RecoveryPutKey)) is { } kept ? HouseholdJson.Read(kept, HouseholdJson.Default.RecoveryPut) : null;
+        set
+        {
+            if (value is null) settings.Remove(RecoveryPutKey);
+            else settings.Set(RecoveryPutKey, Protect(HouseholdJson.Bytes(value, HouseholdJson.Default.RecoveryPut)));
         }
     }
 

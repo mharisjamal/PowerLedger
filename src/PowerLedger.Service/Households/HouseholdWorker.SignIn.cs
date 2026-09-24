@@ -44,6 +44,10 @@ internal static class Recovery
 /// it shows the server, kept while it takes the household back (plan 0.10).</summary>
 internal sealed record Recovering(string Household, int Epoch, string Key, List<WireMember> Members, string Verifier);
 
+/// <summary>N2: a new recovery code for <paramref name="Household"/>, kept until the server has it (plan 0.10), and the body
+/// last put with it; null before the first put.</summary>
+internal sealed record RecoveryPut(string Household, string Code, RecoveryBody? Body = null);
+
 /// <summary>N2's sign-in (households design §7, plan C11, 0.8 and 0.9), on the household worker.</summary>
 internal sealed partial class HouseholdWorker
 {
@@ -162,9 +166,12 @@ internal sealed partial class HouseholdWorker
             var link = await _environment.Relay.LinkAsync(_keys, session, householdId, deadline.Token).ConfigureAwait(false);
             if (!link.Ok) return Reply(request.Id, false, $"Your household couldn't be linked to your account: {link.Problem}.");
             await _relaySync.CatchUpAsync(_keys, deadline.Token).ConfigureAwait(false);   // sealed at the key the server is at
-            return await MakeRecoveryAsync(session, householdId, deadline.Token).ConfigureAwait(false)
-                ? Reply(request.Id, true, "A new recovery code was made.")
-                : Reply(request.Id, false, "Couldn't make a new recovery code. Check this PC is online and try again.");
+            return await MakeRecoveryAsync(session, householdId, deadline.Token).ConfigureAwait(false) switch
+            {
+                true => Reply(request.Id, true, "A new recovery code was made."),
+                null => Reply(request.Id, false, RecoveryCodeWaits),
+                false => Reply(request.Id, false, "Couldn't make a new recovery code. Check this PC is online and try again."),
+            };
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
@@ -172,35 +179,72 @@ internal sealed partial class HouseholdWorker
         }
     }
 
-    /// <summary>Makes a new recovery code for the household (plan 0.9): the key and member list sealed under the code's key at
-    /// the current epoch, put in place of any other code, which makes this PC the one holding it. This PC keeps the code's
-    /// key, to put the recovery again with each new key, and shows the code once as a <see cref="NoticeKind.RecoveryCode"/>
-    /// notice, kept encrypted until the App says it was seen.</summary>
-    /// <returns>False when the recovery couldn't be put.</returns>
-    private async Task<bool> MakeRecoveryAsync(string session, string householdId, CancellationToken cancel)
+    /// <summary>Said when a new recovery code's put got no answer: it goes again, and the code shows once the server has it.</summary>
+    internal const string RecoveryCodeWaits = "The server didn't answer. This PC tries again, and shows the new recovery code once the server has it.";
+
+    /// <summary>Makes a new recovery code for the household (plan 0.10), kept before it is put (<see cref="PutRecoveryCodeAsync"/>).</summary>
+    /// <returns>True once the server has it; null while its put waits to go again; false when it won't go.</returns>
+    private Task<bool?> MakeRecoveryAsync(string session, string householdId, CancellationToken cancel)
     {
-        var code = RecoveryCode.New();
-        var codeKey = RecoveryCode.Key(RecoveryCode.Normalize(code)!);
+        _store.RecoveryPut = new RecoveryPut(householdId, RecoveryCode.New());
+        return PutRecoveryCodeAsync(session, cancel);
+    }
+
+    /// <summary>
+    /// Puts the new recovery code kept (plan 0.10): the key and member list sealed under the code's key at the current epoch,
+    /// in place of any other code, which makes this PC the one holding it. A put whose answer was lost goes again as it was,
+    /// at later turns; one refused because the key moved on is sealed again at the key the server is at; and while a new key
+    /// waits for the server, as after a recovery, it waits for that key. Once the server has it, this PC keeps the code's
+    /// key, to put the recovery again with each new key, and shows the code once as a <see cref="NoticeKind.RecoveryCode"/>
+    /// notice, kept encrypted until the App says it was seen.
+    /// </summary>
+    /// <returns>True once the server has it; null while it waits to go again; false when it won't go.</returns>
+    private async Task<bool?> PutRecoveryCodeAsync(string session, CancellationToken cancel)
+    {
+        if (_store.RecoveryPut is not { } kept) return false;
+        if (kept.Household != _store.HouseholdId)
+        {
+            _store.RecoveryPut = null;                                         // left since: nothing to put
+            return false;
+        }
+        if (_relaySync.RotationPending) return null;                           // sealed at the new key, once the server has it
+        var codeKey = RecoveryCode.Key(RecoveryCode.Normalize(kept.Code)!);
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            if (_store.CurrentKey is not { } key
-                || Recovery.Envelope(codeKey, householdId, _store.Epoch, key, _members.Entries(compact: true), replace: true) is not { } body)
+            var body = kept.Body is { } last && last.Epoch == _store.Epoch ? last
+                : _store.CurrentKey is { } key ? Recovery.Envelope(codeKey, kept.Household, _store.Epoch, key, _members.Entries(compact: true), replace: true)
+                : null;
+            if (body is null)
             {
+                _log.LogWarning("The household's key and members don't fit in a recovery");
+                _store.RecoveryPut = null;
                 return false;
+            }
+            if (kept.Body != body)
+            {
+                kept = kept with { Body = body };
+                _store.RecoveryPut = kept;                                     // kept before it goes: a lost answer, the same put again
             }
             var put = await _environment.Relay.PutRecoveryAsync(_keys, session, body, cancel).ConfigureAwait(false);
             if (put.Ok)
             {
                 _store.RecoveryKey = codeKey;
+                _store.RecoveryPut = null;
                 _recoveryMissing = false;
-                ShowNewRecoveryCode(code);
+                ShowNewRecoveryCode(kept.Code);
                 return true;
             }
             _log.LogWarning("The recovery couldn't be kept with the account ({Problem})", put.Problem);
-            if (put.Status != 409) return false;
+            if (put.Status == 401) _store.Session = null;                      // the session has ended: kept for the next sign-in
+            if (put.Transient) return null;
+            if (put.Status != 409)
+            {
+                _store.RecoveryPut = null;
+                return false;
+            }
             await _relaySync.CatchUpAsync(_keys, cancel).ConfigureAwait(false);   // the key moved on: sealed again at the one the server is at
         }
-        return false;
+        return null;
     }
 
     private void ShowNewRecoveryCode(string code)
@@ -226,13 +270,14 @@ internal sealed partial class HouseholdWorker
         return true;
     }
 
-    /// <summary>Forgets this PC's recovery code and its key, and any recovery under way, as on signing out or signing in as
-    /// another account.</summary>
+    /// <summary>Forgets this PC's recovery code and its key, and any recovery or new code under way, as on signing out or
+    /// signing in as another account.</summary>
     private void ForgetRecovery()
     {
         _store.RecoveryKey = null;
         _store.RecoveryCodeToShow = null;
         _store.Recovering = null;
+        _store.RecoveryPut = null;
         _recoveryMissing = false;
     }
 
@@ -246,8 +291,10 @@ internal sealed partial class HouseholdWorker
         var got = await _environment.Relay.GetRecoveryAsync(_keys, session, cancel).ConfigureAwait(false);
         if (got.Status != 404 && !got.Ok) return;
         var holder = got.Value?.Holder;
-        _recoveryMissing = holder is null || (holder != _keys.DeviceId && _members.Current(holder) is null);
-        var waiting = _store.Pending.Any(op => op.Kind == PendingOp.RecoveryEnvelope && op.Household == householdId && op.Replace == true);
+        var waiting = _store.RecoveryPut?.Household == householdId
+            || _store.Pending.Any(op => op.Kind == PendingOp.RecoveryEnvelope && op.Household == householdId && op.Replace == true);
+        _recoveryMissing = holder is null || (holder != _keys.DeviceId && _members.Current(holder) is null)
+            || (holder == _keys.DeviceId && _store.RecoveryKey is null && !waiting);   // plan 0.10: the holder, but without the code's key
         if (_store.RecoveryKey is not null && holder != _keys.DeviceId && !waiting)
         {
             _log.LogInformation("The account's recovery has a newer code, or none; this PC forgets its own");
@@ -346,11 +393,9 @@ internal sealed partial class HouseholdWorker
         _members.RemoveAllBut(_keys.DeviceId, epoch, _clock.GetUtcNow().ToUnixTimeMilliseconds());   // as the server removed them
         _store.RelayConfirmed = true;
         _relaySync.StartRotation(householdId, atLeast: epoch + 1, forRemoval: true);
-        var next = RecoveryCode.New();
-        _store.RecoveryKey = RecoveryCode.Key(RecoveryCode.Normalize(next)!);
-        _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId, Replace: true));   // after the new key
+        _store.RecoveryKey = null;
+        _store.RecoveryPut = new RecoveryPut(householdId, RecoveryCode.New());   // put after the new key, and shown then
         _recoveryMissing = false;
-        ShowNewRecoveryCode(next);
         _log.LogInformation("Recovered the household with the recovery code; the others were removed at epoch {Epoch}", epoch);
         Publish();
         Kick();
