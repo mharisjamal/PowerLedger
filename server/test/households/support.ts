@@ -134,8 +134,17 @@ export async function createHousehold(device: TestDevice): Promise<string> {
   return id;
 }
 
-/** `by`, a member, adds `device`. */
+/** The joining PC's proof that it holds its keys and asks to join this household: its signature over UTF-8
+ * "powerledger join|{hid}|{sign}|{dh}", the keys as the base64url posted. */
+export async function joinProof(device: TestDevice, householdId: string, sign = device.sign, dh = device.dh): Promise<string> {
+  const statement = new TextEncoder().encode(`powerledger join|${householdId}|${sign}|${dh}`);
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, device.signPrivate, statement);
+  return base64urlEncode(new Uint8Array(signature));
+}
+
+/** `by`, a member, adds `device`, with its proof. */
 export async function addMember(householdId: string, by: TestDevice, device: TestDevice): Promise<void> {
-  const response = await signedFetch(by, "POST", `/v1/households/${householdId}/members`, { sign: device.sign, dh: device.dh });
+  const body = { sign: device.sign, dh: device.dh, proof: await joinProof(device, householdId) };
+  const response = await signedFetch(by, "POST", `/v1/households/${householdId}/members`, body);
   if (response.status !== 200) throw new Error(`add gave ${response.status}: ${await response.text()}`);
 }

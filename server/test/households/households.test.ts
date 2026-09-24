@@ -5,6 +5,7 @@ import {
   aliasedDevice,
   compressedSpki,
   createHousehold,
+  joinProof,
   newDevice,
   randomHouseholdId,
   signedFetch,
@@ -119,7 +120,7 @@ describe("POST /v1/households/{hid}/members", () => {
     expect(response.status).toBe(401);
   });
 
-  it("takes adding a current member again as done", async () => {
+  it("takes adding a current member again with the same keys as done, and with another dh key as 409", async () => {
     const first = await newDevice();
     const second = await newDevice();
     const hid = await createHousehold(first);
@@ -127,6 +128,32 @@ describe("POST /v1/households/{hid}/members", () => {
 
     await addMember(hid, first, second);
     expect(await members(hid, first)).toHaveLength(2);
+
+    const otherDh = (await newDevice()).dh;
+    const response = await signedFetch(first, "POST", `/v1/households/${hid}/members`, {
+      sign: second.sign,
+      dh: otherDh,
+      proof: await joinProof(second, hid, second.sign, otherDh),
+    });
+    expect(response.status).toBe(409);
+    expect((await members(hid, first)).find((member) => member.device === second.id)?.dh).toBe(second.dh);
+  });
+
+  it("needs the joining PC's proof: its signature over this household and the keys posted", async () => {
+    const first = await newDevice();
+    const joining = await newDevice();
+    const hid = await createHousehold(first);
+    const add = (body: Record<string, unknown>) => signedFetch(first, "POST", `/v1/households/${hid}/members`, body);
+    const keys = { sign: joining.sign, dh: joining.dh };
+
+    expect((await add(keys)).status).toBe(400);
+    expect((await add({ ...keys, proof: "not a proof" })).status).toBe(400);
+    expect((await add({ ...keys, proof: await joinProof(first, hid, joining.sign, joining.dh) })).status).toBe(403);
+    expect((await add({ ...keys, proof: await joinProof(joining, randomHouseholdId()) })).status).toBe(403);
+    expect((await add({ ...keys, proof: await joinProof(joining, hid, joining.sign, (await newDevice()).dh) })).status).toBe(403);
+    expect(await members(hid, first)).toHaveLength(1);
+
+    expect((await add({ ...keys, proof: await joinProof(joining, hid) })).status).toBe(200);
   });
 
   it("stops at 16 current members", async () => {
@@ -135,7 +162,11 @@ describe("POST /v1/households/{hid}/members", () => {
     for (let i = 0; i < 15; i++) await addMember(hid, first, await newDevice());
 
     const seventeenth = await newDevice();
-    const response = await signedFetch(first, "POST", `/v1/households/${hid}/members`, { sign: seventeenth.sign, dh: seventeenth.dh });
+    const response = await signedFetch(first, "POST", `/v1/households/${hid}/members`, {
+      sign: seventeenth.sign,
+      dh: seventeenth.dh,
+      proof: await joinProof(seventeenth, hid),
+    });
     expect(response.status).toBe(409);
     expect(await members(hid, first)).toHaveLength(16);
   });

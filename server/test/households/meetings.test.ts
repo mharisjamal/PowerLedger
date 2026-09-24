@@ -40,6 +40,12 @@ describe("the meeting slots", () => {
     expect(new Uint8Array(await (await get(id, "welcome")).arrayBuffer())).toEqual(bytes);
   });
 
+  it("include \"joined\", where the joiner leaves its proof", async () => {
+    const id = meetingId();
+    expect((await put(id, "joined", "{\"proof\":\"x\"}")).status).toBe(200);
+    expect(await (await get(id, "joined")).text()).toBe("{\"proof\":\"x\"}");
+  });
+
   it("give 404 for a slot nobody has written", async () => {
     const id = meetingId();
     expect((await get(id, "joiner")).status).toBe(404);

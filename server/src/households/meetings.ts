@@ -4,7 +4,7 @@ import { errorResponse, ok, overAddressLimit } from "./http";
 /** Pairing by code (households design §4, plan 0.6): the two PCs meet at /v1/meetings/{id}/{slot}, where the ID is the
  * first 16 bytes of SHA-256 of the code. Nothing is signed; the slots' contents vouch for themselves with the code's
  * MAC or are sealed with the session key, so the Worker only keeps them, once each, for 10 minutes. */
-export const MEETING_SLOTS = ["adder", "joiner", "answer", "welcome"] as const;
+export const MEETING_SLOTS = ["adder", "joiner", "answer", "welcome", "joined"] as const;
 export const MAX_SLOT_BYTES = 8 * 1024;
 export const MEETING_LIFETIME_MS = 10 * 60 * 1000;
 

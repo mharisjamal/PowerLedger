@@ -1,4 +1,13 @@
-import { deviceIdOf, DEVICE_ID, importSignKey, isDhKey, type MemberRow, readSignedHeaders, verifySignedByKey } from "./auth";
+import {
+  deviceIdOf,
+  DEVICE_ID,
+  importSignKey,
+  isDhKey,
+  type MemberRow,
+  readSignedHeaders,
+  verifySignature,
+  verifySignedByKey,
+} from "./auth";
 import { readBounded } from "../body";
 import { deleteBodies } from "../store";
 import { base64urlDecode } from "./encoding";
@@ -86,16 +95,35 @@ export function addMemberStatement(
   ).bind(household, device, sign, dh, now, MAX_MEMBERS);
 }
 
-/** POST /v1/households/{hid}/members: {"sign","dh"}, by a member. */
+/** What a joining PC signs to show it holds its keys and asks to join this household (plan N, contract A). */
+export function joinStatement(household: string, sign: string, dh: string): Uint8Array {
+  return new TextEncoder().encode(`powerledger join|${household}|${sign}|${dh}`);
+}
+
+/**
+ * POST /v1/households/{hid}/members: {"sign","dh","proof"}, by a member. The proof is the joining PC's ECDSA signature
+ * (P1363, base64url) over "powerledger join|{hid}|{sign}|{dh}", the keys as posted, so no member can add keys whose PC
+ * never asked to join. A current member with the same keys is done; with another dh key, 409.
+ */
 export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
-  const keys = await readKeys(parseObject(body));
+  const posted = parseObject(body);
+  const keys = await readKeys(posted);
   if (keys instanceof Response) return keys;
+  const proof = typeof posted?.proof === "string" ? base64urlDecode(posted.proof) : null;
+  if (!proof || proof.byteLength !== 64) {
+    return errorResponse(400, 'proof must be the joining PC\'s signature over "powerledger join|{hid}|{sign}|{dh}", as base64url.');
+  }
+  if (!(await verifySignature(keys.sign, joinStatement(member.household, keys.sign, keys.dh), proof))) {
+    return errorResponse(403, "The proof isn't the joining PC's signature over this household and its keys.");
+  }
   const device = await deviceIdOf(base64urlDecode(keys.sign)!);
 
-  const current = await env.DB.prepare("SELECT 1 FROM members WHERE household = ? AND device = ? AND removed IS NULL")
+  const current = await env.DB.prepare("SELECT dh_key FROM members WHERE household = ? AND device = ? AND removed IS NULL")
     .bind(member.household, device)
-    .first();
-  if (current) return ok();
+    .first<{ dh_key: string }>();
+  if (current) {
+    return current.dh_key === keys.dh ? ok() : errorResponse(409, "This PC is already a member, with another key-agreement key.");
+  }
 
   const added = await addMemberStatement(env, member.household, device, keys.sign, keys.dh, Date.now()).first();
   return added ? ok() : errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
