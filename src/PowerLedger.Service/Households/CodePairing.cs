@@ -37,7 +37,9 @@ internal sealed class CodeMeeting(string code, string normalized, ECDiffieHellma
 /// comparison code since the code vouches for the adder, and the answer with the joining PC's name, the welcome with the
 /// adding PC's, and the joining PC's proof of its join go through the <c>answer</c>, <c>welcome</c> and <c>joined</c>
 /// slots, sealed. The joining PC enters the household only once the adding PC, having recorded it, writes the sealed
-/// <c>welcomed</c> slot (plan 0.8); without it, nothing changes on the joining PC. A meeting lasts 10 minutes.
+/// <c>welcomed</c> slot (plan 0.8); without it, nothing changes on the joining PC. A meeting lasts 10 minutes. A code its
+/// adding PC stopped before any PC used it says so in the <c>welcome</c> slot, sealed under a key from the code, which the
+/// joining PC looks at before it asks its user (plan 0.10).
 /// </summary>
 /// <param name="wait">How a poll waits for the next; <see cref="PollEvery"/> on the clock when null.</param>
 internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<TimeSpan, CancellationToken, Task>? wait = null)
@@ -138,9 +140,33 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         {
             goodbye ??= await JoinerNowAsync(meeting).ConfigureAwait(false) is { } toJoiner ? (toJoiner, "welcome") : null;
             if (goodbye is { } left) await GoodbyeAsync(meeting.MeetingId, left.Slot, left.Key).ConfigureAwait(false);
+            else await CancelledAsync(meeting).ConfigureAwait(false);          // no PC has used the code yet
             return new PairingOutcome.Refused("Adding the other PC was cancelled.");
         }
     }
+
+    /// <summary>Marks a code nobody has used yet as cancelled (plan 0.10): <c>{"type":"cancelled"}</c> in the meeting's
+    /// <c>welcome</c> slot, sealed like a welcome, but under a key from the code, as no joining PC's is known.</summary>
+    private async Task CancelledAsync(CodeMeeting meeting)
+    {
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var body = HouseholdCrypto.Seal(CancelledKey(meeting.CodeKey), LanMessages.Write(new LanMessage { Type = "cancelled" }), Encoding.ASCII.GetBytes("welcome"));
+        try
+        {
+            await relay.PutSlotAsync(meeting.MeetingId, "welcome", body, limit.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>The key a cancelled code's marker is sealed under, from the code alone.</summary>
+    private static byte[] CancelledKey(byte[] codeKey) => HouseholdCrypto.Hkdf(codeKey, [], Side + "cancelled");
+
+    /// <summary>True when the welcome slot holds the adding PC's goodbye: to this joining PC, or, for a code stopped before any
+    /// PC used it, to whoever has the code.</summary>
+    private static bool Stopped(byte[] slot, byte[] toJoiner, byte[] codeKey) =>
+        Open(toJoiner, slot, "welcome") is { Type: "cancel" } || Open(CancelledKey(codeKey), slot, "welcome") is { Type: "cancelled" };
 
     /// <summary>A cancel that came before the joining PC's hello was read: it may be in its slot already, its user asked, so it
     /// is looked for once, to say goodbye to; the key sealing to it, or null when there is none.</summary>
@@ -165,8 +191,10 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
     /// <param name="inHousehold">True when this PC is in a household that joining leaves: the user is told so.</param>
     /// <param name="enter">Takes this PC into the household in the welcome, once the adding PC has said it recorded the joining;
     /// false when this PC may no longer, as when it entered another household meanwhile.</param>
+    /// <param name="joining">Heard just before this PC says it is joining: from then on, the pairing only finishes (plan 0.10).</param>
     public async Task<PairingOutcome> JoinAsync(
-        string typed, PairingIdentity me, IPromptBroker broker, bool inHousehold, Func<Welcome, MemberInfo, Task<bool>> enter, CancellationToken cancel)
+        string typed, PairingIdentity me, IPromptBroker broker, bool inHousehold, Func<Welcome, MemberInfo, Task<bool>> enter, CancellationToken cancel,
+        Action? joining = null)
     {
         if (PairingCode.Normalize(typed) is not { } normalized)
         {
@@ -194,11 +222,16 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
             var (toJoiner, toAdder) = SessionKeys(eph, adder.Eph, adder.Eph, ephPublic);
             var deadline = clock.GetUtcNow() + Lifetime;
             goodbye = (toAdder, "answer");
+            var before = await relay.GetSlotAsync(meetingId, "welcome", cancel).ConfigureAwait(false);   // plan 0.10: a code stopped already asks nobody
+            if (before.Ok && before.Value is { Length: > 0 } already && Stopped(already, toJoiner, codeKey))
+            {
+                return new PairingOutcome.Refused("The other PC stopped the pairing, so nothing was changed.");
+            }
 
             // While its user is asked, the meeting is watched: the adding PC stopping withdraws the question (plan 0.9).
             using var question = CancellationTokenSource.CreateLinkedTokenSource(cancel);
             using var watching = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-            var watch = WatchForGoodbyeAsync(meetingId, toJoiner, deadline, question, watching.Token);
+            var watch = WatchForGoodbyeAsync(meetingId, toJoiner, codeKey, deadline, question, watching.Token);
             bool accept;
             try
             {
@@ -222,17 +255,21 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
             var sealedWelcome = await PollAsync(meetingId, "welcome", deadline, cancel).ConfigureAwait(false);
             if (sealedWelcome is null) return new PairingOutcome.Failed("The other PC didn't finish adding this PC in time, so nothing was changed.");
             var keysOnly = new MemberInfo(adder.Id, "", ChassisKind.Desktop, adder.Sign, adder.Dh);
+            if (Stopped(sealedWelcome, toJoiner, codeKey)) return new PairingOutcome.Refused("The other PC stopped the pairing, so nothing was changed.");
             var message = Open(toJoiner, sealedWelcome, "welcome");
-            if (message is { Type: "cancel" }) return new PairingOutcome.Refused("The other PC stopped the pairing, so nothing was changed.");
             if (message is not { Type: "welcome" } || PairingSession.ReadWelcome(message, keysOnly) is not { } welcome)
             {
                 return new PairingOutcome.Failed("The other PC sent a household that wasn't a good one, so nothing was changed.");
             }
             var from = welcome.Members.First(member => member.Id == adder.Id);
             var joined = HouseholdCrypto.Seal(toAdder, Wire.SignJoin(me.Keys, welcome.HouseholdId), Encoding.ASCII.GetBytes("joined"));
-            put = await relay.PutSlotAsync(meetingId, "joined", joined, cancel).ConfigureAwait(false);
-            if (!put.Ok) return new PairingOutcome.Failed($"Couldn't tell {from.Name} this PC is joining: {put.Problem}. Nothing was changed.");
-            goodbye = null;
+            cancel.ThrowIfCancellationRequested();
+            joining?.Invoke();
+            goodbye = null;                                                     // joining: no cancel now
+            if (!await PutUntilAsync(meetingId, "joined", joined, deadline, CancellationToken.None).ConfigureAwait(false))   // plan 0.10: until it lands
+            {
+                return new PairingOutcome.Failed($"Couldn't tell {from.Name} this PC is joining before the code ran out. Nothing was changed.");
+            }
             var sealedWelcomed = await PollAsync(meetingId, "welcomed", deadline, CancellationToken.None).ConfigureAwait(false);   // joined: no cancel now
             var said = sealedWelcomed is null ? null : Open(toJoiner, sealedWelcomed, "welcomed");
             if (said is { Type: "cancel" }) return new PairingOutcome.Refused($"{from.Name} stopped the pairing, so nothing was changed.");
@@ -253,13 +290,12 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
     /// <summary>Watches the welcome slot while the joining PC's user is asked: a goodbye there from the adding PC withdraws the
     /// question.</summary>
     /// <returns>True when the adding PC stopped.</returns>
-    private async Task<bool> WatchForGoodbyeAsync(string meetingId, byte[] toJoiner, DateTimeOffset deadline, CancellationTokenSource question,
+    private async Task<bool> WatchForGoodbyeAsync(string meetingId, byte[] toJoiner, byte[] codeKey, DateTimeOffset deadline, CancellationTokenSource question,
         CancellationToken watching)
     {
         try
         {
-            if (await PollAsync(meetingId, "welcome", deadline, watching).ConfigureAwait(false) is not { } slot
-                || Open(toJoiner, slot, "welcome") is not { Type: "cancel" })
+            if (await PollAsync(meetingId, "welcome", deadline, watching).ConfigureAwait(false) is not { } slot || !Stopped(slot, toJoiner, codeKey))
             {
                 return false;
             }

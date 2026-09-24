@@ -206,6 +206,44 @@ public sealed class CodePairingTests : IDisposable
         _relay.Slot(meeting.MeetingId, "answer").ShouldBeNull();                   // nothing more said
     }
 
+    [Fact]
+    public async Task The_joiners_joined_goes_again_until_it_lands_then_it_waits_for_welcomed()
+    {
+        using var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull();
+        var refused = 0;
+        _relay.Intercept = (request, _) => request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath.EndsWith("/joined", StringComparison.Ordinal)
+            && refused++ < 2
+            ? FakeRelay.Error(503, "The server is busy; try again later.")
+            : null;
+        var joining = 0;
+
+        var adding = _pairing.AddAsync(meeting, Adder, Welcome, NoRecord, CancellationToken.None);
+        var joined = await _pairing.JoinAsync(meeting.Code, Joiner, new Broker(_ => true), false, (_, _) => Task.FromResult(true), CancellationToken.None,
+            () => joining++);
+
+        joined.ShouldBeOfType<PairingOutcome.Joined>();
+        (await adding).ShouldBeOfType<PairingOutcome.Joined>();
+        refused.ShouldBe(3);                                                         // two refused, then it landed
+        joining.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_code_stopped_before_any_pc_used_it_asks_nobody()
+    {
+        using var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull();
+        using var stopAdder = new CancellationTokenSource();
+        var adding = _pairing.AddAsync(meeting, Adder, Welcome, NoRecord, stopAdder.Token);
+        await stopAdder.CancelAsync();
+        (await adding).ShouldBeOfType<PairingOutcome.Refused>();
+        var asked = false;
+
+        var joined = await _pairing.JoinAsync(meeting.Code, Joiner, new Broker(_ => asked = true), false, (_, _) => Task.FromResult(true), CancellationToken.None);
+
+        joined.ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("The other PC stopped the pairing, so nothing was changed.");
+        asked.ShouldBeFalse();
+        _relay.Slot(meeting.MeetingId, "answer").ShouldBeNull();
+    }
+
     public void Dispose()
     {
         _client.Dispose();
