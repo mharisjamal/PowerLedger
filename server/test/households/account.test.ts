@@ -166,7 +166,7 @@ async function readyToApprove(hid: string, by: TestDevice, pc: SignedIn): Promis
 }
 
 describe("join requests", () => {
-  it("run ask, commit, nonce, reveal and approve, each side seeing the other's steps, the PC reading its approval once", async () => {
+  it("run ask, commit, nonce, reveal and approve, each side seeing the other's steps, the PC's approval kept until it withdraws it", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
 
@@ -247,6 +247,42 @@ describe("join requests", () => {
     expect(await ownRequests(laptop)).toEqual([]);
     await runRetention(env, new Date());
     expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE device = ?").bind(laptop.device.id).first()).toBeNull();
+  });
+
+  it("let a PC approved but never entered leave by itself once its approval lapses, then ask again and be approved afresh", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(200);
+
+    // It never enters, and 7 days on its approval lapses: it takes itself out, its session and link left as they were.
+    await env.DB.prepare("UPDATE join_requests SET approved_at = ? WHERE device = ?")
+      .bind(Date.now() - 7 * DAY_MS - 1, laptop.device.id)
+      .run();
+    expect(await ownRequests(laptop)).toEqual([]);
+    expect((await signedFetch(laptop.device, "DELETE", `/v1/households/${hid}/members/${laptop.device.id}`)).status).toBe(200);
+    expect(await isMember(hid, laptop.device.id)).toBe(false);
+
+    const asked = await asAccount(laptop, "POST", "/v1/account/requests");
+    expect(asked.status).toBe(200);
+    expect(await asked.json()).toEqual({ ok: true, householdId: hid });
+    expect(await ownRequests(laptop)).toMatchObject([{ household: hid, approver: null, reveal: null, approved: null }]);
+    expect(await memberList(hid, owner.device)).toMatchObject([{ device: laptop.device.id, approver: null }]);
+
+    // Its envelope at epoch 1 is never sealed again: the rotation its leaving calls for comes first.
+    await readyToApprove(hid, owner.device, laptop);
+    expect((await approveAs(hid, owner.device, laptop, 1)).status).toBe(409);
+    await rotate(hid, owner.device, 2);
+    const body = envelope();
+    expect((await approveAs(hid, owner.device, laptop, 2, body)).status).toBe(200);
+    expect(await isMember(hid, laptop.device.id)).toBe(true);
+    expect(await (await signedFetch(laptop.device, "GET", `/v1/households/${hid}/keys/2`)).json()).toEqual({
+      epoch: 2,
+      from: owner.device.id,
+      body,
+    });
+    expect(await ownRequests(laptop)).toMatchObject([{ approved: { epoch: 2 } }]);
   });
 
   it("are withdrawn by the waiting PC itself, as when its user says the codes don't match", async () => {
@@ -670,7 +706,66 @@ describe("recovery", () => {
     expect(byDevice.get(other.id)).toMatchObject({ removed_epoch: 2 });
     expect((await asAccount(newPc, "GET", "/v1/account/recovery")).status).toBe(404);
     expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE device = ?").bind(newPc.device.id).first()).toBeNull();
-    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier })).status).toBe(404);
+    const laterPc = await signIn(undefined, owner.account);
+    expect((await asAccount(laterPc, "POST", "/v1/account/recover", { verifier })).status).toBe(404);
+  });
+
+  it("answers a retry by the PC that recovered, for 10 minutes, as it answered the recover; any other PC gets 404", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const other = await newDevice();
+    await addMember(hid, owner.device, other);
+    const verifier = nonce();
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
+    await rotate(hid, owner.device, 2, [owner.device, other]);
+    const newPc = await signIn(undefined, owner.account);
+    const recover = async (pc: SignedIn) => {
+      const response = await asAccount(pc, "POST", "/v1/account/recover", { verifier });
+      return { status: response.status, body: await response.json() };
+    };
+    const members = async () =>
+      (await env.DB.prepare("SELECT device, removed, added_epoch, removed_epoch FROM members WHERE household = ? ORDER BY device")
+        .bind(hid)
+        .all()).results;
+
+    expect(await recover(newPc)).toEqual({ status: 200, body: { household: hid, epoch: 2 } });
+    const after = await members();
+
+    // Its answer lost, the PC asks again: the same answer, though the code is used up, and nothing changes.
+    expect(await recover(newPc)).toEqual({ status: 200, body: { household: hid, epoch: 2 } });
+    expect(await members()).toEqual(after);
+    await rotate(hid, newPc.device, 3);
+    expect(await recover(newPc)).toEqual({ status: 200, body: { household: hid, epoch: 2 } });
+
+    expect((await recover(await signIn(undefined, owner.account))).status).toBe(404);
+    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier: nonce() })).status).toBe(404);
+
+    const age = (ms: number) => env.DB.prepare("UPDATE used_recoveries SET used = used - ? WHERE device = ?").bind(ms, newPc.device.id).run();
+    await age(9 * 60 * 1000);
+    expect((await recover(newPc)).status).toBe(200);
+    await age(60 * 1000);
+    expect((await recover(newPc)).status).toBe(404);
+  });
+
+  it("answers the same to a retry racing its own recover, which takes once", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const verifier = nonce();
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
+    const newPc = await signIn(undefined, owner.account);
+
+    const raced = hookBefore(env, /UPDATE members SET removed/, async () => {
+      expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier })).status).toBe(200);
+    });
+    const request = await signedRequest(newPc.device, "POST", "/v1/account/recover", JSON.stringify({ verifier }), {
+      headers: { Authorization: `Session ${newPc.session}` },
+    });
+    const response = (await handleHouseholdRoutes(request, raced))!;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ household: hid, epoch: 1 });
+
+    expect(await isMember(hid, newPc.device.id)).toBe(true);
+    expect(await isMember(hid, owner.device.id)).toBe(false);
+    const used = await env.DB.prepare("SELECT device, household, epoch FROM used_recoveries WHERE account = ?").bind(owner.account).all();
+    expect(used.results).toEqual([{ device: newPc.device.id, household: hid, epoch: 1 }]);
   });
 
   it("uses up every recovery of the household, so another account's code can't bring its removed holder back", async () => {
@@ -853,18 +948,29 @@ describe("removing a member", () => {
   });
 });
 
+/** A recover `pc` made of `hid` a moment ago, as the Worker remembers it for a retry. */
+async function usedRecovery(pc: SignedIn, hid: string): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO used_recoveries (account, verifier_hash, device, household, epoch, used) VALUES (?, ?, ?, ?, 1, ?)",
+  )
+    .bind(pc.account, "ab".repeat(32), pc.device.id, hid, Date.now())
+    .run();
+}
+
 describe("a household that ends", () => {
-  it("takes its account links, join requests and recovery with it", async () => {
+  it("takes its account links, join requests, recovery and recovers remembered with it", async () => {
     const { hid, owner } = await linkedHousehold();
     await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)), epoch: 1, replace: true });
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
+    await usedRecovery(owner, hid);
 
     expect((await signedFetch(owner.device, "DELETE", `/v1/households/${hid}/members/${owner.device.id}`)).status).toBe(200);
 
     expect(await env.DB.prepare("SELECT 1 FROM account_households WHERE account = ?").bind(owner.account).first()).toBeNull();
     expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE household = ?").bind(hid).first()).toBeNull();
     expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(owner.account).first()).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM used_recoveries WHERE household = ?").bind(hid).first()).toBeNull();
   });
 });
 
@@ -890,11 +996,12 @@ describe("POST /v1/auth/signout", () => {
 });
 
 describe("DELETE /v1/account", () => {
-  it("deletes the account, its link, sessions, requests and recovery; the household carries on", async () => {
+  it("deletes the account, its link, sessions, requests, recovery and recovers remembered; the household carries on", async () => {
     const { hid, owner } = await linkedHousehold();
     await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)), epoch: 1, replace: true });
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
+    await usedRecovery(laptop, hid);
     const bystander = await signIn();
 
     expect((await asAccount(owner, "DELETE", "/v1/account")).status).toBe(200);
@@ -905,6 +1012,7 @@ describe("DELETE /v1/account", () => {
       ["account_households", "account"],
       ["join_requests", "account"],
       ["recovery", "account"],
+      ["used_recoveries", "account"],
     ]) {
       const row = await env.DB.prepare(`SELECT 1 FROM ${table} WHERE ${column} = ?`).bind(owner.account).first();
       expect(row, table).toBeNull();

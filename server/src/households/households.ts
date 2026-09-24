@@ -185,13 +185,14 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
 /**
  * Ends a household whose last member has gone. The household and its member rows stay, every member removed, so a
  * former member is told 410 rather than taken for a stranger (401); its batches and their bodies, key envelopes, the
- * PCs waiting to join, and for sign-in every account's link to it and recovery for it, go.
+ * PCs waiting to join, and for sign-in every account's link to it, recovery for it and recovers of it remembered, go.
  */
 export async function endHousehold(env: Cloudflare.Env, household: string): Promise<void> {
   const bodies = await env.DB.prepare("SELECT r2_key FROM batches WHERE household = ?").bind(household).all<{ r2_key: string }>();
   await deleteBodies(env, bodies.results.map((row) => row.r2_key));
   await env.DB.batch([
     env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)").bind(household),
+    env.DB.prepare("DELETE FROM used_recoveries WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM account_households WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM join_requests WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM batches WHERE household = ?").bind(household),
@@ -261,7 +262,8 @@ export async function currentEpoch(env: Cloudflare.Env, household: string): Prom
  * exactly the current members: one for a PC that isn't current is 400, and a current one left out is 409, as are
  * members changing before the epoch moves. The Worker keeps each household's epoch: only current + 1 is taken, and it
  * becomes current with its envelopes in one step. An identical retry of the current epoch's keys by the PC that sealed
- * them is taken as done, since its first answer may have been lost; anything else at another epoch gets 409.
+ * them is taken as done, since its first answer may have been lost; anything else at another epoch gets 409. Every 409
+ * carries {"epoch"}, the household's epoch as it is then: a PC whose epoch was taken rotates on to the one after it.
  */
 export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
@@ -293,11 +295,11 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     return errorResponse(400, "Every envelope must be for a current member.");
   }
   if (envelopes.length !== currentIds.size) {
-    return errorResponse(409, "Every current member needs the new key; look at the members again.");
+    return errorResponse(409, "Every current member needs the new key; look at the members again.", { epoch: at });
   }
 
   if (at === null || epoch !== at + 1) {
-    return errorResponse(409, `The household's key is at epoch ${at}; new keys are for epoch ${(at ?? 0) + 1} only.`);
+    return errorResponse(409, `The household's key is at epoch ${at}; new keys are for epoch ${(at ?? 0) + 1} only.`, { epoch: at });
   }
 
   // The envelopes and the epoch's move are one transaction, each holding only while the key is still at the epoch before
@@ -323,13 +325,18 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     ]);
   } catch (error) {
     // Envelopes already at that epoch: another member's keys for it.
-    if (String(error).includes("UNIQUE constraint failed")) return errorResponse(409, `Epoch ${epoch} already has its keys.`);
+    if (String(error).includes("UNIQUE constraint failed")) return keysConflict(env, member.household, `Epoch ${epoch} already has its keys.`);
     throw error;
   }
   if (results[0].results.length === 0) {
-    return errorResponse(409, "The household's key or its members changed meanwhile; look again.");
+    return keysConflict(env, member.household, "The household's key or its members changed meanwhile; look again.");
   }
   return ok();
+}
+
+/** A 409 for new keys that lost a race, with the household's epoch read again: the one the PC looked at may be gone. */
+async function keysConflict(env: Cloudflare.Env, household: string, message: string): Promise<Response> {
+  return errorResponse(409, message, { epoch: await currentEpoch(env, household) });
 }
 
 /** True when this PC's envelopes at the epoch are exactly these, byte for byte: a retry of a post whose answer was lost,

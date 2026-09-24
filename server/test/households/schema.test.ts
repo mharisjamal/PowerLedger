@@ -32,6 +32,7 @@ describe("the households schema", () => {
       "approved_epoch", "approved_at",
     ]);
     expect(await columns("recovery")).toEqual(["account", "body", "verifier_hash", "epoch", "holder", "updated"]);
+    expect(await columns("used_recoveries")).toEqual(["account", "verifier_hash", "device", "household", "epoch", "used"]);
   });
 
   it("keys members by household and device, and batches by household and seq", async () => {

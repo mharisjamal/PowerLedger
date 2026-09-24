@@ -1,8 +1,9 @@
 /** Small response and body helpers shared by the household routes. */
 import { addressOf } from "../address";
 
-export function errorResponse(status: number, message: string): Response {
-  return Response.json({ error: message }, { status });
+/** {"error": message}, with any fields a caller acts on beside it (a 409 on new keys carries the epoch). */
+export function errorResponse(status: number, message: string, extra: Record<string, unknown> = {}): Response {
+  return Response.json({ error: message, ...extra }, { status });
 }
 
 export function ok(extra: Record<string, unknown> = {}): Response {
