@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -220,8 +221,8 @@ public class MidnightControlsTests
                     chart.Hovered.ShouldBe(144);
                     chart.Tip.ShouldNotBeNull();
                     chart.Tip.IsOpen.ShouldBeTrue();
-                    chart.Tip.Content.ShouldBeOfType<string>().ShouldMatch(@"^12:00 PM · \d+ W$");
-                    chart.Describe().ShouldMatch(@"At 12:00 PM · \d+ W\.$");
+                    chart.Tip.Content.ShouldBeOfType<string>().ShouldMatch(@"^12:00 · \d+ W$");
+                    chart.Describe().ShouldMatch(@"At 12:00 · \d+ W\.$");
                     UiHarness.Find<Border>(chart.Tip, border => border.Style == host.Resources["M.Glass"]).ShouldNotBeNull("the tooltip wears the glass");
                     UiHarness.Render(host, (int)host.ActualWidth, (int)host.ActualHeight, $"midnight-controls-{theme}.png");
                     UiHarness.Render(chart.Tip, (int)Math.Ceiling(chart.Tip.ActualWidth), (int)Math.Ceiling(chart.Tip.ActualHeight), $"midnight-tooltip-{theme}.png");
@@ -235,8 +236,20 @@ public class MidnightControlsTests
 
                     chart.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice, PresentationSource.FromVisual(chart)!, 0, System.Windows.Input.Key.Left) { RoutedEvent = UIElement.KeyDownEvent });
                     chart.Hovered.ShouldBe(174, "from nowhere, the keys start at now");
+                    chart.Model = MidnightFixtures.DayChart();
+                    chart.Hovered.ShouldBe(174, "the same range read again, a minute on, keeps the crosshair where it was");
+                    chart.Tip.IsOpen.ShouldBeTrue();
                     chart.Model = ChartModel.Empty;
-                    chart.Hovered.ShouldBe(-1, "a new model takes the crosshair away");
+                    chart.Hovered.ShouldBe(-1, "another range's model takes the crosshair away");
+
+                    var german = CultureInfo.GetCultureInfo("de-DE");
+                    var week = Ranges.LastDays(7, MidnightFixtures.Now, TimeZoneInfo.Utc, MidnightFixtures.English);
+                    chart.Culture = german;
+                    chart.From = week.From;
+                    chart.Model = Charts.Build(week, MidnightFixtures.WeekSeries(week), ChartUnit.Watts, TimeZoneInfo.Utc, MidnightFixtures.English);
+                    chart.Hover(30);
+                    chart.Tip.Content.ShouldBeOfType<string>().ShouldStartWith((week.From + TimeSpan.FromHours(30)).ToString("ddd d MMM", german), Case.Sensitive,
+                        "the tooltip speaks the chart's culture, the page's, not the thread's");
                 }
                 finally
                 {

@@ -23,6 +23,7 @@ internal sealed class AreaChart : Instrument
     public static readonly DependencyProperty FillBottomBrushProperty = Register<Brush>(nameof(FillBottomBrush), Brushes.Transparent, typeof(AreaChart));
     public static readonly DependencyProperty HatchBrushProperty = Register<Brush>(nameof(HatchBrush), Brushes.Gray, typeof(AreaChart));
     public static readonly DependencyProperty EmptyTextProperty = Register(nameof(EmptyText), "No history yet", typeof(AreaChart));
+    public static readonly DependencyProperty CultureProperty = Register(nameof(Culture), CultureInfo.CurrentCulture, typeof(AreaChart));
 
     private const double Left = 48;
     private const double RightInset = 16;
@@ -55,6 +56,9 @@ internal sealed class AreaChart : Instrument
     /// <summary>What the plot says when there is nothing to draw.</summary>
     public string EmptyText { get => (string)GetValue(EmptyTextProperty); set => SetValue(EmptyTextProperty, value); }
 
+    /// <summary>The culture the axis and the tooltip write in: the page's, which built the model's ticks, not the thread's.</summary>
+    public CultureInfo Culture { get => (CultureInfo)GetValue(CultureProperty); set => SetValue(CultureProperty, value); }
+
     /// <summary>The bucket the crosshair is on, or -1.</summary>
     internal int Hovered => _hover;
 
@@ -83,7 +87,7 @@ internal sealed class AreaChart : Instrument
         var right = ActualWidth - RightInset;
         var bottom = ActualHeight - AxisRoom;
         if (!(right > Left) || !(bottom > Top)) return;
-        var culture = CultureInfo.CurrentCulture;
+        var culture = Culture;
         var (max, step) = Scale(model);
         double X(double at) => AreaGeometry.X(at, capacity, Left, right);
         double Y(double value) => AreaGeometry.Y(value, max, Top, bottom);
@@ -198,10 +202,19 @@ internal sealed class AreaChart : Instrument
 
     private static void OnModelChanged(DependencyObject element, DependencyPropertyChangedEventArgs e)
     {
-        // A new model has new buckets: the old crosshair would point at a bucket that is not there any more.
         var chart = (AreaChart)element;
-        if (chart._hover >= 0) chart.Hover(-1);
+        if (chart._hover < 0) return;
+        // The same range read again (the minute's re-read of the hour or the day) has its buckets in the same places: the
+        // crosshair stays and the tooltip says the new figure. Another range's model would point at a bucket that isn't there.
+        if (e.OldValue is ChartModel old && e.NewValue is ChartModel now && SameLayout(old, now) && chart._hover < now.Buckets.Count)
+        {
+            chart.ShowTip();
+            return;
+        }
+        chart.Hover(-1);
     }
+
+    private static bool SameLayout(ChartModel a, ChartModel b) => a.Bucket == b.Bucket && a.Capacity == b.Capacity && a.Ticks.SequenceEqual(b.Ticks);
 
     private static (double Max, double Step) Scale(ChartModel model)
         => Geometry.ChartScale(model.Buckets.Count > 0 ? model.Buckets.Max(b => b.Total) : 0, Charts.Floor(model.Unit));
@@ -222,7 +235,7 @@ internal sealed class AreaChart : Instrument
     private static Color ColourOf(Brush brush) => (brush as SolidColorBrush)?.Color ?? Colors.Transparent;
 
     private string HoverLabel(int index)
-        => AreaGeometry.HoverLabel(From, Model.Bucket, index, Model.Capacity, Model.Buckets[index].Total, Model.Unit, Zone, CultureInfo.CurrentCulture);
+        => AreaGeometry.HoverLabel(From, Model.Bucket, index, Model.Capacity, Model.Buckets[index].Total, Model.Unit, Zone, Culture);
 
     private void ShowTip()
     {
