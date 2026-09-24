@@ -101,4 +101,63 @@ public class RangesTests
         Ranges.At(new DateTime(2026, 3, 29, 2, 30, 0), europe).ShouldBe(new DateTimeOffset(2026, 3, 29, 3, 0, 0, TimeSpan.FromHours(2)));
         Ranges.At(new DateTime(2026, 3, 29, 6, 0, 0), europe).ShouldBe(new DateTimeOffset(2026, 3, 29, 6, 0, 0, TimeSpan.FromHours(2)));
     }
+
+    [Fact]
+    public void The_last_hour_is_sixty_whole_minutes_ending_with_the_one_under_way()
+    {
+        var hour = Ranges.LastHour(Now, Utc, English);
+        hour.From.ShouldBe(new DateTimeOffset(2026, 9, 8, 13, 33, 0, TimeSpan.Zero));
+        hour.To.ShouldBe(Now);
+        hour.Through.ShouldBe(new DateTimeOffset(2026, 9, 8, 14, 33, 0, TimeSpan.Zero));
+        hour.Bucket.ShouldBe(TimeSpan.FromMinutes(1));
+        hour.Capacity.ShouldBe(60);
+        hour.Title.ShouldBe("Last hour");
+    }
+
+    [Fact]
+    public void The_last_hour_across_a_clock_change_is_still_sixty_minutes_long()
+    {
+        var europe = TimeZoneInfo.FindSystemTimeZoneById("W. Europe Standard Time");
+        var halfPastThree = new DateTimeOffset(2026, 3, 29, 3, 30, 0, TimeSpan.FromHours(2));   // 01:30 UTC, half an hour after 02:00 became 03:00
+        var hour = Ranges.LastHour(halfPastThree, europe, English);
+        hour.From.ShouldBe(new DateTimeOffset(2026, 3, 29, 1, 31, 0, TimeSpan.FromHours(1)));
+        hour.From.Offset.ShouldBe(TimeSpan.FromHours(1));   // local time before the change
+        (hour.Through - hour.From).ShouldBe(TimeSpan.FromMinutes(60));
+    }
+
+    [Fact]
+    public void The_last_year_is_the_last_365_days_in_day_buckets()
+    {
+        var year = Ranges.LastYear(Now, Utc, English);
+        year.From.ShouldBe(new DateTimeOffset(2025, 9, 9, 0, 0, 0, TimeSpan.Zero));
+        year.To.ShouldBe(Now);
+        year.Through.ShouldBe(new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero));
+        year.Bucket.ShouldBe(TimeSpan.FromDays(1));
+        year.Capacity.ShouldBe(365);
+        year.Title.ShouldBe("Last 365 days");
+    }
+
+    [Fact]
+    public void All_runs_from_the_first_rows_day_in_day_buckets_whatever_its_length()
+    {
+        var all = Ranges.All(new DateTimeOffset(2026, 9, 3, 9, 15, 0, TimeSpan.Zero), Now, Utc, English);
+        all.From.ShouldBe(new DateTimeOffset(2026, 9, 3, 0, 0, 0, TimeSpan.Zero));
+        all.To.ShouldBe(Now);
+        all.Through.ShouldBe(new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero));
+        all.Bucket.ShouldBe(TimeSpan.FromDays(1));
+        all.Capacity.ShouldBe(6);
+        all.Title.ShouldBe("Since 3 Sep 2026");
+
+        var none = Ranges.All(null, Now, Utc, English);   // no history yet: today alone
+        none.From.ShouldBe(new DateTimeOffset(2026, 9, 8, 0, 0, 0, TimeSpan.Zero));
+        none.Capacity.ShouldBe(1);
+        none.Title.ShouldBe("Since 8 Sep 2026");
+    }
+
+    [Fact]
+    public void A_minute_bucket_has_its_names()
+    {
+        Ranges.BucketName(TimeSpan.FromMinutes(1)).ShouldBe("1-min");
+        Ranges.BucketLength(TimeSpan.FromMinutes(1)).ShouldBe("minute");
+    }
 }

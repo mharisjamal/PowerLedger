@@ -96,6 +96,31 @@ public sealed class UiPreferencesTests : IDisposable
     }
 
     [Fact]
+    public void The_look_is_classic_until_chosen_and_survives_a_save_and_a_load()
+    {
+        var store = new UiPreferencesStore(File);
+        store.Load().Look.ShouldBe(Look.Classic);
+
+        store.Save(UiPreferences.Default with { Look = Look.Midnight });
+
+        store.Load().Look.ShouldBe(Look.Midnight);
+        System.IO.File.ReadAllText(File).ShouldContain("\"Midnight\"");
+    }
+
+    [Fact]
+    public void A_look_this_version_does_not_know_reads_as_classic_and_keeps_the_rest_of_the_file()
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, """{ "Theme": "Dark", "Look": "Neon", "FirstRunDone": true }""");
+
+        var read = new UiPreferencesStore(File).Load();
+
+        read.Look.ShouldBe(Look.Classic);
+        read.Theme.ShouldBe(ThemeChoice.Dark);
+        read.FirstRunDone.ShouldBeTrue();
+    }
+
+    [Fact]
     public void The_update_bookkeeping_survives_a_save_and_a_load()
     {
         var store = new UiPreferencesStore(File);

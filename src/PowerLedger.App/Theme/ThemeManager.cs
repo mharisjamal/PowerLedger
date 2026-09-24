@@ -21,8 +21,9 @@ internal static class ThemeRules
 }
 
 /// <summary>
-/// Keeps the application's palette in step with the choice and, for System, with Windows' app mode. The palette is the
-/// first merged dictionary; everything else refers to its brushes with DynamicResource, so a swap repaints at once.
+/// Keeps the application's palette in step with the look, the choice and, for System, with Windows' app mode. The palette
+/// is the first merged dictionary, and the only one there that defines a brush; everything else refers to its brushes with
+/// DynamicResource, so a swap repaints at once.
 /// </summary>
 internal sealed class ThemeManager : IDisposable
 {
@@ -32,19 +33,30 @@ internal sealed class ThemeManager : IDisposable
     private ThemeChoice _choice;
     private ResourceDictionary? _palette;
 
-    public ThemeManager(Application application, ThemeChoice choice)
+    public ThemeManager(Application application, ThemeChoice choice, Look look = Look.Classic)
     {
         _application = application;
         _choice = choice;
+        Look = look;
         Apply();
         SystemEvents.UserPreferenceChanged += OnPreferenceChanged;
     }
 
     public Theme Current { get; private set; }
 
+    /// <summary>The look whose palette is on (Midnight look design §3).</summary>
+    public Look Look { get; private set; }
+
     public void Choose(ThemeChoice choice)
     {
         _choice = choice;
+        Apply();
+    }
+
+    /// <summary>Draws in <paramref name="look"/>'s palette for the choice in force.</summary>
+    public void Apply(Look look)
+    {
+        Look = look;
         Apply();
     }
 
@@ -55,9 +67,11 @@ internal sealed class ThemeManager : IDisposable
         return key?.GetValue("AppsUseLightTheme") is int value && value != 0;
     }
 
-    /// <summary>A palette as a fresh dictionary, for the application or for a test that draws a view.</summary>
-    public static ResourceDictionary Palette(Theme theme)
-        => new() { Source = new Uri($"pack://application:,,,/PowerLedger;component/Theme/Palette.{theme}.xaml", UriKind.Absolute) };
+    /// <summary>Classic's palette for a theme as a fresh dictionary, for the application or for a test that draws a view.</summary>
+    public static ResourceDictionary Palette(Theme theme) => Palette(Look.Classic, theme);
+
+    /// <summary>A look's palette for a theme as a fresh dictionary.</summary>
+    public static ResourceDictionary Palette(Look look, Theme theme) => new() { Source = LookRules.PaletteFor(look, theme) };
 
     public void Dispose() => SystemEvents.UserPreferenceChanged -= OnPreferenceChanged;
 
@@ -69,8 +83,9 @@ internal sealed class ThemeManager : IDisposable
     private void Apply()
     {
         var theme = ThemeRules.Resolve(_choice, WindowsUsesLight());
-        if (_palette is not null && theme == Current) return;
-        var palette = Palette(theme);
+        var source = LookRules.PaletteFor(Look, theme);
+        if (_palette?.Source == source) return;
+        var palette = new ResourceDictionary { Source = source };
         var merged = _application.Resources.MergedDictionaries;
         if (_palette is not null) merged.Remove(_palette);
         merged.Insert(0, palette);

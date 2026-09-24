@@ -3,7 +3,8 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace PowerLedger.App;
 
-/// <summary>The four screens of spec §9's rail.</summary>
+/// <summary>The screens of spec §9's rail, and Midnight's Dashboard (Midnight look design §2), which stands in for Now
+/// there as Now stands in for it in Classic.</summary>
 internal enum Page
 {
     Now,
@@ -11,6 +12,7 @@ internal enum Page
     Report,
     Household,
     Settings,
+    Dashboard,
 }
 
 /// <summary>The window: which page shows, the screens, the first-run wizard while it runs, and the version in the title bar.</summary>
@@ -21,7 +23,7 @@ internal sealed class ShellViewModel : ObservableObject
 
     public ShellViewModel(
         NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, HouseholdViewModel household, SettingsViewModel settings,
-        WizardViewModel wizard, string version, Updater? updates = null)
+        WizardViewModel wizard, string version, Updater? updates = null, DashboardViewModel? dashboard = null)
     {
         Now = now;
         Breakdown = breakdown;
@@ -31,12 +33,27 @@ internal sealed class ShellViewModel : ObservableObject
         Wizard = wizard;
         Version = version;
         Updates = updates;
+        Dashboard = dashboard;
         Wizard.Finished += EndSetup;
         Settings.SetupRequested += BeginSetup;
+        Settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SettingsViewModel.Look)) OnPropertyChanged(nameof(SwitchLookTip));
+        };
         Feedback = new RelayCommand(() => FeedbackRequested?.Invoke());
+        SwitchLook = new RelayCommand(() => Settings.Look = Settings.Look == Look.Classic ? Look.Midnight : Look.Classic);
     }
 
     public NowViewModel Now { get; }
+
+    /// <summary>Midnight's landing page (Midnight look design §4); a Classic-only App has none, and shows Now for it.</summary>
+    public DashboardViewModel? Dashboard { get; }
+
+    /// <summary>The title bars' Switch look button: the other look, chosen as in Settings, so the choice is kept.</summary>
+    public IRelayCommand SwitchLook { get; }
+
+    /// <summary>What the Switch look button offers.</summary>
+    public string SwitchLookTip => Settings.Look == Look.Classic ? "Switch to the Midnight look" : "Switch to the Classic look";
 
     public BreakdownViewModel Breakdown { get; }
 
@@ -86,6 +103,7 @@ internal sealed class ShellViewModel : ObservableObject
     public object Current => IsSetup ? Wizard : Page switch
     {
         Page.Now => Now,
+        Page.Dashboard => Dashboard ?? (object)Now,
         Page.Breakdown => Breakdown,
         Page.Report => Report,
         Page.Household => Household,
@@ -99,10 +117,10 @@ internal sealed class ShellViewModel : ObservableObject
         IsSetup = true;
     }
 
-    /// <summary>The wizard is done: back to the Now screen.</summary>
+    /// <summary>The wizard is done: back to the landing page, Now or Midnight's Dashboard by the look in use.</summary>
     public void EndSetup()
     {
-        _page = Page.Now;
+        _page = Settings.Look == Look.Midnight && Dashboard is not null ? Page.Dashboard : Page.Now;
         OnPropertyChanged(nameof(Page));
         IsSetup = false;
     }
@@ -111,6 +129,8 @@ internal sealed class ShellViewModel : ObservableObject
     private void ShowPage()
     {
         var shown = IsSetup ? (Page?)null : Page;
+        if (shown == Page.Dashboard) Dashboard?.Show();
+        else Dashboard?.Hide();
         if (shown == Page.Breakdown) Breakdown.Show();
         else Breakdown.Hide();
         if (shown == Page.Report) Report.Show();

@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.IO;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -18,6 +17,7 @@ using PowerLedger.Contracts;
 using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
+using static PowerLedger.App.Tests.UiHarness;
 
 namespace PowerLedger.App.Tests;
 
@@ -29,13 +29,9 @@ namespace PowerLedger.App.Tests;
 [Trait("Category", "UI")]
 public class RenderingTests
 {
-    public static readonly string Folder = Path.Combine(Path.GetTempPath(), "powerledger-renders");
+    public static readonly string Folder = UiHarness.Folder;
     private static readonly DateTimeOffset Now = new(2026, 9, 8, 14, 32, 7, TimeSpan.Zero);
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
-    private static readonly Lazy<Dispatcher> Ui = new(StartUi);
-    private static ResourceDictionary? _palette;
-    private static bool _working;
-    private static Exception? _stray;
 
     private static readonly (Page Page, string Name, Action<ShellViewModel> Prepare, Func<ShellViewModel, FrameworkElement> View)[] Pages =
     [
@@ -92,6 +88,100 @@ public class RenderingTests
             }
         }
     }
+
+    /// <summary>Midnight look design §1, plan O 0.4: the title bar's Switch look button, Segoe Fluent's Switch glyph in the
+    /// caption buttons' style, sits just left of Minimize, offers the other look, and chooses it as Settings would, so the
+    /// choice is kept.</summary>
+    [Fact]
+    public void The_title_bar_offers_the_other_look_next_to_minimize()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                using var saver = new FakeSaver();
+                var shell = Shell(saver);
+                var window = new MainWindow
+                {
+                    DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                };
+                try
+                {
+                    window.Show();
+                    window.UpdateLayout();
+                    var @switch = Find<Button>(window, button => AutomationProperties.GetName(button) == "Switch look").ShouldNotBeNull(theme.ToString());
+                    var minimize = Find<Button>(window, button => Equals(button.ToolTip, "Minimize")).ShouldNotBeNull(theme.ToString());
+                    @switch.ToolTip.ShouldBe("Switch to the Midnight look", theme.ToString());
+                    @switch.Content.ShouldBe("", theme.ToString());
+                    @switch.Style.ShouldBeSameAs(minimize.Style, theme.ToString());
+                    var left = @switch.TranslatePoint(new Point(0, 0), window).X;
+                    minimize.TranslatePoint(new Point(0, 0), window).X.ShouldBe(left + @switch.ActualWidth, 1, theme.ToString());
+                    Save(window, (int)window.ActualWidth, 40, $"classic-switch-look-{theme}.png");
+
+                    @switch.Command.Execute(null);
+
+                    shell.Settings.Look.ShouldBe(Look.Midnight, theme.ToString());
+                    @switch.ToolTip.ShouldBe("Switch to the Classic look", theme.ToString());
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+        foreach (var theme in new[] { Theme.Dark, Theme.Light })
+        {
+            new FileInfo(Path.Combine(Folder, $"classic-switch-look-{theme}.png")).Length.ShouldBeGreaterThan(3_000);
+        }
+    }
+
+    /// <summary>Plan O 0.4: Classic's window as the look switcher sees it. It is placed at the bounds it is given rather
+    /// than fitting itself to the screen, shows Midnight's Dashboard as Now, and a close for the switch closes it.</summary>
+    [Fact]
+    public void Classics_window_takes_the_bounds_and_page_a_switch_carries_and_closes_for_it()
+        => OnUi(() =>
+        {
+            UseTheme(Theme.Dark);
+            using var saver = new FakeSaver();
+            var shell = Shell(saver);
+            var window = new MainWindow { DataContext = shell, ShowInTaskbar = false, ShowActivated = false };
+            IShellWindow shellWindow = window;
+            shellWindow.Window.ShouldBeSameAs(window);
+            var closed = 0;
+            shellWindow.Closed += (_, _) => closed++;
+
+            shellWindow.Bounds = new Rect(-20000, 10, 1000, 700);
+            shellWindow.Page = Page.Dashboard;
+            shell.Page.ShouldBe(Page.Now);
+            shellWindow.Page = Page.Report;
+            shell.Page.ShouldBe(Page.Report);
+            shellWindow.Page.ShouldBe(Page.Report);
+            try
+            {
+                shellWindow.Show();
+                window.UpdateLayout();
+
+                // Within a device pixel: Windows places the window on whole pixels of the screen's scale.
+                var placed = new Rect(window.Left, window.Top, window.ActualWidth, window.ActualHeight);
+                var carried = shellWindow.Bounds;
+                foreach (var bounds in new[] { placed, carried })
+                {
+                    bounds.X.ShouldBe(-20000, 1);
+                    bounds.Y.ShouldBe(10, 1);
+                    bounds.Width.ShouldBe(1000, 1);
+                    bounds.Height.ShouldBe(700, 1);
+                }
+                shellWindow.State.ShouldBe(WindowState.Normal);
+            }
+            finally
+            {
+                shellWindow.CloseForSwitch();
+            }
+            closed.ShouldBe(1);
+        });
 
     [Fact]
     public void A_window_that_places_itself_opens_inside_the_work_area_of_its_screen()
@@ -359,6 +449,76 @@ public class RenderingTests
                 window.Close();
             }
         });
+
+    /// <summary>Midnight look design §1, §5: Preferences offers the look, Classic or Midnight, just under the theme and
+    /// lined up with its choices. A look whose window won't open leaves the old one chosen and says why on the
+    /// preferences' message line; one that opens is chosen.</summary>
+    [Fact]
+    public void Settings_offers_the_look_under_the_theme_and_says_why_one_did_not_open()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var ui = new FakeUiSettings { LookProblem = "Couldn't open the Midnight look: no XAML" };
+                var settings = SettingsScreen(ui: ui);
+                settings.Show();
+                var view = new SettingsView { DataContext = settings };
+                var window = new Window
+                {
+                    Content = view, Width = 880, Height = 560, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                window.SetResourceReference(Control.BackgroundProperty, "Brush.Ground");
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    var label = Find<TextBlock>(view, text => text.Text == "Look").ShouldNotBeNull(theme.ToString());
+                    var classic = Choice("Classic");
+                    var midnight = Choice("Midnight");
+                    (classic.IsChecked, midnight.IsChecked).ShouldBe((true, false), theme.ToString());
+                    var themeRow = Choice("Like Windows");
+                    Top(label).ShouldBeGreaterThan(Top(themeRow), theme.ToString());
+                    Top(label).ShouldBeLessThan(Top(Find<TextBlock>(view, text => text.Text == "Start with Windows").ShouldNotBeNull()), theme.ToString());
+                    Left(classic).ShouldBe(Left(themeRow), 0.5, theme.ToString());
+
+                    midnight.IsChecked = true;
+                    Pump(TimeSpan.FromMilliseconds(100));
+
+                    settings.Look.ShouldBe(Look.Classic, theme.ToString());
+                    (classic.IsChecked, midnight.IsChecked).ShouldBe((true, false), theme.ToString());
+                    var said = Find<TextBlock>(view, text => text.Text == "Couldn't open the Midnight look: no XAML").ShouldNotBeNull(theme.ToString());
+                    said.IsVisible.ShouldBeTrue(theme.ToString());
+                    var scroller = view.Content.ShouldBeOfType<ScrollViewer>();
+                    var preferences = Find<TextBlock>(view, text => text.Text == "PREFERENCES").ShouldNotBeNull();
+                    scroller.ScrollToVerticalOffset(scroller.VerticalOffset + preferences.TranslatePoint(default, scroller).Y - 16);
+                    Pump(TimeSpan.FromMilliseconds(100));
+                    Save(window, 880, 560, $"settings-look-{theme}.png");
+
+                    ui.LookProblem = null;
+                    midnight.IsChecked = true;
+
+                    settings.Look.ShouldBe(Look.Midnight, theme.ToString());
+                    ui.Changes.ShouldBe(["look Midnight"], theme.ToString());
+                    (classic.IsChecked, midnight.IsChecked).ShouldBe((false, true), theme.ToString());
+                }
+                finally
+                {
+                    window.Close();
+                }
+
+                RadioButton Choice(string content) => Find<RadioButton>(view, button => Equals(button.Content, content)).ShouldNotBeNull($"{content} on {theme}");
+
+                double Top(FrameworkElement element) => element.TranslatePoint(default, view).Y;
+
+                double Left(FrameworkElement element) => element.TranslatePoint(default, view).X;
+            }
+        });
+        new FileInfo(Path.Combine(Folder, "settings-look-Dark.png")).Length.ShouldBeGreaterThan(3_000);
+    }
 
     [Fact]
     public void Settings_lists_the_ups_and_the_power_supply_asks_what_the_ups_powers_and_offers_to_stop_reading_the_supply()
@@ -1471,6 +1631,63 @@ public class RenderingTests
         });
     }
 
+    /// <summary>Plan O 0.4: a look switch hands Send feedback to the new window before the old one closes, so its
+    /// screenshot is of the window it belongs to now, not of the one it was opened over.</summary>
+    [Fact]
+    public void Send_feedbacks_screenshot_is_of_the_window_that_owns_it_now()
+        => OnUi(() =>
+        {
+            UseTheme(Theme.Dark);
+            var openedOver = Plain(Brushes.Red);
+            var ownsItNow = Plain(Brushes.Blue);
+            var sender = new FeedbackSender(
+                new FakeHttp().Client(), Path.Combine(Path.GetTempPath(), "pl-feedback-render-tests"), new FakeTimeProvider(Now));
+            var model = new FeedbackViewModel(sender, UiThreads.Inline, () => null);
+            var window = new SendFeedbackWindow(model, openedOver, new FakeImagePicker())
+            {
+                Owner = openedOver, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false,
+                ShowActivated = false,
+            };
+            window.Show();
+            try
+            {
+                window.Owner = ownsItNow;   // as the App's retarget does
+                openedOver.Close();
+                Find<Button>(window, button => Equals(button.Content, "Add a PowerLedger screenshot")).ShouldNotBeNull()
+                    .RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+                Centre(model.Images.ShouldHaveSingleItem().Data).ToString().ShouldBe(Colors.Blue.ToString());
+            }
+            finally
+            {
+                window.Close();
+                ownsItNow.Close();
+            }
+        });
+
+    /// <summary>A shown, empty window in <paramref name="background"/>, off the screen.</summary>
+    private static Window Plain(Brush background)
+    {
+        var window = new Window
+        {
+            Background = background, Width = 320, Height = 200, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+            ShowInTaskbar = false, ShowActivated = false,
+        };
+        window.Show();
+        return window;
+    }
+
+    /// <summary>The colour at the middle of a PNG or JPEG.</summary>
+    private static Color Centre(byte[] image)
+    {
+        using var stream = new MemoryStream(image);
+        var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0];
+        var pixels = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+        var bgra = new byte[4];
+        pixels.CopyPixels(new Int32Rect(pixels.PixelWidth / 2, pixels.PixelHeight / 2, 1, 1), bgra, 4, 0);
+        return Color.FromArgb(bgra[3], bgra[2], bgra[1], bgra[0]);
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();
@@ -1514,91 +1731,10 @@ public class RenderingTests
         File.WriteAllBytes(Path.Combine(Folder, "report.pdf"), ReportDocument.Generate(shell.Report.Data, "0.1.0", Now, English));
     }
 
-    /// <summary>Runs <paramref name="work"/> on the application's thread, and throws here what it threw there.</summary>
-    internal static void OnUi(Action work)
-    {
-        ExceptionDispatchInfo? failure = null;
-        Ui.Value.Invoke(() =>
-        {
-            _working = true;
-            try
-            {
-                if (_stray is { } stray) ExceptionDispatchInfo.Capture(stray).Throw();
-                work();
-            }
-            catch (Exception error)
-            {
-                failure = ExceptionDispatchInfo.Capture(error);
-            }
-            finally
-            {
-                _working = false;
-                _stray = null;
-            }
-        });
-        failure?.Throw();
-    }
-
-    /// <summary>
-    /// Starts the application, with the App's styles, on an STA thread that runs its dispatcher until the process ends.
-    /// A failure while no test is running is kept for the next test to throw rather than ending the process.
-    /// </summary>
-    private static Dispatcher StartUi()
-    {
-        var started = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-                application.Resources.MergedDictionaries.Add(new ResourceDictionary
-                {
-                    Source = new Uri("pack://application:,,,/PowerLedger;component/Theme/Styles.xaml", UriKind.Absolute),
-                });
-                application.DispatcherUnhandledException += (_, e) =>
-                {
-                    if (_working) return;
-                    _stray = e.Exception;
-                    e.Handled = true;
-                };
-                started.SetResult(Dispatcher.CurrentDispatcher);
-            }
-            catch (Exception error)
-            {
-                started.SetException(error);
-                return;
-            }
-            Dispatcher.Run();
-        })
-        {
-            IsBackground = true,
-        };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        return started.Task.GetAwaiter().GetResult();
-    }
-
-    /// <summary>Puts <paramref name="theme"/>'s palette first among the application's dictionaries, where the App keeps it.</summary>
-    private static void UseTheme(Theme theme)
-    {
-        var merged = Application.Current.Resources.MergedDictionaries;
-        if (_palette is not null) merged.Remove(_palette);
-        _palette = ThemeManager.Palette(theme);
-        merged.Insert(0, _palette);
-    }
-
     private static ShellViewModel Shell(FakeSaver saver)
         => new(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.1.0");
 
-    private static void Save(Visual visual, int width, int height, string name)
-    {
-        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
-        var png = new PngBitmapEncoder();
-        png.Frames.Add(BitmapFrame.Create(bitmap));
-        using var file = File.Create(Path.Combine(Folder, name));
-        png.Save(file);
-    }
+    private static void Save(Visual visual, int width, int height, string name) => UiHarness.Render(visual, width, height, name);
 
     /// <summary>A Tuesday afternoon eight days into September: asleep until 07:30, a working morning, an idle patch, a peak at
     /// 14:00; and now, on battery, the two external monitors Settings lists: the Dell, on a plug of its own, counted on top of
@@ -1673,12 +1809,12 @@ public class RenderingTests
     /// Energy Star's list whose brightness was read, on a plug of its own, and a portable one estimated from its size whose
     /// brightness wasn't, running off the laptop — and a UPS and a power supply read over USB. The service is
     /// <paramref name="link"/> when it is given.</summary>
-    private static SettingsViewModel SettingsScreen(FakeLink? link = null)
+    private static SettingsViewModel SettingsScreen(FakeLink? link = null, FakeUiSettings? ui = null)
     {
         link ??= new FakeLink();
         link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) with { PowerDevices = [Statuses.Ups, Statuses.PowerSupply] };
         link.Connect(true);
-        return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
+        return new SettingsViewModel(link, new FakeMachineHistory(), ui ?? new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");
     }
 
@@ -1762,32 +1898,6 @@ public class RenderingTests
                 });
         }
         return series;
-    }
-
-    /// <summary>The first <typeparamref name="T"/> under <paramref name="root"/>, outermost first, that <paramref name="match"/> accepts.</summary>
-    private static T? Find<T>(DependencyObject root, Func<T, bool>? match = null)
-        where T : DependencyObject
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is T found && (match is null || match(found))) return found;
-            if (Find(child, match) is { } deeper) return deeper;
-        }
-        return null;
-    }
-
-    private static void Pump(TimeSpan duration)
-    {
-        var frame = new DispatcherFrame();
-        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = duration };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            frame.Continue = false;
-        };
-        timer.Start();
-        Dispatcher.PushFrame(frame);
     }
 
     private const int NearestMonitor = 2;

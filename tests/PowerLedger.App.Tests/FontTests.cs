@@ -9,7 +9,7 @@ namespace PowerLedger.App.Tests;
 /// The faces bundled under the App's Fonts folder, a folder a family: each family answers to the pack URI its folder gives
 /// it, with the static weights Styles.xaml's styles ask for, read from the App's own resources rather than from a font Windows
 /// happens to have; Styles.xaml's keys reach them; and text set in one measures by that face's own advances. The tests run
-/// on <see cref="RenderingTests"/>' application thread.
+/// on <see cref="UiHarness"/>'s application thread.
 /// </summary>
 [Trait("Category", "UI")]
 public class FontTests
@@ -40,7 +40,7 @@ public class FontTests
     [Theory]
     [MemberData(nameof(Families))]
     public void Each_bundled_family_offers_its_weights_from_the_apps_own_files(string folder, string family, string stretch, int[] weights)
-        => RenderingTests.OnUi(() =>
+        => UiHarness.OnUi(() =>
         {
             var fonts = Bundled(folder, family);
             var faces = fonts.GetTypefaces()
@@ -76,7 +76,7 @@ public class FontTests
     [InlineData("Font.Ui2", "/Fonts/Manrope/#Manrope", "Normal")]
     [InlineData("Font.Numbers2", "/Fonts/JetBrainsMono/#JetBrains Mono", "Normal")]
     public void Styles_keys_name_a_bundled_folder_and_family(string key, string first, string stretch)
-        => RenderingTests.OnUi(() =>
+        => UiHarness.OnUi(() =>
         {
             var fonts = (FontFamily)Application.Current.FindResource(key);
             fonts.Source.Split(',')[0].Trim().ShouldBe(first);
@@ -104,7 +104,7 @@ public class FontTests
     [InlineData("JetBrainsMono", "JetBrains Mono", "Cascadia Mono")]
     [InlineData("MartianMono", "Martian Mono", "Cascadia Mono")]
     public void Text_set_in_a_bundled_face_measures_by_its_own_advances(string folder, string family, string windows)
-        => RenderingTests.OnUi(() =>
+        => UiHarness.OnUi(() =>
         {
             var face = Face(Bundled(folder, family));
             face.TryGetGlyphTypeface(out var glyphs).ShouldBeTrue(family);

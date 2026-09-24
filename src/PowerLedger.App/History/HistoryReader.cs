@@ -20,6 +20,10 @@ internal interface IHistory
 {
     /// <summary>Null when the database cannot be read, as while the service is stopped.</summary>
     HistorySnapshot? Read(DateTimeOffset now, TimeZoneInfo zone);
+
+    /// <summary>The start of the oldest row, where the history begins, for the Dashboard's All range (Midnight look
+    /// design §4); null with no rows, or when the database cannot be read.</summary>
+    DateTimeOffset? FirstRow();
 }
 
 /// <summary>The App's read-only view of the service's database (spec §3: the App never writes it).</summary>
@@ -79,11 +83,15 @@ internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeH
         }
     }
 
-    public DateOnly? FirstDay(TimeZoneInfo zone)
+    public DateOnly? FirstDay(TimeZoneInfo zone) => FirstRow() is { } first ? Ranges.LocalDay(first, zone) : null;
+
+    /// <summary>The oldest minute row's start. Minute rows are kept for years (spec §7), so the oldest is where the
+    /// history begins, as the monthly reports take it.</summary>
+    public DateTimeOffset? FirstRow()
     {
         try
         {
-            return new AggregateRepository(database).FirstMinuteStart() is { } first ? Ranges.LocalDay(first, zone) : null;
+            return new AggregateRepository(database).FirstMinuteStart();
         }
         catch (SqliteException)
         {

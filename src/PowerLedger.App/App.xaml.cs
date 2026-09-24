@@ -35,8 +35,9 @@ public partial class App : Application
     private BrightnessReporter? _brightness;
     private Updater? _updates;
     private ShellViewModel? _shell;
+    private DashboardViewModel? _dashboard;
     private TrayIcon? _tray;
-    private MainWindow? _window;
+    private LookSwitcher? _looks;
     private AddPcWindow? _addPcWindow;
     private ApprovePromptWindow? _approvePromptWindow;
     private DateTimeOffset? _approvePromptClosedAt;
@@ -51,6 +52,10 @@ public partial class App : Application
     /// promptId, so a pushed <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others
     /// untouched.</summary>
     private readonly Dictionary<string, Window> _openPrompts = new();
+
+    /// <summary>The modeless windows the shell window owns (Add a PC, Send feedback, What's been sent, a payload), so a
+    /// look switch can hand them to the new window before the old one closes and takes its owned windows with it.</summary>
+    private readonly List<Window> _owned = new();
     private UiThreads? _threads;
     private CultureInfo? _culture;
     private string? _sentFolder;
@@ -81,7 +86,7 @@ public partial class App : Application
         var version = Version();
         AppLog.Write($"PowerLedger {version} starting.");
         new CrashCatcher(CrashFolder, version, ScrubNames.Here()).Hook(this);   // data-sharing design §5: as early as the App can catch itself
-        _theme = new ThemeManager(this, preferences.Theme);
+        _theme = new ThemeManager(this, preferences.Theme, preferences.Look);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
         IServerCheck check = options.PipeName == PipeProtocol.PipeName ? InstalledServiceCheck.FromServiceManager() : new TrustAnyServer();
         _link = new PipeServiceLink(options.PipeName, new LastInputIdleSource(), TimeProvider.System, check);
@@ -99,7 +104,7 @@ public partial class App : Application
         _report = new ReportViewModel(
             _link, history, householdHistory, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
         var autostart = new StartWithWindows(Environment.ProcessPath!);
-        _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
+        _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart, look => _looks?.Switch(look));
         _preferences.ApplyFirstRunDefaults();
         _preferences.EnsureFirstRunAt();   // data-sharing design §3: backfills an install from before this field existed
         var signIn = new SignIn(() => new HttpLoopbackServer(), OpenPage, new HttpClient(), TimeProvider.System);
@@ -128,8 +133,10 @@ public partial class App : Application
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
-        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates);
+        _dashboard = new DashboardViewModel(_now, history, history, TimeProvider.System, zone, culture, threads);
+        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard);
         _shell.FeedbackRequested += OpenFeedbackWindow;
+        _looks = new LookSwitcher(OpenWindow, _theme, Retarget, line => AppLog.Write(line));
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
         _settings.PropertyChanged += OnSettingsChanged;
@@ -185,6 +192,7 @@ public partial class App : Application
         _usage?.CountPage(_shell.Page switch
         {
             Page.Now => "now",
+            Page.Dashboard => "dashboard",
             Page.Breakdown => "breakdown",
             Page.Report => "report",
             Page.Household => "household",
@@ -199,6 +207,7 @@ public partial class App : Application
         var name = e.PropertyName switch
         {
             nameof(SettingsViewModel.Theme) => "theme",
+            nameof(SettingsViewModel.Look) => "look",
             nameof(SettingsViewModel.StartWithWindows) => "startWithWindows",
             nameof(SettingsViewModel.ReadMonitorBrightness) => "readMonitorBrightness",
             _ => null,
@@ -235,38 +244,67 @@ public partial class App : Application
         if (_exiting || _shell is null) return;
         _usage?.CountAppOpen();   // data-sharing design §3: every time the main window is shown
         if (_preferences is { Current.FirstRunDone: false } && !_shell.IsSetup) _shell.BeginSetup();   // spec §9: the first window is the wizard
-        if (_window is null)
-        {
-            _window = new MainWindow { DataContext = _shell };
-            _window.Closing += (_, args) =>
-            {
-                if (_exiting) return;
-                args.Cancel = true;      // closing hides to the tray; the service keeps logging either way
-                _window.Hide();
-            };
-        }
-        _window.Show();
-        if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
-        _window.Activate();
+        if (_looks is null) return;
+        var window = _looks.Current;   // opened in the saved look the first time
+        window.Show();
+        if (window.State == WindowState.Minimized) window.State = WindowState.Normal;
+        window.Window.Activate();
         // spec §2: an existing install is asked the first time the main window opens; a new install waits for the wizard.
         if (_preferences is { Current.FirstRunDone: true }) _consentGate?.CheckOnce();
+    }
+
+    /// <summary>A shell window in <paramref name="look"/> over the one shell (Midnight look design §2). Closing it hides
+    /// it to the tray while it is the current one; the service keeps logging either way. On exit, and once a switch has
+    /// moved on to another window, a close is a close.</summary>
+    private IShellWindow OpenWindow(Look look)
+    {
+        IShellWindow window = look == Look.Midnight
+            ? new MidnightWindow(_shell!, _looks!, _theme!, _updates!, OpenFeedbackWindow)
+            : new MainWindow { DataContext = _shell };
+        window.Window.Closing += (_, args) =>
+        {
+            if (_exiting || _looks?.IsOpen != true || _looks.Current != window) return;
+            args.Cancel = true;
+            window.Window.Hide();
+        };
+        return window;
+    }
+
+    /// <summary>A switch has a new window: the modeless windows the old one owned go to it, before the old one closes and
+    /// would take them with it.</summary>
+    private void Retarget(IShellWindow window)
+    {
+        foreach (var owned in _owned) owned.Owner = window.Window;
+    }
+
+    /// <summary>The shell window, as the dialogs' owner; none until it has opened, since an owner must have shown.</summary>
+    private Window? ShellWindow => _looks is { IsOpen: true } looks ? looks.Current.Window : null;
+
+    /// <summary>Owns <paramref name="window"/> by the shell window for as long as it stays open, so a look switch can
+    /// hand it on; then shows it.</summary>
+    private void ShowOwned(Window window)
+    {
+        window.Owner = ShellWindow;
+        _owned.Add(window);
+        window.Closed += (_, _) => _owned.Remove(window);
+        window.Show();
     }
 
     /// <summary>Opens the consent dialog, modal and owned by the main window (data-sharing design §2, owner's round: one
     /// screen, two choices — the status that triggered it no longer has anything left to show).</summary>
     private void OpenConsentDialog(Consent current)
     {
-        if (_window is null || _link is null || _threads is null) return;
+        if (ShellWindow is not { } owner || _link is null || _threads is null) return;
         var model = new ConsentViewModel(_link, _threads, OpenPage);
         model.Applied += consent => _usage?.ConsentChanged(consent);   // data-sharing design §3: known to usage counting at once
-        new ConsentDialog(model) { Owner = _window }.ShowDialog();
+        new ConsentDialog(model) { Owner = owner }.ShowDialog();
     }
 
     /// <summary>Opens one payload file, owned by the main window: each row of "What's been sent".</summary>
     private void OpenPayload(string path)
     {
-        if (_window is null) return;
-        new PayloadWindow(path) { Owner = _window }.Show();
+        if (ShellWindow is null) return;
+        ShowOwned(new PayloadWindow(path));
     }
 
     /// <summary>Add a PC from the Household page (households design §2), modeless and owned by the main window. Review
@@ -278,10 +316,10 @@ public partial class App : Application
             _addPcWindow.Activate();
             return;
         }
-        if (_window is null || _link is null || _threads is null) return;
-        _addPcWindow = new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window };
+        if (ShellWindow is null || _link is null || _threads is null) return;
+        _addPcWindow = new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System));
         _addPcWindow.Closed += (_, _) => _addPcWindow = null;
-        _addPcWindow.Show();
+        ShowOwned(_addPcWindow);
     }
 
     /// <summary>Send feedback, from the rail's bug button: modeless, owned by the main window, single-instance like Add a PC.</summary>
@@ -292,16 +330,16 @@ public partial class App : Application
             _feedbackWindow.Activate();
             return;
         }
-        if (_window is null || _feedbackSender is null || _threads is null) return;
+        if (ShellWindow is not { } owner || _feedbackSender is null || _threads is null) return;
         var model = new FeedbackViewModel(_feedbackSender, _threads, ReadFeedbackLog);
         model.Closed += message =>
         {
             _feedbackWindow?.Close();
             if (message is not null) _tray?.Notify("PowerLedger", message, null);
         };
-        _feedbackWindow = new SendFeedbackWindow(model, _window, new ImagePicker()) { Owner = _window };
+        _feedbackWindow = new SendFeedbackWindow(model, owner, new ImagePicker());
         _feedbackWindow.Closed += (_, _) => _feedbackWindow = null;
-        _feedbackWindow.Show();
+        ShowOwned(_feedbackWindow);
     }
 
     /// <summary>What's new, from the update card's own link: modeless, owned by the main window, single-instance like
@@ -313,12 +351,12 @@ public partial class App : Application
             _whatsNewWindow.Activate();
             return;
         }
-        if (_window is null || _updates is null) return;
+        if (ShellWindow is null || _updates is null) return;
         var model = new WhatsNewViewModel(_updates.WhatsNewTitle, _updates.WhatsNewPoints, _updates.OpenNotes);
         model.Closed += () => _whatsNewWindow?.Close();
-        _whatsNewWindow = new WhatsNewWindow(model) { Owner = _window };
+        _whatsNewWindow = new WhatsNewWindow(model);
         _whatsNewWindow.Closed += (_, _) => _whatsNewWindow = null;
-        _whatsNewWindow.Show();
+        ShowOwned(_whatsNewWindow);
     }
 
     /// <summary>The last 300 lines of the App's own log and, if it can be read, of the service's (Send feedback's
@@ -380,7 +418,7 @@ public partial class App : Application
     {
         if (_link is null || _threads is null) return;
         var model = new JoinPromptViewModel(_link, _threads, TimeProvider.System, notice);
-        var window = new JoinPromptWindow(model) { Owner = _window };
+        var window = new JoinPromptWindow(model) { Owner = ShellWindow };
         TrackPrompt(notice.PromptId, window);
         window.ShowDialog();
     }
@@ -397,7 +435,7 @@ public partial class App : Application
             || (_approvePromptClosedAt is { } closedAt && TimeProvider.System.GetUtcNow() - closedAt <= ApprovePromptRecentlyClosed);
         _approvePromptWindow?.Close();
         var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice, requestChanged);
-        var window = new ApprovePromptWindow(model) { Owner = _window };
+        var window = new ApprovePromptWindow(model) { Owner = ShellWindow };
         _approvePromptWindow = window;
         window.Closed += (_, _) =>
         {
@@ -417,7 +455,7 @@ public partial class App : Application
         if (_link is null || _threads is null) return;
         _confirmJoinWindow?.Close();
         var model = new ConfirmJoinViewModel(_link, _threads, TimeProvider.System, notice);
-        var window = new ConfirmJoinWindow(model) { Owner = _window };
+        var window = new ConfirmJoinWindow(model) { Owner = ShellWindow };
         _confirmJoinWindow = window;
         window.Closed += (_, _) =>
         {
@@ -442,7 +480,7 @@ public partial class App : Application
     {
         if (_link is null) return;
         var model = new RecoveryCodeViewModel(_link, notice, new FileSaver(), CopyToClipboard);
-        var window = new RecoveryCodeWindow(model) { Owner = _window };
+        var window = new RecoveryCodeWindow(model) { Owner = ShellWindow };
         TrackPrompt(notice.PromptId, window);
         window.ShowDialog();
     }
@@ -450,9 +488,9 @@ public partial class App : Application
     /// <summary>"What's been sent…" in Settings → Privacy (data-sharing design §2).</summary>
     private void OpenSentWindow()
     {
-        if (_window is null || _link is null || _threads is null || _culture is null || _sentFolder is null) return;
+        if (ShellWindow is null || _link is null || _threads is null || _culture is null || _sentFolder is null) return;
         var model = new SentViewModel(_link, _threads, _sentFolder, _culture, OpenPayload);
-        new SentWindow(model) { Owner = _window }.Show();
+        ShowOwned(new SentWindow(model));
     }
 
     /// <summary>Windows is signing out or shutting down: let the window close instead of hiding it.</summary>
@@ -496,7 +534,7 @@ public partial class App : Application
             _feedbackRetryTimer?.Dispose();
             _feedbackWindow?.Close();
             _whatsNewWindow?.Close();
-            _window?.Close();
+            if (_looks is { IsOpen: true }) _looks.Current.CloseForSwitch();   // for good, shown or hidden
             _tray?.Dispose();
             if (_now is not null)
             {
@@ -511,6 +549,7 @@ public partial class App : Application
                 _settings.Tariff.Saved -= CountTariffChanged;
                 _settings.Service.Saved -= CountMachineChanged;
             }
+            _dashboard?.Dispose();
             _breakdown?.Dispose();
             _report?.Dispose();
             _household?.Dispose();
