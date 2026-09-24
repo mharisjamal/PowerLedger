@@ -914,4 +914,25 @@ service's classes.
 
 ## Results
 
-Filled in after the release.
+Released as **v0.7.0** on 2026-09-24: https://github.com/mharisjamal/PowerLedger/releases/tag/v0.7.0 (main merge 80f4d8a).
+
+- **Built by three agents in parallel** (Worker, service, App) against the Task 0 contract, then four review rounds:
+  the whole-branch review (35 findings, plan 0.8), the security re-review by three reviewers (plan 0.9: committed
+  nonces in both codes, epochs), round 5 (plan 0.10: the server's list plus introductions decide membership, pinned
+  approvals shown before the reveal, retry-safe recovery), and a focused round on the approval-answer binding. Every
+  finding was fixed test-first and re-checked; the last check found no way for the server alone to get the key.
+- **Also shipped:** the installer's real-build check (a compatibility mode made Inno refuse Windows 11), 32-bit
+  Windows, in-app feedback filed as issues in the owner's private repo, the one-screen consent (Allow all / Decline),
+  the in-app What's new, and the bundled fonts (Classic had rendered in Bahnschrift).
+- **Sign-in** is built and tested but off in this release: the providers hide until the owner's Microsoft and Google
+  client IDs are set (0.7.1).
+- **Tests:** Core 307, Storage 73, Sensors 576, Service 701 (incl. 4 Worker end-to-end), App 1053; Worker 288 + 7 tool
+  tests. Sandbox regression on the release installers 48/48 (1 skipped: no console session there), including the
+  0.6.0 → 0.7.0 upgrade and installs under Windows 7 and 8 compatibility modes. CI run on 7fcd10e green on x64, Arm64
+  and the x86 test step.
+- **Installers:** universal 144.3 MB, x64 58.1 MB, arm64 51.4 MB, x86 53.6 MB.
+- **Worker:** migrations 0003–0005 applied remotely; deployed with MEETING_LIMIT and FEEDBACK_REPO; smoke-tested live
+  (401/404/503/202 as designed; feedback issue #1 with an image and a multi-line log).
+- **Two flakes seen once under 100 % host load** (ServiceLinkTests' pipe connect wait, ScrubberTests' wall-clock
+  bound) are being root-caused on branch fix/servicelink-flake.
+- **Not done here:** the owner's real two-PC test, sign-in on, R2, the admin token.

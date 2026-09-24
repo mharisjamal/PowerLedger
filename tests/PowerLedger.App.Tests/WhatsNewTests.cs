@@ -45,6 +45,18 @@ public class WhatsNewTests
     }
 
     [Fact]
+    public void The_0_7_1_points_match_exactly()
+        => PointsOf("0.7.1").ShouldBe(
+        [
+            "Sign in with Google to add a PC to your household from anywhere: your other PC approves it after both show the same code.",
+            "A recovery code gets your household back if you ever lose every PC.",
+        ]);
+
+    [Fact]
+    public void Updating_from_0_7_0_shows_only_what_0_7_1_added()
+        => WhatsNew.Since("0.7.0", "0.7.1").ShouldBe(PointsOf("0.7.1"));
+
+    [Fact]
     public void The_0_7_0_points_match_exactly()
         => PointsOf("0.7.0").ShouldBe(
         [
