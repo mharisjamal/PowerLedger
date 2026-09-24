@@ -107,7 +107,7 @@ public class MidnightPageRenderingTests
                 AllOf<RadioButton>(view).Where(p => p.IsVisible).Select(p => p.Content)   // the Report keeps Classic's six ranges
                     .ShouldBe(["Today", "7 days", "30 days", "This month", "Last month", "Custom"], ignoreOrder: true, theme.ToString());
                 Find<CheckBox>(view, c => Equals(c.Content, "Include my household")).ShouldNotBeNull(theme.ToString()).Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
-                foreach (var title in new[] { "BILL", "TIME", "BY COMPONENT", "EVERYDAY EQUIVALENTS", "IDLE WASTE", "DATA QUALITY", "DAILY ENERGY" })
+                foreach (var title in new[] { "Bill", "Time", "By component", "Everyday equivalents", "Idle waste", "Data quality", "Daily energy" })
                 {
                     Find<TextBlock>(view, t => t.Text == title).ShouldNotBeNull($"{title} on {theme}").IsVisible.ShouldBeTrue($"{title} on {theme}");
                 }
@@ -138,11 +138,11 @@ public class MidnightPageRenderingTests
                 model.Show();
                 var view = new Midnight.HouseholdView { DataContext = model };
                 using var page = Page(view, 1010);
-                foreach (var title in new[] { "TODAY", "THIS WEEK", "THIS MONTH", "Your PCs", "MANAGE THIS HOUSEHOLD", "SIGN IN" })
+                foreach (var title in new[] { "Today", "This week", "This month", "Your PCs", "Manage this household", "Sign in" })
                 {
                     Find<TextBlock>(view, t => t.Text == title).ShouldNotBeNull($"{title} on {theme}").IsVisible.ShouldBeTrue($"{title} on {theme}");
                 }
-                Find<TextBlock>(view, t => t.Text == "HOUSEHOLD").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeFalse($"the explainer on {theme}");
+                Find<TextBlock>(view, t => t.Text == "Household").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeFalse($"the explainer on {theme}");
                 Find<TextBlock>(view, t => t.Text == "46.8").ShouldNotBeNull($"this month's energy on {theme}");
 
                 // A row per PC: this one with no Remove, each with its bar as long as its share of the month.
@@ -187,7 +187,7 @@ public class MidnightPageRenderingTests
                     var add = AllOf<Button>(explainer).Where(b => Equals(b.Content, "Add a PC") && b.IsVisible).ToList();
                     add.Count.ShouldBe(1, theme.ToString());
                     add[0].Style.ShouldBe(explainer.FindResource("M.Button.Primary"), theme.ToString());
-                    Find<TextBlock>(explainer, t => t.Text == "SIGN IN").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
+                    Find<TextBlock>(explainer, t => t.Text == "Sign in").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
                     page.Render($"midnight-household-none-{theme}.png");
                 }
 
@@ -226,7 +226,7 @@ public class MidnightPageRenderingTests
                 model.Service.Message.ShouldBe("Saved.");
                 var view = new Midnight.SettingsView { DataContext = model };
                 using var page = Page(view, 1010);
-                foreach (var title in new[] { "TARIFF", "MACHINE", "SAMPLING AND HISTORY", "CALIBRATION", "PREFERENCES", "PRIVACY", "HOUSEHOLD", "ABOUT" })
+                foreach (var title in new[] { "Tariff", "Machine", "Sampling and history", "Calibration", "Preferences", "Privacy", "Household", "About" })
                 {
                     var eyebrow = Find<TextBlock>(view, t => t.Text == title).ShouldNotBeNull($"{title} on {theme}");
                     eyebrow.IsVisible.ShouldBeTrue($"{title} on {theme}");

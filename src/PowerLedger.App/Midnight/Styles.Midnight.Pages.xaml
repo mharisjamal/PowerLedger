@@ -16,8 +16,9 @@
     <Thickness x:Key="M.Card.Gap">0,16,0,0</Thickness>
     <sys:Double x:Key="M.ShareTrack.Width" xmlns:sys="clr-namespace:System;assembly=System.Runtime">120</sys:Double>
 
-    <!-- A card's title: the eyebrow with room under it. -->
-    <Style x:Key="M.Card.Title" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Eyebrow}">
+    <!-- A card's title: a small heading in sentence case with room under it, as the Dashboard's sections have theirs. -->
+    <Style x:Key="M.Card.Title" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Heading}">
+        <Setter Property="FontSize" Value="14" />
         <Setter Property="Margin" Value="0,0,0,12" />
     </Style>
 
@@ -92,6 +93,10 @@
                             <Setter TargetName="Note" Property="Margin" Value="8,0,0,6" />
                         </Trigger>
                         <Trigger Property="Note" Value="">
+                            <Setter TargetName="Note" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <!-- No value, no unit: "N/A", not "N/A kWh". -->
+                        <Trigger Property="Value" Value="{x:Static app:Format.Missing}">
                             <Setter TargetName="Note" Property="Visibility" Value="Collapsed" />
                         </Trigger>
                     </ControlTemplate.Triggers>

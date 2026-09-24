@@ -30,8 +30,7 @@
             <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
                 <StackPanel>
                     <DockPanel>
-                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Eyebrow}" VerticalAlignment="Center"
-                                   Text="{Binding UnitLabel, Converter={StaticResource Upper}}" />
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Column}" VerticalAlignment="Center" Text="{Binding UnitLabel}" />
                         <TextBlock Style="{StaticResource M.Text.Heading}" Text="{Binding Heading}" TextTrimming="CharacterEllipsis" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,8,0,0" Text="{Binding Message}"
@@ -66,9 +65,9 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="64" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="COMPONENT" />
-                            <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" HorizontalAlignment="Right" />
-                            <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Margin="24,0,0,0" Width="{StaticResource M.ShareTrack.Width}" />
+                            <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Column}" Text="Component" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Column}" Text="kWh" HorizontalAlignment="Right" />
+                            <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Column}" Text="Share" Margin="24,0,0,0" Width="{StaticResource M.ShareTrack.Width}" />
                         </Grid>
                     </Border>
                     <ItemsControl ItemsSource="{Binding Parts}" Focusable="False">

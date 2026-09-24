@@ -49,8 +49,11 @@ public class MidnightRenderingTests
                     UiTree.Descendants<TrendMark>(view).Where(mark => mark.Kind is TrendKind.Up or TrendKind.Down)
                         .ShouldAllBe(mark => mark.LowerIsBetter, "every trend on the page is of energy, where less is better");
                     UiTree.Descendants<TrendMark>(CardNamed(view, "Today")).Single().Sense.ShouldBe(TrendSense.Bad, "today runs above the average day");
-                    UiTree.Descendants<Border>(view).ShouldNotContain(border => border.Style == window.Resources["M.Glass"], "glass stays on the top bar and tooltips");
-                    UiTree.Descendants<Card>(view).Count().ShouldBe(5, "three KPI cards, the chart's and the table's, each painting its own shadow");
+                    // 0.8.1, after the reference: two framed sections, the KPIs and the chart in one and the table in the other, flat.
+                    UiTree.Descendants<Border>(view).Count(border => border.Style == window.Resources["M.Card"]).ShouldBe(2, "the overview and the table");
+                    UiTree.Descendants<Border>(view).ShouldAllBe(border => border.Effect == null, "no shadow under a section");
+                    UiHarness.Find<TextBlock>(view, text => text.Text == "Energy used").ShouldNotBeNull("a KPI's name in sentence case");
+                    UiHarness.Find<TextBlock>(view, text => text.Text == "This month").ShouldNotBeNull("and the time it covers in its tag");
                     // No Effect over a card's text or the chart: text keeps ClearType, and the crosshair redraws the chart alone.
                     foreach (var element in UiTree.Descendants<TextBlock>(view).Cast<DependencyObject>().Append(UiHarness.Find<AreaChart>(view)!))
                     {
@@ -165,7 +168,7 @@ public class MidnightRenderingTests
     }
 
     [Fact]
-    public void The_chart_tooltip_opens_at_the_middle_point_in_the_glass_and_the_cards_stand_three_across()
+    public void The_chart_tooltip_opens_at_the_middle_point_in_its_bubble_and_the_kpis_stand_three_across()
     {
         Directory.CreateDirectory(UiHarness.Folder);
         UiHarness.OnUi(() =>
@@ -187,8 +190,8 @@ public class MidnightRenderingTests
                 UiHarness.Pump(TimeSpan.FromMilliseconds(300));
                 chart.Tip.ShouldNotBeNull();
                 chart.Tip.IsOpen.ShouldBeTrue();
-                chart.Tip.Content.ShouldBeOfType<string>().ShouldMatch(@"^12:00 · \d+ W$", "the time as the axis writes it");
-                UiHarness.Find<Border>(chart.Tip, border => border.Style == window.Resources["M.Glass"]).ShouldNotBeNull("the tooltip wears the glass");
+                chart.TipText.ShouldMatch(@"^12:00 Power: \d+ W$", "the time as the axis writes it, over the figure named");
+                UiHarness.Find<Border>(chart.Tip, border => border.Name == "Bubble").ShouldNotBeNull("the tooltip is a solid bubble");
                 WithTip(window, chart, "midnight-dashboard-hover-Dark.png");
                 UiHarness.Render(chart.Tip, (int)Math.Ceiling(chart.Tip.ActualWidth), (int)Math.Ceiling(chart.Tip.ActualHeight), "midnight-dashboard-tooltip-Dark.png");
                 chart.Hover(-1);
@@ -710,8 +713,7 @@ public class MidnightRenderingTests
 
     /// <summary>
     /// The window with the chart's tooltip laid where it opens over the chart: a popup is a window of its own, which a render
-    /// of the main one leaves out. The popup of a window far off screen lands on a screen, so its frosted backdrop, a
-    /// snapshot of what lies under it there, is empty and the glass shows its fill alone.
+    /// of the main one leaves out.
     /// </summary>
     private static void WithTip(MidnightWindow window, AreaChart chart, string name)
     {

@@ -95,8 +95,8 @@ internal partial class MidnightWindow : Window, IShellWindow
 
     public Window Window => this;
 
-    /// <summary>The pill behind the current sidebar item, for a test to check where it sits.</summary>
-    internal Border Pill => NavPill;
+    /// <summary>The row behind the current sidebar item (the pill of 0.8.0, a full-width glow since 0.8.1), for a test to check where it sits.</summary>
+    internal NavGlow Pill => NavPill;
 
     /// <summary>How long a failed switch's banner stays unless dismissed.</summary>
     internal TimeSpan ProblemShownFor { get; set; } = TimeSpan.FromSeconds(8);

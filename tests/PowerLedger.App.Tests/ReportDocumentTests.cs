@@ -34,6 +34,16 @@ public class ReportDocumentTests
         ReportDocument.Generate(data, "0.1.0", Now, hindi).Length.ShouldBeGreaterThan(1_000);
     }
 
+    /// <summary>An empty report reads "N/A", not "N/A kWh" or "N/A W while on": no unit after a value that isn't there.</summary>
+    [Fact]
+    public void A_missing_value_goes_without_its_unit()
+    {
+        ReportDocument.WithUnit(Format.Missing, "kWh").ShouldBe("N/A");
+        ReportDocument.WithUnit("1.24", "kWh").ShouldBe("1.24 kWh");
+        ReportDocument.UnitAfter(Format.Missing, "kWh").ShouldBe("");
+        ReportDocument.UnitAfter("1.24", "kWh").ShouldBe(" kWh");
+    }
+
     [Fact]
     public void A_year_of_bars_fits()
     {
