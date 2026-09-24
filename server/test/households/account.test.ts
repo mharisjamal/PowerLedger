@@ -43,7 +43,7 @@ async function proofFor(verifier: Uint8Array, deviceId: string): Promise<string>
 async function linkedHousehold(): Promise<{ hid: string; owner: SignedIn }> {
   const owner = await signIn();
   const hid = await createHousehold(owner.device);
-  const linked = await asAccount(owner, "POST", "/v1/account/household", {});
+  const linked = await asAccount(owner, "POST", "/v1/account/household", { householdId: hid });
   expect(linked.status).toBe(200);
   return { hid, owner };
 }
@@ -80,21 +80,24 @@ describe("POST /v1/account/household", () => {
     expect(await again.json()).toEqual({ ok: true, householdId: hid });
   });
 
-  it("refuses a PC in no household, and a household the PC isn't in", async () => {
-    const lonely = await signIn();
-    expect((await asAccount(lonely, "POST", "/v1/account/household", {})).status).toBe(409);
+  it("needs householdId, naming a household the PC is a current member of", async () => {
+    const member = await signIn();
+    const hid = await createHousehold(member.device);
+    expect((await asAccount(member, "POST", "/v1/account/household", {})).status).toBe(400);
+    expect((await asAccount(member, "POST", "/v1/account/household", { household: hid })).status).toBe(400);
+    expect((await asAccount(member, "POST", "/v1/account/household", { householdId: "not-an-id" })).status).toBe(400);
 
     const elsewhere = await createHousehold(await newDevice());
-    expect((await asAccount(lonely, "POST", "/v1/account/household", { householdId: elsewhere })).status).toBe(403);
-    expect((await asAccount(lonely, "POST", "/v1/account/household", { householdId: "not-an-id" })).status).toBe(400);
+    expect((await asAccount(member, "POST", "/v1/account/household", { householdId: elsewhere })).status).toBe(403);
+    expect(await env.DB.prepare("SELECT 1 FROM account_households WHERE account = ?").bind(member.account).first()).toBeNull();
   });
 
   it("gives 409 when the account is already linked to another household", async () => {
     const { owner } = await linkedHousehold();
     const other = await signIn(undefined, owner.account);
-    await createHousehold(other.device);
+    const otherHid = await createHousehold(other.device);
 
-    expect((await asAccount(other, "POST", "/v1/account/household", {})).status).toBe(409);
+    expect((await asAccount(other, "POST", "/v1/account/household", { householdId: otherHid })).status).toBe(409);
   });
 });
 

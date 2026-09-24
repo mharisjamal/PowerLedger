@@ -25,28 +25,14 @@ async function isCurrentMember(env: Cloudflare.Env, household: string, device: s
   return row !== null;
 }
 
-/** POST /v1/account/household: links the account to the household this PC is in, or the one {"householdId"} names. An
- * account links to one household; linking it again to the same one is done. */
+/** POST /v1/account/household: {"householdId"}, which this PC must be a current member of, links the account to that
+ * household. An account links to one household; linking it again to the same one is done. */
 export async function handleLink(env: Cloudflare.Env, session: SessionRow, body: Uint8Array): Promise<Response> {
-  const posted = body.byteLength === 0 ? {} : parseObject(body);
-  if (!posted) return errorResponse(400, "The body must be a JSON object.");
-
-  let household: string;
-  const named = posted.householdId ?? posted.household;
-  if (named !== undefined) {
-    if (typeof named !== "string" || !HOUSEHOLD_ID.test(named)) {
-      return errorResponse(400, "householdId must be 32 lower-case hex characters.");
-    }
-    if (!(await isCurrentMember(env, named, session.device))) return errorResponse(403, "This PC isn't a member of that household.");
-    household = named;
-  } else {
-    const rows = await env.DB.prepare("SELECT household FROM members WHERE device = ? AND removed IS NULL")
-      .bind(session.device)
-      .all<{ household: string }>();
-    if (rows.results.length === 0) return errorResponse(409, "This PC isn't in a household yet.");
-    if (rows.results.length > 1) return errorResponse(400, "This PC is in more than one household: say which, as householdId.");
-    household = rows.results[0].household;
+  const household = parseObject(body)?.householdId;
+  if (typeof household !== "string" || !HOUSEHOLD_ID.test(household)) {
+    return errorResponse(400, "householdId must be 32 lower-case hex characters.");
   }
+  if (!(await isCurrentMember(env, household, session.device))) return errorResponse(403, "This PC isn't a member of that household.");
 
   await env.DB.prepare("INSERT INTO account_households (account, household, linked) VALUES (?, ?, ?) ON CONFLICT DO NOTHING")
     .bind(session.account, household, Date.now())
