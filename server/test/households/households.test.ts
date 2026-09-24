@@ -362,6 +362,25 @@ describe("the household's keys", () => {
     expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, { epoch: 2, envelopes: [keys.envelopes[0]] })).status).toBe(409);
   });
 
+  it("takes the identical re-post as done even after the members changed, or another member sealed a key at that epoch", async () => {
+    const first = await newDevice();
+    const second = await newDevice();
+    const third = await newDevice();
+    const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    const keys = { epoch: 2, envelopes: [{ device: first.id, body: envelope() }, { device: second.id, body: envelope() }] };
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
+
+    // Before first re-posts the same bytes: second adds third with a key sealed at epoch 2, then leaves.
+    await addMember(hid, second, third);
+    await env.DB.prepare("INSERT INTO key_envelopes (household, epoch, device, from_device, body, created) VALUES (?, 2, ?, ?, ?, 1)")
+      .bind(hid, third.id, second.id, envelope())
+      .run();
+    await signedFetch(second, "DELETE", `/v1/households/${hid}/members/${second.id}`);
+
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
+  });
+
   it("refuses envelopes for PCs that aren't current members, and malformed ones", async () => {
     const first = await newDevice();
     const second = await newDevice();

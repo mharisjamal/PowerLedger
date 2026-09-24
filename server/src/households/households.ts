@@ -277,6 +277,11 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     return errorResponse(400, `envelopes must be 1 to ${MAX_MEMBERS} of {"device","body"}, one per PC.`);
   }
 
+  // A re-post of the very bytes this PC's rotation to the current epoch was taken with is done, whatever has changed
+  // since (a member removed, another's key sealed at that epoch): its first answer was lost, and the rotation stands.
+  const at = await currentEpoch(env, member.household);
+  if (at !== null && epoch === at && (await isSameKeys(env, member, epoch, envelopes))) return ok();
+
   const current = await env.DB.prepare("SELECT device FROM members WHERE household = ? AND removed IS NULL")
     .bind(member.household)
     .all<{ device: string }>();
@@ -285,8 +290,6 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     return errorResponse(400, "Every envelope must be for a current member.");
   }
 
-  const at = await currentEpoch(env, member.household);
-  if (at !== null && epoch === at && (await isSameKeys(env, member, epoch, envelopes))) return ok();
   if (at === null || epoch !== at + 1) {
     return errorResponse(409, `The household's key is at epoch ${at}; new keys are for epoch ${(at ?? 0) + 1} only.`);
   }
@@ -313,18 +316,17 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
   return ok();
 }
 
-/** True when the epoch already holds exactly these envelopes, all sealed by this PC: a retry of a post whose answer was
- * lost, so the PC doesn't make a new key for nothing. */
+/** True when this PC's envelopes at the epoch are exactly these, byte for byte: a retry of a post whose answer was lost,
+ * so the PC doesn't make a new key for nothing. Envelopes other members sealed there since (approvals) don't count. */
 async function isSameKeys(env: Cloudflare.Env, member: MemberRow, epoch: number, envelopes: Envelope[]): Promise<boolean> {
-  const stored = await env.DB.prepare("SELECT device, from_device, body FROM key_envelopes WHERE household = ? AND epoch = ?")
-    .bind(member.household, epoch)
-    .all<{ device: string; from_device: string; body: string }>();
+  const stored = await env.DB.prepare(
+    "SELECT device, body FROM key_envelopes WHERE household = ? AND epoch = ? AND from_device = ?",
+  )
+    .bind(member.household, epoch, member.device)
+    .all<{ device: string; body: string }>();
   if (stored.results.length !== envelopes.length) return false;
-  const byDevice = new Map(stored.results.map((row) => [row.device, row]));
-  return envelopes.every((item) => {
-    const row = byDevice.get(item.device);
-    return row !== undefined && row.from_device === member.device && row.body === item.body;
-  });
+  const byDevice = new Map(stored.results.map((row) => [row.device, row.body]));
+  return envelopes.every((item) => byDevice.get(item.device) === item.body);
 }
 
 /** GET /v1/households/{hid}/keys/{epoch}: the caller's own envelope, and who sealed it. */
