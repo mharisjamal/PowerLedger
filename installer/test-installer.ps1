@@ -65,6 +65,7 @@ $UninstallKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{8E49
 $Shortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\PowerLedger.lnk'
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $EventSourceKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\PowerLedger'
+$FirewallRule = 'PowerLedger households'        # households design §3: the other PCs reach the service's listener
 $PipeScript = Join-Path $root 'scripts\pipe-status.ps1'
 $Silent = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
 $SetupProcess = 'PowerLedger-*-setup*'          # the installer and the setup.tmp it runs, which owns the wizard
@@ -218,6 +219,21 @@ function Get-RunValue { (Get-ItemProperty $RunKey -ErrorAction SilentlyContinue)
 function Get-ServiceLog { Get-ChildItem (Join-Path $DataDir 'logs') -Filter 'service-*.log' -File -ErrorAction SilentlyContinue }
 
 function Get-SetAside { Get-ChildItem $DataDir -File -ErrorAction SilentlyContinue | Where-Object Name -match '^power\.(untrusted|corrupt)-' }
+
+# The households firewall rules, by the name the installer gives them: one while PowerLedger is installed, none after.
+function Get-FirewallRules { @(Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue) }
+
+# The one households rule as the installer adds it: inbound TCP allowed to the service's program, on Private networks only.
+function Test-FirewallRule {
+    $rules = Get-FirewallRules
+    if ($rules.Count -ne 1) { throw "$($rules.Count) rules named '$FirewallRule'." }
+    $rule = $rules[0]
+    $program = ($rule | Get-NetFirewallApplicationFilter).Program
+    $protocol = ($rule | Get-NetFirewallPortFilter).Protocol
+    Assert ("$($rule.Direction)" -eq 'Inbound' -and "$($rule.Action)" -eq 'Allow' -and "$($rule.Profile)" -eq 'Private' -and
+        "$($rule.Enabled)" -eq 'True' -and $program -eq $ServiceExe -and $protocol -eq 'TCP') `
+        "$($rule.Direction) $($rule.Action), profile $($rule.Profile), enabled $($rule.Enabled), $program, $protocol"
+}
 
 # The machine a program is built for, from its PE header: 0x8664 for x64, 0xAA64 for Arm64.
 function Get-PeMachine([string]$Path) {
@@ -494,6 +510,7 @@ function Step-Preflight {
     Check Preflight 'no uninstall entry' { Assert (-not (Test-Path $UninstallKey)) (Get-Presence $UninstallKey) }
     Check Preflight 'no program folder' { Assert (-not (Test-Path $AppDir)) (Get-Presence $AppDir) }
     Check Preflight 'no data folder' { Assert (-not (Test-Path $DataDir)) (Get-Presence $DataDir) }
+    Check Preflight 'no households firewall rule' { $count = (Get-FirewallRules).Count; Assert ($count -eq 0) "$count rules named '$FirewallRule'" }
     if (Test-Path $DataDir) {
         Write-Host "  $DataDir may hold somebody's history, so the run stops here. Move it away and run again." -ForegroundColor Red
         $script:StopRun = $true
@@ -543,6 +560,7 @@ function Step-Service {
         Assert ($service.StartMode -eq 'Auto' -and $service.StartName -eq 'LocalSystem') "$($service.StartMode), $($service.StartName)"
     }
     Check Service 'has a description' { Assert $service.Description "'$($service.Description)'" }
+    Check Service 'households firewall rule: inbound TCP to the service, Private networks only' { Test-FirewallRule }
     Check Service 'running within 30 s' { Assert (Wait-ServiceRunning 30) (Get-ServiceState) }
     Check Service 'restarts three times, 5 s apart, counted over a day' {
         $failure = (& sc.exe qfailure $ServiceName) -join "`n"
@@ -641,6 +659,7 @@ function Step-Upgrade {
         Assert ($shown -eq (Get-SetupVersion $Upgrade)) "DisplayVersion $shown"
     }
     Check Upgrade 'service running' { Assert (Wait-ServiceRunning 30) (Get-ServiceState) }
+    Check Upgrade 'households firewall rule replaced, not doubled' { Test-FirewallRule }
     Confirm-HistoryKept Upgrade $before
 }
 
@@ -657,6 +676,7 @@ function Step-UninstallKeep {
     Check UninstallKeep 'uninstall entry removed' { Assert (-not (Test-Path $UninstallKey)) (Get-Presence $UninstallKey) }
     Check UninstallKeep 'start-with-Windows entry removed' { $value = Get-RunValue; Assert ($null -eq $value) "Run\PowerLedger: $($value ?? 'absent')" }
     Check UninstallKeep 'event log source removed' { Assert (-not (Test-Path $EventSourceKey)) (Get-Presence $EventSourceKey) }
+    Check UninstallKeep 'households firewall rule removed' { $count = (Get-FirewallRules).Count; Assert ($count -eq 0) "$count rules named '$FirewallRule'" }
     Check UninstallKeep 'history kept' { Assert (Test-Path $Database) (Get-Presence $Database) }
 }
 
@@ -697,6 +717,7 @@ function Step-UninstallDelete {
     Check UninstallDelete 'uninstaller finished' { $code = Wait-Exit $uninstaller 60; Wait-Uninstaller; Assert ($code -eq 0) "exit code $code" }
     Check UninstallDelete 'history deleted' { Assert (-not (Test-Path $DataDir)) (Get-Presence $DataDir) }
     Check UninstallDelete 'service removed' { Assert (Wait-Until { (Get-ScQueryCode) -eq 1060 } -Seconds 30) "sc.exe query: exit code $(Get-ScQueryCode)" }
+    Check UninstallDelete 'households firewall rule removed' { $count = (Get-FirewallRules).Count; Assert ($count -eq 0) "$count rules named '$FirewallRule'" }
 }
 
 # The installer's wizard end to end, in a setup this run starts, as somebody new to PowerLedger would install it.
