@@ -1,0 +1,101 @@
+using System.Windows;
+using System.Windows.Media;
+using Shouldly;
+
+namespace PowerLedger.App.Tests;
+
+/// <summary>
+/// Holds Midnight's two palettes to what the design promises (§3): text reads on every ground at 4.5:1, the marks (the
+/// accent, the trends, the parts, card borders and the focus ring) stand off the panel at 3:1, and a chip's text reads
+/// on its chip at 4.5:1; and to Classic's key set, so the shared dialogs find every brush they ask for in either look.
+/// The palettes load through the harness's application, which registers the pack scheme's loader.
+/// </summary>
+[Trait("Category", "UI")]
+public class ContrastTests
+{
+    private static readonly string[] Texts = ["M.Ink", "M.Ink2", "M.Ink3"];
+    private static readonly string[] Grounds = ["M.Ground", "M.Panel", "M.Raised"];
+    private static readonly string[] Marks = ["M.Accent", "M.Good", "M.Bad", "M.Warn", "M.PartCpu", "M.PartGpu", "M.PartDisplay", "M.PartRest", "M.LineStrong", "M.Focus"];
+    private static readonly string[] Chips = ["M.ChipMeasured", "M.ChipCalibrated", "M.ChipEstimated"];
+
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Text_reads_on_every_ground_at_four_and_a_half_to_one(string theme)
+    {
+        var palette = Midnight(Enum.Parse<Theme>(theme));
+        foreach (var text in Texts)
+        {
+            foreach (var ground in Grounds)
+            {
+                Contrast.Ratio(palette[text], palette[ground]).ShouldBeGreaterThanOrEqualTo(4.5, $"{text} on {ground}, {theme}");
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Marks_stand_off_the_panel_at_three_to_one(string theme)
+    {
+        var palette = Midnight(Enum.Parse<Theme>(theme));
+        foreach (var mark in Marks)
+        {
+            Contrast.Ratio(palette[mark], palette["M.Panel"]).ShouldBeGreaterThanOrEqualTo(3, $"{mark} on M.Panel, {theme}");
+        }
+    }
+
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void A_chips_text_reads_on_its_chip_at_four_and_a_half_to_one(string theme)
+    {
+        var palette = Midnight(Enum.Parse<Theme>(theme));
+        foreach (var chip in Chips)
+        {
+            Contrast.Ratio(palette[chip + "Text"], palette[chip]).ShouldBeGreaterThanOrEqualTo(4.5, $"{chip}, {theme}");
+        }
+    }
+
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Midnight_defines_every_key_classic_defines_and_all_as_solid_brushes(string theme)
+    {
+        var classic = Keys(Look.Classic, Enum.Parse<Theme>(theme));
+        var midnight = Keys(Look.Midnight, Enum.Parse<Theme>(theme));
+        classic.Keys.ShouldBeSubsetOf(midnight.Keys);
+        midnight.Values.ShouldAllBe(type => type == typeof(SolidColorBrush));
+        midnight.Keys.Count(key => key.StartsWith("M.", StringComparison.Ordinal)).ShouldBe(midnight.Count - classic.Count);
+    }
+
+    [Fact]
+    public void Both_midnight_palettes_define_the_same_keys()
+        => Keys(Look.Midnight, Theme.Dark).Keys.OrderBy(k => k).ShouldBe(Keys(Look.Midnight, Theme.Light).Keys.OrderBy(k => k));
+
+    [Fact]
+    public void The_maths_is_wcags()
+    {
+        Contrast.Ratio(Colors.White, Colors.Black).ShouldBe(21, 0.001);
+        Contrast.Ratio(Colors.Black, Colors.White).ShouldBe(21, 0.001);
+        Contrast.Ratio(Color.FromRgb(0x77, 0x77, 0x77), Colors.White).ShouldBe(4.48, 0.01);   // the classic threshold grey
+        Contrast.Luminance(Color.FromRgb(0x80, 0x80, 0x80)).ShouldBe(0.2159, 0.001);
+        Contrast.Over(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF), Colors.Black).ShouldBe(Color.FromRgb(0x80, 0x80, 0x80));
+    }
+
+    /// <summary>The colours of a Midnight palette, by key; a translucent one laid over the panel, as the screen shows it.
+    /// Read on the application's thread, which owns the brushes.</summary>
+    private static Dictionary<string, Color> Midnight(Theme theme) => UiHarness.OnUi(() =>
+    {
+        var dictionary = new ResourceDictionary { Source = LookRules.PaletteFor(Look.Midnight, theme) };
+        var panel = ((SolidColorBrush)dictionary["M.Panel"]).Color;
+        return dictionary.Keys.Cast<string>().ToDictionary(key => key, key => Contrast.Over(((SolidColorBrush)dictionary[key]).Color, panel));
+    });
+
+    /// <summary>What a palette defines: each key and the type of its value.</summary>
+    private static Dictionary<string, Type> Keys(Look look, Theme theme) => UiHarness.OnUi(() =>
+    {
+        var dictionary = new ResourceDictionary { Source = LookRules.PaletteFor(look, theme) };
+        return dictionary.Keys.Cast<string>().ToDictionary(key => key, key => dictionary[key].GetType());
+    });
+}
