@@ -232,8 +232,11 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             }
             else if (op.Kind == PendingOp.Keys)
             {
-                log.LogWarning("The server didn't take the household's new key ({Status}: {Problem}); it goes again later", result.Status, result.Problem);
-                run.Problem = $"The server didn't take the household's new key ({result.Problem}), so this PC sends nothing through it until it does.";
+                if (result.Error != WaitingForMembers)
+                {
+                    log.LogWarning("The server didn't take the household's new key ({Status}: {Problem}); it goes again later", result.Status, result.Problem);
+                    run.Problem = $"The server didn't take the household's new key ({result.Problem}), so this PC sends nothing through it until it does.";
+                }
                 held.Add(op.Household);                                        // kept, and nothing posted under the old key meanwhile
                 continue;
             }
@@ -294,13 +297,15 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     }
 
     /// <summary>
-    /// Posts the waiting new key (plan 0.9): sealed to each member this PC knows as current that the server lists as current
-    /// too, with the keys this PC holds for it, and to this PC. The envelopes are kept until the key is taken, so a retry
-    /// posts the very same bytes, which the server takes as done when its first answer was lost. When a member went between
-    /// the list and the post (400), the list is read again. When the epoch is taken (409), this rotation is given up: the
-    /// key there is taken if its sealer may hand it over, and a new rotation goes to the next epoch unless it was, and no PC
-    /// removed here may hold it. Any other refusal leaves it queued. Once the server takes it, the key becomes this PC's
-    /// current one, and the recovery envelope goes again with it.
+    /// Posts the waiting new key (plan 0.9), sealed to exactly the members the server lists as current, which the server
+    /// needs, each with the keys this PC holds for it. This PC never seals to a member it doesn't hold as current itself:
+    /// while the server lists one it doesn't know, or knows as removed, the key waits, and nothing is posted under the old
+    /// one, until the others' lists tell it of that member. The envelopes are kept until the key is taken, so a retry posts
+    /// the very same bytes, which the server takes as done when its first answer was lost. When the members changed between
+    /// the list and the post (400, or a 409 with the epoch still free), the list is read again. When the epoch is taken
+    /// (409), this rotation is given up: the key there is taken if its sealer may hand it over, and a new rotation goes to
+    /// the next epoch unless it was, and no PC removed here may hold it. Any other refusal leaves it queued. Once the server
+    /// takes it, the key becomes this PC's current one, and the recovery envelope goes again with it.
     /// </summary>
     private async Task<RelayResult<Done>> PostRotationAsync(DeviceKeys keys, string householdId, CancellationToken cancel)
     {
@@ -314,11 +319,17 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             {
                 _members.RemovedByServer(gone.Device, gone.Removed!.Value, gone.RemovedEpoch, gone.AddedEpoch);
             }
-            var current = serverMembers.Where(member => member.Removed is null).ToDictionary(member => member.Device, StringComparer.Ordinal);
-            var staying = household.Members().Where(member => _members.Current(member.DeviceId) is not null && (member.DeviceId == keys.DeviceId
-                || (current.TryGetValue(member.DeviceId, out var server) && Wire.PublicKey(server.Dh) is { } dh && dh.AsSpan().SequenceEqual(member.DhKey))))
-                .ToList();
-            if (staying.All(member => member.DeviceId != keys.DeviceId)) staying.Add(new HouseholdMember(keys.DeviceId, "", default, keys.SignPublic, keys.DhPublic, 0, null, null));
+            var staying = new List<HouseholdMember>();
+            foreach (var listedMember in serverMembers.Where(member => member.Removed is null && member.Device != keys.DeviceId))
+            {
+                if (_members.Current(listedMember.Device) is not { } known || Wire.PublicKey(listedMember.Dh) is not { } dh || !dh.AsSpan().SequenceEqual(known.DhKey))
+                {
+                    log.LogInformation("The server lists {Device} as a member, which this PC doesn't know as one yet; the new key waits", listedMember.Device);
+                    return new RelayResult<Done>(409, null, WaitingForMembers);
+                }
+                staying.Add(known);
+            }
+            staying.Add(new HouseholdMember(keys.DeviceId, "", default, keys.SignPublic, keys.DhPublic, 0, null, null));
             var result = await relay.PostKeysAsync(keys, householdId, rotation.Epoch, Envelopes(keys, householdId, rotation, staying), cancel).ConfigureAwait(false);
             if (result.Ok)
             {
@@ -328,24 +339,31 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                 log.LogInformation("The server took the household's new key; it is now at epoch {Epoch}", rotation.Epoch);
                 return result;
             }
-            if (result.Status == 409)
+            if (result.Status == 400) continue;
+            if (result.Status != 409) return result;
+            var taken = rotation.Epoch;
+            var there = await relay.GetKeyAsync(keys, householdId, taken, cancel).ConfigureAwait(false);
+            if (there.Status == 404) continue;                                 // the epoch is still free: the members changed meanwhile
+            if (!there.Ok)
             {
-                var taken = rotation.Epoch;
-                store.RotationKey = null;                                      // given up
-                if (await FetchKeyAsync(keys, householdId, taken, cancel).ConfigureAwait(false) is { } theirs) store.AddKey(taken, theirs);
-                if (store.Epoch >= taken && !MayHold(serverMembers, taken))
-                {
-                    log.LogInformation("Another member's new key came first, at epoch {Epoch}; this PC took it", taken);
-                    return new RelayResult<Done>(200, null, null);
-                }
-                rotation = NewRotation(Math.Max(store.Epoch, taken) + 1);
-                log.LogInformation("The household's epoch {Epoch} was taken by a key this PC can't use; rotating on to {Next}", taken, rotation.Epoch);
-                continue;
+                if (there.Transient) throw new RelayStop($"Couldn't reach the server to update the household: {there.Problem}.");
+                return new RelayResult<Done>(there.Status, null, there.Error);
             }
-            if (result.Status != 400) return result;
+            store.RotationKey = null;                                          // taken: given up
+            if (Opened(keys, householdId, taken, there.Value!) is { } theirs) store.AddKey(taken, theirs);
+            if (store.Epoch >= taken && !MayHold(serverMembers, taken))
+            {
+                log.LogInformation("Another member's new key came first, at epoch {Epoch}; this PC took it", taken);
+                return new RelayResult<Done>(200, null, null);
+            }
+            rotation = NewRotation(Math.Max(store.Epoch, taken) + 1);
+            log.LogInformation("The household's epoch {Epoch} was taken by a key this PC can't use; rotating on to {Next}", taken, rotation.Epoch);
         }
         return new RelayResult<Done>(503, null, "the household's key kept moving on; it goes again later");
     }
+
+    /// <summary>Why a new key waits: the server lists a member this PC doesn't hold as current yet.</summary>
+    private const string WaitingForMembers = "the server lists a member this PC doesn't know yet";
 
     /// <summary>A new key for <paramref name="epoch"/>, kept aside until the server takes it.</summary>
     private (int Epoch, byte[] Key) NewRotation(int epoch)
@@ -741,10 +759,15 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             if (result.Transient) throw new RelayStop($"Couldn't sync through the server: {result.Problem}.");
             return null;
         }
-        var reply = result.Value!;
+        return Opened(keys, householdId, epoch, result.Value!);
+    }
+
+    /// <summary>The key in this PC's envelope for an epoch, when its sealer may hand it over (plan 0.9); null otherwise.</summary>
+    private byte[]? Opened(DeviceKeys keys, string householdId, int epoch, KeyEnvelopeReply reply)
+    {
         if (reply.Epoch != epoch || !_members.MaySeal(reply.From, epoch) || household.Member(reply.From) is not { } sealer)
         {
-            log.LogWarning("The key for epoch {Epoch} came from {Sealer}, which can't have sealed it, so it wasn't taken", epoch, reply.From);
+            log.LogWarning("The key for epoch {Epoch} came from {Sealer}, which may not hand it over, so it wasn't taken", epoch, reply.From);
             return null;
         }
         return KeyWrap.Open(keys, sealer.DhKey, reply.Body, householdId, epoch);

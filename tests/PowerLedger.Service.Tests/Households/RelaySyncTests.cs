@@ -452,8 +452,8 @@ public sealed class RelaySyncTests : IDisposable
     public async Task Two_rotations_to_the_same_epoch_settle_on_the_one_the_server_took_when_its_sealer_may_hand_it_over()
     {
         var theirs = HouseholdCrypto.NewKey();
-        await _laptop.Client.PostKeysAsync(_laptop.Keys, Household, 2, KeyWrap.For(_laptop.Keys, Household, 2, theirs, [_desktop.AsMember()]),
-            CancellationToken.None);
+        (await _laptop.Client.PostKeysAsync(_laptop.Keys, Household, 2, KeyWrap.For(_laptop.Keys, Household, 2, theirs, [_desktop.AsMember(), _laptop.AsMember()]),
+            CancellationToken.None)).Ok.ShouldBeTrue();
         _desktop.Sync.StartRotation(Household);                                   // the desktop's own new key, for epoch 2 too
 
         (await _desktop.RunAsync()).Problem.ShouldBeNull();
@@ -503,6 +503,31 @@ public sealed class RelaySyncTests : IDisposable
         _desktop.Store.KeyFor(2).ShouldBeNull();
         _desktop.Store.Epoch.ShouldBe(3);
         _relay.Sealed(Household, 3).ShouldBe([_desktop.Id, _laptop.Id], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task A_new_key_waits_while_the_server_lists_a_member_this_pc_doesnt_know_until_a_members_list_brings_it_in()
+    {
+        using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
+        _relay.Seed(Household, study.Keys);                                       // the laptop added it; the desktop hasn't heard
+        _laptop.Household.SaveMember(study.AsMember());
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100)]);
+        _desktop.Sync.StartRotation(Household);
+
+        var waiting = await _desktop.RunAsync();
+
+        (waiting.Problem, waiting.RowsOut).ShouldBe(((string?)null, 0));           // nothing under the old key, and nothing to worry about
+        _relay.Epoch(Household).ShouldBe(1);
+        _desktop.Store.Pending.ShouldHaveSingleItem().Kind.ShouldBe(PendingOp.Keys);
+
+        _laptop.Household.Upsert([Row(_laptop.Id, 0, 20, changed: 100)]);
+        await _laptop.RunAsync();                                                 // its sealed list tells the desktop of the study PC
+        await _desktop.RunAsync();
+        (await _desktop.RunAsync()).Problem.ShouldBeNull();
+
+        _relay.Epoch(Household).ShouldBe(2);
+        _relay.Sealed(Household, 2).ShouldBe([_desktop.Id, _laptop.Id, study.Id], ignoreOrder: true);
+        _relay.Batches.Where(batch => batch.Device == _desktop.Id).ShouldAllBe(batch => batch.Epoch == 2);
     }
 
     [Fact]
@@ -586,9 +611,13 @@ public sealed class RelaySyncTests : IDisposable
     public async Task A_member_still_posting_under_an_older_key_an_hour_on_gets_a_new_key_sealed_to_it_too()
     {
         var k2 = HouseholdCrypto.NewKey();
-        (await _desktop.Client.PostKeysAsync(_desktop.Keys, Household, 2, KeyWrap.For(_desktop.Keys, Household, 2, k2, [_desktop.AsMember()]),
-            CancellationToken.None)).Ok.ShouldBeTrue();                               // made without the laptop, which it didn't know yet
+        (await _desktop.Client.PostKeysAsync(_desktop.Keys, Household, 2, KeyWrap.For(_desktop.Keys, Household, 2, k2, [_desktop.AsMember(), _laptop.AsMember()]),
+            CancellationToken.None)).Ok.ShouldBeTrue();
         _desktop.Store.AddKey(2, k2);
+        _relay.Intercept = (request, _) => request.Headers.GetValues("X-PL-Device").Single() == _laptop.Id
+            && request.RequestUri!.AbsolutePath.EndsWith("/keys/2", StringComparison.Ordinal)
+            ? FakeRelay.Error(404, "There's no key for this PC at that epoch.")    // the laptop's envelope went astray
+            : null;
         _laptop.Household.Upsert([Row(_laptop.Id, 0, 1, changed: 100)]);
         await _laptop.RunAsync();
         await _desktop.RunAsync();

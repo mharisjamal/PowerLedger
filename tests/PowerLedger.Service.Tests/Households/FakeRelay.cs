@@ -272,10 +272,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 var posted = JsonNode.Parse(body)!;
                 var epoch = (int)posted["epoch"]!;
                 var envelopes = posted["envelopes"]!.AsArray().Select(item => ((string)item!["device"]!, (string)item["body"]!)).ToList();
-                if (envelopes.Count is 0 or > 16 || envelopes.Any(item => !list.TryGetValue(item.Item1, out var member) || member.Removed is not null))
-                {
-                    return Error(400, "Every envelope must be for a current member.");
-                }
+                if (envelopes.Count is 0 or > 16) return Error(400, "envelopes must be 1 to 16 of {\"device\",\"body\"}, one per PC.");
                 var current = _epochs.GetValueOrDefault(household, 1);
                 var mine = _envelopes.Where(pair => pair.Key.Household == household && pair.Key.Epoch == epoch && pair.Value.From == caller).ToList();
                 if (epoch == current && mine.Count == envelopes.Count
@@ -283,7 +280,15 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 {
                     return Ok();                                                   // this PC's very rotation again, whatever changed since
                 }
-                if (epoch != current + 1) return Error(409, $"The household is at epoch {current}; a new key must be for {current + 1}.");
+                if (envelopes.Any(item => !list.TryGetValue(item.Item1, out var member) || member.Removed is not null))
+                {
+                    return Error(400, "Every envelope must be for a current member.");
+                }
+                if (envelopes.Count != list.Values.Count(member => member.Removed is null))
+                {
+                    return Error(409, "Every current member needs the new key; look at the members again.");
+                }
+                if (epoch != current + 1) return Error(409, $"The household's key is at epoch {current}; new keys are for epoch {current + 1} only.");
                 foreach (var (device, sealedKey) in envelopes) _envelopes[(household, epoch, device)] = (caller, sealedKey);
                 _epochs[household] = epoch;
                 return Ok();
