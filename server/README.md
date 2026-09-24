@@ -19,6 +19,40 @@ for the design.
 - A daily cron (`retention.ts`) drops reports whose day is more than 3 years old, and request counts more than 2
   days old.
 
+## Households
+
+`src/households/` holds the households routes (`docs/superpowers/specs/2026-09-24-powerledger-households-design.md`
+§5 to §8). The server keeps membership, public keys and sealed batches; never a household key, a PC's name or a row.
+
+- **Signed requests.** Every household and account request carries `X-PL-Device`, `X-PL-Time` (unix seconds, within
+  300 s) and `X-PL-Signature`: base64url ECDSA P-256 (r ‖ s) over `METHOD\npath?query\ntime\nhex SHA-256(body)`, the
+  path and query as sent. A signature is taken once, and a PC makes at most 1000 requests a UTC day.
+- **Households.** `POST /v1/households` (`{"id","sign","dh"}`, signed by that key); `GET`/`POST …/{hid}/members`;
+  `DELETE …/{hid}/members/{device}` (the household ends with its last member); `POST …/{hid}/keys`
+  (`{"epoch","envelopes":[{"device","body"}]}`, once an epoch, each epoch later than the last) and
+  `GET …/{hid}/keys/{epoch}` (`{"epoch","from","body"}`, the caller's own). At most 16 members.
+- **Batches.** `POST …/{hid}/batches` (`{"device","epoch","seq","body"}`, at most 1 MB, `seq` the sender's own);
+  `GET …/{hid}/batches?after=&limit=` gives `{"items":[{"seq","device","epoch","body"}],"next","more"}`: the others'
+  batches as posted, `next` the cursor to send as `after` next time, `more` when another page waits.
+- **Meetings**, for pairing by code: `PUT`/`GET /v1/meetings/{id}/{adder|joiner|answer|welcome}`, unsigned and behind
+  the address limit; each slot written once, 8 KB at most, for 10 minutes from the meeting's first `PUT`.
+- **Sign-in.** `POST /v1/auth/signin` (`{"provider","idToken","nonce","sign","dh"}`) checks the ID token against the
+  provider's JWKS and gives `{"session","householdId","hasRecovery"}`. The posted `nonce` is a salt: the token's nonce
+  claim must be base64url(SHA-256(UTF-8(`<device ID>:<salt>`))) for the PC that signed the request, so a token only
+  signs in the PC that asked for it. Removing a PC, or its leaving, ends its session. With
+  `Authorization: Session <token>` as well as the signature: `POST /v1/account/household` (link),
+  `POST /v1/account/requests` (ask to join),
+  `PUT`/`GET /v1/account/recovery` (`{"body","verifier","epoch"}`; `GET` never gives the verifier),
+  `POST /v1/account/recover` (`{"proof"}`: HMAC-SHA256 of the device ID under the verifier), `POST /v1/auth/signout`
+  and `DELETE /v1/account`. Members see and approve waiting PCs at `GET …/{hid}/requests` and
+  `POST …/{hid}/requests/{device}/approve` (`{"epoch","body"}`).
+- **Retention.** The daily cron also drops batches past 90 days, ended meetings, join requests past 7 days, per-PC
+  request counts past 2 days and seen signatures past 10 minutes.
+
+Sign-in needs the public client IDs in `wrangler.toml`'s `[vars]`, `MS_CLIENT_ID` and `GOOGLE_CLIENT_ID`; while one is
+empty, that provider's sign-in answers 503. Migrations `0003_households.sql` and `0004_accounts.sql` go out with the
+usual `npx wrangler d1 migrations apply powerledger-index --remote`.
+
 ## Storage
 
 Report bodies live in D1 (`report_bodies`) until R2 is enabled on the account — comfortably inside the free 5 GB
@@ -44,6 +78,10 @@ npx wrangler deploy
 npm ci
 npm test
 ```
+
+On Windows, a private `TEMP` must be a plain Windows path (`TEMP="$(cygpath -w "$TEMP/x")"` in Git Bash): with a mixed
+one such as `C:\…\Temp/x`, workerd's SQLite can't make the temp file a larger D1 transaction needs, and it fails with
+`SQLITE_CANTOPEN`.
 
 `npm test` runs the Worker's own tests (`vitest`, against a local Miniflare D1 and R2 — no network, no Cloudflare
 account needed) and the export tool's pure-function tests (`node --test`, plain Node).

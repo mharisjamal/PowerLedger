@@ -8,6 +8,10 @@ declare namespace Cloudflare {
     // A secret in production (`wrangler secret put ADMIN_TOKEN`), so it never lives in
     // wrangler.toml; set for tests in vitest.config.ts.
     ADMIN_TOKEN: string;
+    // Sign-in's public client IDs (wrangler.toml's [vars]): the owner's Azure app registration and
+    // Google OAuth client. Empty turns that provider's sign-in off; tests set their own.
+    MS_CLIENT_ID?: string;
+    GOOGLE_CLIENT_ID?: string;
     // Test-only: the parsed migrations, set in vitest.config.ts and applied by
     // test/apply-migrations.ts.
     TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];

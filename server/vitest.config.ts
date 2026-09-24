@@ -18,6 +18,9 @@ export default defineConfig(async () => {
           bindings: {
             TEST_MIGRATIONS: migrations,
             ADMIN_TOKEN: "test-admin-token",
+            // Sign-in's client IDs, as the tests' own ID tokens name them.
+            MS_CLIENT_ID: "11111111-2222-3333-4444-555555555555",
+            GOOGLE_CLIENT_ID: "test-client.apps.googleusercontent.com",
           },
           // Independent of wrangler.toml, whose r2_buckets block is commented out until R2 is
           // enabled on the account: the test Worker keeps an R2 bucket bound as REPORTS, so the
