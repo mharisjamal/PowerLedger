@@ -250,22 +250,44 @@ describe("DELETE /v1/households/{hid}/members/{device}", () => {
     expect(back?.removed).toBeNull();
   });
 
-  it("gives 404 for a PC that isn't a current member", async () => {
+  it("gives 404 for a PC that was never a member, and 200 for one already removed", async () => {
     const first = await newDevice();
+    const second = await newDevice();
     const hid = await createHousehold(first);
+    await addMember(hid, first, second);
 
-    const response = await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${(await newDevice()).id}`);
-    expect(response.status).toBe(404);
+    const stranger = await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${(await newDevice()).id}`);
+    expect(stranger.status).toBe(404);
+
+    expect((await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`)).status).toBe(200);
+    expect((await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`)).status).toBe(200);
   });
 
-  it("ends the household when its last member leaves", async () => {
+  it("ends the household with its last member, keeping it and its members as removed, so former members get 410", async () => {
     const first = await newDevice();
+    const second = await newDevice();
     const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    await signedFetch(first, "POST", `/v1/households/${hid}/batches`, {
+      device: first.id,
+      epoch: 1,
+      seq: 1,
+      body: envelope(),
+      sig: btoa(String.fromCharCode(...new Uint8Array(64))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+    });
 
+    expect((await signedFetch(second, "DELETE", `/v1/households/${hid}/members/${second.id}`)).status).toBe(200);
     expect((await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${first.id}`)).status).toBe(200);
 
-    expect(await env.DB.prepare("SELECT 1 FROM households WHERE id = ?").bind(hid).first()).toBeNull();
-    expect(await env.DB.prepare("SELECT 1 FROM members WHERE household = ?").bind(hid).first()).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM households WHERE id = ?").bind(hid).first()).not.toBeNull();
+    const rows = await env.DB.prepare("SELECT removed_epoch FROM members WHERE household = ?").bind(hid).all();
+    expect(rows.results).toEqual([{ removed_epoch: 1 }, { removed_epoch: 1 }]);
+    expect(await env.DB.prepare("SELECT 1 FROM batches WHERE household = ?").bind(hid).first()).toBeNull();
+
+    for (const pc of [first, second]) {
+      const response = await signedFetch(pc, "GET", `/v1/households/${hid}/members`);
+      expect(response.status).toBe(410);
+    }
   });
 });
 

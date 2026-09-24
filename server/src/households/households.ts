@@ -150,7 +150,11 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
   )
     .bind(Date.now(), hid, device)
     .first();
-  if (!removed) return errorResponse(404, "That PC isn't a member of this household.");
+  if (!removed) {
+    // Removing a PC already removed is done, so a retried removal settles; one that never was a member is 404.
+    const was = await env.DB.prepare("SELECT 1 FROM members WHERE household = ? AND device = ?").bind(hid, device).first();
+    return was ? ok() : errorResponse(404, "That PC isn't a member of this household.");
+  }
 
   // Read before the sessions go: the accounts the removed PC was signed in as, linked to this household.
   const signedIn = await env.DB.prepare(
@@ -176,8 +180,11 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
   return ok();
 }
 
-/** Deletes everything kept for a household: its batches and their bodies, key envelopes, members and itself, and for
- * sign-in the accounts' links to it, their recovery envelopes and the PCs waiting to join. */
+/**
+ * Ends a household whose last member has gone. The household and its member rows stay, every member removed, so a
+ * former member is told 410 rather than taken for a stranger (401); its batches and their bodies, key envelopes, the
+ * PCs waiting to join, and for sign-in every account's link to it and recovery for it, go.
+ */
 export async function endHousehold(env: Cloudflare.Env, household: string): Promise<void> {
   const bodies = await env.DB.prepare("SELECT r2_key FROM batches WHERE household = ?").bind(household).all<{ r2_key: string }>();
   await deleteBodies(env, bodies.results.map((row) => row.r2_key));
@@ -187,8 +194,6 @@ export async function endHousehold(env: Cloudflare.Env, household: string): Prom
     env.DB.prepare("DELETE FROM join_requests WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM batches WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM key_envelopes WHERE household = ?").bind(household),
-    env.DB.prepare("DELETE FROM members WHERE household = ?").bind(household),
-    env.DB.prepare("DELETE FROM households WHERE id = ?").bind(household),
   ]);
 }
 
