@@ -16,14 +16,17 @@ public class JoinPromptViewModelTests
         string text = "Join Desktop-7's household?", string? comparisonCode = "482 913", DateTimeOffset? expiresAt = null, string? fromName = "Desktop-7")
         => new(NoticeKind.JoinPrompt, "prompt-1", text, fromName, comparisonCode, expiresAt ?? Now.AddMinutes(2));
 
+    /// <summary>Review finding A10: the code is shown separately and large, not folded into a sentence, since the
+    /// service no longer puts it in the text.</summary>
     [Fact]
-    public void The_heading_is_the_services_own_wording_and_shows_the_comparison_code_from_pairing_on_the_network()
+    public void The_heading_is_the_services_own_wording_and_the_code_is_shown_separately()
     {
         var model = Model(Notice(text: "Join Desktop-7's household?", comparisonCode: "482 913", fromName: "Desktop-7"));
 
         model.Heading.ShouldBe("Join Desktop-7's household?");
-        model.HasComparisonLine.ShouldBeTrue();
-        model.ComparisonLine.ShouldBe("Its code is 482 913. Check it matches the code on Desktop-7.");
+        model.HasComparisonCode.ShouldBeTrue();
+        model.ComparisonCode.ShouldBe("482 913");
+        model.ComparisonCaption.ShouldBe("Check Desktop-7 shows this code");
     }
 
     /// <summary>The service already appends the leave warning to Text when this PC belongs to another household; the
@@ -37,19 +40,21 @@ public class JoinPromptViewModelTests
     }
 
     [Fact]
-    public void A_pairing_by_code_has_no_comparison_line()
+    public void A_pairing_by_code_has_no_comparison_code_to_show()
     {
         var model = Model(Notice(comparisonCode: null));
 
-        model.HasComparisonLine.ShouldBeFalse();
-        model.ComparisonLine.ShouldBeNull();
+        model.HasComparisonCode.ShouldBeFalse();
+        model.ComparisonCode.ShouldBeNull();
+        model.ComparisonCaption.ShouldBeNull();
     }
 
     [Fact]
-    public void With_no_name_the_comparison_line_still_reads_sensibly()
+    public void With_no_name_the_caption_still_reads_sensibly()
     {
         var model = Model(Notice(fromName: null));
-        model.ComparisonLine.ShouldBe("Its code is 482 913. Check it matches the code on the other PC.");
+        model.ComparisonCode.ShouldBe("482 913");
+        model.ComparisonCaption.ShouldBe("Check the other PC shows this code");
     }
 
     [Fact]

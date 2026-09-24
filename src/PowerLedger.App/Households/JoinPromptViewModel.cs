@@ -25,9 +25,8 @@ internal sealed class JoinPromptViewModel : ObservableObject
         _threads = threads;
         _promptId = notice.PromptId ?? "";
         Heading = notice.Text;
-        ComparisonLine = notice.ComparisonCode is { } code
-            ? $"Its code is {code}. Check it matches the code on {notice.FromName ?? "the other PC"}."
-            : null;
+        ComparisonCode = notice.ComparisonCode;
+        ComparisonCaption = notice.ComparisonCode is not null ? $"Check {notice.FromName ?? "the other PC"} shows this code" : null;
         Join = new RelayCommand(() => _ = AnswerAsync(true));
         DontJoin = new RelayCommand(() => _ = AnswerAsync(false));
         if (notice.ExpiresAt is { } expires)
@@ -41,10 +40,14 @@ internal sealed class JoinPromptViewModel : ObservableObject
     /// one, "Join Desktop-7's household? Joining leaves the household this PC is in now."</summary>
     public string Heading { get; }
 
-    /// <summary>"Its code is 482 913. Check it matches the code on {name}."; null for a pairing by code, which has none.</summary>
-    public string? ComparisonLine { get; }
+    /// <summary>"482 913", shown large and on its own (review finding A10: the service no longer folds it into a
+    /// sentence); null for a pairing by code, which has none.</summary>
+    public string? ComparisonCode { get; }
 
-    public bool HasComparisonLine => ComparisonLine is not null;
+    /// <summary>"Check {name} shows this code."; null exactly when <see cref="ComparisonCode"/> is.</summary>
+    public string? ComparisonCaption { get; }
+
+    public bool HasComparisonCode => ComparisonCode is not null;
 
     public IRelayCommand Join { get; }
 

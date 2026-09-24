@@ -864,7 +864,8 @@ public class RenderingTests
                 {
                     Pump(TimeSpan.FromMilliseconds(300));
                     Find<TextBlock>(window, t => t.Text == "Join Desktop-7's household? Joining leaves the household this PC is in now.").ShouldNotBeNull(theme.ToString());
-                    Find<TextBlock>(window, t => t.Text == "Its code is 482 913. Check it matches the code on Desktop-7.").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Check Desktop-7 shows this code").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
                     window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
                     var content = (FrameworkElement)window.Content;
                     foreach (var label in new[] { "Don't join", "Join" })
