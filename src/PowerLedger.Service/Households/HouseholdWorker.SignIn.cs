@@ -89,6 +89,7 @@ internal sealed partial class HouseholdWorker
             return Reply(request.Id, false, "That isn't a recovery code. A recovery code has 24 letters and digits.");
         }
 
+        if (PairingCommitted) return Reply(request.Id, false, Busy);           // plan 0.10: it waits for the pairing to finish
         using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         deadline.CancelAfter(AccountWait);

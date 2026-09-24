@@ -627,6 +627,85 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Once_the_joining_pc_has_said_it_is_joining_leaving_its_household_waits_for_the_pairing_to_finish()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await WorkerPc.Pair(laptop, study);                                         // the laptop's household, which joining leaves
+        using var hold = new ManualResetEventSlim();
+        _relay.Intercept = (request, _) =>
+        {
+            if (request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath.EndsWith("/welcomed", StringComparison.Ordinal)) hold.Wait(TimeSpan.FromSeconds(20));
+            return null;
+        };
+        var code = (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(1))).Code!;
+        await laptop.Send<HouseholdReply>(new JoinByCodeRequest(2, code));
+        await laptop.Send<HouseholdReply>(new AnswerPromptRequest(3, (await laptop.Next(NoticeKind.JoinPrompt)).PromptId!, true));
+        await WaitFor.True(() => _relay.Calls.Any(call => call.StartsWith("PUT", StringComparison.Ordinal) && call.EndsWith("/welcomed", StringComparison.Ordinal)));
+
+        (await laptop.Send<HouseholdReply>(new LeaveHouseholdRequest(4))).ShouldBe(new HouseholdReply(4, false, HouseholdWorker.Busy));
+
+        hold.Set();
+        (await laptop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("This PC joined Desktop-7's household.");
+        await laptop.Worker.Running;
+        laptop.Worker.Store.HouseholdId.ShouldBe(desktop.Worker.Store.HouseholdId);
+    }
+
+    [Fact]
+    public async Task A_first_pairing_stopped_before_it_records_the_new_member_leaves_no_household_behind()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        using var hold = new ManualResetEventSlim();
+        _relay.Intercept = (request, _) =>
+        {
+            if (request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath.EndsWith("/joined", StringComparison.Ordinal)) hold.Wait(TimeSpan.FromSeconds(20));
+            return null;
+        };
+        var code = (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(1))).Code!;
+        await laptop.Send<HouseholdReply>(new JoinByCodeRequest(2, code));
+        await laptop.Send<HouseholdReply>(new AnswerPromptRequest(3, (await laptop.Next(NoticeKind.JoinPrompt)).PromptId!, true));
+        await WaitFor.True(() => _relay.Calls.Any(call => call.StartsWith("PUT", StringComparison.Ordinal) && call.EndsWith("/joined", StringComparison.Ordinal)));
+
+        (await desktop.Send<HouseholdReply>(new CancelPairingRequest(4))).Ok.ShouldBeTrue();   // the welcome went; the laptop's joining is on its way
+
+        desktop.Worker.Store.HouseholdId.ShouldBeNull();                          // no household of one
+        desktop.Worker.Store.Pending.ShouldBeEmpty();
+        hold.Set();
+        (await laptop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Desktop-7 stopped the pairing, so nothing was changed.");
+        await laptop.Worker.Running;
+        laptop.Worker.Store.HouseholdId.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task The_users_own_pairing_stops_a_strangers_that_hasnt_asked_anything_but_not_one_that_has()
+    {
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        await using (var channel = await LanConnector.ConnectAsync(IPAddress.Loopback, laptop.Worker.Port, TimeSpan.FromSeconds(5)))
+        {
+            using var keys = DeviceKeys.Create();
+            var hello = LanMessages.Hello("pair", keys.DhPublic, keys, "Stranger", ChassisKind.Laptop, "c3") with
+            {
+                Commit = Wire.Encode(HouseholdCrypto.Commitment(HouseholdCrypto.NewNonce())),
+            };
+            await channel.SendAsync(LanMessages.Write(hello));
+            (await channel.ReceiveAsync()).ShouldNotBeNull();                      // the laptop's hello: then the stranger says no more
+
+            (await laptop.Send<HouseholdReply>(new StartCodePairingRequest(1))).Ok.ShouldBeTrue();
+        }
+        (await laptop.Send<HouseholdReply>(new CancelPairingRequest(2))).Ok.ShouldBeTrue();
+        laptop.Drain().ShouldNotContain(notice => notice.Kind == NoticeKind.JoinPrompt);
+
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);                 // a pairing that has asked this PC's user stays
+        await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(3));
+        (await desktop.Send<HouseholdReply>(new AddPcRequest(4, laptop.Worker.InstanceId))).Ok.ShouldBeTrue();
+        await laptop.Next(NoticeKind.JoinPrompt);
+
+        (await laptop.Send<HouseholdReply>(new StartCodePairingRequest(5))).Ok.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task A_pairing_that_comes_while_another_runs_is_closed_without_this_pcs_hello()
     {
         var laptop = await Start("Laptop-2", ChassisKind.Laptop);

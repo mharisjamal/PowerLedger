@@ -224,6 +224,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         using var lease = await _gate.EnterBackgroundAsync(stop).ConfigureAwait(false);
         try
         {
+            if (PairingCommitted) return;                                      // plan 0.10: household changes wait for the pairing
             Announce();
             ShowRecoveryCode();
             await ResumeRecoveryAsync(lease.Attention).ConfigureAwait(false);
@@ -352,8 +353,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         var name = NameOf(pc);
         if (InThisHousehold(pc, _store.CurrentKey)) return Reply(request.Id, false, $"{name} is already in this household.");
+        await StopStrangerAsync().ConfigureAwait(false);
         if (BeginPairing(out var refusal) is not { } pairing) return Reply(request.Id, false, refusal!);
-        await Task.CompletedTask.ConfigureAwait(false);
         Track(AddOnNetworkAsync(pc, name, pairing));
         return Reply(request.Id, true, $"Connecting to {name}.");
     }
@@ -366,7 +367,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             try
             {
                 await using var channel = await LanConnector.ConnectAsync(pc.Address!, pc.Port, ConnectTimeout, pairing.Token).ConfigureAwait(false);
-                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, _prompts, WelcomeForAsync, RecordAsync, _timeouts, pairing.Token)
+                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, _prompts, joiner => WelcomeForAsync(joiner, pairing),
+                        (welcome, joiner, proof, cancel) => RecordAsync(welcome, joiner, proof, pairing, cancel), _timeouts, pairing.Token)
                     .ConfigureAwait(false);
             }
             catch (IOException)
@@ -387,6 +389,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     private async Task<PipeMessage> StartCodePairingAsync(StartCodePairingRequest request, CancellationToken cancel)
     {
+        await StopStrangerAsync().ConfigureAwait(false);
         if (BeginPairing(out var refusal, madeCode: true) is not { } pairing) return Reply(request.Id, false, refusal!);
         CodeMeeting? meeting;
         try
@@ -416,7 +419,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             PairingOutcome outcome;
             try
             {
-                outcome = await _codePairing.AddAsync(meeting, Identity(), WelcomeForAsync, RecordAsync, pairing.Token).ConfigureAwait(false);
+                outcome = await _codePairing.AddAsync(meeting, Identity(), joiner => WelcomeForAsync(joiner, pairing),
+                    (welcome, joiner, proof, cancel) => RecordAsync(welcome, joiner, proof, pairing, cancel), pairing.Token).ConfigureAwait(false);
             }
             catch (GateTimeout)
             {
@@ -434,6 +438,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             return Reply(request.Id, false, "That isn't a code. A code has 16 letters and digits, like K7QM-2XHD-9PW4-R8TA.");
         }
         await StopOwnCodeAsync().ConfigureAwait(false);
+        await StopStrangerAsync().ConfigureAwait(false);
         if (BeginPairing(out var refusal) is not { } pairing) return Reply(request.Id, false, refusal!);
         Track(JoinByCodeAsync(request.Code, pairing));
         return Reply(request.Id, true, "Looking for the PC that made that code.");
@@ -447,7 +452,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             try
             {
                 outcome = await _codePairing.JoinAsync(code, Identity(), _prompts, _store.HouseholdId is not null,
-                        (welcome, adder) => EnterAsync(welcome, adder, pairing), pairing.Token)
+                        (welcome, adder) => EnterAsync(welcome, adder, pairing), pairing.Token, pairing.Commit)
                     .ConfigureAwait(false);
             }
             catch (GateTimeout)
@@ -480,7 +485,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         if (call.Message.Purpose != Hello.Pair) return;
         if (call.From is { } address && !_strangers.Allowed(address)) return;
-        if (BeginPairing(out _, also: stopping.Token) is not { } pairing)
+        if (BeginPairing(out _, also: stopping.Token, incoming: true) is not { } pairing)
         {
             if (call.From is { } busyFrom) _strangers.Failed(busyFrom);
             return;                                                            // closed without a word: not even this PC's hello
@@ -497,8 +502,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             try
             {
                 outcome = await PairingSession.JoinAsync(
-                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, (welcome, adder) => EnterAsync(welcome, adder, pairing), _timeouts,
-                    pairing.Token, Refused)
+                    channel, hello, Identity(), new AskingBroker(_prompts, pairing), _store.HouseholdId is not null,
+                    (welcome, adder) => EnterAsync(welcome, adder, pairing), _timeouts, pairing.Token, Refused, pairing.Commit)
                     .ConfigureAwait(false);
             }
             catch (GateTimeout)
@@ -510,29 +515,19 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
     }
 
-    /// <summary>The welcome for a PC being added, making the household first when this PC is in none (households design
-    /// §1: it is made when a PC adds its first other PC). No old key goes to a newcomer (plan 0.10): a new key waiting for the
-    /// server goes first; null while it can't.</summary>
-    private async Task<Welcome?> WelcomeForAsync(MemberInfo joiner)
+    /// <summary>The welcome for a PC being added. When this PC is in no household, it is one to be made (households design §1:
+    /// it is made when a PC adds its first other PC), kept with the pairing until the step that records the new member makes
+    /// it (plan 0.10). No old key goes to a newcomer: a new key waiting for the server goes first; null while it can't.</summary>
+    private async Task<Welcome?> WelcomeForAsync(MemberInfo joiner, CurrentPairing pairing)
     {
         using var entered = await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false);
-        var now = _clock.GetUtcNow();
         if (_store.HouseholdId is null || _store.CurrentKey is null)
         {
-            var householdId = Wire.NewHouseholdId();
-            ClearOthers();
-            KeepOnlyRemovalsOfOthers(householdId);
-            _store.EnterHousehold(householdId, 1, HouseholdCrypto.NewKey());
-            SaveSelf(now);
-            BuildRows(now);
-            _store.PostedThrough = _household.LatestChange(_keys.DeviceId);   // the year goes as the first snapshot
-            _store.AddPending(new PendingOp(PendingOp.Create, householdId));
-            _log.LogInformation("Made a household to add {Name} to", joiner.Name);
+            var (householdId, key) = pairing.Provisional ??= (Wire.NewHouseholdId(), HouseholdCrypto.NewKey());
+            var self = new MemberInfo(_keys.DeviceId, _store.Name, Kind(), _keys.SignPublic, _keys.DhPublic);
+            return new Welcome(householdId, 1, key, [self], [Wire.Member(self) with { Added = _clock.GetUtcNow().ToUnixTimeMilliseconds() }]);
         }
-        else if (!await RotationFirstAsync(_store.HouseholdId, joiner.Id, _stopping.Token).ConfigureAwait(false))
-        {
-            return null;
-        }
+        if (!await RotationFirstAsync(_store.HouseholdId, joiner.Id, _stopping.Token).ConfigureAwait(false)) return null;
         var members = _household.Members()
             .Where(member => _members.Current(member.DeviceId) is not null && member.DeviceId != joiner.Id)
             .Select(member => new MemberInfo(member.DeviceId, member.Name, member.Kind, member.SignKey, member.DhKey))
@@ -556,25 +551,44 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         return await _relaySync.FinishRotationAsync(_keys, limit.Token).ConfigureAwait(false);
     }
 
-    /// <summary>Records a PC this one is adding, in one step before it is told it is in (plan 0.10): the add queued for the
-    /// server, and the new member's keys introduced here. The pairing's cancel stops it only while it waits for the gate:
-    /// before the step, nothing is left behind.</summary>
+    /// <summary>Records a PC this one is adding, in one step before it is told it is in (plan 0.10): a first pairing's household
+    /// made, the add queued for the server, and the new member's keys introduced here. The pairing's cancel stops it only
+    /// while it waits for the gate: before the step, nothing is left behind, not even a household; after it, the pairing
+    /// only finishes.</summary>
     /// <returns>What went wrong when it couldn't be added, as when this PC's household is no longer the welcome's; else null.</returns>
-    private async Task<string?> RecordAsync(Welcome welcome, MemberInfo joiner, byte[] proof, CancellationToken cancel)
+    private async Task<string?> RecordAsync(Welcome welcome, MemberInfo joiner, byte[] proof, CurrentPairing pairing, CancellationToken cancel)
     {
         using (await EnterGateAsync(cancel, PairingGateWait).ConfigureAwait(false))
         {
-            if (_store.HouseholdId != welcome.HouseholdId)
+            var making = pairing.Provisional is { } made && made.Id == welcome.HouseholdId && _store.HouseholdId is null;
+            if (!making && _store.HouseholdId != welcome.HouseholdId)
             {
                 return $"This PC's household changed while {joiner.Name} was joining, so it wasn't added. Try again.";
             }
+            if (making) MakeHousehold(welcome.HouseholdId, welcome.Key, joiner);
             _store.AddPending(new PendingOp(PendingOp.Add, welcome.HouseholdId, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
                 Proof: Wire.Encode(proof)));
             _members.Introduce(joiner, _clock.GetUtcNow().ToUnixTimeMilliseconds());
+            pairing.Commit();                                                  // recorded: it only finishes now
             Announce();
         }
         Kick();
         return null;
+    }
+
+    /// <summary>Makes the household a first pairing adds its PC to, inside the gate, this PC its first member: its year goes as
+    /// the first snapshot, and the server is told to make it before it hears of the add.</summary>
+    private void MakeHousehold(string householdId, byte[] key, MemberInfo joiner)
+    {
+        var now = _clock.GetUtcNow();
+        ClearOthers();
+        KeepOnlyRemovalsOfOthers(householdId);
+        _store.EnterHousehold(householdId, 1, key);
+        SaveSelf(now);
+        BuildRows(now);
+        _store.PostedThrough = _household.LatestChange(_keys.DeviceId);
+        _store.AddPending(new PendingOp(PendingOp.Create, householdId));
+        _log.LogInformation("Made a household to add {Name} to", joiner.Name);
     }
 
     /// <summary>Tells the App how a pairing this PC started ended. Its user's own adds never count toward pausing pairing.</summary>
@@ -641,6 +655,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     private async Task<PipeMessage> RemoveAsync(RemovePcRequest request, CancellationToken cancel)
     {
+        if (PairingCommitted) return Reply(request.Id, false, Busy);           // plan 0.10: it waits for the pairing to finish
         using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
         if (_store.HouseholdId is null) return Reply(request.Id, false, NotInOne);
         if (request.DeviceId == _keys.DeviceId) return Reply(request.Id, false, "To take this PC out, leave the household.");
@@ -705,6 +720,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     private async Task<PipeMessage> LeaveAsync(LeaveHouseholdRequest request, CancellationToken cancel)
     {
+        if (PairingCommitted) return Reply(request.Id, false, Busy);           // plan 0.10: it waits for the pairing to finish
         await StopPairingAsync().ConfigureAwait(false);                         // plan 0.9: a pairing under way is stopped first
         using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
         if (_store.HouseholdId is null) return Reply(request.Id, false, NotInOne);
@@ -798,7 +814,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// (plan 0.10): inside the gate, and within <see cref="FreshenWait"/>, after which the sync goes on with the list as it is.</summary>
     private async Task FreshenMembersAsync(CancellationToken cancel)
     {
-        if (_store.HouseholdId is null || _store.MembersCheckedAt is { } checkedAt
+        if (_store.HouseholdId is null || PairingCommitted || _store.MembersCheckedAt is { } checkedAt
             && _clock.GetUtcNow().ToUnixTimeMilliseconds() - checkedAt < (long)MembersFreshFor.TotalMilliseconds)
         {
             return;

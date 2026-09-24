@@ -354,6 +354,7 @@ internal sealed partial class HouseholdWorker
         using var lease = await _gate.EnterBackgroundAsync(stop).ConfigureAwait(false);
         try
         {
+            if (PairingCommitted) return;                                      // household changes wait for the pairing
             await CheckApprovedAsync(lease.Attention).ConfigureAwait(false);
             if (_store.HouseholdId is not null && _store.Approving is not null) await PollRequestsAsync(lease.Attention).ConfigureAwait(false);
         }

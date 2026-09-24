@@ -208,9 +208,10 @@ internal static class PairingSession
     /// <param name="refused">Counts a pairing whose question came to nothing: the user said no, or the adding PC stopped or
     /// went while it was open. It is counted before the answer goes, so the next try already meets the count. A pairing that
     /// ends before a good reveal isn't counted here; the caller counts every pairing that comes to nothing.</param>
+    /// <param name="joining">Heard just before this PC says it is joining: from then on, the pairing only finishes (plan 0.10).</param>
     public static async Task<PairingOutcome> JoinAsync(
         IFrameChannel channel, byte[] adderHello, PairingIdentity me, IPromptBroker broker, bool inHousehold,
-        Func<Welcome, MemberInfo, Task<bool>> enter, PairingTimeouts timeouts, CancellationToken cancel, Action? refused = null)
+        Func<Welcome, MemberInfo, Task<bool>> enter, PairingTimeouts timeouts, CancellationToken cancel, Action? refused = null, Action? joining = null)
     {
         if (Hello.Of(LanMessages.Read(adderHello)) is not { Purpose: Hello.Pair, Commit: { } commit } hello)
         {
@@ -265,7 +266,9 @@ internal static class PairingSession
             {
                 return new PairingOutcome.Failed($"{name} sent a household that wasn't a good one, so nothing was changed.");
             }
-            await talk.SendAsync(new LanMessage { Type = "joined", Proof = Wire.Encode(Wire.SignJoin(me.Keys, welcome.HouseholdId)) }, cancel)
+            cancel.ThrowIfCancellationRequested();
+            joining?.Invoke();
+            await talk.SendAsync(new LanMessage { Type = "joined", Proof = Wire.Encode(Wire.SignJoin(me.Keys, welcome.HouseholdId)) }, CancellationToken.None)
                 .ConfigureAwait(false);
             await talk.ReceiveAsync("welcomed", CancellationToken.None).ConfigureAwait(false);   // joined: no cancel now; without it, nothing
             if (!await enter(welcome, hello.From).ConfigureAwait(false))
