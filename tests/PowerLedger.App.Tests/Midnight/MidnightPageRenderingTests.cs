@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
@@ -62,7 +63,7 @@ public class MidnightPageRenderingTests
                     if (part.Part is null) bar.Visibility.ShouldBe(Visibility.Hidden, theme.ToString());
                     else (bar.Value, bar.ActualWidth).ShouldBe((part.Fraction, 120.0), $"{part.Name} on {theme}");
                 }
-                Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-history-{theme}.png");
+                page.Render($"midnight-history-{theme}.png");
 
                 // The Dashboard's hour and year, which BreakdownViewModel's range resolves as it is, in minutes and in days.
                 pills.Single(p => Equals(p.Content, "Last hour")).IsChecked = true;
@@ -71,7 +72,7 @@ public class MidnightPageRenderingTests
                 page.Host.UpdateLayout();
                 model.Heading.ShouldStartWith("Last hour · 1-min", customMessage: theme.ToString());
                 pills.Where(p => p.IsChecked == true).Select(p => p.Content).ShouldBe(["Last hour", "W"], ignoreOrder: true, theme.ToString());
-                Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-history-hour-{theme}.png");
+                page.Render($"midnight-history-hour-{theme}.png");
                 pills.Single(p => Equals(p.Content, "Last year")).IsChecked = true;
                 model.Range.Choice.ShouldBe(RangeChoice.LastYear, theme.ToString());
                 Pump(TimeSpan.FromMilliseconds(300));
@@ -81,7 +82,7 @@ public class MidnightPageRenderingTests
                 Pump(TimeSpan.FromMilliseconds(300));
                 page.Host.UpdateLayout();
                 Find<DatePicker>(view).ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
-                Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-history-custom-{theme}.png");
+                page.Render($"midnight-history-custom-{theme}.png");
             }
         });
         Sizes(30_000, "history", "history-hour", "history-custom");
@@ -112,7 +113,7 @@ public class MidnightPageRenderingTests
                 }
                 Find<TextBlock>(view, t => t.Text == model.Data.Title).ShouldNotBeNull(theme.ToString());
                 Find<TextBlock>(view, t => t.Text == model.Data.Energy).ShouldNotBeNull(theme.ToString());
-                Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-report-{theme}.png");
+                page.Render($"midnight-report-{theme}.png");
 
                 // PNG draws the sheet, the element named Sheet, into the file the saver names.
                 view.FindName("Sheet").ShouldBeOfType<Grid>(theme.ToString());
@@ -160,7 +161,7 @@ public class MidnightPageRenderingTests
                     Find<Initials>(row).ShouldNotBeNull($"{member.Name} on {theme}").Member.ShouldBe(member.Name, $"{member.Name} on {theme}");
                 }
                 AllOf<Button>(view).Count(b => Equals(b.Content, "Add a PC") && b.IsVisible).ShouldBe(1, theme.ToString());
-                Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-household-{theme}.png");
+                page.Render($"midnight-household-{theme}.png");
             }
         });
         Sizes(30_000, "household");
@@ -187,7 +188,7 @@ public class MidnightPageRenderingTests
                     add.Count.ShouldBe(1, theme.ToString());
                     add[0].Style.ShouldBe(explainer.FindResource("M.Button.Primary"), theme.ToString());
                     Find<TextBlock>(explainer, t => t.Text == "SIGN IN").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
-                    Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-household-none-{theme}.png");
+                    page.Render($"midnight-household-none-{theme}.png");
                 }
 
                 var left = LeftMemberScreen();
@@ -203,7 +204,7 @@ public class MidnightPageRenderingTests
                     // The confirm block lives in the Manage card here and in the explainer card before a household exists; the visible one counts.
                     Find<TextBlock>(members, t => t.Text == "Remove Laptop-2's rows? This can't be undone." && t.IsVisible).ShouldNotBeNull(theme.ToString());
                     Find<Button>(members, b => Equals(b.Content, "Confirm") && b.IsVisible).ShouldNotBeNull(theme.ToString());
-                    Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-household-left-{theme}.png");
+                    page.Render($"midnight-household-left-{theme}.png");
                 }
             }
         });
@@ -244,7 +245,7 @@ public class MidnightPageRenderingTests
                         .IsVisible.ShouldBeTrue($"{monitor.Name} on {theme}");
                 }
                 Find<TextBlock>(view, t => t.Text == "Saved.").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
-                Render(page.Host, (int)page.Host.ActualWidth, (int)page.Host.ActualHeight, $"midnight-settings-{theme}.png");
+                page.Render($"midnight-settings-{theme}.png");
             }
         });
         Sizes(30_000, "settings");
@@ -475,6 +476,27 @@ public class MidnightPageRenderingTests
 
     private sealed record PageHost(Border Host, Window Window) : IDisposable
     {
+        /// <summary>
+        /// The whole page to <paramref name="name"/> on Midnight's ground: what the page's scroller holds, at its full length,
+        /// which the host window, kept no taller than the screen, would cut off.
+        /// </summary>
+        public void Render(string name)
+        {
+            Host.UpdateLayout();
+            var content = (FrameworkElement)Find<ScrollViewer>(Host)!.Content;
+            var width = (int)Math.Ceiling(Host.ActualWidth);
+            var height = (int)Math.Ceiling(content.ActualHeight + content.Margin.Top + content.Margin.Bottom);
+            var ground = new DrawingVisual();
+            using (var context = ground.RenderOpen()) context.DrawRectangle(Host.Background, null, new Rect(0, 0, width, height));
+            var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(ground);
+            bitmap.Render(content);   // at its offset in the scroller, the page's margin
+            var png = new PngBitmapEncoder();
+            png.Frames.Add(BitmapFrame.Create(bitmap));
+            using var file = File.Create(Path.Combine(Folder, name));
+            png.Save(file);
+        }
+
         public void Dispose() => Window.Close();
     }
 
