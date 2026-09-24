@@ -15,18 +15,19 @@ public class ContrastTests
 {
     private static readonly string[] Texts = ["M.Ink", "M.Ink2", "M.Ink3"];
     private static readonly string[] Grounds = ["M.Ground", "M.Panel", "M.Raised"];
-    private static readonly string[] Marks = ["M.Accent", "M.Good", "M.Bad", "M.Warn", "M.PartCpu", "M.PartGpu", "M.PartDisplay", "M.PartRest", "M.LineStrong", "M.Focus"];
+    private static readonly string[] Marks = ["M.Accent", "M.Good", "M.Bad", "M.Warn", "M.PartCpu", "M.PartGpu", "M.PartDisplay", "M.PartRest", "M.LineStrong", "M.Focus", "M.Tip"];
     private static readonly string[] Chips = ["M.ChipMeasured", "M.ChipCalibrated", "M.ChipEstimated"];
 
     /// <summary>Text set in a colour, and where it sits: white on the accent (the active pill, primary buttons, the
-    /// badge), the trends' green and red on the cards and hovered rows, and the accent's text tint (the chart's "now"
-    /// label and other small accent labels) there too.</summary>
+    /// badge), the trends' green and red on the cards and hovered rows, the accent's text tint (the chart's "now"
+    /// label and other small accent labels) there too, and the tooltip's words on its bubble.</summary>
     private static readonly (string Text, string Ground)[] ColouredText =
     [
         ("M.OnAccent", "M.Accent"),
         ("M.Good", "M.Panel"), ("M.Good", "M.Raised"),
         ("M.Bad", "M.Panel"), ("M.Bad", "M.Raised"),
         ("M.AccentText", "M.Panel"), ("M.AccentText", "M.Raised"),
+        ("M.TipText", "M.Tip"), ("M.TipMuted", "M.Tip"),
     ];
 
     [Theory]

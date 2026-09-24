@@ -1,21 +1,22 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- Midnight, dark: the design's §3 tokens. Classic's keys come first with Midnight's values, so the dialogs, the wizard
-         and the update card take Midnight's colours without a change; the amber keys carry the accent, as the brand mark
-         alone stays amber. Ink3 and LineStrong sit a little above the design's first figures, where the contrast tests
-         (text 4.5:1, borders 3:1 on the panel) put them. The accent is a touch deeper than #4C6FFF so white reads on it
-         at 4.5:1; so deep, it can't also read as small text on the panel, so accent text takes AccentText, a lighter tint.
-         The CPU is teal, not a second blue, so its band stays apart from the accent's total line. -->
-    <SolidColorBrush x:Key="Brush.Ground" Color="#0B0E1C" />
-    <SolidColorBrush x:Key="Brush.Panel" Color="#10142A" />
-    <SolidColorBrush x:Key="Brush.Raised" Color="#161B36" />
-    <SolidColorBrush x:Key="Brush.Line" Color="#1F2547" />
-    <SolidColorBrush x:Key="Brush.LineStrong" Color="#5A6396" />
-    <SolidColorBrush x:Key="Brush.Ink" Color="#ECEEF9" />
-    <SolidColorBrush x:Key="Brush.Ink2" Color="#A9AFCC" />
-    <SolidColorBrush x:Key="Brush.Ink3" Color="#7E85AC" />
-    <SolidColorBrush x:Key="Brush.Amber" Color="#4468FA" />
-    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#384468FA" />
+    <!-- Midnight, dark: the design's §3 tokens, taken nearer the reference in 0.8.1: a near-black ground with a blue cast,
+         panels a step lighter framed by hairlines, a blue accent and a violet second accent that only gradients use. Classic's
+         keys come first with Midnight's values, so the dialogs, the wizard and the update card take Midnight's colours
+         without a change; the amber keys carry the accent, as the brand mark alone stays amber. Ink3 and LineStrong sit
+         where the contrast tests (text 4.5:1, borders 3:1 on the panel) put them. White reads on the accent at 4.5:1; so
+         deep, the accent can't also read as small text on the panel, so accent text takes AccentText, a lighter tint. The
+         CPU is teal, not a second blue, so its band stays apart from the accent's total line. -->
+    <SolidColorBrush x:Key="Brush.Ground" Color="#0A0C16" />
+    <SolidColorBrush x:Key="Brush.Panel" Color="#0F1220" />
+    <SolidColorBrush x:Key="Brush.Raised" Color="#161A2B" />
+    <SolidColorBrush x:Key="Brush.Line" Color="#1F2438" />
+    <SolidColorBrush x:Key="Brush.LineStrong" Color="#58618C" />
+    <SolidColorBrush x:Key="Brush.Ink" Color="#F2F3F8" />
+    <SolidColorBrush x:Key="Brush.Ink2" Color="#A3A9C2" />
+    <SolidColorBrush x:Key="Brush.Ink3" Color="#7D84A6" />
+    <SolidColorBrush x:Key="Brush.Amber" Color="#3D5CFF" />
+    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#383D5CFF" />
     <SolidColorBrush x:Key="Brush.OnAmber" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Brush.Measured" Color="#D9E27F" />
     <SolidColorBrush x:Key="Brush.Calibrated" Color="#F1D57A" />
@@ -26,18 +27,20 @@
     <SolidColorBrush x:Key="Brush.PartRest" Color="#7C86A8" />
 
     <!-- Midnight's own keys. -->
-    <SolidColorBrush x:Key="M.Ground" Color="#0B0E1C" />
-    <SolidColorBrush x:Key="M.Panel" Color="#10142A" />
-    <SolidColorBrush x:Key="M.Raised" Color="#161B36" />
-    <SolidColorBrush x:Key="M.Line" Color="#1F2547" />
-    <SolidColorBrush x:Key="M.LineStrong" Color="#5A6396" />
-    <SolidColorBrush x:Key="M.Ink" Color="#ECEEF9" />
-    <SolidColorBrush x:Key="M.Ink2" Color="#A9AFCC" />
-    <SolidColorBrush x:Key="M.Ink3" Color="#7E85AC" />
-    <SolidColorBrush x:Key="M.Accent" Color="#4468FA" />
-    <SolidColorBrush x:Key="M.AccentSoft" Color="#384468FA" />
+    <SolidColorBrush x:Key="M.Ground" Color="#0A0C16" />
+    <SolidColorBrush x:Key="M.Panel" Color="#0F1220" />
+    <SolidColorBrush x:Key="M.Raised" Color="#161A2B" />
+    <SolidColorBrush x:Key="M.Line" Color="#1F2438" />
+    <SolidColorBrush x:Key="M.LineStrong" Color="#58618C" />
+    <SolidColorBrush x:Key="M.Ink" Color="#F2F3F8" />
+    <SolidColorBrush x:Key="M.Ink2" Color="#A3A9C2" />
+    <SolidColorBrush x:Key="M.Ink3" Color="#7D84A6" />
+    <SolidColorBrush x:Key="M.Accent" Color="#3D5CFF" />
+    <SolidColorBrush x:Key="M.AccentSoft" Color="#383D5CFF" />
     <SolidColorBrush x:Key="M.OnAccent" Color="#FFFFFF" />
     <SolidColorBrush x:Key="M.AccentText" Color="#7B93FF" />
+    <!-- The violet the accent runs into: the chart's line and the sidebar's current page, never alone and never text. -->
+    <SolidColorBrush x:Key="M.Accent2" Color="#8B5CF6" />
     <SolidColorBrush x:Key="M.Good" Color="#34D399" />
     <SolidColorBrush x:Key="M.Bad" Color="#F87171" />
     <SolidColorBrush x:Key="M.Warn" Color="#F5B942" />
@@ -52,13 +55,14 @@
     <SolidColorBrush x:Key="M.ChipCalibratedText" Color="#F1D57A" />
     <SolidColorBrush x:Key="M.ChipEstimated" Color="#1A2F44" />
     <SolidColorBrush x:Key="M.ChipEstimatedText" Color="#7CC4F5" />
-    <!-- Glass (the top bar and tooltips over content), shadow, hatch, the area chart's gradient and the focus ring. -->
-    <SolidColorBrush x:Key="M.GlassFill" Color="#B810142A" />
-    <SolidColorBrush x:Key="M.GlassBorder" Color="#14FFFFFF" />
-    <SolidColorBrush x:Key="M.GlassHighlight" Color="#24FFFFFF" />
+    <!-- Tooltips: a white bubble with dark words over the dark page, as the reference draws its chart's. -->
+    <SolidColorBrush x:Key="M.Tip" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="M.TipText" Color="#0F1220" />
+    <SolidColorBrush x:Key="M.TipMuted" Color="#5C6386" />
+    <!-- Shadow (menus and tooltips), hatch, the area chart's gradient and the focus ring. -->
     <SolidColorBrush x:Key="M.Shadow" Color="#73000000" />
     <SolidColorBrush x:Key="M.Hatch" Color="#1AFFFFFF" />
-    <SolidColorBrush x:Key="M.ChartFillTop" Color="#594468FA" />
-    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#004468FA" />
+    <SolidColorBrush x:Key="M.ChartFillTop" Color="#5C3D5CFF" />
+    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#003D5CFF" />
     <SolidColorBrush x:Key="M.Focus" Color="#8FA5FF" />
 </ResourceDictionary>
