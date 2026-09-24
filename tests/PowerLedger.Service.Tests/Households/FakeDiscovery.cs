@@ -45,8 +45,11 @@ internal sealed class FakeDiscovery(FakeNetwork network) : IDiscovery
 
     public void Unregister() => network.Withdraw(this);
 
+    /// <summary>What browsing throws instead of answering, when set.</summary>
+    public Exception? BrowseFails { get; set; }
+
     public Task<IReadOnlyList<FoundService>> BrowseAsync(TimeSpan timeout, CancellationToken cancel = default) =>
-        Task.FromResult(network.Announced);
+        BrowseFails is { } error ? Task.FromException<IReadOnlyList<FoundService>>(error) : Task.FromResult(network.Announced);
 
     public void Dispose() => Unregister();
 }

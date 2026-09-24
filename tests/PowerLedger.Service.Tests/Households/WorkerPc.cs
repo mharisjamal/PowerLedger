@@ -37,7 +37,7 @@ internal sealed class WorkerPc : IAsyncDisposable
         var notices = new NoticeHub(() => Screen);
         _client = client;
         var environment = new HouseholdEnvironment(
-            network.Join(), Category, _client, IPAddress.Loopback, () => name, RunLoop: false,
+            Discovery = network.Join(), Category, _client, IPAddress.Loopback, () => name, RunLoop: false,
             BrowseTime: TimeSpan.Zero, Timeouts: new PairingTimeouts(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)),
             CodeWait: (_, cancel) => Task.Delay(codeWait, cancel));
         Worker = new HouseholdWorker(_database.Db, Board, notices, environment, clock, NullLogger<HouseholdWorker>.Instance);
@@ -71,6 +71,9 @@ internal sealed class WorkerPc : IAsyncDisposable
     }
 
     public StatusBoard Board { get; } = new();
+
+    /// <summary>This PC's view of the network's announcements.</summary>
+    public FakeDiscovery Discovery { get; }
 
     /// <summary>The kind of network this PC is on, Private until the test says otherwise.</summary>
     public FakeNetworkCategory Category { get; } = new();

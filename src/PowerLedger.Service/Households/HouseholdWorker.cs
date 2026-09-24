@@ -269,7 +269,15 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     private async Task<PipeMessage> BrowseAsync(BrowsePcsRequest request, CancellationToken cancel)
     {
-        var found = await _environment.Discovery.BrowseAsync(_environment.BrowseTime ?? DefaultBrowseTime, cancel).ConfigureAwait(false);
+        IReadOnlyList<FoundService> found;
+        try
+        {
+            found = await _environment.Discovery.BrowseAsync(_environment.BrowseTime ?? DefaultBrowseTime, cancel).ConfigureAwait(false);
+        }
+        catch (PlatformNotSupportedException error)
+        {
+            return new ErrorReply(request.Id, error.Message);                  // a Windows too old to find PCs: said so
+        }
         var mine = _store.InstanceId;
         var key = _store.CurrentKey;
         var pcs = new List<FoundPc>();

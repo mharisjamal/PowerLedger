@@ -279,6 +279,9 @@ internal sealed class WindowsDiscovery(ILogger log) : IDiscovery
     /// <summary>The service type every PowerLedger PC announces itself under.</summary>
     public const string ServiceType = "_powerledger._tcp.local";
 
+    /// <summary>What finding PCs says on a Windows without the DNS-SD functions, added in Windows 10 version 1903.</summary>
+    public const string TooOld = "Finding PCs on the network needs Windows 10 version 1903 or later.";
+
     private const int RequestPending = 9506;           // DNS_REQUEST_PENDING
     private const uint Cancelled = 1223;                // ERROR_CANCELLED
     private const uint RequestVersion1 = 1;             // DNS_QUERY_REQUEST_VERSION1
@@ -307,7 +310,23 @@ internal sealed class WindowsDiscovery(ILogger log) : IDiscovery
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate void ResolveComplete(uint status, IntPtr context, IntPtr instance);
 
-    public void Register(string instance, int port, IReadOnlyDictionary<string, string> txt)
+    public void Register(string instance, int port, IReadOnlyDictionary<string, string> txt) => Supported(() => RegisterCore(instance, port, txt));
+
+    /// <summary>Runs a call into dnsapi.dll, turning a function that Windows lacks, as before Windows 10 version 1903, into a
+    /// <see cref="PlatformNotSupportedException"/> that says so in words the App can show.</summary>
+    internal static void Supported(Action call)
+    {
+        try
+        {
+            call();
+        }
+        catch (EntryPointNotFoundException error)
+        {
+            throw new PlatformNotSupportedException(TooOld, error);
+        }
+    }
+
+    private void RegisterCore(string instance, int port, IReadOnlyDictionary<string, string> txt)
     {
         lock (_gate)
         {
@@ -356,6 +375,18 @@ internal sealed class WindowsDiscovery(ILogger log) : IDiscovery
     public void Dispose() => Unregister();
 
     public async Task<IReadOnlyList<FoundService>> BrowseAsync(TimeSpan timeout, CancellationToken cancel = default)
+    {
+        try
+        {
+            return await BrowseCoreAsync(timeout, cancel).ConfigureAwait(false);
+        }
+        catch (EntryPointNotFoundException error)
+        {
+            throw new PlatformNotSupportedException(TooOld, error);
+        }
+    }
+
+    private async Task<IReadOnlyList<FoundService>> BrowseCoreAsync(TimeSpan timeout, CancellationToken cancel)
     {
         var browse = new Browse();
         browse.Context = GCHandle.Alloc(browse);

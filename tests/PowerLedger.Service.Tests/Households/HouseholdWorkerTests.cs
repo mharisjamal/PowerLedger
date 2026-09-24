@@ -96,6 +96,17 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task On_a_windows_too_old_for_finding_pcs_browsing_says_so()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Discovery.BrowseFails = Should.Throw<PlatformNotSupportedException>(
+            () => WindowsDiscovery.Supported(() => throw new EntryPointNotFoundException("Unable to find an entry point named 'DnsServiceBrowse'.")));
+
+        (await desktop.Worker.HandleAsync(new BrowsePcsRequest(1), WorkerPc.Screen, CancellationToken.None)).ShouldBe(
+            new ErrorReply(1, "Finding PCs on the network needs Windows 10 version 1903 or later."));
+    }
+
+    [Fact]
     public async Task Adding_a_pc_not_found_or_already_in_the_household_is_refused()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);
