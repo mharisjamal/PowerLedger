@@ -62,8 +62,7 @@
 
                 <StackPanel Grid.Row="0" Grid.ColumnSpan="2">
                     <DockPanel>
-                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Eyebrow}" VerticalAlignment="Center"
-                                   Text="{Binding Data.Period, Converter={StaticResource Upper}}" />
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Column}" VerticalAlignment="Center" Text="{Binding Data.Period}" />
                         <TextBlock Style="{StaticResource M.Text.Title}" Text="{Binding Data.Title}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,8,0,0" Text="{Binding Message}"
@@ -72,7 +71,7 @@
 
                 <Border Grid.Row="1" Style="{StaticResource Left}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="BILL" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="Bill" />
                         <app:LedgerRow IsHero="True" Key="Energy" Value="{Binding Data.Energy}" Note="kWh" />
                         <app:LedgerRow Key="Cost" Value="{Binding Data.Cost}" Note="{Binding Data.CostNote}" />
                         <app:LedgerRow Key="CO₂" Value="{Binding Data.Co2}" Note="{Binding Data.Co2Note}" />
@@ -82,7 +81,7 @@
                 </Border>
                 <Border Grid.Row="1" Style="{StaticResource Right}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="TIME" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="Time" />
                         <app:LedgerRow IsHero="True" Key="On" Value="{Binding Data.On}" />
                         <app:LedgerRow Key="Idle, display on" Value="{Binding Data.IdleOn}" />
                         <app:LedgerRow Key="Idle, display off" Value="{Binding Data.IdleOff}" />
@@ -94,7 +93,7 @@
                 <Border Grid.Row="2" Style="{StaticResource Left}">
                     <!-- The header and each row are grids of their own; the shared group keeps the kWh column one width in all of them. -->
                     <StackPanel Grid.IsSharedSizeScope="True">
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="BY COMPONENT" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="By component" />
                         <Border Style="{StaticResource M.Table.Header}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -104,9 +103,9 @@
                                     <ColumnDefinition Width="56" />
                                     <ColumnDefinition Width="32" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="PART" />
-                                <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" />
-                                <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Margin="12,0,0,0" />
+                                <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Column}" Text="Part" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Column}" Text="kWh" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Column}" Text="Share" Margin="12,0,0,0" />
                             </Grid>
                         </Border>
                         <ItemsControl ItemsSource="{Binding Data.Parts}" Focusable="False">
@@ -152,7 +151,7 @@
                 </Border>
                 <Border Grid.Row="2" Style="{StaticResource Right}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="EVERYDAY EQUIVALENTS" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="Everyday equivalents" />
                         <ItemsControl ItemsSource="{Binding Data.Equivalents}" Focusable="False">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type app:ReportLine}">
@@ -165,7 +164,7 @@
 
                 <Border Grid.Row="3" Style="{StaticResource Left}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="IDLE WASTE" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="Idle waste" />
                         <app:LedgerRow IsHero="True" Key="Energy while idle" Value="{Binding Data.IdleWaste}" />
                         <TextBlock Style="{StaticResource M.Text.Secondary}" TextWrapping="Wrap" Margin="0,8,0,0" Text="{Binding Data.IdleWasteNote}" />
                         <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" Margin="0,10,0,0" Text="{Binding Data.Advice}" />
@@ -173,7 +172,7 @@
                 </Border>
                 <Border Grid.Row="3" Style="{StaticResource Right}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="DATA QUALITY" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="Data quality" />
                         <app:QualityBar Style="{StaticResource M.QualityBar}" Margin="0,8,0,12" Mix="{Binding Data.Quality}" />
                         <WrapPanel>
                             <ContentControl Style="{StaticResource M.Chip.Measured}" Margin="0,0,6,6" />
@@ -188,8 +187,8 @@
                 <Border Grid.Row="4" Grid.ColumnSpan="2" Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
                     <StackPanel>
                         <DockPanel Margin="0,0,0,12">
-                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" />
-                            <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="DAILY ENERGY" />
+                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Column}" Text="kWh" VerticalAlignment="Center" />
+                            <TextBlock Style="{StaticResource M.Text.Heading}" FontSize="14" Text="Daily energy" />
                         </DockPanel>
                         <app:DailyBars Style="{StaticResource M.DailyBars}" Days="{Binding Data.Days}" />
                     </StackPanel>
