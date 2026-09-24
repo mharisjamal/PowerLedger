@@ -122,11 +122,37 @@ internal sealed class RelayClient : IDisposable
         SendAsync<Done>(HttpMethod.Post, "v1/account/household", Json(new LinkBody(householdId), HouseholdJson.Default.LinkBody), keys, null, cancel,
             session: session);
 
-    /// <summary>N2's <c>POST /v1/account/requests</c>: asks to join the account's household.</summary>
-    public Task<RelayResult<Done>> AskToJoinAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
-        SendAsync<Done>(HttpMethod.Post, "v1/account/requests", [], keys, null, cancel, session: session);
+    /// <summary>N2's <c>POST /v1/account/requests</c>: asks to join the account's household, which it names; asking again starts
+    /// a fresh request.</summary>
+    public Task<RelayResult<AskReply>> AskToJoinAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
+        SendAsync(HttpMethod.Post, "v1/account/requests", [], keys, HouseholdJson.Default.AskReply, cancel, session: session);
 
-    /// <summary>N2's <c>PUT /v1/account/recovery</c>: the household key sealed under the recovery code, and its verifier.</summary>
+    /// <summary>N2's <c>GET /v1/account/requests</c>: this PC's own requests to join, with their approval so far.</summary>
+    public Task<RelayResult<OwnRequestsReply>> OwnRequestsAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
+        SendAsync(HttpMethod.Get, "v1/account/requests", null, keys, HouseholdJson.Default.OwnRequestsReply, cancel, session: session);
+
+    /// <summary>N2's <c>POST /v1/account/requests/nonce</c>: this PC's nonce, answering the member that committed (plan 0.9).</summary>
+    public Task<RelayResult<Done>> SendNonceAsync(DeviceKeys keys, string session, string nonce, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, "v1/account/requests/nonce", Json(new NonceBody(nonce), HouseholdJson.Default.NonceBody), keys, null, cancel,
+            session: session);
+
+    /// <summary>N2's <c>DELETE /v1/account/requests</c>: this PC withdraws its own request, waiting or approved.</summary>
+    public Task<RelayResult<Done>> WithdrawAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Delete, "v1/account/requests", null, keys, null, cancel, session: session);
+
+    /// <summary>N2's <c>POST /v1/households/{hid}/requests/{device}/commit</c>: this PC's commitment to its nonce, which makes it
+    /// the request's approver (plan 0.9).</summary>
+    public Task<RelayResult<Done>> CommitAsync(DeviceKeys keys, string householdId, string deviceId, string commit, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, $"v1/households/{householdId}/requests/{deviceId}/commit",
+            Json(new CommitBody(commit), HouseholdJson.Default.CommitBody), keys, null, cancel);
+
+    /// <summary>N2's <c>POST /v1/households/{hid}/requests/{device}/reveal</c>: the nonce this PC committed to.</summary>
+    public Task<RelayResult<Done>> RevealAsync(DeviceKeys keys, string householdId, string deviceId, string nonce, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Post, $"v1/households/{householdId}/requests/{deviceId}/reveal",
+            Json(new NonceBody(nonce), HouseholdJson.Default.NonceBody), keys, null, cancel);
+
+    /// <summary>N2's <c>PUT /v1/account/recovery</c>: the household key and member list sealed under the recovery code's key at an
+    /// epoch, and the verifier made from the code (plan 0.9).</summary>
     public Task<RelayResult<Done>> PutRecoveryAsync(DeviceKeys keys, string session, RecoveryBody recovery, CancellationToken cancel) =>
         SendAsync<Done>(HttpMethod.Put, "v1/account/recovery", Json(recovery, HouseholdJson.Default.RecoveryBody), keys, null, cancel, session: session);
 
@@ -134,17 +160,17 @@ internal sealed class RelayClient : IDisposable
     public Task<RelayResult<RecoveryReply>> GetRecoveryAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
         SendAsync(HttpMethod.Get, "v1/account/recovery", null, keys, HouseholdJson.Default.RecoveryReply, cancel, session: session);
 
-    /// <summary>N2's <c>POST /v1/account/recover</c>: this PC joins the account's household on the verifier, which only a PC
-    /// that opened the recovery envelope can make.</summary>
-    public Task<RelayResult<Done>> RecoverAsync(DeviceKeys keys, string session, byte[] verifier, CancellationToken cancel) =>
-        SendAsync<Done>(HttpMethod.Post, "v1/account/recover", Json(new RecoverBody(Wire.Encode(verifier)), HouseholdJson.Default.RecoverBody), keys,
-            null, cancel, session: session);
+    /// <summary>N2's <c>POST /v1/account/recover</c>: this PC becomes the account's household's only current member on the
+    /// verifier, which only a PC given the code can make; the answer names the household's current epoch.</summary>
+    public Task<RelayResult<RecoverReply>> RecoverAsync(DeviceKeys keys, string session, byte[] verifier, CancellationToken cancel) =>
+        SendAsync(HttpMethod.Post, "v1/account/recover", Json(new RecoverBody(Wire.Encode(verifier)), HouseholdJson.Default.RecoverBody), keys,
+            HouseholdJson.Default.RecoverReply, cancel, session: session);
 
     /// <summary>N2's <c>GET /v1/households/{hid}/requests</c>: the PCs signed in as the account waiting to join.</summary>
     public Task<RelayResult<List<JoinRequestItem>>> RequestsAsync(DeviceKeys keys, string householdId, CancellationToken cancel) =>
         SendAsync(HttpMethod.Get, $"v1/households/{householdId}/requests", null, keys, HouseholdJson.Default.ListJoinRequestItem, cancel);
 
-    /// <summary>N2's <c>POST /v1/households/{hid}/requests/{device}/approve</c>: the key sealed for the waiting PC.</summary>
+    /// <summary>N2's <c>POST /v1/households/{hid}/requests/{device}/approve</c>: the key and member list sealed for the waiting PC.</summary>
     public Task<RelayResult<Done>> ApproveAsync(DeviceKeys keys, string householdId, string deviceId, int epoch, string envelope, CancellationToken cancel) =>
         SendAsync<Done>(HttpMethod.Post, $"v1/households/{householdId}/requests/{deviceId}/approve",
             Json(new ApproveBody(epoch, envelope), HouseholdJson.Default.ApproveBody), keys, null, cancel);
@@ -294,16 +320,45 @@ internal sealed record SignInReply(string Session, string? HouseholdId, bool Has
 
 internal sealed record LinkBody(string HouseholdId);
 
-/// <summary>N2: the recovery envelope as put: the household key sealed under the recovery code's key, and the verifier a
-/// recovering PC shows. The server records the household's epoch with it.</summary>
-internal sealed record RecoveryBody(string Body, string Verifier);
+/// <summary>N2: the recovery as put (plan 0.9): the household key and member list sealed under the recovery code's key at
+/// <see cref="Epoch"/>, which must be the household's current one, and the verifier a recovering PC shows. Only the PC
+/// holding the code renews it; <see cref="Replace"/> is a new code, which makes this PC the holder.</summary>
+internal sealed record RecoveryBody(string Body, string Verifier, int Epoch, bool Replace);
 
-internal sealed record RecoveryReply(string? HouseholdId, int? Epoch, string Body);
+/// <summary>N2: the recovery as the server keeps it: its sealed body, the epoch it was sealed at, and the PC holding its code.</summary>
+internal sealed record RecoveryReply(string Body, int Epoch, string Holder);
 
 internal sealed record RecoverBody(string Verifier);
 
-/// <summary>N2: a PC waiting to join, signed in as the account <see cref="Account"/>, an opaque ID.</summary>
-internal sealed record JoinRequestItem(string Device, string Sign, string Dh, long Created, string? Account = null);
+/// <summary>N2: a PC waiting to join, signed in as the account <see cref="Account"/>, an opaque ID, with its approval so far
+/// (plan 0.9): the member that committed, its commitment, the waiting PC's nonce and the member's reveal, null until set.</summary>
+internal sealed record JoinRequestItem(
+    string Device, string Sign, string Dh, long Created, string? Account = null, string? Approver = null, string? Commit = null, string? Nonce = null,
+    string? Reveal = null);
+
+/// <summary>N2: what <c>POST /v1/account/requests</c> answers: the household asked to join.</summary>
+internal sealed record AskReply(string? HouseholdId);
+
+/// <summary>N2: this PC's own requests, as <c>GET /v1/account/requests</c> gives them.</summary>
+internal sealed record OwnRequestsReply(List<OwnRequest>? Requests);
+
+/// <summary>N2: one of this PC's own requests: the member that committed to approving it, with its keys, its commitment and
+/// reveal, and the epoch it was approved at once it has been.</summary>
+internal sealed record OwnRequest(string Device, string Household, ApproverKeys? Approver, string? Commit, string? Reveal, ApprovedAt? Approved, long Expires);
+
+internal sealed record ApproverKeys(string Device, string Sign, string Dh);
+
+internal sealed record ApprovedAt(int Epoch);
+
+internal sealed record CommitBody(string Commit);
+
+internal sealed record NonceBody(string Nonce);
+
+/// <summary>What <c>POST /v1/account/recover</c> answers: the household, and its current epoch.</summary>
+internal sealed record RecoverReply(string Household, int Epoch);
+
+/// <summary>A household key and its member list, as an approval's and a recovery's sealed body carry them (plan 0.9).</summary>
+internal sealed record SealedKeyList(string Key, List<WireMember> Members);
 
 internal sealed record ApproveBody(int Epoch, string Body);
 

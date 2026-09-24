@@ -48,6 +48,10 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string RotationPostKey = "household.rotation-post";
     internal const string RecoveryCodeKey = "household.recovery-code";
     internal const string LaggingKey = "household.lagging";
+    internal const string ApprovingKey = "household.approving";
+    internal const string AnsweringKey = "household.answering";
+    internal const string CanAskAgainKey = "household.can-ask-again";
+    internal const string ApprovalsStartedKey = "household.approvals-started";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
@@ -55,6 +59,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         [
             IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, SnapshotEpochKey, SnapshotAtKey, SnapshotWantedKey,
             SnapshotFromKey, ConfirmedKey, MembersCheckedKey, ProblemKey, WaitingKey, MemberEpochsKey, RotationKeyKey, RotationPostKey, LaggingKey,
+            ApprovingKey,
         ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
@@ -358,6 +363,40 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     {
         get => settings.Get(AskedToJoinKey);
         set => WriteText(AskedToJoinKey, value);
+    }
+
+    /// <summary>N2: this PC's answer to the member that committed to approving it (plan 0.9); null before one has.</summary>
+    public Answering? Answering
+    {
+        get => HouseholdJson.Read(settings.Get(AnsweringKey), HouseholdJson.Default.Answering);
+        set => WriteText(AnsweringKey, value is null ? null : HouseholdJson.Write(value, HouseholdJson.Default.Answering));
+    }
+
+    /// <summary>N2: true once this PC's request to join was refused or lapsed: its user may ask again (plan 0.9).</summary>
+    public bool CanAskAgain
+    {
+        get => settings.Get(CanAskAgainKey) == "1";
+        set => WriteText(CanAskAgainKey, value ? "1" : null);
+    }
+
+    /// <summary>N2: the approval of a waiting PC this PC runs (plan 0.9); null while it runs none.</summary>
+    public Approving? Approving
+    {
+        get => HouseholdJson.Read(settings.Get(ApprovingKey), HouseholdJson.Default.Approving);
+        set => WriteText(ApprovingKey, value is null ? null : HouseholdJson.Write(value, HouseholdJson.Default.Approving));
+    }
+
+    /// <summary>N2: how many approvals this PC started on the UTC day given, as <c>yyyy-MM-dd:count</c>.</summary>
+    public (DateOnly Day, int Count)? ApprovalsStarted
+    {
+        get => settings.Get(ApprovalsStartedKey)?.Split(':') is [var day, var count]
+            && DateOnly.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+            && int.TryParse(count, NumberStyles.None, CultureInfo.InvariantCulture, out var n)
+            ? (d, n)
+            : null;
+        set => WriteText(ApprovalsStartedKey, value is { } started
+            ? string.Create(CultureInfo.InvariantCulture, $"{started.Day:yyyy-MM-dd}:{started.Count}")
+            : null);
     }
 
     /// <summary>N2: the session token the server gave this PC at sign-in; null while signed out.</summary>

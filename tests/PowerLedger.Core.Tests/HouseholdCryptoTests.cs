@@ -70,21 +70,6 @@ public class HouseholdCryptoTests
     }
 
     [Fact]
-    public void The_approval_code_is_six_digits_and_changes_with_any_of_its_three_keys()
-    {
-        using var requester = DeviceKeys.Create();
-        using var approver = DeviceKeys.Create();
-        using var other = DeviceKeys.Create();
-        var code = HouseholdCrypto.ApprovalCode(requester.SignPublic, requester.DhPublic, approver.DhPublic);
-
-        code.ShouldMatch("^[0-9]{3} [0-9]{3}$");
-        HouseholdCrypto.ApprovalCode(requester.SignPublic, requester.DhPublic, approver.DhPublic).ShouldBe(code);
-        HouseholdCrypto.ApprovalCode(other.SignPublic, requester.DhPublic, approver.DhPublic).ShouldNotBe(code);
-        HouseholdCrypto.ApprovalCode(requester.SignPublic, other.DhPublic, approver.DhPublic).ShouldNotBe(code);
-        HouseholdCrypto.ApprovalCode(requester.SignPublic, requester.DhPublic, other.DhPublic).ShouldNotBe(code);
-    }
-
-    [Fact]
     public void A_nonce_is_32_fresh_bytes_and_its_commitment_is_a_fixed_hash_of_it()
     {
         var nonce = HouseholdCrypto.NewNonce();

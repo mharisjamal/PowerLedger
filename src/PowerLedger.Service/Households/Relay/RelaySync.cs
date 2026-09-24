@@ -12,15 +12,18 @@ namespace PowerLedger.Service.Households.Relay;
 /// <summary>Something the server still has to be told, kept until it has been: a household made, a member added or removed, a
 /// new epoch's keys. Each names its household, so what leaving asks of the server still goes after this PC has left. A new
 /// epoch's key waits in <see cref="HouseholdStore.RotationKey"/>, sealed only when it goes.</summary>
+/// <param name="Replace">For the recovery: a new code, which replaces any other on the server (plan 0.9).</param>
 internal sealed record PendingOp(
-    string Kind, string Household, string? Device = null, string? Sign = null, string? Dh = null, int? Epoch = null, string? Proof = null)
+    string Kind, string Household, string? Device = null, string? Sign = null, string? Dh = null, int? Epoch = null, string? Proof = null,
+    bool? Replace = null)
 {
     public const string Create = "create";
     public const string Add = "add";
     public const string Remove = "remove";
     public const string Keys = "keys";
 
-    /// <summary>N2: the household's current key in the account's recovery envelope, sealed when it goes, with this PC's session.</summary>
+    /// <summary>N2: the household's current key and member list in the account's recovery, sealed when it goes, with this PC's
+    /// session: put only by the PC holding the code.</summary>
     public const string RecoveryEnvelope = "recovery";
 }
 
@@ -194,10 +197,7 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
                     await relay.RemoveMemberAsync(keys, op.Household, device, cancel).ConfigureAwait(false),
                 PendingOp.Keys when op.Household == store.HouseholdId => await PostRotationAsync(keys, op.Household, cancel).ConfigureAwait(false),
                 PendingOp.Keys => new RelayResult<Done>(200, null, null),       // left since: nobody to rotate for
-                PendingOp.RecoveryEnvelope when store.Session is { } session && store.RecoveryKey is { } recoveryKey
-                    && op.Household == store.HouseholdId && store.CurrentKey is { } current =>
-                    await relay.PutRecoveryAsync(keys, session, Recovery.Envelope(recoveryKey, op.Household, store.Epoch, current), cancel).ConfigureAwait(false),
-                PendingOp.RecoveryEnvelope => new RelayResult<Done>(200, null, null),   // signed out since: nobody to put it for
+                PendingOp.RecoveryEnvelope => await PutRecoveryAsync(keys, op, cancel).ConfigureAwait(false),
                 _ => new RelayResult<Done>(400, null, "it wasn't a request this PC can make"),
             };
             if (result.Ok)
@@ -220,9 +220,10 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             {
                 log.LogInformation("A household this PC is no longer in doesn't take its {Kind}; it is dropped", op.Kind);
             }
-            else if (op.Kind == PendingOp.RecoveryEnvelope && result.Status == 401)
+            else if (op.Kind == PendingOp.RecoveryEnvelope && result.Error == RecoveryWaits)
             {
-                store.Session = null;                                          // the session has ended: signed out elsewhere
+                held.Add(op.Household);                                        // put once this PC has caught up with the key
+                continue;
             }
             else if (result.Transient)
             {
@@ -251,6 +252,52 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             Done(op);
         }
     }
+
+    /// <summary>
+    /// Puts the account's recovery (plan 0.9): the current key and the member list, sealed under the code's key at the current
+    /// epoch, with the verifier made from the code. Only the PC holding the code puts it, a new code replacing any other.
+    /// When the server has a newer code, or none, the holder forgets its own; when the key moved on meanwhile, the put waits
+    /// for this PC to catch up.
+    /// </summary>
+    private async Task<RelayResult<Done>> PutRecoveryAsync(DeviceKeys keys, PendingOp op, CancellationToken cancel)
+    {
+        if (store.Session is not { } session || store.RecoveryKey is not { } codeKey || op.Household != store.HouseholdId)
+        {
+            return new RelayResult<Done>(200, null, null);                     // signed out, forgotten or left since: nothing to put
+        }
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            if (store.CurrentKey is not { } key
+                || Recovery.Envelope(codeKey, op.Household, store.Epoch, key, _members.Entries(compact: true), op.Replace == true) is not { } body)
+            {
+                log.LogWarning("The household's key and members don't fit in a recovery");
+                return new RelayResult<Done>(200, null, null);
+            }
+            var put = await relay.PutRecoveryAsync(keys, session, body, cancel).ConfigureAwait(false);
+            if (put.Ok || (put.Transient && put.Status != 401)) return put;
+            if (put.Status == 401)
+            {
+                store.Session = null;                                          // the session has ended: signed out elsewhere
+                return new RelayResult<Done>(200, null, null);
+            }
+            if (put.Status != 409) return new RelayResult<Done>(200, null, null);   // no longer a member: the household's routes say so
+            var got = await relay.GetRecoveryAsync(keys, session, cancel).ConfigureAwait(false);
+            if (op.Replace != true && (got.Status == 404 || (got.Value?.Holder is { } holder && holder != keys.DeviceId)))
+            {
+                log.LogInformation("The account's recovery has a newer code, or none; this PC forgets its own");
+                store.RecoveryKey = null;
+                store.RecoveryCodeToShow = null;
+                return new RelayResult<Done>(200, null, null);
+            }
+            var before = store.Epoch;
+            await CatchUpAsync(keys, cancel).ConfigureAwait(false);            // the key moved on: sealed again at the one the server is at
+            if (store.Epoch == before) break;
+        }
+        return new RelayResult<Done>(409, null, RecoveryWaits);
+    }
+
+    /// <summary>Why the recovery waits: the household's key moved on while it was sealed.</summary>
+    private const string RecoveryWaits = "the household's key moved on; the recovery goes once this PC has caught up";
 
     /// <summary>Takes a request the server has heard, or won't ever take, off the queue.</summary>
     private void Done(PendingOp op)
@@ -287,10 +334,11 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
     /// sealed and posted when the server can be told, to the members it then lists as current, and used here only once it
     /// takes it. One at a time: a rotation already waiting covers every removal since, as it is sealed when it goes.
     /// </summary>
-    public void StartRotation(string householdId)
+    /// <param name="atLeast">The epoch to make it for at the least, as when the server is known to be further on.</param>
+    public void StartRotation(string householdId, int? atLeast = null)
     {
         if (store.HouseholdId != householdId || store.Pending.Any(op => op.Kind == PendingOp.Keys && op.Household == householdId)) return;
-        var epoch = store.Epoch + 1;
+        var epoch = Math.Max(store.Epoch + 1, atLeast ?? 0);
         store.RotationKey = (epoch, HouseholdCrypto.NewKey());
         store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch));
         log.LogInformation("A new key for the household waits to go to the server at epoch {Epoch}", epoch);
@@ -640,12 +688,11 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         {
             return 0;                                                          // removed: nothing of it after its removal, nor once its rows went
         }
-        var starting = member is null && KnowsNobody(keys);
-        if (member is null && !(starting && item.Epoch == store.Epoch)) return null;
+        if (member is null) return null;                                       // not introduced yet by a member's list
         if (Wire.Decode(item.Body) is not { } sealedBody || Wire.Decode(item.Sig) is not { } sig) return 0;
         var aad = HouseholdCrypto.BatchAad(householdId, item.Device, item.Epoch, item.Seq);
         var signed = HouseholdCrypto.BatchToSign(aad, sealedBody);
-        if (member is not null && !HouseholdCrypto.Verify(member.SignKey, signed, sig))
+        if (!HouseholdCrypto.Verify(member.SignKey, signed, sig))
         {
             log.LogWarning("A batch said to be from {Device} isn't signed by it, so it was passed over", item.Device);
             return 0;
@@ -675,20 +722,6 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
             return 0;
         }
         if (batch?.Device is not { } sender || sender.Id != item.Device) return 0;
-        if (member is null)
-        {
-            // This PC knows no other member yet, as after a recovery or an approval: the first batch under the current key,
-            // which no removed PC holds, introduces its sender and the members it lists, when signed by the sender's own key.
-            if (batch.Members?.FirstOrDefault(entry => entry.Id == item.Device) is not { } own || Wire.Member(own) is not { } self
-                || !HouseholdCrypto.Verify(self.Sign, signed, sig))
-            {
-                return 0;
-            }
-            _members.Learn(batch.Members, item.Device, keys.DeviceId, Now);
-            if (household.Member(item.Device) is not { } introduced) return 0;
-            member = introduced;
-        }
-
         if (_members.Current(item.Device) is not null)
         {
             if (Wire.Name(sender.Name) is { } name && Wire.Kind(sender.Kind) is { } kind && (name != member.Name || kind != member.Kind))
@@ -743,10 +776,6 @@ internal sealed class RelaySync(HouseholdStore store, HouseholdRepository househ
         foreach (var device in due) marked[device] = new Lag(Now, epoch);          // time to catch up with the new key
         store.Lagging = marked;
     }
-
-    /// <summary>True while this PC knows no member but itself, as just after a recovery or an approval.</summary>
-    private bool KnowsNobody(DeviceKeys keys) =>
-        household.Members().All(member => member.DeviceId == keys.DeviceId || _members.Current(member.DeviceId) is null);
 
     /// <summary>This PC's envelope for an epoch, opened with the key of the member that sealed it; null when there is none, or
     /// when its sealer may not hand over that epoch's key (plan 0.9): it must be current here and added before the epoch,

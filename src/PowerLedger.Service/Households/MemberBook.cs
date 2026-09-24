@@ -76,6 +76,18 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
         return known.Current;
     }
 
+    /// <summary>This PC recovered the household (plan 0.9): every other member it knows is removed at <paramref name="epoch"/>,
+    /// the household's epoch at the recovery, as the server removed them then.</summary>
+    public void RemoveAllBut(string selfId, int epoch, long nowMs)
+    {
+        foreach (var member in household.Members().Where(member => member.DeviceId != selfId && Current(member.DeviceId) is not null))
+        {
+            var known = EpochsOf(member.DeviceId)!;
+            Set(member.DeviceId, known.Merge(new MemberEpochs(0, Math.Max(epoch, known.Added))));
+            household.MarkLeft(member.DeviceId, nowMs);
+        }
+    }
+
     /// <summary>
     /// The server lists a member as removed (plan 0.9): removed at the higher of its add and this PC's epoch, unless a higher
     /// removal is known. The server's word only ever removes. A removal the server made before an add known here, at an

@@ -255,6 +255,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                 SignInRequest signIn => await SignInAsync(signIn, cancel).ConfigureAwait(false),
                 SignOutRequest signOut => await SignOutAsync(signOut, cancel).ConfigureAwait(false),
                 DeleteAccountRequest delete => await DeleteAccountAsync(delete, cancel).ConfigureAwait(false),
+                AskAgainRequest askAgain => await AskAgainAsync(askAgain, cancel).ConfigureAwait(false),
                 _ => new ErrorReply(request.Id, "The service does not handle that request."),
             };
         }
@@ -842,7 +843,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             _board.Publish(new HouseholdStatus(
                 householdId, me, _store.Name, Kind(), _store.Discoverable, members, householdId is null ? null : _store.Problem,
                 SignedIn: _store.Session is not null, PendingApprovals: householdId is null ? 0 : Volatile.Read(ref _waitingApprovals),
-                RecoveryMissing: householdId is not null && _store.Session is not null && _recoveryMissing));
+                RecoveryMissing: householdId is not null && _store.Session is not null && _recoveryMissing,
+                CanAskAgain: householdId is null && _store.Session is not null && _store.CanAskAgain));
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {

@@ -7,9 +7,10 @@ namespace PowerLedger.Service.Households;
 
 /// <summary>
 /// Asks the user at the screen (households design §3, §7): a prompt goes as a pushed <see cref="HouseholdNotice"/> to the App
-/// in the console session, and waits for its <see cref="AnswerPromptRequest"/>. Nobody there means no at once; no answer
-/// in two minutes means no. A prompt whose token is cancelled, as when its connection has gone or the other side
-/// cancelled, is withdrawn: a <see cref="NoticeKind.Withdraw"/> notice names it, so the App closes it, and the answer is no.
+/// in the console session, and waits for its <see cref="AnswerPromptRequest"/>. For pairing, nobody there means no at once,
+/// and no answer in two minutes means no. N2's prompts have no answer instead (plan 0.9): one that closes unanswered comes
+/// back at a later turn, and never counts as a no. A prompt whose token is cancelled, as when its connection has gone or
+/// the other side cancelled, is withdrawn: a <see cref="NoticeKind.Withdraw"/> notice names it, so the App closes it.
 /// </summary>
 internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : IPromptBroker
 {
@@ -39,39 +40,45 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
 
     /// <summary>N2: a PC asks to join, signed in as this PC's own account when <paramref name="asYou"/>, else as another linked
     /// to the household. The server knows it only by its keys, so it has no name yet; <paramref name="code"/> is the approval
-    /// code (plan 0.8), which the App shows beside the question and the PC asking shows once approved.</summary>
-    public Task<bool> AskToApproveAsync(bool asYou, string code, CancellationToken cancel) => AskAsync(
+    /// code (plan 0.9), which the PC asking shows at the same time.</summary>
+    /// <returns>Null when it wasn't answered: it comes back at a later turn.</returns>
+    public Task<bool?> AskToApproveAsync(bool asYou, string code, CancellationToken cancel) => AskOrNotAsync(
         NoticeKind.ApprovePrompt,
         asYou ? "A PC signed in as you asks to join your household. Approve it?" : "A PC asks to join your household. Approve it?",
         null, code, cancel);
 
-    /// <summary>N2: this PC was approved (plan 0.8). Before it joins, its user checks the PC that approved it showed the same
-    /// code: a server that put in keys of its own would make the two differ.</summary>
-    public Task<bool> ConfirmJoinAsync(string code, CancellationToken cancel) =>
-        AskAsync(NoticeKind.ConfirmJoin, $"Did the PC that approved this one show {code}?", null, code, cancel);
+    /// <summary>N2: a member is about to approve this PC (plan 0.9). Before anything is sealed, its user checks that PC
+    /// shows the same code: a server that put in keys of its own would make the two differ.</summary>
+    /// <returns>Null when it wasn't answered: it comes back at a later turn.</returns>
+    public Task<bool?> ConfirmJoinAsync(string code, CancellationToken cancel) =>
+        AskOrNotAsync(NoticeKind.ConfirmJoin, $"Does your other PC show {code}? Approve it there too.", null, code, cancel);
 
     /// <summary>The user's answer to an open prompt.</summary>
     /// <returns>False when no prompt of that ID waits: it was answered, ran out, or never was.</returns>
     public bool Answer(string promptId, bool accept) => _open.TryRemove(promptId, out var waiting) && waiting.TrySetResult(accept);
 
-    private async Task<bool> AskAsync(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel)
+    private async Task<bool> AskAsync(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel) =>
+        await AskOrNotAsync(kind, text, fromName, code, cancel).ConfigureAwait(false) ?? false;
+
+    /// <summary>The user's answer; null when nobody is at the screen, no answer came in time, or the prompt was withdrawn.</summary>
+    private async Task<bool?> AskOrNotAsync(NoticeKind kind, string text, string? fromName, string? code, CancellationToken cancel)
     {
         var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         var answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _open[id] = answer;
         try
         {
-            if (!notices.Publish(new HouseholdNotice(kind, id, text, fromName, code, clock.GetUtcNow() + Timeout))) return false;
+            if (!notices.Publish(new HouseholdNotice(kind, id, text, fromName, code, clock.GetUtcNow() + Timeout))) return null;
             return await answer.Task.WaitAsync(Timeout, clock, cancel).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            return false;
+            return null;
         }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
             if (_open.TryRemove(id, out _)) notices.Publish(new HouseholdNotice(NoticeKind.Withdraw, id, Withdrawn, fromName, null, null));
-            return false;
+            return null;
         }
         finally
         {

@@ -31,7 +31,7 @@ public sealed class SignInTests : IAsyncLifetime
     [Fact]
     public async Task Signing_in_on_a_pc_in_a_household_links_it_to_the_account_and_gives_a_recovery_code_once()
     {
-        var (desktop, _) = await Household();
+        var (desktop, laptop) = await Household();
         var household = desktop.Worker.Store.HouseholdId!;
 
         var reply = await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
@@ -48,10 +48,12 @@ public sealed class SignInTests : IAsyncLifetime
         desktop.Board.Household!.SignedIn.ShouldBeTrue();
         _relay.LinkOf("alice").ShouldBe(household);
         var envelope = _relay.RecoveryOf("alice").ShouldNotBeNull();
-        envelope.Epoch.ShouldBe(1);
-        var opened = Recovery.Open(RecoveryCode.Key(RecoveryCode.Normalize(code)!), new RecoveryReply(household, 1, envelope.Body));
-        opened.ShouldBe(desktop.Worker.Store.CurrentKey);
-        envelope.Verifier.ShouldBe(Wire.Encode(Recovery.Verifier(opened!)));
+        (envelope.Epoch, envelope.Holder).ShouldBe((1, desktop.Worker.DeviceId));   // this PC holds the code
+        var codeKey = RecoveryCode.Key(RecoveryCode.Normalize(code)!);
+        var opened = Recovery.Open(codeKey, household, new RecoveryReply(envelope.Body, 1, envelope.Holder)).ShouldNotBeNull();
+        opened.Key.ShouldBe(desktop.Worker.Store.CurrentKey);
+        opened.Members.Select(member => member.Id).ShouldContain(laptop.Worker.DeviceId);   // with the member list
+        envelope.Verifier.ShouldBe(Wire.Encode(Recovery.Verifier(codeKey)));        // made from the code alone
 
         var again = await desktop.Send<HouseholdReply>(SignIn(desktop, "alice", salt: "another"));
         (again.Ok, again.Message, again.Code).ShouldBe((true, "Signed in.", (string?)null));
@@ -73,26 +75,113 @@ public sealed class SignInTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task The_recovery_code_brings_the_household_back_on_a_new_pc_without_approval()
+    public async Task The_recovery_code_brings_the_household_back_on_a_new_pc_as_its_only_member_and_is_used_up()
     {
-        var (desktop, _) = await Household();
+        var (desktop, laptop) = await Household();
+        var household = desktop.Worker.Store.HouseholdId!;
         await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
         var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
         desktop.Household.Upsert([new HouseholdRow(desktop.Worker.DeviceId, Now.AddHours(-3).ToUnixTimeMilliseconds(), 12, 1, 1, 1, 1, 0, 0,
             3600, 0, 0, 3600, 0, 0, 3_000, "GBP", Now.ToUnixTimeMilliseconds() + 1)]);
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        var oldKey = desktop.Worker.Store.CurrentKey;
         var fresh = await Start("New laptop");
 
         var reply = await fresh.Send<HouseholdReply>(SignIn(fresh, "alice", recovery: code.ToLowerInvariant().Replace('-', ' ')));
 
         reply.ShouldBe(new HouseholdReply(7, true, "Your household is back on this PC."));
-        fresh.Worker.Store.HouseholdId.ShouldBe(desktop.Worker.Store.HouseholdId);
-        fresh.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);
-        _relay.Members(fresh.Worker.Store.HouseholdId!).Keys.ShouldContain(fresh.Worker.DeviceId);
+        fresh.Worker.Store.HouseholdId.ShouldBe(household);
+        var members = _relay.Members(household);
+        members[fresh.Worker.DeviceId].Removed.ShouldBeNull();                       // the only current member,
+        members[desktop.Worker.DeviceId].Removed.ShouldNotBeNull();                  // every other removed
+        members[laptop.Worker.DeviceId].Removed.ShouldNotBeNull();
+        fresh.Household.Member(desktop.Worker.DeviceId).ShouldNotBeNull().LeftMs.ShouldNotBeNull();   // known from the recovery's list
+        var newCode = (await fresh.Next(NoticeKind.RecoveryCode)).RecoveryCode.ShouldNotBeNull();      // the code is used up: a new one
+        newCode.ShouldNotBe(code);
+        fresh.Worker.Store.RecoveryKey.ShouldNotBe(RecoveryCode.Key(RecoveryCode.Normalize(code)!));   // the old one isn't kept
 
         await fresh.Worker.RunOnceAsync(CancellationToken.None);
-        fresh.Household.Member(desktop.Worker.DeviceId).ShouldNotBeNull().Name.ShouldBe("Desktop-7");
-        fresh.Household.RowsBetween(desktop.Worker.DeviceId, 0, long.MaxValue).ShouldNotBeEmpty();
+
+        fresh.Worker.Store.Epoch.ShouldBe(2);                                        // a new key, without the others
+        fresh.Worker.Store.CurrentKey.ShouldNotBe(oldKey);
+        _relay.Sealed(household, 2).ShouldBe([fresh.Worker.DeviceId]);
+        var recovery = _relay.RecoveryOf("alice").ShouldNotBeNull();
+        (recovery.Epoch, recovery.Holder).ShouldBe((2, fresh.Worker.DeviceId));
+        Recovery.Open(RecoveryCode.Key(RecoveryCode.Normalize(newCode)!), household, new RecoveryReply(recovery.Body, 2, recovery.Holder))
+            .ShouldNotBeNull().Key.ShouldBe(fresh.Worker.Store.CurrentKey);
+        fresh.Household.RowsBetween(desktop.Worker.DeviceId, 0, long.MaxValue).ShouldNotBeEmpty();   // what it posted before it went
+        var other = await Start("Another PC");
+        (await other.Send<HouseholdReply>(SignIn(other, "alice", salt: "o1", recovery: code))).ShouldBe(
+            new HouseholdReply(7, false, "That recovery code doesn't open your account's household."));
+        (await desktop.Worker.RunOnceAsync(CancellationToken.None).ContinueWith(_ => desktop.Worker.Store.HouseholdId)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_recovery_code_sign_in_on_a_pc_in_another_household_is_refused_like_one_linked_elsewhere()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
+        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
+        var elsewhere = await Start("Study PC");
+        var other = await Start("Other PC");
+        await WorkerPc.Pair(elsewhere, other);
+
+        var reply = await elsewhere.Send<HouseholdReply>(SignIn(elsewhere, "alice", recovery: code));
+
+        reply.ShouldBe(new HouseholdReply(7, false, HouseholdWorker.LinkedElsewhere));
+        elsewhere.Worker.Store.HouseholdId.ShouldNotBe(desktop.Worker.Store.HouseholdId);
+        elsewhere.Worker.Store.Session.ShouldBeNull();
+        _relay.Members(desktop.Worker.Store.HouseholdId!)[desktop.Worker.DeviceId].Removed.ShouldBeNull();
+        _relay.RecoveryOf("alice").ShouldNotBeNull();                               // not used up
+    }
+
+    [Fact]
+    public async Task A_pc_holding_an_older_code_never_overwrites_a_newer_one_and_forgets_its_own()
+    {
+        var (desktop, laptop) = await Household();
+        var household = desktop.Worker.Store.HouseholdId!;
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));                 // the desktop holds the first code
+        await laptop.Send<HouseholdReply>(SignIn(laptop, "alice", salt: "l1"));
+        laptop.Worker.Store.RecoveryKey.ShouldBeNull();                               // signing in with a code linked keeps none
+
+        (await laptop.Send<HouseholdReply>(new NewRecoveryCodeRequest(8))).Ok.ShouldBeTrue();
+        var newer = (await laptop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
+        desktop.Worker.Store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, household));   // the old holder puts its code again
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        var recovery = _relay.RecoveryOf("alice").ShouldNotBeNull();
+        recovery.Holder.ShouldBe(laptop.Worker.DeviceId);
+        Recovery.Open(RecoveryCode.Key(RecoveryCode.Normalize(newer)!), household, new RecoveryReply(recovery.Body, recovery.Epoch, recovery.Holder))
+            .ShouldNotBeNull();
+        desktop.Worker.Store.RecoveryKey.ShouldBeNull();                              // a newer code exists: it forgets its own
+        desktop.Worker.Store.Pending.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_recovery_goes_up_only_sealed_at_the_households_current_epoch_waiting_for_this_pc_to_catch_up()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2");
+        var study = await Start("Study PC");
+        await WorkerPc.Pair(desktop, laptop);
+        await WorkerPc.Pair(desktop, study);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        var household = desktop.Worker.Store.HouseholdId!;
+        await desktop.Send<HouseholdReply>(SignIn(desktop, "alice"));
+        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
+        await laptop.Send<HouseholdReply>(new RemovePcRequest(9, study.Worker.DeviceId));
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);                     // the key moves to 2; the desktop hasn't heard
+        _relay.Epoch(household).ShouldBe(2);
+
+        desktop.Worker.Store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, household));
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                    // sealed at 1: refused; it catches up and seals again
+        desktop.Worker.Store.Epoch.ShouldBe(2);
+
+        var recovery = _relay.RecoveryOf("alice").ShouldNotBeNull();
+        recovery.Epoch.ShouldBe(2);
+        Recovery.Open(RecoveryCode.Key(RecoveryCode.Normalize(code)!), household, new RecoveryReply(recovery.Body, 2, recovery.Holder))
+            .ShouldNotBeNull().Key.ShouldBe(desktop.Worker.Store.CurrentKey);
+        desktop.Worker.Store.Pending.ShouldNotContain(op => op.Kind == PendingOp.RecoveryEnvelope);
     }
 
     [Fact]

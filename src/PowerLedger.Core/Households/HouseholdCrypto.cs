@@ -132,11 +132,6 @@ public static class HouseholdCrypto
     /// the bytes that went over the wire.</summary>
     public static byte[] Transcript(byte[] adderHello, byte[] joinerHello) => SHA256.HashData([.. adderHello, .. joinerHello]);
 
-    /// <summary>The first form, over three keys and no nonces: a server could try keys until the codes matched. It goes once
-    /// the service uses the six-part form (plan 0.9).</summary>
-    public static string ApprovalCode(byte[] requesterSign, byte[] requesterDh, byte[] approverDh) =>
-        SixDigits(SHA256.HashData([.. Encoding.UTF8.GetBytes("powerledger approval code"), .. requesterSign, .. requesterDh, .. approverDh])[..4]);
-
     /// <summary>N2's approval code (households design §7, plan 0.9): 6 digits over both PCs' signing and key-agreement keys
     /// (SPKI, fixed length) and both nonces. The approving PC committed to its nonce before the waiting PC sent its own, and
     /// the waiting PC sends one nonce per request, so the server between them can't steer the two codes to match.</summary>

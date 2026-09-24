@@ -11,7 +11,6 @@ namespace PowerLedger.Service.Households;
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(Dictionary<string, MemberEpochs>))]
 [JsonSerializable(typeof(Dictionary<string, Lag>))]
-[JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(LanMessage))]
 [JsonSerializable(typeof(CreateHouseholdBody))]
 [JsonSerializable(typeof(MemberKeysBody))]
@@ -31,6 +30,14 @@ namespace PowerLedger.Service.Households;
 [JsonSerializable(typeof(RecoverBody))]
 [JsonSerializable(typeof(List<JoinRequestItem>))]
 [JsonSerializable(typeof(ApproveBody))]
+[JsonSerializable(typeof(Approving))]
+[JsonSerializable(typeof(Answering))]
+[JsonSerializable(typeof(OwnRequestsReply))]
+[JsonSerializable(typeof(CommitBody))]
+[JsonSerializable(typeof(NonceBody))]
+[JsonSerializable(typeof(AskReply))]
+[JsonSerializable(typeof(SealedKeyList))]
+[JsonSerializable(typeof(RecoverReply))]
 internal sealed partial class HouseholdJson : JsonSerializerContext
 {
     /// <summary>The value, or null when the text is missing or isn't one.</summary>

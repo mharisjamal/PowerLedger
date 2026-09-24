@@ -8,8 +8,9 @@ using Shouldly;
 
 namespace PowerLedger.Service.Tests;
 
-/// <summary>N2's approvals (households design §7): a member signed in asks its user about a PC waiting to join and seals the
-/// key to it on Approve; a new key goes into the recovery envelope; signing out and deleting the account.</summary>
+/// <summary>N2's approvals (households design §7, plan 0.9): commit, then reveal, so both screens show the approval code
+/// before anything is sealed; the waiting PC enters only with its user's word and the committed approver's envelope;
+/// unanswered prompts come back; a request turned away lets the user ask again; signing out and deleting the account.</summary>
 public sealed class ApprovalTests : IAsyncLifetime
 {
     private static readonly DateTimeOffset Now = new(2026, 9, 24, 12, 0, 0, TimeSpan.Zero);
@@ -29,91 +30,205 @@ public sealed class ApprovalTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_member_signed_in_is_asked_about_a_pc_waiting_to_join_and_approving_lets_it_in()
+    public async Task Both_screens_show_the_approval_code_before_anything_is_sealed_and_the_pc_enters_once_both_users_said_so()
     {
-        var (desktop, _) = await Household();
+        var (desktop, laptop) = await Household();
         await desktop.Send<HouseholdReply>(SignIn(desktop));
         var study = await Start("Study PC", ChassisKind.Desktop);
         await study.Send<HouseholdReply>(SignIn(study));
         var household = desktop.Worker.Store.HouseholdId!;
 
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                  // commits to a nonce
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldNotBeNull().ShouldSatisfyAllConditions(
+            request => request.Approver.ShouldBe(desktop.Worker.DeviceId), request => request.Nonce.ShouldBeNull());
+        await study.Worker.RunOnceAsync(CancellationToken.None);                    // answers with its own
+        _relay.RequestOf(household, study.Worker.DeviceId)!.Nonce.ShouldNotBeNull();
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                  // reveals, and asks its user
+        var approve = await desktop.Next(NoticeKind.ApprovePrompt);
+        await study.Worker.RunOnceAsync(CancellationToken.None);                    // checks the reveal, and asks its user at once
+        var confirm = await study.Next(NoticeKind.ConfirmJoin);
 
-        var prompt = await desktop.Next(NoticeKind.ApprovePrompt);
-        (prompt.Text, prompt.FromName).ShouldBe(("A PC signed in as you asks to join your household. Approve it?", (string?)null));
-        prompt.ComparisonCode.ShouldBe(HouseholdCrypto.ApprovalCode(PublicKeys(study).Sign, PublicKeys(study).Dh, PublicKeys(desktop).Dh));
+        var request = _relay.RequestOf(household, study.Worker.DeviceId)!;
+        var code = HouseholdCrypto.ApprovalCode(PublicKeys(study).Sign, PublicKeys(study).Dh, PublicKeys(desktop).Sign, PublicKeys(desktop).Dh,
+            Wire.Decode(request.Nonce)!, Wire.Decode(request.Reveal)!);
+        (approve.ComparisonCode, confirm.ComparisonCode).ShouldBe((code, code));
+        approve.Text.ShouldBe("A PC signed in as you asks to join your household. Approve it?");
+        confirm.Text.ShouldBe($"Does your other PC show {code}? Approve it there too.");
+        _relay.Members(household).Keys.ShouldNotContain(study.Worker.DeviceId);    // nothing sealed while both screens show it
+        _relay.Sealed(household, 1).ShouldNotContain(study.Worker.DeviceId);
         desktop.Board.Household!.PendingApprovals.ShouldBe(1);
-        await study.Worker.RunOnceAsync(CancellationToken.None);                  // not yet
-        study.Worker.Store.HouseholdId.ShouldBeNull();
 
-        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, prompt.PromptId!, true));
-        (await desktop.Next(NoticeKind.Info, text => text.Contains("now in your household"))).ShouldNotBeNull();
-        await desktop.Worker.Running;
-        _relay.Members(household).Keys.ShouldContain(study.Worker.DeviceId);
-        _relay.Waiting(household).ShouldBeEmpty();
-        desktop.Board.Household!.PendingApprovals.ShouldBe(0);
-
-        await study.Worker.RunOnceAsync(CancellationToken.None);
-        var check = await study.Next(NoticeKind.ConfirmJoin);                     // the same code, worked out on the study PC
-        (check.Text, check.ComparisonCode).ShouldBe(($"Did the PC that approved this one show {prompt.ComparisonCode}?", prompt.ComparisonCode));
-        study.Worker.Store.HouseholdId.ShouldBeNull();                            // nothing until its user says so
-        await study.Send<HouseholdReply>(new AnswerPromptRequest(10, check.PromptId!, true));
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(9, confirm.PromptId!, true));
         await study.Worker.Running;
-        study.Worker.Store.HouseholdId.ShouldBe(household);
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        study.Worker.Store.HouseholdId.ShouldBeNull();                               // not before the approval is there
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(10, approve.PromptId!, true));
+        (await desktop.Next(NoticeKind.Info, text => text.Contains("now in your household", StringComparison.Ordinal))).ShouldNotBeNull();
+        await desktop.Worker.Running;
+        desktop.Board.Household!.PendingApprovals.ShouldBe(0);
         desktop.Household.Member(study.Worker.DeviceId).ShouldNotBeNull().Name.ShouldBe(HouseholdWorker.NewPcName);   // known by its keys
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+
+        study.Worker.Store.HouseholdId.ShouldBe(household);
+        study.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);
+        (await study.Next(NoticeKind.Info, text => text == "This PC joined your household.")).ShouldNotBeNull();
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldBeNull();          // taken off the server once it is in
+        study.Household.Member(laptop.Worker.DeviceId).ShouldNotBeNull().LeftMs.ShouldBeNull();   // known from the approval, before any batch
         study.Household.Upsert([new HouseholdRow(study.Worker.DeviceId, Now.AddHours(-2).ToUnixTimeMilliseconds(), 7, 1, 1, 1, 1, 0, 0,
             3600, 0, 0, 3600, 0, 0, 1_000, "GBP", Now.ToUnixTimeMilliseconds() + 1)]);
         await study.Worker.RunOnceAsync(CancellationToken.None);
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
         desktop.Household.Row(study.Worker.DeviceId, Now.AddHours(-2).ToUnixTimeMilliseconds()).ShouldNotBeNull().EnergyWh.ShouldBe(7);
         desktop.Household.Member(study.Worker.DeviceId)!.Name.ShouldBe("Study PC");
-        study.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);
-        (await study.Next(NoticeKind.Info, text => text == "This PC joined your household.")).ShouldNotBeNull();
-        study.Worker.Store.AskedToJoin.ShouldBeNull();
     }
 
     [Fact]
-    public async Task An_approved_pc_whose_user_sees_another_code_doesnt_join_and_takes_itself_off()
+    public async Task They_dont_match_takes_the_request_off_the_server_before_the_approval_so_nothing_is_sealed()
     {
-        var (desktop, _) = await Household();
-        await desktop.Send<HouseholdReply>(SignIn(desktop));
-        var study = await Start("Study PC", ChassisKind.Desktop);
-        await study.Send<HouseholdReply>(SignIn(study));
-        var household = desktop.Worker.Store.HouseholdId!;
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);
-        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, (await desktop.Next(NoticeKind.ApprovePrompt)).PromptId!, true));
-        await desktop.Worker.Running;
+        var (desktop, study, household) = await BothAsked();
+        var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
 
-        await study.Worker.RunOnceAsync(CancellationToken.None);
-        await study.Send<HouseholdReply>(new AnswerPromptRequest(10, (await study.Next(NoticeKind.ConfirmJoin)).PromptId!, false));
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(9, confirm.PromptId!, false));
+        await study.Worker.Running;
+
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldBeNull();
+        study.Worker.Store.AskedToJoin.ShouldBeNull();
+        study.Board.Household!.CanAskAgain.ShouldBeTrue();
+        (await study.Next(NoticeKind.Info, text => text.StartsWith("This PC didn't join", StringComparison.Ordinal))).ShouldNotBeNull();
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(10, approve.PromptId!, true));
+        await desktop.Worker.Running;
+        _relay.Members(household).Keys.ShouldNotContain(study.Worker.DeviceId);
+        desktop.Household.Member(study.Worker.DeviceId).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task They_dont_match_after_the_approval_takes_the_pc_out_of_the_household_on_the_server()
+    {
+        var (desktop, study, household) = await BothAsked();
+        var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, approve.PromptId!, true));
+        await desktop.Worker.Running;
+        _relay.Members(household)[study.Worker.DeviceId].Removed.ShouldBeNull();
+
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(10, confirm.PromptId!, false));
         await study.Worker.Running;
         await study.Worker.RunOnceAsync(CancellationToken.None);
 
-        study.Worker.Store.HouseholdId.ShouldBeNull();
-        study.Worker.Store.AskedToJoin.ShouldBeNull();
         _relay.Members(household)[study.Worker.DeviceId].Removed.ShouldNotBeNull();
-        (await study.Next(NoticeKind.Info, text => text.StartsWith("This PC didn't join", StringComparison.Ordinal))).ShouldNotBeNull();
+        study.Worker.Store.HouseholdId.ShouldBeNull();
+        study.Worker.Store.Pending.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Not_approving_turns_it_away_on_the_server()
+    public async Task An_unanswered_prompt_comes_back_at_the_next_turn_and_never_counts_as_a_no()
+    {
+        var (desktop, study, household) = await BothAsked();
+        var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
+
+        _clock.Advance(HouseholdPrompts.Timeout);
+        await desktop.Worker.Running;
+        await study.Worker.Running;
+
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldNotBeNull();       // not turned away
+        study.Worker.Store.AskedToJoin.ShouldBe(household);                           // nor did it give up
+        study.Worker.Store.Pending.ShouldBeEmpty();
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        (await desktop.Next(NoticeKind.ApprovePrompt)).ComparisonCode.ShouldBe(approve.ComparisonCode);
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        (await study.Next(NoticeKind.ConfirmJoin)).ComparisonCode.ShouldBe(confirm.ComparisonCode);
+    }
+
+    [Fact]
+    public async Task An_approved_pc_enters_only_with_the_envelope_its_approver_sealed_for_the_epoch_the_server_names()
+    {
+        var (desktop, study, household) = await BothAsked();
+        var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(9, confirm.PromptId!, true));
+        await study.Worker.Running;
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(10, approve.PromptId!, true));
+        await desktop.Worker.Running;
+        using var other = DeviceKeys.Create();                                       // the server hands over a key sealed by another PC
+        var planted = Wire.Encode(HouseholdCrypto.WrapFor(other.Dh, PublicKeys(study).Dh, HouseholdCrypto.NewKey(), Approval.Context(household, 1)));
+        _relay.Intercept = (request, _) => request.RequestUri!.AbsolutePath.EndsWith("/keys/1", StringComparison.Ordinal)
+            && request.Headers.GetValues("X-PL-Device").Single() == study.Worker.DeviceId
+            ? FakeRelay.Json(new System.Text.Json.Nodes.JsonObject { ["epoch"] = 1, ["from"] = other.DeviceId, ["body"] = planted })
+            : null;
+
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+
+        study.Worker.Store.HouseholdId.ShouldBeNull();
+        (await study.Next(NoticeKind.Info, text => text.StartsWith("This PC didn't join", StringComparison.Ordinal))).ShouldNotBeNull();
+        _relay.Intercept = null;
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        _relay.Members(household)[study.Worker.DeviceId].Removed.ShouldNotBeNull();  // it took itself out
+    }
+
+    [Fact]
+    public async Task A_member_runs_one_approval_at_a_time_and_starts_at_most_five_a_day()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var household = desktop.Worker.Store.HouseholdId!;
+        _relay.Link("another-account", household);
+        var waiting = Enumerable.Range(0, 7).Select(_ => DeviceKeys.Create()).ToList();
+        foreach (var pc in waiting)
+        {
+            _relay.Ask(household, pc, "another-account");
+            _clock.Advance(TimeSpan.FromMilliseconds(1));
+        }
+
+        for (var started = 0; started < HouseholdWorker.ApprovalsADay; started++)
+        {
+            await desktop.Worker.RunOnceAsync(CancellationToken.None);
+            var committed = waiting.Where(pc => _relay.RequestOf(household, pc.DeviceId)?.Approver == desktop.Worker.DeviceId).ToList();
+            committed.ShouldHaveSingleItem();                                         // one at a time
+            _relay.Deny(household, committed[0].DeviceId);                            // another member turned it away
+        }
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        waiting.ShouldAllBe(pc => _relay.RequestOf(household, pc.DeviceId) == null || _relay.RequestOf(household, pc.DeviceId)!.Approver == null);
+
+        _clock.Advance(TimeSpan.FromDays(1));                                         // the next day, with the two left asking again
+        foreach (var pc in waiting.Where(pc => _relay.RequestOf(household, pc.DeviceId) is not null)) _relay.Ask(household, pc, "another-account");
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        waiting.Count(pc => _relay.RequestOf(household, pc.DeviceId)?.Approver == desktop.Worker.DeviceId).ShouldBe(1);
+        foreach (var pc in waiting) pc.Dispose();
+    }
+
+    [Fact]
+    public async Task A_request_turned_away_lets_the_user_ask_again_and_the_pc_never_asks_by_itself()
+    {
+        var (desktop, study, household) = await BothAsked();
+        var approve = await desktop.Next(NoticeKind.ApprovePrompt);
+
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, approve.PromptId!, false));
+        await desktop.Worker.Running;
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldBeNull();
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+
+        study.Board.Household!.CanAskAgain.ShouldBeTrue();
+        study.Worker.Store.AskedToJoin.ShouldBeNull();
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldBeNull();           // never by itself
+        (await study.Send<HouseholdReply>(new AskAgainRequest(11))).ShouldBe(new HouseholdReply(11, true, HouseholdWorker.WaitingForApproval));
+        _relay.RequestOf(household, study.Worker.DeviceId).ShouldNotBeNull();
+        study.Worker.Store.AskedToJoin.ShouldBe(household);
+        study.Board.Household!.CanAskAgain.ShouldBeFalse();
+        (await desktop.Send<HouseholdReply>(new AskAgainRequest(12))).ShouldBe(new HouseholdReply(12, false, HouseholdWorker.AskedAgainButIn));
+    }
+
+    [Fact]
+    public async Task A_request_that_lapses_unanswered_lets_the_user_ask_again()
     {
         var (desktop, _) = await Household();
         await desktop.Send<HouseholdReply>(SignIn(desktop));
         var study = await Start("Study PC", ChassisKind.Desktop);
         await study.Send<HouseholdReply>(SignIn(study));
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);
-        var prompt = await desktop.Next(NoticeKind.ApprovePrompt);
 
-        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, prompt.PromptId!, false));
-        await desktop.Worker.Running;
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        _clock.Advance(TimeSpan.FromHours(25));
+        await study.Worker.RunOnceAsync(CancellationToken.None);
 
-        _relay.Posted($"POST /v1/households/{desktop.Worker.Store.HouseholdId}/requests").ShouldBe(0);
-        _relay.Posted($"DELETE /v1/households/{desktop.Worker.Store.HouseholdId}/requests/{study.Worker.DeviceId}").ShouldBe(1);
-        _relay.Waiting(desktop.Worker.Store.HouseholdId!).ShouldBeEmpty();
-        desktop.Board.Household!.PendingApprovals.ShouldBe(0);
-        desktop.Worker.Prompts.Open.ShouldBe(0);
+        study.Board.Household!.CanAskAgain.ShouldBeTrue();
+        (await study.Next(NoticeKind.Info, text => text.Contains("You can ask again", StringComparison.Ordinal))).ShouldNotBeNull();
     }
 
     [Fact]
@@ -121,8 +236,12 @@ public sealed class ApprovalTests : IAsyncLifetime
     {
         var (desktop, _) = await Household();
         await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var household = desktop.Worker.Store.HouseholdId!;
+        _relay.Link("another-account", household);
         using var stranger = DeviceKeys.Create();
-        _relay.Ask(desktop.Worker.Store.HouseholdId!, stranger, "another-account");
+        _relay.Ask(household, stranger, "another-account");
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        _relay.Answer(household, stranger.DeviceId, HouseholdCrypto.NewNonce());
 
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
 
@@ -130,30 +249,27 @@ public sealed class ApprovalTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task An_approval_refused_for_an_older_key_goes_again_with_the_newest()
+    public async Task An_approval_the_server_refuses_because_the_key_moved_on_goes_again_with_the_newest()
     {
         var (desktop, laptop) = await Household();
-        await desktop.Send<HouseholdReply>(SignIn(desktop));
-        var household = desktop.Worker.Store.HouseholdId!;
-        var newer = HouseholdCrypto.NewKey();                                     // the laptop rotated; the desktop hasn't heard
+        var (_, study, household) = await BothAsked(desktop);
+        var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(9, confirm.PromptId!, true));
+        var newer = HouseholdCrypto.NewKey();                                      // the laptop rotated; the desktop hasn't heard
         using var laptopKeys = laptop.Worker.Store.DeviceKeys();
         using var client = new RelayClient(FakeRelay.Endpoint, _clock, _relay);
-        await client.PostKeysAsync(laptopKeys, household, 2,
+        (await client.PostKeysAsync(laptopKeys, household, 2,
             KeyWrap.For(laptopKeys, household, 2, newer, [desktop.Household.Member(desktop.Worker.DeviceId)!, laptop.Household.Member(laptop.Worker.DeviceId)!]),
-            CancellationToken.None);
-        var study = await Start("Study PC", ChassisKind.Desktop);
-        await study.Send<HouseholdReply>(SignIn(study));
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);
-        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, (await desktop.Next(NoticeKind.ApprovePrompt)).PromptId!, true));
-        await desktop.Worker.Running;
+            CancellationToken.None)).Ok.ShouldBeTrue();
 
-        desktop.Worker.Store.Epoch.ShouldBe(2);                                   // it caught up
-        _relay.Waiting(household).ShouldBe([study.Worker.DeviceId]);
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);                // and approves again with the newest key
-        _relay.Waiting(household).ShouldBeEmpty();
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(10, approve.PromptId!, true));
+        await desktop.Worker.Running;
+        desktop.Worker.Store.Epoch.ShouldBe(2);                                    // it caught up
+        _relay.Members(household).Keys.ShouldNotContain(study.Worker.DeviceId);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                 // and approves again with the newest key, not asking twice
+        desktop.Drain().ShouldNotContain(notice => notice.Kind == NoticeKind.ApprovePrompt);
         await study.Worker.RunOnceAsync(CancellationToken.None);
-        await study.Send<HouseholdReply>(new AnswerPromptRequest(10, (await study.Next(NoticeKind.ConfirmJoin)).PromptId!, true));
-        await study.Worker.Running;
+
         study.Worker.Store.Epoch.ShouldBe(2);
         study.Worker.Store.CurrentKey.ShouldBe(newer);
     }
@@ -172,25 +288,6 @@ public sealed class ApprovalTests : IAsyncLifetime
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
 
         _relay.LinkOf("alice").ShouldBe(household);
-    }
-
-    [Fact]
-    public async Task A_new_key_goes_into_the_recovery_envelope_when_this_pc_is_signed_in()
-    {
-        var (desktop, laptop) = await Household();
-        await desktop.Send<HouseholdReply>(SignIn(desktop));
-        var code = (await desktop.Next(NoticeKind.RecoveryCode)).RecoveryCode!;
-        var household = desktop.Worker.Store.HouseholdId!;
-
-        await desktop.Send<HouseholdReply>(new RemovePcRequest(3, laptop.Worker.DeviceId));
-        desktop.Worker.Store.Pending.Select(op => op.Kind).ShouldNotContain(PendingOp.RecoveryEnvelope);   // not before the server takes the key
-        await desktop.Worker.RunOnceAsync(CancellationToken.None);
-
-        var envelope = _relay.RecoveryOf("alice").ShouldNotBeNull();
-        envelope.Epoch.ShouldBe(2);
-        Recovery.Open(RecoveryCode.Key(RecoveryCode.Normalize(code)!), new RecoveryReply(household, 2, envelope.Body))
-            .ShouldBe(desktop.Worker.Store.CurrentKey);
-        desktop.Worker.Store.Pending.ShouldBeEmpty();
     }
 
     [Fact]
@@ -237,5 +334,20 @@ public sealed class ApprovalTests : IAsyncLifetime
         await WorkerPc.Pair(desktop, laptop);
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
         return (desktop, laptop);
+    }
+
+    /// <summary>A household with a member signed in, and a study PC signed in as the same account asking to join, both asked
+    /// about the approval: its code on both screens, nothing sealed yet.</summary>
+    private async Task<(WorkerPc Desktop, WorkerPc Study, string Household)> BothAsked(WorkerPc? member = null)
+    {
+        var desktop = member ?? (await Household()).Desktop;
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await study.Send<HouseholdReply>(SignIn(study));
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        return (desktop, study, desktop.Worker.Store.HouseholdId!);
     }
 }

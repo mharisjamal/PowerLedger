@@ -174,7 +174,31 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     /// <summary>N2: the devices waiting to join a household.</summary>
     public IReadOnlyList<string> Waiting(string household)
     {
-        lock (_gate) return [.. _requests.Keys.Where(key => key.Household == household).Select(key => key.Device)];
+        lock (_gate) return [.. _requests.Where(pair => pair.Key.Household == household && Waiting(pair.Key, pair.Value)).Select(pair => pair.Key.Device)];
+    }
+
+    /// <summary>N2: links an account, by its opaque ID, to a household, as a PC of it signed in as that account would.</summary>
+    public void Link(string account, string household)
+    {
+        lock (_gate) _links[account] = household;
+    }
+
+    /// <summary>N2: the waiting PC's nonce, as that PC would send it once a member has committed.</summary>
+    public void Answer(string household, string device, byte[] nonce)
+    {
+        lock (_gate) _requests[(household, device)] = _requests[(household, device)] with { Nonce = Encode(nonce) };
+    }
+
+    /// <summary>N2: another member turns a waiting PC away.</summary>
+    public void Deny(string household, string device)
+    {
+        lock (_gate) _requests.Remove((household, device));
+    }
+
+    /// <summary>N2: a PC's request to join, as the server keeps it; null when there is none.</summary>
+    public JoinRequest? RequestOf(string household, string device)
+    {
+        lock (_gate) return _requests.GetValueOrDefault((household, device));
     }
 
     /// <summary>N2: a PC signed in as another account asks to join the household that account is linked to.</summary>
@@ -332,27 +356,44 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 });
             }
             case ("GET", "/requests"):
-                return Json(new JsonArray([.. _requests.Where(pair => pair.Key.Household == household)
+                return Json(new JsonArray([.. _requests.Where(pair => pair.Key.Household == household && Waiting(pair.Key, pair.Value))
+                    .OrderBy(pair => pair.Value.Created)
                     .Select(pair => (JsonNode)new JsonObject
                     {
                         ["device"] = pair.Key.Device, ["sign"] = pair.Value.Sign, ["dh"] = pair.Value.Dh, ["created"] = pair.Value.Created,
-                        ["account"] = pair.Value.Account,
+                        ["account"] = pair.Value.Account, ["approver"] = pair.Value.Approver, ["commit"] = pair.Value.Commit,
+                        ["nonce"] = pair.Value.Nonce, ["reveal"] = pair.Value.Reveal,
                     })]));
-            case ("POST", var approving) when approving.StartsWith("/requests/", StringComparison.Ordinal) && approving.EndsWith("/approve", StringComparison.Ordinal):
+            case ("POST", var committing) when RequestStep().Match(committing) is { Success: true } step:
             {
-                var device = approving["/requests/".Length..^"/approve".Length];
-                if (!_requests.TryGetValue((household, device), out var waiting)) return Error(404, "That PC isn't waiting to join this household.");
-                var posted = JsonNode.Parse(body)!;
-                var epoch = (int)posted["epoch"]!;
-                var current = _epochs.GetValueOrDefault(household, 1);
-                if (epoch != current) return Error(409, $"The household's key is at epoch {current} now; approve with that one.");
-                if (!list.TryGetValue(device, out var already) || already.Removed is not null) list[device] = new Member(waiting.Sign, waiting.Dh, Now, null, current);
-                _envelopes[(household, epoch, device)] = (caller, (string)posted["body"]!);
-                _requests.Remove((household, device));
+                var device = step.Groups[1].Value;
+                var value = JsonNode.Parse(body)?[step.Groups[2].Value == "commit" ? "commit" : "nonce"] is { } given ? (string?)given : null;
+                if (step.Groups[2].Value == "approve") return Approve(household, device, caller, list, body);
+                if (value is null || Decode(value).Length != 32) return Error(400, "It must be 32 bytes, as base64url.");
+                if (!_requests.TryGetValue((household, device), out var asked) || !Waiting((household, device), asked))
+                {
+                    return Error(404, "That PC isn't waiting to join this household.");
+                }
+                if (step.Groups[2].Value == "commit")
+                {
+                    if (asked.Approver is null) _requests[(household, device)] = asked with { Approver = caller, Commit = value };
+                    else if (asked.Approver != caller || asked.Commit != value) return Error(409, "A member has already committed to approving this PC.");
+                    return Ok();
+                }
+                if (asked.Approver != caller) return Error(403, "Only the member that committed can reveal.");
+                if (asked.Nonce is null) return Error(409, "The waiting PC hasn't sent its nonce yet.");
+                if (asked.Reveal is null) _requests[(household, device)] = asked with { Reveal = value };
+                else if (asked.Reveal != value) return Error(409, "The approver has already revealed.");
                 return Ok();
             }
             case ("DELETE", var denying) when denying.StartsWith("/requests/", StringComparison.Ordinal):
-                return _requests.Remove((household, denying["/requests/".Length..])) ? Ok() : Error(404, "That PC isn't waiting to join this household.");
+            {
+                var device = denying["/requests/".Length..];
+                if (!_requests.TryGetValue((household, device), out var asked) || !Unlapsed(asked)) return Error(404, "That PC isn't waiting to join this household.");
+                if (asked.ApprovedEpoch is not null) return Error(409, "That PC has already been approved.");
+                _requests.Remove((household, device));
+                return Ok();
+            }
             default:
                 return Error(404, "Not found.");
         }
@@ -406,32 +447,96 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
                 _requests[(household, session.Device)] = new JoinRequest(session.Account, session.Sign, session.Dh, Now);
                 return Json(new JsonObject { ["ok"] = true, ["householdId"] = household });
             }
+            case ("GET", "/v1/account/requests"):
+                return Json(new JsonObject
+                {
+                    ["requests"] = new JsonArray([.. _requests
+                        .Where(pair => pair.Key.Device == session.Device && pair.Value.Account == session.Account && Unlapsed(pair.Value))
+                        .OrderBy(pair => pair.Value.Created)
+                        .Select(pair => (JsonNode)new JsonObject
+                        {
+                            ["device"] = session.Device,
+                            ["household"] = pair.Key.Household,
+                            ["approver"] = pair.Value.Approver is { } approver && _households[pair.Key.Household].TryGetValue(approver, out var member)
+                                ? new JsonObject { ["device"] = approver, ["sign"] = member.Sign, ["dh"] = member.Dh }
+                                : null,
+                            ["commit"] = pair.Value.Commit,
+                            ["reveal"] = pair.Value.Reveal,
+                            ["approved"] = pair.Value.ApprovedEpoch is { } epoch ? new JsonObject { ["epoch"] = epoch } : null,
+                            ["expires"] = pair.Value.ApprovedAt is { } at ? at + (long)TimeSpan.FromDays(7).TotalMilliseconds
+                                : pair.Value.Created + (long)TimeSpan.FromDays(1).TotalMilliseconds,
+                        })]),
+                });
+            case ("DELETE", "/v1/account/requests"):
+                foreach (var key in _requests.Where(pair => pair.Key.Device == session.Device && pair.Value.Account == session.Account).Select(pair => pair.Key).ToList())
+                {
+                    _requests.Remove(key);
+                }
+                return Ok();
+            case ("POST", "/v1/account/requests/nonce"):
+            {
+                var nonce = (string?)JsonNode.Parse(body)?["nonce"];
+                if (nonce is null || Decode(nonce).Length != 32) return Error(400, "nonce must be 32 bytes, as base64url.");
+                if (!_links.TryGetValue(session.Account, out var household) || !_requests.TryGetValue((household, session.Device), out var asked)
+                    || !Waiting((household, session.Device), asked) || asked.Account != session.Account)
+                {
+                    return Error(404, "This PC has no request waiting.");
+                }
+                if (asked.Commit is null) return Error(409, "No member has committed to approving this PC yet.");
+                if (asked.Nonce is null) _requests[(household, session.Device)] = asked with { Nonce = nonce };
+                else if (asked.Nonce != nonce) return Error(409, "This PC has already sent its nonce.");
+                return Ok();
+            }
             case ("PUT", "/v1/account/recovery"):
             {
                 var posted = JsonNode.Parse(body)!;
                 if (!_links.TryGetValue(session.Account, out var household)) return Error(409, "This account isn't linked to a household yet.");
                 if (!IsMember(household)) return Error(403, "Only a PC in the household can set how to recover it.");
-                _recovery[session.Account] = new Recovery((string)posted["body"]!, (string)posted["verifier"]!, _epochs.GetValueOrDefault(household, 1), session.Device);
+                var current = _epochs.GetValueOrDefault(household, 1);
+                if ((int?)posted["epoch"] != current) return Error(409, $"The household's key is at epoch {current}; seal the recovery at that one.");
+                var replace = (bool?)posted["replace"] ?? false;
+                if (!replace && (!_recovery.TryGetValue(session.Account, out var held) || held.Holder != session.Device))
+                {
+                    return Error(409, "This PC doesn't hold this account's recovery code; a new code must replace it.");
+                }
+                _recovery[session.Account] = new Recovery((string)posted["body"]!, (string)posted["verifier"]!, current, session.Device);
                 return Ok();
             }
             case ("GET", "/v1/account/recovery"):
                 return _recovery.TryGetValue(session.Account, out var kept)
-                    ? Json(new JsonObject { ["householdId"] = _links.GetValueOrDefault(session.Account), ["epoch"] = kept.Epoch, ["body"] = kept.Body })
-                    : Error(404, "This account has no recovery envelope.");
+                    ? Json(new JsonObject { ["body"] = kept.Body, ["epoch"] = kept.Epoch, ["holder"] = kept.Holder })
+                    : Error(404, "This account has no recovery.");
             case ("POST", "/v1/account/recover"):
             {
-                if (!_recovery.TryGetValue(session.Account, out var envelope) || !_links.TryGetValue(session.Account, out var household))
+                if (!_recovery.TryGetValue(session.Account, out var envelope) || !_links.TryGetValue(session.Account, out var household)
+                    || !_households[household].TryGetValue(envelope.Holder, out var holder) || holder.Removed is not null)
                 {
                     return Error(404, "This account has nothing to recover.");
                 }
-                if ((string?)JsonNode.Parse(body)!["verifier"] != envelope.Verifier) return Error(403, "The recovery verifier doesn't match.");
-                if (envelope.Epoch != _epochs.GetValueOrDefault(household, 1)) return Error(409, "The recovery envelope is for an older key.");
-                _households[household][session.Device] = new Member(session.Sign, session.Dh, Now, null, _epochs.GetValueOrDefault(household, 1));
-                _requests.Remove((household, session.Device));
-                return Json(new JsonObject { ["ok"] = true, ["householdId"] = household });
+                if ((string?)JsonNode.Parse(body)!["verifier"] != envelope.Verifier) return Error(403, "That isn't this account's recovery verifier.");
+                var members = _households[household];
+                var current = _epochs.GetValueOrDefault(household, 1);
+                var others = members.Where(pair => pair.Key != session.Device && pair.Value.Removed is null).Select(pair => pair.Key).ToHashSet();
+                foreach (var key in _requests.Where(pair => pair.Key.Household == household
+                    && (pair.Key.Device == session.Device || others.Contains(pair.Key.Device) || (pair.Value.Approver is { } by && others.Contains(by))))
+                    .Select(pair => pair.Key).ToList())
+                {
+                    _requests.Remove(key);
+                }
+                foreach (var other in others) members[other] = members[other] with { Removed = Now, RemovedEpoch = current };
+                if (!members.TryGetValue(session.Device, out var mine) || mine.Removed is not null)
+                {
+                    members[session.Device] = new Member(session.Sign, session.Dh, Now, null, current);
+                }
+                foreach (var account in _links.Where(pair => pair.Value == household).Select(pair => pair.Key).ToList()) _recovery.Remove(account);
+                return Json(new JsonObject { ["household"] = household, ["epoch"] = current });
             }
             case ("POST", "/v1/auth/signout"):
                 _sessions.Remove(token);
+                foreach (var key in _requests.Where(pair => pair.Key.Device == session.Device && pair.Value.Account == session.Account).Select(pair => pair.Key).ToList())
+                {
+                    _requests.Remove(key);
+                }
                 return Ok();
             case ("DELETE", "/v1/account"):
                 foreach (var key in _requests.Where(pair => pair.Value.Account == session.Account).Select(pair => pair.Key).ToList()) _requests.Remove(key);
@@ -510,6 +615,11 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
             _recovery.Remove(account);
         }
         _requests.Remove((household, device));
+        foreach (var key in _requests.Where(pair => pair.Key.Household == household && pair.Value.Approver == device && pair.Value.ApprovedEpoch is null)
+            .Select(pair => pair.Key).ToList())
+        {
+            _requests.Remove(key);                                             // those it committed to: their PCs may ask again
+        }
         if (list.Values.Any(member => member.Removed is null)) return;
         foreach (var account in linked)
         {
@@ -519,6 +629,46 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         foreach (var key in _requests.Keys.Where(key => key.Household == household).ToList()) _requests.Remove(key);
         foreach (var key in _envelopes.Keys.Where(key => key.Household == household).ToList()) _envelopes.Remove(key);
         _batches.RemoveAll(batch => batch.Household == household);
+    }
+
+    /// <summary>A request still waiting: its account still linked to its household, not approved, less than 24 hours old.</summary>
+    private bool Waiting((string Household, string Device) key, JoinRequest request) =>
+        request.ApprovedEpoch is null && Now - request.Created < (long)TimeSpan.FromDays(1).TotalMilliseconds
+        && _links.TryGetValue(request.Account, out var linked) && linked == key.Household;
+
+    /// <summary>A request not yet lapsed: waiting for less than 24 hours, or approved less than 7 days ago.</summary>
+    private bool Unlapsed(JoinRequest request) => request.ApprovedAt is { } at
+        ? Now - at < (long)TimeSpan.FromDays(7).TotalMilliseconds
+        : Now - request.Created < (long)TimeSpan.FromDays(1).TotalMilliseconds;
+
+    /// <summary>POST …/requests/{device}/approve, as the Worker takes it (plan 0.9).</summary>
+    private HttpResponseMessage Approve(string household, string device, string caller, Dictionary<string, Member> list, byte[] body)
+    {
+        var posted = JsonNode.Parse(body)!;
+        var epoch = (int)posted["epoch"]!;
+        var sealedBody = (string)posted["body"]!;
+        if (sealedBody.Length > 16384) return Error(400, "The body must be {\"epoch\",\"body\"}, 16384 characters at most.");
+        if (!_requests.TryGetValue((household, device), out var request) || !Waiting((household, device), request))
+        {
+            if (request is not { ApprovedEpoch: { } approvedAt }) return Error(404, "That PC isn't waiting to join this household.");
+            return request.Approver == caller && approvedAt == epoch && _envelopes.TryGetValue((household, epoch, device), out var made)
+                && made.From == caller && made.Body == sealedBody
+                ? Ok()
+                : Error(409, "That PC has already been approved.");
+        }
+        if (request.Approver != caller) return Error(403, "Only the member that committed can approve.");
+        if (request.Reveal is null) return Error(409, "The approval's reveal hasn't been made yet.");
+        var current = _epochs.GetValueOrDefault(household, 1);
+        if (epoch != current) return Error(409, $"The household's key is at epoch {current}; approve with that one.");
+        if (_envelopes.ContainsKey((household, epoch, device))) return Error(409, "That PC already has a key at this epoch.");
+        if (!list.TryGetValue(device, out var already) || already.Removed is not null)
+        {
+            if (list.Values.Count(member => member.Removed is null) >= 16) return Error(409, "This household already has 16 PCs.");
+            list[device] = new Member(request.Sign, request.Dh, Now, null, current);
+        }
+        _envelopes[(household, epoch, device)] = (caller, sealedBody);
+        _requests[(household, device)] = request with { ApprovedEpoch = epoch, ApprovedAt = Now };
+        return Ok();
     }
 
     private static HttpResponseMessage Ok() => Json(new JsonObject { ["ok"] = true });
@@ -539,6 +689,9 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     [GeneratedRegex("^/v1/meetings/([0-9a-f]{32})/(adder|joiner|answer|welcome|joined|welcomed)$")]
     private static partial Regex MeetingPath();
 
+    [GeneratedRegex("^/requests/([0-9a-f]{32})/(commit|reveal|approve)$")]
+    private static partial Regex RequestStep();
+
     public sealed record Member(string Sign, string Dh, long Added, long? Removed, int AddedEpoch = 1, int? RemovedEpoch = null);
 
     /// <summary>An account's recovery: its sealed body, its verifier, the epoch it was put at and the PC that holds its code.</summary>
@@ -548,5 +701,8 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 
     private sealed record Session(string Account, string Device, string Sign, string Dh);
 
-    private sealed record JoinRequest(string Account, string Sign, string Dh, long Created);
+    /// <summary>A PC's request to join, with its approval so far (plan 0.9).</summary>
+    public sealed record JoinRequest(
+        string Account, string Sign, string Dh, long Created, string? Approver = null, string? Commit = null, string? Nonce = null, string? Reveal = null,
+        int? ApprovedEpoch = null, long? ApprovedAt = null);
 }
