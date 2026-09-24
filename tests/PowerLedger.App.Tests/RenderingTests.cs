@@ -9,6 +9,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
@@ -1493,6 +1494,63 @@ public class RenderingTests
                 }
             }
         });
+    }
+
+    /// <summary>Plan O 0.4: a look switch hands Send feedback to the new window before the old one closes, so its
+    /// screenshot is of the window it belongs to now, not of the one it was opened over.</summary>
+    [Fact]
+    public void Send_feedbacks_screenshot_is_of_the_window_that_owns_it_now()
+        => OnUi(() =>
+        {
+            UseTheme(Theme.Dark);
+            var openedOver = Plain(Brushes.Red);
+            var ownsItNow = Plain(Brushes.Blue);
+            var sender = new FeedbackSender(
+                new FakeHttp().Client(), Path.Combine(Path.GetTempPath(), "pl-feedback-render-tests"), new FakeTimeProvider(Now));
+            var model = new FeedbackViewModel(sender, UiThreads.Inline, () => null);
+            var window = new SendFeedbackWindow(model, openedOver, new FakeImagePicker())
+            {
+                Owner = openedOver, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false,
+                ShowActivated = false,
+            };
+            window.Show();
+            try
+            {
+                window.Owner = ownsItNow;   // as the App's retarget does
+                openedOver.Close();
+                Find<Button>(window, button => Equals(button.Content, "Add a PowerLedger screenshot")).ShouldNotBeNull()
+                    .RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+                Centre(model.Images.ShouldHaveSingleItem().Data).ToString().ShouldBe(Colors.Blue.ToString());
+            }
+            finally
+            {
+                window.Close();
+                ownsItNow.Close();
+            }
+        });
+
+    /// <summary>A shown, empty window in <paramref name="background"/>, off the screen.</summary>
+    private static Window Plain(Brush background)
+    {
+        var window = new Window
+        {
+            Background = background, Width = 320, Height = 200, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+            ShowInTaskbar = false, ShowActivated = false,
+        };
+        window.Show();
+        return window;
+    }
+
+    /// <summary>The colour at the middle of a PNG or JPEG.</summary>
+    private static Color Centre(byte[] image)
+    {
+        using var stream = new MemoryStream(image);
+        var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0];
+        var pixels = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+        var bgra = new byte[4];
+        pixels.CopyPixels(new Int32Rect(pixels.PixelWidth / 2, pixels.PixelHeight / 2, 1, 1), bgra, 4, 0);
+        return Color.FromArgb(bgra[3], bgra[2], bgra[1], bgra[0]);
     }
 
     private static void Render()
