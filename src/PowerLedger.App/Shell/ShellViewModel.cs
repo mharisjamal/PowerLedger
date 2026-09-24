@@ -3,7 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace PowerLedger.App;
 
-/// <summary>The four screens of spec §9's rail.</summary>
+/// <summary>The screens of spec §9's rail, and Midnight's Dashboard (plan O 0.4), which stands where Now does in Classic.</summary>
 internal enum Page
 {
     Now,
@@ -11,6 +11,7 @@ internal enum Page
     Report,
     Household,
     Settings,
+    Dashboard,
 }
 
 /// <summary>The window: which page shows, the screens, the first-run wizard while it runs, and the version in the title bar.</summary>
@@ -21,7 +22,7 @@ internal sealed class ShellViewModel : ObservableObject
 
     public ShellViewModel(
         NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, HouseholdViewModel household, SettingsViewModel settings,
-        WizardViewModel wizard, string version, Updater? updates = null)
+        WizardViewModel wizard, string version, Updater? updates = null, DashboardViewModel? dashboard = null)
     {
         Now = now;
         Breakdown = breakdown;
@@ -31,6 +32,7 @@ internal sealed class ShellViewModel : ObservableObject
         Wizard = wizard;
         Version = version;
         Updates = updates;
+        Dashboard = dashboard;
         Wizard.Finished += EndSetup;
         Settings.SetupRequested += BeginSetup;
         Feedback = new RelayCommand(() => FeedbackRequested?.Invoke());
@@ -52,6 +54,9 @@ internal sealed class ShellViewModel : ObservableObject
 
     /// <summary>The update card in the rail (spec §13); without one the card stays hidden.</summary>
     public Updater? Updates { get; }
+
+    /// <summary>Midnight's landing page (plan O 0.4); Classic never shows it, and without one Page.Dashboard shows Now.</summary>
+    public DashboardViewModel? Dashboard { get; }
 
     /// <summary>The rail's Send feedback button.</summary>
     public IRelayCommand Feedback { get; }
@@ -86,6 +91,7 @@ internal sealed class ShellViewModel : ObservableObject
     public object Current => IsSetup ? Wizard : Page switch
     {
         Page.Now => Now,
+        Page.Dashboard => (object?)Dashboard ?? Now,
         Page.Breakdown => Breakdown,
         Page.Report => Report,
         Page.Household => Household,
@@ -111,6 +117,8 @@ internal sealed class ShellViewModel : ObservableObject
     private void ShowPage()
     {
         var shown = IsSetup ? (Page?)null : Page;
+        if (shown == Page.Dashboard) Dashboard?.Show();
+        else Dashboard?.Hide();
         if (shown == Page.Breakdown) Breakdown.Show();
         else Breakdown.Hide();
         if (shown == Page.Report) Report.Show();

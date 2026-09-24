@@ -1,0 +1,19 @@
+<UserControl x:Class="PowerLedger.App.DashboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:PowerLedger.App">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- The window's styles, shared with it (SharedDictionary): a view built by a DataTemplate resolves its StaticResources before it joins the window. -->
+                <local:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <!-- Plan O M1-4 fills this in; until then the page host has something to show. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="32,16,32,28">
+            <TextBlock Style="{StaticResource M.Text.Muted}" Text="Dashboard" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -220,6 +220,50 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- A sidebar item that acts rather than navigates (Support): the item's rest look on a button. -->
+    <Style x:Key="M.NavButton" TargetType="Button">
+        <Setter Property="Height" Value="40" />
+        <Setter Property="Margin" Value="12,0,12,2" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource M.Focus.Ring}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Hover" Background="{DynamicResource M.Raised}" local:Rounding.Pill="True" Opacity="0" />
+                        <StackPanel Margin="{TemplateBinding Padding}" Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource M.Text.Glyph}" Width="20" Text="{TemplateBinding Tag}" Foreground="{TemplateBinding Foreground}" />
+                            <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style x:Key="M.Badge" TargetType="ContentControl">
         <Setter Property="Focusable" Value="False" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -350,6 +394,16 @@
         <Setter Property="FontFamily" Value="{StaticResource M.Font.Glyphs}" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="local:Wash.Corner" Value="18" />
+    </Style>
+
+    <!-- The close button of the caption: the icon button whose wash is the palette's red, so it warns like Windows' own. -->
+    <Style x:Key="M.Caption.Close" TargetType="Button" BasedOn="{StaticResource M.IconButton}">
+        <Setter Property="local:Wash.Brush" Value="{DynamicResource M.Bad}" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource M.OnAccent}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <!-- Range pills: a row of radio buttons on a raised track (M.PillTrack); the chosen one is filled with the accent. -->
