@@ -272,6 +272,36 @@ public class ReportTests
     }
 
     [Fact]
+    public void Each_card_the_inventory_names_is_a_part_of_its_own_and_named_by_its_own_source()
+    {
+        // A workstation with a Quadro beside a Radeon. The typed 220 W can be only one card's rating, so each card keeps
+        // the table's, and a card the table does not know takes the typed figure.
+        var inputs = SharingFakes.Inputs() with
+        {
+            Facts = SharingFakes.Facts with { GpuName = "NVIDIA Quadro 6000 + AMD Radeon RX 7800 XT + Matrox C900" },
+            Status = SharingFakes.Status(sources:
+            [
+                new SourceStatus("nvidia-gpu", true, null, 0, null),
+                new SourceStatus("amd-gpu", true, null, 0, null),
+            ]),
+        };
+
+        var report = ReportBuilder.Build(inputs);
+
+        report.Power.ShouldNotBeNull().Hardware.ShouldNotBeNull().Gpus.ShouldBe(
+        [
+            new GpuDto("nvidia", "NVIDIA Quadro 6000", null, Discrete: true, 204, TdpTyped: false),
+            new GpuDto("amd", "AMD Radeon RX 7800 XT", null, Discrete: true, 263, TdpTyped: false),
+            new GpuDto("other", "Matrox C900", null, Discrete: true, 220, TdpTyped: true),
+        ]);
+        report.Diagnostics.ShouldNotBeNull().Sources.Select(source => (source.Id, source.Device)).ShouldBe(new[]
+        {
+            ("nvidia-gpu", (string?)"NVIDIA Quadro 6000"), ("amd-gpu", "AMD Radeon RX 7800 XT"),
+        });
+        ReportSchema.Problems(ReportJson.Write(report)).ShouldBeNull();
+    }
+
+    [Fact]
     public void The_apps_counts_are_copied_as_they_were_merged()
     {
         var usage = ReportBuilder.Build(SharingFakes.Inputs()).Usage.ShouldNotBeNull();

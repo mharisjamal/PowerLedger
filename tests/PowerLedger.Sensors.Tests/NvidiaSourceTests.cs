@@ -62,6 +62,57 @@ public class NvidiaSourceTests
     }
 
     [Fact]
+    public void Every_card_is_added_with_its_name_pci_device_and_rating()
+    {
+        var source = new NvidiaSource(
+        [
+            new NvidiaCard("Quadro 6000", 0x06D8, new GpuRating(204, false), () => new GpuReading(true, null, 0.5), static () => false),
+            new NvidiaCard("NVIDIA GeForce GTX 1080", 0x1B80, new GpuRating(180, false), () => new GpuReading(true, 150, 0.9), static () => false),
+        ], present: true, unavailable: null, loadsEveryCard: true);
+
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+
+        draft.Gpus.Count.ShouldBe(2);
+        draft.Gpus.ShouldAllBe(card => card.VendorId == DiscreteGpu.NvidiaVendor);
+        draft.Gpus.Select(card => (card.Name, card.DeviceId, card.Watts, card.Load, card.Rating!.Value.Watts))
+            .ShouldBe([("Quadro 6000", 0x06D8u, (double?)null, (double?)0.5, 204.0), ("NVIDIA GeForce GTX 1080", 0x1B80u, 150, 0.9, 180)]);
+    }
+
+    [Fact]
+    public void Only_the_card_windows_has_switched_off_draws_nothing_and_is_not_asked()
+    {
+        var asked = 0;
+        var source = new NvidiaSource(
+        [
+            new NvidiaCard("A", 1, null, () => { asked++; return new GpuReading(true, 99, 0.9); }, static () => true),
+            new NvidiaCard("B", 2, null, () => new GpuReading(true, 40, 0.3), static () => false),
+        ], present: true, unavailable: null, loadsEveryCard: true);
+
+        var draft = new SampleDraft();
+        source.Contribute(draft);
+
+        draft.Gpus.Select(card => card.Watts).ShouldBe([0, 40]);
+        asked.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_card_that_breaks_leaves_the_tick_with_none_of_nvmls_cards()
+    {
+        // A lost GPU throws, the sampler backs the source off, and the tick keeps nothing half-read from it.
+        var source = new NvidiaSource(
+        [
+            new NvidiaCard("A", 1, null, () => new GpuReading(true, 99, 0.9), static () => false),
+            new NvidiaCard("B", 2, null, () => throw new InvalidOperationException("NVML error 15"), static () => false),
+        ], present: true, unavailable: null, loadsEveryCard: true);
+
+        var draft = new SampleDraft();
+        Should.Throw<InvalidOperationException>(() => source.Contribute(draft));
+
+        draft.Gpus.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void The_source_is_named_for_the_status_screen()
         => From(1, 1).Name.ShouldBe("nvidia-gpu");
 }

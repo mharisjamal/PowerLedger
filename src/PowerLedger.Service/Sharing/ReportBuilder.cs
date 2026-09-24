@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
+using PowerLedger.Sensors;
 using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Sharing;
@@ -14,7 +15,7 @@ namespace PowerLedger.Service.Sharing;
 internal static partial class ReportBuilder
 {
     public const int SchemaVersion = 1;
-    private const int MaxName = 200, MaxError = 2000, MaxSources = 32, MaxCrashes = 20, MaxMonitors = 16, MaxCount = 1_000_000;
+    private const int MaxName = 200, MaxError = 2000, MaxSources = 32, MaxCrashes = 20, MaxMonitors = 16, MaxGpus = 8, MaxCount = 1_000_000;
 
     /// <summary>Each graphics source, with the maker of the cards it reads.</summary>
     private static readonly Dictionary<string, string> GraphicsSources = new(StringComparer.Ordinal)
@@ -68,7 +69,7 @@ internal static partial class ReportBuilder
         var device = !source.Supported ? null : source.Name switch
         {
             _ when GraphicsSources.TryGetValue(source.Name, out var maker) =>
-                inputs.Facts?.GpuName is { } gpu && Vendor(gpu) == maker ? gpu : null,
+                inputs.Facts?.GpuNames.FirstOrDefault(gpu => Vendor(gpu) == maker),
             "ups" => DeviceName(inputs.Status, PowerDeviceKind.Ups),
             "power-supply" => DeviceName(inputs.Status, PowerDeviceKind.PowerSupply),
             _ => null,
@@ -101,10 +102,16 @@ internal static partial class ReportBuilder
         var cpu = new CpuDto(
             Text(facts?.CpuName, MaxName, names), Cores: null, Within(inputs.Host.Threads, 1, 2048),
             Watts(profile.CpuTdpOverrideW ?? facts?.CpuTdpW, 1, 1000), TdpTyped: profile.CpuTdpOverrideW is not null);
-        GpuDto[] gpus = facts?.GpuName is { Length: > 0 } gpu
-            ? [new GpuDto(Vendor(gpu), Text(gpu, MaxName, names), MemoryMb: null, inputs.DiscreteGpu,
-                Watts(profile.GpuTdpOverrideW ?? facts.GpuTdpW, 1, 2000), TdpTyped: profile.GpuTdpOverrideW is not null)]
-            : [];
+        // Each card the inventory names is a part of its own. The typed figure rates the only card, as the model has it;
+        // beside another card it rates only one the table does not know.
+        var cards = facts?.GpuNames ?? [];
+        var gpus = cards.Take(MaxGpus).Select(gpu =>
+        {
+            var table = TdpTable.Bundled.Gpu(gpu);
+            var typed = profile.GpuTdpOverrideW is not null && (cards.Count == 1 || table is null);
+            return new GpuDto(Vendor(gpu), Text(gpu, MaxName, names), MemoryMb: null, inputs.DiscreteGpu,
+                Watts(typed ? profile.GpuTdpOverrideW : table, 1, 2000), TdpTyped: typed);
+        }).ToArray();
         var monitors = (inputs.Status?.Monitors ?? []).Take(MaxMonitors).Select(monitor => Monitor(monitor, names)).ToList();
         var psuName = DeviceName(inputs.Status, PowerDeviceKind.PowerSupply);
         var psu = new PsuDto(Tier(profile.PsuTier), Within(PsuEfficiency.RatedWatts(psuName), 50, 5000), Text(psuName, MaxName, names));

@@ -87,7 +87,7 @@ public class NowViewModelTests
 
         // Nothing was measured, so the scope says nothing of a figure the model worked out from the load.
         _link.Push(Frames.At(Now) with { GpuScope = scope });
-        model.Live.Budget[1].Detail.ShouldBe("GeForce MX330 · 31% load · modelled");
+        model.Live.Budget[1].Detail.ShouldBe("GeForce MX330 · 31% load · estimated from load");
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public class NowViewModelTests
         _link.Push(Frames.At(Now));
 
         model.Live.Budget[0].Detail.ShouldBe("Core i7-1165G7 · 30% load · measured");
-        model.Live.Budget[1].Detail.ShouldBe("GeForce MX330 · 31% load · modelled");
+        model.Live.Budget[1].Detail.ShouldBe("GeForce MX330 · 31% load · estimated from load");
         model.Live.Budget[2].Detail.ShouldBe("15.3 in · brightness 60%");
         model.Live.Budget[3].Detail.ShouldBe("RAM, SSD, board, radios · measured remainder");
     }

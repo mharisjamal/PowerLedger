@@ -10,7 +10,7 @@ public sealed record EngineSnapshot(long At, IReadOnlyDictionary<string, long> R
 
 /// <summary>
 /// Windows' "GPU Engine" performance counters: how long each process has kept each engine of each graphics adapter busy.
-/// Windows keeps them for every vendor's card, so they give an AMD or Intel card's load with no vendor library, and on the
+/// Windows keeps them for every vendor's card, so they give any card's load with no vendor library, and on the
 /// development laptop reading them left the switched-off GeForce switched off. A read walks every process on every
 /// engine, which costs one to two milliseconds of processor time there, so the caller reads them seconds apart.
 /// </summary>

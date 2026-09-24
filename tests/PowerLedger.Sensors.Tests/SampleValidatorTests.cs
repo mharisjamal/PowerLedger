@@ -65,6 +65,40 @@ public class SampleValidatorTests
     }
 
     [Fact]
+    public void Each_card_is_range_checked_and_spike_filtered_on_its_own_and_the_totals_follow()
+    {
+        var validator = new SampleValidator();
+        Sample Cards(int second, double? geforce, double? quadro, double? load = 0.4)
+        {
+            IReadOnlyList<GpuCard> cards =
+            [
+                new GpuCard("NVIDIA GeForce GTX 1080", geforce, load),
+                new GpuCard("Quadro 6000", quadro, 0.2, RatedW: 204),
+            ];
+            var totals = GpuCard.Totals(cards);
+            return Raw(gpu: totals.Watts, second: second) with { Gpus = cards, DGpuLoad = totals.Load };
+        }
+
+        // The Quadro idles at 30 W the whole time; the GeForce's window fills at 100 W.
+        for (var i = 0; i < 30; i++) validator.Validate(Cards(i, 100, 30)).Suspect.ShouldBeFalse();
+
+        // A GeForce spike is the GeForce's alone: it is replaced, and the Quadro's figure stands.
+        var spike = validator.Validate(Cards(30, 400, 30));
+        spike.Gpus.ShouldNotBeNull().Select(g => g.Watts).ShouldBe([100, 30]);
+        spike.DGpuW.ShouldBe(130);
+        spike.Suspect.ShouldBeTrue();
+
+        // A figure no card could draw is dropped, which leaves that card to the model, and a load past 1 is held to 1.
+        var broken = validator.Validate(Cards(31, 100, 5000, load: 1.7));
+        broken.Gpus.ShouldNotBeNull()[1].Watts.ShouldBeNull();
+        broken.Gpus[0].Load.ShouldBe(1);
+        broken.DGpuW.ShouldBeNull();
+        broken.DGpuLoad.ShouldBe(1);
+        broken.DGpuPresent.ShouldBeTrue();
+        broken.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
     public void A_sustained_rise_is_accepted_on_its_second_reading_instead_of_being_rejected_forever()
     {
         var validator = new SampleValidator();

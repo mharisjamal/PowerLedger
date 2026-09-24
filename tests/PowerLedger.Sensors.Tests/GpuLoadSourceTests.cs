@@ -8,10 +8,10 @@ public class GpuLoadSourceTests
 {
     private static readonly GpuAdapter Radeon = new("AMD Radeon RX 7800 XT", DiscreteGpu.AmdVendor, 16UL << 30, 0xD1A4, 0, false);
 
-    private static readonly GpuAdapter[] DevelopmentLaptop =
+    /// <summary>A laptop with graphics in its processor and nothing else.</summary>
+    private static readonly GpuAdapter[] ProcessorGraphicsOnly =
     [
         new("Intel(R) Iris(R) Xe Graphics", DiscreteGpu.IntelVendor, 128UL << 20, 0xD935, 0, false),
-        new("NVIDIA GeForce MX330", 0x10DE, 1968UL << 20, 0xDCDD, 0, false),
         new("Microsoft Basic Render Driver", 0x1414, 0, 0xDCAA, 0, true),
     ];
 
@@ -26,13 +26,13 @@ public class GpuLoadSourceTests
     }
 
     [Fact]
-    public void Without_an_amd_or_intel_card_the_source_says_so_and_claims_nothing()
+    public void Without_a_card_the_source_says_so_and_claims_nothing()
     {
         var engines = new Engines(() => _now);
-        var source = new GpuLoadSource(() => DevelopmentLaptop, engines.Read, () => _now);
+        var source = new GpuLoadSource(() => ProcessorGraphicsOnly, engines.Read, () => _now);
 
         source.Supported.ShouldBeFalse();
-        source.Unavailable.ShouldBe("no AMD or Intel discrete GPU");
+        source.Unavailable.ShouldBe("no discrete GPU");
         var draft = Tick(source, 0);
         draft.DGpuPresent.ShouldBeFalse();
         draft.DGpuLoad.ShouldBeNull();
@@ -119,7 +119,7 @@ public class GpuLoadSourceTests
         var source = new GpuLoadSource(() => adapters, engines.Read, () => _now);
         Tick(source, 0);
 
-        adapters = DevelopmentLaptop;
+        adapters = ProcessorGraphicsOnly;
         var gone = Tick(source, 5);
         gone.DGpuPresent.ShouldBeFalse();
         gone.DGpuLoad.ShouldBeNull();

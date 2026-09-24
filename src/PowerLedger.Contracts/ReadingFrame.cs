@@ -10,8 +10,8 @@ public sealed record ComponentWatts(
 /// <summary>One tick as the App sees it, pushed to every subscriber (spec §8).</summary>
 /// <param name="Quality">How far to trust the total.</param>
 /// <param name="CpuMeasured">The processor's watts came from its energy meter this tick, not the load model.</param>
-/// <param name="GpuMeasured">The discrete GPU's watts were reported this tick (0 W for a card Windows has switched off);
-/// false means the load model, or no card the service can read.</param>
+/// <param name="GpuMeasured">Every discrete card's watts were reported this tick (0 W for a card Windows has switched off);
+/// false means the load model worked out at least one card's, or there is no card.</param>
 /// <param name="GpuScope">What a measured GPU figure covers; a chip or package reading has the rest of the card estimated.</param>
 /// <param name="Total">Where the total came from. Both came later: a frame without them is from an older service.</param>
 public sealed record ReadingFrame(

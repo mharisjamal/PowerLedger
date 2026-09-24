@@ -27,6 +27,7 @@ public sealed class ArcSource : ISensorSource
     private readonly Func<bool> _poweredOff = static () => false;
     private readonly IntPtr _domain;
     private readonly GpuPowerScope _scope = GpuPowerScope.Board;
+    private readonly uint _deviceId;
     private SysmanEnergy? _previous;
 
     /// <summary>Opens the graphics driver's own Level Zero library and looks for a card in it.</summary>
@@ -57,6 +58,7 @@ public sealed class ArcSource : ISensorSource
             {
                 _domain = card.Domain;
                 _scope = card.Scope;
+                _deviceId = card.Device.DeviceId;
                 _poweredOff = powerState(card.Device);
             }
             Unavailable = unavailable;
@@ -83,25 +85,20 @@ public sealed class ArcSource : ISensorSource
 
     public string? Unavailable { get; }
 
+    /// <summary>Adds the card. A machine can have a discrete Radeon and a discrete Arc card at once, and each is a card of
+    /// its own: its name, rating and load come from Windows' load counters, which recognise it by its PCI ids.</summary>
     public void Contribute(SampleDraft draft)
     {
         if (!Supported) return;
-        draft.DGpuPresent = true;
-
-        // A machine can have a discrete Radeon and a discrete Arc card at once, and the tick has one field between
-        // them for the card's watts. AMD's library is read before this one, so whatever it measured stands: writing
-        // over it would lose the Radeon's draw, and an Arc that Windows has switched off would replace it with a nought.
-        // Not asking Level Zero at all is also what keeps this from waking a card for a reading nobody will use.
-        if (draft.DGpuW is not null) return;
-
-        draft.DGpuScope = _scope;
+        var card = draft.AddGpu(DiscreteGpu.IntelVendor, _deviceId);
+        card.Scope = _scope;
         try
         {
-            draft.DGpuW = Watts();
+            card.Watts = Watts();
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            draft.DGpuW = null;
+            card.Watts = null;
         }
     }
 

@@ -60,6 +60,13 @@ public sealed class HistoryReaderTests : IDisposable
         snapshot.Machine.ShouldBe(new MachineNames("11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz", "NVIDIA GeForce MX330", 15.3));
     }
 
+    [Theory]
+    [InlineData("""{"GpuName":"NVIDIA Quadro 6000 + Matrox C900","GpuTdpRough":true}""", true)]
+    [InlineData("""{"GpuName":"NVIDIA Quadro 6000","GpuTdpRough":false}""", false)]
+    [InlineData("""{"GpuName":"NVIDIA Quadro 6000"}""", false)]                  // stored before the flag was
+    public void The_names_say_whether_a_cards_rating_is_only_rough(string json, bool rough)
+        => HistoryReader.Names(new InventoryRecord("hash", Now, json)).ShouldNotBeNull().GpuRough.ShouldBe(rough);
+
     [Fact]
     public void A_database_that_cannot_be_opened_reads_as_nothing()
     {

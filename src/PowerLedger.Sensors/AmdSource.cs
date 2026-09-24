@@ -94,11 +94,12 @@ public sealed class AmdSource : ISensorSource
         }
 
         // Windows can say the card is switched off without waking it, which asking the library would.
+        var pciDevice = DiscreteGpu.DeviceIdIn(_gpu.DeviceId);
         if (_gpu.DeviceId is { } device && Safely(() => _poweredOff(device), false))
         {
-            draft.DGpuPresent = true;
-            draft.DGpuW = 0;
-            draft.DGpuScope = GpuPowerScope.Board;
+            var off = draft.AddGpu(DiscreteGpu.AmdVendor, pciDevice);
+            off.Watts = 0;
+            off.Scope = GpuPowerScope.Board;
             return;
         }
 
@@ -109,9 +110,10 @@ public sealed class AmdSource : ISensorSource
             return;
         }
 
-        draft.DGpuPresent = true;
-        draft.DGpuW = reading.Watts;
-        if (reading.Watts is not null) draft.DGpuScope = reading.Scope;
+        // The card's name, rating and load come from Windows' load counters, which recognise it by its PCI ids.
+        var card = draft.AddGpu(DiscreteGpu.AmdVendor, pciDevice);
+        card.Watts = reading.Watts;
+        if (reading.Watts is not null) card.Scope = reading.Scope;
     }
 
     public void Dispose() => Close();

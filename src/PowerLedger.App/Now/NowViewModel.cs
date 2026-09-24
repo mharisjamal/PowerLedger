@@ -348,21 +348,26 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var (name, detail) = share.Part switch
         {
             Part.Cpu => ("CPU package", Join(ShortName(machine?.Cpu), Load(frame.CpuLoad), frame.CpuMeasured ? "measured" : "modelled")),
-            Part.Gpu => ("GPU", GpuDetail(machine?.Gpu, frame)),
+            Part.Gpu => ("GPU", GpuDetail(machine, frame)),
             Part.Display => ("Display", DisplayDetail(machine, frame)),
             _ => ("Rest of system", Join("RAM, SSD, board, radios", Remainder(frame.Quality))),
         };
         return new BudgetRow(share.Part, name, detail, Format.Watts(share.Watts, _culture) + " W", Format.Percent(share.Share, _culture), share.Share);
     }
 
-    private string GpuDetail(string? gpu, ReadingFrame frame)
+    /// <summary>The graphics row: every card the service names ("Quadro 6000 + GeForce GTX 1080"), the busiest card's load,
+    /// and how the watts were known. They are measured only when every card measured its own; otherwise the service worked
+    /// some out from the card's load and rating, which is a rough estimate when the rating is only its guess from the card's
+    /// memory, unless the user typed the rating.</summary>
+    private string GpuDetail(MachineNames? machine, ReadingFrame frame)
     {
-        var name = ShortName(gpu);
+        var name = ShortName(machine?.Gpu);
         if (frame.GpuMeasured && frame.Components.Gpu <= 0 && (frame.GpuLoad ?? 0) <= 0) return Join(name, "switched off");
-        if (!frame.GpuMeasured && frame.GpuLoad is null && frame.Components.Gpu <= 0) return "no discrete GPU the service can read";
+        if (!frame.GpuMeasured && frame.GpuLoad is null && frame.Components.Gpu <= 0) return "no discrete GPU found";
+        var rough = machine?.GpuRough == true && _settings?.Profile.GpuTdpOverrideW is null;
         // A chip or package figure leaves out the card's memory regulators, its regulator losses and its fans, which the
         // model adds (spec §3).
-        var how = !frame.GpuMeasured ? "modelled" : frame.GpuScope switch
+        var how = !frame.GpuMeasured ? (rough ? "rough estimate" : "estimated from load") : frame.GpuScope switch
         {
             GpuPowerScope.ChipOnly => "chip measured, rest of card estimated",
             GpuPowerScope.Package => "package measured, rest of card estimated",

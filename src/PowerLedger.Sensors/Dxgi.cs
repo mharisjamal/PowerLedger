@@ -9,7 +9,8 @@ namespace PowerLedger.Sensors;
 /// <param name="LuidLow">The low half of the adapter's LUID, which names it in the GPU Engine counters until its driver restarts.</param>
 /// <param name="LuidHigh">The high half of the LUID.</param>
 /// <param name="Software">A software rasteriser, such as the Microsoft Basic Render Driver.</param>
-public sealed record GpuAdapter(string Description, uint VendorId, ulong DedicatedBytes, uint LuidLow, int LuidHigh, bool Software)
+/// <param name="DeviceId">The PCI device id, e.g. 0x06D8 for a Quadro 6000, which tells one maker's cards apart; 0 when unknown.</param>
+public sealed record GpuAdapter(string Description, uint VendorId, ulong DedicatedBytes, uint LuidLow, int LuidHigh, bool Software, uint DeviceId = 0)
 {
     /// <summary>How the GPU Engine counter instances name this adapter, e.g. "luid_0x00000000_0x0000D1A4".</summary>
     public string CounterLuid => FormattableString.Invariant($"luid_0x{LuidHigh:X8}_0x{LuidLow:X8}");
@@ -59,7 +60,7 @@ internal sealed class DxgiAdapters : IDisposable
                 Marshal.ThrowExceptionForHR(adapter.GetDesc1(out var desc));
                 adapters.Add(new GpuAdapter(
                     desc.Description, desc.VendorId, desc.DedicatedVideoMemory,
-                    desc.LuidLowPart, desc.LuidHighPart, (desc.Flags & SoftwareFlag) != 0));
+                    desc.LuidLowPart, desc.LuidHighPart, (desc.Flags & SoftwareFlag) != 0, desc.DeviceId));
             }
             finally
             {
