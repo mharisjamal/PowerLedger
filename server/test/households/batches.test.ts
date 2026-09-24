@@ -110,12 +110,12 @@ describe("POST and GET /v1/households/{hid}/batches", () => {
     }
   });
 
-  it("gives 403 to a removed member, both ways", async () => {
+  it("gives 410 to a removed member, both ways", async () => {
     const { hid, first, second } = await pair();
     await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`);
 
-    expect((await post(hid, second, 1)).status).toBe(403);
-    expect((await signedFetch(second, "GET", `/v1/households/${hid}/batches?after=0`)).status).toBe(403);
+    expect((await post(hid, second, 1)).status).toBe(410);
+    expect((await signedFetch(second, "GET", `/v1/households/${hid}/batches?after=0`)).status).toBe(410);
   });
 
   it("gives 413 for a batch over 1 MB, and takes one just under", async () => {

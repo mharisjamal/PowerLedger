@@ -138,7 +138,7 @@ describe("join requests", () => {
     const { hid, owner } = await linkedHousehold();
     const stranger = await newDevice();
 
-    expect((await signedFetch(stranger, "GET", `/v1/households/${hid}/requests`)).status).toBe(403);
+    expect((await signedFetch(stranger, "GET", `/v1/households/${hid}/requests`)).status).toBe(401);
     const approve = await signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${stranger.id}/approve`, {
       epoch: 1,
       body: envelope(),

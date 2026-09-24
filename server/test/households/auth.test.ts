@@ -114,7 +114,7 @@ describe("verifySigned", () => {
   it("refuses a PC that isn't a member of the path's household", async () => {
     const { request, body } = vectorRequest({ path: `/v1/households/${randomHouseholdId()}/batches` });
     const result = await verifySigned(request, env, body, { now: vectorNow });
-    expect((result as Response).status).toBe(403);
+    expect((result as Response).status).toBe(401);
   });
 
   it("refuses a removed member", async () => {
@@ -124,7 +124,24 @@ describe("verifySigned", () => {
 
     const request = await signedRequest(device, "GET", `/v1/households/${hid}/members`);
     const result = await verifySigned(request, env, await bodyOf(request));
-    expect((result as Response).status).toBe(403);
+    expect((result as Response).status).toBe(410);
+    expect(await (result as Response).json()).toEqual({ error: "This PC was removed from the household." });
+  });
+
+  it("gives no member row and a bad signature the same 401, telling a removed PC so only when its signature is good", async () => {
+    const removed = await newDevice();
+    const stranger = await newDevice();
+    const hid = randomHouseholdId();
+    await seedMember(hid, removed.id, removed.sign, Date.now());
+
+    const fromStranger = await signedRequest(stranger, "GET", `/v1/households/${hid}/members`);
+    const noRow = (await verifySigned(fromStranger, env, new Uint8Array(0))) as Response;
+    const forged = await signedRequest(removed, "POST", `/v1/households/${hid}/batches`, "{}", { signedBody: "{ }" });
+    const badSignature = (await verifySigned(forged, env, await bodyOf(forged))) as Response;
+
+    expect(noRow.status).toBe(401);
+    expect(badSignature.status).toBe(401);
+    expect(await noRow.json()).toEqual(await badSignature.json());
   });
 
   it("accepts a fresh request from a current member, 300 s off at most", async () => {
