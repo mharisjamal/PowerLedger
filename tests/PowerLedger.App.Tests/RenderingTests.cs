@@ -399,6 +399,76 @@ public class RenderingTests
             }
         });
 
+    /// <summary>Midnight look design §1, §5: Preferences offers the look, Classic or Midnight, just under the theme and
+    /// lined up with its choices. A look whose window won't open leaves the old one chosen and says why on the
+    /// preferences' message line; one that opens is chosen.</summary>
+    [Fact]
+    public void Settings_offers_the_look_under_the_theme_and_says_why_one_did_not_open()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var ui = new FakeUiSettings { LookProblem = "Couldn't open the Midnight look: no XAML" };
+                var settings = SettingsScreen(ui: ui);
+                settings.Show();
+                var view = new SettingsView { DataContext = settings };
+                var window = new Window
+                {
+                    Content = view, Width = 880, Height = 560, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    ShowInTaskbar = false, ShowActivated = false,
+                };
+                window.SetResourceReference(Control.BackgroundProperty, "Brush.Ground");
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    var label = Find<TextBlock>(view, text => text.Text == "Look").ShouldNotBeNull(theme.ToString());
+                    var classic = Choice("Classic");
+                    var midnight = Choice("Midnight");
+                    (classic.IsChecked, midnight.IsChecked).ShouldBe((true, false), theme.ToString());
+                    var themeRow = Choice("Like Windows");
+                    Top(label).ShouldBeGreaterThan(Top(themeRow), theme.ToString());
+                    Top(label).ShouldBeLessThan(Top(Find<TextBlock>(view, text => text.Text == "Start with Windows").ShouldNotBeNull()), theme.ToString());
+                    Left(classic).ShouldBe(Left(themeRow), 0.5, theme.ToString());
+
+                    midnight.IsChecked = true;
+                    Pump(TimeSpan.FromMilliseconds(100));
+
+                    settings.Look.ShouldBe(Look.Classic, theme.ToString());
+                    (classic.IsChecked, midnight.IsChecked).ShouldBe((true, false), theme.ToString());
+                    var said = Find<TextBlock>(view, text => text.Text == "Couldn't open the Midnight look: no XAML").ShouldNotBeNull(theme.ToString());
+                    said.IsVisible.ShouldBeTrue(theme.ToString());
+                    var scroller = view.Content.ShouldBeOfType<ScrollViewer>();
+                    var preferences = Find<TextBlock>(view, text => text.Text == "PREFERENCES").ShouldNotBeNull();
+                    scroller.ScrollToVerticalOffset(scroller.VerticalOffset + preferences.TranslatePoint(default, scroller).Y - 16);
+                    Pump(TimeSpan.FromMilliseconds(100));
+                    Save(window, 880, 560, $"settings-look-{theme}.png");
+
+                    ui.LookProblem = null;
+                    midnight.IsChecked = true;
+
+                    settings.Look.ShouldBe(Look.Midnight, theme.ToString());
+                    ui.Changes.ShouldBe(["look Midnight"], theme.ToString());
+                    (classic.IsChecked, midnight.IsChecked).ShouldBe((false, true), theme.ToString());
+                }
+                finally
+                {
+                    window.Close();
+                }
+
+                RadioButton Choice(string content) => Find<RadioButton>(view, button => Equals(button.Content, content)).ShouldNotBeNull($"{content} on {theme}");
+
+                double Top(FrameworkElement element) => element.TranslatePoint(default, view).Y;
+
+                double Left(FrameworkElement element) => element.TranslatePoint(default, view).X;
+            }
+        });
+        new FileInfo(Path.Combine(Folder, "settings-look-Dark.png")).Length.ShouldBeGreaterThan(3_000);
+    }
+
     [Fact]
     public void Settings_lists_the_ups_and_the_power_supply_asks_what_the_ups_powers_and_offers_to_stop_reading_the_supply()
         => OnUi(() =>
@@ -1674,12 +1744,12 @@ public class RenderingTests
     /// Energy Star's list whose brightness was read, on a plug of its own, and a portable one estimated from its size whose
     /// brightness wasn't, running off the laptop — and a UPS and a power supply read over USB. The service is
     /// <paramref name="link"/> when it is given.</summary>
-    private static SettingsViewModel SettingsScreen(FakeLink? link = null)
+    private static SettingsViewModel SettingsScreen(FakeLink? link = null, FakeUiSettings? ui = null)
     {
         link ??= new FakeLink();
         link.Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) with { PowerDevices = [Statuses.Ups, Statuses.PowerSupply] };
         link.Connect(true);
-        return new SettingsViewModel(link, new FakeMachineHistory(), new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
+        return new SettingsViewModel(link, new FakeMachineHistory(), ui ?? new FakeUiSettings(), UiThreads.Inline, new FakeTimeProvider(Now),
             TimeZoneInfo.Utc, English, "USD");
     }
 
