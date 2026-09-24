@@ -834,6 +834,53 @@ public class RenderingTests
         });
     }
 
+    /// <summary>The Join prompt (households design §2, §3): the household's name, the comparison code, the leave warning
+    /// for a PC already in one, and its buttons fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void The_join_prompt_shows_the_household_name_the_code_and_the_leave_warning()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink
+                {
+                    Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "This-PC", ChassisKind.Desktop, true, [], null) },
+                };
+                link.Connect(true);
+                var notice = new HouseholdNotice(NoticeKind.JoinPrompt, "p1", "", "Desktop-7", "482 913", Now.AddMinutes(2));
+                var model = new JoinPromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new JoinPromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Join Desktop-7's household?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Its code is 482 913. Check it matches the code on Desktop-7.").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Joining will leave your current household.").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Don't join", "Join" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 420, (int)window.ActualHeight, $"join-prompt-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();

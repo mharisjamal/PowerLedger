@@ -111,6 +111,9 @@ internal interface IServiceLink : IAsyncDisposable
 
     /// <summary>Joins a household with the code another PC showed.</summary>
     Task<HouseholdOutcome> JoinByCodeAsync(string code, CancellationToken cancel = default);
+
+    /// <summary>The user's answer to a pushed Join or Approve prompt.</summary>
+    Task<HouseholdOutcome> AnswerPromptAsync(string promptId, bool accept, CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -222,6 +225,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public Task<HouseholdOutcome> JoinByCodeAsync(string code, CancellationToken cancel = default)
         => HouseholdAsync(new JoinByCodeRequest(NextId(), code), cancel);
+
+    public Task<HouseholdOutcome> AnswerPromptAsync(string promptId, bool accept, CancellationToken cancel = default)
+        => HouseholdAsync(new AnswerPromptRequest(NextId(), promptId, accept), cancel);
 
     public async ValueTask DisposeAsync()
     {

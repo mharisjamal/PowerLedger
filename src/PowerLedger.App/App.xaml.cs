@@ -109,6 +109,7 @@ public partial class App : Application
         _settings.Service.Saved += CountMachineChanged;
         _report.PropertyChanged += OnReportChanged;
         _tray = new TrayIcon(ShowWindow, ExitUi, autostart);
+        _link.HouseholdNoticeReceived += OnHouseholdNotice;
         _monthly = new MonthlyReports(
             history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,
             written => Dispatcher.InvokeAsync(() =>
@@ -242,6 +243,29 @@ public partial class App : Application
     {
         if (_window is null || _link is null || _threads is null) return;
         new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window }.Show();
+    }
+
+    /// <summary>A pushed household notice (households design §9): a Join prompt opens a modal on top of whatever is
+    /// showing; anything else shows as a tray notification. Raised off the UI thread.</summary>
+    private void OnHouseholdNotice(HouseholdNotice notice)
+    {
+        switch (notice.Kind)
+        {
+            case NoticeKind.JoinPrompt:
+                Dispatcher.InvokeAsync(() => OpenJoinPromptWindow(notice));
+                break;
+            case NoticeKind.Info:
+                Dispatcher.InvokeAsync(() => _tray?.Notify("PowerLedger", notice.Text, null));
+                break;
+        }
+    }
+
+    /// <summary>The Join prompt (households design §2, §3): modal, owned by the main window when it is open.</summary>
+    private void OpenJoinPromptWindow(HouseholdNotice notice)
+    {
+        if (_link is null || _threads is null) return;
+        var model = new JoinPromptViewModel(_link, _threads, TimeProvider.System, notice);
+        new JoinPromptWindow(model) { Owner = _window }.ShowDialog();
     }
 
     /// <summary>"What's been sent…" in Settings → Privacy (data-sharing design §2).</summary>

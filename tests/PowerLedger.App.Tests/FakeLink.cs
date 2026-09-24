@@ -132,6 +132,8 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<HouseholdOutcome> JoinByCodeAsync(string code, CancellationToken cancel = default) => Household(code);
 
+    public Task<HouseholdOutcome> AnswerPromptAsync(string promptId, bool accept, CancellationToken cancel = default) => Household((promptId, accept));
+
     private Task<HouseholdOutcome> Household(object request)
     {
         if (!IsConnected) return Task.FromResult(HouseholdOutcome.NotConnected);
