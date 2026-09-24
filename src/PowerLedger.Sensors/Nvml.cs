@@ -10,6 +10,8 @@ public readonly record struct GpuReading(bool Present, double? PowerWatts, doubl
 /// <summary>
 /// The NVIDIA management library, which ships with the display driver. No package reference and no driver of
 /// ours: if there is no NVIDIA GPU, loading the library simply fails and the source reports itself unsupported.
+/// <see cref="NvmlLibrary"/> finds it in System32, NVSMI or the driver's DriverStore folder; the DllImports' own
+/// search stays System32 alone.
 /// </summary>
 public sealed class Nvml : IDisposable
 {
@@ -20,6 +22,9 @@ public sealed class Nvml : IDisposable
 
     private readonly IntPtr _device;
     private bool _initialised;
+
+    /// <summary>The library is looked for where the driver put it, not only in System32 (see <see cref="NvmlLibrary"/>).</summary>
+    static Nvml() => NvmlLibrary.Register();
 
     public Nvml() : this(Environment.Is64BitProcess)
     {

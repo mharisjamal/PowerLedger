@@ -42,6 +42,21 @@ public class GpuHardwareTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void An_nvidia_display_drivers_copy_of_nvml_is_among_the_places_looked_in()
+    {
+        if (DevicePowerState.FindNvidiaGpu() is null) return;
+
+        var folders = NvmlLibrary.DriverFolders(NvmlLibrary.DisplayDrivers());
+        var candidates = NvmlLibrary.Candidates(
+            Environment.SystemDirectory, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), folders);
+        output.WriteLine(string.Join(Environment.NewLine, candidates));
+
+        // Some copy exists wherever an NVIDIA driver is installed: System32 or NVSMI, or the DCH driver's own folder.
+        candidates.ShouldContain(path => File.Exists(path));
+        candidates.ShouldAllBe(path => Path.IsPathFullyQualified(path));
+    }
+
+    [Fact]
     public void Dxgi_lists_the_adapters_and_finds_no_amd_or_intel_card_on_the_development_laptop()
     {
         using var dxgi = new DxgiAdapters();
