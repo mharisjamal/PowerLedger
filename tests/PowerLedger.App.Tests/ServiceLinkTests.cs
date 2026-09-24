@@ -51,7 +51,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         _service.FoundPcs = [new FoundPc("inst-1", "Laptop-2", InThisHousehold: false)];
         _service.HouseholdCode = "K7QM-2XHD-9PW4-R8TA";
 
-        (await _link.BrowsePcsAsync()).ShouldBe(_service.FoundPcs);
+        (await _link.BrowsePcsAsync()).Pcs.ShouldBe(_service.FoundPcs);
 
         var added = await _link.AddPcAsync("inst-1");
         added.ShouldBe(new HouseholdOutcome(true, "Done."));
@@ -70,6 +70,17 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     {
         _service.Refuse = "This household already has 16 PCs.";
         (await _link.AddPcAsync("inst-1")).ShouldBe(new HouseholdOutcome(false, "This household already has 16 PCs."));
+    }
+
+    /// <summary>Service gap: a browse the service refuses, such as on Windows too old for network discovery, used to
+    /// come back as an ErrorReply the link turned into a bare null, dropping the reason.</summary>
+    [Fact]
+    public async Task A_browse_refusal_comes_back_in_the_services_words_too()
+    {
+        _service.Refuse = "Finding PCs on the network needs Windows 10 version 1903 or later.";
+        var result = await _link.BrowsePcsAsync();
+        result.Pcs.ShouldBeNull();
+        result.Error.ShouldBe("Finding PCs on the network needs Windows 10 version 1903 or later.");
     }
 
     [Fact]
@@ -197,8 +208,12 @@ public sealed class ServiceLinkTests : IAsyncLifetime
 
         (await checkedLink.SetTariffAsync(0.2m, "EUR", null)).Problem.ShouldBe(RefuseAll.Reason);
         (await checkedLink.ReportBrightnessAsync([new MonitorBrightness { Instance = Statuses.Dell.Instance, Brightness = 0.6 }], [], [])).Problem.ShouldBe(RefuseAll.Reason);
+        (await checkedLink.AddPcAsync("inst-1")).Message.ShouldBe(RefuseAll.Reason);
+        (await checkedLink.BrowsePcsAsync()).Error.ShouldBe(RefuseAll.Reason);
         service.Requests.OfType<SetTariffRequest>().ShouldBeEmpty();
         service.Requests.OfType<ReportBrightnessRequest>().ShouldBeEmpty();
+        service.Requests.OfType<AddPcRequest>().ShouldBeEmpty();
+        service.Requests.OfType<BrowsePcsRequest>().ShouldBeEmpty();
     }
 
     [Fact]
@@ -208,7 +223,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         (await alone.ResetCalibrationAsync()).ShouldBe(WriteResult.NotConnected);
         (await alone.SetConsentAsync(Consent.Unanswered)).ShouldBe(SharingOutcome.NotConnected);
         (await alone.AddPcAsync("inst-1")).ShouldBe(HouseholdOutcome.NotConnected);
-        (await alone.BrowsePcsAsync()).ShouldBeNull();
+        (await alone.BrowsePcsAsync()).Pcs.ShouldBeNull();
     }
 
     [Fact]

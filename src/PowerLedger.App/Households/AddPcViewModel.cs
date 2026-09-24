@@ -202,7 +202,9 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
 
     /// <summary>Review finding A5: a browse still out is not joined by a second one — a tick or a tab reopen that lands
     /// while one is in flight just asks for one more right behind it, so nothing is lost and nothing overlaps. A link
-    /// that can't answer (not connected) reads as a message, never as "Looking…" forever.</summary>
+    /// that can't answer (not connected, or no answer) reads as a generic message, never as "Looking…" forever; one the
+    /// service refused with a reason of its own (service gap: an ErrorReply used to be dropped here) shows that reason
+    /// instead.</summary>
     private async Task BrowseAsync()
     {
         if (Interlocked.CompareExchange(ref _browsing, 1, 0) != 0)
@@ -210,14 +212,17 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
             Volatile.Write(ref _browseAgain, 1);
             return;
         }
-        var found = await _link.BrowsePcsAsync().ConfigureAwait(false);
+        var result = await _link.BrowsePcsAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
-            if (found is null) Message = "Couldn't look for PCs right now.";
+            if (result.Pcs is { } pcs)
+            {
+                Found = pcs;
+                Message = null;
+            }
             else
             {
-                Found = found;
-                Message = null;
+                Message = result.Error ?? "Couldn't look for PCs right now.";
             }
         });
         Volatile.Write(ref _browsing, 0);

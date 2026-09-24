@@ -134,10 +134,10 @@ internal sealed class FakeService(string name) : IAsyncDisposable
         PreviewUploadRequest r => new SharingReply(r.Id, true, "Written.", PreviewPath),
         SendNowRequest r => new SharingReply(r.Id, true, "Sent."),
         DeleteMyDataRequest r => new SharingReply(r.Id, true, "Your data has been deleted from the server."),
-        BrowsePcsRequest r => new FoundPcsReply(r.Id, FoundPcs),
-        AddPcRequest or StartCodePairingRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest or LeaveHouseholdRequest
-            or RenamePcRequest or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest
+        BrowsePcsRequest or AddPcRequest or StartCodePairingRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest
+            or LeaveHouseholdRequest or RenamePcRequest or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest
             when Refuse is { } refusal => new ErrorReply(request.Id, refusal),
+        BrowsePcsRequest r => new FoundPcsReply(r.Id, FoundPcs),
         StartCodePairingRequest r => new HouseholdReply(r.Id, true, "Here's your code.", HouseholdCode),
         AddPcRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest or LeaveHouseholdRequest or RenamePcRequest
             or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest => new HouseholdReply(request.Id, true, "Done."),
