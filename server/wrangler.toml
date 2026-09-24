@@ -20,3 +20,8 @@ simple = { limit = 60, period = 60 }
 
 [triggers]
 crons = ["17 3 * * *"]
+
+# Sign-in (households design §7): the public client IDs of the owner's Azure app registration and Google OAuth client, filled in when they exist. Empty turns that provider's sign-in off.
+[vars]
+MS_CLIENT_ID = ""
+GOOGLE_CLIENT_ID = ""

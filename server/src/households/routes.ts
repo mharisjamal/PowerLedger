@@ -10,6 +10,7 @@ import {
   readSmall,
 } from "./households";
 import { handleGetSlot, handlePutSlot, MEETING_SLOTS } from "./meetings";
+import { handleSignin } from "./signin";
 
 type Params = string[];
 type Handler = (request: Request, env: Cloudflare.Env, params: Params) => Promise<Response>;
@@ -86,6 +87,7 @@ const ROUTES: Route[] = [
     path: new RegExp(MEETING),
     handle: (request, env, params) => handleGetSlot(request, env, params[0], params[1]),
   },
+  { method: "POST", path: /^\/v1\/auth\/signin$/, handle: (request, env) => handleSignin(request, env) },
 ];
 
 /** The households routes (households design §5 to §8), or null when the request is for none of them. */

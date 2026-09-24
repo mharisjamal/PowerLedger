@@ -20,7 +20,7 @@ export async function readSmall(request: Request): Promise<Uint8Array | Response
 }
 
 /** A posted {"sign","dh"} pair, checked; or the 400 to send back. */
-async function readKeys(posted: Record<string, unknown> | null): Promise<{ sign: string; dh: string } | Response> {
+export async function readKeys(posted: Record<string, unknown> | null): Promise<{ sign: string; dh: string } | Response> {
   const sign = posted?.sign;
   const dh = posted?.dh;
   if (typeof sign !== "string" || typeof dh !== "string" || !(await importSignKey(sign)) || !(await isDhKey(dh))) {

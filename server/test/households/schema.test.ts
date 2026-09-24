@@ -20,6 +20,14 @@ describe("the households schema", () => {
     expect(await columns("seen_signatures")).toEqual(["device", "r", "seen"]);
   });
 
+  it("creates the sign-in tables (0004) with their columns", async () => {
+    expect(await columns("accounts")).toEqual(["id", "provider", "subject", "created"]);
+    expect(await columns("sessions")).toEqual(["token_hash", "account", "device", "sign_key", "dh_key", "created"]);
+    expect(await columns("account_households")).toEqual(["account", "household", "linked"]);
+    expect(await columns("join_requests")).toEqual(["household", "device", "account", "sign_key", "dh_key", "created"]);
+    expect(await columns("recovery")).toEqual(["account", "body", "verifier", "epoch", "updated"]);
+  });
+
   it("keys members by household and device, and batches by household and seq", async () => {
     const hid = "a".repeat(32);
     const insertMember = () =>
