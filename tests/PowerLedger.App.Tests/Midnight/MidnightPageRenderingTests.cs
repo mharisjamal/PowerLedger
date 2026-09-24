@@ -517,6 +517,16 @@ public class MidnightPageRenderingTests
                 var room = Math.Min(line.ActualWidth, LayoutInformation.GetLayoutSlot(line).Width - line.Margin.Left - line.Margin.Right);
                 if (Written(line) > room + 1) problems.Add($"{Describe(line)} is cut off at {room:0} of {Written(line):0}");
             }
+            // Or inside a panel that ran out of room and was clipped with it, as a row of pieces in a narrow column is.
+            if (element is TextBlock { Text.Length: > 0 } text)
+            {
+                for (var parent = VisualTreeHelper.GetParent(text) as FrameworkElement; parent is not null && parent != scroller; parent = VisualTreeHelper.GetParent(parent) as FrameworkElement)
+                {
+                    if (LayoutInformation.GetLayoutClip(parent) is not { } clip || clip.Bounds.IsEmpty) continue;
+                    var end = text.TranslatePoint(new Point(text.ActualWidth, 0), parent).X;
+                    if (end > clip.Bounds.Right + 1) problems.Add($"{Describe(text)} is clipped by {Describe(parent)} at {clip.Bounds.Right:0} of {end:0}");
+                }
+            }
         }
         return problems;
     }

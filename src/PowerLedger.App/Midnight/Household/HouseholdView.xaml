@@ -103,7 +103,8 @@
 
                 <!-- The members: a row per PC with its kind, when it synced, its share of the month and its energy. -->
                 <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" Padding="20,20,20,12">
-                    <!-- The header and each row are grids of their own; the shared group keeps the actions column one width in all of them. -->
+                    <!-- The header and each row are grids of their own; the shared groups keep the PC and actions columns one width in
+                         all of them. The PC takes the room it needs and when it synced gives way, trimmed, in a narrow page. -->
                     <StackPanel Grid.IsSharedSizeScope="True">
                         <DockPanel Margin="0,0,0,12">
                             <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Eyebrow}" VerticalAlignment="Center" Text="SHARE OF THIS MONTH" />
@@ -112,14 +113,14 @@
                         <Border Style="{StaticResource M.Table.Header}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" MinWidth="120" />
-                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="Pc" />
+                                    <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="72" />
                                     <ColumnDefinition Width="Auto" SharedSizeGroup="Actions" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="PC" />
-                                <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="LAST SYNCED" />
+                                <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="LAST SYNCED" HorizontalAlignment="Right" Margin="12,0,16,0" />
                                 <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Width="80" Margin="0,0,16,0" />
                                 <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" HorizontalAlignment="Right" />
                             </Grid>
@@ -130,8 +131,8 @@
                                     <Border Style="{StaticResource M.Table.Row}">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" MinWidth="120" />
-                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="Auto" SharedSizeGroup="Pc" />
+                                                <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="72" />
                                                 <ColumnDefinition Width="Auto" SharedSizeGroup="Actions" />
@@ -144,8 +145,8 @@
                                                 <TextBlock Style="{StaticResource M.Text.Muted}" Margin="8,0,0,0" Text="this PC" VerticalAlignment="Center"
                                                            Visibility="{Binding IsThisPc, Converter={StaticResource VisibleWhen}}" />
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Muted}" Text="{Binding Status}" VerticalAlignment="Center" Margin="0,0,12,0"
-                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Muted}" Text="{Binding Status}" VerticalAlignment="Center" Margin="12,0,16,0"
+                                                       HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" ToolTip="{Binding Status}" />
                                             <app:ShareBar Grid.Column="2" Style="{StaticResource M.ShareBar}" Width="80" Margin="0,0,16,0" VerticalAlignment="Center"
                                                           Value="{Binding Share}" FillBrush="{DynamicResource M.PartCpu}"
                                                           AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}" />
