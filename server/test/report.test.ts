@@ -52,7 +52,7 @@ describe("POST /v1/report", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
 
-    const object = await env.REPORTS.get(`reports/v1/${report.installId}/${report.day}.json.gz`);
+    const object = await env.REPORTS!.get(`reports/v1/${report.installId}/${report.day}.json.gz`);
     expect(object).not.toBeNull();
     expect(new Uint8Array(await object!.arrayBuffer())).toEqual(body);
 
@@ -127,7 +127,7 @@ describe("POST /v1/report", () => {
     expect((await postReport(report, key)).status).toBe(200);
     expect((await postReport(report, key)).status).toBe(200);
 
-    const objects = await env.REPORTS.list({ prefix: `reports/v1/${report.installId}/` });
+    const objects = await env.REPORTS!.list({ prefix: `reports/v1/${report.installId}/` });
     expect(objects.objects).toHaveLength(1);
 
     const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE install_id = ?")
@@ -207,7 +207,7 @@ describe("POST /v1/report, limits and races", () => {
     const installId = randomInstallId();
     const day = utcDateString(-1, new Date());
     const r2Key = `reports/v1/${installId}/${day}.json.gz`;
-    await env.REPORTS.put(r2Key, new Uint8Array([1, 2, 3]));
+    await env.REPORTS!.put(r2Key, new Uint8Array([1, 2, 3]));
     await env.DB.prepare(
       "INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key) VALUES (?, ?, 0, 3, 'power', 'XX', ?)",
     )
@@ -215,11 +215,11 @@ describe("POST /v1/report, limits and races", () => {
       .run();
 
     expect(await discardIfDeleted(env, installId, day, r2Key)).toBe(false);
-    expect(await env.REPORTS.head(r2Key)).not.toBeNull();
+    expect(await env.REPORTS!.head(r2Key)).not.toBeNull();
 
     await env.DB.prepare("INSERT INTO tombstones (id, deleted_at) VALUES (?, 0)").bind(installId).run();
     expect(await discardIfDeleted(env, installId, day, r2Key)).toBe(true);
-    expect(await env.REPORTS.head(r2Key)).toBeNull();
+    expect(await env.REPORTS!.head(r2Key)).toBeNull();
     const row = await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(installId).first();
     expect(row).toBeNull();
   });

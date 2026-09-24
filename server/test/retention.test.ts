@@ -14,7 +14,7 @@ async function runScheduled(): Promise<void> {
 
 async function seedReport(installId: string, day: string): Promise<string> {
   const r2Key = `reports/v1/${installId}/${day}.json.gz`;
-  await env.REPORTS.put(r2Key, new Uint8Array([1, 2, 3]));
+  await env.REPORTS!.put(r2Key, new Uint8Array([1, 2, 3]));
   await env.DB.prepare(
     `INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key)
      VALUES (?, ?, ?, 3, 'power', 'XX', ?)`,
@@ -37,12 +37,12 @@ describe("retention", () => {
 
     await runScheduled();
 
-    expect(await env.REPORTS.get(oldKey)).toBeNull();
+    expect(await env.REPORTS!.get(oldKey)).toBeNull();
     expect(
       await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(oldInstall).first(),
     ).toBeNull();
 
-    expect(await env.REPORTS.get(recentKey)).not.toBeNull();
+    expect(await env.REPORTS!.get(recentKey)).not.toBeNull();
     expect(
       await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(recentInstall).first(),
     ).not.toBeNull();

@@ -90,7 +90,7 @@ describe("POST /v1/delete", () => {
     const deleteResponse = await postJson("/v1/delete", { installId: id }, key);
     expect(deleteResponse.status).toBe(200);
 
-    const objects = await env.REPORTS.list({ prefix: `reports/v1/${id}/` });
+    const objects = await env.REPORTS!.list({ prefix: `reports/v1/${id}/` });
     expect(objects.objects).toHaveLength(0);
 
     const reportsRow = await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(id).first();
