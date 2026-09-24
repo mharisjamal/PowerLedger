@@ -3,7 +3,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { utcDateString, utcDateYearsAgo } from "../src/day";
-import { randomInstallId } from "./support";
+import { runRetention } from "../src/retention";
+import { putBody } from "../src/store";
+import { randomInstallId, withoutR2 } from "./support";
 
 async function runScheduled(): Promise<void> {
   const controller = createScheduledController();
@@ -70,5 +72,28 @@ describe("retention", () => {
     expect(
       await env.DB.prepare("SELECT 1 FROM requests WHERE install_id = ?").bind(recentInstall).first(),
     ).not.toBeNull();
+  });
+});
+
+describe("retention, without R2 bound", () => {
+  it("deletes an old body stored in D1", async () => {
+    const now = new Date();
+    const oldInstall = randomInstallId();
+    const oldDay = utcDateYearsAgo(4, now);
+    const r2Key = `reports/v1/${oldInstall}/${oldDay}.json.gz`;
+    const noR2 = withoutR2(env);
+
+    await putBody(noR2, r2Key, new Uint8Array([1, 2, 3]), { contentType: "application/json", receivedAt: Date.now() });
+    await env.DB.prepare(
+      `INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key)
+       VALUES (?, ?, ?, 3, 'power', 'XX', ?)`,
+    )
+      .bind(oldInstall, oldDay, Date.now(), r2Key)
+      .run();
+
+    await runRetention(noR2, now);
+
+    expect(await env.DB.prepare("SELECT 1 FROM report_bodies WHERE r2_key = ?").bind(r2Key).first()).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM reports WHERE install_id = ?").bind(oldInstall).first()).toBeNull();
   });
 });

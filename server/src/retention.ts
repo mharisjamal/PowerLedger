@@ -1,4 +1,5 @@
 import { utcDateString, utcDateYearsAgo } from "./day";
+import { deleteBodies } from "./store";
 
 const BATCH_SIZE = 1000;
 const MAX_BATCHES = 10;
@@ -26,7 +27,7 @@ export async function runRetention(env: Cloudflare.Env, now: Date = new Date()):
 
     if (rows.results.length === 0) break;
 
-    await env.REPORTS.delete(rows.results.map((row) => row.r2_key));
+    await deleteBodies(env, rows.results.map((row) => row.r2_key));
     await env.DB.batch(
       rows.results.map((row) =>
         env.DB.prepare("DELETE FROM reports WHERE install_id = ? AND day = ?").bind(row.install_id, row.day),
