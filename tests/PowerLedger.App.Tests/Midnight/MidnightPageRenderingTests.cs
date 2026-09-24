@@ -246,6 +246,13 @@ public class MidnightPageRenderingTests
                 }
                 Find<TextBlock>(view, t => t.Text == "Saved.").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
                 page.Render($"midnight-settings-{theme}.png");
+
+                // The look is chosen as the theme is, through SettingsViewModel.Look (F6).
+                var looks = AllOf<RadioButton>(view).Where(p => p.Content is "Classic" or "Midnight").ToList();
+                looks.Single(p => p.IsChecked == true).Content.ShouldBe("Classic", theme.ToString());
+                looks.Single(p => Equals(p.Content, "Midnight")).IsChecked = true;
+                model.Look.ShouldBe(Look.Midnight, theme.ToString());
+                looks.Single(p => p.IsChecked == true).Content.ShouldBe("Midnight", theme.ToString());
             }
         });
         Sizes(30_000, "settings");
