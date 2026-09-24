@@ -64,6 +64,25 @@ public class ShellViewModelTests
     }
 
     [Fact]
+    public void Switch_look_chooses_the_other_look_through_settings_and_says_which_it_offers()
+    {
+        var shell = Shell();
+        var raised = new List<string?>();
+        shell.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        shell.SwitchLookTip.ShouldBe("Switch to the Midnight look");
+
+        shell.SwitchLook.Execute(null);
+
+        _ui.Current.Look.ShouldBe(Look.Midnight);
+        _ui.Changes.ShouldContain("look Midnight");
+        shell.SwitchLookTip.ShouldBe("Switch to the Classic look");
+        raised.ShouldContain(nameof(ShellViewModel.SwitchLookTip));
+
+        shell.SwitchLook.Execute(null);
+        _ui.Current.Look.ShouldBe(Look.Classic);
+    }
+
+    [Fact]
     public void Setup_ends_on_the_dashboard_under_midnight_and_on_now_under_classic()
     {
         _ui.Current = UiPreferences.Default with { Look = Look.Midnight };

@@ -52,6 +52,9 @@
             <Border Grid.Row="0" Background="{DynamicResource Brush.Ground}" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,0,0,1">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <!-- Switch look (Midnight look design §1): the other look, chosen as in Settings, so the choice is kept. -->
+                        <Button Style="{StaticResource Caption}" Content="&#xE8AB;" ToolTip="{Binding SwitchLookTip}" Command="{Binding SwitchLook}"
+                                AutomationProperties.Name="Switch look" WindowChrome.IsHitTestVisibleInChrome="True" />
                         <Button Style="{StaticResource Caption}" Content="&#xE921;" ToolTip="Minimize" Click="MinimizeClick" WindowChrome.IsHitTestVisibleInChrome="True" />
                         <Button Style="{StaticResource Caption}" Content="&#xE922;" ToolTip="Maximize" Click="MaximizeClick" WindowChrome.IsHitTestVisibleInChrome="True" />
                         <Button Style="{StaticResource Caption.Close}" Content="&#xE8BB;" ToolTip="Close to the tray" Click="CloseClick" WindowChrome.IsHitTestVisibleInChrome="True" />
