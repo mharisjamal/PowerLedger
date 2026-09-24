@@ -240,6 +240,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                     ? Reply(answer.Id, true, "Answered.")
                     : Reply(answer.Id, false, "That question has closed."),
                 RemovePcRequest remove => await RemoveAsync(remove, cancel).ConfigureAwait(false),
+                RemoveOldRowsRequest old => await RemoveOldRowsAsync(old, cancel).ConfigureAwait(false),
                 LeaveHouseholdRequest leave => await LeaveAsync(leave, cancel).ConfigureAwait(false),
                 RenamePcRequest rename => await RenameAsync(rename, cancel).ConfigureAwait(false),
                 SetDiscoverableRequest discoverable => await SetDiscoverableAsync(discoverable, cancel).ConfigureAwait(false),
@@ -559,6 +560,36 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         return Reply(request.Id, true, $"{member.Name} was removed from the household.");
     }
 
+    /// <summary>
+    /// Deletes the rows this PC keeps from PCs no longer in its household (plan 0.8, "Old rows"): the one named, which must
+    /// have left or been removed, or with none named every such PC's, which after leaving is all of them, this PC's own
+    /// too. A removed PC's tombstone stays, so it is never taken back on another PC's word.
+    /// </summary>
+    private async Task<PipeMessage> RemoveOldRowsAsync(RemoveOldRowsRequest request, CancellationToken cancel)
+    {
+        using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
+        var withRows = _household.Latest().Keys.ToHashSet(StringComparer.Ordinal);
+        if (request.DeviceId is { } device)
+        {
+            if (device == _keys.DeviceId) return Reply(request.Id, false, "This PC's own rows stay while it is in the household.");
+            if (_store.HouseholdId is not null && _members.Current(device) is { } current)
+            {
+                return Reply(request.Id, false, $"{current.Name} is still in the household. Remove it first.");
+            }
+            var known = _household.Member(device);
+            if (known is null && !withRows.Contains(device)) return Reply(request.Id, false, "That PC has no rows on this PC.");
+            _members.ForgetRows(device);
+            return Reply(request.Id, true, known is null ? "That PC's rows were removed." : $"{known.Name}'s rows were removed.");
+        }
+        var stay = _store.HouseholdId is null
+            ? []
+            : _household.Members().Where(member => member.LeftMs is null).Select(member => member.DeviceId).Append(_keys.DeviceId).ToHashSet(StringComparer.Ordinal);
+        var old = withRows.Union(_household.Members().Select(member => member.DeviceId)).Where(id => !stay.Contains(id)).ToList();
+        foreach (var id in old) _members.ForgetRows(id);
+        if (_store.HouseholdId is null) _rowsBuiltForHour = -1;
+        return Reply(request.Id, true, old.Count == 0 ? "There were no old rows to remove." : "The old rows were removed.");
+    }
+
     private async Task<PipeMessage> LeaveAsync(LeaveHouseholdRequest request, CancellationToken cancel)
     {
         using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
@@ -734,9 +765,10 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             var me = _keys.DeviceId;
             var householdId = _store.HouseholdId;
+            var withRows = _household.Latest();
             IReadOnlyList<MemberStatus> members = householdId is null
                 ? []
-                : [.. _household.Members().Select(member => new MemberStatus(
+                : [.. _household.Members().Where(member => member.LeftMs is null || withRows.ContainsKey(member.DeviceId)).Select(member => new MemberStatus(
                     member.DeviceId, member.Name, member.Kind, member.DeviceId == me,
                     member.DeviceId == me || member.LastSyncedMs is not { } synced ? null : DateTimeOffset.FromUnixTimeMilliseconds(synced),
                     member.LeftMs is not null))];

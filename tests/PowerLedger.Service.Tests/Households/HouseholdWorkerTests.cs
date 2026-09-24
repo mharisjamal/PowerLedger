@@ -224,7 +224,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         desktop.Worker.Store.Pending.Select(op => op.Kind).ShouldBe([PendingOp.Remove, PendingOp.Keys]);
         desktop.Worker.Store.RotationKey.ShouldNotBeNull().Epoch.ShouldBe(2);
-        desktop.Board.Household!.Members.Single(member => member.DeviceId == study.Worker.DeviceId).Left.ShouldBeTrue();
+        desktop.Board.Household!.Members.ShouldAllBe(member => member.DeviceId != study.Worker.DeviceId || member.Left);   // listed only while it has rows
         _relay.Down = true;
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
         desktop.Worker.Store.Epoch.ShouldBe(1);                                  // not before the server takes the new key
@@ -270,7 +270,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
         _clock.Advance(RelaySync.MembersEvery);
         await desktop.Worker.RunOnceAsync(CancellationToken.None);               // sees the laptop gone, and makes a new key
-        desktop.Board.Household!.Members.Single(member => member.DeviceId == laptop.Worker.DeviceId).Left.ShouldBeTrue();
+        desktop.Household.Member(laptop.Worker.DeviceId).ShouldNotBeNull().LeftMs.ShouldNotBeNull();
         await desktop.Worker.RunOnceAsync(CancellationToken.None);               // which the server takes
         desktop.Worker.Store.Epoch.ShouldBe(2);
         desktop.Worker.Store.CurrentKey.ShouldNotBe(oldKey);
@@ -325,6 +325,60 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         desktop.Household.Row(laptop.Worker.DeviceId, Hour(0)).ShouldBeNull();
         desktop.Worker.Store.Tombstones.ShouldContainKey(laptop.Worker.DeviceId);   // never taken back on another's word
         desktop.Worker.Store.Epoch.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Removing_old_rows_takes_a_left_pcs_rows_and_entry_off_this_pc_but_keeps_it_known_as_removed()
+    {
+        var (desktop, laptop, study) = await Household();
+        desktop.Household.Upsert([Row(laptop.Worker.DeviceId, 0, 5, changed: 1), Row(study.Worker.DeviceId, 0, 6, changed: 1)]);
+        desktop.Household.MarkLeft(laptop.Worker.DeviceId, 1);
+        await desktop.Send<HouseholdReply>(new SetDiscoverableRequest(9, true));   // the status again
+        desktop.Board.Household!.Members.Single(member => member.DeviceId == laptop.Worker.DeviceId).Left.ShouldBeTrue();
+
+        (await desktop.Send<HouseholdReply>(new RemoveOldRowsRequest(1, laptop.Worker.DeviceId))).ShouldBe(
+            new HouseholdReply(1, true, "Laptop-2's rows were removed."));
+
+        desktop.Household.Row(laptop.Worker.DeviceId, Hour(0)).ShouldBeNull();
+        desktop.Household.Member(laptop.Worker.DeviceId).ShouldBeNull();
+        desktop.Board.Household!.Members.ShouldNotContain(member => member.DeviceId == laptop.Worker.DeviceId);
+        desktop.Worker.Store.Tombstones.ShouldContainKey(laptop.Worker.DeviceId);   // never added back on another PC's word
+        desktop.Household.Row(study.Worker.DeviceId, Hour(0)).ShouldNotBeNull();     // a current member's stay
+    }
+
+    [Fact]
+    public async Task Old_rows_can_t_be_removed_for_this_pc_or_a_current_member()
+    {
+        var (desktop, laptop, _) = await Household();
+
+        (await desktop.Send<HouseholdReply>(new RemoveOldRowsRequest(1, desktop.Worker.DeviceId))).ShouldBe(
+            new HouseholdReply(1, false, "This PC's own rows stay while it is in the household."));
+        (await desktop.Send<HouseholdReply>(new RemoveOldRowsRequest(2, laptop.Worker.DeviceId))).ShouldBe(
+            new HouseholdReply(2, false, "Laptop-2 is still in the household. Remove it first."));
+        (await desktop.Send<HouseholdReply>(new RemoveOldRowsRequest(3, "0000000000000000000000000000dead"))).ShouldBe(
+            new HouseholdReply(3, false, "That PC has no rows on this PC."));
+    }
+
+    [Fact]
+    public async Task With_no_pc_named_every_old_pcs_rows_go_and_after_leaving_that_is_all_of_them()
+    {
+        var (desktop, laptop, study) = await Household();
+        desktop.Household.Upsert([
+            Row(desktop.Worker.DeviceId, 0, 4, changed: 1), Row(laptop.Worker.DeviceId, 0, 5, changed: 1), Row(study.Worker.DeviceId, 0, 6, changed: 1)]);
+        desktop.Household.MarkLeft(study.Worker.DeviceId, 1);
+
+        (await desktop.Send<HouseholdReply>(new RemoveOldRowsRequest(1))).ShouldBe(new HouseholdReply(1, true, "The old rows were removed."));
+
+        desktop.Household.Row(study.Worker.DeviceId, Hour(0)).ShouldBeNull();
+        desktop.Household.Row(laptop.Worker.DeviceId, Hour(0)).ShouldNotBeNull();
+        desktop.Household.Row(desktop.Worker.DeviceId, Hour(0)).ShouldNotBeNull();
+
+        await desktop.Send<HouseholdReply>(new LeaveHouseholdRequest(2));
+        (await desktop.Send<HouseholdReply>(new RemoveOldRowsRequest(3))).ShouldBe(new HouseholdReply(3, true, "The old rows were removed."));
+
+        desktop.Household.Latest().ShouldBeEmpty();
+        desktop.Household.Members().ShouldBeEmpty();
+        (await desktop.Send<HouseholdReply>(new RemoveOldRowsRequest(4))).ShouldBe(new HouseholdReply(4, true, "There were no old rows to remove."));
     }
 
     [Fact]
@@ -407,7 +461,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         new AddPcRequest(1, "a1"), new StartCodePairingRequest(2), new JoinByCodeRequest(3, "K7QM-2XHD-9PW4-R8TA"), new AnswerPromptRequest(4, "p1", true),
         new RemovePcRequest(5, "0123456789abcdef0123456789abcdef"), new LeaveHouseholdRequest(6), new RenamePcRequest(7, "Study PC"),
         new SetDiscoverableRequest(8, false), new SignInRequest(9, "microsoft", "token", "salt"), new SignOutRequest(10), new DeleteAccountRequest(11),
-        new CancelPairingRequest(12), new NewRecoveryCodeRequest(13),
+        new CancelPairingRequest(12), new NewRecoveryCodeRequest(13), new RemoveOldRowsRequest(15), new RemoveOldRowsRequest(16, "0123456789abcdef0123456789abcdef"),
     ];
 
     [Theory]

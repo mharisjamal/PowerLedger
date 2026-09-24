@@ -42,10 +42,11 @@ internal sealed class MemberBook(HouseholdStore store, HouseholdRepository house
         return wasCurrent;
     }
 
-    /// <summary>Takes a removed member's rows off this PC, and its entry off the Household page; its tombstone stays.</summary>
+    /// <summary>Takes a removed member's rows off this PC, and its entry off the Household page; its tombstone stays while
+    /// this PC is in the household.</summary>
     public void ForgetRows(string id)
     {
-        if (household.Member(id)?.LeftMs is { } left) Bury(id, left);
+        if (store.HouseholdId is not null && household.Member(id)?.LeftMs is { } left) Bury(id, left);
         household.DeleteRows(id);
         household.DeleteMember(id);
     }
