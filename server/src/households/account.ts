@@ -17,8 +17,10 @@ import { errorResponse, ok, overAddressLimit, parseObject } from "./http";
 export const MAX_WAITING = 16;
 /** At most this many PCs of one account wait at a time, so one account can't fill a household's list. */
 export const MAX_WAITING_PER_ACCOUNT = 2;
-/** A join request lasts this long, approved or not (the daily cron clears it). */
+/** A join request waits this long for its approval (the daily cron clears it). */
 export const JOIN_REQUEST_LIFETIME_MS = 24 * 60 * 60 * 1000;
+/** An approved request stays this long from its approval, or until its PC withdraws it. */
+export const APPROVED_REQUEST_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RECOVERY_CHARS = MAX_SEALED_LIST_CHARS;
 const VERIFIER_BYTES = 32;
 /** An approval's commit, nonce and reveal (plan 0.9). */
@@ -63,10 +65,15 @@ export async function handleAskToJoin(env: Cloudflare.Env, session: SessionRow):
   if (!household) return errorResponse(409, "This account isn't linked to a household yet.");
   if (await isCurrentMember(env, household, session.device)) return errorResponse(409, "This PC is already in the household.");
 
+  // Only requests still waiting count: an approved one, kept until its PC withdraws it, isn't.
+  const waitingSince = Date.now() - JOIN_REQUEST_LIFETIME_MS;
   const [forHousehold, forAccount] = await env.DB.batch<{ n: number }>([
-    env.DB.prepare("SELECT COUNT(*) AS n FROM join_requests WHERE household = ? AND device != ?").bind(household, session.device),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM join_requests WHERE account = ? AND device != ? AND created > ?")
-      .bind(session.account, session.device, Date.now() - JOIN_REQUEST_LIFETIME_MS),
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM join_requests WHERE household = ? AND device != ? AND approved_epoch IS NULL AND created > ?",
+    ).bind(household, session.device, waitingSince),
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM join_requests WHERE account = ? AND device != ? AND approved_epoch IS NULL AND created > ?",
+    ).bind(session.account, session.device, waitingSince),
   ]);
   if (forHousehold.results[0].n >= MAX_WAITING) return errorResponse(409, "Too many PCs are already waiting to join this household.");
   if (forAccount.results[0].n >= MAX_WAITING_PER_ACCOUNT) {
@@ -77,7 +84,7 @@ export async function handleAskToJoin(env: Cloudflare.Env, session: SessionRow):
     `INSERT INTO join_requests (household, device, account, sign_key, dh_key, created) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (household, device) DO UPDATE SET
        account = excluded.account, sign_key = excluded.sign_key, dh_key = excluded.dh_key, created = excluded.created,
-       approver = NULL, commitment = NULL, nonce = NULL, reveal = NULL, approved_epoch = NULL`,
+       approver = NULL, commitment = NULL, nonce = NULL, reveal = NULL, approved_epoch = NULL, approved_at = NULL`,
   )
     .bind(household, session.device, session.account, session.sign_key, session.dh_key, Date.now())
     .run();
@@ -138,12 +145,28 @@ export async function handleListRequests(env: Cloudflare.Env, member: MemberRow)
   );
 }
 
-/** DELETE /v1/households/{hid}/requests/{device}: a member denies a waiting PC; 404 when none is waiting. */
+/** DELETE /v1/households/{hid}/requests/{device}: a member denies a waiting PC; 404 when none is waiting, and 409 once
+ * it's approved, since the approved PC needs its request to enter. */
 export async function handleDenyRequest(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
-  const denied = await env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ? RETURNING device")
+  const denied = await env.DB.prepare(
+    "DELETE FROM join_requests WHERE household = ? AND device = ? AND approved_epoch IS NULL RETURNING device",
+  )
     .bind(member.household, device)
     .first();
-  return denied ? ok() : errorResponse(404, "That PC isn't waiting to join this household.");
+  if (denied) return ok();
+  const approved = await env.DB.prepare("SELECT 1 FROM join_requests WHERE household = ? AND device = ?")
+    .bind(member.household, device)
+    .first();
+  return approved
+    ? errorResponse(409, "That PC has already been approved.")
+    : errorResponse(404, "That PC isn't waiting to join this household.");
+}
+
+/** DELETE /v1/account/requests: this PC withdraws its own request, waiting or approved: when its user says the codes
+ * don't match, or once it has entered. Done whether there was one or not. */
+export async function handleWithdrawRequest(env: Cloudflare.Env, session: SessionRow): Promise<Response> {
+  await env.DB.prepare("DELETE FROM join_requests WHERE device = ? AND account = ?").bind(session.device, session.account).run();
+  return ok();
 }
 
 /** A posted commit, nonce or reveal: base64url of 32 bytes, kept as sent; null otherwise. */
@@ -216,18 +239,22 @@ export async function handleReveal(env: Cloudflare.Env, member: MemberRow, devic
   return set || request.reveal === reveal ? ok() : errorResponse(409, "The approver has already revealed.");
 }
 
+/** A request not yet lapsed: waiting for less than 24 hours, or approved less than 7 days ago. */
+const UNLAPSED = `((r.approved_epoch IS NULL AND r.created > ?3) OR (r.approved_epoch IS NOT NULL AND r.approved_at > ?4))`;
+
 /**
  * GET /v1/account/requests: this PC's own requests, as {"requests":[{"device","household","approver":{"device","sign",
- * "dh"}|null,"commit","reveal","approved":{"epoch"}|null,"expires"}]}, expires being unix ms. An approved request is
- * given here once: reading it ends it.
+ * "dh"}|null,"commit","reveal","approved":{"epoch"}|null,"expires"}]}, expires being unix ms. An approved request stays,
+ * read as often as need be, until the PC withdraws it (DELETE /v1/account/requests) or 7 days after its approval.
  */
 export async function handleOwnRequests(env: Cloudflare.Env, session: SessionRow): Promise<Response> {
+  const now = Date.now();
   const rows = await env.DB.prepare(
-    `SELECT r.household, r.created, r.approver, r.commitment, r.reveal, r.approved_epoch, m.sign_key, m.dh_key
+    `SELECT r.household, r.created, r.approver, r.commitment, r.reveal, r.approved_epoch, r.approved_at, m.sign_key, m.dh_key
      FROM join_requests r LEFT JOIN members m ON m.household = r.household AND m.device = r.approver
-     WHERE r.device = ? AND r.account = ? AND r.created > ? ORDER BY r.created`,
+     WHERE r.device = ?1 AND r.account = ?2 AND ${UNLAPSED} ORDER BY r.created`,
   )
-    .bind(session.device, session.account, Date.now() - JOIN_REQUEST_LIFETIME_MS)
+    .bind(session.device, session.account, now - JOIN_REQUEST_LIFETIME_MS, now - APPROVED_REQUEST_LIFETIME_MS)
     .all<{
       household: string;
       created: number;
@@ -235,18 +262,10 @@ export async function handleOwnRequests(env: Cloudflare.Env, session: SessionRow
       commitment: string | null;
       reveal: string | null;
       approved_epoch: number | null;
+      approved_at: number | null;
       sign_key: string | null;
       dh_key: string | null;
     }>();
-
-  const approved = rows.results.filter((row) => row.approved_epoch !== null).map((row) => row.household);
-  if (approved.length > 0) {
-    await env.DB.prepare(
-      `DELETE FROM join_requests WHERE device = ? AND approved_epoch IS NOT NULL AND household IN (SELECT value FROM json_each(?))`,
-    )
-      .bind(session.device, JSON.stringify(approved))
-      .run();
-  }
 
   return Response.json({
     requests: rows.results.map((row) => ({
@@ -256,7 +275,7 @@ export async function handleOwnRequests(env: Cloudflare.Env, session: SessionRow
       commit: row.commitment,
       reveal: row.reveal,
       approved: row.approved_epoch === null ? null : { epoch: row.approved_epoch },
-      expires: row.created + JOIN_REQUEST_LIFETIME_MS,
+      expires: row.approved_at === null ? row.created + JOIN_REQUEST_LIFETIME_MS : row.approved_at + APPROVED_REQUEST_LIFETIME_MS,
     })),
   });
 }
@@ -300,9 +319,9 @@ export async function handleApprove(env: Cloudflare.Env, member: MemberRow, devi
        RETURNING device`,
     ).bind(member.household, epoch, device, member.device, posted.body, now),
     env.DB.prepare(
-      `UPDATE join_requests SET approved_epoch = ?3 WHERE household = ?1 AND device = ?2
+      `UPDATE join_requests SET approved_epoch = ?3, approved_at = ?4 WHERE household = ?1 AND device = ?2
        AND EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?2 AND removed IS NULL)`,
-    ).bind(member.household, device, epoch),
+    ).bind(member.household, device, epoch, now),
   ]);
   if (!alreadyIn && results[0].results.length === 0) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
   // Another member's approval sealed one first, between the look above and this: that one stays.

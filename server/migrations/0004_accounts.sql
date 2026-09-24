@@ -34,7 +34,8 @@ CREATE TABLE join_requests (                  -- PCs signed in as a linked accou
   commitment TEXT,                            -- its commitment to its nonce, base64url; each of these four written once
   nonce     TEXT,                             -- the waiting PC's nonce, base64url
   reveal    TEXT,                             -- the approver's nonce, revealed, base64url
-  approved_epoch INTEGER,                     -- set by the approval; the request then stays until the PC reads it
+  approved_epoch INTEGER,                     -- set by the approval; the request then stays until the PC withdraws it
+  approved_at    INTEGER,                     -- ms of the approval: an approved request lasts 7 days from it
   PRIMARY KEY (household, device)
 );
 CREATE INDEX join_requests_account ON join_requests(account);

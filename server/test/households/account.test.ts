@@ -217,7 +217,47 @@ describe("join requests", () => {
     });
     expect(await memberList(hid, owner.device)).toEqual([]);
 
+    // Reading the approval keeps it, however often: only the PC's own withdrawal, once it has entered, ends it.
     expect(await ownRequests(laptop)).toMatchObject([{ approved: { epoch: 1 } }]);
+    expect(await ownRequests(laptop)).toMatchObject([{ approved: { epoch: 1 } }]);
+    expect((await asAccount(laptop, "DELETE", "/v1/account/requests")).status).toBe(200);
+    expect(await ownRequests(laptop)).toEqual([]);
+    expect((await asAccount(laptop, "DELETE", "/v1/account/requests")).status).toBe(200);
+  });
+
+  it("keep an approved request 7 days from its approval, and won't let a member deny it", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(200);
+
+    expect((await signedFetch(owner.device, "DELETE", `/v1/households/${hid}/requests/${laptop.device.id}`)).status).toBe(409);
+
+    const day = 24 * 60 * 60 * 1000;
+    const approvedAt = Date.now() - 6 * day;
+    await env.DB.prepare("UPDATE join_requests SET created = ?, approved_at = ? WHERE device = ?")
+      .bind(Date.now() - 30 * day, approvedAt, laptop.device.id)
+      .run();
+    expect(await ownRequests(laptop)).toMatchObject([{ approved: { epoch: 1 }, expires: approvedAt + 7 * day }]);
+    await runRetention(env, new Date());
+    expect(await ownRequests(laptop)).toHaveLength(1);
+
+    await env.DB.prepare("UPDATE join_requests SET approved_at = ? WHERE device = ?").bind(Date.now() - 8 * day, laptop.device.id).run();
+    expect(await ownRequests(laptop)).toEqual([]);
+    await runRetention(env, new Date());
+    expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE device = ?").bind(laptop.device.id).first()).toBeNull();
+  });
+
+  it("are withdrawn by the waiting PC itself, as when its user says the codes don't match", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await commitAs(hid, owner.device, laptop);
+
+    expect((await asAccount(laptop, "DELETE", "/v1/account/requests")).status).toBe(200);
+
+    expect(await memberList(hid, owner.device)).toEqual([]);
     expect(await ownRequests(laptop)).toEqual([]);
   });
 
@@ -319,6 +359,11 @@ describe("join requests", () => {
 
     const waiting = await memberList(hid, owner.device);
     expect(waiting.map((item) => item.device).sort()).toEqual([pcs[0].device.id, pcs[1].device.id].sort());
+
+    // An approved request, kept until its PC withdraws it, is no longer waiting.
+    await readyToApprove(hid, owner.device, pcs[0]);
+    expect((await approveAs(hid, owner.device, pcs[0])).status).toBe(200);
+    expect((await asAccount(pcs[2], "POST", "/v1/account/requests")).status).toBe(200);
   });
 
   it("start afresh when a PC asks again", async () => {
