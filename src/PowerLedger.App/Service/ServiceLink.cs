@@ -133,6 +133,13 @@ internal interface IServiceLink : IAsyncDisposable
     Task<HouseholdOutcome> SignOutAsync(CancellationToken cancel = default);
 
     Task<HouseholdOutcome> DeleteAccountAsync(CancellationToken cancel = default);
+
+    /// <summary>Stops a pairing under way, including a code meeting, and frees the pairing gate (task 0.8).</summary>
+    Task<HouseholdOutcome> CancelPairingAsync(CancellationToken cancel = default);
+
+    /// <summary>N2: makes a new recovery code once <see cref="HouseholdStatus.RecoveryMissing"/> says the old one no
+    /// longer works (task 0.8).</summary>
+    Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -266,6 +273,10 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public Task<HouseholdOutcome> SignOutAsync(CancellationToken cancel = default) => HouseholdAsync(new SignOutRequest(NextId()), cancel);
 
     public Task<HouseholdOutcome> DeleteAccountAsync(CancellationToken cancel = default) => HouseholdAsync(new DeleteAccountRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> CancelPairingAsync(CancellationToken cancel = default) => HouseholdAsync(new CancelPairingRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default) => HouseholdAsync(new NewRecoveryCodeRequest(NextId()), cancel);
 
     public async ValueTask DisposeAsync()
     {

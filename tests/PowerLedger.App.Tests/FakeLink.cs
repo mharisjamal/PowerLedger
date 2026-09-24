@@ -152,6 +152,10 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<HouseholdOutcome> DeleteAccountAsync(CancellationToken cancel = default) => Household("deleteAccount");
 
+    public Task<HouseholdOutcome> CancelPairingAsync(CancellationToken cancel = default) => Household("cancelPairing");
+
+    public Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default) => Household("newRecoveryCode");
+
     private Task<HouseholdOutcome> Household(object request)
     {
         if (!IsConnected) return Task.FromResult(HouseholdOutcome.NotConnected);
