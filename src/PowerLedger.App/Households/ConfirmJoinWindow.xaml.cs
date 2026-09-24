@@ -14,6 +14,9 @@ public partial class ConfirmJoinWindow : Window
         InitializeComponent();
         DataContext = model;
         model.Closed += Close;
+        // Service round, review: however this window actually closes — answered, timed out, replaced by a newer prompt
+        // for the same request, or force-closed for a Withdraw — the model's own timer is stopped for good.
+        Closed += (_, _) => model.Stop();
         MaxHeight = Math.Max(240, SystemParameters.WorkArea.Height - 2 * ScreenMargin);
         Loaded += (_, _) => KeepOnScreen();
     }

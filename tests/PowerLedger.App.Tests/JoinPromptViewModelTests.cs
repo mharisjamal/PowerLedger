@@ -101,6 +101,19 @@ public class JoinPromptViewModelTests
         closed.ShouldBe(1);
     }
 
+    /// <summary>Service round, review: only the first answer counts, so a fast double-click can never send two.</summary>
+    [Fact]
+    public void A_second_click_after_answering_sends_nothing_more()
+    {
+        _link.Connect(true);
+        var model = Model(Notice());
+
+        model.Join.Execute(null);
+        model.DontJoin.Execute(null);
+
+        _link.HouseholdRequests.Single().ShouldBe(("prompt-1", true));
+    }
+
     [Fact]
     public void Not_answered_by_its_expiry_it_closes_itself_without_sending_anything()
     {
@@ -111,6 +124,22 @@ public class JoinPromptViewModelTests
         _clock.Advance(TimeSpan.FromMinutes(2));
 
         closed.ShouldBe(1);
+        _link.HouseholdRequests.ShouldBeEmpty();
+    }
+
+    /// <summary>Service round, review: its named prompt withdrawn, or this PC otherwise force-closing the window, stops
+    /// the timer for good, so it can never answer late.</summary>
+    [Fact]
+    public void Stop_prevents_a_late_timeout_from_answering()
+    {
+        var model = Model(Notice(expiresAt: Now.AddMinutes(2)));
+        var closed = 0;
+        model.Closed += () => closed++;
+
+        model.Stop();
+        _clock.Advance(TimeSpan.FromMinutes(2));
+
+        closed.ShouldBe(0);
         _link.HouseholdRequests.ShouldBeEmpty();
     }
 

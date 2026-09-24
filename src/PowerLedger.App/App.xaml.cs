@@ -35,6 +35,7 @@ public partial class App : Application
     private MainWindow? _window;
     private AddPcWindow? _addPcWindow;
     private ApprovePromptWindow? _approvePromptWindow;
+    private ConfirmJoinWindow? _confirmJoinWindow;
 
     /// <summary>Review finding A4, follow-up: every open Join/Approve/Confirm join/Recovery code prompt, by its
     /// promptId, so a pushed <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others
@@ -339,12 +340,20 @@ public partial class App : Application
     }
 
     /// <summary>The Confirm join prompt (households design §7, task 0.8): modal, owned by the main window when it is
-    /// open.</summary>
+    /// open. Service round, review: an unanswered ConfirmJoin can come back at R's next turn, under the same or a new
+    /// PromptId, while its request is still waiting — this never shows two windows for it, replacing whichever is
+    /// already open.</summary>
     private void OpenConfirmJoinWindow(HouseholdNotice notice)
     {
         if (_link is null || _threads is null) return;
+        _confirmJoinWindow?.Close();
         var model = new ConfirmJoinViewModel(_link, _threads, TimeProvider.System, notice);
         var window = new ConfirmJoinWindow(model) { Owner = _window };
+        _confirmJoinWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (_confirmJoinWindow == window) _confirmJoinWindow = null;
+        };
         TrackPrompt(notice.PromptId, window);
         window.ShowDialog();
     }

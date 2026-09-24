@@ -14,6 +14,9 @@ public partial class JoinPromptWindow : Window
         InitializeComponent();
         DataContext = model;
         model.Closed += Close;
+        // Service round, review: however this window actually closes — answered, timed out, or force-closed for a
+        // Withdraw — the model's own timer is stopped for good, so it can never fire late.
+        Closed += (_, _) => model.Stop();
         MaxHeight = Math.Max(280, SystemParameters.WorkArea.Height - 2 * ScreenMargin);
         Loaded += (_, _) => KeepOnScreen();
     }

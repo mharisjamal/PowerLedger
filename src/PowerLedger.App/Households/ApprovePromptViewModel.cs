@@ -17,6 +17,7 @@ internal sealed class ApprovePromptViewModel : ObservableObject
     private readonly UiThreads _threads;
     private readonly string _promptId;
     private ITimer? _timer;
+    private bool _answered;
 
     public ApprovePromptViewModel(IServiceLink link, UiThreads threads, TimeProvider clock, HouseholdNotice notice)
     {
@@ -52,12 +53,31 @@ internal sealed class ApprovePromptViewModel : ObservableObject
     /// <summary>The prompt was answered, or its time ran out: the window closes.</summary>
     public event Action? Closed;
 
+    /// <summary>Only the first counts, so a fast double-click, or the notice's own timer racing a click, can never send
+    /// two answers for the same prompt (service round, review).</summary>
     private async Task AnswerAsync(bool accept)
     {
+        if (_answered) return;
+        _answered = true;
         _timer?.Dispose();
         await _link.AnswerPromptAsync(_promptId, accept).ConfigureAwait(false);
         _threads.Post(() => Closed?.Invoke());
     }
 
-    private void TimedOut() => Closed?.Invoke();
+    private void TimedOut()
+    {
+        if (_answered) return;
+        _answered = true;
+        Closed?.Invoke();
+    }
+
+    /// <summary>The window is closing some other way — replaced by a newer prompt for the same request, or its promptId
+    /// withdrawn (service round, review: an unanswered prompt can come back under a new PromptId, and this PC never
+    /// shows two windows for one request). Stops the timer for good, so it can never answer late; sends nothing, since
+    /// this PC isn't the one closing it.</summary>
+    public void Stop()
+    {
+        _answered = true;
+        _timer?.Dispose();
+    }
 }
