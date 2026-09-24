@@ -86,8 +86,9 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
   5. Both derive a 6-digit **comparison code** from the shared secret, both hellos and the nonce, as Bluetooth's numeric
      comparison and ZRTP do. The commitment is what makes it hold: the joining PC answered before it knew the nonce, and
      the adding PC was bound to the nonce before it saw the answer. So neither side, and no PC in the middle, can steer
-     the code. A PC in the middle can make both screens show the same code only by a one-in-a-million chance per try,
-     and each try needs a user.
+     the code. A PC in the middle can make both screens show the same code only by a one-in-a-million chance per try.
+     It can abort a try against the joining PC unseen, but every try counts against the limits below: at most about 20
+     per 10 minutes, about 1 in 50,000 per pairing.
   6. Both PCs show the code: the joining PC's prompt, and the adding PC's "Does Laptop-2 show 482 913?". Only after
      both users have said yes does the adding PC send:
      - the household ID;
@@ -154,20 +155,30 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
   read older batches.
 - **Leaving** is removing yourself, done the same way by the PC that leaves, when it is online.
 - **What a removed PC keeps.** It keeps what it already had, and can read nothing new.
-- **Order without clocks.**
-  - Adds and removals are ordered by the household's epoch, not by the PCs' clocks, which can disagree.
-  - Each member entry records the epoch it was added at and, once removed, the epoch it was removed at. A PC is in
-    when it was added after its last removal.
-  - A removed PC can come back only through a new pairing or approval, made after the key has changed.
-- **Who may say who is in.**
-  - A PC learns of members:
-    - from its own pairings and approvals;
-    - from the member list it is given on joining;
-    - from the sealed, signed lists of members it already knows are current.
-  - A removed PC's word counts for nothing.
-  - The server's list can only ever take a PC out, never put one in.
-- **Who may hand over a key.** A member may seal the key for an epoch only if it was in the household before that epoch
-  and was not removed before it.
+- **Who is in.** Two things decide it:
+  - **The server's member list** says which PCs are in. The server takes a member only from a current member's signed
+    request with the new PC's own proof, and a removal from any member.
+  - **Introductions** say whose keys this PC trusts:
+    - its own pairings and approvals;
+    - the member list it was given on joining;
+    - the sealed, signed lists of members it already holds as current.
+
+  A PC counts as in only when both agree. So the server alone can't slip in keys of its own, and a removed PC's own
+  claims count for nothing.
+- **Removals someone tells this PC about** stop direct network sync with that PC at once. The server's list, which only
+  current members can change, decides the rest.
+- **Order.** The server records the household's epoch at each add and removal. A PC may seal the key for an epoch only
+  if it was added before that epoch and not removed before it, and its keys were introduced here.
+- **A PC nobody introduces.** One the server lists but no member has introduced within 3 days is taken out again.
+
+**Who this protects against.**
+- **Protected:**
+  - the server on its own;
+  - a removed PC on its own, once the server has taken its removal;
+  - a PC in the middle on the network.
+- **Not claimed:**
+  - a PC acting against the household while it is still a member;
+  - a removed PC working together with the server.
 
 ## 7. Sign-in (N2)
 
@@ -190,8 +201,13 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
        with the member list. The new PC enters only when its own user has also said the codes match.
 
     Because of the commitments, a server that swaps keys makes the codes differ, except by a one-in-a-million chance
-    per request. A member takes one approval at a time and at most 5 a day. The new PC answers one per request, and
-    asks again only when its user says so.
+    per request.
+    - **The member's side.** It pins the new PC's keys and nonce as it first reads them, and shows its code before it
+      reveals its own nonce. So every code the server could learn has already been on screen.
+    - **Limits.** A member takes one approval at a time, and at most 5 a day. The new PC answers one per request, and
+      asks again only when its user says so. A waiting request lapses after a day.
+    - **Pace.** While an approval is under way, both PCs check every 10 seconds, and both prompts stay up for 10
+      minutes, so the user sees the two codes side by side.
 
     The server never has the key, as with Signal's or WhatsApp's linked devices. An unanswered prompt comes back later;
     it never counts as a no.
