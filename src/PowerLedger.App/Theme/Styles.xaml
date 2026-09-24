@@ -2,10 +2,15 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:local="clr-namespace:PowerLedger.App">
 
-    <!-- Spec §9 type: the bundled faces first, then Windows' own. -->
-    <FontFamily x:Key="Font.Ui">/Fonts/#Archivo, Bahnschrift, Segoe UI</FontFamily>
-    <FontFamily x:Key="Font.Narrow">/Fonts/#Archivo Narrow, Bahnschrift</FontFamily>
-    <FontFamily x:Key="Font.Numbers">/Fonts/#Martian Mono, Cascadia Mono, Consolas</FontFamily>
+    <!-- Spec §9 type: the bundled faces first (a folder a family under Fonts, static 400–700 instances), then Windows' own. -->
+    <FontFamily x:Key="Font.Ui">/Fonts/Archivo/#Archivo, Bahnschrift, Segoe UI</FontFamily>
+    <!-- Archivo Narrow's files: DirectWrite reads "Narrow" as a width, so they are the family Archivo at the semi-condensed
+         stretch, which Text.Eyebrow asks for. -->
+    <FontFamily x:Key="Font.Narrow">/Fonts/ArchivoNarrow/#Archivo, Bahnschrift</FontFamily>
+    <FontFamily x:Key="Font.Numbers">/Fonts/MartianMono/#Martian Mono, Cascadia Mono, Consolas</FontFamily>
+    <!-- The second pairing, bundled for the same screens: Manrope for text and JetBrains Mono for figures. -->
+    <FontFamily x:Key="Font.Ui2">/Fonts/Manrope/#Manrope, Segoe UI</FontFamily>
+    <FontFamily x:Key="Font.Numbers2">/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono</FontFamily>
     <FontFamily x:Key="Font.Glyphs">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <!-- The logo, as assets\brand\make-brand.ps1 draws it: a graphite P on an amber tile, its bowl a meter's dial with the
