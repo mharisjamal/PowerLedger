@@ -1,8 +1,9 @@
 # PowerLedger's data server
 
-A Cloudflare Worker, `powerledger-data`, written in TypeScript. It stores the daily reports users choose to send,
-in an R2 bucket, and indexes them in a D1 database for the owner's export and admin tools. See
-`docs/superpowers/specs/2026-09-24-powerledger-data-sharing-design.md` §6 for the design.
+A Cloudflare Worker, `powerledger-data`, written in TypeScript. It stores the daily reports users choose to send
+(in R2, or in D1 until R2 is enabled on the account — see Storage, below), and indexes them in a D1 database for
+the owner's export and admin tools. See `docs/superpowers/specs/2026-09-24-powerledger-data-sharing-design.md` §6
+for the design.
 
 ## What it does
 
@@ -17,6 +18,25 @@ in an R2 bucket, and indexes them in a D1 database for the owner's export and ad
   install and upload counts, a paged list of stored reports, and streaming one report's bytes back out.
 - A daily cron (`retention.ts`) drops reports whose day is more than 3 years old, and request counts more than 2
   days old.
+
+## Storage
+
+Report bodies live in D1 (`report_bodies`) until R2 is enabled on the account — comfortably inside the free 5 GB
+D1 limit, since each body is at most 1 MB. `src/store.ts` is the one place that reads, writes and deletes bodies;
+a body already in D1 stays readable once R2 takes over, with no migration step.
+
+To switch: enable R2 on the account, then
+
+```
+npx wrangler r2 bucket create powerledger-data
+```
+
+uncomment the `[[r2_buckets]]` block in `wrangler.toml`, and
+
+```
+npx wrangler d1 migrations apply powerledger-index --remote
+npx wrangler deploy
+```
 
 ## Running the tests
 
@@ -35,10 +55,12 @@ These are the lead's commands (design §6, plan L5), run once when the Worker is
 ```
 npx wrangler login
 npx wrangler d1 create powerledger-index          # then set the returned id in wrangler.toml
-npx wrangler r2 bucket create powerledger-data
 npx wrangler d1 migrations apply powerledger-index --remote
 npx wrangler deploy
 ```
+
+R2 isn't part of first deploy — the account doesn't have it enabled yet, and the Worker runs on D1 alone until it
+does (see Storage, above).
 
 The owner then runs `tools/set-admin-token.ps1` themselves. It creates `%USERPROFILE%\.powerledger\admin.json`
 (a token and a salt, 32 random bytes each) the first time, or reuses it if it already exists, and sets `ADMIN_TOKEN`
