@@ -1,9 +1,7 @@
 import { utcDateString, utcDateYearsAgo } from "./day";
-import { runHouseholdRetention } from "./households/retention";
+import { RETENTION_BUDGET_MS, type RetentionOptions, retentionPart, runHouseholdRetention, workThrough } from "./households/retention";
 import { deleteBodies } from "./store";
 
-const BATCH_SIZE = 1000;
-const MAX_BATCHES = 10;
 const RETENTION_YEARS = 3;
 const REQUEST_RETENTION_DAYS = 2;
 
@@ -15,33 +13,34 @@ interface ReportKeyRow {
 
 /**
  * The daily cron: deletes reports (and their R2 objects) whose day is more than 3 years old, and
- * request counts more than 2 days old. Reports are worked off 1000 at a time, at most 10 batches
- * a run, so a large backlog is bounded and simply continues on the next run. Then the households'
- * own (households/retention.ts).
+ * request counts more than 2 days old; then the households' own (households/retention.ts). Old
+ * reports are worked through 1000 at a time for as long as the run's 20 s budget lasts, so a large
+ * backlog simply continues on the next run. Each part is on its own: one failing doesn't stop the rest.
  */
-export async function runRetention(env: Cloudflare.Env, now: Date = new Date()): Promise<void> {
+export async function runRetention(env: Cloudflare.Env, now: Date = new Date(), options: RetentionOptions = {}): Promise<void> {
+  const deadline = (options.clock ?? Date.now)() + (options.budgetMs ?? RETENTION_BUDGET_MS);
   const cutoff = utcDateYearsAgo(RETENTION_YEARS, now);
 
-  for (let batch = 0; batch < MAX_BATCHES; batch++) {
-    const rows = await env.DB.prepare("SELECT install_id, day, r2_key FROM reports WHERE day < ? LIMIT ?")
-      .bind(cutoff, BATCH_SIZE)
-      .all<ReportKeyRow>();
+  await retentionPart("reports", () =>
+    workThrough<ReportKeyRow>(
+      async (limit) =>
+        (await env.DB.prepare("SELECT install_id, day, r2_key FROM reports WHERE day < ? LIMIT ?")
+          .bind(cutoff, limit)
+          .all<ReportKeyRow>()).results,
+      async (rows) => {
+        await deleteBodies(env, rows.map((row) => row.r2_key));
+        await env.DB.batch(
+          rows.map((row) => env.DB.prepare("DELETE FROM reports WHERE install_id = ? AND day = ?").bind(row.install_id, row.day)),
+        );
+      },
+      options,
+      deadline,
+    ),
+  );
 
-    if (rows.results.length === 0) break;
+  await retentionPart("request counts", () =>
+    env.DB.prepare("DELETE FROM requests WHERE utc_day < ?").bind(utcDateString(-REQUEST_RETENTION_DAYS, now)).run(),
+  );
 
-    await deleteBodies(env, rows.results.map((row) => row.r2_key));
-    await env.DB.batch(
-      rows.results.map((row) =>
-        env.DB.prepare("DELETE FROM reports WHERE install_id = ? AND day = ?").bind(row.install_id, row.day),
-      ),
-    );
-
-    if (rows.results.length < BATCH_SIZE) break;
-  }
-
-  await env.DB.prepare("DELETE FROM requests WHERE utc_day < ?")
-    .bind(utcDateString(-REQUEST_RETENTION_DAYS, now))
-    .run();
-
-  await runHouseholdRetention(env, now);
+  await runHouseholdRetention(env, now, options, deadline);
 }
