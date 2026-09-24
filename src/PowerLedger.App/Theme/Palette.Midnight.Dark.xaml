@@ -62,7 +62,7 @@
     <!-- Shadow (menus and tooltips), hatch, the area chart's gradient and the focus ring. -->
     <SolidColorBrush x:Key="M.Shadow" Color="#73000000" />
     <SolidColorBrush x:Key="M.Hatch" Color="#1AFFFFFF" />
-    <SolidColorBrush x:Key="M.ChartFillTop" Color="#5C3D5CFF" />
+    <SolidColorBrush x:Key="M.ChartFillTop" Color="#733D5CFF" />
     <SolidColorBrush x:Key="M.ChartFillBottom" Color="#003D5CFF" />
     <SolidColorBrush x:Key="M.Focus" Color="#8FA5FF" />
 </ResourceDictionary>

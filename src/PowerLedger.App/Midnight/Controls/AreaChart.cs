@@ -8,9 +8,9 @@ using System.Windows.Media;
 namespace PowerLedger.App;
 
 /// <summary>
-/// "Power over time" (plan O M1-2, after the reference in 0.8.1): the total as a 2 px line running from the accent into
-/// the violet over a gradient that fades to nothing, the parts as stacked bands beneath it at 35 %, sleep hatched, a
-/// dashed line at now, and the axes the model gives in small grey words. The pointer or the arrow keys pick a bucket: a
+/// "Power over time" (plan O M1-2, after the reference in 0.8.1): the total as one smooth 2 px line running from the
+/// accent into the violet over a gradient that fades to nothing, sleep faintly hatched, a dashed line at now, and the axes
+/// the model gives in small grey words. The parts are the History page's and the table's to show, not this chart's. The pointer or the arrow keys pick a bucket: a
 /// ringed dot marks it on the line, a dotted guide runs from it to the axis, and a tooltip says when and how much, so
 /// the figure is reachable without a mouse. The tooltip is a ToolTip of the window's, so it takes the window's bubble.
 /// </summary>
@@ -33,7 +33,6 @@ internal sealed class AreaChart : Instrument
     private const double Top = 18;
     private const double AxisRoom = 28;
     private const double PlotHeight = 260;
-    private const double BandOpacity = 0.35;
     private const double LabelSize = 11;
 
     private int _hover = -1;
@@ -131,21 +130,12 @@ internal sealed class AreaChart : Instrument
             dc.DrawRectangle(HatchBar.Hatch(HatchBrush), null, new Rect(new Point(X(start), Top), new Point(X(end), bottom)));
         }
 
-        // The parts, tallest band first so no two share an anti-aliased edge, faint under the total's own fill.
-        var tops = Geometry.StackTops(buckets);
-        dc.PushOpacity(BandOpacity);
-        foreach (var (top, brush) in new[] { (tops.CpuTop, CpuBrush), (tops.GpuTop, GpuBrush), (tops.DisplayTop, DisplayBrush), (tops.RestTop, RestBrush) })
-        {
-            dc.DrawGeometry(brush, null, Polygon(AreaGeometry.Area(AreaGeometry.Line(top, capacity, max, Left, right, Top, bottom), bottom), closed: true));
-        }
-        dc.Pop();
-
         var line = AreaGeometry.Line(buckets.Select(b => b.Total).ToArray(), capacity, max, Left, right, Top, bottom);
         var fill = new LinearGradientBrush(ColourOf(FillTopBrush), ColourOf(FillBottomBrush), new Point(0, 0), new Point(0, 1));
         fill.Freeze();
-        dc.DrawGeometry(fill, null, Polygon(AreaGeometry.Area(line, bottom), closed: true));
+        dc.DrawGeometry(fill, null, Curve(line, bottom));
         var stroke = new Pen(LineBrushFor(line), 2) { LineJoin = PenLineJoin.Round, StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-        dc.DrawGeometry(null, stroke, Polygon(line, closed: false));
+        dc.DrawGeometry(null, stroke, Curve(line, null));
 
         if (model.NowAt is { } nowAt)
         {
@@ -234,14 +224,22 @@ internal sealed class AreaChart : Instrument
     private static (double Max, double Step) Scale(ChartModel model)
         => Geometry.ChartScale(model.Buckets.Count > 0 ? model.Buckets.Max(b => b.Total) : 0, Charts.Floor(model.Unit));
 
-    private static StreamGeometry Polygon(IReadOnlyList<Point> points, bool closed)
+    /// <summary>The line through <paramref name="points"/> as one smooth curve (AreaGeometry.Smooth); with a
+    /// <paramref name="baseline"/>, closed down to it and back, for the fill under the line.</summary>
+    private static StreamGeometry Curve(IReadOnlyList<Point> points, double? baseline)
     {
         var shape = new StreamGeometry();
         if (points.Count > 0)
         {
             using var g = shape.Open();
-            g.BeginFigure(points[0], isFilled: closed, isClosed: closed);
-            for (var i = 1; i < points.Count; i++) g.LineTo(points[i], isStroked: !closed, isSmoothJoin: false);
+            var filled = baseline is not null;
+            g.BeginFigure(points[0], isFilled: filled, isClosed: filled);
+            foreach (var (c1, c2, end) in AreaGeometry.Smooth(points)) g.BezierTo(c1, c2, end, isStroked: !filled, isSmoothJoin: true);
+            if (baseline is { } y)
+            {
+                g.LineTo(new Point(points[^1].X, y), isStroked: false, isSmoothJoin: false);
+                g.LineTo(new Point(points[0].X, y), isStroked: false, isSmoothJoin: false);
+            }
         }
         shape.Freeze();
         return shape;

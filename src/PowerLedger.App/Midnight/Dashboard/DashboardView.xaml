@@ -26,7 +26,7 @@
                     <DataTrigger Binding="{Binding Part}" Value="Display"><Setter Property="Foreground" Value="{DynamicResource M.PartDisplay}" /></DataTrigger>
                 </Style.Triggers>
             </Style>
-            <!-- The round tint behind a part's glyph, as the reference's row icons. -->
+            <!-- A part's round badge, as the reference's row icons: a tinted disc, and a ring in the part's colour round it. -->
             <Style x:Key="PartDisc" TargetType="Ellipse">
                 <Setter Property="Opacity" Value="0.16" />
                 <Setter Property="Fill" Value="{DynamicResource M.PartRest}" />
@@ -34,6 +34,16 @@
                     <DataTrigger Binding="{Binding Part}" Value="Cpu"><Setter Property="Fill" Value="{DynamicResource M.PartCpu}" /></DataTrigger>
                     <DataTrigger Binding="{Binding Part}" Value="Gpu"><Setter Property="Fill" Value="{DynamicResource M.PartGpu}" /></DataTrigger>
                     <DataTrigger Binding="{Binding Part}" Value="Display"><Setter Property="Fill" Value="{DynamicResource M.PartDisplay}" /></DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="PartRing" TargetType="Ellipse">
+                <Setter Property="Opacity" Value="0.5" />
+                <Setter Property="StrokeThickness" Value="1" />
+                <Setter Property="Stroke" Value="{DynamicResource M.PartRest}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Part}" Value="Cpu"><Setter Property="Stroke" Value="{DynamicResource M.PartCpu}" /></DataTrigger>
+                    <DataTrigger Binding="{Binding Part}" Value="Gpu"><Setter Property="Stroke" Value="{DynamicResource M.PartGpu}" /></DataTrigger>
+                    <DataTrigger Binding="{Binding Part}" Value="Display"><Setter Property="Stroke" Value="{DynamicResource M.PartDisplay}" /></DataTrigger>
                 </Style.Triggers>
             </Style>
             <Style x:Key="PartShare" TargetType="local:ShareBar" BasedOn="{StaticResource M.ShareBar}">
@@ -188,7 +198,7 @@
                         </ItemsControl.ItemsPanel>
                     </ItemsControl>
 
-                    <!-- Power over time: the range's name, the range choices, the chart, the key to its colours. -->
+                    <!-- Power over time: the range's name, the range choices, the chart and its key: the one line, and sleep. -->
                     <Border Style="{StaticResource M.Divider}" Padding="20,18,20,16" AutomationProperties.Name="Power over time">
                         <StackPanel>
                             <DockPanel>
@@ -221,17 +231,8 @@
                                         <Setter Property="Margin" Value="7,0,18,0" />
                                         <Setter Property="VerticalAlignment" Value="Center" />
                                     </Style>
-                                    <Style TargetType="Ellipse">
-                                        <Setter Property="Width" Value="8" />
-                                        <Setter Property="Height" Value="8" />
-                                        <Setter Property="VerticalAlignment" Value="Center" />
-                                    </Style>
                                 </WrapPanel.Resources>
-                                <Ellipse Fill="{DynamicResource M.Accent}" /><TextBlock Text="Total" />
-                                <Ellipse Fill="{DynamicResource M.PartCpu}" /><TextBlock Text="CPU" />
-                                <Ellipse Fill="{DynamicResource M.PartGpu}" /><TextBlock Text="GPU" />
-                                <Ellipse Fill="{DynamicResource M.PartDisplay}" /><TextBlock Text="Display" />
-                                <Ellipse Fill="{DynamicResource M.PartRest}" /><TextBlock Text="Rest" />
+                                <Border Width="16" Height="2" CornerRadius="1" Background="{DynamicResource M.Accent}" VerticalAlignment="Center" /><TextBlock Text="Total power" />
                                 <local:HatchBar Style="{StaticResource M.SleepKey}" Width="18" VerticalAlignment="Center" /><TextBlock Text="Asleep" />
                             </WrapPanel>
                         </StackPanel>
@@ -296,9 +297,10 @@
                                                 <ColumnDefinition Width="100" />
                                                 <ColumnDefinition Width="68" />
                                             </Grid.ColumnDefinitions>
-                                            <Grid Grid.Column="0" Width="30" Height="30" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                            <Grid Grid.Column="0" Width="28" Height="28" HorizontalAlignment="Left" VerticalAlignment="Center">
                                                 <Ellipse Style="{StaticResource PartDisc}" />
-                                                <TextBlock Style="{StaticResource PartGlyph}" Text="{Binding Glyph}" />
+                                                <Ellipse Style="{StaticResource PartRing}" />
+                                                <TextBlock Style="{StaticResource PartGlyph}" FontSize="13" Text="{Binding Glyph}" />
                                             </Grid>
                                             <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Body}" FontWeight="Medium" Text="{Binding Name}" VerticalAlignment="Center"
                                                        TextTrimming="CharacterEllipsis" />
