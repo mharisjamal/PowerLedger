@@ -4,26 +4,33 @@ using PowerLedger.Sensors;
 namespace PowerLedger.Service;
 
 /// <summary>The latest status and settings the loop has published, for the pipe and the sharing worker to read from any
-/// thread, with the hardware it detected and whether its last reading found a discrete graphics card. The sharing worker
-/// publishes how sharing stands, which the status carries from the moment it changes.</summary>
+/// thread, with the hardware it detected and whether its last reading found a discrete graphics card. The sharing and
+/// household workers publish how sharing and the household stand, which the status carries from the moment they change.</summary>
 internal sealed class StatusBoard
 {
     private ServiceStatus? _status;
     private ServiceSettings? _settings;
     private InventoryFacts? _facts;
     private SharingStatus? _sharing;
+    private HouseholdStatus? _household;
     private int _discreteGpu;
 
-    /// <summary>The loop's latest status with sharing's; null until the loop has published one.</summary>
+    /// <summary>The loop's latest status with sharing's and the household's; null until the loop has published one.</summary>
     public ServiceStatus? Status
     {
         get
         {
             var status = Volatile.Read(ref _status);
+            if (status is null) return null;
             var sharing = Volatile.Read(ref _sharing);
-            return status is not null && sharing is not null ? status with { Sharing = sharing } : status;
+            var household = Volatile.Read(ref _household);
+            if (sharing is not null) status = status with { Sharing = sharing };
+            return household is not null ? status with { Household = household } : status;
         }
     }
+
+    /// <summary>How the household stands as last published; null before the household worker has published.</summary>
+    public HouseholdStatus? Household => Volatile.Read(ref _household);
 
     public ServiceSettings? Settings => Volatile.Read(ref _settings);
 
@@ -40,6 +47,8 @@ internal sealed class StatusBoard
     public void Publish(InventoryFacts facts) => Volatile.Write(ref _facts, facts);
 
     public void Publish(SharingStatus sharing) => Volatile.Write(ref _sharing, sharing);
+
+    public void Publish(HouseholdStatus household) => Volatile.Write(ref _household, household);
 
     public void PublishDiscreteGpu(bool present) => Volatile.Write(ref _discreteGpu, present ? 1 : 0);
 }

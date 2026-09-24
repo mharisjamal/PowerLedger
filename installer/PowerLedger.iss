@@ -122,6 +122,12 @@ begin
   Log(Format('net %s -> %d', [Params, Result]));
 end;
 
+function Netsh(const Params: string): Integer;
+begin
+  Result := RunHidden(ExpandConstant('{sys}\netsh.exe'), Params);
+  Log(Format('netsh %s -> %d', [Params, Result]));
+end;
+
 function ServiceExists: Boolean;
 begin
   Result := Sc('query {#ServiceName}') = 0;
@@ -137,6 +143,22 @@ end;
 function ServiceExecutable: string;
 begin
   Result := ExpandConstant('{app}\Service\PowerLedger.Service.exe');
+end;
+
+{ Households (design §3): the other PCs in a household reach the service's listener, inbound TCP to the service's program,
+  on Private networks only. Deleting it first replaces the rule an earlier install added, so an update never doubles it. A
+  failure is only logged: the PCs can still pair and sync through the server. }
+procedure AddFirewallRule;
+begin
+  Netsh('advfirewall firewall delete rule name="PowerLedger households"');
+  if Netsh('advfirewall firewall add rule name="PowerLedger households" dir=in action=allow program="' + ServiceExecutable +
+      '" protocol=TCP profile=private') <> 0 then
+    Log('The households firewall rule could not be added.');
+end;
+
+procedure RemoveFirewallRule;
+begin
+  Netsh('advfirewall firewall delete rule name="PowerLedger households"');
 end;
 
 { The quoted image path keeps Windows from starting C:\Program.exe in the service's place. }
@@ -224,6 +246,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     Log('Installed the ' + BuildName + ' build.');
+    AddFirewallRule;
     RegisterService;
     ServiceDown := False;
   end;
@@ -260,6 +283,7 @@ begin
   begin
     StopService;
     Sc('delete {#ServiceName}');
+    RemoveFirewallRule;
     { The event source the service creates; it goes after the service stops, since stopping writes an event. }
     RegDeleteKeyIncludingSubkeys(HKLM, 'SYSTEM\CurrentControlSet\Services\EventLog\Application\PowerLedger');
     RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'PowerLedger');

@@ -10,12 +10,12 @@ public sealed class MigrationTests : IDisposable
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"powerledger-v1-{Guid.NewGuid():N}.db");
 
     [Fact]
-    public void A_fresh_database_is_at_version_2_with_the_new_columns_and_the_outbox()
+    public void A_fresh_database_is_at_the_latest_version_with_the_new_columns_and_the_outbox()
     {
         using var db = SqliteDatabase.OpenAndMigrate(_path);
         using var c = db.Open();
-        Migrator.LatestVersion.ShouldBe(2);
-        Migrator.CurrentVersion(c).ShouldBe(2);
+        Migrator.LatestVersion.ShouldBe(3);
+        Migrator.CurrentVersion(c).ShouldBe(3);
         Columns(c, "samples_raw").ShouldContain("total_source");
         Columns(c, "samples_raw").ShouldContain("gpu_scope");
         Columns(c, "samples_raw").ShouldContain("measured_mask");
@@ -24,13 +24,13 @@ public sealed class MigrationTests : IDisposable
     }
 
     [Fact]
-    public void A_version_1_database_moves_to_2_and_its_old_readings_read_0_in_the_new_columns()
+    public void A_version_1_database_moves_to_the_latest_and_its_old_readings_read_0_in_the_new_columns()
     {
         MakeVersion1(_path);
 
         using var db = SqliteDatabase.OpenAndMigrate(_path);
         using var c = db.Open();
-        Migrator.CurrentVersion(c).ShouldBe(2);
+        Migrator.CurrentVersion(c).ShouldBe(Migrator.LatestVersion);
         Scalar(c, "SELECT COUNT(*) FROM samples_raw").ShouldBe(1);
         Scalar(c, "SELECT total_source FROM samples_raw").ShouldBe(0);
         Scalar(c, "SELECT gpu_scope FROM samples_raw").ShouldBe(0);

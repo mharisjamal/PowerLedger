@@ -12,9 +12,12 @@ namespace PowerLedger.Service;
 /// The service's end of \\.\pipe\PowerLedger.v1 (spec §8, §11). Network logons are denied; local signed-in users may
 /// read and write but not create instances, so no other process can serve the name while the service runs. One
 /// listening instance always waits for the next client, and each client is served on its own task, so a slow or
-/// broken client holds up nobody else.
+/// broken client holds up nobody else. A client that subscribes gets each reading, and, when it is in the console session,
+/// the household's notices (households design §9).
 /// </summary>
-internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSignals signals, ILogger<PipeServer> log, string pipeName) : BackgroundService
+internal sealed class PipeServer(
+    PipeHandler handler, LiveFeed feed, ServiceSignals signals, ILogger<PipeServer> log, string pipeName, Households.NoticeHub? notices = null)
+    : BackgroundService
 {
     /// <summary>More clients than this wait for a free instance.</summary>
     public const int MaxClients = 16;
@@ -128,6 +131,7 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
         using var done = CancellationTokenSource.CreateLinkedTokenSource(stop);
         await using var channel = new MessageChannel(stream);
         ChannelReader<ReadingFrame>? frames = null;
+        ChannelReader<HouseholdNotice>? householdNotices = null;
         Task? pump = null;
         try
         {
@@ -138,7 +142,11 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
                 if (message is SubscribeRequest && frames is null)
                 {
                     frames = feed.Subscribe();
-                    pump = PumpAsync(channel, frames, done.Token);
+                    if (notices is not null && Households.ConsoleSessions.OfClient(stream.SafePipeHandle) is { } session)
+                    {
+                        householdNotices = notices.Subscribe(session);
+                    }
+                    pump = Task.WhenAll(PumpAsync(channel, frames, done.Token), PumpAsync(channel, householdNotices, done.Token));
                 }
             }
         }
@@ -159,18 +167,21 @@ internal sealed class PipeServer(PipeHandler handler, LiveFeed feed, ServiceSign
         {
             await done.CancelAsync().ConfigureAwait(false);
             if (frames is not null) feed.Unsubscribe(frames);
+            if (householdNotices is not null) notices!.Unsubscribe(householdNotices);
             signals.ForgetClient(client);
             if (pump is not null) await pump.ConfigureAwait(false);
         }
     }
 
-    private static async Task PumpAsync(MessageChannel channel, ChannelReader<ReadingFrame> frames, CancellationToken cancel)
+    /// <summary>Writes what the reader gives until it ends or the connection does; nothing when there is no reader.</summary>
+    private static async Task PumpAsync<T>(MessageChannel channel, ChannelReader<T>? messages, CancellationToken cancel) where T : PipeMessage
     {
+        if (messages is null) return;
         try
         {
-            await foreach (var frame in frames.ReadAllAsync(cancel).ConfigureAwait(false))
+            await foreach (var message in messages.ReadAllAsync(cancel).ConfigureAwait(false))
             {
-                await channel.WriteAsync(frame, cancel).ConfigureAwait(false);
+                await channel.WriteAsync(message, cancel).ConfigureAwait(false);
             }
         }
         catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException)
