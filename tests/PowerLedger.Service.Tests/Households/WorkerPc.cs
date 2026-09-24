@@ -65,6 +65,7 @@ internal sealed class WorkerPc : IAsyncDisposable
         confirm.ComparisonCode.ShouldBe(prompt.ComparisonCode);
         await adder.Send<HouseholdReply>(new AnswerPromptRequest(93, confirm.PromptId!, true));
         (await adder.Next(NoticeKind.PairingProgress, text => text.EndsWith("joined your household.", StringComparison.Ordinal))).ShouldNotBeNull();
+        (await joiner.Next(NoticeKind.Info, text => text.StartsWith("This PC joined", StringComparison.Ordinal))).ShouldNotBeNull();   // it enters once told
         await adder.Worker.Running;
         await joiner.Worker.Running;
     }
