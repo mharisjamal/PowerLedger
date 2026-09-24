@@ -293,6 +293,42 @@ with 100,000 iterations, the salt `"powerledger recovery"` and 32 bytes; the cod
   - `adder` and `joiner` hold the hello fields plus a `mac`.
   - `answer` and `welcome` are sealed with the session key.
 
+### 0.7 Contract changes after the Worker's security review (they replace 0.6 where the two differ)
+
+- **Joining proves its keys.**
+  - `POST /v1/households/{hid}/members` takes `{"sign","dh","proof"}`, where `proof` is the joining PC's signature over
+    `powerledger join|{hid}|{sign}|{dh}`.
+  - The joiner sends it in its last LAN frame, `{"type":"joined","proof"}`. In a pairing by code it goes in a fifth
+    meeting slot, `joined`, sealed like `answer` and `welcome`.
+  - The same sign key with a different dh key gets 409.
+- **The server keeps the household's epoch,** starting at 1.
+  - `POST …/keys` must be the current epoch + 1.
+  - An approval uses the current epoch and never overwrites an envelope.
+- **Recovery (N2).**
+  - `PUT /v1/account/recovery` takes `{"body","verifier"}`. The server keeps only SHA-256 of the verifier, and the
+    household's current epoch.
+  - `POST /v1/account/recover` takes `{"verifier"}` and works only at the current epoch, so a signed-in PC puts
+    recovery again after every rotation.
+- **Linking (N2)** requires `householdId`. A PC that finds its account unlinked links it again at the next sync.
+- **Join requests (N2).**
+  - They carry an opaque `account`, and sign-in returns the caller's own, so "signed in as you" is shown only when the
+    two match.
+  - `DELETE /v1/households/{hid}/requests/{device}` refuses a request.
+  - At most 2 wait per account.
+- **Statuses:**
+
+  | Status | Means |
+  |---|---|
+  | 401 | not a member, or a bad signature: one message, so the two can't be told apart |
+  | 410 | a valid signature from a removed member: this PC was removed |
+  | 429 | past a daily cap: 1000 requests, 200 batches or 5 MB of batches per PC per UTC day |
+  | 503 | the server's global caps are reached |
+
+- **Removal** also:
+  - deletes the recovery of every linked account;
+  - unlinks the accounts that had a session on the removed PC;
+  - deletes that PC's sessions for those accounts and its join requests.
+
 ---
 
 ## Wave 1 — three agents in parallel
