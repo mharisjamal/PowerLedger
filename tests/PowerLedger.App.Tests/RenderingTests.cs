@@ -967,8 +967,9 @@ public class RenderingTests
         });
     }
 
-    /// <summary>The Confirm join prompt (households design §7, task 0.8): the approved PC's own check, its heading and
-    /// comparison code shown prominently, and its buttons fitting a short screen, in both themes.</summary>
+    /// <summary>The Confirm join prompt (households design §7, plan 0.9): sent before the approver has actually
+    /// approved anything, so its heading never says "approved"; the comparison code shows prominently, and its buttons
+    /// fit a short screen, in both themes.</summary>
     [Fact]
     public void The_confirm_join_prompt_shows_the_heading_and_the_comparison_code()
     {
@@ -981,7 +982,7 @@ public class RenderingTests
                 var link = new FakeLink();
                 link.Connect(true);
                 var notice = new HouseholdNotice(
-                    NoticeKind.ConfirmJoin, "p3", "Your household approved this PC. Does the approving PC show this code?", null, "482 913",
+                    NoticeKind.ConfirmJoin, "p3", "Does your other PC show 482 913? Approve it there too.", null, "482 913",
                     Now.AddMinutes(2));
                 var model = new ConfirmJoinViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
                 var window = new ConfirmJoinWindow(model)
@@ -993,11 +994,12 @@ public class RenderingTests
                 try
                 {
                     Pump(TimeSpan.FromMilliseconds(300));
-                    Find<TextBlock>(window, t => t.Text == "Your household approved this PC. Does the approving PC show this code?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Does your other PC show 482 913? Approve it there too.").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text != null && t.Text.Contains("approved")).ShouldBeNull(theme.ToString());
                     Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
                     window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
                     var content = (FrameworkElement)window.Content;
-                    foreach (var label in new[] { "Cancel", "Codes match" })
+                    foreach (var label in new[] { "They don't match", "Codes match" })
                     {
                         var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
                         button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
@@ -1187,6 +1189,50 @@ public class RenderingTests
                     Find<Button>(window, b => Equals(b.Content, "Cancel")).ShouldNotBeNull(theme.ToString());
                     Find<Button>(window, b => Equals(b.Content, "Confirm")).ShouldNotBeNull(theme.ToString());
                     Save(window, 480, (int)window.ActualHeight, $"remove-old-household-rows-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Plan 0.9: a typed recovery code warns before the browser opens, since it removes the household's other
+    /// PCs, with Continue and Cancel fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void A_recovery_code_sign_in_shows_its_warning_and_buttons()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var signIn = new SignIn(() => new FakeLoopbackServer(), _ => { }, new System.Net.Http.HttpClient(), new FakeTimeProvider(Now));
+                var account = new SignInViewModel(link, new FakeUiSettings(), signIn, UiThreads.Inline, "ms-client", "google-client");
+                var model = new HouseholdViewModel(link, new FakeHouseholdHistory(), UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, account);
+                model.Show();
+                account.RecoveryCodeInput = "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE";
+                account.SignInWithMicrosoft.Execute(null);
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == SignInViewModel.RecoveryWarning).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Cancel")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Continue")).ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(560);
+                    Save(window, 480, (int)window.ActualHeight, $"recovery-sign-in-warning-{theme}.png");
                 }
                 finally
                 {

@@ -29,14 +29,20 @@ CREATE TABLE join_requests (                  -- PCs signed in as a linked accou
   account   TEXT NOT NULL,
   sign_key  TEXT NOT NULL,
   dh_key    TEXT NOT NULL,
-  created   INTEGER NOT NULL,                 -- ms
+  created   INTEGER NOT NULL,                 -- ms; a request lasts 24 hours
+  approver  TEXT,                             -- the member that committed, the only one that may reveal and approve
+  commitment TEXT,                            -- its commitment to its nonce, base64url; each of these four written once
+  nonce     TEXT,                             -- the waiting PC's nonce, base64url
+  reveal    TEXT,                             -- the approver's nonce, revealed, base64url
+  approved_epoch INTEGER,                     -- set by the approval; the request then stays until the PC reads it
   PRIMARY KEY (household, device)
 );
 CREATE INDEX join_requests_account ON join_requests(account);
 CREATE TABLE recovery (
   account       TEXT PRIMARY KEY,
-  body          TEXT NOT NULL,                -- the household key sealed under the recovery code's key, base64url, as sent
+  body          TEXT NOT NULL,                -- the key and member list sealed under the recovery code's key, base64url, as sent
   verifier_hash TEXT NOT NULL,                -- hex SHA-256 of the 32-byte verifier recover must send; never the verifier
-  epoch         INTEGER NOT NULL,             -- the household's epoch when this was put: recover needs it still current
+  epoch         INTEGER NOT NULL,             -- the household's epoch the body was sealed at (its current one when put)
+  holder        TEXT NOT NULL,                -- the one PC that holds the code, and alone puts the recovery
   updated       INTEGER NOT NULL              -- ms
 );

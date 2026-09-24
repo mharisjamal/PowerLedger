@@ -18,12 +18,14 @@ interface MemberJson {
   dh: string;
   added: number;
   removed: number | null;
+  addedEpoch: number;
+  removedEpoch: number | null;
 }
 
 async function members(hid: string, by: TestDevice): Promise<MemberJson[]> {
   const response = await signedFetch(by, "GET", `/v1/households/${hid}/members`);
   expect(response.status).toBe(200);
-  return response.json();
+  return ((await response.json()) as { members: MemberJson[] }).members;
 }
 
 function envelope(): string {
@@ -31,6 +33,45 @@ function envelope(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(60));
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+
+/** `by` moves the household's key on to `epoch`, sealed to `to`. */
+async function rotate(hid: string, by: TestDevice, epoch: number, to: TestDevice[] = [by]): Promise<void> {
+  const response = await signedFetch(by, "POST", `/v1/households/${hid}/keys`, {
+    epoch,
+    envelopes: to.map((pc) => ({ device: pc.id, body: envelope() })),
+  });
+  expect(response.status).toBe(200);
+}
+
+describe("GET /v1/households/{hid}/members", () => {
+  it("gives each member with the household epochs it was added and removed at, as {members}", async () => {
+    const first = await newDevice();
+    const second = await newDevice();
+    const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    const response = await signedFetch(first, "GET", `/v1/households/${hid}/members`);
+    const body = (await response.json()) as { members: MemberJson[] };
+    expect(body.members.find((member) => member.device === first.id)).toEqual({
+      device: first.id,
+      sign: first.sign,
+      dh: first.dh,
+      added: expect.any(Number),
+      removed: null,
+      addedEpoch: 1,
+      removedEpoch: null,
+    });
+
+    await rotate(hid, first, 2, [first, second]);
+    await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`);
+    const removed = (await members(hid, first)).find((member) => member.device === second.id)!;
+    expect(removed).toMatchObject({ addedEpoch: 1, removedEpoch: 2, removed: expect.any(Number) });
+
+    await rotate(hid, first, 3);
+    await addMember(hid, first, second);
+    const back = (await members(hid, first)).find((member) => member.device === second.id)!;
+    expect(back).toMatchObject({ addedEpoch: 3, removedEpoch: null, removed: null });
+  });
+});
 
 describe("POST /v1/households", () => {
   it("creates a household with its creator as the one member", async () => {
@@ -209,22 +250,44 @@ describe("DELETE /v1/households/{hid}/members/{device}", () => {
     expect(back?.removed).toBeNull();
   });
 
-  it("gives 404 for a PC that isn't a current member", async () => {
+  it("gives 404 for a PC that was never a member, and 200 for one already removed", async () => {
     const first = await newDevice();
+    const second = await newDevice();
     const hid = await createHousehold(first);
+    await addMember(hid, first, second);
 
-    const response = await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${(await newDevice()).id}`);
-    expect(response.status).toBe(404);
+    const stranger = await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${(await newDevice()).id}`);
+    expect(stranger.status).toBe(404);
+
+    expect((await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`)).status).toBe(200);
+    expect((await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`)).status).toBe(200);
   });
 
-  it("ends the household when its last member leaves", async () => {
+  it("ends the household with its last member, keeping it and its members as removed, so former members get 410", async () => {
     const first = await newDevice();
+    const second = await newDevice();
     const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    await signedFetch(first, "POST", `/v1/households/${hid}/batches`, {
+      device: first.id,
+      epoch: 1,
+      seq: 1,
+      body: envelope(),
+      sig: btoa(String.fromCharCode(...new Uint8Array(64))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+    });
 
+    expect((await signedFetch(second, "DELETE", `/v1/households/${hid}/members/${second.id}`)).status).toBe(200);
     expect((await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${first.id}`)).status).toBe(200);
 
-    expect(await env.DB.prepare("SELECT 1 FROM households WHERE id = ?").bind(hid).first()).toBeNull();
-    expect(await env.DB.prepare("SELECT 1 FROM members WHERE household = ?").bind(hid).first()).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM households WHERE id = ?").bind(hid).first()).not.toBeNull();
+    const rows = await env.DB.prepare("SELECT removed_epoch FROM members WHERE household = ?").bind(hid).all();
+    expect(rows.results).toEqual([{ removed_epoch: 1 }, { removed_epoch: 1 }]);
+    expect(await env.DB.prepare("SELECT 1 FROM batches WHERE household = ?").bind(hid).first()).toBeNull();
+
+    for (const pc of [first, second]) {
+      const response = await signedFetch(pc, "GET", `/v1/households/${hid}/members`);
+      expect(response.status).toBe(410);
+    }
   });
 });
 
@@ -299,6 +362,25 @@ describe("the household's keys", () => {
     expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, { epoch: 2, envelopes: [keys.envelopes[0]] })).status).toBe(409);
   });
 
+  it("takes the identical re-post as done even after the members changed, or another member sealed a key at that epoch", async () => {
+    const first = await newDevice();
+    const second = await newDevice();
+    const third = await newDevice();
+    const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    const keys = { epoch: 2, envelopes: [{ device: first.id, body: envelope() }, { device: second.id, body: envelope() }] };
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
+
+    // Before first re-posts the same bytes: second adds third with a key sealed at epoch 2, then leaves.
+    await addMember(hid, second, third);
+    await env.DB.prepare("INSERT INTO key_envelopes (household, epoch, device, from_device, body, created) VALUES (?, 2, ?, ?, ?, 1)")
+      .bind(hid, third.id, second.id, envelope())
+      .run();
+    await signedFetch(second, "DELETE", `/v1/households/${hid}/members/${second.id}`);
+
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
+  });
+
   it("refuses envelopes for PCs that aren't current members, and malformed ones", async () => {
     const first = await newDevice();
     const second = await newDevice();
@@ -313,6 +395,7 @@ describe("the household's keys", () => {
       { epoch: -1, envelopes: [{ device: first.id, body: envelope() }] },
       { epoch: 2, envelopes: [{ device: first.id, body: "not base64url!" }] },
       { epoch: 2, envelopes: [{ device: first.id, body: envelope() }, { device: first.id, body: envelope() }] },
+      { epoch: 2, envelopes: [{ device: first.id, body: "A".repeat(1028) }] },
     ]) {
       const response = await signedFetch(first, "POST", `/v1/households/${hid}/keys`, body);
       expect(response.status, JSON.stringify(body)).toBe(400);

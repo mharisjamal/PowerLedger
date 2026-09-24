@@ -71,6 +71,8 @@ public class SignInViewModelTests
         _link.HouseholdRequests.Count.ShouldBe(1);
     }
 
+    /// <summary>Plan 0.9: a typed recovery code warns before the browser opens at all; Continue is what actually runs
+    /// the sign-in with it.</summary>
     [Fact]
     public async Task A_typed_recovery_code_is_sent_with_the_sign_in_and_cleared_once_taken()
     {
@@ -81,6 +83,11 @@ public class SignInViewModelTests
         model.RecoveryCodeInput = "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE";
 
         model.SignInWithMicrosoft.Execute(null);
+        model.ConfirmingRecoverySignIn.ShouldBeTrue();
+        _opened.ShouldBeNull();   // the browser doesn't open until Continue
+
+        model.ContinueRecoverySignIn.Execute(null);
+        model.ConfirmingRecoverySignIn.ShouldBeFalse();
         var q = Query(_opened.ShouldNotBeNull());
         _http.Reply(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { id_token = Jwt(q["nonce"], "jo@example.com") }));
         _server.Redirect.SetResult($"?code=abc&state={q["state"]}");
@@ -91,6 +98,33 @@ public class SignInViewModelTests
         provider.ShouldBe("microsoft");
         recoveryCode.ShouldBe("K7QM-2XHD-9PW4-R8TA-VMNP-3QWE");
         await WaitFor.True(() => model.RecoveryCodeInput == "");
+    }
+
+    [Fact]
+    public void Cancelling_a_recovery_sign_in_warning_opens_no_browser()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.RecoveryCodeInput = "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE";
+
+        model.SignInWithMicrosoft.Execute(null);
+        model.CancelRecoverySignIn.Execute(null);
+
+        model.ConfirmingRecoverySignIn.ShouldBeFalse();
+        _opened.ShouldBeNull();
+        _link.HouseholdRequests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void With_no_recovery_code_signing_in_skips_the_warning()
+    {
+        _link.Connect(true);
+        var model = Model();
+
+        model.SignInWithMicrosoft.Execute(null);
+
+        model.ConfirmingRecoverySignIn.ShouldBeFalse();
+        _opened.ShouldNotBeNull();
     }
 
     /// <summary>Review finding A7: Google's client secret, configured on the view model, reaches the token exchange;

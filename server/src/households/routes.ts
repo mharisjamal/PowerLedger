@@ -1,13 +1,17 @@
 import {
   handleApprove,
   handleAskToJoin,
+  handleCommit,
   handleDeleteAccount,
   handleDenyRequest,
   handleGetRecovery,
   handleLink,
   handleListRequests,
+  handleOwnRequests,
   handlePutRecovery,
   handleRecover,
+  handleRequestNonce,
+  handleReveal,
   handleSignout,
 } from "./account";
 import { checkMember, checkSession, finishMember, finishSession, type MemberRow, type SessionRow } from "./auth";
@@ -19,6 +23,7 @@ import {
   handleListMembers,
   handlePostKeys,
   handleRemoveMember,
+  readMedium,
   readSmall,
 } from "./households";
 import { overAddressLimit } from "./http";
@@ -62,13 +67,16 @@ function asMember(
 
 /** An account route (N2): behind the address limit, a current session checked before the body is read, and the request
  * signed by that session's PC. */
-function asSession(act: (env: Cloudflare.Env, session: SessionRow, body: Uint8Array) => Promise<Response>): Handler {
+function asSession(
+  act: (env: Cloudflare.Env, session: SessionRow, body: Uint8Array) => Promise<Response>,
+  read: (request: Request) => Promise<Uint8Array | Response> = readSmall,
+): Handler {
   return async (request, env) => {
     const limited = await overAddressLimit(request, env);
     if (limited) return limited;
     const check = await checkSession(request, env);
     if (check instanceof Response) return check;
-    const body = await readSmall(request);
+    const body = await read(request);
     if (body instanceof Response) return body;
     const session = await finishSession(request, env, check, body);
     if (session instanceof Response) return session;
@@ -126,7 +134,9 @@ const ROUTES: Route[] = [
   { method: "POST", path: /^\/v1\/auth\/signin$/, handle: (request, env) => handleSignin(request, env) },
   { method: "POST", path: /^\/v1\/account\/household$/, handle: asSession(handleLink) },
   { method: "POST", path: /^\/v1\/account\/requests$/, handle: asSession((env, session) => handleAskToJoin(env, session)) },
-  { method: "PUT", path: /^\/v1\/account\/recovery$/, handle: asSession(handlePutRecovery) },
+  { method: "GET", path: /^\/v1\/account\/requests$/, handle: asSession((env, session) => handleOwnRequests(env, session)) },
+  { method: "POST", path: /^\/v1\/account\/requests\/nonce$/, handle: asSession(handleRequestNonce) },
+  { method: "PUT", path: /^\/v1\/account\/recovery$/, handle: asSession(handlePutRecovery, readMedium) },
   { method: "GET", path: /^\/v1\/account\/recovery$/, handle: asSession((env, session) => handleGetRecovery(env, session)) },
   { method: "POST", path: /^\/v1\/account\/recover$/, handle: asSession(handleRecover) },
   { method: "POST", path: /^\/v1\/auth\/signout$/, handle: (request, env) => handleSignout(request, env) },
@@ -139,7 +149,17 @@ const ROUTES: Route[] = [
   {
     method: "POST",
     path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}/approve$`),
-    handle: asMember((env, member, body, params) => handleApprove(env, member, params[1], body)),
+    handle: asMember((env, member, body, params) => handleApprove(env, member, params[1], body), readMedium),
+  },
+  {
+    method: "POST",
+    path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}/commit$`),
+    handle: asMember((env, member, body, params) => handleCommit(env, member, params[1], body)),
+  },
+  {
+    method: "POST",
+    path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}/reveal$`),
+    handle: asMember((env, member, body, params) => handleReveal(env, member, params[1], body)),
   },
   {
     method: "DELETE",

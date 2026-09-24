@@ -24,6 +24,13 @@ internal sealed class SignInViewModel : ObservableObject
     private bool _busy;
     private string? _message;
     private string _recoveryCodeInput = "";
+    private bool _confirmingRecoverySignIn;
+    private SignInProvider? _pendingSignInProvider;
+
+    /// <summary>Plan 0.9: shown before a sign-in that carries a typed recovery code actually runs, since it removes the
+    /// household's other PCs.</summary>
+    public const string RecoveryWarning =
+        "Signing in with the recovery code removes your household's other PCs from it. Use it only if you've lost them all; otherwise approve this PC from one of them.";
 
     /// <summary><paramref name="microsoftClientId"/> and <paramref name="googleClientId"/> are <see cref="SignInClients"/>'s,
     /// passed in so a test can use one that isn't empty; while either is empty its button says sign-in isn't set up yet.
@@ -40,8 +47,20 @@ internal sealed class SignInViewModel : ObservableObject
         _microsoftClientId = microsoftClientId;
         _googleClientId = googleClientId;
         _googleClientSecret = googleClientSecret;
-        SignInWithMicrosoft = new RelayCommand(() => _ = RunAsync(SignInProvider.Microsoft), () => !Busy && MicrosoftAvailable);
-        SignInWithGoogle = new RelayCommand(() => _ = RunAsync(SignInProvider.Google), () => !Busy && GoogleAvailable);
+        SignInWithMicrosoft = new RelayCommand(() => BeginSignIn(SignInProvider.Microsoft), () => !Busy && MicrosoftAvailable);
+        SignInWithGoogle = new RelayCommand(() => BeginSignIn(SignInProvider.Google), () => !Busy && GoogleAvailable);
+        ContinueRecoverySignIn = new RelayCommand(() =>
+        {
+            var provider = _pendingSignInProvider;
+            ConfirmingRecoverySignIn = false;
+            _pendingSignInProvider = null;
+            if (provider is { } chosen) _ = RunAsync(chosen);
+        });
+        CancelRecoverySignIn = new RelayCommand(() =>
+        {
+            ConfirmingRecoverySignIn = false;
+            _pendingSignInProvider = null;
+        });
         SignOut = new RelayCommand(() => _ = SignOutAsync(), () => !Busy);
         DeleteAccount = new RelayCommand(() => ConfirmingDelete = true, () => !Busy);
         ConfirmDelete = new RelayCommand(() => _ = DeleteAsync(), () => !Busy);
@@ -68,6 +87,10 @@ internal sealed class SignInViewModel : ObservableObject
     /// <summary>"Delete account" was pressed once; it waits for Confirm or Cancel.</summary>
     public bool ConfirmingDelete { get => _confirmingDelete; private set => SetProperty(ref _confirmingDelete, value); }
 
+    /// <summary>Plan 0.9: a sign-in with a typed recovery code was pressed once; it waits for Continue or Cancel before
+    /// the browser opens at all.</summary>
+    public bool ConfirmingRecoverySignIn { get => _confirmingRecoverySignIn; private set => SetProperty(ref _confirmingRecoverySignIn, value); }
+
     /// <summary>Why the last action didn't go through, or null.</summary>
     public string? Message { get => _message; private set => SetProperty(ref _message, value); }
 
@@ -85,6 +108,12 @@ internal sealed class SignInViewModel : ObservableObject
 
     public IRelayCommand SignInWithGoogle { get; }
 
+    /// <summary>Runs the sign-in the warning was about (plan 0.9).</summary>
+    public IRelayCommand ContinueRecoverySignIn { get; }
+
+    /// <summary>Backs out of a recovery-code sign-in; nothing was sent (plan 0.9).</summary>
+    public IRelayCommand CancelRecoverySignIn { get; }
+
     public IRelayCommand SignOut { get; }
 
     public IRelayCommand DeleteAccount { get; }
@@ -99,6 +128,19 @@ internal sealed class SignInViewModel : ObservableObject
     {
         SignedIn = household?.SignedIn ?? false;
         if (household is not null) _deviceId = household.DeviceId;
+    }
+
+    /// <summary>Plan 0.9: a typed recovery code warns before the browser even opens, since it removes the household's
+    /// other PCs; Continue there is what actually starts <see cref="RunAsync"/>.</summary>
+    private void BeginSignIn(SignInProvider provider)
+    {
+        if (!string.IsNullOrWhiteSpace(_recoveryCodeInput))
+        {
+            _pendingSignInProvider = provider;
+            ConfirmingRecoverySignIn = true;
+            return;
+        }
+        _ = RunAsync(provider);
     }
 
     /// <summary>Review finding A7: whatever goes wrong, including something <see cref="SignIn"/> itself didn't expect

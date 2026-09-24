@@ -5,11 +5,14 @@ using PowerLedger.Contracts;
 namespace PowerLedger.App;
 
 /// <summary>
-/// A pushed <see cref="NoticeKind.ConfirmJoin"/> (households design §7, task 0.8, Plan N review finding A2): this PC was
-/// approved by another member, signed in as the same account; its user checks the approving PC showed the same code
-/// before this PC actually joins. The question is <see cref="HouseholdNotice.Text"/> as the service words it; the code
-/// is <see cref="HouseholdNotice.ComparisonCode"/>, shown large and on its own. Codes match and Cancel both send the
-/// answer and close; not answered by the notice's expiry, it closes itself (households design §3).
+/// A pushed <see cref="NoticeKind.ConfirmJoin"/> (households design §7, plan 0.9): sent to the waiting PC R once both
+/// sides' nonces are in, before the approver P has actually approved anything — nothing here may say this PC is
+/// approved, since it is not yet. R's user checks the approving PC shows the same code; the approval itself, sealing
+/// the key and the member list to R, happens separately on P afterward. The question is
+/// <see cref="HouseholdNotice.Text"/> as the service words it; the code is <see cref="HouseholdNotice.ComparisonCode"/>,
+/// shown large and on its own. Codes match sends accept; They don't match deletes R's request, or makes it leave if it
+/// was already added — both close the window; not answered by the notice's expiry, it closes itself (households design
+/// §3).
 /// </summary>
 internal sealed class ConfirmJoinViewModel : ObservableObject
 {
@@ -26,7 +29,7 @@ internal sealed class ConfirmJoinViewModel : ObservableObject
         Heading = notice.Text;
         ComparisonCode = notice.ComparisonCode;
         CodesMatch = new RelayCommand(() => _ = AnswerAsync(true));
-        Cancel = new RelayCommand(() => _ = AnswerAsync(false));
+        CodesDontMatch = new RelayCommand(() => _ = AnswerAsync(false));
         if (notice.ExpiresAt is { } expires)
         {
             var delay = expires - clock.GetUtcNow();
@@ -43,7 +46,9 @@ internal sealed class ConfirmJoinViewModel : ObservableObject
 
     public IRelayCommand CodesMatch { get; }
 
-    public IRelayCommand Cancel { get; }
+    /// <summary>"They don't match" (plan 0.9): sends refuse for this prompt, the same as before, just no longer worded
+    /// as a plain Cancel.</summary>
+    public IRelayCommand CodesDontMatch { get; }
 
     /// <summary>The prompt was answered, or its time ran out: the window closes.</summary>
     public event Action? Closed;

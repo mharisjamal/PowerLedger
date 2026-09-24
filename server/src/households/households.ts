@@ -18,7 +18,12 @@ export const HOUSEHOLD_ID = /^[0-9a-f]{32}$/;
 export const MAX_MEMBERS = 16;
 /** The body limit for every household request but a batch. */
 export const SMALL_BODY_BYTES = 16 * 1024;
+/** The body limit for an approval and a recovery put, whose sealed key and member list can be 16384 characters. */
+export const MEDIUM_BODY_BYTES = 20 * 1024;
+/** A key envelope for a rotation: the key alone. */
 const MAX_ENVELOPE_CHARS = 1024;
+/** An approval's envelope, or a recovery body: the key and the member list with its epochs (plan 0.9). */
+export const MAX_SEALED_LIST_CHARS = 16384;
 const MAX_EPOCH = 2_147_483_647;
 
 const BAD_KEYS = "sign and dh must be P-256 public keys, as base64url SubjectPublicKeyInfo.";
@@ -26,6 +31,11 @@ const BAD_KEYS = "sign and dh must be P-256 public keys, as base64url SubjectPub
 /** Reads a body of at most 16 KB, or the 413 to send back. */
 export async function readSmall(request: Request): Promise<Uint8Array | Response> {
   return (await readBounded(request, SMALL_BODY_BYTES)) ?? errorResponse(413, "The body is larger than 16 KB.");
+}
+
+/** Reads a body of at most 20 KB, or the 413 to send back. */
+export async function readMedium(request: Request): Promise<Uint8Array | Response> {
+  return (await readBounded(request, MEDIUM_BODY_BYTES)) ?? errorResponse(413, "The body is larger than 20 KB.");
 }
 
 /** A posted {"sign","dh"} pair, checked; or the 400 to send back. */
@@ -62,8 +72,8 @@ export async function handleCreateHousehold(request: Request, env: Cloudflare.En
   const [created] = await env.DB.batch([
     env.DB.prepare("INSERT INTO households (id, created) VALUES (?, ?) ON CONFLICT DO NOTHING RETURNING id").bind(id, now),
     env.DB.prepare(
-      `INSERT INTO members (household, device, sign_key, dh_key, added, removed)
-       SELECT ?1, ?2, ?3, ?4, ?5, NULL WHERE NOT EXISTS (SELECT 1 FROM members WHERE household = ?1)`,
+      `INSERT INTO members (household, device, sign_key, dh_key, added, removed, added_epoch, removed_epoch)
+       SELECT ?1, ?2, ?3, ?4, ?5, NULL, 1, NULL WHERE NOT EXISTS (SELECT 1 FROM members WHERE household = ?1)`,
     ).bind(id, signer.device, keys.sign, keys.dh, now),
   ]);
   if (created.results.length > 0) return ok();
@@ -75,8 +85,8 @@ export async function handleCreateHousehold(request: Request, env: Cloudflare.En
   return mine ? ok() : errorResponse(409, "A household with this ID already exists.");
 }
 
-/** Adds a PC as a current member, or makes a removed one current again, while the household has fewer than 16; false
- * when it's full. */
+/** Adds a PC as a current member at the household's current epoch, or makes a removed one current again (a new
+ * added epoch, its removal cleared), while the household has fewer than 16; no row back when it's full. */
 export function addMemberStatement(
   env: Cloudflare.Env,
   household: string,
@@ -86,11 +96,12 @@ export function addMemberStatement(
   now: number,
 ): D1PreparedStatement {
   return env.DB.prepare(
-    `INSERT INTO members (household, device, sign_key, dh_key, added, removed)
-     SELECT ?1, ?2, ?3, ?4, ?5, NULL
+    `INSERT INTO members (household, device, sign_key, dh_key, added, removed, added_epoch, removed_epoch)
+     SELECT ?1, ?2, ?3, ?4, ?5, NULL, (SELECT epoch FROM households WHERE id = ?1), NULL
      WHERE (SELECT COUNT(*) FROM members WHERE household = ?1 AND removed IS NULL) < ?6
      ON CONFLICT (household, device) DO UPDATE SET
-       sign_key = excluded.sign_key, dh_key = excluded.dh_key, added = excluded.added, removed = NULL
+       sign_key = excluded.sign_key, dh_key = excluded.dh_key, added = excluded.added, removed = NULL,
+       added_epoch = excluded.added_epoch, removed_epoch = NULL
      RETURNING device`,
   ).bind(household, device, sign, dh, now, MAX_MEMBERS);
 }
@@ -133,36 +144,31 @@ export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, bo
 }
 
 /**
- * DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. A PC taken out (a lost
- * laptop, say) mustn't keep a way back in, so with it go:
- * - every linked account's recovery envelope, whose key is about to be replaced anyway;
- * - the link of each account the removed PC was signed in as, and those sessions of it (accounts linked to another
- *   household are left alone, so one household can't reach into another's by adding and removing a PC);
- * - any request of the PC's to join this household.
- * The household ends with its last member.
+ * DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave (plan 0.9). The row stays,
+ * marked removed at the household's current epoch. Accounts are left alone, sessions and links included, except that a
+ * recovery the removed PC holds goes; so does its request to join this household, if it had one. Removing a PC already
+ * removed is done (200). The household ends with its last member.
  */
 export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
   const hid = member.household;
   const removed = await env.DB.prepare(
-    "UPDATE members SET removed = ? WHERE household = ? AND device = ? AND removed IS NULL RETURNING device",
+    `UPDATE members SET removed = ?1, removed_epoch = (SELECT epoch FROM households WHERE id = ?2)
+     WHERE household = ?2 AND device = ?3 AND removed IS NULL RETURNING device`,
   )
     .bind(Date.now(), hid, device)
     .first();
-  if (!removed) return errorResponse(404, "That PC isn't a member of this household.");
+  if (!removed) {
+    // Removing a PC already removed is done, so a retried removal settles; one that never was a member is 404.
+    const was = await env.DB.prepare("SELECT 1 FROM members WHERE household = ? AND device = ?").bind(hid, device).first();
+    return was ? ok() : errorResponse(404, "That PC isn't a member of this household.");
+  }
 
-  // Read before the sessions go: the accounts the removed PC was signed in as, linked to this household.
-  const signedIn = await env.DB.prepare(
-    `SELECT s.account FROM sessions s JOIN account_households l ON l.account = s.account AND l.household = ?
-     WHERE s.device = ?`,
-  )
-    .bind(hid, device)
-    .all<{ account: string }>();
-  const accounts = JSON.stringify(signedIn.results.map((row) => row.account));
+  // Accounts are left alone (a PC can remove itself for reasons that have nothing to do with them), but the recovery the
+  // removed PC held for this household goes: the one PC that holds a code must be a member.
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)").bind(hid),
-    env.DB.prepare("DELETE FROM sessions WHERE device = ? AND account IN (SELECT value FROM json_each(?))").bind(device, accounts),
-    env.DB.prepare("DELETE FROM account_households WHERE household = ? AND account IN (SELECT value FROM json_each(?))")
-      .bind(hid, accounts),
+    env.DB.prepare(
+      "DELETE FROM recovery WHERE holder = ? AND account IN (SELECT account FROM account_households WHERE household = ?)",
+    ).bind(device, hid),
     env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(hid, device),
   ]);
 
@@ -174,8 +180,11 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
   return ok();
 }
 
-/** Deletes everything kept for a household: its batches and their bodies, key envelopes, members and itself, and for
- * sign-in the accounts' links to it, their recovery envelopes and the PCs waiting to join. */
+/**
+ * Ends a household whose last member has gone. The household and its member rows stay, every member removed, so a
+ * former member is told 410 rather than taken for a stranger (401); its batches and their bodies, key envelopes, the
+ * PCs waiting to join, and for sign-in every account's link to it and recovery for it, go.
+ */
 export async function endHousehold(env: Cloudflare.Env, household: string): Promise<void> {
   const bodies = await env.DB.prepare("SELECT r2_key FROM batches WHERE household = ?").bind(household).all<{ r2_key: string }>();
   await deleteBodies(env, bodies.results.map((row) => row.r2_key));
@@ -185,21 +194,42 @@ export async function endHousehold(env: Cloudflare.Env, household: string): Prom
     env.DB.prepare("DELETE FROM join_requests WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM batches WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM key_envelopes WHERE household = ?").bind(household),
-    env.DB.prepare("DELETE FROM members WHERE household = ?").bind(household),
-    env.DB.prepare("DELETE FROM households WHERE id = ?").bind(household),
   ]);
 }
 
-/** GET /v1/households/{hid}/members: every PC that is or was a member, times in unix ms. */
+interface MemberListRow {
+  device: string;
+  sign_key: string;
+  dh_key: string;
+  added: number;
+  removed: number | null;
+  added_epoch: number;
+  removed_epoch: number | null;
+}
+
+/**
+ * GET /v1/households/{hid}/members: {"members":[{"device","sign","dh","added","removed","addedEpoch","removedEpoch"}]},
+ * every PC that is or was a member. The epochs are the household's at each change, which is what orders membership
+ * (plan 0.9); added and removed are unix ms, for display. removed and removedEpoch are null while a PC is current.
+ */
 export async function handleListMembers(env: Cloudflare.Env, member: MemberRow): Promise<Response> {
   const rows = await env.DB.prepare(
-    "SELECT device, sign_key, dh_key, added, removed FROM members WHERE household = ? ORDER BY added, device",
+    `SELECT device, sign_key, dh_key, added, removed, added_epoch, removed_epoch FROM members
+     WHERE household = ? ORDER BY added, device`,
   )
     .bind(member.household)
-    .all<{ device: string; sign_key: string; dh_key: string; added: number; removed: number | null }>();
-  return Response.json(
-    rows.results.map((row) => ({ device: row.device, sign: row.sign_key, dh: row.dh_key, added: row.added, removed: row.removed })),
-  );
+    .all<MemberListRow>();
+  return Response.json({
+    members: rows.results.map((row) => ({
+      device: row.device,
+      sign: row.sign_key,
+      dh: row.dh_key,
+      added: row.added,
+      removed: row.removed,
+      addedEpoch: row.added_epoch,
+      removedEpoch: row.removed_epoch,
+    })),
+  });
 }
 
 interface Envelope {
@@ -208,8 +238,8 @@ interface Envelope {
 }
 
 /** An envelope's body: base64url of what HouseholdCrypto.WrapFor sealed, 28 bytes at least. */
-export function isEnvelopeBody(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > MAX_ENVELOPE_CHARS) return false;
+export function isEnvelopeBody(value: unknown, maxChars = MAX_ENVELOPE_CHARS): value is string {
+  if (typeof value !== "string" || value.length > maxChars) return false;
   const bytes = base64urlDecode(value);
   return bytes !== null && bytes.byteLength >= 28;
 }
@@ -247,6 +277,11 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     return errorResponse(400, `envelopes must be 1 to ${MAX_MEMBERS} of {"device","body"}, one per PC.`);
   }
 
+  // A re-post of the very bytes this PC's rotation to the current epoch was taken with is done, whatever has changed
+  // since (a member removed, another's key sealed at that epoch): its first answer was lost, and the rotation stands.
+  const at = await currentEpoch(env, member.household);
+  if (at !== null && epoch === at && (await isSameKeys(env, member, epoch, envelopes))) return ok();
+
   const current = await env.DB.prepare("SELECT device FROM members WHERE household = ? AND removed IS NULL")
     .bind(member.household)
     .all<{ device: string }>();
@@ -255,8 +290,6 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     return errorResponse(400, "Every envelope must be for a current member.");
   }
 
-  const at = await currentEpoch(env, member.household);
-  if (at !== null && epoch === at && (await isSameKeys(env, member, epoch, envelopes))) return ok();
   if (at === null || epoch !== at + 1) {
     return errorResponse(409, `The household's key is at epoch ${at}; new keys are for epoch ${(at ?? 0) + 1} only.`);
   }
@@ -283,18 +316,17 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
   return ok();
 }
 
-/** True when the epoch already holds exactly these envelopes, all sealed by this PC: a retry of a post whose answer was
- * lost, so the PC doesn't make a new key for nothing. */
+/** True when this PC's envelopes at the epoch are exactly these, byte for byte: a retry of a post whose answer was lost,
+ * so the PC doesn't make a new key for nothing. Envelopes other members sealed there since (approvals) don't count. */
 async function isSameKeys(env: Cloudflare.Env, member: MemberRow, epoch: number, envelopes: Envelope[]): Promise<boolean> {
-  const stored = await env.DB.prepare("SELECT device, from_device, body FROM key_envelopes WHERE household = ? AND epoch = ?")
-    .bind(member.household, epoch)
-    .all<{ device: string; from_device: string; body: string }>();
+  const stored = await env.DB.prepare(
+    "SELECT device, body FROM key_envelopes WHERE household = ? AND epoch = ? AND from_device = ?",
+  )
+    .bind(member.household, epoch, member.device)
+    .all<{ device: string; body: string }>();
   if (stored.results.length !== envelopes.length) return false;
-  const byDevice = new Map(stored.results.map((row) => [row.device, row]));
-  return envelopes.every((item) => {
-    const row = byDevice.get(item.device);
-    return row !== undefined && row.from_device === member.device && row.body === item.body;
-  });
+  const byDevice = new Map(stored.results.map((row) => [row.device, row.body]));
+  return envelopes.every((item) => byDevice.get(item.device) === item.body);
 }
 
 /** GET /v1/households/{hid}/keys/{epoch}: the caller's own envelope, and who sealed it. */

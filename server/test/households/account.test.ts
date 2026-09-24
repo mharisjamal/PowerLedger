@@ -102,41 +102,197 @@ describe("POST /v1/account/household", () => {
   });
 });
 
+function nonce(): string {
+  return base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+interface MemberRequest {
+  device: string;
+  account: string;
+  sign: string;
+  dh: string;
+  created: number;
+  approver: string | null;
+  commit: string | null;
+  nonce: string | null;
+  reveal: string | null;
+}
+
+interface OwnRequest {
+  device: string;
+  household: string;
+  approver: { device: string; sign: string; dh: string } | null;
+  commit: string | null;
+  reveal: string | null;
+  approved: { epoch: number } | null;
+  expires: number;
+}
+
+async function memberList(hid: string, by: TestDevice): Promise<MemberRequest[]> {
+  const response = await signedFetch(by, "GET", `/v1/households/${hid}/requests`);
+  expect(response.status).toBe(200);
+  return response.json();
+}
+
+async function ownRequests(who: SignedIn): Promise<OwnRequest[]> {
+  const response = await asAccount(who, "GET", "/v1/account/requests");
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { requests: OwnRequest[] }).requests;
+}
+
+function commitAs(hid: string, by: TestDevice, pc: SignedIn, commit = nonce()): Promise<Response> {
+  return signedFetch(by, "POST", `/v1/households/${hid}/requests/${pc.device.id}/commit`, { commit });
+}
+
+function nonceAs(pc: SignedIn, value = nonce()): Promise<Response> {
+  return asAccount(pc, "POST", "/v1/account/requests/nonce", { nonce: value });
+}
+
+function revealAs(hid: string, by: TestDevice, pc: SignedIn, value = nonce()): Promise<Response> {
+  return signedFetch(by, "POST", `/v1/households/${hid}/requests/${pc.device.id}/reveal`, { nonce: value });
+}
+
+function approveAs(hid: string, by: TestDevice, pc: SignedIn, epoch = 1, body = envelope()): Promise<Response> {
+  return signedFetch(by, "POST", `/v1/households/${hid}/requests/${pc.device.id}/approve`, { epoch, body });
+}
+
+/** `by` commits, `pc` answers with its nonce, `by` reveals: all an approval needs before it. */
+async function readyToApprove(hid: string, by: TestDevice, pc: SignedIn): Promise<void> {
+  expect((await commitAs(hid, by, pc)).status).toBe(200);
+  expect((await nonceAs(pc)).status).toBe(200);
+  expect((await revealAs(hid, by, pc)).status).toBe(200);
+}
+
 describe("join requests", () => {
-  it("lets a PC signed in as the account ask, and members see and approve it with its envelope", async () => {
+  it("run ask, commit, nonce, reveal and approve, each side seeing the other's steps, the PC reading its approval once", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
 
     const asked = await asAccount(laptop, "POST", "/v1/account/requests");
     expect(asked.status).toBe(200);
     expect(await asked.json()).toEqual({ ok: true, householdId: hid });
-
-    const waiting = await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`);
-    expect(waiting.status).toBe(200);
-    expect(await waiting.json()).toEqual([
+    const mine = await ownRequests(laptop);
+    expect(mine).toEqual([
+      { device: laptop.device.id, household: hid, approver: null, commit: null, reveal: null, approved: null, expires: expect.any(Number) },
+    ]);
+    expect(mine[0].expires).toBeGreaterThan(Date.now() + 23 * 60 * 60 * 1000);
+    expect(mine[0].expires).toBeLessThanOrEqual(Date.now() + 24 * 60 * 60 * 1000);
+    expect(await memberList(hid, owner.device)).toEqual([
       {
         device: laptop.device.id,
         account: owner.account,
         sign: laptop.device.sign,
         dh: laptop.device.dh,
         created: expect.any(Number),
+        approver: null,
+        commit: null,
+        nonce: null,
+        reveal: null,
       },
     ]);
 
+    const commit = nonce();
+    expect((await commitAs(hid, owner.device, laptop, commit)).status).toBe(200);
+    expect(await ownRequests(laptop)).toMatchObject([
+      { approver: { device: owner.device.id, sign: owner.device.sign, dh: owner.device.dh }, commit, reveal: null, approved: null },
+    ]);
+
+    const theirs = nonce();
+    expect((await nonceAs(laptop, theirs)).status).toBe(200);
+    expect(await memberList(hid, owner.device)).toMatchObject([{ approver: owner.device.id, commit, nonce: theirs, reveal: null }]);
+
+    const reveal = nonce();
+    expect((await revealAs(hid, owner.device, laptop, reveal)).status).toBe(200);
+    expect(await ownRequests(laptop)).toMatchObject([{ commit, reveal }]);
+
     const body = envelope();
-    const approved = await signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, {
+    expect((await approveAs(hid, owner.device, laptop, 1, body)).status).toBe(200);
+    expect(await isMember(hid, laptop.device.id)).toBe(true);
+    expect(await (await signedFetch(laptop.device, "GET", `/v1/households/${hid}/keys/1`)).json()).toEqual({
       epoch: 1,
+      from: owner.device.id,
       body,
     });
-    expect(approved.status).toBe(200);
+    expect(await memberList(hid, owner.device)).toEqual([]);
 
-    expect(await isMember(hid, laptop.device.id)).toBe(true);
-    const key = await signedFetch(laptop.device, "GET", `/v1/households/${hid}/keys/1`);
-    expect(await key.json()).toEqual({ epoch: 1, from: owner.device.id, body });
-    expect(await (await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`)).json()).toEqual([]);
+    expect(await ownRequests(laptop)).toMatchObject([{ approved: { epoch: 1 } }]);
+    expect(await ownRequests(laptop)).toEqual([]);
   });
 
-  it("lets a member deny a waiting PC, which is then gone from the list", async () => {
+  it("take each step once: an identical retry by the same PC is done, anything else 409", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const second = await newDevice();
+    await addMember(hid, owner.device, second);
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+
+    const commit = nonce();
+    expect((await commitAs(hid, owner.device, laptop, commit)).status).toBe(200);
+    expect((await commitAs(hid, owner.device, laptop, commit)).status).toBe(200);
+    expect((await commitAs(hid, owner.device, laptop)).status).toBe(409);
+    expect((await commitAs(hid, second, laptop)).status).toBe(409);
+
+    const theirs = nonce();
+    expect((await nonceAs(laptop, theirs)).status).toBe(200);
+    expect((await nonceAs(laptop, theirs)).status).toBe(200);
+    expect((await nonceAs(laptop)).status).toBe(409);
+
+    const reveal = nonce();
+    expect((await revealAs(hid, owner.device, laptop, reveal)).status).toBe(200);
+    expect((await revealAs(hid, owner.device, laptop, reveal)).status).toBe(200);
+    expect((await revealAs(hid, owner.device, laptop)).status).toBe(409);
+    expect(await memberList(hid, owner.device)).toMatchObject([{ commit, nonce: theirs, reveal }]);
+  });
+
+  it("keep their order: the nonce after a commit, the reveal after the nonce, the approval after the reveal", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+
+    expect((await nonceAs(laptop)).status).toBe(409);
+    expect((await commitAs(hid, owner.device, laptop)).status).toBe(200);
+    expect((await revealAs(hid, owner.device, laptop)).status).toBe(409);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(409);
+    expect((await nonceAs(laptop)).status).toBe(200);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(409);
+    expect(await isMember(hid, laptop.device.id)).toBe(false);
+    expect((await revealAs(hid, owner.device, laptop)).status).toBe(200);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(200);
+  });
+
+  it("let only the member that committed reveal and approve", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const second = await newDevice();
+    await addMember(hid, owner.device, second);
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await commitAs(hid, owner.device, laptop);
+    await nonceAs(laptop);
+
+    expect((await revealAs(hid, second, laptop)).status).toBe(403);
+    expect((await revealAs(hid, owner.device, laptop)).status).toBe(200);
+    expect((await approveAs(hid, second, laptop)).status).toBe(403);
+    expect(await isMember(hid, laptop.device.id)).toBe(false);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(200);
+  });
+
+  it("give 400 for a commit, nonce or reveal that isn't 32 bytes, and 404 for a PC not waiting", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    const short = base64urlEncode(new Uint8Array(16));
+
+    expect((await commitAs(hid, owner.device, laptop)).status).toBe(404);
+    expect((await nonceAs(laptop)).status).toBe(404);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+
+    expect((await commitAs(hid, owner.device, laptop, short)).status).toBe(400);
+    await commitAs(hid, owner.device, laptop);
+    expect((await nonceAs(laptop, short)).status).toBe(400);
+    await nonceAs(laptop);
+    expect((await revealAs(hid, owner.device, laptop, "not base64url!")).status).toBe(400);
+  });
+
+  it("let a member deny a waiting PC, which is then gone from the list", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
@@ -144,12 +300,13 @@ describe("join requests", () => {
 
     expect((await deny(await newDevice())).status).toBe(401);
     expect((await deny(owner.device)).status).toBe(200);
-    expect(await (await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`)).json()).toEqual([]);
+    expect(await memberList(hid, owner.device)).toEqual([]);
+    expect(await ownRequests(laptop)).toEqual([]);
     expect((await deny(owner.device)).status).toBe(404);
     expect(await isMember(hid, laptop.device.id)).toBe(false);
   });
 
-  it("keeps at most 2 PCs of one account waiting", async () => {
+  it("keep at most 2 PCs of one account waiting", async () => {
     const { hid, owner } = await linkedHousehold();
     const pcs = [await signIn(undefined, owner.account), await signIn(undefined, owner.account), await signIn(undefined, owner.account)];
 
@@ -158,11 +315,22 @@ describe("join requests", () => {
     expect((await asAccount(pcs[2], "POST", "/v1/account/requests")).status).toBe(409);
     expect((await asAccount(pcs[1], "POST", "/v1/account/requests")).status).toBe(200);
 
-    const waiting = (await (await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`)).json()) as { device: string }[];
+    const waiting = await memberList(hid, owner.device);
     expect(waiting.map((item) => item.device).sort()).toEqual([pcs[0].device.id, pcs[1].device.id].sort());
   });
 
-  it("clears a PC's request when it's added directly, and when it signs out", async () => {
+  it("start afresh when a PC asks again", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await commitAs(hid, owner.device, laptop);
+
+    await asAccount(laptop, "POST", "/v1/account/requests");
+
+    expect(await memberList(hid, owner.device)).toMatchObject([{ approver: null, commit: null, nonce: null, reveal: null }]);
+  });
+
+  it("are cleared when the PC is added directly, and when it signs out", async () => {
     const { hid, owner } = await linkedHousehold();
     const added = await signIn(undefined, owner.account);
     const leaving = await signIn(undefined, owner.account);
@@ -175,7 +343,7 @@ describe("join requests", () => {
     expect(await env.DB.prepare("SELECT device FROM join_requests WHERE household = ?").bind(hid).all()).toMatchObject({ results: [] });
   });
 
-  it("refuses to ask without a linked household, or when already in it", async () => {
+  it("can't be made without a linked household, or by a PC already in it", async () => {
     const lonely = await signIn();
     expect((await asAccount(lonely, "POST", "/v1/account/requests")).status).toBe(409);
 
@@ -183,7 +351,7 @@ describe("join requests", () => {
     expect((await asAccount(owner, "POST", "/v1/account/requests")).status).toBe(409);
   });
 
-  it("shows requests only to members, and approves only waiting PCs", async () => {
+  it("are shown only to members, and only waiting PCs are approved", async () => {
     const { hid, owner } = await linkedHousehold();
     const stranger = await newDevice();
 
@@ -196,10 +364,22 @@ describe("join requests", () => {
     expect(await isMember(hid, stranger.id)).toBe(false);
   });
 
-  it("gives 400 for an approval without a well-formed envelope", async () => {
+  it("take an approval's sealed key and member list up to 16384 characters", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
+
+    expect((await approveAs(hid, owner.device, laptop, 1, "A".repeat(16385))).status).toBe(400);
+    expect((await approveAs(hid, owner.device, laptop, 1, "A".repeat(16388))).status).toBe(400);
+    expect((await approveAs(hid, owner.device, laptop, 1, "A".repeat(16384))).status).toBe(200);
+  });
+
+  it("give 400 for an approval without a well-formed envelope", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
 
     for (const body of [{ epoch: 1 }, { epoch: "1", body: envelope() }, { epoch: 1, body: "AAAA" }]) {
       const response = await signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, body);
@@ -208,29 +388,25 @@ describe("join requests", () => {
     expect(await isMember(hid, laptop.device.id)).toBe(false);
   });
 
-  it("gives 409 for an approval sealing any epoch but the household's current one", async () => {
+  it("give 409 for an approval sealing any epoch but the household's current one", async () => {
     const { hid, owner } = await linkedHousehold();
-    const rotated = await signedFetch(owner.device, "POST", `/v1/households/${hid}/keys`, {
-      epoch: 2,
-      envelopes: [{ device: owner.device.id, body: envelope() }],
-    });
-    expect(rotated.status).toBe(200);
+    await rotate(hid, owner.device, 2);
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
-    const approve = (epoch: number) =>
-      signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, { epoch, body: envelope() });
+    await readyToApprove(hid, owner.device, laptop);
 
-    expect((await approve(1)).status).toBe(409);
-    expect((await approve(3)).status).toBe(409);
+    expect((await approveAs(hid, owner.device, laptop, 1)).status).toBe(409);
+    expect((await approveAs(hid, owner.device, laptop, 3)).status).toBe(409);
     expect(await isMember(hid, laptop.device.id)).toBe(false);
-    expect((await approve(2)).status).toBe(200);
+    expect((await approveAs(hid, owner.device, laptop, 2)).status).toBe(200);
     expect(await isMember(hid, laptop.device.id)).toBe(true);
   });
 
-  it("never overwrites an envelope: an approval whose PC already has one at the epoch is 409, and changes nothing", async () => {
+  it("never overwrite an envelope: an approval whose PC already has one at the epoch is 409, and changes nothing", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
     const kept = envelope();
     await env.DB.prepare(
       "INSERT INTO key_envelopes (household, epoch, device, from_device, body, created) VALUES (?, 1, ?, ?, ?, 1)",
@@ -238,11 +414,7 @@ describe("join requests", () => {
       .bind(hid, laptop.device.id, owner.device.id, kept)
       .run();
 
-    const approve = await signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, {
-      epoch: 1,
-      body: envelope(),
-    });
-    expect(approve.status).toBe(409);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(409);
     expect(await isMember(hid, laptop.device.id)).toBe(false);
     const row = await env.DB.prepare("SELECT body FROM key_envelopes WHERE household = ? AND device = ?")
       .bind(hid, laptop.device.id)
@@ -250,46 +422,47 @@ describe("join requests", () => {
     expect(row?.body).toBe(kept);
   });
 
-  it("keeps a request waiting when the household is full", async () => {
+  it("stay waiting when the household is full", async () => {
     const { hid, owner } = await linkedHousehold();
     for (let i = 0; i < 15; i++) await addMember(hid, owner.device, await newDevice());
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
 
-    const approve = await signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, {
-      epoch: 1,
-      body: envelope(),
-    });
-    expect(approve.status).toBe(409);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(409);
     expect(await isMember(hid, laptop.device.id)).toBe(false);
     expect(await env.DB.prepare("SELECT 1 FROM key_envelopes WHERE device = ?").bind(laptop.device.id).first()).toBeNull();
-    expect(await (await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`)).json()).toHaveLength(1);
+    expect(await memberList(hid, owner.device)).toHaveLength(1);
   });
 
-  it("are cleared by the daily cron after 7 days", async () => {
+  it("expire after 24 hours, and the daily cron clears them", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
+    await env.DB.prepare("UPDATE join_requests SET created = ? WHERE device = ?").bind(Date.now() - 25 * 60 * 60 * 1000, laptop.device.id).run();
 
-    await runRetention(env, new Date(Date.now() + 8 * DAY_MS));
+    expect(await memberList(hid, owner.device)).toEqual([]);
+    expect(await ownRequests(laptop)).toEqual([]);
+    expect((await commitAs(hid, owner.device, laptop)).status).toBe(404);
 
+    await runRetention(env, new Date());
     expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE household = ?").bind(hid).first()).toBeNull();
   });
 });
 
 describe("recovery", () => {
-  it("keeps the envelope a member puts at the household's current epoch, and only a hash of the verifier", async () => {
+  it("keeps what its holder puts at the household's current epoch, and only a hash of the verifier", async () => {
     const { hid, owner } = await linkedHousehold();
     const body = envelope();
     const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
     const verifier = base64urlEncode(verifierBytes);
 
-    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body, verifier, epoch: 7 })).status).toBe(200);
+    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body, verifier, epoch: 1, replace: true })).status).toBe(200);
 
     const newPc = await signIn(undefined, owner.account);
     const fetched = await asAccount(newPc, "GET", "/v1/account/recovery");
     expect(fetched.status).toBe(200);
-    expect(await fetched.json()).toEqual({ householdId: hid, epoch: 1, body });
+    expect(await fetched.json()).toEqual({ body, epoch: 1, holder: owner.device.id });
 
     const stored = await env.DB.prepare("SELECT * FROM recovery WHERE account = ?").bind(owner.account).first<Record<string, unknown>>();
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", verifierBytes));
@@ -298,13 +471,42 @@ describe("recovery", () => {
 
     await rotate(hid, owner.device, 2);
     const replaced = envelope();
-    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body: replaced, verifier })).status).toBe(200);
-    expect(await (await asAccount(newPc, "GET", "/v1/account/recovery")).json()).toEqual({ householdId: hid, epoch: 2, body: replaced });
+    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body: replaced, verifier, epoch: 1 })).status).toBe(409);
+    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body: replaced, verifier, epoch: 3 })).status).toBe(409);
+    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body: replaced, verifier, epoch: 2 })).status).toBe(200);
+    expect(await (await asAccount(newPc, "GET", "/v1/account/recovery")).json()).toEqual({ body: replaced, epoch: 2, holder: owner.device.id });
   });
 
-  it("is only put by a member of the linked household, with a 32-byte verifier", async () => {
+  it("is put only by its holder, unless replace hands it to a new holder with a new code", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const second = await signIn(undefined, owner.account);
+    await addMember(hid, owner.device, second.device);
+    const put = (who: SignedIn, replace?: boolean) =>
+      asAccount(who, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)), epoch: 1, replace });
+
+    expect((await put(owner)).status).toBe(409); // nothing to hold yet: a first code is a new code
+    expect((await put(owner, true)).status).toBe(200);
+    expect((await put(owner, false)).status).toBe(200);
+
+    expect((await put(second)).status).toBe(409);
+    expect((await put(second, true)).status).toBe(200);
+    expect(((await (await asAccount(owner, "GET", "/v1/account/recovery")).json()) as { holder: string }).holder).toBe(second.device.id);
+    expect((await put(owner)).status).toBe(409); // a newer code exists: the old holder forgets its key
+  });
+
+  it("takes a sealed key and member list up to 16384 characters", async () => {
+    const { owner } = await linkedHousehold();
+    const put = (body: string) =>
+      asAccount(owner, "PUT", "/v1/account/recovery", { body, verifier: base64urlEncode(new Uint8Array(32)), epoch: 1, replace: true });
+
+    expect((await put("A".repeat(16385))).status).toBe(400);
+    expect((await put("A".repeat(16388))).status).toBe(400);
+    expect((await put("A".repeat(16384))).status).toBe(200);
+  });
+
+  it("is only put by a current member of the linked household, well formed", async () => {
     const lonely = await signIn();
-    const good = { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)) };
+    const good = { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)), epoch: 1, replace: true };
     expect((await asAccount(lonely, "PUT", "/v1/account/recovery", good)).status).toBe(409);
 
     const { owner } = await linkedHousehold();
@@ -312,42 +514,53 @@ describe("recovery", () => {
     expect((await asAccount(outsider, "PUT", "/v1/account/recovery", good)).status).toBe(403);
 
     for (const body of [
-      { body: envelope() },
-      { body: envelope(), verifier: base64urlEncode(new Uint8Array(16)) },
-      { body: "AAAA", verifier: good.verifier },
+      { ...good, body: undefined },
+      { ...good, verifier: base64urlEncode(new Uint8Array(16)) },
+      { ...good, body: "AAAA" },
+      { ...good, epoch: undefined },
+      { ...good, epoch: -1 },
+      { ...good, replace: "yes" },
     ]) {
       expect((await asAccount(owner, "PUT", "/v1/account/recovery", body)).status, JSON.stringify(body)).toBe(400);
     }
   });
 
-  it("adds a PC that sends the verifier, with no approval", async () => {
+  it("makes the recovering PC the only current member at any stored epoch, and is used up", async () => {
     const { hid, owner } = await linkedHousehold();
+    const other = await newDevice();
+    await addMember(hid, owner.device, other);
     const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier });
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
+    await rotate(hid, owner.device, 2);
     const newPc = await signIn(undefined, owner.account);
     await asAccount(newPc, "POST", "/v1/account/requests");
 
     const recovered = await asAccount(newPc, "POST", "/v1/account/recover", { verifier });
     expect(recovered.status).toBe(200);
-    expect(await recovered.json()).toEqual({ ok: true, householdId: hid });
+    expect(await recovered.json()).toEqual({ household: hid, epoch: 2 });
 
-    expect(await isMember(hid, newPc.device.id)).toBe(true);
+    const rows = await env.DB.prepare("SELECT device, removed_epoch, added_epoch FROM members WHERE household = ? ORDER BY device")
+      .bind(hid)
+      .all<{ device: string; removed_epoch: number | null; added_epoch: number }>();
+    const byDevice = new Map(rows.results.map((row) => [row.device, row]));
+    expect(byDevice.get(newPc.device.id)).toMatchObject({ removed_epoch: null, added_epoch: 2 });
+    expect(byDevice.get(owner.device.id)).toMatchObject({ removed_epoch: 2 });
+    expect(byDevice.get(other.id)).toMatchObject({ removed_epoch: 2 });
+    expect((await asAccount(newPc, "GET", "/v1/account/recovery")).status).toBe(404);
     expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE device = ?").bind(newPc.device.id).first()).toBeNull();
+    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier })).status).toBe(404);
   });
 
-  it("refuses another verifier, one from before the key changed, and an account with nothing to recover", async () => {
+  it("refuses another verifier, a malformed one, and an account with nothing to recover", async () => {
     const { hid, owner } = await linkedHousehold();
     const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier });
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
     const newPc = await signIn(undefined, owner.account);
     const other = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
 
     expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier: other })).status).toBe(403);
     expect((await asAccount(newPc, "POST", "/v1/account/recover", {})).status).toBe(400);
     expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier: base64urlEncode(new Uint8Array(16)) })).status).toBe(400);
-
-    await rotate(hid, owner.device, 2);
-    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier })).status).toBe(409);
     expect(await isMember(hid, newPc.device.id)).toBe(false);
 
     const lonely = await signIn();
@@ -356,53 +569,45 @@ describe("recovery", () => {
 });
 
 describe("removing a member", () => {
-  it("ends the removed PC's session, and leaves the remover's alone", async () => {
+  it("leaves the removed PC's session and its account's link alone, whoever removes it", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
+    const desktop = await signIn(undefined, owner.account);
     await addMember(hid, owner.device, laptop.device);
+    await addMember(hid, owner.device, desktop.device);
 
     expect((await signedFetch(owner.device, "DELETE", `/v1/households/${hid}/members/${laptop.device.id}`)).status).toBe(200);
+    expect((await signedFetch(desktop.device, "DELETE", `/v1/households/${hid}/members/${desktop.device.id}`)).status).toBe(200);
 
-    expect((await asAccount(laptop, "POST", "/v1/account/requests")).status).toBe(401);
-    expect((await asAccount(owner, "GET", "/v1/account/recovery")).status).toBe(404);
+    for (const pc of [laptop, desktop, owner]) {
+      expect((await asAccount(pc, "GET", "/v1/account/recovery")).status).toBe(404);
+    }
+    expect(await env.DB.prepare("SELECT household FROM account_households WHERE account = ?").bind(owner.account).first())
+      .toEqual({ household: hid });
   });
 
-  it("ends a leaving PC's session too", async () => {
-    const { hid, owner } = await linkedHousehold();
-    const laptop = await signIn(undefined, owner.account);
-    await addMember(hid, owner.device, laptop.device);
-
-    expect((await signedFetch(laptop.device, "DELETE", `/v1/households/${hid}/members/${laptop.device.id}`)).status).toBe(200);
-
-    expect((await asAccount(laptop, "GET", "/v1/account/recovery")).status).toBe(401);
-    expect((await asAccount(owner, "GET", "/v1/account/recovery")).status).toBe(404);
-  });
-
-  it("revokes every linked account's recovery, and unlinks the accounts the removed PC was signed in as", async () => {
+  it("deletes a recovery only when the removed PC is its holder", async () => {
     const { hid, owner } = await linkedHousehold();
     const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier });
-    // A second account, a family member's, linked to the same household, whose PC stays.
+    // A second account, a family member's, linked to the same household, holding its own recovery.
     const family = await signIn();
     await addMember(hid, owner.device, family.device);
     await asAccount(family, "POST", "/v1/account/household", { householdId: hid });
-    await asAccount(family, "PUT", "/v1/account/recovery", { body: envelope(), verifier });
-    const stolen = await signIn(undefined, owner.account);
-    await addMember(hid, owner.device, stolen.device);
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
+    await asAccount(family, "PUT", "/v1/account/recovery", { body: envelope(), verifier, epoch: 1, replace: true });
+    const other = await signIn(undefined, owner.account);
+    await addMember(hid, owner.device, other.device);
 
-    expect((await signedFetch(family.device, "DELETE", `/v1/households/${hid}/members/${stolen.device.id}`)).status).toBe(200);
-
+    expect((await signedFetch(family.device, "DELETE", `/v1/households/${hid}/members/${other.device.id}`)).status).toBe(200);
     for (const account of [owner.account, family.account]) {
-      expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(account).first(), account).toBeNull();
+      expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(account).first(), account).not.toBeNull();
     }
-    expect(await env.DB.prepare("SELECT 1 FROM account_households WHERE account = ?").bind(owner.account).first()).toBeNull();
-    expect(await env.DB.prepare("SELECT household FROM account_households WHERE account = ?").bind(family.account).first())
-      .toEqual({ household: hid });
 
-    // Whoever holds the stolen PC's account can neither recover nor ask to join again.
-    const thief = await signIn(undefined, owner.account);
-    expect((await asAccount(thief, "POST", "/v1/account/recover", { verifier })).status).toBe(404);
-    expect((await asAccount(thief, "POST", "/v1/account/requests")).status).toBe(409);
+    expect((await signedFetch(family.device, "DELETE", `/v1/households/${hid}/members/${owner.device.id}`)).status).toBe(200);
+    expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(owner.account).first()).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(family.account).first()).not.toBeNull();
+    expect(await env.DB.prepare("SELECT household FROM account_households WHERE account = ?").bind(owner.account).first())
+      .toEqual({ household: hid });
   });
 
   it("leaves a PC's session and link for its own household alone when another household removes it", async () => {
@@ -437,7 +642,7 @@ describe("removing a member", () => {
 describe("a household that ends", () => {
   it("takes its account links, join requests and recovery with it", async () => {
     const { hid, owner } = await linkedHousehold();
-    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)) });
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)), epoch: 1, replace: true });
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
 
@@ -473,7 +678,7 @@ describe("POST /v1/auth/signout", () => {
 describe("DELETE /v1/account", () => {
   it("deletes the account, its link, sessions, requests and recovery; the household carries on", async () => {
     const { hid, owner } = await linkedHousehold();
-    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)) });
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(new Uint8Array(32)), epoch: 1, replace: true });
     const laptop = await signIn(undefined, owner.account);
     await asAccount(laptop, "POST", "/v1/account/requests");
     const bystander = await signIn();

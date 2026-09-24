@@ -85,7 +85,7 @@ public class SignInTests
         q["client_id"].ShouldBe("test-client");
         q["response_type"].ShouldBe("code");
         q["scope"].ShouldBe("openid email");
-        q["redirect_uri"].ShouldBe($"http://localhost:{_server.Port}/");
+        q["redirect_uri"].ShouldBe($"http://127.0.0.1:{_server.Port}/");
         q["code_challenge_method"].ShouldBe("S256");
         q["state"].Length.ShouldBeGreaterThan(10);
         q["code_challenge"].Length.ShouldBeGreaterThan(10);
@@ -138,7 +138,7 @@ public class SignInTests
         form["client_id"].ShouldBe("test-client");
         form["code"].ShouldBe("auth-code-1");
         form["grant_type"].ShouldBe("authorization_code");
-        form["redirect_uri"].ShouldBe($"http://localhost:{_server.Port}/");
+        form["redirect_uri"].ShouldBe($"http://127.0.0.1:{_server.Port}/");
         Pkce.Challenge(form["code_verifier"]).ShouldBe(q["code_challenge"]);
     }
 
