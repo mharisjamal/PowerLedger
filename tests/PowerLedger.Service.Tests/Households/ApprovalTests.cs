@@ -60,7 +60,7 @@ public sealed class ApprovalTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Not_approving_leaves_it_waiting_and_it_isnt_asked_about_again()
+    public async Task Not_approving_turns_it_away_on_the_server()
     {
         var (desktop, _) = await Household();
         await desktop.Send<HouseholdReply>(SignIn(desktop));
@@ -74,8 +74,66 @@ public sealed class ApprovalTests : IAsyncLifetime
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
 
         _relay.Posted($"POST /v1/households/{desktop.Worker.Store.HouseholdId}/requests").ShouldBe(0);
-        _relay.Waiting(desktop.Worker.Store.HouseholdId!).ShouldBe([study.Worker.DeviceId]);
+        _relay.Posted($"DELETE /v1/households/{desktop.Worker.Store.HouseholdId}/requests/{study.Worker.DeviceId}").ShouldBe(1);
+        _relay.Waiting(desktop.Worker.Store.HouseholdId!).ShouldBeEmpty();
+        desktop.Board.Household!.PendingApprovals.ShouldBe(0);
         desktop.Worker.Prompts.Open.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_pc_signed_in_as_another_account_is_asked_about_without_saying_it_is_you()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        using var stranger = DeviceKeys.Create();
+        _relay.Ask(desktop.Worker.Store.HouseholdId!, stranger, "another-account");
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        (await desktop.Next(NoticeKind.ApprovePrompt)).Text.ShouldBe("A PC asks to join your household. Approve it?");
+    }
+
+    [Fact]
+    public async Task An_approval_refused_for_an_older_key_goes_again_with_the_newest()
+    {
+        var (desktop, laptop) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var household = desktop.Worker.Store.HouseholdId!;
+        var newer = HouseholdCrypto.NewKey();                                     // the laptop rotated; the desktop hasn't heard
+        using var laptopKeys = laptop.Worker.Store.DeviceKeys();
+        using var client = new RelayClient(FakeRelay.Endpoint, _clock, _relay);
+        await client.PostKeysAsync(laptopKeys, household, 2,
+            KeyWrap.For(laptopKeys, household, 2, newer, [desktop.Household.Member(desktop.Worker.DeviceId)!, laptop.Household.Member(laptop.Worker.DeviceId)!]),
+            CancellationToken.None);
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await study.Send<HouseholdReply>(SignIn(study));
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, (await desktop.Next(NoticeKind.ApprovePrompt)).PromptId!, true));
+        await desktop.Worker.Running;
+
+        desktop.Worker.Store.Epoch.ShouldBe(2);                                   // it caught up
+        _relay.Waiting(household).ShouldBe([study.Worker.DeviceId]);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                // and approves again with the newest key
+        _relay.Waiting(household).ShouldBeEmpty();
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+        study.Worker.Store.Epoch.ShouldBe(2);
+        study.Worker.Store.CurrentKey.ShouldBe(newer);
+    }
+
+    [Fact]
+    public async Task A_link_the_server_lost_is_made_again_at_the_next_turn_after_a_while()
+    {
+        var (desktop, _) = await Household();
+        await desktop.Send<HouseholdReply>(SignIn(desktop));
+        var household = desktop.Worker.Store.HouseholdId!;
+        _relay.Unlink("alice");
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        _relay.LinkOf("alice").ShouldBeNull();                                    // linked at sign-in: not looked at again yet
+        _clock.Advance(RelaySync.MembersEvery);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        _relay.LinkOf("alice").ShouldBe(household);
     }
 
     [Fact]

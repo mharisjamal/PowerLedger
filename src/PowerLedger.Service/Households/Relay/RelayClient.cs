@@ -141,6 +141,10 @@ internal sealed class RelayClient : IDisposable
         SendAsync<Done>(HttpMethod.Post, $"v1/households/{householdId}/requests/{deviceId}/approve",
             Json(new ApproveBody(epoch, envelope), HouseholdJson.Default.ApproveBody), keys, null, cancel);
 
+    /// <summary>N2's <c>DELETE /v1/households/{hid}/requests/{device}</c>: the user said not to let that PC in.</summary>
+    public Task<RelayResult<Done>> DenyAsync(DeviceKeys keys, string householdId, string deviceId, CancellationToken cancel) =>
+        SendAsync<Done>(HttpMethod.Delete, $"v1/households/{householdId}/requests/{deviceId}", null, keys, null, cancel);
+
     /// <summary>N2's <c>POST /v1/auth/signout</c>.</summary>
     public Task<RelayResult<Done>> SignOutAsync(DeviceKeys keys, string session, CancellationToken cancel) =>
         SendAsync<Done>(HttpMethod.Post, "v1/auth/signout", [], keys, null, cancel, session: session);
@@ -269,22 +273,22 @@ internal sealed record BatchPlain(int V, WireMember Device, List<WireRow> Rows);
 /// <summary>N2: the body of <c>POST /v1/auth/signin</c>; <see cref="Nonce"/> is the salt the App made the ID token's nonce from.</summary>
 internal sealed record SignInBody(string Provider, string IdToken, string Nonce, string Sign, string Dh);
 
-/// <summary>N2: what sign-in answers: this PC's session, the household the account is linked to, and whether it has a
-/// recovery envelope.</summary>
-internal sealed record SignInReply(string Session, string? HouseholdId, bool HasRecovery);
+/// <summary>N2: what sign-in answers: this PC's session, its account's opaque ID, the household the account is linked to,
+/// and whether it has a recovery envelope.</summary>
+internal sealed record SignInReply(string Session, string? HouseholdId, bool HasRecovery, string? Account = null);
 
 internal sealed record LinkBody(string HouseholdId);
 
-/// <summary>N2: the recovery envelope as put: the household key sealed under the recovery code's key, the verifier the proof
-/// of recovering is checked with, and the key's epoch.</summary>
-internal sealed record RecoveryBody(string Body, string Verifier, int Epoch);
+/// <summary>N2: the recovery envelope as put: the household key sealed under the recovery code's key, and the verifier a
+/// recovering PC shows. The server records the household's epoch with it.</summary>
+internal sealed record RecoveryBody(string Body, string Verifier);
 
 internal sealed record RecoveryReply(string? HouseholdId, int? Epoch, string Body);
 
 internal sealed record RecoverBody(string Verifier);
 
-/// <summary>N2: a PC signed in as the account waiting to join.</summary>
-internal sealed record JoinRequestItem(string Device, string Sign, string Dh, long Created);
+/// <summary>N2: a PC waiting to join, signed in as the account <see cref="Account"/>, an opaque ID.</summary>
+internal sealed record JoinRequestItem(string Device, string Sign, string Dh, long Created, string? Account = null);
 
 internal sealed record ApproveBody(int Epoch, string Body);
 

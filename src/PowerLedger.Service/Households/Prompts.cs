@@ -28,9 +28,12 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
         return AskAsync(NoticeKind.JoinPrompt, text, question.FromName, question.ComparisonCode, cancel);
     }
 
-    /// <summary>N2: a PC signed in as this account asks to join. The server knows it only by its keys, so it has no name yet.</summary>
-    public Task<bool> AskToApproveAsync(CancellationToken cancel) =>
-        AskAsync(NoticeKind.ApprovePrompt, "A PC signed in as you asks to join your household. Approve it?", null, null, cancel);
+    /// <summary>N2: a PC asks to join, signed in as this PC's own account when <paramref name="asYou"/>, else as another linked
+    /// to the household. The server knows it only by its keys, so it has no name yet.</summary>
+    public Task<bool> AskToApproveAsync(bool asYou, CancellationToken cancel) => AskAsync(
+        NoticeKind.ApprovePrompt,
+        asYou ? "A PC signed in as you asks to join your household. Approve it?" : "A PC asks to join your household. Approve it?",
+        null, null, cancel);
 
     /// <summary>The user's answer to an open prompt.</summary>
     /// <returns>False when no prompt of that ID waits: it was answered, ran out, or never was.</returns>

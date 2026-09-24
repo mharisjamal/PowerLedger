@@ -9,25 +9,26 @@ namespace PowerLedger.Service.Households;
 
 /// <summary>
 /// N2's recovery envelope (households design §7): the household key sealed under the key made from the recovery code, with
-/// its household and epoch as associated data, and the verifier, HKDF of the household key: the server keeps it, and a
-/// recovering PC shows it, which only a PC that opened the envelope can make, since the server never has the key.
+/// its household as associated data, and the verifier, HKDF of the household key: the server keeps it with the epoch it
+/// was put at, and a recovering PC shows it, which only a PC that opened the envelope can make, since the server never has
+/// the key. It opens only at the household's current epoch, so a new key is put again.
 /// </summary>
 internal static class Recovery
 {
-    public static byte[] Aad(string householdId, int epoch) => Encoding.UTF8.GetBytes($"powerledger recovery|{householdId}|{epoch}");
+    public static byte[] Aad(string householdId) => Encoding.UTF8.GetBytes($"powerledger recovery|{householdId}");
 
     public static byte[] Verifier(byte[] householdKey) => HouseholdCrypto.Hkdf(householdKey, [], "powerledger recovery verifier");
 
-    public static RecoveryBody Envelope(byte[] recoveryKey, string householdId, int epoch, byte[] householdKey) => new(
-        Wire.Encode(HouseholdCrypto.Seal(recoveryKey, householdKey, Aad(householdId, epoch))), Wire.Encode(Verifier(householdKey)), epoch);
+    public static RecoveryBody Envelope(byte[] recoveryKey, string householdId, byte[] householdKey) => new(
+        Wire.Encode(HouseholdCrypto.Seal(recoveryKey, householdKey, Aad(householdId))), Wire.Encode(Verifier(householdKey)));
 
     /// <summary>The household key in the account's envelope; null when the code's key doesn't open it.</summary>
     public static byte[]? Open(byte[] recoveryKey, RecoveryReply reply)
     {
-        if (reply is not { HouseholdId: { } householdId, Epoch: { } epoch } || Wire.Decode(reply.Body) is not { } sealedKey) return null;
+        if (reply is not { HouseholdId: { } householdId, Epoch: > 0 } || Wire.Decode(reply.Body) is not { } sealedKey) return null;
         try
         {
-            var key = HouseholdCrypto.Open(recoveryKey, sealedKey, Aad(householdId, epoch));
+            var key = HouseholdCrypto.Open(recoveryKey, sealedKey, Aad(householdId));
             return key.Length == HouseholdCrypto.KeyLength ? key : null;
         }
         catch (CryptographicException)
@@ -75,6 +76,8 @@ internal sealed partial class HouseholdWorker
             if (!signIn.Ok) return Reply(request.Id, false, $"Couldn't sign in: {(signIn.Status is 400 or 401 or 403 && signIn.Error is { } why ? why : signIn.Problem)}.");
             var account = signIn.Value!;
             _store.Session = account.Session;
+            _store.Account = account.Account;
+            _linkedAt = null;                                                  // links again at the next turn, as a check
             _log.LogInformation("Signed in with {Provider}", request.Provider);
 
             if (recovery is not null) return await RecoverLockedAsync(request.Id, account.Session, recovery, deadline.Token).ConfigureAwait(false);
@@ -82,6 +85,7 @@ internal sealed partial class HouseholdWorker
             {
                 if (_store.HouseholdId == linked)
                 {
+                    _linkedAt = _clock.GetUtcNow();
                     var made = account.HasRecovery ? null : await MakeRecoveryAsync(account.Session, linked, deadline.Token).ConfigureAwait(false);
                     return Reply(request.Id, true, "Signed in.", made);
                 }
@@ -94,6 +98,7 @@ internal sealed partial class HouseholdWorker
             {
                 var link = await _environment.Relay.LinkAsync(_keys, account.Session, mine, deadline.Token).ConfigureAwait(false);
                 if (!link.Ok) return Reply(request.Id, true, $"Signed in, but your household couldn't be linked to your account: {link.Problem}.");
+                _linkedAt = _clock.GetUtcNow();
                 var code = await MakeRecoveryAsync(account.Session, mine, deadline.Token).ConfigureAwait(false);
                 return Reply(request.Id, true, "Signed in, and your household is linked to your account.", code);
             }
@@ -112,7 +117,7 @@ internal sealed partial class HouseholdWorker
         if (_store.CurrentKey is not { } key) return null;
         var code = RecoveryCode.New();
         var recoveryKey = RecoveryCode.Key(RecoveryCode.Normalize(code)!);
-        var put = await _environment.Relay.PutRecoveryAsync(_keys, session, Recovery.Envelope(recoveryKey, householdId, _store.Epoch, key), cancel)
+        var put = await _environment.Relay.PutRecoveryAsync(_keys, session, Recovery.Envelope(recoveryKey, householdId, key), cancel)
             .ConfigureAwait(false);
         if (!put.Ok)
         {

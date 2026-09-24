@@ -18,6 +18,9 @@ internal sealed partial class HouseholdWorker
     private readonly ConcurrentDictionary<string, bool> _asked = new(StringComparer.Ordinal);
     private int _waitingApprovals;
 
+    /// <summary>When this PC last linked the account to its household, as a check that the link is still there.</summary>
+    private DateTimeOffset? _linkedAt;
+
     /// <summary>With its sync, a member signed in looks at the PCs waiting to join and asks the user at the screen about each
     /// new one; with nobody at the screen to ask, it doesn't look. An approval the server refused, as when this PC's key was
     /// behind the household's, goes again.</summary>
@@ -28,6 +31,7 @@ internal sealed partial class HouseholdWorker
             Volatile.Write(ref _waitingApprovals, 0);
             return;
         }
+        await LinkAgainIfDueAsync(householdId, cancel).ConfigureAwait(false);
         if (!_notices.AnyoneAtTheScreen) return;
         var result = await _environment.Relay.RequestsAsync(_keys, householdId, cancel).ConfigureAwait(false);
         if (!result.Ok) return;
@@ -51,9 +55,15 @@ internal sealed partial class HouseholdWorker
 
     private async Task AskToApproveAsync(string householdId, JoinRequestItem item)
     {
-        if (!await _prompts.AskToApproveAsync(_stopping.Token).ConfigureAwait(false))
+        var asYou = item.Account is not null && item.Account == _store.Account;
+        if (!await _prompts.AskToApproveAsync(asYou, _stopping.Token).ConfigureAwait(false))
         {
-            if (!_notices.AnyoneAtTheScreen) _asked.TryRemove(item.Device, out _);    // nobody saw it: asked again next time
+            if (!_notices.AnyoneAtTheScreen)
+            {
+                _asked.TryRemove(item.Device, out _);                          // nobody saw it: asked again next time
+                return;
+            }
+            await DenyAsync(householdId, item).ConfigureAwait(false);
             return;
         }
         _asked[item.Device] = true;
@@ -85,6 +95,42 @@ internal sealed partial class HouseholdWorker
         }
         _log.LogInformation("The approval of {Device} didn't go ({Status}: {Problem}); it goes again at the next turn", item.Device, result.Status,
             result.Problem);
+        if (result.Status == 409) await _relaySync.CatchUpAsync(_keys, cancel).ConfigureAwait(false);    // sealed an older key
+    }
+
+    /// <summary>The user said not to let the PC in: its request is taken off the server, so no member is asked again.</summary>
+    private async Task DenyAsync(string householdId, JoinRequestItem item)
+    {
+        var result = await _environment.Relay.DenyAsync(_keys, householdId, item.Device, _stopping.Token).ConfigureAwait(false);
+        if (result.Ok || result.Status == 404)
+        {
+            Volatile.Write(ref _waitingApprovals, Math.Max(0, Volatile.Read(ref _waitingApprovals) - 1));
+            Publish();
+        }
+        else
+        {
+            _log.LogInformation("Turning {Device} away didn't reach the server ({Problem})", item.Device, result.Problem);
+        }
+    }
+
+    /// <summary>
+    /// Links the account to this PC's household again every few hours, and at the first turn after signing in: the link is
+    /// gone after some changes on the server, as when the PC that made it is removed (the lead's Worker contract, D). With
+    /// the recovery code's key, the recovery envelope is put again with it, at the current key.
+    /// </summary>
+    private async Task LinkAgainIfDueAsync(string householdId, CancellationToken cancel)
+    {
+        if (_store.Session is not { } session) return;
+        var now = _clock.GetUtcNow();
+        if (_linkedAt is { } linked && now - linked < RelaySync.MembersEvery) return;
+        var link = await _environment.Relay.LinkAsync(_keys, session, householdId, cancel).ConfigureAwait(false);
+        if (link.Status == 401)
+        {
+            _store.Session = null;                                             // the session has ended
+            return;
+        }
+        _linkedAt = now;                                                       // linked, or linked elsewhere: looked at again later
+        if (link.Ok && _store.RecoveryKey is not null) _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId));
     }
 
     /// <summary>A PC signed in and waiting to join looks, with each turn, whether it has been approved: once the server lists
@@ -116,10 +162,10 @@ internal sealed partial class HouseholdWorker
 
     /// <summary>A new household key goes into the recovery envelope too, when this PC is signed in and holds the recovery
     /// code's key (households design §7): the server is told with the rest.</summary>
-    private void QueueRecovery(string householdId, int epoch, byte[] key)
+    private void QueueRecovery(string householdId)
     {
-        if (_store.Session is null || _store.RecoveryKey is not { } recoveryKey) return;
-        _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId, Epoch: epoch, Recovery: Recovery.Envelope(recoveryKey, householdId, epoch, key)));
+        if (_store.Session is null || _store.RecoveryKey is null) return;
+        _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId));
     }
 
     private async Task<PipeMessage> SignOutAsync(SignOutRequest request, CancellationToken cancel)
@@ -131,6 +177,7 @@ internal sealed partial class HouseholdWorker
         var result = await _environment.Relay.SignOutAsync(_keys, session, deadline.Token).ConfigureAwait(false);
         if (!result.Ok && result.Status != 401) return Reply(request.Id, false, $"Couldn't sign out: {result.Problem}.");
         _store.Session = null;
+        _store.Account = null;
         _store.AskedToJoin = null;
         return Reply(request.Id, true, "Signed out.");
     }
@@ -151,6 +198,7 @@ internal sealed partial class HouseholdWorker
         }
         if (!result.Ok) return Reply(request.Id, false, $"Couldn't delete your account: {result.Problem}.");
         _store.Session = null;
+        _store.Account = null;
         _store.AskedToJoin = null;
         _store.RecoveryKey = null;
         _log.LogInformation("Deleted the account; the household carries on without sign-in");

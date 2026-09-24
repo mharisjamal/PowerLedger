@@ -37,6 +37,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string WaitingKey = "household.waiting-since";
     internal const string RecoveryKeyKey = "household.recovery-key";
     internal const string AskedToJoinKey = "household.asked-to-join";
+    internal const string AccountKey = "household.account";
 
     /// <summary>What belongs to the household, not to this PC: forgotten on leaving, and before entering another. What the
     /// server still has to be told stays: it names its household.</summary>
@@ -235,6 +236,13 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
             if (value is null) settings.Remove(RecoveryKeyKey);
             else settings.Set(RecoveryKeyKey, Protect(value));
         }
+    }
+
+    /// <summary>N2: the opaque ID of the account this PC is signed in as; null while signed out.</summary>
+    public string? Account
+    {
+        get => settings.Get(AccountKey);
+        set => WriteText(AccountKey, value);
     }
 
     /// <summary>N2: the household this PC, signed in, has asked to join and waits to be approved into; null otherwise.</summary>

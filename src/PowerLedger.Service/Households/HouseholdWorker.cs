@@ -202,6 +202,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             BuildRowsIfDue();
             await SyncOnNetworkAsync(lease.Attention).ConfigureAwait(false);
             var run = await _relaySync.RunAsync(_keys, _store.Name, Kind(), lease.Attention).ConfigureAwait(false);
+            if (run.Notices.Count > 0) Publish();                              // the status first, then the App is told
             foreach (var notice in run.Notices) Info(notice);
             Announce();                                                        // a new key, or none, changes the tag
             if (!run.Removed && run.Problem is null) await PollRequestsAsync(lease.Attention).ConfigureAwait(false);
@@ -469,8 +470,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             _pairingGate.Refused();
         }
+        Publish();                                                             // the status first, then the App is told
         Progress(outcome.Text, (outcome as PairingOutcome.Joined)?.Other.Name, null);
-        Publish();
     }
 
     /// <summary>Takes this PC into the household in a welcome it accepted. A PC in another household leaves that one first,
@@ -544,7 +545,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         _household.MarkLeft(member.DeviceId, nowMs);
         _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: member.DeviceId));
         _store.AddPending(new PendingOp(PendingOp.Keys, householdId, Epoch: epoch, Envelopes: envelopes));
-        QueueRecovery(householdId, epoch, key);
+        QueueRecovery(householdId);
         Announce();
         Kick();
         _log.LogInformation("Removed {Name} from the household; the key is now at epoch {Epoch}", member.Name, epoch);
