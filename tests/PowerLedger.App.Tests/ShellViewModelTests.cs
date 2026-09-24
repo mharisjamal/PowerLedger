@@ -10,6 +10,7 @@ public class ShellViewModelTests
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly FakeRangeHistory _history = new();
+    private readonly FakeHouseholdHistory _householdHistory = new();
     private readonly FakeLink _link = new();
     private readonly FakeUiSettings _ui = new();
     private readonly FakeMachineHistory _machine = new();
@@ -18,6 +19,7 @@ public class ShellViewModelTests
         new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { }),
         new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
         new ReportViewModel(_history, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4),
+        new HouseholdViewModel(_link, _householdHistory, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
         new SettingsViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         "0.1.0");
@@ -37,6 +39,19 @@ public class ShellViewModelTests
         shell.Page = Page.Now;
         _clock.Advance(BreakdownViewModel.RefreshEvery * 3);
         _history.Reads.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void The_household_page_reads_only_while_it_shows()
+    {
+        var shell = Shell();
+        shell.Page = Page.Household;
+        shell.Current.ShouldBe(shell.Household);
+        _householdHistory.Reads.ShouldBeEmpty();          // no household in the fake status: nothing is read from storage
+
+        shell.Page = Page.Now;
+        _clock.Advance(HouseholdViewModel.RefreshEvery * 3);
+        _householdHistory.Reads.ShouldBeEmpty();           // stopped once hidden, so no read arrives late
     }
 
     [Fact]

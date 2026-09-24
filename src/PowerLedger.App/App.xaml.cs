@@ -21,6 +21,7 @@ public partial class App : Application
     private NowViewModel? _now;
     private BreakdownViewModel? _breakdown;
     private ReportViewModel? _report;
+    private HouseholdViewModel? _household;
     private AppPreferences? _preferences;
     private SettingsViewModel? _settings;
     private WizardViewModel? _wizard;
@@ -68,12 +69,14 @@ public partial class App : Application
         _crashForwarder = new CrashForwarder(_link, threads, CrashFolder, TimeProvider.System);
         _crashForwarder.Start();
         var history = new HistoryReader(_database);
+        var householdHistory = new HouseholdHistory(_database);
         var sleep = new SleepSettings();
         byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, culture);
 
         _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
         _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture);
         _report = new ReportViewModel(history, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
+        _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture);
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _preferences.ApplyFirstRunDefaults();
@@ -97,7 +100,7 @@ public partial class App : Application
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
-        _shell = new ShellViewModel(_now, _breakdown, _report, _settings, _wizard, version, _updates);
+        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates);
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
         _settings.PropertyChanged += OnSettingsChanged;
@@ -152,6 +155,7 @@ public partial class App : Application
             Page.Now => "now",
             Page.Breakdown => "breakdown",
             Page.Report => "report",
+            Page.Household => "household",
             _ => "settings",
         });
     }
@@ -293,6 +297,7 @@ public partial class App : Application
             }
             _breakdown?.Dispose();
             _report?.Dispose();
+            _household?.Dispose();
             _settings?.Dispose();
             _wizard?.Dispose();
             if (_link is not null) await _link.DisposeAsync();

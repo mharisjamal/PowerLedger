@@ -37,6 +37,14 @@ internal static class Ranges
         return Month(today.Year, today.Month, now, zone, culture);
     }
 
+    /// <summary>The calendar week under way, Monday to Sunday, stopping at now (households design §2).</summary>
+    public static DateRange ThisWeek(DateTimeOffset now, TimeZoneInfo zone)
+    {
+        var today = LocalDay(now, zone);
+        var monday = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+        return Build(monday, monday.AddDays(6), now, zone, "This week");
+    }
+
     public static DateRange LastMonth(DateTimeOffset now, TimeZoneInfo zone, CultureInfo culture)
     {
         var today = LocalDay(now, zone);

@@ -40,6 +40,7 @@
     <local:VisibleWhenStep x:Key="VisibleWhenStep" />
     <local:ValueIs x:Key="Is" />
     <local:UpperCase x:Key="Upper" />
+    <local:ShareWidth x:Key="ShareWidth" />
 
     <Style x:Key="Text.Body" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
