@@ -603,8 +603,8 @@ public class RenderingTests
         new FileInfo(Path.Combine(Folder, "update-ready-Dark.png")).Length.ShouldBeGreaterThan(30_000);
     }
 
-    /// <summary>Plan M: the consent dialog first shown and with detail open, Settings scrolled to Privacy with sharing under
-    /// way, and What's been sent listing two files with the newest selected.</summary>
+    /// <summary>Owner's round: the consent dialog is one screen with only Allow all and Decline; plus Settings scrolled
+    /// to Privacy with sharing under way, and What's been sent listing two files with the newest selected.</summary>
     [Fact]
     public void The_consent_dialog_the_privacy_section_and_the_sent_list_draw_in_both_themes()
     {
@@ -620,50 +620,33 @@ public class RenderingTests
             {
                 UseTheme(theme);
 
-                // 1. The consent dialog: as first shown, all off; then with Hardware and power + Share on and "What's sent" open.
+                // 1. The consent dialog (owner's round): the four purposes as a short list, the sold/given line, and
+                // only two buttons — Allow all and Decline.
                 var consentLink = new FakeLink();
                 consentLink.Connect(true);
-                var consentFirst = new ConsentViewModel(consentLink, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { });
-                var dialogFirst = new ConsentDialog(consentFirst)
+                var consent = new ConsentViewModel(consentLink, UiThreads.Inline, _ => { });
+                var dialog = new ConsentDialog(consent)
                 {
-                    Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    Width = 560, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
                     ShowInTaskbar = false, ShowActivated = false,
                 };
-                dialogFirst.Show();
+                dialog.Show();
                 try
                 {
                     Pump(TimeSpan.FromMilliseconds(300));
-                    Find<CheckBox>(dialogFirst, box => box.Content is TextBlock text && text.Text == "Share my detailed data")
-                        .ShouldNotBeNull(theme.ToString()).IsChecked.ShouldBe((bool?)false, theme.ToString());
-                    Save(dialogFirst, (int)dialogFirst.ActualWidth, (int)dialogFirst.ActualHeight, $"consent-first-{theme}.png");
+                    Find<TextBlock>(dialog, t => t.Text == "Help make PowerLedger better").ShouldNotBeNull(theme.ToString());
+                    foreach (var title in new[] { "Crash and sensor reports", "Usage", "Hardware and power", "Share my detailed data" })
+                        Find<TextBlock>(dialog, t => t.Text.StartsWith(title, StringComparison.Ordinal)).ShouldNotBeNull($"{title} on {theme}");
+                    Find<TextBlock>(dialog, t => t.Text.Contains("given or sold")).ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(dialog, t => t.Text == "You can change each choice any time in Settings → Privacy.").ShouldNotBeNull(theme.ToString());
+                    Find<Button>(dialog, b => Equals(b.Content, "Privacy policy")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(dialog, b => Equals(b.Content, "Allow all")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(dialog, b => Equals(b.Content, "Decline")).ShouldNotBeNull(theme.ToString());
+                    Save(dialog, (int)dialog.ActualWidth, (int)dialog.ActualHeight, $"consent-{theme}.png");
                 }
                 finally
                 {
-                    dialogFirst.Close();
-                }
-
-                var consentOpen = new ConsentViewModel(consentLink, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { })
-                {
-                    Power = true, Share = true,
-                };
-                var dialogOpen = new ConsentDialog(consentOpen)
-                {
-                    Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
-                    ShowInTaskbar = false, ShowActivated = false,
-                };
-                dialogOpen.Show();
-                try
-                {
-                    Pump(TimeSpan.FromMilliseconds(300));
-                    foreach (var expander in AllOf<Expander>(dialogOpen)) expander.IsExpanded = true;
-                    Pump(TimeSpan.FromMilliseconds(300));
-                    Find<CheckBox>(dialogOpen, box => box.Content is TextBlock text && text.Text == "Share my detailed data")
-                        .ShouldNotBeNull(theme.ToString()).IsChecked.ShouldBe((bool?)true, theme.ToString());
-                    Save(dialogOpen, (int)dialogOpen.ActualWidth, (int)dialogOpen.ActualHeight, $"consent-open-{theme}.png");
-                }
-                finally
-                {
-                    dialogOpen.Close();
+                    dialog.Close();
                 }
 
                 // 2. Settings, scrolled to Privacy: consent all on, an install id, and a status line with a last-sent size and days waiting.
@@ -729,17 +712,6 @@ public class RenderingTests
                 }
             }
         });
-
-        static IEnumerable<T> AllOf<T>(DependencyObject root)
-            where T : DependencyObject
-        {
-            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-            {
-                var child = VisualTreeHelper.GetChild(root, i);
-                if (child is T match) yield return match;
-                foreach (var deeper in AllOf<T>(child)) yield return deeper;
-            }
-        }
     }
 
     /// <summary>0.3.0 downloaded and waiting, on 0.2.0.</summary>
@@ -800,7 +772,7 @@ public class RenderingTests
     }
 
     /// <summary>On a screen shorter than the dialog (a 1366 × 768 laptop's work area is about 728 pixels high), the text
-    /// scrolls and the three buttons stay in view, so the choice can always be made.</summary>
+    /// scrolls and the two buttons stay in view, so the choice can always be made.</summary>
     [Fact]
     public void The_consent_dialogs_buttons_stay_in_view_when_the_screen_is_too_short_for_all_of_it()
     {
@@ -809,9 +781,9 @@ public class RenderingTests
             UseTheme(Theme.Light);
             var link = new FakeLink();
             link.Connect(true);
-            var dialog = new ConsentDialog(new ConsentViewModel(link, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { }))
+            var dialog = new ConsentDialog(new ConsentViewModel(link, UiThreads.Inline, _ => { }))
             {
-                Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                Width = 560, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
                 ShowInTaskbar = false, ShowActivated = false,
             };
             dialog.MaxHeight = 420;
@@ -821,7 +793,7 @@ public class RenderingTests
                 Pump(TimeSpan.FromMilliseconds(300));
                 dialog.ActualHeight.ShouldBeLessThanOrEqualTo(420);
                 var content = (FrameworkElement)dialog.Content;
-                foreach (var label in new[] { "Allow all", "Allow none", "Save choices" })
+                foreach (var label in new[] { "Allow all", "Decline" })
                 {
                     var button = Find<Button>(dialog, candidate => candidate.Content as string == label).ShouldNotBeNull(label);
                     button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, label);

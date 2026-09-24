@@ -250,16 +250,17 @@ public partial class App : Application
         if (_preferences is { Current.FirstRunDone: true }) _consentGate?.CheckOnce();
     }
 
-    /// <summary>Opens the consent dialog, modal and owned by the main window (data-sharing design §2).</summary>
+    /// <summary>Opens the consent dialog, modal and owned by the main window (data-sharing design §2, owner's round: one
+    /// screen, two choices — the status that triggered it no longer has anything left to show).</summary>
     private void OpenConsentDialog(Consent current)
     {
         if (_window is null || _link is null || _threads is null) return;
-        var model = new ConsentViewModel(_link, _threads, current, OpenPage, OpenPayload);
+        var model = new ConsentViewModel(_link, _threads, OpenPage);
         model.Applied += consent => _usage?.ConsentChanged(consent);   // data-sharing design §3: known to usage counting at once
         new ConsentDialog(model) { Owner = _window }.ShowDialog();
     }
 
-    /// <summary>Opens one payload file, owned by the main window: "See what would be sent" and each row of "What's been sent".</summary>
+    /// <summary>Opens one payload file, owned by the main window: each row of "What's been sent".</summary>
     private void OpenPayload(string path)
     {
         if (_window is null) return;
