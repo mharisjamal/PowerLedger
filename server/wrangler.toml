@@ -9,7 +9,7 @@ bucket_name = "powerledger-data"
 [[d1_databases]]
 binding = "DB"
 database_name = "powerledger-index"
-database_id = "00000000-0000-0000-0000-000000000000"   # the lead sets the real id at deploy (L5)
+database_id = "9fb625e2-f540-4491-a9e6-f3ddc0f9348b"
 migrations_dir = "migrations"
 
 [[ratelimits]]
