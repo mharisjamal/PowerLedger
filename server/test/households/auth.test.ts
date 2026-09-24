@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   deviceIdOf,
   MAX_REQUESTS_PER_DAY,
+  pathAndQuery,
   requestToSign,
   verifySignature,
   verifySigned,
@@ -65,6 +66,14 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
+
+describe("pathAndQuery", () => {
+  it("is the path and query as sent, an empty query's ? kept, as .NET's Uri.PathAndQuery gives", () => {
+    expect(pathAndQuery(new Request("https://example.com/v1/households"))).toBe("/v1/households");
+    expect(pathAndQuery(new Request("https://example.com/v1/h/batches?after=5&limit=100"))).toBe("/v1/h/batches?after=5&limit=100");
+    expect(pathAndQuery(new Request("https://example.com/v1/h/batches?"))).toBe("/v1/h/batches?");
+  });
+});
 
 describe("verifySigned", () => {
   const household = vectors.request.path.split("/")[3];

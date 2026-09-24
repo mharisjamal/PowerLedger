@@ -73,6 +73,13 @@ export async function verifySignature(signSpki: string, data: Uint8Array, signat
   }
 }
 
+/** The path and query as sent, like .NET's Uri.PathAndQuery: an empty query keeps its "?", which URL.search drops. */
+export function pathAndQuery(request: Request): string {
+  const url = new URL(request.url);
+  url.hash = "";
+  return url.href.slice(url.origin.length);
+}
+
 /** The key a device must have signed with, and what to give back when it did; or the refusal. */
 type KeyLookup<T> = (device: string) => Promise<{ signKey: string; signer: T } | Response>;
 
@@ -109,8 +116,7 @@ async function authenticate<T>(
   const found = await keyFor(device);
   if (found instanceof Response) return found;
 
-  const url = new URL(request.url);
-  const signed = requestToSign(request.method, url.pathname + url.search, seconds, hex(await sha256(body)));
+  const signed = requestToSign(request.method, pathAndQuery(request), seconds, hex(await sha256(body)));
   if (!(await verifySignature(found.signKey, signed, signature))) {
     return errorResponse(401, "This request's signature doesn't match.");
   }

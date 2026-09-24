@@ -1,4 +1,5 @@
 import { type MemberRow, verifySigned } from "./auth";
+import { handleGetBatches, handlePostBatch, readBatch } from "./batches";
 import {
   handleAddMember,
   handleCreateHousehold,
@@ -62,6 +63,16 @@ const ROUTES: Route[] = [
     method: "GET",
     path: new RegExp(`^/v1/households/${HID}/keys/([0-9]{1,10})$`),
     handle: asMember((env, member, _body, params) => handleGetKey(env, member, Number(params[1]))),
+  },
+  {
+    method: "POST",
+    path: new RegExp(`^/v1/households/${HID}/batches$`),
+    handle: asMember((env, member, body) => handlePostBatch(env, member, body), readBatch),
+  },
+  {
+    method: "GET",
+    path: new RegExp(`^/v1/households/${HID}/batches$`),
+    handle: asMember((env, member, _body, _params, request) => handleGetBatches(env, member, new URL(request.url))),
   },
 ];
 
