@@ -95,8 +95,9 @@ export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, bo
   return added ? ok() : errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
 }
 
-/** DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. The household ends with
- * its last member. */
+/** DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. The removed PC's session
+ * ends too, so a PC taken out of the household (a lost laptop, say) can't go on asking the account to let it back in.
+ * The household ends with its last member. */
 export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
   const removed = await env.DB.prepare(
     "UPDATE members SET removed = ? WHERE household = ? AND device = ? AND removed IS NULL RETURNING device",
@@ -104,6 +105,8 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
     .bind(Date.now(), member.household, device)
     .first();
   if (!removed) return errorResponse(404, "That PC isn't a member of this household.");
+
+  await env.DB.prepare("DELETE FROM sessions WHERE device = ?").bind(device).run();
 
   const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM members WHERE household = ? AND removed IS NULL")
     .bind(member.household)

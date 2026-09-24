@@ -274,6 +274,30 @@ describe("recovery", () => {
   });
 });
 
+describe("removing a member", () => {
+  it("ends the removed PC's session, and leaves the remover's alone", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await addMember(hid, owner.device, laptop.device);
+
+    expect((await signedFetch(owner.device, "DELETE", `/v1/households/${hid}/members/${laptop.device.id}`)).status).toBe(200);
+
+    expect((await asAccount(laptop, "POST", "/v1/account/requests")).status).toBe(401);
+    expect((await asAccount(owner, "GET", "/v1/account/recovery")).status).toBe(404);
+  });
+
+  it("ends a leaving PC's session too", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await addMember(hid, owner.device, laptop.device);
+
+    expect((await signedFetch(laptop.device, "DELETE", `/v1/households/${hid}/members/${laptop.device.id}`)).status).toBe(200);
+
+    expect((await asAccount(laptop, "GET", "/v1/account/recovery")).status).toBe(401);
+    expect((await asAccount(owner, "GET", "/v1/account/recovery")).status).toBe(404);
+  });
+});
+
 describe("a household that ends", () => {
   it("takes its account links, join requests and recovery with it", async () => {
     const { hid, owner } = await linkedHousehold();
