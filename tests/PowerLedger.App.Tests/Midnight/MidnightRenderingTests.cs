@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Media;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -38,7 +39,20 @@ public class MidnightRenderingTests
                     UiHarness.Find<TextBlock>(window, text => text.Text == Environment.MachineName).ShouldNotBeNull("the PC's name is in the top bar");
                     UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Send feedback").ShouldNotBeNull();
                     window.Pill.Opacity.ShouldBe(1);
+                    var view = UiHarness.Find<DashboardView>(window)!;
+                    UiTree.Descendants<HatchBar>(UiHarness.Find<ItemsControl>(view)!).Count().ShouldBe(3, "three KPI cards, a bar each");
+                    Pills(view, "Power over time").ShouldBe(["1H", "1D", "1W", "1M", "1Y", "All"]);
+                    Checked(view, "Power over time").ShouldBe("1D");
+                    Pills(view, "Where the power went").ShouldBe(["Today", "7 days", "30 days"]);
+                    Checked(view, "Where the power went").ShouldBe("Today");
+                    UiTree.Descendants<ShareBar>(Card(view, "Where the power went")).Count().ShouldBe(4, "a row a part");
+                    UiTree.Descendants<Border>(view).ShouldNotContain(border => border.Style == window.Resources["M.Glass"], "glass stays on the top bar and tooltips");
                     UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-dashboard-{theme}.png");
+                    var scroller = UiHarness.Find<ScrollViewer>(view)!;
+                    scroller.ScrollToEnd();
+                    window.UpdateLayout();
+                    scroller.VerticalOffset.ShouldBeGreaterThan(0, "the page runs past the window, and scrolls");
+                    UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-dashboard-end-{theme}.png");
                 }
                 finally
                 {
@@ -127,6 +141,109 @@ public class MidnightRenderingTests
     }
 
     [Fact]
+    public void The_chart_tooltip_opens_at_the_middle_point_in_the_glass_and_the_cards_stand_three_across()
+    {
+        Directory.CreateDirectory(UiHarness.Folder);
+        UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var shell = MidnightFixtures.Shell(saver);
+            var window = MidnightFixtures.Window(shell);
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(600));
+                var view = UiHarness.Find<DashboardView>(window)!;
+                UiHarness.Find<System.Windows.Controls.Primitives.UniformGrid>(view)!.Columns.ShouldBe(0, "three cards across at 1180 wide");
+                UiHarness.Find<HatchBar>(view).ShouldNotBeNull();
+                var chart = UiHarness.Find<AreaChart>(view)!;
+                chart.Model.Buckets.Count.ShouldBeGreaterThan(100, "today's readings are on the chart");
+                chart.Hover(chart.Model.Capacity / 2);   // the middle of the day's width: noon
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                chart.Tip.ShouldNotBeNull();
+                chart.Tip.IsOpen.ShouldBeTrue();
+                chart.Tip.Content.ShouldBeOfType<string>().ShouldMatch(@"^12:00 PM · \d+ W$");
+                UiHarness.Find<Border>(chart.Tip, border => border.Style == window.Resources["M.Glass"]).ShouldNotBeNull("the tooltip wears the glass");
+                WithTip(window, chart, "midnight-dashboard-hover-Dark.png");
+                UiHarness.Render(chart.Tip, (int)Math.Ceiling(chart.Tip.ActualWidth), (int)Math.Ceiling(chart.Tip.ActualHeight), "midnight-dashboard-tooltip-Dark.png");
+                chart.Hover(-1);
+                chart.Tip.IsOpen.ShouldBeFalse();
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+        new FileInfo(Path.Combine(UiHarness.Folder, "midnight-dashboard-tooltip-Dark.png")).Length.ShouldBeGreaterThan(500);
+    }
+
+    [Theory]
+    [InlineData(1100, 0)]
+    [InlineData(1099, 1)]
+    public void The_cards_stand_three_across_from_1100_wide_and_one_under_another_below(int width, int columns)
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var window = MidnightFixtures.Window(MidnightFixtures.Shell(saver));
+            window.FitTo(new Bounds(-20000, 0, width + 2 * WindowFit.Margin, 900 + 2 * WindowFit.Margin));
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                window.ActualWidth.ShouldBe(width, 1);
+                UiHarness.Find<System.Windows.Controls.Primitives.UniformGrid>(UiHarness.Find<DashboardView>(window)!)!.Columns.ShouldBe(columns);
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
+    [Fact]
+    public void At_the_narrowest_the_cards_go_one_under_another_and_the_table_still_fits()
+    {
+        Directory.CreateDirectory(UiHarness.Folder);
+        UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var shell = MidnightFixtures.Shell(saver);
+            var window = MidnightFixtures.Window(shell, Theme.Light);
+            window.FitTo(new Bounds(-20000, 0, 960 + 2 * WindowFit.Margin, 900 + 2 * WindowFit.Margin));
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(600));
+                window.ActualWidth.ShouldBe(960);
+                var view = UiHarness.Find<DashboardView>(window)!;
+                UiHarness.Find<System.Windows.Controls.Primitives.UniformGrid>(view)!.Columns.ShouldBe(1, "one card under another under 1100 wide");
+                var table = Card(view, "Where the power went");
+                var inside = table.ActualWidth - table.Padding.Right - table.BorderThickness.Right;
+                foreach (var mark in UiTree.Descendants<TrendMark>(table))
+                    mark.TranslatePoint(new Point(mark.ActualWidth, 0), table).X.ShouldBeLessThanOrEqualTo(inside + 0.5, "the trend column stays inside the card");
+                foreach (var name in UiTree.Descendants<TextBlock>(table).Where(text => text.Text is "CPU package" or "Rest of system"))
+                    name.DesiredSize.Width.ShouldBeLessThanOrEqualTo(name.ActualWidth + 0.5, $"{name.Text} is whole");
+                foreach (var title in new[] { "Power over time", "Where the power went" })
+                {
+                    var card = Card(view, title);
+                    var heading = UiHarness.Find<TextBlock>(card, text => text.Text == title)!;
+                    var pills = UiHarness.Find<Border>(card, border => border.Style == window.Resources["M.PillTrack"])!;
+                    heading.TranslatePoint(new Point(heading.ActualWidth, 0), card).X
+                        .ShouldBeLessThan(pills.TranslatePoint(new Point(0, 0), card).X, $"{title}: the heading and the pills keep apart");
+                }
+                UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-dashboard-960-Light.png");
+                UiHarness.Find<ScrollViewer>(view)!.ScrollToEnd();
+                window.UpdateLayout();
+                UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-dashboard-960-end-Light.png");
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+        new FileInfo(Path.Combine(UiHarness.Folder, "midnight-dashboard-960-Light.png")).Length.ShouldBeGreaterThan(30_000);
+    }
+
+    [Fact]
     public void Under_reduced_motion_the_pill_jumps_and_the_page_change_keeps_only_its_fade()
         => UiHarness.OnUi(() =>
         {
@@ -145,7 +262,7 @@ public class MidnightRenderingTests
                 var at = item.TransformToAncestor(canvas).Transform(new Point(0, 0));
                 Canvas.GetTop(window.Pill).ShouldBe(at.Y, 0.5, "with no travel the pill is there at once");
                 var pages = UiHarness.Find<PageHost>(window)!;
-                var transform = (System.Windows.Media.TranslateTransform)pages.Showing.RenderTransform;
+                var transform = (TranslateTransform)pages.Showing.RenderTransform;
                 transform.Y.ShouldBe(0, "nothing rises under reduced motion");
             }
             finally
@@ -174,4 +291,38 @@ public class MidnightRenderingTests
             window.CloseForSwitch();
             closed.ShouldBeTrue();
         });
+
+    /// <summary>The Dashboard's card that <paramref name="title"/> names for a screen reader.</summary>
+    private static Border Card(DashboardView view, string title)
+        => UiHarness.Find<Border>(view, border => AutomationProperties.GetName(border) == title) ?? throw new InvalidOperationException($"No card {title}.");
+
+    private static string[] Pills(DashboardView view, string card)
+        => [.. UiTree.Descendants<RadioButton>(Card(view, card)).Select(pill => (string)pill.Content)];
+
+    private static string? Checked(DashboardView view, string card)
+        => UiTree.Descendants<RadioButton>(Card(view, card)).SingleOrDefault(pill => pill.IsChecked == true)?.Content as string;
+
+    /// <summary>
+    /// The window with the chart's tooltip laid where it opens over the chart: a popup is a window of its own, which a render
+    /// of the main one leaves out. The popup of a window far off screen lands on a screen, so its frosted backdrop, a
+    /// snapshot of what lies under it there, is empty and the glass shows its fill alone.
+    /// </summary>
+    private static void WithTip(MidnightWindow window, AreaChart chart, string name)
+    {
+        var tip = chart.Tip!;
+        var at = chart.TranslatePoint(new Point(tip.HorizontalOffset, tip.VerticalOffset), window);
+        static System.Windows.Media.Imaging.BitmapSource Shot(Visual visual, double width, double height)
+        {
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(width), (int)Math.Ceiling(height), 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(visual);
+            return bitmap;
+        }
+        var picture = new DrawingVisual();
+        using (var dc = picture.RenderOpen())
+        {
+            dc.DrawImage(Shot(window, window.ActualWidth, window.ActualHeight), new Rect(0, 0, Math.Ceiling(window.ActualWidth), Math.Ceiling(window.ActualHeight)));
+            dc.DrawImage(Shot(tip, tip.ActualWidth, tip.ActualHeight), new Rect(at.X, at.Y, Math.Ceiling(tip.ActualWidth), Math.Ceiling(tip.ActualHeight)));
+        }
+        UiHarness.Render(picture, (int)window.ActualWidth, (int)window.ActualHeight, name);
+    }
 }

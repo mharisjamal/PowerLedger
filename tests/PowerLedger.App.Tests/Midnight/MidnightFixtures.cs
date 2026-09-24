@@ -21,13 +21,32 @@ internal static class MidnightFixtures
         return shell;
     }
 
-    /// <summary>The Dashboard over today's five-minute readings, the week's hourly ones for the longer ranges, and a month of days.</summary>
+    /// <summary>
+    /// The Dashboard over today's five-minute readings and the hourly ones for the longer ranges, with the totals of the Now
+    /// screen's day (0.284 kWh), an average day of 0.3 kWh over the last 31, and a day before whose parts split differently,
+    /// so each trend says something of its own.
+    /// </summary>
     public static DashboardViewModel DashboardScreen(NowViewModel now)
     {
         var day = new DateTimeOffset(Now.Date, TimeSpan.Zero);
         var history = new FakeRangeHistory
         {
-            Answer = range => Reports.Typical(range) with { Series = range.Bucket == TimeSpan.FromMinutes(5) ? DaySeries(day) : WeekSeries(range) },
+            Answer = range =>
+            {
+                var report = range.Title switch
+                {
+                    "Today" => Reports.Typical(range, 0.284),
+                    "Last 31 days" => Reports.Typical(range, 31 * 0.3),
+                    "Before" => Reports.Typical(range, 0.26),
+                    _ => Reports.Typical(range),
+                };
+                if (range.Title == "Before")
+                {
+                    var parts = report.Totals;
+                    report = report with { Totals = parts with { CpuKwh = parts.CpuKwh * 0.85, GpuKwh = parts.GpuKwh * 1.35, RestKwh = parts.RestKwh * 1.08 } };
+                }
+                return report with { Series = range.Bucket == TimeSpan.FromMinutes(5) ? DaySeries(day) : WeekSeries(range) };
+            },
         };
         var summary = new FakeHistory { Snapshot = Snapshots.Typical(Now, DaySeries(day)), First = Now.AddDays(-40) };
         return new DashboardViewModel(now, history, summary, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, UiThreads.Inline);
