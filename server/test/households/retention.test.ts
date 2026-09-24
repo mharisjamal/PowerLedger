@@ -71,6 +71,24 @@ describe("household retention", () => {
     expect(await env.DB.prepare("SELECT 1 FROM meetings WHERE id = ?").bind(live).first()).not.toBeNull();
   });
 
+  it("forgets recovers past the 10 minutes a retry is answered in, keeping newer ones", async () => {
+    const now = new Date();
+    const account = crypto.randomUUID();
+    const remember = (hash: string, used: number) =>
+      env.DB.prepare(
+        "INSERT INTO used_recoveries (account, verifier_hash, device, household, epoch, used) VALUES (?, ?, 'd', 'h', 1, ?)",
+      )
+        .bind(account, hash, used)
+        .run();
+    await remember("old", now.getTime() - 11 * MINUTE_MS);
+    await remember("new", now.getTime() - 9 * MINUTE_MS);
+
+    await runRetention(env, now);
+
+    const kept = await env.DB.prepare("SELECT verifier_hash FROM used_recoveries WHERE account = ?").bind(account).all();
+    expect(kept.results).toEqual([{ verifier_hash: "new" }]);
+  });
+
   it("deletes per-PC request counts past 2 days, and seen signatures past 10 minutes", async () => {
     const now = new Date();
     const device = randomHouseholdId();

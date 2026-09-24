@@ -185,13 +185,14 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
 /**
  * Ends a household whose last member has gone. The household and its member rows stay, every member removed, so a
  * former member is told 410 rather than taken for a stranger (401); its batches and their bodies, key envelopes, the
- * PCs waiting to join, and for sign-in every account's link to it and recovery for it, go.
+ * PCs waiting to join, and for sign-in every account's link to it, recovery for it and recovers of it remembered, go.
  */
 export async function endHousehold(env: Cloudflare.Env, household: string): Promise<void> {
   const bodies = await env.DB.prepare("SELECT r2_key FROM batches WHERE household = ?").bind(household).all<{ r2_key: string }>();
   await deleteBodies(env, bodies.results.map((row) => row.r2_key));
   await env.DB.batch([
     env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)").bind(household),
+    env.DB.prepare("DELETE FROM used_recoveries WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM account_households WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM join_requests WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM batches WHERE household = ?").bind(household),

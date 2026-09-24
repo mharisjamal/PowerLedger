@@ -47,3 +47,12 @@ CREATE TABLE recovery (
   holder        TEXT NOT NULL,                -- the one PC that holds the code, and alone puts the recovery
   updated       INTEGER NOT NULL              -- ms
 );
+CREATE TABLE used_recoveries (                -- recovers that took, so a retry whose answer was lost gets it again (plan 0.10)
+  account       TEXT NOT NULL,
+  verifier_hash TEXT NOT NULL,                -- the used recovery's, as kept in recovery
+  device        TEXT NOT NULL,                -- the PC that recovered: only its retry is answered
+  household     TEXT NOT NULL,                -- the answer given: the household and its epoch then
+  epoch         INTEGER NOT NULL,
+  used          INTEGER NOT NULL,             -- ms; a retry is answered for 10 minutes from it
+  PRIMARY KEY (account, verifier_hash)
+);
