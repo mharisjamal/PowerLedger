@@ -10,8 +10,10 @@ CREATE TABLE members (
   device    TEXT NOT NULL,                    -- 32 hex: the first 16 bytes of SHA-256 of sign_key's SPKI
   sign_key  TEXT NOT NULL,                    -- ECDSA P-256 SubjectPublicKeyInfo, base64url
   dh_key    TEXT NOT NULL,                    -- ECDH P-256 SubjectPublicKeyInfo, base64url
-  added     INTEGER NOT NULL,                 -- ms
+  added     INTEGER NOT NULL,                 -- ms, for display: membership is ordered by the epochs below
   removed   INTEGER,                          -- ms; NULL while a current member
+  added_epoch   INTEGER NOT NULL DEFAULT 1,   -- the household's epoch when this PC was (last) added
+  removed_epoch INTEGER,                      -- the household's epoch when it was removed; NULL while current
   PRIMARY KEY (household, device)
 );
 CREATE INDEX members_device ON members(device);

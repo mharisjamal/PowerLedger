@@ -18,12 +18,14 @@ interface MemberJson {
   dh: string;
   added: number;
   removed: number | null;
+  addedEpoch: number;
+  removedEpoch: number | null;
 }
 
 async function members(hid: string, by: TestDevice): Promise<MemberJson[]> {
   const response = await signedFetch(by, "GET", `/v1/households/${hid}/members`);
   expect(response.status).toBe(200);
-  return response.json();
+  return ((await response.json()) as { members: MemberJson[] }).members;
 }
 
 function envelope(): string {
@@ -31,6 +33,45 @@ function envelope(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(60));
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+
+/** `by` moves the household's key on to `epoch`, sealed to `to`. */
+async function rotate(hid: string, by: TestDevice, epoch: number, to: TestDevice[] = [by]): Promise<void> {
+  const response = await signedFetch(by, "POST", `/v1/households/${hid}/keys`, {
+    epoch,
+    envelopes: to.map((pc) => ({ device: pc.id, body: envelope() })),
+  });
+  expect(response.status).toBe(200);
+}
+
+describe("GET /v1/households/{hid}/members", () => {
+  it("gives each member with the household epochs it was added and removed at, as {members}", async () => {
+    const first = await newDevice();
+    const second = await newDevice();
+    const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    const response = await signedFetch(first, "GET", `/v1/households/${hid}/members`);
+    const body = (await response.json()) as { members: MemberJson[] };
+    expect(body.members.find((member) => member.device === first.id)).toEqual({
+      device: first.id,
+      sign: first.sign,
+      dh: first.dh,
+      added: expect.any(Number),
+      removed: null,
+      addedEpoch: 1,
+      removedEpoch: null,
+    });
+
+    await rotate(hid, first, 2, [first, second]);
+    await signedFetch(first, "DELETE", `/v1/households/${hid}/members/${second.id}`);
+    const removed = (await members(hid, first)).find((member) => member.device === second.id)!;
+    expect(removed).toMatchObject({ addedEpoch: 1, removedEpoch: 2, removed: expect.any(Number) });
+
+    await rotate(hid, first, 3);
+    await addMember(hid, first, second);
+    const back = (await members(hid, first)).find((member) => member.device === second.id)!;
+    expect(back).toMatchObject({ addedEpoch: 3, removedEpoch: null, removed: null });
+  });
+});
 
 describe("POST /v1/households", () => {
   it("creates a household with its creator as the one member", async () => {

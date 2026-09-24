@@ -62,8 +62,8 @@ export async function handleCreateHousehold(request: Request, env: Cloudflare.En
   const [created] = await env.DB.batch([
     env.DB.prepare("INSERT INTO households (id, created) VALUES (?, ?) ON CONFLICT DO NOTHING RETURNING id").bind(id, now),
     env.DB.prepare(
-      `INSERT INTO members (household, device, sign_key, dh_key, added, removed)
-       SELECT ?1, ?2, ?3, ?4, ?5, NULL WHERE NOT EXISTS (SELECT 1 FROM members WHERE household = ?1)`,
+      `INSERT INTO members (household, device, sign_key, dh_key, added, removed, added_epoch, removed_epoch)
+       SELECT ?1, ?2, ?3, ?4, ?5, NULL, 1, NULL WHERE NOT EXISTS (SELECT 1 FROM members WHERE household = ?1)`,
     ).bind(id, signer.device, keys.sign, keys.dh, now),
   ]);
   if (created.results.length > 0) return ok();
@@ -75,8 +75,8 @@ export async function handleCreateHousehold(request: Request, env: Cloudflare.En
   return mine ? ok() : errorResponse(409, "A household with this ID already exists.");
 }
 
-/** Adds a PC as a current member, or makes a removed one current again, while the household has fewer than 16; false
- * when it's full. */
+/** Adds a PC as a current member at the household's current epoch, or makes a removed one current again (a new
+ * added epoch, its removal cleared), while the household has fewer than 16; no row back when it's full. */
 export function addMemberStatement(
   env: Cloudflare.Env,
   household: string,
@@ -86,11 +86,12 @@ export function addMemberStatement(
   now: number,
 ): D1PreparedStatement {
   return env.DB.prepare(
-    `INSERT INTO members (household, device, sign_key, dh_key, added, removed)
-     SELECT ?1, ?2, ?3, ?4, ?5, NULL
+    `INSERT INTO members (household, device, sign_key, dh_key, added, removed, added_epoch, removed_epoch)
+     SELECT ?1, ?2, ?3, ?4, ?5, NULL, (SELECT epoch FROM households WHERE id = ?1), NULL
      WHERE (SELECT COUNT(*) FROM members WHERE household = ?1 AND removed IS NULL) < ?6
      ON CONFLICT (household, device) DO UPDATE SET
-       sign_key = excluded.sign_key, dh_key = excluded.dh_key, added = excluded.added, removed = NULL
+       sign_key = excluded.sign_key, dh_key = excluded.dh_key, added = excluded.added, removed = NULL,
+       added_epoch = excluded.added_epoch, removed_epoch = NULL
      RETURNING device`,
   ).bind(household, device, sign, dh, now, MAX_MEMBERS);
 }
@@ -144,7 +145,8 @@ export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, bo
 export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
   const hid = member.household;
   const removed = await env.DB.prepare(
-    "UPDATE members SET removed = ? WHERE household = ? AND device = ? AND removed IS NULL RETURNING device",
+    `UPDATE members SET removed = ?1, removed_epoch = (SELECT epoch FROM households WHERE id = ?2)
+     WHERE household = ?2 AND device = ?3 AND removed IS NULL RETURNING device`,
   )
     .bind(Date.now(), hid, device)
     .first();
@@ -190,16 +192,39 @@ export async function endHousehold(env: Cloudflare.Env, household: string): Prom
   ]);
 }
 
-/** GET /v1/households/{hid}/members: every PC that is or was a member, times in unix ms. */
+interface MemberListRow {
+  device: string;
+  sign_key: string;
+  dh_key: string;
+  added: number;
+  removed: number | null;
+  added_epoch: number;
+  removed_epoch: number | null;
+}
+
+/**
+ * GET /v1/households/{hid}/members: {"members":[{"device","sign","dh","added","removed","addedEpoch","removedEpoch"}]},
+ * every PC that is or was a member. The epochs are the household's at each change, which is what orders membership
+ * (plan 0.9); added and removed are unix ms, for display. removed and removedEpoch are null while a PC is current.
+ */
 export async function handleListMembers(env: Cloudflare.Env, member: MemberRow): Promise<Response> {
   const rows = await env.DB.prepare(
-    "SELECT device, sign_key, dh_key, added, removed FROM members WHERE household = ? ORDER BY added, device",
+    `SELECT device, sign_key, dh_key, added, removed, added_epoch, removed_epoch FROM members
+     WHERE household = ? ORDER BY added, device`,
   )
     .bind(member.household)
-    .all<{ device: string; sign_key: string; dh_key: string; added: number; removed: number | null }>();
-  return Response.json(
-    rows.results.map((row) => ({ device: row.device, sign: row.sign_key, dh: row.dh_key, added: row.added, removed: row.removed })),
-  );
+    .all<MemberListRow>();
+  return Response.json({
+    members: rows.results.map((row) => ({
+      device: row.device,
+      sign: row.sign_key,
+      dh: row.dh_key,
+      added: row.added,
+      removed: row.removed,
+      addedEpoch: row.added_epoch,
+      removedEpoch: row.removed_epoch,
+    })),
+  });
 }
 
 interface Envelope {

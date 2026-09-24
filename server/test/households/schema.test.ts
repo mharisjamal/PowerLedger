@@ -10,7 +10,9 @@ async function columns(table: string): Promise<string[]> {
 describe("the households schema", () => {
   it("creates the household tables with their columns", async () => {
     expect(await columns("households")).toEqual(["id", "created", "epoch"]);
-    expect(await columns("members")).toEqual(["household", "device", "sign_key", "dh_key", "added", "removed"]);
+    expect(await columns("members")).toEqual([
+      "household", "device", "sign_key", "dh_key", "added", "removed", "added_epoch", "removed_epoch",
+    ]);
     expect(await columns("batches")).toEqual([
       "household", "seq", "device", "epoch", "device_seq", "bytes", "received", "r2_key", "sig",
     ]);
