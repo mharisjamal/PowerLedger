@@ -41,6 +41,7 @@ namespace PowerLedger.Contracts;
 [JsonDerivedType(typeof(CancelPairingRequest), "cancelPairing")]
 [JsonDerivedType(typeof(NewRecoveryCodeRequest), "newRecoveryCode")]
 [JsonDerivedType(typeof(RemoveOldRowsRequest), "removeOldRows")]
+[JsonDerivedType(typeof(AskAgainRequest), "askAgain")]
 [JsonDerivedType(typeof(OkReply), "ok")]
 [JsonDerivedType(typeof(ErrorReply), "error")]
 [JsonDerivedType(typeof(StatusReply), "status")]
@@ -201,3 +202,7 @@ public sealed record NewRecoveryCodeRequest(long Id) : PipeRequest(Id);
 /// <paramref name="DeviceId"/>; with none named, every such PC's, which after leaving is all of them (households design
 /// §6). Refused for this PC and for a current member. The PC stays known as removed, so it is never added back.</summary>
 public sealed record RemoveOldRowsRequest(long Id, string? DeviceId = null) : PipeRequest(Id);
+
+/// <summary>N2: ask the household again to let this PC in, after its request ended unanswered or was refused. Only the
+/// user asks again, so the server can't make this PC answer approval after approval (plan 0.9).</summary>
+public sealed record AskAgainRequest(long Id) : PipeRequest(Id);

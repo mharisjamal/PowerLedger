@@ -115,20 +115,40 @@ public static class HouseholdCrypto
         return mine.DeriveRawSecretAgreement(theirs.PublicKey);
     }
 
-    /// <summary>The 6-digit comparison code both screens show (households design §3), as "482 913", from the shared
-    /// secret and the hellos' transcript (<see cref="Transcript"/>). Every key in both hellos is bound: a PC in the middle
-    /// that swaps an ephemeral or a device key gives each side a different code.</summary>
+    /// <summary>The first transcript-only form. The side that answers second could try hellos until the code matched one it
+    /// wanted; it goes once the service uses <see cref="ComparisonCode(byte[], byte[], byte[])"/> (plan 0.9).</summary>
     public static string ComparisonCode(byte[] shared, byte[] transcript) =>
         SixDigits(Hkdf(shared, transcript, "powerledger comparison code", 4));
+
+    /// <summary>The 6-digit comparison code both screens show (households design §3, plan 0.9), as "482 913": from the
+    /// shared secret, the hellos' transcript (<see cref="Transcript"/>) and the nonce the adder committed to in its hello
+    /// and revealed only after the joiner's hello came. Neither side can steer it: the joiner answers before it knows the
+    /// nonce, and the adder was bound to the nonce before it saw the joiner's hello.</summary>
+    public static string ComparisonCode(byte[] shared, byte[] transcript, byte[] adderNonce) =>
+        SixDigits(Hkdf(shared, [.. transcript, .. adderNonce], "powerledger comparison code", 4));
+
+    /// <summary>32 random bytes, used once, for a commit-then-reveal step (plan 0.9).</summary>
+    public static byte[] NewNonce() => RandomNumberGenerator.GetBytes(32);
+
+    /// <summary>What a side sends before it reveals <paramref name="nonce"/>: SHA-256 of a fixed label then the nonce.</summary>
+    public static byte[] Commitment(byte[] nonce) => SHA256.HashData([.. "powerledger commit"u8, .. nonce]);
 
     /// <summary>What a pairing's code and frame keys are bound to: SHA-256 of the adder's hello frame then the joiner's, as
     /// the bytes that went over the wire.</summary>
     public static byte[] Transcript(byte[] adderHello, byte[] joinerHello) => SHA256.HashData([.. adderHello, .. joinerHello]);
 
-    /// <summary>N2's approval code (households design §7): 6 digits over the waiting PC's signing and key-agreement keys and
-    /// the approving PC's key-agreement key. Both PCs show it; a server that swapped any of the three keys makes them differ.</summary>
+    /// <summary>The first form, over three keys and no nonces: a server could try keys until the codes matched. It goes once
+    /// the service uses the six-part form (plan 0.9).</summary>
     public static string ApprovalCode(byte[] requesterSign, byte[] requesterDh, byte[] approverDh) =>
         SixDigits(SHA256.HashData([.. Encoding.UTF8.GetBytes("powerledger approval code"), .. requesterSign, .. requesterDh, .. approverDh])[..4]);
+
+    /// <summary>N2's approval code (households design §7, plan 0.9): 6 digits over both PCs' signing and key-agreement keys
+    /// (SPKI, fixed length) and both nonces. The approving PC committed to its nonce before the waiting PC sent its own, and
+    /// the waiting PC sends one nonce per request, so the server between them can't steer the two codes to match.</summary>
+    public static string ApprovalCode(byte[] requesterSign, byte[] requesterDh, byte[] approverSign, byte[] approverDh,
+        byte[] requesterNonce, byte[] approverNonce) =>
+        SixDigits(SHA256.HashData([.. "powerledger approval code"u8, .. requesterSign, .. requesterDh, .. approverSign, .. approverDh,
+            .. requesterNonce, .. approverNonce])[..4]);
 
     /// <summary>What a batch's signature covers (households design §5): its associated data then the sealed bytes, so a
     /// batch can't be moved to another household, device, epoch or sequence, or changed.</summary>

@@ -33,6 +33,7 @@ public class HouseholdContractTests
             new HouseholdNotice(NoticeKind.RecoveryCode, "p2", "Keep this recovery code.", null, null, null, "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01"),
             new RemoveOldRowsRequest(17, "0123456789abcdef0123456789abcdef"),
             new RemoveOldRowsRequest(18),
+            new AskAgainRequest(19),
         ];
         foreach (var message in messages)
         {
@@ -57,6 +58,17 @@ public class HouseholdContractTests
 
         back.Status.Household.ShouldNotBeNull().Members.Count.ShouldBe(2);
         back.Status.Household.Members[1].Kind.ShouldBe(ChassisKind.Laptop);
+    }
+
+    [Fact]
+    public void A_status_says_when_the_app_may_offer_ask_again()
+    {
+        var household = new HouseholdStatus(null, "d1", "Desktop-7", ChassisKind.Desktop, true, [], null, SignedIn: true, CanAskAgain: true);
+        var line = PipeProtocol.Serialize(new StatusReply(1, new ServiceStatus("0.7.0", DateTimeOffset.UnixEpoch, 0, [], 0, 0,
+            new CalibrationStatus(0, 0, 0, 0), "", 0, null, null, null, Household: household)));
+
+        PipeProtocol.Deserialize(line.AsSpan(0, line.Length - 1)).ShouldBeOfType<StatusReply>().Status.Household!.CanAskAgain.ShouldBeTrue();
+        new HouseholdStatus(null, "d1", "Desktop-7", ChassisKind.Desktop, true, [], null).CanAskAgain.ShouldBeFalse();
     }
 
     [Fact]

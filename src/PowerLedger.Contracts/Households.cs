@@ -21,6 +21,8 @@ public sealed record MemberStatus(
 /// <param name="SignedIn">N2: true while this PC holds a session.</param>
 /// <param name="PendingApprovals">N2: PCs signed in as this account waiting for a member to approve them.</param>
 /// <param name="RecoveryMissing">N2: signed in and linked, but no recovery code works any more; the App offers a new one.</param>
+/// <param name="CanAskAgain">N2: this PC's request to join ended unanswered or was refused; the App offers
+/// <see cref="AskAgainRequest"/>. The service never asks again by itself (plan 0.9).</param>
 public sealed record HouseholdStatus(
     string? HouseholdId,
     string DeviceId,
@@ -31,7 +33,8 @@ public sealed record HouseholdStatus(
     string? Problem,
     bool SignedIn = false,
     int PendingApprovals = 0,
-    bool RecoveryMissing = false);
+    bool RecoveryMissing = false,
+    bool CanAskAgain = false);
 
 /// <summary>A PowerLedger PC found on this network.</summary>
 /// <param name="InstanceId">The random name it announces itself under, which <see cref="AddPcRequest"/> names.</param>

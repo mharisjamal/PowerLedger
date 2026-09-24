@@ -102,6 +102,50 @@ public class HouseholdCryptoTests
     }
 
     [Fact]
+    public void A_nonce_is_32_fresh_bytes_and_its_commitment_is_a_fixed_hash_of_it()
+    {
+        var nonce = HouseholdCrypto.NewNonce();
+        nonce.Length.ShouldBe(32);
+        HouseholdCrypto.NewNonce().ShouldNotBe(nonce);
+        HouseholdCrypto.Commitment(nonce).ShouldBe(SHA256.HashData([.. "powerledger commit"u8, .. nonce]));
+        HouseholdCrypto.Commitment([.. nonce[..31], (byte)(nonce[31] ^ 1)]).ShouldNotBe(HouseholdCrypto.Commitment(nonce));
+    }
+
+    [Fact]
+    public void The_code_takes_the_adders_revealed_nonce_so_the_side_that_answers_second_cant_steer_it()
+    {
+        byte[] shared = [.. Enumerable.Repeat((byte)7, 32)], transcript = [.. Enumerable.Repeat((byte)9, 32)];
+        byte[] nonce = [.. Enumerable.Range(0, 32).Select(i => (byte)i)];
+        var code = HouseholdCrypto.ComparisonCode(shared, transcript, nonce);
+
+        code.ShouldMatch("^[0-9]{3} [0-9]{3}$");
+        code.ShouldBe(SixDigits(HouseholdCrypto.Hkdf(shared, [.. transcript, .. nonce], "powerledger comparison code", 4)));
+        HouseholdCrypto.ComparisonCode(shared, transcript, [.. nonce[..31], 32]).ShouldNotBe(code);
+    }
+
+    [Fact]
+    public void The_approval_code_binds_both_pcs_keys_and_both_nonces()
+    {
+        byte[][] parts = [.. Enumerable.Range(1, 6).Select(i => Enumerable.Repeat((byte)i, i <= 4 ? 91 : 32).ToArray())];
+        var code = HouseholdCrypto.ApprovalCode(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]);
+
+        code.ShouldMatch("^[0-9]{3} [0-9]{3}$");
+        code.ShouldBe(SixDigits(SHA256.HashData([.. "powerledger approval code"u8, .. parts.SelectMany(part => part)])[..4]));
+        for (var changed = 0; changed < parts.Length; changed++)
+        {
+            var other = parts.Select(part => (byte[])part.Clone()).ToArray();
+            other[changed][0] ^= 0xff;
+            HouseholdCrypto.ApprovalCode(other[0], other[1], other[2], other[3], other[4], other[5]).ShouldNotBe(code, $"part {changed}");
+        }
+    }
+
+    private static string SixDigits(byte[] four)
+    {
+        var digits = (System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(four) % 1_000_000).ToString("D6");
+        return $"{digits[..3]} {digits[3..]}";
+    }
+
+    [Fact]
     public void A_batch_signature_covers_its_associated_data_and_then_its_sealed_bytes()
     {
         HouseholdCrypto.BatchToSign([1, 2], [3, 4, 5]).ShouldBe(new byte[] { 1, 2, 3, 4, 5 });

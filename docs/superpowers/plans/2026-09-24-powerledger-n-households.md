@@ -374,6 +374,184 @@ with 100,000 iterations, the salt `"powerledger recovery"` and 32 bytes; the cod
   - It is refused for this PC and for a current member.
   - The tombstone stays, so the PC is never added back.
   - The Household page lists a left PC only while its rows remain.
+
+### 0.9 Contract changes after the security re-review (they replace earlier sections where they differ)
+
+The re-review found:
+- that a comparison code without a commitment can be steered by whoever sends second;
+- that the approver's code could not be checked before it sealed;
+- that removal and recovery leaned on wall clocks and on the server's word.
+
+These changes answer all three. Core already has `NewNonce`, `Commitment`, `ComparisonCode(shared, transcript, adderNonce)`
+and the six-part `ApprovalCode`. The Contracts already have `AskAgainRequest` ("askAgain") and `HouseholdStatus.CanAskAgain`.
+
+**LAN pairing: commit, then reveal.**
+- The adder's pair hello gains `"commit"`: base64url of `Commitment(nonce)`, for a fresh `NewNonce()`.
+- After the hellos, the adder's first sealed frame is `{"type":"reveal","nonce"}`. The joiner checks it against
+  `commit`; if it doesn't match, the pairing ends.
+- The code is `ComparisonCode(shared, Transcript(adderHello, joinerHello), nonce)`. The two-argument form goes, and the
+  frame keys don't change.
+- The joiner asks its user only after a valid reveal. A pairing that ends before one counts as a failed attempt from
+  that address.
+- Limits on failed attempts:
+  - per address: 3 in 10 minutes, with IPv6 counted by /64;
+  - all addresses together: 20 in 10 minutes;
+  - a full table never forgets a paused address; while it is full of paused ones, new addresses are refused;
+  - failures on the network never pause pairing by code.
+
+**Cancelling, and the household changing mid-pairing.**
+- **The adder's step.** After `joined`, the adder records the member and queues the server add as one step, then sends
+  `welcomed`.
+  - A cancel before that step leaves nothing behind.
+  - After it, the pairing completes, and the App is told the PC was added.
+- **The joiner.** It doesn't cancel after sending `joined`; it rolls back only if `welcomed` never comes.
+- **Checks and waits.**
+  - Recording fails if the household ID is no longer the welcome's.
+  - Cancelling frees the pairing gate only once the cancelled pairing has unwound.
+  - Leaving, being removed, and joining by sign-in each wait for, or cancel, a pairing under way.
+- **Code pairing.** While its prompt is up, the joiner watches the meeting, and withdraws the prompt when the adder
+  cancels.
+
+**Discovery, the pipe and names.**
+- **Found PCs.**
+  - At most 64 are kept, the most recently seen.
+  - A PC not seen for 10 minutes is forgotten.
+  - `FoundPcsReply` stays under the pipe's cap.
+- **Oversized replies.** The pipe server answers a reply over 64 KB with an `ErrorReply`, never by dropping the
+  connection.
+- **Names.**
+  - They are cleaned by Unicode scalar (`Rune`), dropping Cc, Cf, Cs, Co, Zl and Zp.
+  - They are cut at 40 UTF-16 units, never between the two halves of a pair.
+- **Private or not.** The network's category is checked every minute. The listener and the announcement stop within a
+  minute of the network turning Public.
+
+**Membership is ordered by epochs, not clocks.**
+- **Fields.** Every member entry carries:
+  - `addedEpoch`: the household epoch the adding PC was at;
+  - once removed, `removedEpoch`: the epoch the removing PC was at;
+  - wall-clock `added` and `removed`, for display only.
+- **Merging.**
+  - A member is current when it has no `removedEpoch`, or when `addedEpoch > removedEpoch`.
+  - Merging two entries keeps the higher value of each field.
+  - An epoch above this PC's own + 1 is ignored.
+- **Removing** records `removedEpoch` = the remover's epoch, then the remover rotates the key, as now.
+- **Adding back** a removed PC, by pairing or approval, needs the adder's epoch to be above its `removedEpoch`. The adder
+  finishes any pending rotation first. The new `addedEpoch` is the adder's epoch. So a removed PC can come back by a new
+  pairing, never by gossip.
+- **Where membership is learned from:**
+  1. this PC's own pairings, approvals and removals;
+  2. the member list inside a welcome, an approval envelope or a recovery body (with its epochs and removals);
+  3. the sealed member list in a batch, but only when its sender is current here;
+  4. the server's list, for removals only. A PC it lists as removed gets
+     `removedEpoch = max(its addedEpoch, this PC's current epoch)`, unless a higher one is already known.
+- **Never learned:** anything from a removed sender's batch.
+- **Rows from a relay batch** are taken only for the sender's own device. From a removed sender, they are taken only if
+  the batch's epoch ≤ its `removedEpoch`.
+- **A PC that knows no members yet** (just approved, or recovered) starts from the list in its envelope or body.
+
+**Keys.**
+- A sealer S may hand over the key for epoch N only when all of these hold:
+  - S is current here;
+  - S's `addedEpoch` < N;
+  - S has no `removedEpoch`, or its `removedEpoch` ≥ N.
+
+  There is no other allowance.
+- **When a rotation (`POST …/keys`) fails:**
+  - On 409 (that epoch is taken), it is given up. This PC takes that epoch's envelope if its sealer passes the rule
+    above, and otherwise rotates to the next epoch.
+  - On any other failure, the rotation stays queued, and nothing is posted to the relay under the old key meanwhile.
+- **A pending rotation keeps its sealed envelopes,** so a retry posts the same bytes, and the Worker's identical-retry
+  check then matches.
+
+**Worker: members, batches and endings.**
+- **Member rows** keep `added_epoch` and `removed_epoch`, the household's epoch at each change. `GET …/members` returns
+  them along with the keys. Adding a removed PC back sets `added_epoch` and clears `removed_epoch`.
+- **Batch numbers never repeat.** They come from `households.next_seq`, taken atomically. Retention deletes batches but
+  never resets the counter.
+- **When the last member goes:**
+  - the household is kept as ended, with its members kept as removed;
+  - its former members get 410, not 401;
+  - removing a PC that is already removed answers 200.
+- **Removal leaves accounts alone,** with two exceptions:
+  - removing the PC that holds the recovery deletes the recovery;
+  - when the household ends, every link and every recovery goes.
+
+**Service queue.**
+- Each queued op belongs to a household.
+- Entering another household drops the old household's ops.
+- A remove or leave that gets 410 counts as done.
+
+**Catching up.**
+- **Snapshots.** Each PC re-posts all its own rows to the relay:
+  - after a rotation takes effect;
+  - after a new member joins;
+  - at least every 30 days.
+
+  It does so at most once a day, unless the epoch changed. So a PC that was away, or is new, can read the whole
+  history with the current key.
+- **Change times.**
+  - If this PC's newest change time is more than a day ahead of now, its rows are re-based to now, once.
+  - After that, changes carry on from `max(now, newest + 1)`.
+
+**N2 approvals: commit, then reveal, with both screens showing the code before anything is sealed.**
+1. The waiting PC R posts its request, as now.
+2. A member P that sees it:
+   - picks `NewNonce()` and posts `{"commit"}` to `POST /v1/households/{hid}/requests/{device}/commit`;
+   - runs at most one approval at a time, and at most 5 new ones a day.
+3. R polls `GET /v1/account/requests`.
+   - When it sees the approver `{device, sign, dh}` and the `commit`, it posts `{"nonce"}` once to
+     `POST /v1/account/requests/nonce`.
+   - R answers one commit per request. It makes a new request only when its user signs in or asks again
+     (`AskAgainRequest`); it never asks again by itself.
+4. P sees R's nonce, posts `{"nonce"}` to `POST …/requests/{device}/reveal`, and pushes its `ApprovePrompt` with
+   `ApprovalCode(R.sign, R.dh, P.sign, P.dh, nonceR, nonceP)`.
+5. R sees the reveal and checks it against the commit. It then pushes `ConfirmJoin` with the same code at once, before
+   any approval, with text like "Does your other PC show 482 913? Approve it there too."
+6. P's answer:
+   - Approve seals the current key and the member list to R, as now, in one step.
+   - Don't approve deletes the request.
+   - An unanswered prompt closes and comes back at P's next turn while the request is still waiting. It never counts as
+     a no.
+7. R enters only when both hold:
+   - its user has said the codes match;
+   - the approval is there, sealed by the approver it committed with, for the epoch the server names.
+
+   What else can happen on R:
+   - "They don't match" deletes R's request, or makes R leave if it was already added.
+   - An unanswered `ConfirmJoin` comes back at R's next turn.
+   - A request that is refused or expires sets `CanAskAgain`.
+- **Worker side:**
+  - The commit, nonce and reveal are each written once per request.
+  - Only the PC that committed may reveal, and only after R's nonce.
+  - Only that PC may approve, and only after its reveal.
+  - Requests expire after 24 hours.
+  - An approved request stays, marked approved with its epoch, until R has read it or it expires.
+
+**N2 recovery: one holder, a code used once, and a verifier from the code.**
+- **One holder.** Only the PC that made the code keeps the code's key, and it alone puts the recovery. No other PC holds
+  it; signing in with a code does not keep it.
+- **The verifier** is `Hkdf(codeKey, [], "powerledger recovery verifier")`. The Worker keeps its SHA-256, as now.
+- **`PUT /v1/account/recovery`** takes `{"body","verifier","epoch","replace"}`. The Worker answers 409 unless both hold:
+  - `epoch` is the household's current epoch;
+  - the caller is the holder, or `replace` is true. `replace` is for a new code, and makes the caller the holder.
+
+  A holder that gets 409 because a newer code exists forgets its key.
+- **The body** carries the key and the member list, with its epochs.
+- **`GET /v1/account/recovery`** returns `{body, epoch, holder}`.
+- **Recovering** (`POST /v1/account/recover`, which checks the verifier):
+  - works at any stored epoch;
+  - makes the recovering PC the household's only current member, removing all others at the current epoch;
+  - uses up the code: the recovery is deleted, and the recovering PC makes a new code, shows it (a `RecoveryCode`
+    notice) and rotates the key.
+- **Warnings and refusals.**
+  - Before signing in with a recovery code, the App warns that the household's other PCs will be removed.
+  - A recovery-code sign-in on a PC in another household is refused, like a sign-in whose account is linked elsewhere.
+- **RecoveryMissing** means signed in, linked, and either no recovery on the server or a holder that isn't a current
+  member.
+
+**Sign-in redirect.** Back to `http://127.0.0.1:{port}/`, for both the listener's prefix and the redirect URI (RFC 8252
+§7.3; a `localhost` prefix answers on every address). The owner registers `http://127.0.0.1` in the Azure
+app's manifest (`replyUrlsWithType`, type `InstalledClient`).
 ---
 
 ## Wave 1 — three agents in parallel
