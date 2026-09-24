@@ -14,6 +14,16 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     private readonly FakeService _service;
     private readonly PipeServiceLink _link;
 
+    /// <summary>The first message through the pipe protocol in a process builds the generated JSON metadata for every
+    /// message type and compiles it: 0.6 to 2.3 s in a fresh process, and 1.4 to 3.4 s of the first test's connection
+    /// inside a full run under load (measured 2026-09-24), which once outlasted <see cref="WaitFor"/>'s window. It is paid
+    /// here, once, before any test's clock starts; a warm connection takes 15 to 50 ms.</summary>
+    static ServiceLinkTests()
+    {
+        var line = PipeProtocol.Serialize(new SubscribeRequest(0));
+        PipeProtocol.Deserialize(line.AsSpan(0, line.Length - 1));
+    }
+
     public ServiceLinkTests()
     {
         _service = new FakeService(_name);
