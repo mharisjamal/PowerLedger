@@ -171,4 +171,34 @@ public sealed class HistoryReaderTests : IDisposable
         report.Days.Count.ShouldBe(3);
         report.Totals.EnergyKwh.ShouldBe(0.107, 1e-12);
     }
+
+    /// <summary>Review round: across London's clock change, a day-bucket read starts each bucket at its day's midnight,
+    /// so a bucket is named for its own day and an evening's row stays in its day, as the daily totals have it.</summary>
+    [Fact]
+    public void A_day_bucket_read_across_a_clock_change_cuts_at_local_midnights()
+    {
+        var london = TimeZoneInfo.TryFindSystemTimeZoneById("GMT Standard Time", out var windows) ? windows : TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+        var now = new DateTimeOffset(2026, 11, 8, 10, 0, 0, TimeSpan.Zero);
+        var aggregates = new AggregateRepository(_writer);
+        var first = new DateTimeOffset(2026, 10, 20, 11, 0, 0, TimeSpan.Zero);
+        var saturdayEvening = new DateTimeOffset(2026, 11, 7, 23, 0, 0, TimeSpan.Zero);   // 23:00 on Saturday 7 November, winter time
+        foreach (var (start, wh) in new[] { (first, 30.0), (saturdayEvening, 20.0) })
+        {
+            var minute = Minute(start, wh);
+            aggregates.UpsertMinute(minute);
+            aggregates.UpsertHour(Downsampler.ToHour(start, [minute]));
+        }
+
+        using var readOnly = new SqliteDatabase(_path, readOnly: true);
+        var reader = new HistoryReader(readOnly);
+        var range = Ranges.All(reader.FirstRow(), now, london, System.Globalization.CultureInfo.InvariantCulture);
+        var report = reader.Read(range, london).ShouldNotBeNull();
+
+        report.Series.Count.ShouldBe(20);   // 20 October to 8 November
+        report.Series.ShouldAllBe(b => TimeZoneInfo.ConvertTime(b.Start, london).TimeOfDay == TimeSpan.Zero);
+        var saturday = report.Series[18];   // the 19th day from 20 October
+        saturday.EnergyWh.ShouldBe(20, 1e-9);
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(saturday.Start, london).DateTime).ShouldBe(new DateOnly(2026, 11, 7));
+        report.Days.Last().Day.ShouldBe(new DateOnly(2026, 11, 7));
+    }
 }
