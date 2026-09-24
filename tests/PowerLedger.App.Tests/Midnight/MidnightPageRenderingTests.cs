@@ -145,7 +145,7 @@ public class MidnightPageRenderingTests
                 Find<TextBlock>(view, t => t.Text == "HOUSEHOLD").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeFalse($"the explainer on {theme}");
                 Find<TextBlock>(view, t => t.Text == "46.8").ShouldNotBeNull($"this month's energy on {theme}");
 
-                // A row per PC: this one with no Remove, the other with its bar as long as its share of the busiest.
+                // A row per PC: this one with no Remove, each with its bar as long as its share of the month.
                 var rows = Find<ItemsControl>(view, items => items.ItemsSource == model.Members).ShouldNotBeNull(theme.ToString());
                 model.Members.Count.ShouldBe(2, theme.ToString());
                 foreach (var member in model.Members)

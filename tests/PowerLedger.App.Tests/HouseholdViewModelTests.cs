@@ -239,14 +239,43 @@ public class HouseholdViewModelTests
         mine.Kind.ShouldBe("Desktop");
         mine.IsThisPc.ShouldBeTrue();
         mine.Energy.ShouldBe("12.0");
-        mine.Share.ShouldBe(1.0);              // the busiest PC's bar is full
+        mine.Share.ShouldBe(12.0 / 16.0, 1e-9); // its share of the month's 16 kWh, as the page labels it, not of the busiest PC's
         mine.Status.ShouldBe("");
 
         var theirs = model.Members.Single(m => m.DeviceId == "bbbb");
         theirs.IsThisPc.ShouldBeFalse();
         theirs.Energy.ShouldBe("4.00");
-        theirs.Share.ShouldBe(4.0 / 12.0, 1e-9);
+        theirs.Share.ShouldBe(4.0 / 16.0, 1e-9);
+        model.Members.Sum(m => m.Share).ShouldBe(1.0, 1e-9, "the bars add up to the month");
         theirs.Status.ShouldBe("last seen 3 days ago");
+    }
+
+    /// <summary>Midnight's sidebar badges the Household item with the PCs waiting for approval, from the service's status.</summary>
+    [Fact]
+    public void The_pcs_waiting_for_approval_come_from_the_status_and_follow_it()
+    {
+        _link.Status = Statuses.Running() with
+        {
+            Household = new HouseholdStatus("hh1", "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, PendingApprovals: 2),
+        };
+        _link.Connect(true);
+        var model = Model();
+        var raised = new List<string?>();
+        model.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        model.PendingApprovals.ShouldBe(0);
+
+        model.Show();
+
+        model.PendingApprovals.ShouldBe(2);
+        raised.ShouldContain(nameof(HouseholdViewModel.PendingApprovals));
+
+        _link.Status = InHousehold();
+        model.Refresh();
+        model.PendingApprovals.ShouldBe(0);
+
+        _link.Status = Statuses.Running() with { Household = null };
+        model.Refresh();
+        model.PendingApprovals.ShouldBe(0);
     }
 
     [Fact]

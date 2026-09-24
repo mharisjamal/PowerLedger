@@ -16,7 +16,7 @@ internal sealed record HouseholdCostLine(string Currency, string Cost);
 internal sealed record HouseholdPeriod(string Title, string Energy, IReadOnlyList<HouseholdCostLine> Costs);
 
 /// <summary>One member row, ready for the page: its name and kind ("Laptop" or "Desktop"), whether it is this PC, this
-/// month's energy for its label, its share of the busiest member's energy for its bar (0 to 1), the status words
+/// month's energy for its label, its share of the household's energy this month for its bar (0 to 1), the status words
 /// ("synced 2 minutes ago", "last seen 3 days ago", "left"), and whether it has left (review finding follow-up, task
 /// 0.8: a left row offers Remove its rows).</summary>
 internal sealed record HouseholdMemberDisplay(string DeviceId, string Name, string Kind, bool IsThisPc, string Energy, double Share, string Status, bool IsLeft)
@@ -80,6 +80,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private bool _hasOldRows;
     private bool _canAskAgain;
     private string? _askAgainMessage;
+    private int _pendingApprovals;
 
     public HouseholdViewModel(
         IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
@@ -177,6 +178,10 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
 
     public IRelayCommand AskAgain { get; }
 
+    /// <summary>PCs signed in as this account waiting for a member to approve them, from the service's status; 0 with
+    /// none or with no household. Midnight's sidebar badges its Household item with it.</summary>
+    public int PendingApprovals { get => _pendingApprovals; private set => SetProperty(ref _pendingApprovals, value); }
+
     /// <summary>Opens Add a PC (Plan N task A2 wires the window up to this).</summary>
     public ICommand AddPc { get; }
 
@@ -272,6 +277,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         Account.Apply(household);   // sign-in works whether or not this PC is in a household
         RecoveryMissing = household?.RecoveryMissing ?? false;   // task 0.8: can matter with or without a household
         CanAskAgain = household?.CanAskAgain ?? false;   // plan 0.9: this PC is waiting to be let in, not a member yet
+        PendingApprovals = Math.Max(0, household?.PendingApprovals ?? 0);
         HasHousehold = household?.HouseholdId is not null;
         Problem = HasHousehold ? household!.Problem : null;
         if (!HasHousehold)
@@ -309,7 +315,8 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private IReadOnlyList<HouseholdMemberDisplay> Rows(HouseholdStatus household, HouseholdSnapshot snapshot, DateTimeOffset now)
     {
         var energyByDevice = snapshot.Month.ByDevice.ToDictionary(d => d.DeviceId, d => d.EnergyKwh, StringComparer.Ordinal);
-        var busiest = snapshot.Month.ByDevice.Count > 0 ? snapshot.Month.ByDevice.Max(d => d.EnergyKwh) : 0;
+        // Review 12: the bar is the PC's share of the month, as the page labels it, so the bars add up to the whole.
+        var total = snapshot.Month.ByDevice.Sum(d => Math.Max(0, d.EnergyKwh));
         return snapshot.Members
             .Select(m =>
             {
@@ -317,7 +324,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
                 var isThisPc = m.DeviceId == household.DeviceId;
                 return new HouseholdMemberDisplay(
                     m.DeviceId, m.Name, m.Kind == ChassisKind.Laptop ? "Laptop" : "Desktop", isThisPc,
-                    Format.Kwh(energy, _culture), busiest > 0 ? energy / busiest : 0, isThisPc ? "" : StatusOf(m, now), m.Left is not null);
+                    Format.Kwh(energy, _culture), total > 0 ? Math.Max(0, energy) / total : 0, isThisPc ? "" : StatusOf(m, now), m.Left is not null);
             })
             .ToList();
     }
