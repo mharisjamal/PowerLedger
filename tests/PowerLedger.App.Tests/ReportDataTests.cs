@@ -22,7 +22,7 @@ public class ReportDataTests
     {
         var data = Month();
         data.Title.ShouldBe("September 2026");
-        data.Period.ShouldBe("1 Sep – 8 Sep 2026");
+        data.Period.ShouldBe("1 Sep to 8 Sep 2026");
         data.HasData.ShouldBeTrue();
         data.Energy.ShouldBe("2.74");
         data.Cost.ShouldBe("$0.47");
@@ -94,7 +94,7 @@ public class ReportDataTests
     public void Without_a_tariff_or_with_a_currency_change_the_cost_says_so()
     {
         var untariffed = Month(r => r with { Totals = r.Totals with { Currency = null, Cost = 0 } });
-        untariffed.Cost.ShouldBe("–");
+        untariffed.Cost.ShouldBe("N/A");
         untariffed.CostNote.ShouldBe("no tariff set");
         untariffed.IdleWasteNote.ShouldBe("14% of the energy");
         Month(r => r with { Totals = r.Totals with { CostIsPartial = true } }).CostNote
@@ -111,7 +111,7 @@ public class ReportDataTests
 
         var empty = ReportData.From(Reports.Empty(Ranges.LastMonth(Now, Utc, English)), Timeouts, 0.38, Utc, English);
         empty.HasData.ShouldBeFalse();
-        empty.Period.ShouldBe("1 Aug – 31 Aug 2026");
+        empty.Period.ShouldBe("1 Aug to 31 Aug 2026");
         empty.QualityText.ShouldBe("no readings");
     }
 }

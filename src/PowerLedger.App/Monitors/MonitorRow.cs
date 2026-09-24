@@ -80,8 +80,8 @@ internal sealed class MonitorRow : ObservableObject
     /// the refresh rate Windows drives it at, to a hundredth of a hertz, as in "59.94 Hz".</summary>
     public string Size { get => _size; private set => SetProperty(ref _size, value); }
 
-    /// <summary>Where the figure came from: "measured for this model", "estimated from its size — correct it if you know
-    /// better" or, for a monitor without its size or resolution, "estimated — correct it if you know better", or "typed".</summary>
+    /// <summary>Where the figure came from: "measured for this model", "estimated from its size (correct it if you know
+    /// better)" or, for a monitor without its size or resolution, "estimated (correct it if you know better)", or "typed".</summary>
     public string Source { get => _source; private set => SetProperty(ref _source, value); }
 
     /// <summary>"brightness 60%, read from the monitor", or "brightness unknown, assumed 75%"; for a typed figure, or the off
@@ -198,8 +198,8 @@ internal sealed class MonitorRow : ObservableObject
         {
             MonitorSource.Model => "measured for this model",
             MonitorSource.Estimate when double.IsFinite(monitor.Inches) && monitor is { Inches: > 0, Width: > 0, Height: > 0 }
-                => "estimated from its size — correct it if you know better",
-            MonitorSource.Estimate => "estimated — correct it if you know better",
+                => "estimated from its size (correct it if you know better)",
+            MonitorSource.Estimate => "estimated (correct it if you know better)",
             _ => "",
         };
         // A figure the service reports as typed is taken as it is, and a monitor off or on standby counts at its off or sleep

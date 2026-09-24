@@ -31,7 +31,7 @@ internal sealed class AtLeast : IValueConverter
 }
 
 /// <summary>A figure's number ("Number") or its unit ("Unit"), split at its last space, so a KPI card can set the unit
-/// smaller than the number it follows: "34.2 W" is 34.2 and W; a dash has no unit.</summary>
+/// smaller than the number it follows: "34.2 W" is 34.2 and W; words without a number ("No reading") have no unit.</summary>
 internal sealed class FigurePart : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
@@ -39,7 +39,7 @@ internal sealed class FigurePart : IValueConverter
         var figure = value as string ?? "";
         var space = figure.LastIndexOf(' ');
         var unit = parameter as string == "Unit";
-        if (space < 0) return unit ? "" : figure;
+        if (space < 0 || !figure.Any(char.IsDigit)) return unit ? "" : figure;
         return unit ? figure[(space + 1)..] : figure[..space];
     }
 

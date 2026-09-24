@@ -76,7 +76,7 @@ public sealed class MonthlyReportsTests : IDisposable
         var data = ReportData.Empty with { Title = "August 2026", Energy = "27.4", Cost = "$4.66" };
         MonthlyReports.Toast([new MonthlyReport("a.pdf", data)])
             .ShouldBe(("August 2026 report saved", "August 2026: 27.4 kWh · $4.66. Saved to Documents\\PowerLedger; click to open it."));
-        MonthlyReports.Toast([new MonthlyReport("a.pdf", data with { Cost = "–" })]).Text
+        MonthlyReports.Toast([new MonthlyReport("a.pdf", data with { Cost = Format.Missing })]).Text
             .ShouldBe("August 2026: 27.4 kWh. Saved to Documents\\PowerLedger; click to open it.");
     }
 

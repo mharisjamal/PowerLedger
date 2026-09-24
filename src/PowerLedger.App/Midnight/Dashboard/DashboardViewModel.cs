@@ -295,14 +295,14 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             : chart.Totals.OnHours > 0 || chart.Totals.AsleepHours > 0 ? null : "No history yet";
     }
 
-    /// <summary>Power now: the live watts over the meter's scale, with how the reading is got as the chip; a dash and the
-    /// last known quality while the service is down (design §5).</summary>
+    /// <summary>Power now: the live watts over the meter's scale, with how the reading is got as the chip; "No reading" and
+    /// the last known quality while the service is down (design §5).</summary>
     private KpiCard PowerNow(LivePanel live)
     {
         var watts = double.IsFinite(live.Watts) ? live.Watts : (double?)null;
         return new KpiCard(
             "Power now",
-            watts is { } w ? Format.Watts(w, _culture) + " W" : Format.Missing,
+            watts is { } w ? Format.Watts(w, _culture) + " W" : Format.NoReading,
             _now.IsServiceDown ? "Service not running" : live.Eyebrow,
             _lastQuality?.ToString(),
             _lastQuality is null ? TrendKind.Text : TrendKind.Quality,
@@ -313,7 +313,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// day; the bar is today over that whole average day.</summary>
     private KpiCard TodayCard()
     {
-        if (_read is not { Snapshot: { } snapshot } read) return new KpiCard("Today", Format.Missing, _read is null ? "" : Unread, null, TrendKind.Text, 0);
+        if (_read is not { Snapshot: { } snapshot } read) return new KpiCard("Today", Format.NoReading, _read is null ? "" : Unread, null, TrendKind.Text, 0);
         var today = snapshot.Today;
         var todayDay = DateOnly.FromDateTime(read.LocalNow.DateTime);
         var average = DashboardMaths.AverageDayWh(read.Recent?.Days.Where(day => day.Day < todayDay).ToList() ?? []);
@@ -331,7 +331,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private KpiCard IdleWaste()
     {
         const string label = "Idle waste this month";
-        if (_read is not { Snapshot: { } snapshot } read) return new KpiCard(label, Format.Missing, _read is null ? "" : Unread, null, TrendKind.Text, 0);
+        if (_read is not { Snapshot: { } snapshot } read) return new KpiCard(label, Format.NoReading, _read is null ? "" : Unread, null, TrendKind.Text, 0);
         var month = snapshot.Month;
         var idle = month.IdleOnKwh + month.IdleOffKwh;
         var price = month.EnergyKwh > 0 ? month.Cost / (decimal)month.EnergyKwh : 0m;

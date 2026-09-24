@@ -3,10 +3,15 @@ using System.Globalization;
 namespace PowerLedger.App;
 
 /// <summary>How every number on screen is written (spec §9). Each method takes the culture to write in; the App passes the
-/// user's. Nothing negative or undefined reaches the screen: a dash stands in for a value that does not exist.</summary>
+/// user's. Nothing negative or undefined reaches the screen: a word stands in for a value that does not exist, "N/A" in
+/// a cell and "No reading" for a figure standing alone.</summary>
 internal static class Format
 {
-    public const string Missing = "–";
+    /// <summary>A cell in a ledger, a table or a legend when there is no value to show.</summary>
+    public const string Missing = "N/A";
+
+    /// <summary>A figure that stands alone, set large, when there is no value to show.</summary>
+    public const string NoReading = "No reading";
 
     /// <summary>The live reading, one decimal: "34.2".</summary>
     public static string Watts(double watts, CultureInfo culture)

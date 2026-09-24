@@ -33,10 +33,10 @@
                 <TextBlock Style="{StaticResource Prose}"
                            Text="PowerLedger works fully without sending anything. If you agree, it sends the following to PowerLedger's server once a day." />
 
-                <TextBlock Style="{StaticResource Purpose}" Text="Crash and sensor reports — what went wrong and on which hardware, so it can be fixed." />
-                <TextBlock Style="{StaticResource Purpose}" Text="Usage — how PowerLedger is used, so the next version works on what matters." />
-                <TextBlock Style="{StaticResource Purpose}" Text="Hardware and power — this PC's parts and its power, minute by minute, so estimates get more accurate for everyone." />
-                <TextBlock Style="{StaticResource Purpose}" Text="Share my detailed data — needs Hardware and power turned on." />
+                <TextBlock Style="{StaticResource Purpose}" Text="Crash and sensor reports: what went wrong and on which hardware, so it can be fixed." />
+                <TextBlock Style="{StaticResource Purpose}" Text="Usage: how PowerLedger is used, so the next version works on what matters." />
+                <TextBlock Style="{StaticResource Purpose}" Text="Hardware and power: this PC's parts and its power, minute by minute, so estimates get more accurate for everyone." />
+                <TextBlock Style="{StaticResource Purpose}" Text="Share my detailed data: needs Hardware and power turned on." />
 
                 <TextBlock Style="{StaticResource Note}"
                            Text="Let what Hardware and power sends be given or sold, as it is, to researchers, hardware makers and energy companies." />

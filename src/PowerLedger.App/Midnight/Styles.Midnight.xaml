@@ -771,7 +771,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="local:TrendMark">
                     <StackPanel x:Name="Root" Orientation="Horizontal">
-                        <TextBlock x:Name="Mark" Text="&#x2014;" FontFamily="{StaticResource M.Font.Ui}" FontSize="9" Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="Mark" Text="&#x25CF;" FontFamily="{StaticResource M.Font.Ui}" FontSize="9" Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
                         <TextBlock Margin="5,0,0,0" Text="{TemplateBinding Text}" FontFamily="{StaticResource M.Font.Ui}" FontSize="12" FontWeight="SemiBold"
                                    Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
                     </StackPanel>

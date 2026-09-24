@@ -14,8 +14,20 @@ public class FormatTests
     {
         Format.Watts(34.23, Invariant).ShouldBe("34.2");
         Format.Watts(-0.4, Invariant).ShouldBe("0.0");
-        Format.Watts(double.NaN, Invariant).ShouldBe("–");
+        Format.Watts(double.NaN, Invariant).ShouldBe("N/A");
         Format.Watts(34.23, German).ShouldBe("34,2");
+    }
+
+    [Fact]
+    public void A_missing_value_reads_as_a_word_never_a_dash()
+    {
+        Format.Missing.ShouldBe("N/A");                          // a cell in a ledger, a table or a legend
+        Format.NoReading.ShouldBe("No reading");                 // a figure standing alone, set large
+        TodayLedger.Empty.Energy.ShouldBe(Format.Missing);
+        MonthLedger.Empty.Cost.ShouldBe(Format.Missing);
+        ChartLegend.Empty.Cpu.ShouldBe(Format.Missing);
+        LiveReadout.Figure(double.NaN, Invariant).ShouldBe(Format.NoReading);
+        LiveReadout.Figure(34.23, Invariant).ShouldBe("34.2");
     }
 
     [Fact]

@@ -286,7 +286,7 @@ public class WizardViewModelTests
         model.Machine.Monitors.Select(m => (m.Name, m.Size, m.Watts, m.Source, m.Counted)).ShouldBe(
         [
             ("DELL U2723QE", "27 in · 3840 × 2160", "26.9", "measured for this model", true),
-            ("24B1XH5", "23.8 in · 1920 × 1080", "13.4", "estimated from its size — correct it if you know better", true),
+            ("24B1XH5", "23.8 in · 1920 × 1080", "13.4", "estimated from its size (correct it if you know better)", true),
         ]);
     }
 
@@ -336,7 +336,7 @@ public class WizardViewModelTests
         model.Machine.Monitors.Select(m => (m.Watts, m.Source, m.Counted)).ShouldBe(
         [
             ("30", "typed", true),
-            ("13.4", "estimated from its size — correct it if you know better", false),
+            ("13.4", "estimated from its size (correct it if you know better)", false),
         ]);
         await model.NextAsync();
         ((ServiceSettings)_link.Writes.Single()).Profile.Monitors.ShouldBe(_link.Settings.Profile.Monitors);
