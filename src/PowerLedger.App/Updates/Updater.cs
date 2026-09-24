@@ -94,8 +94,13 @@ internal sealed class Updater : ObservableObject, IDisposable
             OnPropertyChanged(nameof(ShowCard));
         });
         OpenNotes = new RelayCommand(() => _open(NotesPage));
+        ShowWhatsNew = new RelayCommand(() => NotesRequested?.Invoke());
         CheckNow = new RelayCommand(() => _threads.Background(() => _ = CheckAsync()));
     }
+
+    /// <summary>The card's "What's new" asks the App to open <see cref="WhatsNewWindow"/> (owner's round: in-app, not
+    /// the browser); <see cref="OpenNotes"/> stays for that window's own "Full notes on GitHub" link.</summary>
+    public event Action? NotesRequested;
 
     /// <summary>The version running now.</summary>
     public Version Running { get; }
@@ -172,8 +177,18 @@ internal sealed class Updater : ObservableObject, IDisposable
 
     public ICommand OpenNotes { get; }
 
+    /// <summary>The card's "What's new": opens <see cref="WhatsNewWindow"/> (<see cref="NotesRequested"/>).</summary>
+    public ICommand ShowWhatsNew { get; }
+
     /// <summary>Settings' "Check now", which works with the tick box off.</summary>
     public ICommand CheckNow { get; }
+
+    /// <summary>"What's new in 0.7.0": always the running version's, since a release not yet installed (Available or
+    /// Ready) isn't in the bundled table this build shipped with — "Full notes on GitHub" answers for that one.</summary>
+    public string WhatsNewTitle => $"What's new in {Running.ToString(3)}";
+
+    /// <summary>The bundled points since the user last ran PowerLedger, up to the version running now.</summary>
+    public IReadOnlyList<string> WhatsNewPoints => WhatsNew.Since(_ui.Current.LastVersion, Running.ToString(3));
 
     private Uri NotesPage => _stage == UpdateStage.Updated || _release is null ? GitHubReleaseFeed.PageOf(Running) : _release.Page;
 

@@ -1,0 +1,65 @@
+using Shouldly;
+
+namespace PowerLedger.App.Tests;
+
+public class WhatsNewTests
+{
+    private static IReadOnlyList<string> PointsOf(string version) => WhatsNew.Releases.Single(r => r.Version == version).Points;
+
+    [Fact]
+    public void With_no_last_version_only_the_currents_own_points_come_back()
+        => WhatsNew.Since(null, "0.7.0").ShouldBe(PointsOf("0.7.0"));
+
+    [Fact]
+    public void A_last_version_newer_than_current_falls_back_to_the_currents_own_points()
+        => WhatsNew.Since("0.8.0", "0.7.0").ShouldBe(PointsOf("0.7.0"));
+
+    [Fact]
+    public void A_last_version_equal_to_current_falls_back_to_the_currents_own_points()
+        => WhatsNew.Since("0.7.0", "0.7.0").ShouldBe(PointsOf("0.7.0"));
+
+    [Fact]
+    public void An_unparsable_last_version_falls_back_to_the_currents_own_points()
+        => WhatsNew.Since("not-a-version", "0.7.0").ShouldBe(PointsOf("0.7.0"));
+
+    [Fact]
+    public void A_version_nothing_is_bundled_for_falls_back_to_an_empty_list()
+        => WhatsNew.Since(null, "0.1.0").ShouldBeEmpty();
+
+    /// <summary>Exactly one release qualifies: its points come back on their own, with no version heading.</summary>
+    [Fact]
+    public void One_release_between_last_and_current_has_no_heading()
+        => WhatsNew.Since("0.6.0", "0.7.0").ShouldBe(PointsOf("0.7.0"));
+
+    /// <summary>More than one release qualifies: newest first, each headed by its own version number.</summary>
+    [Fact]
+    public void Several_releases_between_last_and_current_are_headed_by_their_own_version_newest_first()
+    {
+        var points = WhatsNew.Since("0.5.0", "0.7.0");
+
+        var expected = new List<string> { "0.7.0" };
+        expected.AddRange(PointsOf("0.7.0"));
+        expected.Add("0.6.0");
+        expected.AddRange(PointsOf("0.6.0"));
+        points.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void The_0_7_0_points_match_exactly()
+        => PointsOf("0.7.0").ShouldBe(
+        [
+            "See all your PCs together: add a PC on your network or with a code, and the Household page shows their total.",
+            "Your data is encrypted end to end; the server can't read it.",
+            "The installer works again on Windows 11 PCs that showed \"does not support the version of Windows\".",
+            "32-bit Windows is supported.",
+            "Send feedback from the bug button at the foot of the window.",
+            "The data-sharing question is now one screen: Allow all or Decline; change any choice later in Settings → Privacy.",
+        ]);
+
+    [Fact]
+    public void The_0_6_0_points_match_exactly()
+        => PointsOf("0.6.0").ShouldBe(
+        [
+            "Optional data sharing: help improve the estimates by sharing anonymous readings; ask in Settings → Privacy.",
+        ]);
+}
