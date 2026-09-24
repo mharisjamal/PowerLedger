@@ -1,0 +1,244 @@
+using System.Globalization;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
+
+namespace PowerLedger.App;
+
+/// <summary>
+/// "Power over time" (plan O M1-2): the total as a 2 px accent line over a gradient that fades to nothing, the parts as
+/// stacked bands beneath it at 35 %, sleep hatched, a dashed line at now, and the axes the model gives. The pointer or the
+/// arrow keys pick a bucket: a crosshair marks it and a tooltip says when and how much, so the figure is reachable
+/// without a mouse. The tooltip is a ToolTip of the window's, so it takes the glass style.
+/// </summary>
+internal sealed class AreaChart : Instrument
+{
+    public static readonly DependencyProperty ModelProperty = DependencyProperty.Register(
+        nameof(Model), typeof(ChartModel), typeof(AreaChart), new FrameworkPropertyMetadata(ChartModel.Empty, FrameworkPropertyMetadataOptions.AffectsRender, OnModelChanged));
+    public static readonly DependencyProperty FromProperty = Register<DateTimeOffset?>(nameof(From), null, typeof(AreaChart));
+    public static readonly DependencyProperty ZoneProperty = Register(nameof(Zone), TimeZoneInfo.Local, typeof(AreaChart));
+    public static readonly DependencyProperty FillTopBrushProperty = Register<Brush>(nameof(FillTopBrush), Brushes.Transparent, typeof(AreaChart));
+    public static readonly DependencyProperty FillBottomBrushProperty = Register<Brush>(nameof(FillBottomBrush), Brushes.Transparent, typeof(AreaChart));
+    public static readonly DependencyProperty HatchBrushProperty = Register<Brush>(nameof(HatchBrush), Brushes.Gray, typeof(AreaChart));
+    public static readonly DependencyProperty EmptyTextProperty = Register(nameof(EmptyText), "No history yet", typeof(AreaChart));
+
+    private const double Left = 48;
+    private const double RightInset = 16;
+    private const double Top = 18;
+    private const double AxisRoom = 28;
+    private const double PlotHeight = 260;
+    private const double BandOpacity = 0.35;
+
+    private int _hover = -1;
+    private ToolTip? _tip;
+
+    public AreaChart()
+    {
+        Focusable = true;
+    }
+
+    public ChartModel Model { get => (ChartModel)GetValue(ModelProperty); set => SetValue(ModelProperty, value); }
+
+    /// <summary>When the first bucket starts, for the tooltip's time; without it the tooltip gives the value alone.</summary>
+    public DateTimeOffset? From { get => (DateTimeOffset?)GetValue(FromProperty); set => SetValue(FromProperty, value); }
+
+    public TimeZoneInfo Zone { get => (TimeZoneInfo)GetValue(ZoneProperty); set => SetValue(ZoneProperty, value); }
+
+    public Brush FillTopBrush { get => (Brush)GetValue(FillTopBrushProperty); set => SetValue(FillTopBrushProperty, value); }
+
+    public Brush FillBottomBrush { get => (Brush)GetValue(FillBottomBrushProperty); set => SetValue(FillBottomBrushProperty, value); }
+
+    public Brush HatchBrush { get => (Brush)GetValue(HatchBrushProperty); set => SetValue(HatchBrushProperty, value); }
+
+    /// <summary>What the plot says when there is nothing to draw.</summary>
+    public string EmptyText { get => (string)GetValue(EmptyTextProperty); set => SetValue(EmptyTextProperty, value); }
+
+    /// <summary>The bucket the crosshair is on, or -1.</summary>
+    internal int Hovered => _hover;
+
+    /// <summary>The tooltip, once a bucket has been hovered.</summary>
+    internal ToolTip? Tip => _tip;
+
+    internal override string Describe() => Model.Description + (_hover >= 0 && _hover < Model.Buckets.Count ? $" At {HoverLabel(_hover)}." : "");
+
+    /// <summary>Puts the crosshair on <paramref name="index"/>, or takes it away with -1.</summary>
+    internal void Hover(int index)
+    {
+        if (index >= Model.Buckets.Count) index = -1;
+        if (index == _hover) return;
+        _hover = index;
+        InvalidateVisual();
+        ShowTip();
+    }
+
+    protected override Size MeasureOverride(Size availableSize) => Fixed(availableSize, PlotHeight);
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        var model = Model;
+        var buckets = model.Buckets;
+        var capacity = Math.Max(1, model.Capacity);
+        var right = ActualWidth - RightInset;
+        var bottom = ActualHeight - AxisRoom;
+        if (!(right > Left) || !(bottom > Top)) return;
+        var culture = CultureInfo.CurrentCulture;
+        var (max, step) = Scale(model);
+        double X(double at) => AreaGeometry.X(at, capacity, Left, right);
+        double Y(double value) => AreaGeometry.Y(value, max, Top, bottom);
+
+        var grid = Line(LineBrush);
+        foreach (var (value, label) in AreaGeometry.YLabels(max, step, Charts.Symbol(model.Unit), culture))
+        {
+            dc.DrawLine(grid, new Point(Left, Y(value)), new Point(right, Y(value)));
+            DrawText(dc, label, Left - 10, Y(value) - 7, LabelBrush, TextAlignment.Right);
+        }
+        for (var i = 0; i < model.Ticks.Count; i++)
+        {
+            var tick = model.Ticks[i];
+            var x = X(tick.At);
+            if (tick.At > 0 && tick.At < capacity) dc.DrawLine(grid, new Point(x, Top), new Point(x, bottom));
+            var label = Text(tick.Label, 10, LabelBrush);
+            var room = (i + 1 < model.Ticks.Count ? X(model.Ticks[i + 1].At) : right) - x;
+            if (label.Width + 8 <= room) dc.DrawText(label, new Point(x + 4, bottom + 8));
+        }
+        if (buckets.Count == 0)
+        {
+            DrawText(dc, EmptyText, (Left + right) / 2, (Top + bottom) / 2 - 7, LabelBrush, TextAlignment.Center, 12);
+            return;
+        }
+
+        foreach (var (start, end) in AreaGeometry.AsleepRuns(buckets, model.Bucket))
+        {
+            dc.DrawRectangle(HatchBar.Hatch(HatchBrush), null, new Rect(new Point(X(start), Top), new Point(X(end), bottom)));
+        }
+
+        // The parts, tallest band first so no two share an anti-aliased edge, faint under the total's own fill.
+        var tops = Geometry.StackTops(buckets);
+        dc.PushOpacity(BandOpacity);
+        foreach (var (top, brush) in new[] { (tops.CpuTop, CpuBrush), (tops.GpuTop, GpuBrush), (tops.DisplayTop, DisplayBrush), (tops.RestTop, RestBrush) })
+        {
+            dc.DrawGeometry(brush, null, Polygon(AreaGeometry.Area(AreaGeometry.Line(top, capacity, max, Left, right, Top, bottom), bottom), closed: true));
+        }
+        dc.Pop();
+
+        var line = AreaGeometry.Line(buckets.Select(b => b.Total).ToArray(), capacity, max, Left, right, Top, bottom);
+        var fill = new LinearGradientBrush(ColourOf(FillTopBrush), ColourOf(FillBottomBrush), new Point(0, 0), new Point(0, 1));
+        fill.Freeze();
+        dc.DrawGeometry(fill, null, Polygon(AreaGeometry.Area(line, bottom), closed: true));
+        var stroke = new Pen(AccentBrush, 2) { LineJoin = PenLineJoin.Round, StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        dc.DrawGeometry(null, stroke, Polygon(line, closed: false));
+
+        if (model.NowAt is { } nowAt)
+        {
+            var nowX = X(Math.Clamp(nowAt, 0, capacity));
+            dc.DrawLine(Line(AccentBrush, 1, new DashStyle([3, 3], 0)), new Point(nowX, Top), new Point(nowX, bottom));
+            var now = Text("now", 10, AccentBrush);
+            dc.DrawText(now, new Point(nowX + 5 + now.Width <= ActualWidth ? nowX + 5 : nowX - 5 - now.Width, Top - 2));
+        }
+
+        if (_hover >= 0 && _hover < line.Count)
+        {
+            var at = line[_hover];
+            dc.DrawLine(Line(StrongLineBrush), new Point(at.X, Top), new Point(at.X, bottom));
+            dc.DrawEllipse(AccentBrush, new Pen(InkBrush, 2), at, 4, 4);
+        }
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        Hover(AreaGeometry.BucketAt(e.GetPosition(this).X, Model.Buckets.Count, Model.Capacity, Left, ActualWidth - RightInset) ?? -1);
+    }
+
+    protected override void OnMouseLeave(MouseEventArgs e)
+    {
+        base.OnMouseLeave(e);
+        if (!IsKeyboardFocused) Hover(-1);
+    }
+
+    protected override void OnMouseDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseDown(e);
+        Focus();
+    }
+
+    /// <summary>Left and Right walk the buckets from the one hovered, else from now or the last; Escape lets go.</summary>
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        var count = Model.Buckets.Count;
+        if (count > 0)
+        {
+            var start = _hover >= 0 ? _hover : Model.NowAt is { } now ? Math.Clamp((int)now, 0, count - 1) : count - 1;
+            switch (e.Key)
+            {
+                case Key.Left:
+                    Hover(_hover >= 0 ? Math.Max(0, start - 1) : start);
+                    e.Handled = true;
+                    break;
+                case Key.Right:
+                    Hover(_hover >= 0 ? Math.Min(count - 1, start + 1) : start);
+                    e.Handled = true;
+                    break;
+                case Key.Escape:
+                    Hover(-1);
+                    e.Handled = true;
+                    break;
+            }
+        }
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnLostKeyboardFocus(e);
+        if (!IsMouseOver) Hover(-1);
+    }
+
+    private static void OnModelChanged(DependencyObject element, DependencyPropertyChangedEventArgs e)
+    {
+        // A new model has new buckets: the old crosshair would point at a bucket that is not there any more.
+        var chart = (AreaChart)element;
+        if (chart._hover >= 0) chart.Hover(-1);
+    }
+
+    private static (double Max, double Step) Scale(ChartModel model)
+        => Geometry.ChartScale(model.Buckets.Count > 0 ? model.Buckets.Max(b => b.Total) : 0, Charts.Floor(model.Unit));
+
+    private static StreamGeometry Polygon(IReadOnlyList<Point> points, bool closed)
+    {
+        var shape = new StreamGeometry();
+        if (points.Count > 0)
+        {
+            using var g = shape.Open();
+            g.BeginFigure(points[0], isFilled: closed, isClosed: closed);
+            for (var i = 1; i < points.Count; i++) g.LineTo(points[i], isStroked: !closed, isSmoothJoin: false);
+        }
+        shape.Freeze();
+        return shape;
+    }
+
+    private static Color ColourOf(Brush brush) => (brush as SolidColorBrush)?.Color ?? Colors.Transparent;
+
+    private string HoverLabel(int index)
+        => AreaGeometry.HoverLabel(From, Model.Bucket, index, Model.Capacity, Model.Buckets[index].Total, Model.Unit, Zone, CultureInfo.CurrentCulture);
+
+    private void ShowTip()
+    {
+        if (_hover < 0 || _hover >= Model.Buckets.Count || !(ActualWidth > Left + RightInset))
+        {
+            if (_tip is not null) _tip.IsOpen = false;
+            return;
+        }
+        _tip ??= new ToolTip { PlacementTarget = this, Placement = PlacementMode.Relative, StaysOpen = true, Focusable = false };
+        if (TryFindResource(typeof(ToolTip)) is Style style && !ReferenceEquals(_tip.Style, style)) _tip.Style = style;
+        var (max, _) = Scale(Model);
+        var x = AreaGeometry.X(_hover + 0.5, Math.Max(1, Model.Capacity), Left, ActualWidth - RightInset);
+        var y = AreaGeometry.Y(Model.Buckets[_hover].Total, max, Top, ActualHeight - AxisRoom);
+        _tip.Content = HoverLabel(_hover);
+        _tip.HorizontalOffset = x + 10;
+        _tip.VerticalOffset = y - 48;
+        _tip.IsOpen = true;
+    }
+}

@@ -643,6 +643,98 @@
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
+    <!-- The drawn controls take the palette here (Instrument), Midnight's brushes where Classic's Styles.xaml gives its own.
+         A view sets the keyed style on each instrument: a drawn control is not a Control, so the implicit style below
+         does not reach it across a DataTemplate, where every page lives. The implicit ones serve the window's own tree. -->
+    <Style x:Key="M.Instrument" TargetType="local:Instrument">
+        <Setter Property="LineBrush" Value="{DynamicResource M.Line}" />
+        <Setter Property="StrongLineBrush" Value="{DynamicResource M.LineStrong}" />
+        <Setter Property="LabelBrush" Value="{DynamicResource M.Ink3}" />
+        <Setter Property="InkBrush" Value="{DynamicResource M.Ink}" />
+        <Setter Property="AccentBrush" Value="{DynamicResource M.Accent}" />
+        <Setter Property="AccentSoftBrush" Value="{DynamicResource M.AccentSoft}" />
+        <Setter Property="CpuBrush" Value="{DynamicResource M.PartCpu}" />
+        <Setter Property="GpuBrush" Value="{DynamicResource M.PartGpu}" />
+        <Setter Property="DisplayBrush" Value="{DynamicResource M.PartDisplay}" />
+        <Setter Property="RestBrush" Value="{DynamicResource M.PartRest}" />
+        <Setter Property="NumberFont" Value="{StaticResource M.Font.Numbers}" />
+    </Style>
+    <Style x:Key="M.HatchBar" TargetType="local:HatchBar" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="FillBrush" Value="{DynamicResource M.Accent}" />
+        <Setter Property="HatchBrush" Value="{DynamicResource M.Hatch}" />
+        <Setter Property="TrackBrush" Value="{DynamicResource M.Line}" />
+    </Style>
+    <Style x:Key="M.ShareBar" TargetType="local:ShareBar" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="FillBrush" Value="{DynamicResource M.Accent}" />
+        <Setter Property="TrackBrush" Value="{DynamicResource M.Line}" />
+    </Style>
+    <Style x:Key="M.AreaChart" TargetType="local:AreaChart" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="FillTopBrush" Value="{DynamicResource M.ChartFillTop}" />
+        <Setter Property="FillBottomBrush" Value="{DynamicResource M.ChartFillBottom}" />
+        <Setter Property="HatchBrush" Value="{DynamicResource M.Hatch}" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource M.Focus.Ring}" />
+    </Style>
+    <Style x:Key="M.Initials" TargetType="local:Initials" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="GoodBrush" Value="{DynamicResource M.Good}" />
+        <Setter Property="WarnBrush" Value="{DynamicResource M.Warn}" />
+        <Setter Property="LightLetterBrush" Value="{DynamicResource M.OnAccent}" />
+        <Setter Property="DarkLetterBrush" Value="{DynamicResource M.Ground}" />
+        <Setter Property="NumberFont" Value="{StaticResource M.Font.Ui}" />
+    </Style>
+    <Style x:Key="M.StackedChart" TargetType="local:StackedChart" BasedOn="{StaticResource M.Instrument}" />
+    <Style x:Key="M.DailyBars" TargetType="local:DailyBars" BasedOn="{StaticResource M.Instrument}" />
+    <Style x:Key="M.BudgetBar" TargetType="local:BudgetBar" BasedOn="{StaticResource M.Instrument}" />
+    <Style x:Key="M.Sparkline" TargetType="local:Sparkline" BasedOn="{StaticResource M.Instrument}" />
+    <Style x:Key="M.MeterScale" TargetType="local:MeterScale" BasedOn="{StaticResource M.Instrument}" />
+    <Style x:Key="M.QualityBar" TargetType="local:QualityBar" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="MeasuredBrush" Value="{DynamicResource M.ChipMeasuredText}" />
+        <Setter Property="CalibratedBrush" Value="{DynamicResource M.ChipCalibratedText}" />
+        <Setter Property="EstimatedBrush" Value="{DynamicResource M.ChipEstimatedText}" />
+    </Style>
+    <Style TargetType="local:HatchBar" BasedOn="{StaticResource M.HatchBar}" />
+    <Style TargetType="local:ShareBar" BasedOn="{StaticResource M.ShareBar}" />
+    <Style TargetType="local:AreaChart" BasedOn="{StaticResource M.AreaChart}" />
+    <Style TargetType="local:Initials" BasedOn="{StaticResource M.Initials}" />
+    <Style TargetType="local:StackedChart" BasedOn="{StaticResource M.StackedChart}" />
+    <Style TargetType="local:DailyBars" BasedOn="{StaticResource M.DailyBars}" />
+    <Style TargetType="local:BudgetBar" BasedOn="{StaticResource M.BudgetBar}" />
+    <Style TargetType="local:Sparkline" BasedOn="{StaticResource M.Sparkline}" />
+    <Style TargetType="local:MeterScale" BasedOn="{StaticResource M.MeterScale}" />
+    <Style TargetType="local:QualityBar" BasedOn="{StaticResource M.QualityBar}" />
+
+    <!-- A trend: the arrow and its words in green, red or muted ink; words alone for Text; nothing for Quality, whose slot holds a chip. -->
+    <Style TargetType="local:TrendMark">
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink3}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="local:TrendMark">
+                    <StackPanel x:Name="Root" Orientation="Horizontal">
+                        <TextBlock x:Name="Mark" Text="&#x2014;" FontFamily="{StaticResource M.Font.Ui}" FontSize="9" Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
+                        <TextBlock Margin="5,0,0,0" Text="{TemplateBinding Text}" FontFamily="{StaticResource M.Font.Ui}" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Kind" Value="Up">
+                            <Setter TargetName="Mark" Property="Text" Value="&#x25B2;" />
+                            <Setter Property="Foreground" Value="{DynamicResource M.Good}" />
+                        </Trigger>
+                        <Trigger Property="Kind" Value="Down">
+                            <Setter TargetName="Mark" Property="Text" Value="&#x25BC;" />
+                            <Setter Property="Foreground" Value="{DynamicResource M.Bad}" />
+                        </Trigger>
+                        <Trigger Property="Kind" Value="Text">
+                            <Setter TargetName="Mark" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="Kind" Value="Quality">
+                            <Setter TargetName="Root" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Implicit styles, scoped to the window this dictionary is merged into. -->
     <Style TargetType="Button" BasedOn="{StaticResource M.Button.Quiet}" />
     <Style TargetType="TextBox" BasedOn="{StaticResource M.Field}" />
