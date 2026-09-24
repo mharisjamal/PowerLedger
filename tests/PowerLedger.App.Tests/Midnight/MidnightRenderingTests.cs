@@ -446,7 +446,9 @@ public class MidnightRenderingTests
             var ui = new FakeUiSettings { Current = UiPreferences.Default with { Look = Look.Midnight }, LookProblem = "Couldn't open the Classic look: its window failed to load." };
             var shell = MidnightFixtures.Shell(saver, ui: ui);
             var window = MidnightFixtures.Window(shell);
-            window.ProblemShownFor = TimeSpan.FromSeconds(1);
+            // Long enough that no pump can outlast it: another test's work may run inside this one's pumps on the shared
+            // dispatcher, and a banner that timed out meanwhile would read as never shown. Its going by itself is timed below.
+            window.ProblemShownFor = TimeSpan.FromMinutes(10);
             window.Show();
             try
             {
@@ -454,24 +456,22 @@ public class MidnightRenderingTests
                 var banner = UiHarness.Find<Border>(window, border => AutomationProperties.GetName(border) == "Look switch problem")!;
                 banner.IsVisible.ShouldBeFalse();
                 var switchLook = UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Switch look")!;
-                void Press(Button button)
-                {
-                    ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(button)).Invoke();
-                    UiHarness.Pump(TimeSpan.FromMilliseconds(100));
-                }
+                var said = UiHarness.Find<TextBlock>(banner, text => text.Name == "SwitchProblemText")!;
 
                 Press(switchLook);
                 shell.Settings.Look.ShouldBe(Look.Midnight, "the window stays");
                 banner.IsVisible.ShouldBeTrue();
-                UiHarness.Find<TextBlock>(banner, text => text.Text == ui.LookProblem).ShouldNotBeNull();
+                said.Text.ShouldBe(ui.LookProblem);
                 UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-switch-problem-Dark.png");
-                for (var waited = 0; waited < 5000 && banner.IsVisible; waited += 100) UiHarness.Pump(TimeSpan.FromMilliseconds(100));
-                banner.IsVisible.ShouldBeFalse("it goes by itself");
-
-                Press(switchLook);
-                banner.IsVisible.ShouldBeTrue();
                 Press(UiHarness.Find<Button>(banner, button => AutomationProperties.GetName(button) == "Dismiss")!);
                 banner.IsVisible.ShouldBeFalse("dismissed");
+
+                ui.LookProblem = "Couldn't open the Classic look: still no window.";
+                window.ProblemShownFor = TimeSpan.FromMilliseconds(300);
+                Press(switchLook);
+                said.Text.ShouldBe(ui.LookProblem, "shown again, with the new reason");
+                for (var waited = 0; waited < 5000 && banner.IsVisible; waited += 100) UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                banner.IsVisible.ShouldBeFalse("it goes by itself");
 
                 shell.Settings.StartWithWindows = !shell.Settings.StartWithWindows;
                 ui.LookProblem = null;
