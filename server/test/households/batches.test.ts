@@ -4,6 +4,7 @@ import { type MemberRow } from "../../src/households/auth";
 import { handleGetBatches } from "../../src/households/batches";
 import { base64urlEncode } from "../../src/households/encoding";
 import { handleHouseholdRoutes } from "../../src/households/routes";
+import { runRetention } from "../../src/retention";
 import { withoutR2 } from "../support";
 import { addMember, createHousehold, newDevice, signedFetch, signedRequest, type TestDevice } from "./support";
 
@@ -72,6 +73,21 @@ describe("POST and GET /v1/households/{hid}/batches", () => {
       { seq: 2, device: second.id, device_seq: 1 },
       { seq: 3, device: first.id, device_seq: 2 },
     ]);
+  });
+
+  it("never numbers a batch again, even after retention has taken every batch the household had", async () => {
+    const { hid, first, second } = await pair();
+    await post(hid, first, 1);
+    await post(hid, first, 2);
+    await env.DB.prepare("UPDATE batches SET received = ? WHERE household = ?").bind(Date.now() - 91 * 24 * 3600 * 1000, hid).run();
+    await runRetention(env, new Date());
+    expect(await env.DB.prepare("SELECT 1 FROM batches WHERE household = ?").bind(hid).first()).toBeNull();
+
+    await post(hid, first, 3);
+
+    const row = await env.DB.prepare("SELECT seq FROM batches WHERE household = ?").bind(hid).first<{ seq: number }>();
+    expect(row?.seq).toBe(3);
+    expect((await page(hid, second, "after=2")).items.map((item) => item.seq)).toEqual([3]);
   });
 
   it("leaves out the caller's own batches", async () => {

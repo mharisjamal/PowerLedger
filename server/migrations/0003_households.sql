@@ -3,15 +3,18 @@
 CREATE TABLE households (
   id      TEXT PRIMARY KEY,                   -- 32 lower-case hex, made by the PC that creates the household
   created INTEGER NOT NULL,                   -- ms
-  epoch   INTEGER NOT NULL DEFAULT 1          -- the household key's current epoch: new keys are posted for epoch + 1 only
+  epoch   INTEGER NOT NULL DEFAULT 1,         -- the household key's current epoch: new keys are posted for epoch + 1 only
+  next_seq INTEGER NOT NULL DEFAULT 1         -- the next batch number: taken with each batch, never reset by retention
 );
 CREATE TABLE members (
   household TEXT NOT NULL,
   device    TEXT NOT NULL,                    -- 32 hex: the first 16 bytes of SHA-256 of sign_key's SPKI
   sign_key  TEXT NOT NULL,                    -- ECDSA P-256 SubjectPublicKeyInfo, base64url
   dh_key    TEXT NOT NULL,                    -- ECDH P-256 SubjectPublicKeyInfo, base64url
-  added     INTEGER NOT NULL,                 -- ms
+  added     INTEGER NOT NULL,                 -- ms, for display: membership is ordered by the epochs below
   removed   INTEGER,                          -- ms; NULL while a current member
+  added_epoch   INTEGER NOT NULL DEFAULT 1,   -- the household's epoch when this PC was (last) added
+  removed_epoch INTEGER,                      -- the household's epoch when it was removed; NULL while current
   PRIMARY KEY (household, device)
 );
 CREATE INDEX members_device ON members(device);

@@ -30,21 +30,29 @@ for the design.
   A signature is taken once, and a replay doesn't count against the PC's 1000 requests a UTC day. On household
   routes, no member row and a bad signature get the same 401; a removed PC gets 410 ("This PC was removed from the
   household."), and only once its signature is good. Keys are taken only in canonical SPKI (DER, point uncompressed).
-- **Households.** `POST /v1/households` (`{"id","sign","dh"}`, signed by that key); `GET …/{hid}/members`;
-  `POST …/{hid}/members` (`{"sign","dh","proof"}`, where the proof is the joining PC's ECDSA P-256 signature, P1363,
-  over UTF-8 `powerledger join|{hid}|{sign}|{dh}` with the keys as posted: 400 without one, 403 when it doesn't
-  verify; a current member with the same keys is 200, with another dh key 409); `DELETE …/{hid}/members/{device}`
-  (the household ends with its last member). At most 16 members.
+- **Households.** `POST /v1/households` (`{"id","sign","dh"}`, signed by that key); `POST …/{hid}/members`
+  (`{"sign","dh","proof"}`, where the proof is the joining PC's ECDSA P-256 signature, P1363, over UTF-8
+  `powerledger join|{hid}|{sign}|{dh}` with the keys as posted: 400 without one, 403 when it doesn't verify; a current
+  member with the same keys is 200, with another dh key 409); `DELETE …/{hid}/members/{device}` (200 for a PC already
+  removed, 404 for one never a member). At most 16 members.
+- **Members** are ordered by epochs, not clocks. `GET …/{hid}/members` gives
+  `{"members":[{"device","sign","dh","added","removed","addedEpoch","removedEpoch"}]}`: the household's epoch when each
+  was added and removed (`removed` and `removedEpoch` null while current), the times in unix ms for display. Adding a
+  removed PC back sets `addedEpoch` again and clears its removal.
 - **Keys.** The server keeps each household's epoch, 1 at creation. `POST …/{hid}/keys`
-  (`{"epoch","envelopes":[{"device","body"}]}`) takes only the current epoch + 1, which then becomes current (409
-  otherwise, a retry included); `GET …/{hid}/keys/{epoch}` gives `{"epoch","from","body"}`, the caller's own.
-- **Removing a PC**, or its leaving, also deletes the recovery of every account linked to the household; unlinks the
-  accounts the removed PC was signed in as, if linked to this household, and ends those sessions of it; and clears
-  its request to join. Accounts linked to another household are left alone.
+  (`{"epoch","envelopes":[{"device","body"}]}`, each envelope 1024 characters at most) takes only the current
+  epoch + 1, which then becomes current, and 409 otherwise; a re-post of the very bytes the rotation to the current
+  epoch was taken with, by the PC that sealed them, is 200, whatever changed since. `GET …/{hid}/keys/{epoch}` gives
+  `{"epoch","from","body"}`, the caller's own.
+- **Removing a PC**, or its leaving, leaves accounts alone, sessions and links included, except that a recovery the
+  removed PC holds is deleted; it also clears the PC's request to join. **When the last member goes**, the household
+  and its members stay, all removed, so a former member gets 410, not 401; its batches, key envelopes and requests,
+  and every account's link to it and recovery for it, go.
 - **Batches.** `POST …/{hid}/batches` (`{"device","epoch","seq","body","sig"}`, at most 1 MB, `seq` the sender's own,
   `sig` its 64-byte P1363 signature over `BatchToSign(BatchAad(…), body)`, required but not checked here: members check
   it); a PC posts at most 200 batches and 5 MB of them a UTC day (429), and the server takes at most 2 GB a day in all
-  (503, "The server is busy; try again later."). `GET …/{hid}/batches?after=&limit=` gives
+  (503, "The server is busy; try again later."). The Worker numbers a household's batches from its own counter
+  (`households.next_seq`), so a number never comes round again, even after retention. `GET …/{hid}/batches?after=&limit=` gives
   `{"items":[{"seq","device","epoch","body","sig"}],"next","more"}`: the others' batches as posted, `next` the cursor
   to send as `after` next time, `more` when another page waits.
 - **Meetings**, for pairing by code: `PUT`/`GET /v1/meetings/{id}/{adder|joiner|answer|welcome|joined|welcomed}`, unsigned;
@@ -57,17 +65,34 @@ for the design.
   a salt: the token's nonce claim must be base64url(SHA-256(UTF-8(`<device ID>:<salt>`))) for the PC that signed the
   request, so a token only signs in the PC that asked for it. A Microsoft account is its tenant and subject.
 - **Accounts**, with `Authorization: Session <token>` as well as the signature: `POST /v1/account/household`
-  (`{"householdId"}`, required, a household the PC is a current member of); `POST /v1/account/requests` (ask to join:
-  16 waiting a household, 2 an account, lapsing after 7 days); `PUT /v1/account/recovery` (`{"body","verifier"}`, a
-  32-byte verifier of which only SHA-256 is kept, with the household's current epoch) and `GET` (`{"householdId",
-  "epoch","body"}`); `POST /v1/account/recover` (`{"verifier"}`: 403 when it isn't the one put, 409 when the epoch has
-  moved on since); `POST /v1/auth/signout` (the session and the PC's own requests); `DELETE /v1/account`.
-- **Requests, for members.** `GET …/{hid}/requests` gives `[{"device","account","sign","dh","created"}]`;
-  `POST …/{hid}/requests/{device}/approve` (`{"epoch","body"}`, the current epoch only; an envelope the PC already
-  has there is never overwritten, 409); `DELETE …/{hid}/requests/{device}` denies.
+  (`{"householdId"}`, required, a household the PC is a current member of); `POST /v1/auth/signout` (the session and
+  the PC's own requests); `DELETE /v1/account`.
+- **Approvals** run commit, then reveal, so both screens show the code before anything is sealed; each step is
+  written once (an identical retry by the same PC is 200, anything else 409), and a request lasts 24 hours.
+  1. The waiting PC asks: `POST /v1/account/requests` (16 waiting a household, 2 an account; asking again starts a
+     fresh request).
+  2. A member commits: `POST …/{hid}/requests/{device}/commit` (`{"commit"}`, 32 bytes base64url), becoming the
+     request's approver.
+  3. The waiting PC, seeing it in `GET /v1/account/requests`, sends `POST /v1/account/requests/nonce` (`{"nonce"}`).
+  4. The approver reveals: `POST …/{hid}/requests/{device}/reveal` (`{"nonce"}`, only the approver, 403 otherwise).
+  5. The approver approves: `POST …/{hid}/requests/{device}/approve` (`{"epoch","body"}`, only after the reveal, the
+     current epoch only, the sealed key and member list 16384 characters at most; an envelope the PC already has there
+     is never overwritten, 409). The request stays, approved at that epoch, until the waiting PC reads it.
+
+  Members see `GET …/{hid}/requests`: `[{"device","account","sign","dh","created","approver","commit","nonce",
+  "reveal"}]`, the last four null until set, and deny with `DELETE …/{hid}/requests/{device}`. The waiting PC sees
+  `GET /v1/account/requests`: `{"requests":[{"device","household","approver":{"device","sign","dh"}|null,"commit",
+  "reveal","approved":{"epoch"}|null,"expires"}]}`, an approved one given once.
+- **Recovery** has one holder, the PC that made the code. `PUT /v1/account/recovery`
+  (`{"body","verifier","epoch","replace"}`: the sealed key and member list, 16384 characters at most, and a 32-byte
+  verifier of which only SHA-256 is kept) is 409 unless `epoch` is the household's current epoch and the caller is the
+  holder, or `replace` is true, which is a new code and makes the caller the holder. `GET` gives
+  `{"body","epoch","holder"}`, or 404. `POST /v1/account/recover` (`{"verifier"}`, 403 when it isn't the one put)
+  works at any stored epoch: the caller becomes the household's only current member, every other removed at the current
+  epoch, and the recovery is deleted; it answers `{"household","epoch"}`.
 - **Address limit.** Every household, account, sign-in and meeting route, and the reports ones, are behind
   `ADDRESS_LIMIT` (60 a minute), an IPv6 address counted by its /64.
-- **Retention.** The daily cron also drops batches past 90 days, ended meetings, join requests past 7 days, per-PC
+- **Retention.** The daily cron also drops batches past 90 days, ended meetings, join requests past 24 hours, per-PC
   counts and daily totals past 2 days and seen signatures past 10 minutes. Backlogs are worked through for up to
   20 s a run, and each part runs on its own, so one failing doesn't stop the others.
 
