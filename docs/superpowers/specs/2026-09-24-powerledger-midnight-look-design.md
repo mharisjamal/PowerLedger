@@ -219,37 +219,3 @@ disagree on a figure.
 
 Midnight ships as 0.8.0 on its own branch (`plan-o/*`), after 0.7.0. If 0.7.0 is still waiting on the owner's sign-in
 setup when Midnight is done and reviewed, the two go out together.
-
-## 9. Visual revision for 0.8.1 (owner, 2026-09-25)
-
-The owner found 0.8.0's colours and buttons "too AI-looking" and asked for a standard, human-made look. The layout,
-pages and data above stay; the visual language changes to Windows 11's own conventions, which is what a person
-expects of a Windows utility. This section overrides §3's palette and the reference-image styling where they differ.
-
-- **Neutrals, not navy.** Windows 11's dark and light layers:
-
-  | Key | Dark | Light | Used for |
-  |---|---|---|---|
-  | `M.Ground` | #202020 | #F3F3F3 | the window and the sidebar |
-  | `M.Layer` | #272727 | #F9F9F9 | the content area, one panel with an 8 px top-left corner and a 1 px border, as Settings has |
-  | `M.Panel` | #2D2D2D | #FFFFFF | cards |
-  | `M.Line` | #333333 | #E5E5E5 | hairlines and card borders |
-  | `M.Ink` / `M.Ink2` / `M.Ink3` | #FFFFFF / #C9C9C9 / #9D9D9D | #1A1A1A / #5D5D5D / #6E6E6E | text |
-  | `M.Good` / `M.Bad` / `M.Warn` | #6CCB5F / #FF99A4 / #FCE100 | #0F7B0F / #C42B1C / #9D5D00 | Fluent's status colours |
-
-- **The accent is the user's Windows accent** (SystemColors.AccentColorLight2 in dark, AccentColorDark1 in light;
-  Windows' default blue when it can't be read), and follows it when the user changes it. It marks only what can be
-  clicked or is selected: the current page, the selected range, primary buttons, focus, links. Text on it is black
-  or white, whichever reaches 4.5:1.
-- **Data has its own palette**, not the accent: the total line in ink, the parts in a colour-blind-safe categorical
-  set, flat fills at low opacity, no gradients.
-- **Controls:** 4 px corners on buttons and fields, 8 px on cards; a 1 px border and a flat fill; hover a step
-  lighter, pressed a step darker, no scale or glow. Range choices are a segmented selector with an underline, not
-  pills. The sidebar's current page has a subtle fill and a 3 × 16 px accent bar at its left edge, which slides between
-  items; no filled pill. No group headings in the sidebar: Settings and Support sit at its foot, as in Windows.
-- **Type:** Segoe UI Variable (Display for the big figures, Text for the rest; Segoe UI on Windows 10), figures in
-  tabular numerals, not a monospace face. Sentence case everywhere: no all-caps labels or table headers, no strings
-  joined with middle dots, no arrows after link text.
-- **Surfaces:** cards with a hairline border and no shadow or hover lift; the KPI bars are plain 4 px progress bars;
-  the tooltip is a solid surface with a 1 px border, not glass; no blur anywhere.
-- **Motion:** only what answers the user: the page cross-fade, the sidebar's indicator sliding, tooltips fading.
