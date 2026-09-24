@@ -59,7 +59,8 @@ internal sealed record PairingTimeouts(TimeSpan Step, TimeSpan Answer)
 /// users check the code: the joining PC's presses Join, and the adding PC's presses Codes match on "Does Laptop-2 show
 /// 482 913?". The household's key goes in the welcome only once both have, whichever answers first; a no or a cancel on
 /// either side sends <c>{"type":"cancel"}</c> or a no, and the other side's question closes, as it does when the
-/// connection goes.
+/// connection goes. The joining PC keeps the welcome aside, signs its joining, and enters the household only once the
+/// adding PC, having recorded it, answers <c>{"type":"welcomed"}</c>; without that, nothing changes on it.
 /// </summary>
 internal static class PairingSession
 {
@@ -68,9 +69,10 @@ internal static class PairingSession
     /// <param name="broker">Asks this PC's user whether the other PC shows the same code.</param>
     /// <param name="welcomeFor">Makes the welcome for the joining PC once both users said yes, making the household if there
     /// is none yet.</param>
+    /// <param name="record">Records the joining PC as a member, with its proof for the server, before it is told it is in.</param>
     public static async Task<PairingOutcome> AddAsync(
         IFrameChannel channel, PairingIdentity me, string? expectedInstance, IPromptBroker broker,
-        Func<MemberInfo, Task<Welcome>> welcomeFor, PairingTimeouts timeouts, CancellationToken cancel)
+        Func<MemberInfo, Task<Welcome>> welcomeFor, Func<MemberInfo, byte[], Task> record, PairingTimeouts timeouts, CancellationToken cancel)
     {
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
@@ -136,6 +138,16 @@ internal static class PairingSession
             {
                 return new PairingOutcome.Failed($"{name} didn't sign its joining, so it wasn't added.");
             }
+            await record(hello.From, proof!).ConfigureAwait(false);
+            try
+            {
+                await talk.SendAsync(new LanMessage { Type = "welcomed" }, cancel).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is IOException or ObjectDisposedException)
+            {
+                return new PairingOutcome.Failed(
+                    $"The connection to {name} went as it joined. If {name} doesn't show your household, remove it here and add it again.");
+            }
             return new PairingOutcome.Joined(hello.From, $"{name} joined your household.", proof);
         }
         catch (LanException error)
@@ -156,7 +168,8 @@ internal static class PairingSession
     /// <summary>The joining side, which was connected to and has read the adder's hello.</summary>
     /// <param name="adderHello">The adder's hello as it came, which the transcript takes.</param>
     /// <param name="inHousehold">True when this PC is in a household, which joining leaves: the user is told so.</param>
-    /// <param name="enter">Takes this PC into the household in the welcome, from the adding PC.</param>
+    /// <param name="enter">Takes this PC into the household in the welcome, from the adding PC, once the adding PC has said
+    /// it recorded the joining.</param>
     public static async Task<PairingOutcome> JoinAsync(
         IFrameChannel channel, byte[] adderHello, PairingIdentity me, IPromptBroker broker, bool inHousehold,
         Func<Welcome, MemberInfo, Task> enter, PairingTimeouts timeouts, CancellationToken cancel)
@@ -200,9 +213,10 @@ internal static class PairingSession
             {
                 return new PairingOutcome.Failed($"{name} sent a household that wasn't a good one, so nothing was changed.");
             }
-            await enter(welcome, hello.From).ConfigureAwait(false);
             await talk.SendAsync(new LanMessage { Type = "joined", Proof = Wire.Encode(Wire.SignJoin(me.Keys, welcome.HouseholdId)) }, cancel)
                 .ConfigureAwait(false);
+            await talk.ReceiveAsync("welcomed", cancel).ConfigureAwait(false);
+            await enter(welcome, hello.From).ConfigureAwait(false);
             return new PairingOutcome.Joined(hello.From, $"This PC joined {name}'s household.");
         }
         catch (LanException error)

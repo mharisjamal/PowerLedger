@@ -440,7 +440,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     [GeneratedRegex("^/v1/households/([0-9a-f]{32})(/.*)$")]
     private static partial Regex HouseholdPath();
 
-    [GeneratedRegex("^/v1/meetings/([0-9a-f]{32})/(adder|joiner|answer|welcome|joined)$")]
+    [GeneratedRegex("^/v1/meetings/([0-9a-f]{32})/(adder|joiner|answer|welcome|joined|welcomed)$")]
     private static partial Regex MeetingPath();
 
     public sealed record Member(string Sign, string Dh, long Added, long? Removed);

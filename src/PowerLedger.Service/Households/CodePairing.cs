@@ -34,7 +34,8 @@ internal sealed class CodeMeeting(string code, string normalized, ECDiffieHellma
 /// only sees the meeting ID made from the code, can't put in keys of its own. Both then agree a secret from their ephemeral
 /// keys; the joining PC's user is asked, without a comparison code since the code vouches for the adder, and the answer,
 /// the welcome and the joining PC's proof of its join go through the <c>answer</c>, <c>welcome</c> and <c>joined</c> slots,
-/// sealed. A meeting lasts 10 minutes.
+/// sealed. The joining PC enters the household only once the adding PC, having recorded it, writes the sealed
+/// <c>welcomed</c> slot (plan 0.8); without it, nothing changes on the joining PC. A meeting lasts 10 minutes.
 /// </summary>
 /// <param name="wait">How a poll waits for the next; <see cref="PollEvery"/> on the clock when null.</param>
 internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<TimeSpan, CancellationToken, Task>? wait = null)
@@ -61,9 +62,11 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
     }
 
     /// <summary>The adding side from there: waits for a joining PC's hello and checks its MAC, then its answer, then sends
-    /// the welcome, all within the meeting's 10 minutes.</summary>
+    /// the welcome, and once the joining PC's proof comes, records it and says so, all within the meeting's 10 minutes.</summary>
+    /// <param name="record">Records the joining PC as a member, with its proof for the server, before it is told it is in.</param>
     public async Task<PairingOutcome> AddAsync(
-        CodeMeeting meeting, PairingIdentity me, Func<MemberInfo, Task<Welcome>> welcomeFor, CancellationToken cancel)
+        CodeMeeting meeting, PairingIdentity me, Func<MemberInfo, Task<Welcome>> welcomeFor, Func<MemberInfo, byte[], Task> record,
+        CancellationToken cancel)
     {
         var deadline = meeting.Opened + Lifetime;
         var slot = await PollAsync(meeting.MeetingId, "joiner", deadline, cancel).ConfigureAwait(false);
@@ -93,12 +96,19 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         {
             return new PairingOutcome.Failed($"{joiner.From.Name} didn't sign its joining, so it wasn't added.");
         }
+        await record(joiner.From, proof!).ConfigureAwait(false);
+        var welcomed = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(new LanMessage { Type = "welcomed" }), Encoding.ASCII.GetBytes("welcomed"));
+        if (!await PutUntilAsync(meeting.MeetingId, "welcomed", welcomed, deadline, cancel).ConfigureAwait(false))
+        {
+            return new PairingOutcome.Failed(
+                $"Couldn't tell {joiner.From.Name} it was added. If it doesn't show your household, remove it here and add it again.");
+        }
         return new PairingOutcome.Joined(joiner.From, $"{joiner.From.Name} joined your household.", proof);
     }
 
     /// <summary>The joining side, given the code as the user typed it.</summary>
     /// <param name="inHousehold">True when this PC is in a household that joining leaves: the user is told so.</param>
-    /// <param name="enter">Takes this PC into the household in the welcome.</param>
+    /// <param name="enter">Takes this PC into the household in the welcome, once the adding PC has said it recorded the joining.</param>
     public async Task<PairingOutcome> JoinAsync(
         string typed, PairingIdentity me, IPromptBroker broker, bool inHousehold, Func<Welcome, MemberInfo, Task> enter, CancellationToken cancel)
     {
@@ -137,14 +147,15 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         {
             return new PairingOutcome.Failed($"{adder.From.Name} sent a household that wasn't a good one, so nothing was changed.");
         }
-        await enter(welcome, adder.From).ConfigureAwait(false);
         var joined = HouseholdCrypto.Seal(toAdder, Wire.SignJoin(me.Keys, welcome.HouseholdId), Encoding.ASCII.GetBytes("joined"));
         put = await relay.PutSlotAsync(meetingId, "joined", joined, cancel).ConfigureAwait(false);
-        if (!put.Ok)
+        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't tell {adder.From.Name} this PC is joining: {put.Problem}. Nothing was changed.");
+        var sealedWelcomed = await PollAsync(meetingId, "welcomed", deadline, cancel).ConfigureAwait(false);
+        if (sealedWelcomed is null || Open(toJoiner, sealedWelcomed, "welcomed") is not { Type: "welcomed" })
         {
-            return new PairingOutcome.Failed(
-                $"This PC joined {adder.From.Name}'s household, but couldn't tell it so: {put.Problem}. They sync once they meet on the network.");
+            return new PairingOutcome.Failed($"{adder.From.Name} didn't finish adding this PC in time, so nothing was changed.");
         }
+        await enter(welcome, adder.From).ConfigureAwait(false);
         return new PairingOutcome.Joined(adder.From, $"This PC joined {adder.From.Name}'s household.");
     }
 
@@ -183,6 +194,20 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         catch (CryptographicException)
         {
             return null;
+        }
+    }
+
+    /// <summary>Writes a slot, trying again while the server can't be reached, until the deadline; one already written
+    /// counts as written.</summary>
+    /// <returns>False when it couldn't be written in time.</returns>
+    private async Task<bool> PutUntilAsync(string meetingId, string slot, byte[] body, DateTimeOffset deadline, CancellationToken cancel)
+    {
+        while (true)
+        {
+            var put = await relay.PutSlotAsync(meetingId, slot, body, cancel).ConfigureAwait(false);
+            if (put.Ok || put.Status == 409) return true;
+            if (!put.Transient || clock.GetUtcNow() >= deadline) return false;
+            await _wait(PollEvery, cancel).ConfigureAwait(false);
         }
     }
 

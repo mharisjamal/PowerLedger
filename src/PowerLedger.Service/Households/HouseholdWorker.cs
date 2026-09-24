@@ -295,7 +295,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             try
             {
                 await using var channel = await LanConnector.ConnectAsync(pc.Address!, pc.Port, ConnectTimeout, _stopping.Token).ConfigureAwait(false);
-                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, _prompts, WelcomeForAsync, _timeouts, _stopping.Token)
+                outcome = await PairingSession.AddAsync(channel, Identity(), pc.Instance, _prompts, WelcomeForAsync, RecordAsync, _timeouts, _stopping.Token)
                     .ConfigureAwait(false);
             }
             catch (IOException)
@@ -306,7 +306,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             {
                 outcome = new PairingOutcome.Failed($"This PC was busy, so {name} wasn't added. Try again.");
             }
-            await AddedAsync(outcome).ConfigureAwait(false);
+            Added(outcome);
         }
     }
 
@@ -341,13 +341,13 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             PairingOutcome outcome;
             try
             {
-                outcome = await _codePairing.AddAsync(meeting, Identity(), WelcomeForAsync, _stopping.Token).ConfigureAwait(false);
+                outcome = await _codePairing.AddAsync(meeting, Identity(), WelcomeForAsync, RecordAsync, _stopping.Token).ConfigureAwait(false);
             }
             catch (GateTimeout)
             {
                 outcome = new PairingOutcome.Failed("This PC was busy, so the other PC wasn't added. Try again.");
             }
-            await AddedAsync(outcome).ConfigureAwait(false);
+            Added(outcome);
         }
     }
 
@@ -444,25 +444,25 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         return new Welcome(_store.HouseholdId!, _store.Epoch, _store.CurrentKey!, members);
     }
 
-    /// <summary>Records a pairing this PC started: the new member here, and on the server once it can be told.</summary>
-    private async Task AddedAsync(PairingOutcome outcome)
+    /// <summary>Records a PC this one is adding, before it is told it is in: the new member here, and on the server once it
+    /// can be told.</summary>
+    private async Task RecordAsync(MemberInfo joiner, byte[] proof)
     {
-        if (outcome is PairingOutcome.Joined { Other: var joiner, Proof: var proof })
+        using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
         {
-            using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
-            {
-                var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
-                _household.SaveMember(new HouseholdMember(joiner.Id, joiner.Name, joiner.Kind, joiner.Sign, joiner.Dh, nowMs, null, null));
-                _store.AddPending(new PendingOp(PendingOp.Add, _store.HouseholdId!, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
-                    Proof: proof is null ? null : Wire.Encode(proof)));
-                Announce();
-            }
-            Kick();
+            var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+            _household.SaveMember(new HouseholdMember(joiner.Id, joiner.Name, joiner.Kind, joiner.Sign, joiner.Dh, nowMs, null, null));
+            _store.AddPending(new PendingOp(PendingOp.Add, _store.HouseholdId!, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
+                Proof: Wire.Encode(proof)));
+            Announce();
         }
-        else if (outcome is PairingOutcome.Refused)
-        {
-            _pairingGate.Refused();
-        }
+        Kick();
+    }
+
+    /// <summary>Tells the App how a pairing this PC started ended.</summary>
+    private void Added(PairingOutcome outcome)
+    {
+        if (outcome is PairingOutcome.Refused) _pairingGate.Refused();
         Publish();                                                             // the status first, then the App is told
         Progress(outcome.Text, (outcome as PairingOutcome.Joined)?.Other.Name, null);
     }
