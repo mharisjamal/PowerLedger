@@ -104,6 +104,7 @@ async function signinRequest(device: TestDevice, provider: string, token: string
 
 interface SigninReply {
   session: string;
+  account: string;
   householdId: string | null;
   hasRecovery: boolean;
 }
@@ -117,13 +118,19 @@ describe("POST /v1/auth/signin", () => {
     const response = await handleSignin(await signinRequest(pc, "microsoft", await idToken(claims)), testEnv, { jwks: cache });
     expect(response.status).toBe(200);
     const reply = (await response.json()) as SigninReply;
-    expect(reply).toEqual({ session: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), householdId: null, hasRecovery: false });
+    expect(reply).toEqual({
+      session: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      account: expect.any(String),
+      householdId: null,
+      hasRecovery: false,
+    });
     expect(fetched).toEqual([JWKS_URLS.microsoft]);
 
     const account = await env.DB.prepare("SELECT id, provider, subject FROM accounts WHERE subject = ?")
       .bind(claims.sub)
       .first<{ id: string; provider: string; subject: string }>();
     expect(account).toMatchObject({ provider: "microsoft", subject: claims.sub });
+    expect(reply.account).toBe(account!.id);
 
     const session = await env.DB.prepare("SELECT account, device, sign_key, dh_key FROM sessions WHERE token_hash = ?")
       .bind(await sha256hex(reply.session))

@@ -126,7 +126,10 @@ export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, bo
   }
 
   const added = await addMemberStatement(env, member.household, device, keys.sign, keys.dh, Date.now()).first();
-  return added ? ok() : errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
+  if (!added) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
+  // Added directly, it has nothing left to wait for.
+  await env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(member.household, device).run();
+  return ok();
 }
 
 /** DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. The removed PC's session

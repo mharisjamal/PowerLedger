@@ -6,6 +6,8 @@ import { errorResponse, ok, overAddressLimit, parseObject } from "./http";
 
 /** At most this many PCs wait to join one household at a time. */
 export const MAX_WAITING = 16;
+/** At most this many PCs of one account wait at a time, so one account can't fill a household's list. */
+export const MAX_WAITING_PER_ACCOUNT = 2;
 /** A join request nobody has approved lapses after this (the daily cron clears it). */
 export const JOIN_REQUEST_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RECOVERY_CHARS = 4096;
@@ -42,16 +44,22 @@ export async function handleLink(env: Cloudflare.Env, session: SessionRow, body:
 }
 
 /** POST /v1/account/requests: this PC, signed in as an account linked to a household it isn't in, asks to join it. A
- * member approves it (POST …/requests/{device}/approve). */
+ * member approves it (POST …/requests/{device}/approve) or denies it (DELETE …/requests/{device}). At most 16 PCs wait
+ * for a household, and 2 for an account. */
 export async function handleAskToJoin(env: Cloudflare.Env, session: SessionRow): Promise<Response> {
   const household = await linkOf(env, session.account);
   if (!household) return errorResponse(409, "This account isn't linked to a household yet.");
   if (await isCurrentMember(env, household, session.device)) return errorResponse(409, "This PC is already in the household.");
 
-  const waiting = await env.DB.prepare("SELECT COUNT(*) AS n FROM join_requests WHERE household = ? AND device != ?")
-    .bind(household, session.device)
-    .first<{ n: number }>();
-  if ((waiting?.n ?? 0) >= MAX_WAITING) return errorResponse(409, "Too many PCs are already waiting to join this household.");
+  const [forHousehold, forAccount] = await env.DB.batch<{ n: number }>([
+    env.DB.prepare("SELECT COUNT(*) AS n FROM join_requests WHERE household = ? AND device != ?").bind(household, session.device),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM join_requests WHERE account = ? AND device != ? AND created > ?")
+      .bind(session.account, session.device, Date.now() - JOIN_REQUEST_LIFETIME_MS),
+  ]);
+  if (forHousehold.results[0].n >= MAX_WAITING) return errorResponse(409, "Too many PCs are already waiting to join this household.");
+  if (forAccount.results[0].n >= MAX_WAITING_PER_ACCOUNT) {
+    return errorResponse(409, `This account already has ${MAX_WAITING_PER_ACCOUNT} PCs waiting to join.`);
+  }
 
   await env.DB.prepare(
     `INSERT INTO join_requests (household, device, account, sign_key, dh_key, created) VALUES (?, ?, ?, ?, ?, ?)
@@ -68,14 +76,31 @@ const WAITING_REQUEST = `
   FROM join_requests r JOIN account_households l ON l.account = r.account AND l.household = r.household
   WHERE r.household = ? AND r.created > ?`;
 
-/** GET /v1/households/{hid}/requests: the PCs waiting to join, for a member to approve, with their keys. */
+/** GET /v1/households/{hid}/requests: the PCs waiting to join, for a member to approve, with their keys and the
+ * (opaque) account each is signed in as, which a PC can compare with its own from sign-in. */
 export async function handleListRequests(env: Cloudflare.Env, member: MemberRow): Promise<Response> {
-  const rows = await env.DB.prepare(`SELECT r.device, r.sign_key, r.dh_key, r.created ${WAITING_REQUEST} ORDER BY r.created, r.device`)
+  const rows = await env.DB.prepare(
+    `SELECT r.device, r.account, r.sign_key, r.dh_key, r.created ${WAITING_REQUEST} ORDER BY r.created, r.device`,
+  )
     .bind(member.household, Date.now() - JOIN_REQUEST_LIFETIME_MS)
-    .all<{ device: string; sign_key: string; dh_key: string; created: number }>();
+    .all<{ device: string; account: string; sign_key: string; dh_key: string; created: number }>();
   return Response.json(
-    rows.results.map((row) => ({ device: row.device, sign: row.sign_key, dh: row.dh_key, created: row.created })),
+    rows.results.map((row) => ({
+      device: row.device,
+      account: row.account,
+      sign: row.sign_key,
+      dh: row.dh_key,
+      created: row.created,
+    })),
   );
+}
+
+/** DELETE /v1/households/{hid}/requests/{device}: a member denies a waiting PC; 404 when none is waiting. */
+export async function handleDenyRequest(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
+  const denied = await env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ? RETURNING device")
+    .bind(member.household, device)
+    .first();
+  return denied ? ok() : errorResponse(404, "That PC isn't waiting to join this household.");
 }
 
 /**
@@ -221,7 +246,11 @@ export async function handleSignout(request: Request, env: Cloudflare.Env): Prom
   if (body instanceof Response) return body;
   const session = await finishSession(request, env, check, body);
   if (session instanceof Response) return session;
-  await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(tokenHash).run();
+  // The session goes, and with it this PC's own requests to join as that account.
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(tokenHash),
+    env.DB.prepare("DELETE FROM join_requests WHERE device = ? AND account = ?").bind(session.device, session.account),
+  ]);
   return ok();
 }
 

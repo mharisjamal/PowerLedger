@@ -2,6 +2,7 @@ import {
   handleApprove,
   handleAskToJoin,
   handleDeleteAccount,
+  handleDenyRequest,
   handleGetRecovery,
   handleLink,
   handleListRequests,
@@ -139,6 +140,11 @@ const ROUTES: Route[] = [
     method: "POST",
     path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}/approve$`),
     handle: asMember((env, member, body, params) => handleApprove(env, member, params[1], body)),
+  },
+  {
+    method: "DELETE",
+    path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}$`),
+    handle: asMember((env, member, _body, params) => handleDenyRequest(env, member, params[1])),
   },
 ];
 

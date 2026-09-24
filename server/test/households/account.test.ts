@@ -113,7 +113,13 @@ describe("join requests", () => {
     const waiting = await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`);
     expect(waiting.status).toBe(200);
     expect(await waiting.json()).toEqual([
-      { device: laptop.device.id, sign: laptop.device.sign, dh: laptop.device.dh, created: expect.any(Number) },
+      {
+        device: laptop.device.id,
+        account: owner.account,
+        sign: laptop.device.sign,
+        dh: laptop.device.dh,
+        created: expect.any(Number),
+      },
     ]);
 
     const body = envelope();
@@ -127,6 +133,45 @@ describe("join requests", () => {
     const key = await signedFetch(laptop.device, "GET", `/v1/households/${hid}/keys/1`);
     expect(await key.json()).toEqual({ epoch: 1, from: owner.device.id, body });
     expect(await (await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`)).json()).toEqual([]);
+  });
+
+  it("lets a member deny a waiting PC, which is then gone from the list", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    const deny = (by: TestDevice) => signedFetch(by, "DELETE", `/v1/households/${hid}/requests/${laptop.device.id}`);
+
+    expect((await deny(await newDevice())).status).toBe(401);
+    expect((await deny(owner.device)).status).toBe(200);
+    expect(await (await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`)).json()).toEqual([]);
+    expect((await deny(owner.device)).status).toBe(404);
+    expect(await isMember(hid, laptop.device.id)).toBe(false);
+  });
+
+  it("keeps at most 2 PCs of one account waiting", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const pcs = [await signIn(undefined, owner.account), await signIn(undefined, owner.account), await signIn(undefined, owner.account)];
+
+    expect((await asAccount(pcs[0], "POST", "/v1/account/requests")).status).toBe(200);
+    expect((await asAccount(pcs[1], "POST", "/v1/account/requests")).status).toBe(200);
+    expect((await asAccount(pcs[2], "POST", "/v1/account/requests")).status).toBe(409);
+    expect((await asAccount(pcs[1], "POST", "/v1/account/requests")).status).toBe(200);
+
+    const waiting = (await (await signedFetch(owner.device, "GET", `/v1/households/${hid}/requests`)).json()) as { device: string }[];
+    expect(waiting.map((item) => item.device).sort()).toEqual([pcs[0].device.id, pcs[1].device.id].sort());
+  });
+
+  it("clears a PC's request when it's added directly, and when it signs out", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const added = await signIn(undefined, owner.account);
+    const leaving = await signIn(undefined, owner.account);
+    await asAccount(added, "POST", "/v1/account/requests");
+    await asAccount(leaving, "POST", "/v1/account/requests");
+
+    await addMember(hid, owner.device, added.device);
+    expect((await asAccount(leaving, "POST", "/v1/auth/signout")).status).toBe(200);
+
+    expect(await env.DB.prepare("SELECT device FROM join_requests WHERE household = ?").bind(hid).all()).toMatchObject({ results: [] });
   });
 
   it("refuses to ask without a linked household, or when already in it", async () => {
