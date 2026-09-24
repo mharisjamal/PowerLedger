@@ -189,7 +189,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);
         var laptop = await Start("Laptop-2", ChassisKind.Laptop, appAtTheScreen: false);    // says no at once
-        for (var i = 0; i < PairingGate.MaxRefusals; i++)
+        for (var i = 0; i < StrangerGate.PerAddress; i++)
         {
             await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(1));
             (await desktop.Send<HouseholdReply>(new AddPcRequest(2, laptop.Worker.InstanceId))).Ok.ShouldBeTrue();
@@ -198,6 +198,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         }
 
         (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(3))).Ok.ShouldBeTrue();
+        (await laptop.Send<HouseholdReply>(new StartCodePairingRequest(4))).Ok.ShouldBeTrue();   // refusals on the network never pause code pairing
     }
 
     [Fact]
@@ -213,7 +214,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
             return await channel.ReceiveAsync();
         }
 
-        for (var i = 0; i < PairingGate.MaxRefusals; i++) (await TryPair(good: false)).ShouldBeNull();   // a hello that isn't a good one
+        for (var i = 0; i < StrangerGate.PerAddress; i++) (await TryPair(good: false)).ShouldBeNull();   // a hello that isn't a good one
 
         (await TryPair(good: true)).ShouldBeNull();                               // not even this PC's hello back
         var told = laptop.Drain();

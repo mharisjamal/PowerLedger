@@ -140,6 +140,7 @@ public sealed class PairingSessionTests : IDisposable
         var hello = (await attackerEnd.ReceiveAsync()).ShouldNotBeNull();
         var cipher = Answer(attackerEnd, hello, attackerKeys, "Laptop-2", Joiner.Instance, out var sent);
         await attackerEnd.SendAsync(sent);
+        LanMessages.Read(cipher.Open((await attackerEnd.ReceiveAsync())!)).ShouldNotBeNull().Type.ShouldBe("reveal");
         await attackerEnd.SendAsync(cipher.Seal(LanMessages.Write(new LanMessage { Type = "answer", Accept = true })));
 
         var next = attackerEnd.ReceiveAsync();
@@ -197,8 +198,10 @@ public sealed class PairingSessionTests : IDisposable
     {
         var (adderEnd, joinerEnd) = FramePipe.Create();
         var joinerUser = new User();
+        using var adder = new HandAdder(Adder);
         var joining = JoinerSide(joinerEnd, joinerUser, inHousehold: false, enter: (_, _) => throw new InvalidOperationException("never entered"),
-            adderHello: Hello(Adder));
+            adderHello: adder.HelloBytes);
+        await adder.AnswerAsync(adderEnd);
         await joinerUser.WaitAsked();
         await adderEnd.DisposeAsync();
         (await joining).ShouldBeOfType<PairingOutcome.Failed>();
@@ -276,7 +279,8 @@ public sealed class PairingSessionTests : IDisposable
         (await adding).ShouldBeOfType<PairingOutcome.Failed>();
         await adderEnd.DisposeAsync();
         (await joining).ShouldBeOfType<PairingOutcome.Failed>();
-        adderUser.Code.ShouldNotBeNull().ShouldNotBe(shownOnJoiner.ShouldNotBeNull());
+        adderUser.Code.ShouldNotBeNull();
+        shownOnJoiner.ShouldBeNull();                                          // the adder's reveal never opened: the joiner wasn't even asked
         await joinerEnd.DisposeAsync();
         await relaying;
     }
@@ -292,6 +296,7 @@ public sealed class PairingSessionTests : IDisposable
 
         await middleToJoiner.SendAsync((await middleFromAdder.ReceiveAsync())!);          // the adder's hello
         await middleFromAdder.SendAsync((await middleToJoiner.ReceiveAsync())!);          // the joiner's hello
+        await middleToJoiner.SendAsync((await middleFromAdder.ReceiveAsync())!);          // the adder's reveal
         var answer = (await middleToJoiner.ReceiveAsync())!;
         await middleFromAdder.SendAsync(answer);
         await middleToJoiner.SendAsync((await middleFromAdder.ReceiveAsync())!);          // the welcome
@@ -313,7 +318,8 @@ public sealed class PairingSessionTests : IDisposable
         using var cipher = Answer(joinerEnd, (await joinerEnd.ReceiveAsync())!, Joiner.Keys, Joiner.Name, Joiner.Instance, out var sent);
         await joinerEnd.SendAsync(sent);
         await joinerEnd.SendAsync(cipher.Seal(LanMessages.Write(new LanMessage { Type = "answer", Accept = true })));
-        cipher.Open((await joinerEnd.ReceiveAsync())!);
+        cipher.Open((await joinerEnd.ReceiveAsync())!);                           // the reveal
+        cipher.Open((await joinerEnd.ReceiveAsync())!);                           // the welcome
         using var other = DeviceKeys.Create();
         await joinerEnd.SendAsync(cipher.Seal(LanMessages.Write(new LanMessage { Type = "joined", Proof = Wire.Encode(Wire.SignJoin(other, Hid)) })));
 
@@ -327,15 +333,13 @@ public sealed class PairingSessionTests : IDisposable
         {
             var (adderEnd, joinerEnd) = FramePipe.Create();
             var entered = false;
-            using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            var adderHello = LanMessages.Write(LanMessages.Hello("pair", eph.ExportSubjectPublicKeyInfo(), Adder.Keys, Adder.Name, Adder.Kind, Adder.Instance));
+            using var adder = new HandAdder(Adder);
             var joining = JoinerSide(joinerEnd, new User(true), inHousehold: false, enter: (_, _) => { entered = true; return Task.CompletedTask; },
-                adderHello: adderHello);
+                adderHello: adder.HelloBytes);
 
             // A hand-made adder: the key exchange, the welcome, the joining PC's proof; then the acknowledgement, or the connection goes.
-            var joinerHello = (await adderEnd.ReceiveAsync()).ShouldNotBeNull();
-            var theirs = PowerLedger.Service.Households.Lan.Hello.Of(LanMessages.Read(joinerHello)).ShouldNotBeNull();
-            using var cipher = FrameCipher.For(adder: true, HouseholdCrypto.Agree(eph, theirs.Eph), HouseholdCrypto.Transcript(adderHello, joinerHello));
+            await adder.AnswerAsync(adderEnd);
+            var cipher = adder.Cipher!;
             LanMessages.Read(cipher.Open((await adderEnd.ReceiveAsync())!)).ShouldNotBeNull().Accept.ShouldBe(true);
             await adderEnd.SendAsync(cipher.Seal(LanMessages.Write(PairingSession.WelcomeMessage(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])))));
             LanMessages.Read(cipher.Open((await adderEnd.ReceiveAsync())!)).ShouldNotBeNull().Type.ShouldBe("joined");
@@ -371,13 +375,78 @@ public sealed class PairingSessionTests : IDisposable
         var (otherEnd, askedEnd) = FramePipe.Create();
         var counted = 0;
         var stillAsked = new User();
-        var asked = PairingSession.JoinAsync(askedEnd, Hello(Adder), Joiner, stillAsked, false, (_, _) => Task.CompletedTask, Quick, CancellationToken.None,
+        using var adder = new HandAdder(Adder);
+        var asked = PairingSession.JoinAsync(askedEnd, adder.HelloBytes, Joiner, stillAsked, false, (_, _) => Task.CompletedTask, Quick, CancellationToken.None,
             refused: () => counted++);
+        await adder.AnswerAsync(otherEnd);
         await stillAsked.WaitAsked();
         await otherEnd.DisposeAsync();                                         // the adding PC went while the question was open
 
         (await asked).ShouldBeOfType<PairingOutcome.Failed>();
         counted.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task The_code_rests_on_a_nonce_the_adder_bound_itself_to_before_the_joiners_hello_so_the_side_sending_second_cant_steer_it()
+    {
+        var (adderEnd, middleEnd) = FramePipe.Create();
+        var adderUser = new User();
+        var adding = PairingSession.AddAsync(adderEnd, Adder, null, adderUser,
+            _ => Task.FromResult(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])), NoRecord, Quick, CancellationToken.None);
+        var adderHello = (await middleEnd.ReceiveAsync()).ShouldNotBeNull();
+        var theirs = PowerLedger.Service.Households.Lan.Hello.Of(LanMessages.Read(adderHello)).ShouldNotBeNull();
+        var commit = theirs.Commit.ShouldNotBeNull();
+
+        // The PC in the middle, answering second, fixes the code it wants from its other session and may shape its hello as it
+        // likes; but the code the adder shows needs the nonce, which comes only once its hello is sent.
+        const string Wanted = "314 159";
+        using var middleKeys = DeviceKeys.Create();
+        using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var sent = LanMessages.Write(LanMessages.Hello("pair", eph.ExportSubjectPublicKeyInfo(), middleKeys, "Laptop-2", ChassisKind.Laptop, Joiner.Instance));
+        var shared = HouseholdCrypto.Agree(eph, theirs.Eph);
+        var transcript = HouseholdCrypto.Transcript(adderHello, sent);
+        using var cipher = FrameCipher.For(adder: false, shared, transcript);
+        var first = middleEnd.ReceiveAsync();
+        (await Task.WhenAny(first, Task.Delay(200))).ShouldNotBe(first);           // nothing comes before its hello
+        await middleEnd.SendAsync(sent);
+        var reveal = LanMessages.Read(cipher.Open((await first)!)).ShouldNotBeNull();
+        reveal.Type.ShouldBe("reveal");
+        var nonce = Wire.Decode(reveal.Nonce).ShouldNotBeNull();
+
+        HouseholdCrypto.Commitment(nonce).ShouldBe(commit);                       // the adder was bound to it from its hello
+        await adderUser.WaitAsked();
+        adderUser.Code.ShouldBe(HouseholdCrypto.ComparisonCode(shared, transcript, nonce));
+        adderUser.Code.ShouldNotBe(Wanted);                                       // except by a one-in-a-million chance
+        adderUser.Answer(false);
+        await adding;
+    }
+
+    [Fact]
+    public async Task A_reveal_that_doesnt_match_the_commitment_ends_the_pairing_before_the_user_is_asked()
+    {
+        var (adderEnd, joinerEnd) = FramePipe.Create();
+        var joinerUser = new User(true);
+        using var adder = new HandAdder(Adder);
+        var joining = JoinerSide(joinerEnd, joinerUser, inHousehold: false, enter: (_, _) => throw new InvalidOperationException("never entered"),
+            adderHello: adder.HelloBytes);
+
+        await adder.AnswerAsync(adderEnd, reveal: HouseholdCrypto.NewNonce());   // a nonce picked after seeing the joiner's hello
+
+        (await joining).ShouldBeOfType<PairingOutcome.Failed>().Text.ShouldBe("Desktop-7's pairing didn't hold together, so nothing was changed.");
+        joinerUser.Code.ShouldBeNull();                                           // never asked
+    }
+
+    [Fact]
+    public async Task An_adders_hello_without_a_commitment_isnt_answered()
+    {
+        var (_, joinerEnd) = FramePipe.Create();
+        using var eph = DeviceKeys.Create();
+        var bare = LanMessages.Write(LanMessages.Hello("pair", eph.DhPublic, Adder.Keys, Adder.Name, Adder.Kind, Adder.Instance));
+
+        var outcome = await PairingSession.JoinAsync(joinerEnd, bare, Joiner, new User(true), false, (_, _) => Task.CompletedTask, Quick, CancellationToken.None);
+
+        outcome.ShouldBeOfType<PairingOutcome.Failed>();
+        joinerEnd.Sent.ShouldBeEmpty();                                           // not even this PC's hello
     }
 
     public void Dispose()
@@ -388,13 +457,50 @@ public sealed class PairingSessionTests : IDisposable
 
     private static Task NoRecord(MemberInfo joiner, byte[] proof) => Task.CompletedTask;
 
-    /// <summary>A hand-made joiner's side of the key exchange: its hello to send, and the frame keys that go with it.</summary>
+    /// <summary>A hand-made joiner's side of the key exchange: its hello to send, and the frame keys that go with it. The
+    /// first frame it then gets is the adder's reveal.</summary>
     private static FrameCipher Answer(FramePipe end, byte[] adderHello, DeviceKeys keys, string name, string instance, out byte[] hello)
     {
         var theirs = PowerLedger.Service.Households.Lan.Hello.Of(LanMessages.Read(adderHello)).ShouldNotBeNull();
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         hello = LanMessages.Write(LanMessages.Hello("pair", eph.ExportSubjectPublicKeyInfo(), keys, name, ChassisKind.Laptop, instance));
         return FrameCipher.For(adder: false, HouseholdCrypto.Agree(eph, theirs.Eph), HouseholdCrypto.Transcript(adderHello, hello));
+    }
+
+    /// <summary>A hand-made adder: a pair hello committed to a nonce, then, once the joiner's hello comes, the frame keys and
+    /// the reveal.</summary>
+    private sealed class HandAdder : IDisposable
+    {
+        private readonly ECDiffieHellman _eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+        public HandAdder(PairingIdentity who)
+        {
+            HelloBytes = LanMessages.Write(LanMessages.Hello("pair", _eph.ExportSubjectPublicKeyInfo(), who.Keys, who.Name, who.Kind, who.Instance) with
+            {
+                Commit = Wire.Encode(HouseholdCrypto.Commitment(Nonce)),
+            });
+        }
+
+        public byte[] Nonce { get; } = HouseholdCrypto.NewNonce();
+
+        public byte[] HelloBytes { get; }
+
+        public FrameCipher? Cipher { get; private set; }
+
+        /// <summary>Reads the joiner's hello and sends the reveal: the committed nonce, or <paramref name="reveal"/> in its place.</summary>
+        public async Task AnswerAsync(FramePipe end, byte[]? reveal = null)
+        {
+            var joinerHello = (await end.ReceiveAsync()).ShouldNotBeNull();
+            var theirs = PowerLedger.Service.Households.Lan.Hello.Of(LanMessages.Read(joinerHello)).ShouldNotBeNull();
+            Cipher = FrameCipher.For(adder: true, HouseholdCrypto.Agree(_eph, theirs.Eph), HouseholdCrypto.Transcript(HelloBytes, joinerHello));
+            await end.SendAsync(Cipher.Seal(LanMessages.Write(new LanMessage { Type = "reveal", Nonce = Wire.Encode(reveal ?? Nonce) })));
+        }
+
+        public void Dispose()
+        {
+            Cipher?.Dispose();
+            _eph.Dispose();
+        }
     }
 
     private async Task<PairingOutcome> JoinerSide(
@@ -485,23 +591,62 @@ public sealed class PairingSessionTests : IDisposable
 public sealed class PairingGateTests
 {
     [Fact]
-    public void Five_pairings_that_come_to_nothing_from_one_address_leave_it_unanswered_for_ten_minutes()
+    public void Three_pairings_that_come_to_nothing_from_one_address_leave_it_unanswered_for_ten_minutes_and_ipv6_counts_by_its_64()
     {
         var clock = new FakeTimeProvider();
         var strangers = new StrangerGate(clock);
         var noisy = System.Net.IPAddress.Parse("192.168.1.66");
         var other = System.Net.IPAddress.Parse("192.168.1.7");
 
-        for (var i = 0; i < 4; i++) strangers.Failed(noisy);
+        for (var i = 0; i < StrangerGate.PerAddress - 1; i++) strangers.Failed(noisy);
         strangers.Allowed(noisy).ShouldBeTrue();
         strangers.Failed(noisy);
         strangers.Allowed(noisy).ShouldBeFalse();
         strangers.Allowed(other).ShouldBeTrue();
 
-        clock.Advance(PairingGate.Pause);
+        clock.Advance(StrangerGate.Pause);
         strangers.Allowed(noisy).ShouldBeTrue();
         strangers.Failed(noisy);                                               // counting starts again
         strangers.Allowed(noisy).ShouldBeTrue();
+
+        // One home's IPv6 /64 is one address, however many addresses it takes from it.
+        strangers.Failed(System.Net.IPAddress.Parse("2001:db8:1:2::10"));
+        strangers.Failed(System.Net.IPAddress.Parse("2001:db8:1:2:aaaa::11"));
+        strangers.Failed(System.Net.IPAddress.Parse("2001:db8:1:2:bbbb:cccc:dddd:12"));
+        strangers.Allowed(System.Net.IPAddress.Parse("2001:db8:1:2::99")).ShouldBeFalse();
+        strangers.Allowed(System.Net.IPAddress.Parse("2001:db8:1:3::10")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Twenty_from_all_addresses_together_pause_every_pairing_from_the_network()
+    {
+        var clock = new FakeTimeProvider();
+        var strangers = new StrangerGate(clock);
+
+        for (var i = 0; i < StrangerGate.AllAddresses; i++) strangers.Failed(System.Net.IPAddress.Parse($"10.0.{i}.1"));
+
+        strangers.Allowed(System.Net.IPAddress.Parse("10.9.9.9")).ShouldBeFalse();
+        clock.Advance(StrangerGate.Pause);
+        strangers.Allowed(System.Net.IPAddress.Parse("10.9.9.9")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_full_table_keeps_its_paused_addresses_and_while_it_holds_nothing_else_a_new_address_goes_unanswered()
+    {
+        var clock = new FakeTimeProvider();
+        var strangers = new StrangerGate(clock, allAddresses: int.MaxValue, maxAddresses: 4);
+        var addresses = Enumerable.Range(1, 4).Select(i => System.Net.IPAddress.Parse($"10.0.0.{i}")).ToList();
+        foreach (var address in addresses)
+        {
+            for (var i = 0; i < StrangerGate.PerAddress; i++) strangers.Failed(address);
+        }
+
+        var newcomer = System.Net.IPAddress.Parse("172.16.0.1");
+        strangers.Allowed(newcomer).ShouldBeFalse();                           // the table is all paused addresses
+        strangers.Failed(newcomer);
+        addresses.ShouldAllBe(address => !strangers.Allowed(address));         // none pushed out to make room
+        clock.Advance(StrangerGate.Pause);
+        strangers.Allowed(newcomer).ShouldBeTrue();                            // room again once they aren't paused
     }
 
     [Fact]

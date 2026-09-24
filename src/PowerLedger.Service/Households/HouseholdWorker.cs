@@ -439,17 +439,23 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         using (pairing)
         {
             PairingOutcome outcome;
+            var counted = false;
+            void Refused()
+            {
+                counted = true;                                                // before the answer goes, so the next try meets it
+                if (call.From is { } refusedFrom) _strangers.Failed(refusedFrom);
+            }
             try
             {
                 outcome = await PairingSession.JoinAsync(
-                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, pairing.Token, _pairingGate.Refused)
+                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, pairing.Token, Refused)
                     .ConfigureAwait(false);
             }
             catch (GateTimeout)
             {
                 outcome = new PairingOutcome.Failed("This PC was busy, so it didn't join. Try again.");
             }
-            if (outcome is not PairingOutcome.Joined && call.From is { } from) _strangers.Failed(from);
+            if (outcome is not PairingOutcome.Joined && !counted && call.From is { } from) _strangers.Failed(from);   // network ones never pause code pairing
             if (outcome is PairingOutcome.Joined || (outcome is PairingOutcome.Failed && _strangers.MayTell())) Info(outcome.Text);
         }
     }

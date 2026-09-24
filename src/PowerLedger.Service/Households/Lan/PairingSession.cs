@@ -57,7 +57,10 @@ internal sealed record PairingTimeouts(TimeSpan Step, TimeSpan Answer)
 /// Pairing on the same network (households design §3, plan 0.6 and 0.8), over one connection. Each side sends a hello with a
 /// fresh ephemeral key and its own keys; both agree a shared secret, from which, with the two hellos as they went over the
 /// wire, come the keys for the rest of the exchange and the six-digit comparison code both screens show. A PC in the
-/// middle that changes anything in either hello can't make the two codes match, except by a one-in-a-million chance. Both
+/// middle that changes anything in either hello can't make the two codes match, except by a one-in-a-million chance: the
+/// adder commits to a nonce in its hello and reveals it only once the joiner's hello has come (plan 0.9), and the code is
+/// over the nonce too, so the side that sends its hello second can't try hellos until the code comes out as it wants, and
+/// the adder can't pick its nonce after seeing the joiner's hello. The joiner asks its user only after a good reveal. Both
 /// users check the code: the joining PC's presses Join, and the adding PC's presses Codes match on "Does Laptop-2 show
 /// 482 913?". The household's key goes in the welcome only once both have, whichever answers first; a no or a cancel on
 /// either side sends <c>{"type":"cancel"}</c> or a no, and the other side's question closes, as it does when the
@@ -84,9 +87,13 @@ internal static class PairingSession
         Task<LanMessage>? pending = null;
         FrameCipher? cipher = null;                                            // kept to say goodbye after a cancel
         string name = "The other PC";
+        var nonce = HouseholdCrypto.NewNonce();                                // bound in the hello before the joiner's comes
         try
         {
-            var myHello = LanMessages.Write(LanMessages.Hello(Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance));
+            var myHello = LanMessages.Write(LanMessages.Hello(Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance) with
+            {
+                Commit = Wire.Encode(HouseholdCrypto.Commitment(nonce)),
+            });
             await talk.SendAsync(myHello, cancel).ConfigureAwait(false);
             var (theirMessage, theirHello) = await talk.ReceiveWithBytesAsync("hello", cancel).ConfigureAwait(false);
             var hello = Hello.Of(theirMessage);
@@ -102,9 +109,10 @@ internal static class PairingSession
             var transcript = HouseholdCrypto.Transcript(myHello, theirHello);
             cipher = FrameCipher.For(adder: true, shared, transcript);
             talk.Secure(cipher);
+            await talk.SendAsync(new LanMessage { Type = "reveal", Nonce = Wire.Encode(nonce) }, cancel).ConfigureAwait(false);
 
             // Both users answer at once: this PC's to the code, the joining PC's with Join; the key waits for both.
-            confirming = broker.ConfirmCodeAsync(name, HouseholdCrypto.ComparisonCode(shared, transcript), question.Token);
+            confirming = broker.ConfirmCodeAsync(name, HouseholdCrypto.ComparisonCode(shared, transcript, nonce), question.Token);
             pending = talk.ReceiveAsync(null, CancellationToken.None, timeouts.Answer);
             if (await Task.WhenAny(confirming, pending).ConfigureAwait(false) == confirming && !await confirming.ConfigureAwait(false))
             {
@@ -180,12 +188,16 @@ internal static class PairingSession
     /// <param name="enter">Takes this PC into the household in the welcome, from the adding PC, once the adding PC has said
     /// it recorded the joining.</param>
     /// <param name="refused">Counts a pairing whose question came to nothing: the user said no, or the adding PC stopped or
-    /// went while it was open. It is counted before the answer goes, so the next try already meets the count.</param>
+    /// went while it was open. It is counted before the answer goes, so the next try already meets the count. A pairing that
+    /// ends before a good reveal isn't counted here; the caller counts every pairing that comes to nothing.</param>
     public static async Task<PairingOutcome> JoinAsync(
         IFrameChannel channel, byte[] adderHello, PairingIdentity me, IPromptBroker broker, bool inHousehold,
         Func<Welcome, MemberInfo, Task> enter, PairingTimeouts timeouts, CancellationToken cancel, Action? refused = null)
     {
-        if (Hello.Of(LanMessages.Read(adderHello)) is not { Purpose: Hello.Pair } hello) return new PairingOutcome.Failed("The other PC's hello wasn't a good one.");
+        if (Hello.Of(LanMessages.Read(adderHello)) is not { Purpose: Hello.Pair, Commit: { } commit } hello)
+        {
+            return new PairingOutcome.Failed("The other PC's hello wasn't a good one.");
+        }
         if (hello.From.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That is this PC.");
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
@@ -203,9 +215,16 @@ internal static class PairingSession
             var transcript = HouseholdCrypto.Transcript(adderHello, myHello);
             cipher = FrameCipher.For(adder: false, shared, transcript);
             talk.Secure(cipher);
+            var reveal = await talk.ReceiveAsync("reveal", cancel).ConfigureAwait(false);
+            if (Wire.Decode(reveal.Nonce) is not { Length: 32 } nonce
+                || !CryptographicOperations.FixedTimeEquals(HouseholdCrypto.Commitment(nonce), commit))
+            {
+                return new PairingOutcome.Failed($"{name}'s pairing didn't hold together, so nothing was changed.");
+            }
 
             // The user's answer, while the connection is watched: a cancel from the adder, or the connection going, closes the question.
-            asking = broker.AskToJoinAsync(new JoinQuestion(name, HouseholdCrypto.ComparisonCode(shared, transcript), inHousehold), question.Token);
+            var code = HouseholdCrypto.ComparisonCode(shared, transcript, nonce);
+            asking = broker.AskToJoinAsync(new JoinQuestion(name, code, inHousehold), question.Token);
             pending = talk.ReceiveAsync(null, CancellationToken.None, timeouts.Answer);
             if (await Task.WhenAny(asking, pending).ConfigureAwait(false) == pending)
             {
@@ -335,23 +354,38 @@ internal static class PairingSession
 }
 
 /// <summary>
-/// Pairings asked of this PC from the network, by address (plan 0.8): 5 that come to nothing from one address in 10 minutes
-/// and its pairings go unanswered for 10 minutes; and at most 3 notices in 10 minutes about pairings that went wrong, so a
-/// stranger can't fill the tray.
+/// Pairings asked of this PC from the network (plan 0.9). One that comes to nothing, refused, stopped or ended before a good
+/// reveal, counts against the address it came from, an IPv6 one by its /64: 3 in 10 minutes and that address goes
+/// unanswered for 10 minutes; 20 from all addresses together and every pairing from the network does. A full table keeps
+/// its paused addresses, and while it holds nothing else a new address goes unanswered. At most 3 notices in 10 minutes
+/// about pairings that went wrong reach the App, so a stranger can't fill the tray. None of it pauses pairing by code.
 /// </summary>
-internal sealed class StrangerGate(TimeProvider clock)
+internal sealed class StrangerGate(TimeProvider clock, int allAddresses = StrangerGate.AllAddresses, int maxAddresses = StrangerGate.MaxAddresses)
 {
     public const int MaxNotices = 3;
-    private const int MaxAddresses = 256;
+    public const int PerAddress = 3;
+    public const int AllAddresses = 20;
+    public const int MaxAddresses = 256;
+    public static readonly TimeSpan Window = TimeSpan.FromMinutes(10);
+    public static readonly TimeSpan Pause = TimeSpan.FromMinutes(10);
 
     private readonly Lock _gate = new();
-    private readonly Dictionary<IPAddress, (Queue<DateTimeOffset> Failures, DateTimeOffset PausedUntil)> _addresses = [];
+    private readonly Dictionary<string, (Queue<DateTimeOffset> Failures, DateTimeOffset PausedUntil)> _addresses = new(StringComparer.Ordinal);
+    private readonly Queue<DateTimeOffset> _all = new();
     private readonly Queue<DateTimeOffset> _notices = new();
+    private DateTimeOffset _allPausedUntil = DateTimeOffset.MinValue;
 
-    /// <summary>False while pairings from <paramref name="from"/> go unanswered.</summary>
+    /// <summary>False while pairings from <paramref name="from"/> go unanswered: that address, or all of them, paused, or a
+    /// new address with the table full of paused ones.</summary>
     public bool Allowed(IPAddress from)
     {
-        lock (_gate) return !_addresses.TryGetValue(from, out var seen) || clock.GetUtcNow() >= seen.PausedUntil;
+        lock (_gate)
+        {
+            var now = clock.GetUtcNow();
+            if (now < _allPausedUntil) return false;
+            if (_addresses.TryGetValue(Key(from), out var seen)) return now >= seen.PausedUntil;
+            return _addresses.Count < maxAddresses || _addresses.Values.Any(entry => now >= entry.PausedUntil);
+        }
     }
 
     /// <summary>Counts a pairing from <paramref name="from"/> that came to nothing.</summary>
@@ -360,19 +394,37 @@ internal sealed class StrangerGate(TimeProvider clock)
         lock (_gate)
         {
             var now = clock.GetUtcNow();
-            if (!_addresses.TryGetValue(from, out var seen))
+            Trim(_all, now);
+            _all.Enqueue(now);
+            if (_all.Count >= allAddresses)
             {
-                if (_addresses.Count >= MaxAddresses) Forget(now);
+                _allPausedUntil = now + Pause;
+                _all.Clear();
+            }
+            var key = Key(from);
+            if (!_addresses.TryGetValue(key, out var seen))
+            {
+                if (_addresses.Count >= maxAddresses && !Forget(now)) return;     // full of paused addresses: this one isn't answered
                 seen = (new Queue<DateTimeOffset>(), DateTimeOffset.MinValue);
             }
+            Trim(seen.Failures, now);
             seen.Failures.Enqueue(now);
-            while (seen.Failures.Count > 0 && now - seen.Failures.Peek() > PairingGate.Window) seen.Failures.Dequeue();
-            if (seen.Failures.Count >= PairingGate.MaxRefusals)
-            {
-                seen = (new Queue<DateTimeOffset>(), now + PairingGate.Pause);
-            }
-            _addresses[from] = seen;
+            if (seen.Failures.Count >= PerAddress) seen = (new Queue<DateTimeOffset>(), now + Pause);
+            _addresses[key] = seen;
         }
+    }
+
+    /// <summary>An address as it is counted: an IPv4 one whole, an IPv6 one by its /64, which one home is given at once.</summary>
+    internal static string Key(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6) return address.ToString();
+        return Convert.ToHexString(address.GetAddressBytes(), 0, 8) + "/64";
+    }
+
+    private static void Trim(Queue<DateTimeOffset> times, DateTimeOffset now)
+    {
+        while (times.Count > 0 && now - times.Peek() > Window) times.Dequeue();
     }
 
     /// <summary>True when a notice about a pairing from the network may go to the App now.</summary>
@@ -388,24 +440,22 @@ internal sealed class StrangerGate(TimeProvider clock)
         }
     }
 
-    /// <summary>Forgets the addresses with nothing recent, or failing that the oldest, so the table stays small.</summary>
-    private void Forget(DateTimeOffset now)
+    /// <summary>Makes room in a full table: addresses not paused go, those quiet longest first; a paused one never does.</summary>
+    /// <returns>False when every address in the table is paused.</returns>
+    private bool Forget(DateTimeOffset now)
     {
-        var stale = _addresses.Where(pair => now >= pair.Value.PausedUntil && pair.Value.Failures.All(at => now - at > PairingGate.Window))
-            .Select(pair => pair.Key).ToList();
-        if (stale.Count == 0)
-        {
-            stale = [.. _addresses.OrderBy(pair => pair.Value.Failures.Count == 0 ? DateTimeOffset.MinValue : pair.Value.Failures.Last())
-                .Take(MaxAddresses / 4).Select(pair => pair.Key)];
-        }
-        foreach (var address in stale) _addresses.Remove(address);
+        var free = _addresses.Where(pair => now >= pair.Value.PausedUntil)
+            .OrderBy(pair => pair.Value.Failures.Count == 0 ? DateTimeOffset.MinValue : pair.Value.Failures.Last())
+            .Take(Math.Max(1, maxAddresses / 4)).Select(pair => pair.Key).ToList();
+        foreach (var address in free) _addresses.Remove(address);
+        return free.Count > 0;
     }
 }
 
 /// <summary>
-/// One pairing at a time, and a pause after too many refusals (households design §3): 5 refused pairings in 10 minutes stop
-/// pairing for 10 minutes, so nobody can keep asking this PC's user, or keep trying for a matching code. Only pairings other
-/// PCs ask of this one count: this PC's own adds that the other PC refuses don't.
+/// One pairing at a time, and a pause after too many refusals (households design §3): 5 refused pairings by code in 10
+/// minutes stop pairing for 10 minutes. This PC's own adds that the other PC refuses don't count, and pairings asked from
+/// the network count in <see cref="StrangerGate"/> instead, so they never pause pairing by code (plan 0.9).
 /// </summary>
 internal sealed class PairingGate(TimeProvider clock)
 {

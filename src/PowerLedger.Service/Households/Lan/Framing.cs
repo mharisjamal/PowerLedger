@@ -249,6 +249,13 @@ internal sealed record LanMessage
 
     /// <summary>The joining PC's signature over its join (<see cref="Wire.JoinProof"/>), which the server wants to add it.</summary>
     public string? Proof { get; init; }
+
+    /// <summary>In the adder's pair hello: <see cref="HouseholdCrypto.Commitment"/> of the nonce it reveals once the joiner's
+    /// hello has come (plan 0.9).</summary>
+    public string? Commit { get; init; }
+
+    /// <summary>In a <c>reveal</c>: the nonce the adder committed to in its hello.</summary>
+    public string? Nonce { get; init; }
 }
 
 internal static class LanMessages
@@ -278,7 +285,8 @@ internal static class LanMessages
 }
 
 /// <summary>A hello as checked: P-256 keys, a name and a kind.</summary>
-internal sealed record Hello(string Purpose, byte[] Eph, MemberInfo From, string? Instance)
+/// <param name="Commit">For an adder's pair hello, the commitment to the nonce it reveals next (plan 0.9); null otherwise.</param>
+internal sealed record Hello(string Purpose, byte[] Eph, MemberInfo From, string? Instance, byte[]? Commit = null)
 {
     public const string Pair = "pair";
     public const string Sync = "sync";
@@ -293,6 +301,7 @@ internal sealed record Hello(string Purpose, byte[] Eph, MemberInfo From, string
         }
         if (Wire.Name(message.Name) is not { } name || Wire.Kind(message.Kind) is not { } kind) return null;
         var instance = message.Instance is { Length: > 0 and <= 64 } given ? given : null;
-        return new Hello(message.Purpose!, eph, new MemberInfo(HouseholdCrypto.DeviceIdOf(sign), name, kind, sign, dh), instance);
+        var commit = Wire.Decode(message.Commit) is { Length: 32 } committed ? committed : null;
+        return new Hello(message.Purpose!, eph, new MemberInfo(HouseholdCrypto.DeviceIdOf(sign), name, kind, sign, dh), instance, commit);
     }
 }
