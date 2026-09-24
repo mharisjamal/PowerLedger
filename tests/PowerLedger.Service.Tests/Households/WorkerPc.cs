@@ -93,6 +93,14 @@ internal sealed class WorkerPc : IAsyncDisposable
         }
     }
 
+    /// <summary>Every notice the App has been given and the test hasn't read yet.</summary>
+    public List<HouseholdNotice> Drain()
+    {
+        var notices = new List<HouseholdNotice>();
+        while (_app!.TryRead(out var notice)) notices.Add(notice);
+        return notices;
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _stop.CancelAsync();

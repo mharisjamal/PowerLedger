@@ -174,6 +174,43 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task This_pcs_own_adds_that_the_other_pc_refuses_dont_pause_pairing_here()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop, appAtTheScreen: false);    // says no at once
+        for (var i = 0; i < PairingGate.MaxRefusals; i++)
+        {
+            await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(1));
+            (await desktop.Send<HouseholdReply>(new AddPcRequest(2, laptop.Worker.InstanceId))).Ok.ShouldBeTrue();
+            (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Laptop-2 didn't join.");
+            await desktop.Worker.Running;
+        }
+
+        (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(3))).Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task An_address_whose_pairings_keep_coming_to_nothing_goes_unanswered_and_only_a_few_notices_reach_the_app()
+    {
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        async Task<byte[]?> TryPair(bool good)
+        {
+            await using var channel = await LanConnector.ConnectAsync(IPAddress.Loopback, laptop.Worker.Port, TimeSpan.FromSeconds(5));
+            using var keys = DeviceKeys.Create();
+            var hello = LanMessages.Hello("pair", keys.DhPublic, keys, "Stranger", ChassisKind.Laptop, "c3");
+            await channel.SendAsync(LanMessages.Write(good ? hello : hello with { Sign = "not a key" }));
+            return await channel.ReceiveAsync();
+        }
+
+        for (var i = 0; i < PairingGate.MaxRefusals; i++) (await TryPair(good: false)).ShouldBeNull();   // a hello that isn't a good one
+
+        (await TryPair(good: true)).ShouldBeNull();                               // not even this PC's hello back
+        var told = laptop.Drain();
+        told.Count(notice => notice.Kind == NoticeKind.Info).ShouldBe(StrangerGate.MaxNotices);
+        told.ShouldNotContain(notice => notice.Kind == NoticeKind.JoinPrompt);
+    }
+
+    [Fact]
     public async Task Removing_a_pc_changes_the_key_for_those_who_stay_and_the_removed_pc_cant_read_what_comes_after()
     {
         var (desktop, laptop, study) = await Household();

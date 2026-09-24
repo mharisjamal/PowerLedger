@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using PowerLedger.Contracts;
 using PowerLedger.Core.Households;
@@ -178,9 +179,11 @@ internal static class PairingSession
     /// <param name="inHousehold">True when this PC is in a household, which joining leaves: the user is told so.</param>
     /// <param name="enter">Takes this PC into the household in the welcome, from the adding PC, once the adding PC has said
     /// it recorded the joining.</param>
+    /// <param name="refused">Counts a pairing whose question came to nothing: the user said no, or the adding PC stopped or
+    /// went while it was open. It is counted before the answer goes, so the next try already meets the count.</param>
     public static async Task<PairingOutcome> JoinAsync(
         IFrameChannel channel, byte[] adderHello, PairingIdentity me, IPromptBroker broker, bool inHousehold,
-        Func<Welcome, MemberInfo, Task> enter, PairingTimeouts timeouts, CancellationToken cancel)
+        Func<Welcome, MemberInfo, Task> enter, PairingTimeouts timeouts, CancellationToken cancel, Action? refused = null)
     {
         if (Hello.Of(LanMessages.Read(adderHello)) is not { Purpose: Hello.Pair } hello) return new PairingOutcome.Failed("The other PC's hello wasn't a good one.");
         if (hello.From.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That is this PC.");
@@ -207,12 +210,14 @@ internal static class PairingSession
             if (await Task.WhenAny(asking, pending).ConfigureAwait(false) == pending)
             {
                 question.Cancel();
+                refused?.Invoke();
                 return (await pending.ConfigureAwait(false)).Type == "cancel"
                     ? new PairingOutcome.Refused($"{name} stopped the pairing, so nothing was changed.")
                     : new PairingOutcome.Failed($"The connection to {name} went wrong, so nothing was changed.");
             }
             var accept = await asking.ConfigureAwait(false);
             cancel.ThrowIfCancellationRequested();                                // the question was withdrawn: said below
+            if (!accept) refused?.Invoke();
             await talk.SendAsync(new LanMessage { Type = "answer", Accept = accept }, cancel).ConfigureAwait(false);
             if (!accept) return new PairingOutcome.Refused($"This PC didn't join {name}'s household.");
 
@@ -330,8 +335,77 @@ internal static class PairingSession
 }
 
 /// <summary>
+/// Pairings asked of this PC from the network, by address (plan 0.8): 5 that come to nothing from one address in 10 minutes
+/// and its pairings go unanswered for 10 minutes; and at most 3 notices in 10 minutes about pairings that went wrong, so a
+/// stranger can't fill the tray.
+/// </summary>
+internal sealed class StrangerGate(TimeProvider clock)
+{
+    public const int MaxNotices = 3;
+    private const int MaxAddresses = 256;
+
+    private readonly Lock _gate = new();
+    private readonly Dictionary<IPAddress, (Queue<DateTimeOffset> Failures, DateTimeOffset PausedUntil)> _addresses = [];
+    private readonly Queue<DateTimeOffset> _notices = new();
+
+    /// <summary>False while pairings from <paramref name="from"/> go unanswered.</summary>
+    public bool Allowed(IPAddress from)
+    {
+        lock (_gate) return !_addresses.TryGetValue(from, out var seen) || clock.GetUtcNow() >= seen.PausedUntil;
+    }
+
+    /// <summary>Counts a pairing from <paramref name="from"/> that came to nothing.</summary>
+    public void Failed(IPAddress from)
+    {
+        lock (_gate)
+        {
+            var now = clock.GetUtcNow();
+            if (!_addresses.TryGetValue(from, out var seen))
+            {
+                if (_addresses.Count >= MaxAddresses) Forget(now);
+                seen = (new Queue<DateTimeOffset>(), DateTimeOffset.MinValue);
+            }
+            seen.Failures.Enqueue(now);
+            while (seen.Failures.Count > 0 && now - seen.Failures.Peek() > PairingGate.Window) seen.Failures.Dequeue();
+            if (seen.Failures.Count >= PairingGate.MaxRefusals)
+            {
+                seen = (new Queue<DateTimeOffset>(), now + PairingGate.Pause);
+            }
+            _addresses[from] = seen;
+        }
+    }
+
+    /// <summary>True when a notice about a pairing from the network may go to the App now.</summary>
+    public bool MayTell()
+    {
+        lock (_gate)
+        {
+            var now = clock.GetUtcNow();
+            while (_notices.Count > 0 && now - _notices.Peek() > PairingGate.Window) _notices.Dequeue();
+            if (_notices.Count >= MaxNotices) return false;
+            _notices.Enqueue(now);
+            return true;
+        }
+    }
+
+    /// <summary>Forgets the addresses with nothing recent, or failing that the oldest, so the table stays small.</summary>
+    private void Forget(DateTimeOffset now)
+    {
+        var stale = _addresses.Where(pair => now >= pair.Value.PausedUntil && pair.Value.Failures.All(at => now - at > PairingGate.Window))
+            .Select(pair => pair.Key).ToList();
+        if (stale.Count == 0)
+        {
+            stale = [.. _addresses.OrderBy(pair => pair.Value.Failures.Count == 0 ? DateTimeOffset.MinValue : pair.Value.Failures.Last())
+                .Take(MaxAddresses / 4).Select(pair => pair.Key)];
+        }
+        foreach (var address in stale) _addresses.Remove(address);
+    }
+}
+
+/// <summary>
 /// One pairing at a time, and a pause after too many refusals (households design §3): 5 refused pairings in 10 minutes stop
-/// pairing for 10 minutes, so nobody can keep asking this PC's user, or keep trying for a matching code.
+/// pairing for 10 minutes, so nobody can keep asking this PC's user, or keep trying for a matching code. Only pairings other
+/// PCs ask of this one count: this PC's own adds that the other PC refuses don't.
 /// </summary>
 internal sealed class PairingGate(TimeProvider clock)
 {

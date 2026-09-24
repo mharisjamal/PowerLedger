@@ -65,6 +65,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private readonly CodePairing _codePairing;
     private readonly HouseholdPrompts _prompts;
     private readonly PairingGate _pairingGate;
+    private readonly StrangerGate _strangers;
     private readonly HouseholdGate _gate = new();
     private readonly Announcer _announcer;
     private readonly DeviceKeys _keys;
@@ -94,6 +95,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         _codePairing = new CodePairing(environment.Relay, clock, environment.CodeWait);
         _prompts = new HouseholdPrompts(notices, clock);
         _pairingGate = new PairingGate(clock);
+        _strangers = new StrangerGate(clock);
         _announcer = new Announcer(environment.Discovery, environment.Network, log);
         _keys = _store.DeviceKeys();
     }
@@ -391,7 +393,9 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
     }
 
-    /// <summary>A connection from another PC on the network: a pairing asks this PC's user; a sync is with a member.</summary>
+    /// <summary>A connection from another PC on the network: a pairing asks this PC's user; a sync is with a member. Pairings
+    /// that come to nothing count against the address they came from, and too many leave it unanswered for a while; and
+    /// only a few notices about them go to the App, so a stranger can't fill the tray.</summary>
     private async Task OnConnectionAsync(LanCall call, CancellationToken cancel)
     {
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancel, _stopping.Token);
@@ -402,8 +406,10 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             return;
         }
         if (call.Message.Purpose != Hello.Pair) return;
+        if (call.From is { } address && !_strangers.Allowed(address)) return;
         if (BeginPairing(out _, also: stopping.Token) is not { } pairing)
         {
+            if (call.From is { } busyFrom) _strangers.Failed(busyFrom);
             await PairingSession.JoinAsync(channel, hello, Identity(), Refusing.Broker, false, (_, _) => Task.CompletedTask, _timeouts, stopping.Token)
                 .ConfigureAwait(false);
             return;
@@ -414,14 +420,15 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             try
             {
                 outcome = await PairingSession.JoinAsync(
-                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, pairing.Token).ConfigureAwait(false);
+                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, pairing.Token, _pairingGate.Refused)
+                    .ConfigureAwait(false);
             }
             catch (GateTimeout)
             {
                 outcome = new PairingOutcome.Failed("This PC was busy, so it didn't join. Try again.");
             }
-            if (outcome is PairingOutcome.Refused) _pairingGate.Refused();
-            else Info(outcome.Text);
+            if (outcome is not PairingOutcome.Joined && call.From is { } from) _strangers.Failed(from);
+            if (outcome is PairingOutcome.Joined || (outcome is PairingOutcome.Failed && _strangers.MayTell())) Info(outcome.Text);
         }
     }
 
@@ -466,10 +473,9 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         Kick();
     }
 
-    /// <summary>Tells the App how a pairing this PC started ended.</summary>
+    /// <summary>Tells the App how a pairing this PC started ended. Its user's own adds never count toward pausing pairing.</summary>
     private void Added(PairingOutcome outcome)
     {
-        if (outcome is PairingOutcome.Refused) _pairingGate.Refused();
         Publish();                                                             // the status first, then the App is told
         Progress(outcome.Text, (outcome as PairingOutcome.Joined)?.Other.Name, null);
     }

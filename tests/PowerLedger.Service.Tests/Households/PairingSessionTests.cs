@@ -351,6 +351,35 @@ public sealed class PairingSessionTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task A_refusal_is_counted_before_the_answer_goes_and_so_is_an_adder_that_stops_while_asked()
+    {
+        var (adderEnd, joinerEnd) = FramePipe.Create();
+        var framesSentWhenCounted = -1;
+        var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, new User(),
+            _ => Task.FromResult(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])), NoRecord, Quick, CancellationToken.None);
+        var hello = (await joinerEnd.ReceiveAsync()).ShouldNotBeNull();
+
+        var joining = PairingSession.JoinAsync(joinerEnd, hello, Joiner, new User(false), false, (_, _) => Task.CompletedTask, Quick, CancellationToken.None,
+            refused: () => framesSentWhenCounted = joinerEnd.Sent.Count);
+
+        (await joining).ShouldBeOfType<PairingOutcome.Refused>();
+        framesSentWhenCounted.ShouldBe(1);                                    // its hello had gone; its answer hadn't
+        joinerEnd.Sent.Count.ShouldBe(2);
+        await adding;
+
+        var (otherEnd, askedEnd) = FramePipe.Create();
+        var counted = 0;
+        var stillAsked = new User();
+        var asked = PairingSession.JoinAsync(askedEnd, Hello(Adder), Joiner, stillAsked, false, (_, _) => Task.CompletedTask, Quick, CancellationToken.None,
+            refused: () => counted++);
+        await stillAsked.WaitAsked();
+        await otherEnd.DisposeAsync();                                         // the adding PC went while the question was open
+
+        (await asked).ShouldBeOfType<PairingOutcome.Failed>();
+        counted.ShouldBe(1);
+    }
+
     public void Dispose()
     {
         _adderKeys.Dispose();
@@ -455,6 +484,37 @@ public sealed class PairingSessionTests : IDisposable
 /// <summary>One pairing at a time, and a pause after too many refusals (households design §3).</summary>
 public sealed class PairingGateTests
 {
+    [Fact]
+    public void Five_pairings_that_come_to_nothing_from_one_address_leave_it_unanswered_for_ten_minutes()
+    {
+        var clock = new FakeTimeProvider();
+        var strangers = new StrangerGate(clock);
+        var noisy = System.Net.IPAddress.Parse("192.168.1.66");
+        var other = System.Net.IPAddress.Parse("192.168.1.7");
+
+        for (var i = 0; i < 4; i++) strangers.Failed(noisy);
+        strangers.Allowed(noisy).ShouldBeTrue();
+        strangers.Failed(noisy);
+        strangers.Allowed(noisy).ShouldBeFalse();
+        strangers.Allowed(other).ShouldBeTrue();
+
+        clock.Advance(PairingGate.Pause);
+        strangers.Allowed(noisy).ShouldBeTrue();
+        strangers.Failed(noisy);                                               // counting starts again
+        strangers.Allowed(noisy).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void At_most_three_notices_about_pairings_from_the_network_go_in_ten_minutes()
+    {
+        var clock = new FakeTimeProvider();
+        var strangers = new StrangerGate(clock);
+
+        Enumerable.Range(0, 5).Select(_ => strangers.MayTell()).ShouldBe([true, true, true, false, false]);
+        clock.Advance(PairingGate.Window + TimeSpan.FromSeconds(1));
+        strangers.MayTell().ShouldBeTrue();
+    }
+
     [Fact]
     public void Only_one_pairing_runs_at_a_time()
     {
