@@ -223,16 +223,18 @@ function Get-SetAside { Get-ChildItem $DataDir -File -ErrorAction SilentlyContin
 # The households firewall rules, by the name the installer gives them: one while PowerLedger is installed, none after.
 function Get-FirewallRules { @(Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue) }
 
-# The one households rule as the installer adds it: inbound TCP allowed to the service's program, on Private networks only.
+# The one households rule as the installer adds it: inbound TCP allowed to the service's program, on Private networks only,
+# from the local subnet only.
 function Test-FirewallRule {
     $rules = Get-FirewallRules
     if ($rules.Count -ne 1) { throw "$($rules.Count) rules named '$FirewallRule'." }
     $rule = $rules[0]
     $program = ($rule | Get-NetFirewallApplicationFilter).Program
     $protocol = ($rule | Get-NetFirewallPortFilter).Protocol
+    $remote = "$(($rule | Get-NetFirewallAddressFilter).RemoteAddress)"
     Assert ("$($rule.Direction)" -eq 'Inbound' -and "$($rule.Action)" -eq 'Allow' -and "$($rule.Profile)" -eq 'Private' -and
-        "$($rule.Enabled)" -eq 'True' -and $program -eq $ServiceExe -and $protocol -eq 'TCP') `
-        "$($rule.Direction) $($rule.Action), profile $($rule.Profile), enabled $($rule.Enabled), $program, $protocol"
+        "$($rule.Enabled)" -eq 'True' -and $program -eq $ServiceExe -and $protocol -eq 'TCP' -and $remote -eq 'LocalSubnet') `
+        "$($rule.Direction) $($rule.Action), profile $($rule.Profile), enabled $($rule.Enabled), $program, $protocol, from $remote"
 }
 
 # The machine a program is built for, from its PE header: 0x8664 for x64, 0xAA64 for Arm64.
