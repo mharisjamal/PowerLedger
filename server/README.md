@@ -37,8 +37,11 @@ for the design.
 - **Meetings**, for pairing by code: `PUT`/`GET /v1/meetings/{id}/{adder|joiner|answer|welcome}`, unsigned and behind
   the address limit; each slot written once, 8 KB at most, for 10 minutes from the meeting's first `PUT`.
 - **Sign-in.** `POST /v1/auth/signin` (`{"provider","idToken","nonce","sign","dh"}`) checks the ID token against the
-  provider's JWKS and gives `{"session","householdId","hasRecovery"}`. With `Authorization: Session <token>` as well
-  as the signature: `POST /v1/account/household` (link), `POST /v1/account/requests` (ask to join),
+  provider's JWKS and gives `{"session","householdId","hasRecovery"}`. The posted `nonce` is a salt: the token's nonce
+  claim must be base64url(SHA-256(UTF-8(`<device ID>:<salt>`))) for the PC that signed the request, so a token only
+  signs in the PC that asked for it. Removing a PC, or its leaving, ends its session. With
+  `Authorization: Session <token>` as well as the signature: `POST /v1/account/household` (link),
+  `POST /v1/account/requests` (ask to join),
   `PUT`/`GET /v1/account/recovery` (`{"body","verifier","epoch"}`; `GET` never gives the verifier),
   `POST /v1/account/recover` (`{"proof"}`: HMAC-SHA256 of the device ID under the verifier), `POST /v1/auth/signout`
   and `DELETE /v1/account`. Members see and approve waiting PCs at `GET …/{hid}/requests` and

@@ -94,7 +94,8 @@ function audienceIsRight(claims: Record<string, unknown>, clientId: string): boo
 /**
  * Checks an OpenID Connect ID token (households design §7): RS256 by a key in the provider's JWKS, the provider's
  * issuer, this app's client ID as audience, not expired nor issued in the future (5 minutes' allowance), and the nonce
- * the sign-in was started with. The subject is all that's kept.
+ * the sign-in was started with, which the caller works out for the PC signing in (signin.ts, boundNonce). The subject is
+ * all that's kept.
  */
 export async function checkIdToken(
   token: string,
@@ -140,7 +141,7 @@ export async function checkIdToken(
   if (!audienceIsRight(claims, clientId)) return refuse("The ID token is for another app.");
   if (typeof claims.exp !== "number" || claims.exp + CLOCK_SKEW_SECONDS < seconds) return refuse("The ID token has expired.");
   if (typeof claims.iat === "number" && claims.iat - CLOCK_SKEW_SECONDS > seconds) return refuse("The ID token is from the future.");
-  if (claims.nonce !== nonce) return refuse("The ID token's nonce doesn't match.");
+  if (claims.nonce !== nonce) return refuse("The ID token wasn't asked for by this PC: its nonce doesn't match.");
   if (typeof claims.sub !== "string" || claims.sub.length === 0 || claims.sub.length > 255) {
     return refuse("The ID token has no subject.");
   }

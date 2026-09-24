@@ -1,6 +1,6 @@
 import { sha256hex } from "../auth";
 import { verifySignedByKey } from "./auth";
-import { base64urlEncode } from "./encoding";
+import { base64urlEncode, sha256 } from "./encoding";
 import { readKeys, readSmall } from "./households";
 import { addressOf, errorResponse, parseObject } from "./http";
 import { checkIdToken, JwksCache, type Provider } from "./idtoken";
@@ -19,9 +19,20 @@ function clientIdFor(env: Cloudflare.Env, provider: Provider): string | undefine
 }
 
 /**
- * POST /v1/auth/signin: {"provider","idToken","nonce","sign","dh"}, signed by the PC with that signing key. Checks the ID
- * token, keeps the account as provider and subject only, and gives the PC a new session: 32 random bytes, kept hashed.
- * Answers {"session","householdId","hasRecovery"}, the household being the one the account is linked to, or null.
+ * The nonce an ID token must carry to sign in the PC `device` (its verified X-PL-Device): base64url, unpadded, of SHA-256
+ * of the UTF-8 of "<device ID>:<salt>", the salt being what the PC posts as "nonce". The App asks the provider for this
+ * nonce, so a token it got can only sign in the PC that asked for it: another PC presenting it, even with the same salt,
+ * gives another expected nonce and is refused.
+ */
+export async function boundNonce(device: string, salt: string): Promise<string> {
+  return base64urlEncode(await sha256(new TextEncoder().encode(`${device}:${salt}`)));
+}
+
+/**
+ * POST /v1/auth/signin: {"provider","idToken","nonce","sign","dh"}, signed by the PC with that signing key; "nonce" is a
+ * salt, and the ID token's nonce claim must be boundNonce(the signing PC's device ID, salt). Checks the ID token, keeps
+ * the account as provider and subject only, and gives the PC a new session: 32 random bytes, kept hashed. Answers
+ * {"session","householdId","hasRecovery"}, the household being the one the account is linked to, or null.
  */
 export async function handleSignin(request: Request, env: Cloudflare.Env, deps: SigninDeps = defaultDeps): Promise<Response> {
   const limited = await env.ADDRESS_LIMIT.limit({ key: addressOf(request) });
@@ -47,7 +58,8 @@ export async function handleSignin(request: Request, env: Cloudflare.Env, deps: 
   if (!clientId) return errorResponse(503, `Signing in with ${provider === "microsoft" ? "Microsoft" : "Google"} isn't set up.`);
 
   const now = Date.now();
-  const check = await checkIdToken(posted.idToken, provider, clientId, posted.nonce, deps.jwks, now);
+  const expectedNonce = await boundNonce(signer.device, posted.nonce);
+  const check = await checkIdToken(posted.idToken, provider, clientId, expectedNonce, deps.jwks, now);
   if (!check.ok) return errorResponse(check.status, check.message);
 
   const account = await env.DB.prepare(

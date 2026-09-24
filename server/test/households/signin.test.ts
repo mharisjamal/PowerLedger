@@ -58,14 +58,22 @@ async function idToken(
   return `${head}.${body}.${base64urlEncode(new Uint8Array(signature))}`;
 }
 
-function microsoftClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+/** The nonce a sign-in by `device` asks the provider for: base64url(SHA-256(UTF-8("<device ID>:<salt>"))), the salt being
+ * what the PC posts as "nonce". Worked out here on its own, so a change to the Worker's side shows. */
+async function boundNonce(device: TestDevice, salt = "the-salt"): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${device.id}:${salt}`));
+  return base64urlEncode(new Uint8Array(digest));
+}
+
+/** A Microsoft ID token's claims, its nonce bound to `device`. */
+async function microsoftClaims(device: TestDevice, overrides: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const now = Math.floor(Date.now() / 1000);
   return {
     iss: `https://login.microsoftonline.com/${TENANT}/v2.0`,
     aud: MS_CLIENT,
     tid: TENANT,
     sub: `ms-${crypto.randomUUID()}`,
-    nonce: "the-nonce",
+    nonce: await boundNonce(device),
     iat: now - 10,
     exp: now + 3600,
     email: "someone@example.com",
@@ -73,21 +81,23 @@ function microsoftClaims(overrides: Record<string, unknown> = {}): Record<string
   };
 }
 
-function googleClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+/** A Google ID token's claims, its nonce bound to `device`. */
+async function googleClaims(device: TestDevice, overrides: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const now = Math.floor(Date.now() / 1000);
   return {
     iss: "https://accounts.google.com",
     aud: GOOGLE_CLIENT,
     sub: `g-${Math.floor(Math.random() * 1e15)}`,
-    nonce: "the-nonce",
+    nonce: await boundNonce(device),
     iat: now - 10,
     exp: now + 3600,
     ...overrides,
   };
 }
 
-async function signinRequest(device: TestDevice, provider: string, token: string, nonce = "the-nonce"): Promise<Request> {
-  const body = JSON.stringify({ provider, idToken: token, nonce, sign: device.sign, dh: device.dh });
+/** A sign-in request signed by `device`, posting `salt` as its "nonce". */
+async function signinRequest(device: TestDevice, provider: string, token: string, salt = "the-salt"): Promise<Request> {
+  const body = JSON.stringify({ provider, idToken: token, nonce: salt, sign: device.sign, dh: device.dh });
   const headers = { ...(await signHeaders(device, "POST", "/v1/auth/signin", body)), "CF-Connecting-IP": randomAddress() };
   return new Request("https://example.com/v1/auth/signin", { method: "POST", headers, body });
 }
@@ -101,7 +111,7 @@ interface SigninReply {
 describe("POST /v1/auth/signin", () => {
   it("signs a PC in with a Microsoft ID token: an account, a session, no household yet", async () => {
     const pc = await newDevice();
-    const claims = microsoftClaims();
+    const claims = await microsoftClaims(pc);
     const { cache, fetched } = testProvider();
 
     const response = await handleSignin(await signinRequest(pc, "microsoft", await idToken(claims)), testEnv, { jwks: cache });
@@ -122,15 +132,16 @@ describe("POST /v1/auth/signin", () => {
   });
 
   it("signs a PC in with a Google ID token, keeping one account per subject", async () => {
-    const claims = googleClaims();
+    const sub = `g-${crypto.randomUUID()}`;
     const { cache, fetched } = testProvider();
 
     for (const pc of [await newDevice(), await newDevice()]) {
-      const response = await handleSignin(await signinRequest(pc, "google", await idToken(claims)), testEnv, { jwks: cache });
+      const token = await idToken(await googleClaims(pc, { sub }));
+      const response = await handleSignin(await signinRequest(pc, "google", token), testEnv, { jwks: cache });
       expect(response.status).toBe(200);
     }
 
-    const accounts = await env.DB.prepare("SELECT id FROM accounts WHERE provider = 'google' AND subject = ?").bind(claims.sub).all();
+    const accounts = await env.DB.prepare("SELECT id FROM accounts WHERE provider = 'google' AND subject = ?").bind(sub).all();
     expect(accounts.results).toHaveLength(1);
     const sessions = await env.DB.prepare("SELECT device FROM sessions WHERE account = ?").bind(accounts.results[0].id).all();
     expect(sessions.results).toHaveLength(2);
@@ -138,10 +149,14 @@ describe("POST /v1/auth/signin", () => {
   });
 
   it("gives the account's household and whether it has a recovery envelope", async () => {
-    const claims = googleClaims();
+    const sub = `g-${crypto.randomUUID()}`;
     const { cache } = testProvider();
-    const first = await handleSignin(await signinRequest(await newDevice(), "google", await idToken(claims)), testEnv, { jwks: cache });
-    const account = await env.DB.prepare("SELECT id FROM accounts WHERE subject = ?").bind(claims.sub).first<{ id: string }>();
+    const signIn = async (): Promise<Response> => {
+      const pc = await newDevice();
+      return handleSignin(await signinRequest(pc, "google", await idToken(await googleClaims(pc, { sub }))), testEnv, { jwks: cache });
+    };
+    const first = await signIn();
+    const account = await env.DB.prepare("SELECT id FROM accounts WHERE subject = ?").bind(sub).first<{ id: string }>();
     expect(first.status).toBe(200);
 
     const hid = randomHouseholdId();
@@ -150,7 +165,7 @@ describe("POST /v1/auth/signin", () => {
       env.DB.prepare("INSERT INTO recovery (account, body, verifier, epoch, updated) VALUES (?, 'b', 'v', 1, 1)").bind(account!.id),
     ]);
 
-    const again = await handleSignin(await signinRequest(await newDevice(), "google", await idToken(claims)), testEnv, { jwks: cache });
+    const again = await signIn();
     expect(await again.json()).toMatchObject({ householdId: hid, hasRecovery: true });
   });
 
@@ -158,8 +173,12 @@ describe("POST /v1/auth/signin", () => {
     const pc = await newDevice();
     const { cache } = testProvider();
 
-    const one = (await (await handleSignin(await signinRequest(pc, "google", await idToken(googleClaims())), testEnv, { jwks: cache })).json()) as SigninReply;
-    const two = (await (await handleSignin(await signinRequest(pc, "google", await idToken(googleClaims())), testEnv, { jwks: cache })).json()) as SigninReply;
+    const signIn = async (): Promise<SigninReply> => {
+      const token = await idToken(await googleClaims(pc));
+      return (await (await handleSignin(await signinRequest(pc, "google", token), testEnv, { jwks: cache })).json()) as SigninReply;
+    };
+    const one = await signIn();
+    const two = await signIn();
 
     const sessions = await env.DB.prepare("SELECT token_hash FROM sessions WHERE device = ?").bind(pc.id).all<{ token_hash: string }>();
     expect(sessions.results.map((row) => row.token_hash)).toEqual([await sha256hex(two.session)]);
@@ -168,34 +187,54 @@ describe("POST /v1/auth/signin", () => {
 
   it("refuses an ID token that isn't right, with 401", async () => {
     const now = Math.floor(Date.now() / 1000);
-    const cases: [string, string, Promise<string>, string][] = [
-      ["another audience", "microsoft", idToken(microsoftClaims({ aud: "someone-else" })), "another app"],
-      ["another tenant's issuer", "microsoft", idToken(microsoftClaims({ iss: "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0" })), "another issuer"],
-      ["no tenant", "microsoft", idToken(microsoftClaims({ tid: undefined })), "another issuer"],
-      ["Google's audience at Microsoft", "microsoft", idToken(microsoftClaims({ aud: GOOGLE_CLIENT })), "another app"],
-      ["another issuer", "google", idToken(googleClaims({ iss: "https://evil.example.com" })), "another issuer"],
-      ["expired", "google", idToken(googleClaims({ exp: now - 600 })), "expired"],
-      ["issued in the future", "google", idToken(googleClaims({ iat: now + 3600 })), "future"],
-      ["another nonce", "google", idToken(googleClaims({ nonce: "not-the-nonce" })), "nonce"],
-      ["no subject", "google", idToken(googleClaims({ sub: "" })), "subject"],
-      ["signed by another key", "google", idToken(googleClaims(), { key: otherKey.privateKey }), "signature"],
-      ["an unknown key", "google", idToken(googleClaims(), { kid: "unknown" }), "key"],
-      ["not RS256", "google", idToken(googleClaims(), { alg: "HS256" }), "RS256"],
-      ["not a JWT", "google", Promise.resolve("not.a.jwt"), "JWT"],
+    type TokenFor = (pc: TestDevice) => Promise<string>;
+    const cases: [string, string, TokenFor, string][] = [
+      ["another audience", "microsoft", async (pc) => idToken(await microsoftClaims(pc, { aud: "someone-else" })), "another app"],
+      ["another tenant's issuer", "microsoft", async (pc) => idToken(await microsoftClaims(pc, { iss: "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0" })), "another issuer"],
+      ["no tenant", "microsoft", async (pc) => idToken(await microsoftClaims(pc, { tid: undefined })), "another issuer"],
+      ["Google's audience at Microsoft", "microsoft", async (pc) => idToken(await microsoftClaims(pc, { aud: GOOGLE_CLIENT })), "another app"],
+      ["another issuer", "google", async (pc) => idToken(await googleClaims(pc, { iss: "https://evil.example.com" })), "another issuer"],
+      ["expired", "google", async (pc) => idToken(await googleClaims(pc, { exp: now - 600 })), "expired"],
+      ["issued in the future", "google", async (pc) => idToken(await googleClaims(pc, { iat: now + 3600 })), "future"],
+      ["the salt as the nonce, unbound", "google", async (pc) => idToken(await googleClaims(pc, { nonce: "the-salt" })), "nonce"],
+      ["no subject", "google", async (pc) => idToken(await googleClaims(pc, { sub: "" })), "subject"],
+      ["signed by another key", "google", async (pc) => idToken(await googleClaims(pc), { key: otherKey.privateKey }), "signature"],
+      ["an unknown key", "google", async (pc) => idToken(await googleClaims(pc), { kid: "unknown" }), "key"],
+      ["not RS256", "google", async (pc) => idToken(await googleClaims(pc), { alg: "HS256" }), "RS256"],
+      ["not a JWT", "google", async () => "not.a.jwt", "JWT"],
     ];
 
-    for (const [name, provider, token, reason] of cases) {
+    for (const [name, provider, tokenFor, reason] of cases) {
       const { cache } = testProvider();
-      const response = await handleSignin(await signinRequest(await newDevice(), provider, await token), testEnv, { jwks: cache });
+      const pc = await newDevice();
+      const response = await handleSignin(await signinRequest(pc, provider, await tokenFor(pc)), testEnv, { jwks: cache });
       expect(response.status, name).toBe(401);
       expect(((await response.json()) as { error: string }).error, name).toContain(reason);
     }
   });
 
+  it("refuses an ID token asked for by another PC, even with the same salt", async () => {
+    const asker = await newDevice();
+    const presenter = await newDevice();
+    const token = await idToken(await googleClaims(asker));
+    const { cache } = testProvider();
+
+    const stolen = await handleSignin(await signinRequest(presenter, "google", token), testEnv, { jwks: cache });
+    expect(stolen.status).toBe(401);
+    expect(((await stolen.json()) as { error: string }).error).toBe("The ID token wasn't asked for by this PC: its nonce doesn't match.");
+
+    const otherSalt = await handleSignin(await signinRequest(asker, "google", token, "another-salt"), testEnv, { jwks: cache });
+    expect(otherSalt.status).toBe(401);
+
+    const own = await handleSignin(await signinRequest(asker, "google", token), testEnv, { jwks: cache });
+    expect(own.status).toBe(200);
+  });
+
   it("refuses a request the PC didn't sign with the key it posts", async () => {
     const pc = await newDevice();
     const other = await newDevice();
-    const body = JSON.stringify({ provider: "google", idToken: await idToken(googleClaims()), nonce: "the-nonce", sign: other.sign, dh: other.dh });
+    const token = await idToken(await googleClaims(other));
+    const body = JSON.stringify({ provider: "google", idToken: token, nonce: "the-salt", sign: other.sign, dh: other.dh });
     const headers = { ...(await signHeaders(pc, "POST", "/v1/auth/signin", body)), "CF-Connecting-IP": randomAddress() };
     const { cache } = testProvider();
 
@@ -206,7 +245,7 @@ describe("POST /v1/auth/signin", () => {
   it("gives 400 for an unknown provider or a malformed body, and 503 for a provider not set up", async () => {
     const pc = await newDevice();
     const { cache } = testProvider();
-    const token = await idToken(googleClaims());
+    const token = await idToken(await googleClaims(pc));
 
     expect((await handleSignin(await signinRequest(pc, "facebook", token), testEnv, { jwks: cache })).status).toBe(400);
 
@@ -225,7 +264,8 @@ describe("POST /v1/auth/signin", () => {
     const failing = new JwksCache(async () => {
       throw new Error("offline");
     });
-    const response = await handleSignin(await signinRequest(await newDevice(), "google", await idToken(googleClaims())), testEnv, { jwks: failing });
+    const pc = await newDevice();
+    const response = await handleSignin(await signinRequest(pc, "google", await idToken(await googleClaims(pc))), testEnv, { jwks: failing });
     expect(response.status).toBe(503);
   });
 });
