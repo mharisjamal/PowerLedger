@@ -86,6 +86,51 @@ public class RenderingTests
         }
     }
 
+    /// <summary>Plan O 0.4: Classic's window as the look switcher sees it. It is placed at the bounds it is given rather
+    /// than fitting itself to the screen, shows Midnight's Dashboard as Now, and a close for the switch closes it.</summary>
+    [Fact]
+    public void Classics_window_takes_the_bounds_and_page_a_switch_carries_and_closes_for_it()
+        => OnUi(() =>
+        {
+            UseTheme(Theme.Dark);
+            using var saver = new FakeSaver();
+            var shell = Shell(saver);
+            var window = new MainWindow { DataContext = shell, ShowInTaskbar = false, ShowActivated = false };
+            IShellWindow shellWindow = window;
+            shellWindow.Window.ShouldBeSameAs(window);
+            var closed = 0;
+            shellWindow.Closed += (_, _) => closed++;
+
+            shellWindow.Bounds = new Rect(-20000, 10, 1000, 700);
+            shellWindow.Page = Page.Dashboard;
+            shell.Page.ShouldBe(Page.Now);
+            shellWindow.Page = Page.Report;
+            shell.Page.ShouldBe(Page.Report);
+            shellWindow.Page.ShouldBe(Page.Report);
+            try
+            {
+                shellWindow.Show();
+                window.UpdateLayout();
+
+                // Within a device pixel: Windows places the window on whole pixels of the screen's scale.
+                var placed = new Rect(window.Left, window.Top, window.ActualWidth, window.ActualHeight);
+                var carried = shellWindow.Bounds;
+                foreach (var bounds in new[] { placed, carried })
+                {
+                    bounds.X.ShouldBe(-20000, 1);
+                    bounds.Y.ShouldBe(10, 1);
+                    bounds.Width.ShouldBe(1000, 1);
+                    bounds.Height.ShouldBe(700, 1);
+                }
+                shellWindow.State.ShouldBe(WindowState.Normal);
+            }
+            finally
+            {
+                shellWindow.CloseForSwitch();
+            }
+            closed.ShouldBe(1);
+        });
+
     [Fact]
     public void A_window_that_places_itself_opens_inside_the_work_area_of_its_screen()
         => OnUi(() =>
