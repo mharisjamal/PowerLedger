@@ -12,7 +12,7 @@ public class SignInViewModelTests
     private readonly FakeHttp _http = new();
     private Uri? _opened;
 
-    private SignInViewModel Model(string microsoftClientId = "ms-client", string googleClientId = "google-client", string googleClientSecret = "")
+    private SignInViewModel Model(string microsoftClientId = "ms-client", string googleClientId = "google-client", string googleClientSecret = "google-secret")
     {
         var signIn = new SignIn(() => _server, url => _opened = url, _http.Client(), TimeProvider.System);
         return new SignInViewModel(_link, _ui, signIn, UiThreads.Inline, microsoftClientId, googleClientId, googleClientSecret);
@@ -32,24 +32,40 @@ public class SignInViewModelTests
         return result;
     }
 
+    /// <summary>Security round, review: with no client ID (or, for Google, no secret) neither provider is offered, and
+    /// the section explains why instead of showing a button that would only refuse.</summary>
     [Fact]
-    public void With_no_client_id_the_button_says_sign_in_isnt_set_up_yet()
+    public void With_no_client_id_or_secret_neither_provider_is_offered()
     {
-        var model = Model(microsoftClientId: "", googleClientId: "");
+        var model = Model(microsoftClientId: "", googleClientId: "", googleClientSecret: "");
 
         model.MicrosoftAvailable.ShouldBeFalse();
-        model.MicrosoftButtonText.ShouldBe("Sign-in isn't set up yet");
         model.SignInWithMicrosoft.CanExecute(null).ShouldBeFalse();
-        model.GoogleButtonText.ShouldBe("Sign-in isn't set up yet");
+        model.GoogleAvailable.ShouldBeFalse();
+        model.SignInWithGoogle.CanExecute(null).ShouldBeFalse();
+        model.AnyAvailable.ShouldBeFalse();
+    }
+
+    /// <summary>Security round, review: a client ID alone isn't enough for Google — its installed-app flow calls for
+    /// the secret too.</summary>
+    [Fact]
+    public void With_a_google_client_id_but_no_secret_google_is_still_not_offered()
+    {
+        var model = Model(googleClientSecret: "");
+
+        model.MicrosoftAvailable.ShouldBeTrue();
+        model.GoogleAvailable.ShouldBeFalse();
+        model.AnyAvailable.ShouldBeTrue();
     }
 
     [Fact]
-    public void With_a_client_id_the_button_invites_sign_in()
+    public void With_a_client_id_and_secret_both_providers_are_offered()
     {
         var model = Model();
+
         model.MicrosoftAvailable.ShouldBeTrue();
-        model.MicrosoftButtonText.ShouldBe("Sign in with Microsoft");
-        model.GoogleButtonText.ShouldBe("Sign in with Google");
+        model.GoogleAvailable.ShouldBeTrue();
+        model.AnyAvailable.ShouldBeTrue();
     }
 
     [Fact]

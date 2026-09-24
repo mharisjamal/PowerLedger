@@ -32,10 +32,13 @@ internal sealed class SignInViewModel : ObservableObject
     public const string RecoveryWarning =
         "Signing in with the recovery code removes your household's other PCs from it. Use it only if you've lost them all; otherwise approve this PC from one of them.";
 
+    /// <summary>Security round, review: a provider is offered only once it has everything it needs — Microsoft its
+    /// client ID, Google its client ID and its secret (<see cref="SignInClients.GoogleSecret"/>, empty in a build
+    /// nobody set it in) — never shown, rather than shown and refusing.</summary>
+    public const string Unavailable = "Sign-in isn't available in this build.";
+
     /// <summary><paramref name="microsoftClientId"/> and <paramref name="googleClientId"/> are <see cref="SignInClients"/>'s,
-    /// passed in so a test can use one that isn't empty; while either is empty its button says sign-in isn't set up yet.
-    /// <paramref name="googleClientSecret"/> is <see cref="SignInClients.GoogleSecret"/>, Google's only (review finding
-    /// A7).</summary>
+    /// passed in so a test can use one that isn't empty.</summary>
     public SignInViewModel(
         IServiceLink link, IUiSettings ui, SignIn signIn, UiThreads threads, string microsoftClientId, string googleClientId,
         string googleClientSecret = "")
@@ -69,11 +72,12 @@ internal sealed class SignInViewModel : ObservableObject
 
     public bool MicrosoftAvailable => _microsoftClientId.Length > 0;
 
-    public bool GoogleAvailable => _googleClientId.Length > 0;
+    /// <summary>Google's installed-app flow needs its secret too, so a build with a client ID but no secret still
+    /// leaves it unavailable (security round, review).</summary>
+    public bool GoogleAvailable => _googleClientId.Length > 0 && _googleClientSecret.Length > 0;
 
-    public string MicrosoftButtonText => MicrosoftAvailable ? "Sign in with Microsoft" : "Sign-in isn't set up yet";
-
-    public string GoogleButtonText => GoogleAvailable ? "Sign in with Google" : "Sign-in isn't set up yet";
+    /// <summary>Neither provider is offered: the section explains why instead of showing anything to press.</summary>
+    public bool AnyAvailable => MicrosoftAvailable || GoogleAvailable;
 
     /// <summary>The e-mail from the ID token, kept in ui.json only; null while signed out.</summary>
     public string? Email => _ui.Current.SignedInEmail;
