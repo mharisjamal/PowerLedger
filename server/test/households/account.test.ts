@@ -377,6 +377,61 @@ describe("removing a member", () => {
     expect((await asAccount(laptop, "GET", "/v1/account/recovery")).status).toBe(401);
     expect((await asAccount(owner, "GET", "/v1/account/recovery")).status).toBe(404);
   });
+
+  it("revokes every linked account's recovery, and unlinks the accounts the removed PC was signed in as", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier });
+    // A second account, a family member's, linked to the same household, whose PC stays.
+    const family = await signIn();
+    await addMember(hid, owner.device, family.device);
+    await asAccount(family, "POST", "/v1/account/household", { householdId: hid });
+    await asAccount(family, "PUT", "/v1/account/recovery", { body: envelope(), verifier });
+    const stolen = await signIn(undefined, owner.account);
+    await addMember(hid, owner.device, stolen.device);
+
+    expect((await signedFetch(family.device, "DELETE", `/v1/households/${hid}/members/${stolen.device.id}`)).status).toBe(200);
+
+    for (const account of [owner.account, family.account]) {
+      expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(account).first(), account).toBeNull();
+    }
+    expect(await env.DB.prepare("SELECT 1 FROM account_households WHERE account = ?").bind(owner.account).first()).toBeNull();
+    expect(await env.DB.prepare("SELECT household FROM account_households WHERE account = ?").bind(family.account).first())
+      .toEqual({ household: hid });
+
+    // Whoever holds the stolen PC's account can neither recover nor ask to join again.
+    const thief = await signIn(undefined, owner.account);
+    expect((await asAccount(thief, "POST", "/v1/account/recover", { verifier })).status).toBe(404);
+    expect((await asAccount(thief, "POST", "/v1/account/requests")).status).toBe(409);
+  });
+
+  it("leaves a PC's session and link for its own household alone when another household removes it", async () => {
+    const theirs = await newDevice();
+    const theirHid = await createHousehold(theirs);
+    const { hid: homeHid, owner: victim } = await linkedHousehold();
+    await addMember(theirHid, theirs, victim.device);
+
+    expect((await signedFetch(theirs, "DELETE", `/v1/households/${theirHid}/members/${victim.device.id}`)).status).toBe(200);
+
+    expect((await asAccount(victim, "GET", "/v1/account/recovery")).status).toBe(404);
+    expect(await env.DB.prepare("SELECT household FROM account_households WHERE account = ?").bind(victim.account).first())
+      .toEqual({ household: homeHid });
+  });
+
+  it("clears a request the removed PC had waiting for the household", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await addMember(hid, owner.device, laptop.device);
+    await env.DB.prepare(
+      "INSERT INTO join_requests (household, device, account, sign_key, dh_key, created) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind(hid, laptop.device.id, owner.account, laptop.device.sign, laptop.device.dh, Date.now())
+      .run();
+
+    await signedFetch(owner.device, "DELETE", `/v1/households/${hid}/members/${laptop.device.id}`);
+
+    expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE device = ?").bind(laptop.device.id).first()).toBeNull();
+  });
 });
 
 describe("a household that ends", () => {

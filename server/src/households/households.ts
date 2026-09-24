@@ -132,18 +132,39 @@ export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, bo
   return ok();
 }
 
-/** DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. The removed PC's session
- * ends too, so a PC taken out of the household (a lost laptop, say) can't go on asking the account to let it back in.
- * The household ends with its last member. */
+/**
+ * DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. A PC taken out (a lost
+ * laptop, say) mustn't keep a way back in, so with it go:
+ * - every linked account's recovery envelope, whose key is about to be replaced anyway;
+ * - the link of each account the removed PC was signed in as, and those sessions of it (accounts linked to another
+ *   household are left alone, so one household can't reach into another's by adding and removing a PC);
+ * - any request of the PC's to join this household.
+ * The household ends with its last member.
+ */
 export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
+  const hid = member.household;
   const removed = await env.DB.prepare(
     "UPDATE members SET removed = ? WHERE household = ? AND device = ? AND removed IS NULL RETURNING device",
   )
-    .bind(Date.now(), member.household, device)
+    .bind(Date.now(), hid, device)
     .first();
   if (!removed) return errorResponse(404, "That PC isn't a member of this household.");
 
-  await env.DB.prepare("DELETE FROM sessions WHERE device = ?").bind(device).run();
+  // Read before the sessions go: the accounts the removed PC was signed in as, linked to this household.
+  const signedIn = await env.DB.prepare(
+    `SELECT s.account FROM sessions s JOIN account_households l ON l.account = s.account AND l.household = ?
+     WHERE s.device = ?`,
+  )
+    .bind(hid, device)
+    .all<{ account: string }>();
+  const accounts = JSON.stringify(signedIn.results.map((row) => row.account));
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)").bind(hid),
+    env.DB.prepare("DELETE FROM sessions WHERE device = ? AND account IN (SELECT value FROM json_each(?))").bind(device, accounts),
+    env.DB.prepare("DELETE FROM account_households WHERE household = ? AND account IN (SELECT value FROM json_each(?))")
+      .bind(hid, accounts),
+    env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(hid, device),
+  ]);
 
   const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM members WHERE household = ? AND removed IS NULL")
     .bind(member.household)
