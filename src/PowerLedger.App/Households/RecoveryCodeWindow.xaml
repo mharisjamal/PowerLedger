@@ -1,0 +1,19 @@
+<Window x:Class="PowerLedger.App.RecoveryCodeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:PowerLedger.App"
+        Title="Your recovery code" Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{DynamicResource Brush.Panel}" Foreground="{DynamicResource Brush.Ink}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+    <StackPanel Margin="28,24,28,20">
+        <TextBlock Style="{StaticResource Text.Body}" FontSize="16" TextWrapping="Wrap" Text="Your recovery code" />
+        <TextBox Style="{StaticResource Field}" IsReadOnly="True" FontFamily="{StaticResource Font.Numbers}" FontSize="17"
+                 HorizontalContentAlignment="Center" Padding="0,10" Margin="0,14,0,0" Text="{Binding Code, Mode=OneWay}" />
+        <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,14,0,0" Text="{x:Static local:RecoveryCodeViewModel.Explanation}" />
+        <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+            <Button Style="{StaticResource Quiet}" Content="Copy" Command="{Binding Copy}" />
+            <Button Style="{StaticResource Quiet}" Content="Save as text file" Command="{Binding SaveAsTextFile}" Margin="8,0,0,0" />
+        </StackPanel>
+    </StackPanel>
+</Window>

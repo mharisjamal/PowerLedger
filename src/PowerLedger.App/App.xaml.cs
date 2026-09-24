@@ -85,6 +85,7 @@ public partial class App : Application
         var account = new SignInViewModel(_link, _preferences, signIn, threads, SignInClients.Microsoft, SignInClients.Google);
         _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account);
         _household.AddPcRequested += OpenAddPcWindow;
+        account.RecoveryCodeReceived += OpenRecoveryCodeWindow;   // already raised on the UI thread, via UiThreads.Post
         var http = UpdateHttp.Create(version);
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
@@ -248,14 +249,17 @@ public partial class App : Application
         new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window }.Show();
     }
 
-    /// <summary>A pushed household notice (households design §9): a Join prompt opens a modal on top of whatever is
-    /// showing; anything else shows as a tray notification. Raised off the UI thread.</summary>
+    /// <summary>A pushed household notice (households design §9): a Join or Approve prompt opens a modal on top of
+    /// whatever is showing; anything else shows as a tray notification. Raised off the UI thread.</summary>
     private void OnHouseholdNotice(HouseholdNotice notice)
     {
         switch (notice.Kind)
         {
             case NoticeKind.JoinPrompt:
                 Dispatcher.InvokeAsync(() => OpenJoinPromptWindow(notice));
+                break;
+            case NoticeKind.ApprovePrompt:
+                Dispatcher.InvokeAsync(() => OpenApprovePromptWindow(notice));
                 break;
             case NoticeKind.Info:
                 Dispatcher.InvokeAsync(() => _tray?.Notify("PowerLedger", notice.Text, null));
@@ -269,6 +273,22 @@ public partial class App : Application
         if (_link is null || _threads is null) return;
         var model = new JoinPromptViewModel(_link, _threads, TimeProvider.System, notice);
         new JoinPromptWindow(model) { Owner = _window }.ShowDialog();
+    }
+
+    /// <summary>The Approve prompt (households design §7): modal, owned by the main window when it is open.</summary>
+    private void OpenApprovePromptWindow(HouseholdNotice notice)
+    {
+        if (_link is null || _threads is null) return;
+        var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice);
+        new ApprovePromptWindow(model) { Owner = _window }.ShowDialog();
+    }
+
+    /// <summary>A first sign-in that linked a household made a recovery code (households design §7): shown once, modal
+    /// and owned by the main window.</summary>
+    private void OpenRecoveryCodeWindow(string code)
+    {
+        var model = new RecoveryCodeViewModel(code, new FileSaver(), CopyToClipboard);
+        new RecoveryCodeWindow(model) { Owner = _window }.ShowDialog();
     }
 
     /// <summary>"What's been sent…" in Settings → Privacy (data-sharing design §2).</summary>

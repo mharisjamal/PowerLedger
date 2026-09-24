@@ -22,6 +22,7 @@ internal sealed class SignInViewModel : ObservableObject
     private bool _confirmingDelete;
     private bool _busy;
     private string? _message;
+    private string _recoveryCodeInput = "";
 
     /// <summary><paramref name="microsoftClientId"/> and <paramref name="googleClientId"/> are <see cref="SignInClients"/>'s,
     /// passed in so a test can use one that isn't empty; while either is empty its button says sign-in isn't set up yet.</summary>
@@ -52,6 +53,10 @@ internal sealed class SignInViewModel : ObservableObject
 
     /// <summary>The e-mail from the ID token, kept in ui.json only; null while signed out.</summary>
     public string? Email => _ui.Current.SignedInEmail;
+
+    /// <summary>Use a recovery code (households design §7): typed here, on the sign-in flow, and sent with the next
+    /// sign-in instead of waiting for another member's approval.</summary>
+    public string RecoveryCodeInput { get => _recoveryCodeInput; set => SetProperty(ref _recoveryCodeInput, value); }
 
     public bool SignedIn { get => _signedIn; private set => SetProperty(ref _signedIn, value); }
 
@@ -111,7 +116,8 @@ internal sealed class SignInViewModel : ObservableObject
             return;
         }
         var providerName = provider == SignInProvider.Microsoft ? "microsoft" : "google";
-        var result = await _link.SignInAsync(providerName, outcome.IdToken, outcome.Salt, null).ConfigureAwait(false);
+        var recoveryCode = string.IsNullOrWhiteSpace(_recoveryCodeInput) ? null : _recoveryCodeInput.Trim();
+        var result = await _link.SignInAsync(providerName, outcome.IdToken, outcome.Salt, recoveryCode).ConfigureAwait(false);
         _threads.Post(() =>
         {
             Busy = false;
@@ -121,6 +127,7 @@ internal sealed class SignInViewModel : ObservableObject
                 _ui.SetSignedInEmail(outcome.Email);
                 OnPropertyChanged(nameof(Email));
             }
+            if (result.Ok) RecoveryCodeInput = "";
             if (result.Ok && result.Code is { } code) RecoveryCodeReceived?.Invoke(code);
         });
     }
