@@ -35,9 +35,9 @@ public sealed class PairingSessionTests : IDisposable
         var adding = PairingSession.AddAsync(
             adderEnd, Adder, expectedInstance: Joiner.Instance, adderUser,
             welcomeFor: joiner => Task.FromResult<Welcome?>(new Welcome(Hid, 1, household, [Member(Adder)])),
-            record: (joiner, proof) => { recorded = (joiner, proof); return Task.FromResult(true); }, Quick, CancellationToken.None);
+            record: (_, joiner, proof, _) => { recorded = (joiner, proof); return Task.FromResult<string?>(null); }, Quick, CancellationToken.None);
         var joining = JoinerSide(joinerEnd, new User(question => { asked = question; return true; }), inHousehold: false,
-            enter: (welcome, adder) => { entered = welcome; return Task.CompletedTask; });
+            enter: (welcome, adder) => { entered = welcome; return Task.FromResult(true); });
 
         var added = (await adding).ShouldBeOfType<PairingOutcome.Joined>();
         var joined = (await joining).ShouldBeOfType<PairingOutcome.Joined>();
@@ -61,6 +61,58 @@ public sealed class PairingSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_cancel_while_the_adder_waits_to_record_leaves_nothing_behind_on_either_side()
+    {
+        var (adderEnd, joinerEnd) = FramePipe.Create();
+        using var stop = new CancellationTokenSource();
+        var recording = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = false;
+
+        var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, new User(true),
+            _ => Task.FromResult<Welcome?>(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])),
+            async (_, _, _, cancel) =>
+            {
+                recording.SetResult();
+                await Task.Delay(Timeout.Infinite, cancel);                           // waiting for the household's gate
+                return null;
+            },
+            Quick, stop.Token);
+        var joining = JoinerSide(joinerEnd, new User(true), inHousehold: false, enter: (_, _) => { entered = true; return Task.FromResult(true); });
+        await recording.Task;
+        await stop.CancelAsync();
+
+        (await adding).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("Adding Laptop-2 was cancelled.");
+        (await joining).ShouldBeOfType<PairingOutcome.Failed>();
+        entered.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Once_the_adder_has_recorded_the_pairing_completes_whatever_is_cancelled_on_either_side()
+    {
+        var (adderEnd, joinerEnd) = FramePipe.Create();
+        using var stopAdder = new CancellationTokenSource();
+        using var stopJoiner = new CancellationTokenSource();
+        Welcome? entered = null;
+
+        var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, new User(true),
+            _ => Task.FromResult<Welcome?>(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])),
+            async (_, _, _, _) =>
+            {
+                await stopJoiner.CancelAsync();                                       // the joiner's user cancels after it sent joined,
+                await stopAdder.CancelAsync();                                        // and the adder's once it recorded
+                return null;
+            },
+            Quick, stopAdder.Token);
+        var hello = (await joinerEnd.ReceiveAsync()).ShouldNotBeNull();
+        var joining = PairingSession.JoinAsync(joinerEnd, hello, Joiner, new User(true), false,
+            (welcome, _) => { entered = welcome; return Task.FromResult(true); }, Quick, stopJoiner.Token);
+
+        (await adding).ShouldBeOfType<PairingOutcome.Joined>();
+        (await joining).ShouldBeOfType<PairingOutcome.Joined>();
+        entered.ShouldNotBeNull().HouseholdId.ShouldBe(Hid);
+    }
+
+    [Fact]
     public async Task Refusing_changes_nothing_on_either_side_and_closes_the_adders_question()
     {
         var (adderEnd, joinerEnd) = FramePipe.Create();
@@ -71,7 +123,7 @@ public sealed class PairingSessionTests : IDisposable
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, adderUser,
             joiner => { welcomed = true; return Task.FromResult<Welcome?>(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])); },
             NoRecord, Quick, CancellationToken.None);
-        var joining = JoinerSide(joinerEnd, new User(_ => false), inHousehold: false, enter: (_, _) => { entered = true; return Task.CompletedTask; });
+        var joining = JoinerSide(joinerEnd, new User(_ => false), inHousehold: false, enter: (_, _) => { entered = true; return Task.FromResult(true); });
 
         (await adding).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("Laptop-2 didn't join.");
         (await joining).ShouldBeOfType<PairingOutcome.Refused>();
@@ -118,7 +170,7 @@ public sealed class PairingSessionTests : IDisposable
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, new User(true),
             _ => Task.FromResult<Welcome?>(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])), NoRecord, Quick, CancellationToken.None);
         var joining = JoinerSide(joinerEnd, new User(question => { asked = question; return false; }), inHousehold: true,
-            enter: (_, _) => Task.CompletedTask);
+            enter: (_, _) => Task.FromResult(true));
 
         await adding;
         await joining;
@@ -161,7 +213,7 @@ public sealed class PairingSessionTests : IDisposable
         var joinerUser = new User();
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, adderUser,
             _ => Task.FromResult<Welcome?>(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])), NoRecord, Quick, CancellationToken.None);
-        var joining = JoinerSide(joinerEnd, joinerUser, inHousehold: false, enter: (_, _) => Task.CompletedTask);
+        var joining = JoinerSide(joinerEnd, joinerUser, inHousehold: false, enter: (_, _) => Task.FromResult(true));
 
         await joinerUser.WaitAsked();
         joinerUser.Answer(true);
@@ -236,14 +288,14 @@ public sealed class PairingSessionTests : IDisposable
             NoRecord, Quick, CancellationToken.None);
         // The laptop's user presses Join without a second look.
         var joining = JoinerSide(joinerEnd, new User(question => { joinerCode.TrySetResult(question.ComparisonCode!); return true; }),
-            inHousehold: false, enter: (_, _) => { entered = true; return Task.CompletedTask; });
+            inHousehold: false, enter: (_, _) => { entered = true; return Task.FromResult(true); });
 
         // The middle is a joiner to the desktop and an adder to the laptop, under their names, with keys of its own: both
         // handshakes complete, and it can read and write every frame of both.
         Welcome? stolen = null;
         var toAdder = PairingSession.JoinAsync(middleFromAdder, (await middleFromAdder.ReceiveAsync())!,
             new PairingIdentity(middleKeys, "Laptop-2", ChassisKind.Laptop, Joiner.Instance), new User(true), inHousehold: false,
-            (welcome, _) => { stolen = welcome; return Task.CompletedTask; }, Quick, CancellationToken.None);
+            (welcome, _) => { stolen = welcome; return Task.FromResult(true); }, Quick, CancellationToken.None);
         var toJoiner = PairingSession.AddAsync(middleToJoiner, new PairingIdentity(middleKeys, "Desktop-7", ChassisKind.Desktop, Adder.Instance),
             Joiner.Instance, new User(true), async _ => (await toAdder) is PairingOutcome.Joined ? stolen! : throw new InvalidOperationException("no key"),
             NoRecord, Quick, CancellationToken.None);
@@ -292,7 +344,7 @@ public sealed class PairingSessionTests : IDisposable
         var (middleToJoiner, joinerEnd) = FramePipe.Create();
         var adding = PairingSession.AddAsync(adderEnd, Adder, Joiner.Instance, new User(true),
             _ => Task.FromResult<Welcome?>(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])), NoRecord, Quick, CancellationToken.None);
-        var joining = JoinerSide(joinerEnd, new User(_ => true), inHousehold: false, enter: (_, _) => Task.CompletedTask);
+        var joining = JoinerSide(joinerEnd, new User(_ => true), inHousehold: false, enter: (_, _) => Task.FromResult(true));
 
         await middleToJoiner.SendAsync((await middleFromAdder.ReceiveAsync())!);          // the adder's hello
         await middleFromAdder.SendAsync((await middleToJoiner.ReceiveAsync())!);          // the joiner's hello
@@ -334,7 +386,7 @@ public sealed class PairingSessionTests : IDisposable
             var (adderEnd, joinerEnd) = FramePipe.Create();
             var entered = false;
             using var adder = new HandAdder(Adder);
-            var joining = JoinerSide(joinerEnd, new User(true), inHousehold: false, enter: (_, _) => { entered = true; return Task.CompletedTask; },
+            var joining = JoinerSide(joinerEnd, new User(true), inHousehold: false, enter: (_, _) => { entered = true; return Task.FromResult(true); },
                 adderHello: adder.HelloBytes);
 
             // A hand-made adder: the key exchange, the welcome, the joining PC's proof; then the acknowledgement, or the connection goes.
@@ -364,7 +416,7 @@ public sealed class PairingSessionTests : IDisposable
             _ => Task.FromResult<Welcome?>(new Welcome(Hid, 1, HouseholdCrypto.NewKey(), [Member(Adder)])), NoRecord, Quick, CancellationToken.None);
         var hello = (await joinerEnd.ReceiveAsync()).ShouldNotBeNull();
 
-        var joining = PairingSession.JoinAsync(joinerEnd, hello, Joiner, new User(false), false, (_, _) => Task.CompletedTask, Quick, CancellationToken.None,
+        var joining = PairingSession.JoinAsync(joinerEnd, hello, Joiner, new User(false), false, (_, _) => Task.FromResult(true), Quick, CancellationToken.None,
             refused: () => framesSentWhenCounted = joinerEnd.Sent.Count);
 
         (await joining).ShouldBeOfType<PairingOutcome.Refused>();
@@ -376,7 +428,7 @@ public sealed class PairingSessionTests : IDisposable
         var counted = 0;
         var stillAsked = new User();
         using var adder = new HandAdder(Adder);
-        var asked = PairingSession.JoinAsync(askedEnd, adder.HelloBytes, Joiner, stillAsked, false, (_, _) => Task.CompletedTask, Quick, CancellationToken.None,
+        var asked = PairingSession.JoinAsync(askedEnd, adder.HelloBytes, Joiner, stillAsked, false, (_, _) => Task.FromResult(true), Quick, CancellationToken.None,
             refused: () => counted++);
         await adder.AnswerAsync(otherEnd);
         await stillAsked.WaitAsked();
@@ -443,7 +495,7 @@ public sealed class PairingSessionTests : IDisposable
         using var eph = DeviceKeys.Create();
         var bare = LanMessages.Write(LanMessages.Hello("pair", eph.DhPublic, Adder.Keys, Adder.Name, Adder.Kind, Adder.Instance));
 
-        var outcome = await PairingSession.JoinAsync(joinerEnd, bare, Joiner, new User(true), false, (_, _) => Task.CompletedTask, Quick, CancellationToken.None);
+        var outcome = await PairingSession.JoinAsync(joinerEnd, bare, Joiner, new User(true), false, (_, _) => Task.FromResult(true), Quick, CancellationToken.None);
 
         outcome.ShouldBeOfType<PairingOutcome.Failed>();
         joinerEnd.Sent.ShouldBeEmpty();                                           // not even this PC's hello
@@ -455,7 +507,7 @@ public sealed class PairingSessionTests : IDisposable
         _joinerKeys.Dispose();
     }
 
-    private static Task<bool> NoRecord(MemberInfo joiner, byte[] proof) => Task.FromResult(true);
+    private static Task<string?> NoRecord(Welcome welcome, MemberInfo joiner, byte[] proof, CancellationToken cancel) => Task.FromResult<string?>(null);
 
     /// <summary>A hand-made joiner's side of the key exchange: its hello to send, and the frame keys that go with it. The
     /// first frame it then gets is the adder's reveal.</summary>
@@ -504,7 +556,7 @@ public sealed class PairingSessionTests : IDisposable
     }
 
     private async Task<PairingOutcome> JoinerSide(
-        FramePipe end, IPromptBroker broker, bool inHousehold, Func<Welcome, MemberInfo, Task> enter, byte[]? adderHello = null)
+        FramePipe end, IPromptBroker broker, bool inHousehold, Func<Welcome, MemberInfo, Task<bool>> enter, byte[]? adderHello = null)
     {
         var hello = adderHello ?? (await end.ReceiveAsync()).ShouldNotBeNull();
         return await PairingSession.JoinAsync(end, hello, Joiner, broker, inHousehold, enter, Quick, CancellationToken.None);

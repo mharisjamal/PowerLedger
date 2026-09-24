@@ -354,6 +354,7 @@ internal sealed partial class HouseholdWorker
                 cancel).ConfigureAwait(false);
             return;
         }
+        CancelPairingUnderWay();                                               // plan 0.9: joining by sign-in stops a pairing under way
         EnterLocked(householdId, approved.Epoch, sealedList.Key, sealedList.Members, answering.Approver);
         _store.RelayConfirmed = true;
         _store.Answering = null;

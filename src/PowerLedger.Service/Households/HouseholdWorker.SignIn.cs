@@ -265,6 +265,7 @@ internal sealed partial class HouseholdWorker
         var recovered = await _environment.Relay.RecoverAsync(_keys, session, Recovery.Verifier(codeKey), cancel).ConfigureAwait(false);
         if (!recovered.Ok || recovered.Value!.Household != householdId) return Reply(id, false, $"Couldn't recover your household: {recovered.Problem}.");
         var epoch = recovered.Value.Epoch;
+        CancelPairingUnderWay();                                               // plan 0.9: joining by sign-in stops a pairing under way
         EnterLocked(householdId, got.Value!.Epoch, sealedList.Key, sealedList.Members, got.Value.Holder);
         _members.RemoveAllBut(_keys.DeviceId, epoch, _clock.GetUtcNow().ToUnixTimeMilliseconds());   // as the server removed them
         _store.RelayConfirmed = true;

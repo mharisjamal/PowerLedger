@@ -44,7 +44,7 @@ public sealed class CodePairingTests : IDisposable
         var adding = _pairing.AddAsync(meeting, Adder, Welcome, NoRecord, CancellationToken.None);
         var joined = await _pairing.JoinAsync(meeting.Code.ToLowerInvariant().Replace("-", " "), Joiner,
             new Broker(question => { asked = question; return true; }), inHousehold: true,
-            enter: (welcome, _) => { entered = welcome; return Task.CompletedTask; }, CancellationToken.None);
+            enter: (welcome, _) => { entered = welcome; return Task.FromResult(true); }, CancellationToken.None);
         var added = await adding;
 
         joined.ShouldBeOfType<PairingOutcome.Joined>().Other.Id.ShouldBe(_adderKeys.DeviceId);
@@ -95,9 +95,9 @@ public sealed class CodePairingTests : IDisposable
         using var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull();
         var entered = false;
 
-        var adding = _pairing.AddAsync(meeting, Adder, Welcome, (_, _) => throw new TimeoutException("the household stayed busy"), CancellationToken.None);
+        var adding = _pairing.AddAsync(meeting, Adder, Welcome, (_, _, _, _) => throw new TimeoutException("the household stayed busy"), CancellationToken.None);
         var joining = _pairing.JoinAsync(meeting.Code, Joiner, new Broker(_ => true), inHousehold: false,
-            enter: (_, _) => { entered = true; return Task.CompletedTask; }, CancellationToken.None);
+            enter: (_, _) => { entered = true; return Task.FromResult(true); }, CancellationToken.None);
         await Should.ThrowAsync<TimeoutException>(adding);                    // the adder couldn't record it, so never said welcomed
 
         await WaitFor.True(() => _relay.Calls.Any(call => call.EndsWith("/welcomed", StringComparison.Ordinal)));
@@ -112,9 +112,9 @@ public sealed class CodePairingTests : IDisposable
         using var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull();
         var wrong = PairingCode.New();
 
-        (await _pairing.JoinAsync(wrong, Joiner, new Broker(_ => true), false, (_, _) => Task.CompletedTask, CancellationToken.None))
+        (await _pairing.JoinAsync(wrong, Joiner, new Broker(_ => true), false, (_, _) => Task.FromResult(true), CancellationToken.None))
             .ShouldBeOfType<PairingOutcome.Failed>().Text.ShouldBe("No PC is waiting with that code. Check it, or make a new one on the other PC.");
-        (await _pairing.JoinAsync("not a code", Joiner, new Broker(_ => true), false, (_, _) => Task.CompletedTask, CancellationToken.None))
+        (await _pairing.JoinAsync("not a code", Joiner, new Broker(_ => true), false, (_, _) => Task.FromResult(true), CancellationToken.None))
             .ShouldBeOfType<PairingOutcome.Failed>().Text.ShouldStartWith("That isn't a code");
 
         // Someone who knows the meeting but not the code: its MAC is made under another key.
@@ -124,7 +124,7 @@ public sealed class CodePairingTests : IDisposable
         var asked = false;
         var planted = PairingCode.MeetingId(forged);
         _relay.PutSlot(planted, "adder", ForgedHello(Adder, PairingCode.Key(normalized)));
-        (await _pairing.JoinAsync(forged, Joiner, new Broker(_ => { asked = true; return true; }), false, (_, _) => Task.CompletedTask, CancellationToken.None))
+        (await _pairing.JoinAsync(forged, Joiner, new Broker(_ => { asked = true; return true; }), false, (_, _) => Task.FromResult(true), CancellationToken.None))
             .ShouldBeOfType<PairingOutcome.Failed>().Text.ShouldBe("That code doesn't match the other PC's, so nothing was changed.");
         asked.ShouldBeFalse();
 
@@ -143,7 +143,7 @@ public sealed class CodePairingTests : IDisposable
         _clock.Advance(CodePairing.Lifetime);
 
         (await adding).ShouldBeOfType<PairingOutcome.Failed>().Text.ShouldBe("The code ran out before another PC used it.");
-        (await _pairing.JoinAsync(meeting.Code, Joiner, new Broker(_ => true), false, (_, _) => Task.CompletedTask, CancellationToken.None))
+        (await _pairing.JoinAsync(meeting.Code, Joiner, new Broker(_ => true), false, (_, _) => Task.FromResult(true), CancellationToken.None))
             .ShouldBeOfType<PairingOutcome.Failed>();
     }
 
@@ -168,7 +168,7 @@ public sealed class CodePairingTests : IDisposable
                 stopAdder.Token.ThrowIfCancellationRequested();
                 return await Welcome(joiner);
             }, NoRecord, stopAdder.Token);
-            var joined = await _pairing.JoinAsync(meeting.Code, Joiner, new Broker(_ => true), false, (_, _) => Task.CompletedTask, CancellationToken.None);
+            var joined = await _pairing.JoinAsync(meeting.Code, Joiner, new Broker(_ => true), false, (_, _) => Task.FromResult(true), CancellationToken.None);
 
             (await adding).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("Adding the other PC was cancelled.");
             joined.ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("The other PC stopped the pairing, so nothing was changed.");
@@ -179,7 +179,7 @@ public sealed class CodePairingTests : IDisposable
         {
             using var stopJoiner = new CancellationTokenSource();
             var adding = _pairing.AddAsync(meeting, Adder, Welcome, NoRecord, CancellationToken.None);
-            var joined = _pairing.JoinAsync(meeting.Code, Joiner, new Waiting(), false, (_, _) => Task.CompletedTask, stopJoiner.Token);
+            var joined = _pairing.JoinAsync(meeting.Code, Joiner, new Waiting(), false, (_, _) => Task.FromResult(true), stopJoiner.Token);
             await WaitFor.True(() => _relay.Calls.Any(call => call.EndsWith("/joiner", StringComparison.Ordinal) && call.StartsWith("PUT", StringComparison.Ordinal)));
             await stopJoiner.CancelAsync();
 
@@ -195,7 +195,7 @@ public sealed class CodePairingTests : IDisposable
         _joinerKeys.Dispose();
     }
 
-    private static Task<bool> NoRecord(MemberInfo joiner, byte[] proof) => Task.FromResult(true);
+    private static Task<string?> NoRecord(Welcome welcome, MemberInfo joiner, byte[] proof, CancellationToken cancel) => Task.FromResult<string?>(null);
 
     private Task<Welcome?> Welcome(MemberInfo joiner) => Task.FromResult<Welcome?>(
         new Welcome(Household, 1, _key, [new MemberInfo(_adderKeys.DeviceId, "Desktop-7", ChassisKind.Desktop, _adderKeys.SignPublic, _adderKeys.DhPublic)]));

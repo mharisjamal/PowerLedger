@@ -185,6 +185,27 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Leaving_stops_a_pairing_under_way_first_so_the_pc_isnt_added_after()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        var study = await Start("Study PC", ChassisKind.Desktop);
+        await WorkerPc.Pair(desktop, laptop);
+        var code = (await desktop.Send<HouseholdReply>(new StartCodePairingRequest(1))).Code!;
+        await study.Send<HouseholdReply>(new JoinByCodeRequest(2, code));
+        var prompt = await study.Next(NoticeKind.JoinPrompt);
+
+        (await desktop.Send<HouseholdReply>(new LeaveHouseholdRequest(3))).Ok.ShouldBeTrue();
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(4, prompt.PromptId!, true));
+
+        (await desktop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("Adding the other PC was cancelled.");
+        (await study.Next(NoticeKind.PairingProgress)).Text.ShouldBe("The other PC stopped the pairing, so nothing was changed.");
+        using var studyKeys = study.Worker.Store.DeviceKeys();
+        desktop.Worker.Store.Pending.ShouldNotContain(op => op.Kind == PendingOp.Add && op.Sign == Wire.Encode(studyKeys.SignPublic));
+        (desktop.Worker.Store.HouseholdId, study.Worker.Store.HouseholdId).ShouldBe((null, null));
+    }
+
+    [Fact]
     public async Task This_pcs_own_adds_that_the_other_pc_refuses_dont_pause_pairing_here()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);

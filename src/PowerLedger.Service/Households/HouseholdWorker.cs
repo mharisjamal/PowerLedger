@@ -209,6 +209,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             SaveSelf(_clock.GetUtcNow());                                      // its name and kind as they are now
             BuildRowsIfDue();
             var run = await _relaySync.RunAsync(_keys, _store.Name, Kind(), lease.Attention).ConfigureAwait(false);   // the server first
+            if (run.Removed) CancelPairingUnderWay();                          // plan 0.9: removed, it adds and joins nobody
             if (run.Notices.Count > 0) Publish();                              // the status first, then the App is told
             foreach (var notice in run.Notices) Info(notice);
             Announce();                                                        // a new key, or none, changes the tag
@@ -241,8 +242,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                 BrowsePcsRequest browse => await BrowseAsync(browse, cancel).ConfigureAwait(false),
                 AddPcRequest add => await AddPcAsync(add, cancel).ConfigureAwait(false),
                 StartCodePairingRequest start => await StartCodePairingAsync(start, cancel).ConfigureAwait(false),
-                JoinByCodeRequest join => JoinByCode(join),
-                CancelPairingRequest cancelPairing => CancelPairing(cancelPairing),
+                JoinByCodeRequest join => await JoinByCodeAsync(join).ConfigureAwait(false),
+                CancelPairingRequest cancelPairing => await CancelPairingAsync(cancelPairing).ConfigureAwait(false),
                 AnswerPromptRequest answer => _prompts.Answer(answer.PromptId ?? "", answer.Accept) || RecoveryCodeSeen(answer.PromptId ?? "")
                     ? Reply(answer.Id, true, "Answered.")
                     : Reply(answer.Id, false, "That question has closed."),
@@ -380,13 +381,13 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     }
 
     /// <summary>Joins by code; a code this PC made and still waits on is stopped first, since its user is joining instead.</summary>
-    private PipeMessage JoinByCode(JoinByCodeRequest request)
+    private async Task<PipeMessage> JoinByCodeAsync(JoinByCodeRequest request)
     {
         if (PairingCode.Normalize(request.Code) is null)
         {
             return Reply(request.Id, false, "That isn't a code. A code has 16 letters and digits, like K7QM-2XHD-9PW4-R8TA.");
         }
-        StopOwnCode();
+        await StopOwnCodeAsync().ConfigureAwait(false);
         if (BeginPairing(out var refusal) is not { } pairing) return Reply(request.Id, false, refusal!);
         Track(JoinByCodeAsync(request.Code, pairing));
         return Reply(request.Id, true, "Looking for the PC that made that code.");
@@ -399,7 +400,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             PairingOutcome outcome;
             try
             {
-                outcome = await _codePairing.JoinAsync(code, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, pairing.Token)
+                outcome = await _codePairing.JoinAsync(code, Identity(), _prompts, _store.HouseholdId is not null,
+                        (welcome, adder) => EnterAsync(welcome, adder, pairing), pairing.Token)
                     .ConfigureAwait(false);
             }
             catch (GateTimeout)
@@ -449,7 +451,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             try
             {
                 outcome = await PairingSession.JoinAsync(
-                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, pairing.Token, Refused)
+                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, (welcome, adder) => EnterAsync(welcome, adder, pairing), _timeouts,
+                    pairing.Token, Refused)
                     .ConfigureAwait(false);
             }
             catch (GateTimeout)
@@ -496,21 +499,25 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         return new Welcome(_store.HouseholdId!, _store.Epoch, _store.CurrentKey!, members, [.. _members.Entries().Where(entry => entry.Id != joiner.Id)]);
     }
 
-    /// <summary>Records a PC this one is adding, before it is told it is in: the new member here, added at this PC's epoch
-    /// (plan 0.9), and on the server once it can be told.</summary>
-    /// <returns>False when it couldn't be added: it was removed at this PC's epoch.</returns>
-    private async Task<bool> RecordAsync(MemberInfo joiner, byte[] proof)
+    /// <summary>Records a PC this one is adding, in one step before it is told it is in (plan 0.9): the new member here, added
+    /// at this PC's epoch, and the add queued for the server. The pairing's cancel stops it only while it waits for the gate:
+    /// before the step, nothing is left behind.</summary>
+    /// <returns>What went wrong when it couldn't be added, as when this PC's household is no longer the welcome's; else null.</returns>
+    private async Task<string?> RecordAsync(Welcome welcome, MemberInfo joiner, byte[] proof, CancellationToken cancel)
     {
-        using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
+        using (await EnterGateAsync(cancel, PairingGateWait).ConfigureAwait(false))
         {
-            var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
-            if (_store.HouseholdId is not { } householdId || !_members.Add(joiner, _store.Epoch, nowMs)) return false;
-            _store.AddPending(new PendingOp(PendingOp.Add, householdId, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
+            if (_store.HouseholdId != welcome.HouseholdId)
+            {
+                return $"This PC's household changed while {joiner.Name} was joining, so it wasn't added. Try again.";
+            }
+            if (!_members.Add(joiner, _store.Epoch, _clock.GetUtcNow().ToUnixTimeMilliseconds())) return PairingSession.NotYet(joiner.Name);
+            _store.AddPending(new PendingOp(PendingOp.Add, welcome.HouseholdId, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
                 Proof: Wire.Encode(proof)));
             Announce();
         }
         Kick();
-        return true;
+        return null;
     }
 
     /// <summary>Tells the App how a pairing this PC started ended. Its user's own adds never count toward pausing pairing.</summary>
@@ -523,14 +530,21 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>Takes this PC into the household in a welcome it accepted. A PC in another household leaves that one first,
     /// as a PC removing itself does; the household's other PCs and their rows go with it, and this PC's year is built for
     /// the new one.</summary>
-    private async Task EnterAsync(Welcome welcome, MemberInfo adder)
+    /// <returns>False when this PC entered or left a household while it was joining this one (plan 0.9): it doesn't join too.</returns>
+    private async Task<bool> EnterAsync(Welcome welcome, MemberInfo adder, CurrentPairing pairing)
     {
         using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
         {
+            if (_store.HouseholdId != pairing.StartHousehold && _store.HouseholdId != welcome.HouseholdId)
+            {
+                _log.LogInformation("This PC's household changed while it was joining {Name}'s, so it didn't join", adder.Name);
+                return false;
+            }
             EnterLocked(welcome.HouseholdId, welcome.Epoch, welcome.Key, welcome.AllEntries, adder.Id);
             _log.LogInformation("Joined {Name}'s household", adder.Name);
         }
         Kick();
+        return true;
     }
 
     /// <summary>Takes this PC into a household with its key, inside the gate, leaving any other first (see
@@ -625,6 +639,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     private async Task<PipeMessage> LeaveAsync(LeaveHouseholdRequest request, CancellationToken cancel)
     {
+        await StopPairingAsync().ConfigureAwait(false);                         // plan 0.9: a pairing under way is stopped first
         using var entered = await EnterGateAsync(cancel).ConfigureAwait(false);
         if (_store.HouseholdId is null) return Reply(request.Id, false, NotInOne);
         LeaveLocked(_clock.GetUtcNow());
