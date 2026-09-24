@@ -7,7 +7,9 @@ namespace PowerLedger.Service.Households;
 /// This PC's hour rows for the household (households design §1): one per complete hour in samples_1h, with the energy by
 /// part, the idle energy and seconds, how the figures were known, and the cost at the tariff in force at the hour's start,
 /// in millionths of that tariff's currency. A row is written only when its figures differ from the one kept, and then as
-/// changed now, so a later correction of an hour, or a tariff entered for the past, replaces it on every member.
+/// changed now, so a later correction of an hour, or a tariff entered for the past, replaces it on every member. Now is
+/// never earlier than just after this PC's newest change: after the clock goes back, what is built still counts as newer
+/// than everything before it, and goes to the other members.
 /// </summary>
 internal sealed class HourRows(AggregateRepository aggregates, TariffRepository tariffs, HouseholdRepository household)
 {
@@ -22,16 +24,13 @@ internal sealed class HourRows(AggregateRepository aggregates, TariffRepository 
     {
         var schedule = tariffs.Schedule();
         var nowMs = now.ToUnixTimeMilliseconds();
+        var changedMs = Math.Max(nowMs, household.LatestChange(deviceId) + 1);   // the clock may have gone back
         var kept = household.RowsBetween(deviceId, from.ToUnixTimeMilliseconds(), nowMs).ToDictionary(row => row.HourMs);
         var changed = new List<HouseholdRow>();
         foreach (var hour in aggregates.ReadHours(from, now))
         {
-            var row = Of(deviceId, hour, schedule.At(hour.Start), nowMs);
-            if (kept.TryGetValue(row.HourMs, out var before))
-            {
-                if (before.SameFigures(row)) continue;
-                if (before.ChangedMs >= nowMs) row = row with { ChangedMs = before.ChangedMs + 1 };   // the clock was set back
-            }
+            var row = Of(deviceId, hour, schedule.At(hour.Start), changedMs);
+            if (kept.TryGetValue(row.HourMs, out var before) && before.SameFigures(row)) continue;
             changed.Add(row);
         }
         return changed.Count == 0 ? 0 : household.Upsert(changed);

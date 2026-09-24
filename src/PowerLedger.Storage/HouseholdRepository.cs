@@ -89,6 +89,16 @@ public sealed class HouseholdRepository(SqliteDatabase db)
         ReadRows("WHERE device_id = $device AND (changed_ms > $changed OR (changed_ms = $changed AND hour_ms > $hour)) ORDER BY changed_ms, hour_ms",
             ("$device", deviceId), ("$changed", changedMs), ("$hour", hourMs));
 
+    /// <summary>When one device's newest change was; 0 when it has no rows.</summary>
+    public long LatestChange(string deviceId)
+    {
+        using var c = db.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT COALESCE(MAX(changed_ms), 0) FROM household_rows WHERE device_id = $device";
+        Rows.Add(cmd, "$device", deviceId);
+        return (long)cmd.ExecuteScalar()!;
+    }
+
     /// <summary>For each device with rows, when its newest change was.</summary>
     public Dictionary<string, long> Latest()
     {

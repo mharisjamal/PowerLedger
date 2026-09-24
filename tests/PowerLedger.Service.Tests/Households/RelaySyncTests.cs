@@ -163,6 +163,20 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
+    public async Task After_the_clock_goes_back_the_hours_built_since_still_go_up()
+    {
+        _desktop.Aggregates.UpsertHour(Aggregate(Now.AddHours(-3)));
+        _desktop.Rows.Build(_desktop.Id, Now.AddDays(-1), Now.AddHours(2));    // built while the clock was 2 h fast
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(1);
+
+        _desktop.Aggregates.UpsertHour(Aggregate(Now.AddHours(-2)));
+        _desktop.Rows.Build(_desktop.Id, Now.AddDays(-1), Now);                  // a new hour, once the clock was put right
+
+        (await _desktop.RunAsync()).RowsOut.ShouldBe(1);
+        (await _laptop.RunAsync()).RowsIn.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task A_batch_that_doesnt_open_is_passed_over_and_the_cursor_moves_on()
     {
         _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100)]);
@@ -315,6 +329,11 @@ public sealed class RelaySyncTests : IDisposable
     private static HouseholdRow Row(string device, int hour, double energyWh, long changed) => new(
         device, Hour(hour), energyWh, 1, 1, 1, 1, 0, 0, 3600, 0, 0, 3600, 0, 0, 1_000, "GBP", changed);
 
+    private static PowerLedger.Core.Aggregate Aggregate(DateTimeOffset start) => new(
+        start, AvgW: 50, MaxW: 90, EnergyWh: 50, CpuWh: 12, GpuWh: 8, DisplayWh: 5, RestWh: 25, IdleOnWh: 3, IdleOffWh: 1,
+        IdleOnSeconds: 400, IdleOffSeconds: 300, OnSeconds: 3500, BatterySeconds: 900, GapSeconds: 100, SampleCount: 3500,
+        MeasuredSeconds: 2000, CalibratedSeconds: 1000, EstimatedSeconds: 500);
+
     /// <summary>One PC with its own database, keys and relay sync, on a shared fake server.</summary>
     private sealed class RelayPc : IDisposable
     {
@@ -346,6 +365,11 @@ public sealed class RelaySyncTests : IDisposable
         public RelayClient Client { get; }
 
         public RelaySync Sync { get; }
+
+        /// <summary>This PC's hour totals, which its rows are built from.</summary>
+        public AggregateRepository Aggregates => new(_database.Db);
+
+        public HourRows Rows => new(Aggregates, new TariffRepository(_database.Db), Household);
 
         public HouseholdMember AsMember() => new(Id, Name, Kind, Keys.SignPublic, Keys.DhPublic, 0, null, null);
 
