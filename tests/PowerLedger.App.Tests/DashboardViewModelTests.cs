@@ -239,6 +239,52 @@ public sealed class DashboardViewModelTests : IDisposable
         dashboard.Kpis[2].Big.ShouldBe("0.210 kWh");
     }
 
+    /// <summary>Review 7: a chart that couldn't be read is read again the next minute on every range, not only on the
+    /// hour and the day, which are read every minute anyway.</summary>
+    [Theory]
+    [InlineData("Week", "Last 7 days", false)]
+    [InlineData("Month", "Last 30 days", true)]
+    [InlineData("Year", "Last 365 days", false)]
+    [InlineData("All", "Since 20 Jul 2026", true)]
+    public void A_chart_that_could_not_be_read_is_read_again_the_next_minute(string pill, string title, bool throws)
+    {
+        _summary.First = new DateTimeOffset(2026, 7, 20, 8, 0, 0, TimeSpan.Zero);
+        var answer = _history.Answer;
+        var failing = true;
+        _history.Answer = range => !failing || range.Title != title ? answer(range)
+            : throws ? throw new System.IO.IOException("The history file is locked.") : null;
+        var dashboard = Dashboard();
+        dashboard.Range = Enum.Parse<RangePill>(pill);
+        dashboard.Show();
+        dashboard.ChartMessage.ShouldBe("Couldn't read the history");
+
+        failing = false;
+        _clock.Advance(DashboardViewModel.RefreshEvery);
+
+        dashboard.ChartMessage.ShouldBeNull();
+        dashboard.ChartTitle.ShouldBe(title);
+        dashboard.Chart.Buckets.ShouldNotBeEmpty();
+        _history.Reads.Clear();
+        _clock.Advance(DashboardViewModel.RefreshEvery);
+        _history.Reads.Count(range => range.Title == title).ShouldBe(0, "a chart read well is kept for the rest of the day");
+    }
+
+    /// <summary>Review 7: a kept week is kept only for the day it was cut on; the first minute after midnight cuts it again.</summary>
+    [Fact]
+    public void A_kept_chart_is_cut_again_after_midnight()
+    {
+        _clock.SetUtcNow(new DateTimeOffset(2026, 9, 8, 23, 59, 30, TimeSpan.Zero));
+        var dashboard = Dashboard();
+        dashboard.Range = RangePill.Week;
+        dashboard.Show();
+        dashboard.ChartFrom.ShouldBe(new DateTimeOffset(2026, 9, 2, 0, 0, 0, TimeSpan.Zero));
+
+        _clock.Advance(DashboardViewModel.RefreshEvery);   // 00:00:30 on the 9th
+
+        dashboard.ChartFrom.ShouldBe(new DateTimeOffset(2026, 9, 3, 0, 0, 0, TimeSpan.Zero));
+        dashboard.ChartTitle.ShouldBe("Last 7 days");
+    }
+
     [Fact]
     public void The_parts_table_lists_the_four_parts_with_watts_now_energy_share_quality_and_trend()
     {

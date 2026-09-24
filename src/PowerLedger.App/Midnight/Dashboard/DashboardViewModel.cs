@@ -145,20 +145,23 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <paramref name="chart"/> is false and the last reading's chart is of the range still chosen: a minute's tick can
     /// start just after a pill is clicked and finish after that click's read, and must not bring the old range back. A
     /// read that throws would go with its task; it comes back as a reading of nothing, which the page shows as unread
-    /// (design §5), and the next minute tries again. Call on the UI thread.
+    /// (design §5), and the next minute tries again. Review 7: a chart that wasn't read is never kept, whatever its
+    /// range, and a kept one only while its range is still the one now would cut, so the first minute after midnight
+    /// cuts the week, the month, the year and All again. Call on the UI thread.
     /// </summary>
     private void Refresh(bool chart = true)
     {
         var read = ++_reads;
         var pill = Range;
         var parts = PartsRange;
-        var kept = chart || _read?.Pill != pill ? null : _read;
+        var kept = chart || _read is not { Chart: not null } last || last.Pill != pill ? null : _read;
         _threads.Background(() =>
         {
             var now = _clock.GetUtcNow();
             Reading reading;
             try
             {
+                if (kept is not null && !SameCut(kept.ChartRange, RangeFor(pill, now))) kept = null;   // a new day
                 reading = Read(now, pill, parts, kept);
             }
             catch (Exception error) when (error is not OutOfMemoryException)
@@ -207,6 +210,9 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         }
         return new Reading(pill, TimeZoneInfo.ConvertTime(now, _zone), null, null, null, chartRange, null, RangeFor(parts, now), null, null);
     }
+
+    /// <summary>Whether two ranges are cut the same: they start and end on the same days.</summary>
+    private static bool SameCut(DateRange one, DateRange other) => one.From == other.From && one.Through == other.Through;
 
     private DateRange RangeFor(RangePill pill, DateTimeOffset now) => pill switch
     {
