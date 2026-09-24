@@ -35,14 +35,21 @@ internal static class NvmlLibrary
     private static IntPtr _handle;
 
     /// <summary>Answers the runtime's request for nvml.dll from here on, for this assembly's DllImports. Once is enough; later
-    /// calls do nothing.</summary>
+    /// calls do nothing. Never throws: it runs in <see cref="Nvml"/>'s static constructor, where an exception would leave
+    /// NVML unusable for the life of the process, so an assembly that somehow has a resolver already keeps System32 alone.</summary>
     public static void Register()
     {
         lock (Gate)
         {
             if (_registered) return;
             _registered = true;
-            NativeLibrary.SetDllImportResolver(typeof(NvmlLibrary).Assembly, (name, _, _) => Resolve(name, Cached));
+            try
+            {
+                NativeLibrary.SetDllImportResolver(typeof(NvmlLibrary).Assembly, (name, _, _) => Resolve(name, Cached));
+            }
+            catch (InvalidOperationException)
+            {
+            }
         }
     }
 

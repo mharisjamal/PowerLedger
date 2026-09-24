@@ -20,8 +20,8 @@ internal static class Frames
         GpuScope: r.GpuScope, Total: r.TotalSource);
 
     /// <summary>What the sample measured of a reading whose total came from <paramref name="total"/>, as the frame says it:
-    /// the processor from its energy meter, the graphics card from its maker's library (only the NVIDIA, AMD and Intel Arc
-    /// sources report a card's watts), and the total from a device rather than the model.</summary>
+    /// the processor from its energy meter, the graphics cards when every one had its watts reported, by its maker's library
+    /// or, for one Windows has switched off, as nought, and the total from a device rather than the model.</summary>
     public static MeasuredParts Measured(Sample s, TotalSource total) =>
         (s.CpuPackageW is { } cpu && double.IsFinite(cpu) ? MeasuredParts.Cpu : MeasuredParts.None)
         | (s.DGpuW is { } gpu && double.IsFinite(gpu) ? MeasuredParts.Gpu : MeasuredParts.None)
