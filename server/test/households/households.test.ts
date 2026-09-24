@@ -284,6 +284,21 @@ describe("the household's keys", () => {
     expect(await current()).toBe(3);
   });
 
+  it("takes an identical retry of the current epoch's keys from the same PC as done, and anything else as 409", async () => {
+    const first = await newDevice();
+    const second = await newDevice();
+    const hid = await createHousehold(first);
+    await addMember(hid, first, second);
+    const keys = { epoch: 2, envelopes: [{ device: first.id, body: envelope() }, { device: second.id, body: envelope() }] };
+
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);   // its answer was lost
+    expect((await signedFetch(second, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(409);  // not the sealer
+    const changed = { epoch: 2, envelopes: [{ device: first.id, body: envelope() }, { device: second.id, body: envelope() }] };
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, changed)).status).toBe(409);
+    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, { epoch: 2, envelopes: [keys.envelopes[0]] })).status).toBe(409);
+  });
+
   it("refuses envelopes for PCs that aren't current members, and malformed ones", async () => {
     const first = await newDevice();
     const second = await newDevice();

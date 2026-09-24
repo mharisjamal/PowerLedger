@@ -226,8 +226,9 @@ export async function currentEpoch(env: Cloudflare.Env, household: string): Prom
 
 /**
  * POST /v1/households/{hid}/keys: {"epoch","envelopes":[{"device","body"}]}, the household key of a new epoch sealed to
- * current members. The Worker keeps each household's epoch: only current + 1 is taken (409 otherwise, an identical
- * retry included), and it becomes current with its envelopes.
+ * current members. The Worker keeps each household's epoch: only current + 1 is taken, and it becomes current with its
+ * envelopes. An identical retry of the current epoch's keys by the PC that sealed them is taken as done, since its first
+ * answer may have been lost; anything else at another epoch gets 409.
  */
 export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
@@ -255,6 +256,7 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
   }
 
   const at = await currentEpoch(env, member.household);
+  if (at !== null && epoch === at && (await isSameKeys(env, member, epoch, envelopes))) return ok();
   if (at === null || epoch !== at + 1) {
     return errorResponse(409, `The household's key is at epoch ${at}; new keys are for epoch ${(at ?? 0) + 1} only.`);
   }
@@ -279,6 +281,20 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     throw error;
   }
   return ok();
+}
+
+/** True when the epoch already holds exactly these envelopes, all sealed by this PC: a retry of a post whose answer was
+ * lost, so the PC doesn't make a new key for nothing. */
+async function isSameKeys(env: Cloudflare.Env, member: MemberRow, epoch: number, envelopes: Envelope[]): Promise<boolean> {
+  const stored = await env.DB.prepare("SELECT device, from_device, body FROM key_envelopes WHERE household = ? AND epoch = ?")
+    .bind(member.household, epoch)
+    .all<{ device: string; from_device: string; body: string }>();
+  if (stored.results.length !== envelopes.length) return false;
+  const byDevice = new Map(stored.results.map((row) => [row.device, row]));
+  return envelopes.every((item) => {
+    const row = byDevice.get(item.device);
+    return row !== undefined && row.from_device === member.device && row.body === item.body;
+  });
 }
 
 /** GET /v1/households/{hid}/keys/{epoch}: the caller's own envelope, and who sealed it. */
