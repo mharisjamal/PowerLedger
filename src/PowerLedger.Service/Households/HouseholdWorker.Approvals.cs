@@ -19,7 +19,8 @@ internal sealed partial class HouseholdWorker
     private int _waitingApprovals;
 
     /// <summary>With its sync, a member signed in looks at the PCs waiting to join and asks the user at the screen about each
-    /// new one. An approval the server refused, as when this PC's key was behind the household's, goes again.</summary>
+    /// new one; with nobody at the screen to ask, it doesn't look. An approval the server refused, as when this PC's key was
+    /// behind the household's, goes again.</summary>
     private async Task PollRequestsAsync(CancellationToken cancel)
     {
         if (_store.Session is null || _store.HouseholdId is not { } householdId)
@@ -27,6 +28,7 @@ internal sealed partial class HouseholdWorker
             Volatile.Write(ref _waitingApprovals, 0);
             return;
         }
+        if (!_notices.AnyoneAtTheScreen) return;
         var result = await _environment.Relay.RequestsAsync(_keys, householdId, cancel).ConfigureAwait(false);
         if (!result.Ok) return;
         var waiting = result.Value!
@@ -49,9 +51,13 @@ internal sealed partial class HouseholdWorker
 
     private async Task AskToApproveAsync(string householdId, JoinRequestItem item)
     {
-        if (!await _prompts.AskToApproveAsync(_stopping.Token).ConfigureAwait(false)) return;
+        if (!await _prompts.AskToApproveAsync(_stopping.Token).ConfigureAwait(false))
+        {
+            if (!_notices.AnyoneAtTheScreen) _asked.TryRemove(item.Device, out _);    // nobody saw it: asked again next time
+            return;
+        }
         _asked[item.Device] = true;
-        using (await EnterGateAsync(_stopping.Token).ConfigureAwait(false))
+        using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
         {
             if (_store.HouseholdId == householdId) await ApproveLockedAsync(householdId, item, _stopping.Token).ConfigureAwait(false);
         }

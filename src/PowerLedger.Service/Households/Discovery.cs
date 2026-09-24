@@ -144,8 +144,8 @@ internal sealed class Announcer : IDisposable
 /// <summary>
 /// The network's category from Windows' Network List Manager: Private when some connected network is Private and none is
 /// Public. A domain network alone counts as neither, as the firewall rule is for Private networks only. Address changes
-/// raise <see cref="Changed"/>, and so does the worker's own periodic look, since changing a network's category in Settings
-/// changes no address.
+/// raise <see cref="Changed"/>; changing a network's category in Settings changes no address, so the worker also asks
+/// again with each turn.
 /// </summary>
 internal sealed class WindowsNetworkCategory : INetworkCategory, IDisposable
 {
@@ -172,9 +172,6 @@ internal sealed class WindowsNetworkCategory : INetworkCategory, IDisposable
             return categories.Contains(Private) && !categories.Contains(Public);
         }
     }
-
-    /// <summary>Tells the announcer to look again, as the worker does every few minutes.</summary>
-    public void Recheck() => Changed?.Invoke();
 
     public void Dispose()
     {

@@ -43,6 +43,9 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     /// <summary>How long a request waits for the gate before saying the household is busy: well inside <see cref="AppWait"/>.</summary>
     private static readonly TimeSpan GateWait = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long a pairing under way waits for the gate to record its outcome: nobody waits on its answer.</summary>
+    private static readonly TimeSpan PairingGateWait = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan DefaultBrowseTime = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
 
@@ -195,6 +198,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                 await CheckApprovedAsync(lease.Attention).ConfigureAwait(false);
                 return;
             }
+            SaveSelf(_clock.GetUtcNow());                                      // its name and kind as they are now
             BuildRowsIfDue();
             await SyncOnNetworkAsync(lease.Attention).ConfigureAwait(false);
             var run = await _relaySync.RunAsync(_keys, _store.Name, Kind(), lease.Attention).ConfigureAwait(false);
@@ -297,6 +301,10 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             {
                 outcome = new PairingOutcome.Failed($"Couldn't reach {name}. Check it's on and on the same network.");
             }
+            catch (GateTimeout)
+            {
+                outcome = new PairingOutcome.Failed($"This PC was busy, so {name} wasn't added. Try again.");
+            }
             await AddedAsync(outcome).ConfigureAwait(false);
         }
     }
@@ -329,8 +337,16 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         using (entered)
         using (meeting)
         {
-            await AddedAsync(await _codePairing.AddAsync(meeting, Identity(), WelcomeForAsync, _stopping.Token).ConfigureAwait(false))
-                .ConfigureAwait(false);
+            PairingOutcome outcome;
+            try
+            {
+                outcome = await _codePairing.AddAsync(meeting, Identity(), WelcomeForAsync, _stopping.Token).ConfigureAwait(false);
+            }
+            catch (GateTimeout)
+            {
+                outcome = new PairingOutcome.Failed("This PC was busy, so the other PC wasn't added. Try again.");
+            }
+            await AddedAsync(outcome).ConfigureAwait(false);
         }
     }
 
@@ -349,8 +365,16 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     {
         using (entered)
         {
-            var outcome = await _codePairing.JoinAsync(code, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _stopping.Token)
-                .ConfigureAwait(false);
+            PairingOutcome outcome;
+            try
+            {
+                outcome = await _codePairing.JoinAsync(code, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _stopping.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (GateTimeout)
+            {
+                outcome = new PairingOutcome.Failed("This PC was busy, so it didn't join. Try again.");
+            }
             if (outcome is PairingOutcome.Refused or PairingOutcome.Failed { Text: "That code doesn't match the other PC's, so nothing was changed." })
             {
                 _pairingGate.Refused();
@@ -377,8 +401,16 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         using (entered)
         {
-            var outcome = await PairingSession.JoinAsync(
-                channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, stopping.Token).ConfigureAwait(false);
+            PairingOutcome outcome;
+            try
+            {
+                outcome = await PairingSession.JoinAsync(
+                    channel, hello, Identity(), _prompts, _store.HouseholdId is not null, EnterAsync, _timeouts, stopping.Token).ConfigureAwait(false);
+            }
+            catch (GateTimeout)
+            {
+                outcome = new PairingOutcome.Failed("This PC was busy, so it didn't join. Try again.");
+            }
             if (outcome is PairingOutcome.Refused) _pairingGate.Refused();
             else Info(outcome.Text);
         }
@@ -396,7 +428,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// §1: it is made when a PC adds its first other PC).</summary>
     private async Task<Welcome> WelcomeForAsync(MemberInfo joiner)
     {
-        using var entered = await EnterGateAsync(_stopping.Token).ConfigureAwait(false);
+        using var entered = await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false);
         var now = _clock.GetUtcNow();
         if (_store.HouseholdId is null || _store.CurrentKey is null)
         {
@@ -423,7 +455,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     {
         if (outcome is PairingOutcome.Joined { Other: var joiner })
         {
-            using (await EnterGateAsync(_stopping.Token).ConfigureAwait(false))
+            using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
             {
                 var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
                 _household.SaveMember(new HouseholdMember(joiner.Id, joiner.Name, joiner.Kind, joiner.Sign, joiner.Dh, nowMs, null, null));
@@ -445,7 +477,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// the new one.</summary>
     private async Task EnterAsync(Welcome welcome, MemberInfo adder)
     {
-        using (await EnterGateAsync(_stopping.Token).ConfigureAwait(false))
+        using (await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false))
         {
             EnterLocked(welcome.HouseholdId, welcome.Epoch, welcome.Key, welcome.Members);
             _log.LogInformation("Joined {Name}'s household", adder.Name);
@@ -666,10 +698,11 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     private void Info(string text) => _notices.Publish(new HouseholdNotice(NoticeKind.Info, null, text, null, null, null));
 
-    private async Task<IDisposable> EnterGateAsync(CancellationToken cancel)
+    /// <summary>Enters the gate within <paramref name="wait"/>, <see cref="GateWait"/> by default, or throws <see cref="GateTimeout"/>.</summary>
+    private async Task<IDisposable> EnterGateAsync(CancellationToken cancel, TimeSpan? wait = null)
     {
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        limit.CancelAfter(GateWait);
+        limit.CancelAfter(wait ?? GateWait);
         try
         {
             return await _gate.EnterAsync(limit.Token).ConfigureAwait(false);
