@@ -21,8 +21,18 @@ public sealed class Nvml : IDisposable
     private readonly IntPtr _device;
     private bool _initialised;
 
-    public Nvml()
+    public Nvml() : this(Environment.Is64BitProcess)
     {
+    }
+
+    /// <summary>Test seam: a 32-bit process never loads NVML, which has no 32-bit version.</summary>
+    internal Nvml(bool is64BitProcess)
+    {
+        if (Bitness.SixtyFourBitOnly("NVIDIA's NVML", is64BitProcess) is { } reason)
+        {
+            Unavailable = reason;
+            return;
+        }
         try
         {
             if (nvmlInit_v2() != Success)
