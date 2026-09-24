@@ -89,6 +89,26 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         _changes.ToArray().ShouldBe(new[] { true });
     }
 
+    /// <summary>A server that failed the installed-service check is never trusted with a household notice either
+    /// (Plan N review finding A8), the same as it is never sent a household request.</summary>
+    [Fact]
+    public async Task A_pushed_household_notice_from_a_server_that_failed_the_check_is_ignored()
+    {
+        var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
+        await using var service = new FakeService(name);
+        await using var checkedLink = new PipeServiceLink(name, new FixedIdle(0), _clock, new RefuseAll());
+        var notices = new ConcurrentQueue<HouseholdNotice>();
+        checkedLink.HouseholdNoticeReceived += notices.Enqueue;
+        service.Start();
+        checkedLink.Start();
+        await WaitFor.True(() => checkedLink.IsConnected);
+
+        await service.PushAsync(new HouseholdNotice(NoticeKind.Info, null, "A PC was removed.", null, null, null));
+
+        await Task.Delay(50);   // give a wrongly-delivered notice a chance to arrive
+        notices.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Status_and_settings_come_back_for_the_request_that_asked()
     {

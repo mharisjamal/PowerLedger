@@ -368,8 +368,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
                     Answer(reply.Id, reply);
                     break;
                 case HouseholdNotice notice:
-                    // Pushed, not a reply to anything pending: households design §9.
-                    HouseholdNoticeReceived?.Invoke(notice);
+                    // Pushed, not a reply to anything pending (households design §9); a server that failed the
+                    // installed-service check is never trusted with one, the same as it is never sent a request.
+                    if (_refusal is null) HouseholdNoticeReceived?.Invoke(notice);
                     break;
                 case ErrorReply { Id: { } id } reply:
                     Answer(id, reply);
