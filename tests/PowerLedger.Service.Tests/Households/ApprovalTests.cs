@@ -446,6 +446,27 @@ public sealed class ApprovalTests : IAsyncLifetime
 
     /// <summary>A household with a member signed in, and a study PC signed in as the same account asking to join, both asked
     /// about the approval: its code on both screens, nothing sealed yet.</summary>
+    [Fact]
+    public async Task A_pc_approved_that_never_confirms_takes_itself_out_when_its_approval_lapses_and_may_ask_again()
+    {
+        var (desktop, study, household) = await BothAsked();
+        var approve = await desktop.Next(NoticeKind.ApprovePrompt);
+        await desktop.Send<HouseholdReply>(new AnswerPromptRequest(9, approve.PromptId!, true));
+        await desktop.Worker.Running;
+        _relay.Members(household)[study.Worker.DeviceId].Removed.ShouldBeNull();   // a member on the server, though never in here
+        var week = (long)TimeSpan.FromDays(7).TotalMilliseconds;                  // a week on, its user never having said the codes match
+        _relay.Rewrite(household, study.Worker.DeviceId, request => request with { ApprovedAt = request.ApprovedAt - week - 1 });
+
+        await study.Worker.RunOnceAsync(CancellationToken.None);
+
+        _relay.Members(household)[study.Worker.DeviceId].Removed.ShouldNotBeNull();
+        study.Worker.Store.HouseholdId.ShouldBeNull();
+        study.Board.Household!.CanAskAgain.ShouldBeTrue();
+        (await study.Next(NoticeKind.Info, text => text.EndsWith("You can ask again.", StringComparison.Ordinal))).ShouldNotBeNull();
+        (await study.Send<HouseholdReply>(new AskAgainRequest(11))).ShouldBe(new HouseholdReply(11, true, HouseholdWorker.WaitingForApproval));
+        _relay.Waiting(household).ShouldBe([study.Worker.DeviceId]);
+    }
+
     private async Task<(WorkerPc Desktop, WorkerPc Study, string Household)> BothAsked(WorkerPc? member = null)
     {
         var desktop = member ?? (await Household()).Desktop;

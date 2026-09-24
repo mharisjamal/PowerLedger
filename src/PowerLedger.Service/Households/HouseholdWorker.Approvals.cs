@@ -365,6 +365,8 @@ internal sealed partial class HouseholdWorker
     /// matches, this PC's user is asked at once whether the other PC shows the same code, before anything is sealed. Once its
     /// user said so, and the approval is there, sealed by that member for the epoch the server names, this PC enters, and
     /// takes its request off the server. A request refused or lapsed lets the user ask again: this PC never asks by itself.
+    /// One that ends with this PC not in, as when its user never said the codes match, may have left it a member on the
+    /// server all the same, approved: it takes itself out there first (plan 0.10).
     /// </summary>
     private async Task CheckApprovedAsync(CancellationToken cancel)
     {
@@ -378,8 +380,9 @@ internal sealed partial class HouseholdWorker
         if (!listed.Ok) return;
         if (listed.Value!.Requests?.FirstOrDefault(own => own.Household == householdId && own.Device == _keys.DeviceId) is not { } request)
         {
+            _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: _keys.DeviceId));   // approved but never in: out again
             EndRequest(canAskAgain: true);
-            Info("Your request to join your household ended without an approval. You can ask again.");
+            Info("Your request to join your household ended without this PC joining. You can ask again.");
             return;
         }
         if (request.Approver is not { } approver || request.Commit is null) return;          // no member has committed yet
