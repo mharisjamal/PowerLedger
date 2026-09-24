@@ -48,4 +48,18 @@ internal static class Format
 
     /// <summary>A size on disk or as sent, rounded up so a non-empty file never reads "0 KB": "41 KB".</summary>
     public static string Kb(long bytes, CultureInfo culture) => $"{Math.Ceiling(Math.Max(0, bytes) / 1024.0).ToString("N0", culture)} KB";
+
+    /// <summary>How long ago, in the coarsest unit that fits (households design §2): "2 minutes", "3 hours", "5 days";
+    /// under a minute, "a few seconds". Negative spans, from clock skew, read as "a few seconds".</summary>
+    public static string Ago(TimeSpan since, CultureInfo culture)
+    {
+        var span = since < TimeSpan.Zero ? TimeSpan.Zero : since;
+        if (span < TimeSpan.FromMinutes(1)) return "a few seconds";
+        if (span < TimeSpan.FromHours(1)) return Plural((int)span.TotalMinutes, "minute", culture);
+        if (span < TimeSpan.FromDays(1)) return Plural((int)span.TotalHours, "hour", culture);
+        return Plural((int)span.TotalDays, "day", culture);
+    }
+
+    private static string Plural(int count, string unit, CultureInfo culture)
+        => $"{count.ToString(culture)} {unit}{(count == 1 ? "" : "s")}";
 }

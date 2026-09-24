@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -14,6 +15,10 @@ namespace PowerLedger.App;
 /// <summary>The tray App (spec §9): one per session, living in the tray, with a window on demand.</summary>
 public partial class App : Application
 {
+    /// <summary>Review round: an Approve prompt replacing one that closed within this long is taken as the same
+    /// request, whose code may have changed since.</summary>
+    private static readonly TimeSpan ApprovePromptRecentlyClosed = TimeSpan.FromMinutes(2);
+
     private SingleInstance? _instance;
     private ThemeManager? _theme;
     private SqliteDatabase? _database;
@@ -21,6 +26,7 @@ public partial class App : Application
     private NowViewModel? _now;
     private BreakdownViewModel? _breakdown;
     private ReportViewModel? _report;
+    private HouseholdViewModel? _household;
     private AppPreferences? _preferences;
     private SettingsViewModel? _settings;
     private WizardViewModel? _wizard;
@@ -31,6 +37,20 @@ public partial class App : Application
     private ShellViewModel? _shell;
     private TrayIcon? _tray;
     private MainWindow? _window;
+    private AddPcWindow? _addPcWindow;
+    private ApprovePromptWindow? _approvePromptWindow;
+    private DateTimeOffset? _approvePromptClosedAt;
+    private ConfirmJoinWindow? _confirmJoinWindow;
+    private SendFeedbackWindow? _feedbackWindow;
+    private FeedbackSender? _feedbackSender;
+    private ITimer? _feedbackRetryTimer;
+    private string? _dataFolder;
+    private WhatsNewWindow? _whatsNewWindow;
+
+    /// <summary>Review finding A4, follow-up: every open Join/Approve/Confirm join/Recovery code prompt, by its
+    /// promptId, so a pushed <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others
+    /// untouched.</summary>
+    private readonly Dictionary<string, Window> _openPrompts = new();
     private UiThreads? _threads;
     private CultureInfo? _culture;
     private string? _sentFolder;
@@ -57,7 +77,9 @@ public partial class App : Application
         var culture = CultureInfo.CurrentCulture;
         _culture = culture;
         _sentFolder = Path.Combine(options.DataFolder, "Sent");
+        _dataFolder = options.DataFolder;
         var version = Version();
+        AppLog.Write($"PowerLedger {version} starting.");
         new CrashCatcher(CrashFolder, version, ScrubNames.Here()).Hook(this);   // data-sharing design §5: as early as the App can catch itself
         _theme = new ThemeManager(this, preferences.Theme);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
@@ -68,17 +90,25 @@ public partial class App : Application
         _crashForwarder = new CrashForwarder(_link, threads, CrashFolder, TimeProvider.System);
         _crashForwarder.Start();
         var history = new HistoryReader(_database);
+        var householdHistory = new HouseholdHistory(_database);
         var sleep = new SleepSettings();
         byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, culture);
 
         _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
         _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture);
-        _report = new ReportViewModel(history, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
+        _report = new ReportViewModel(
+            _link, history, householdHistory, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart);
         _preferences.ApplyFirstRunDefaults();
         _preferences.EnsureFirstRunAt();   // data-sharing design §3: backfills an install from before this field existed
+        var signIn = new SignIn(() => new HttpLoopbackServer(), OpenPage, new HttpClient(), TimeProvider.System);
+        var account = new SignInViewModel(
+            _link, _preferences, signIn, threads, SignInClients.Microsoft, SignInClients.Google, SignInClients.GoogleSecret);
+        _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account);
+        _household.AddPcRequested += OpenAddPcWindow;
         var http = UpdateHttp.Create(version);
+        _feedbackSender = new FeedbackSender(http, FeedbackQueue.DefaultFolder, TimeProvider.System);
         _updates = new Updater(
             GitHubReleaseFeed.For(http, options.UpdateFeed), new UpdateDownloader(http, UpdateDownloader.DefaultFolder), new SetupRunner(),
             new ConnectionCost(), _preferences, threads, TimeProvider.System, zone, culture, Updater.RunningVersion(version),
@@ -90,6 +120,7 @@ public partial class App : Application
                 ShowWindow),
             OpenPage);
         _updates.PropertyChanged += OnUpdatesChanged;
+        _updates.NotesRequested += OpenWhatsNewWindow;
         _settings = new SettingsViewModel(
             _link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates,
             openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
@@ -97,7 +128,8 @@ public partial class App : Application
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
-        _shell = new ShellViewModel(_now, _breakdown, _report, _settings, _wizard, version, _updates);
+        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates);
+        _shell.FeedbackRequested += OpenFeedbackWindow;
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
         _settings.PropertyChanged += OnSettingsChanged;
@@ -105,6 +137,7 @@ public partial class App : Application
         _settings.Service.Saved += CountMachineChanged;
         _report.PropertyChanged += OnReportChanged;
         _tray = new TrayIcon(ShowWindow, ExitUi, autostart);
+        _link.HouseholdNoticeReceived += OnHouseholdNotice;
         _monthly = new MonthlyReports(
             history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,
             written => Dispatcher.InvokeAsync(() =>
@@ -127,6 +160,8 @@ public partial class App : Application
         _brightness.Start();
         _updates.Start();
         _usage.Start();
+        // A minute after start, then hourly (Updater's own cadence): pending feedback goes out once the PC is online again.
+        _feedbackRetryTimer = TimeProvider.System.CreateTimer(_ => _ = _feedbackSender!.RetryPendingAsync(), null, Updater.FirstCheck, Updater.CheckEvery);
         if (!options.StartInTray) ShowWindow();
     }
 
@@ -152,6 +187,7 @@ public partial class App : Application
             Page.Now => "now",
             Page.Breakdown => "breakdown",
             Page.Report => "report",
+            Page.Household => "household",
             _ => "settings",
         });
     }
@@ -216,20 +252,199 @@ public partial class App : Application
         if (_preferences is { Current.FirstRunDone: true }) _consentGate?.CheckOnce();
     }
 
-    /// <summary>Opens the consent dialog, modal and owned by the main window (data-sharing design §2).</summary>
+    /// <summary>Opens the consent dialog, modal and owned by the main window (data-sharing design §2, owner's round: one
+    /// screen, two choices — the status that triggered it no longer has anything left to show).</summary>
     private void OpenConsentDialog(Consent current)
     {
         if (_window is null || _link is null || _threads is null) return;
-        var model = new ConsentViewModel(_link, _threads, current, OpenPage, OpenPayload);
+        var model = new ConsentViewModel(_link, _threads, OpenPage);
         model.Applied += consent => _usage?.ConsentChanged(consent);   // data-sharing design §3: known to usage counting at once
         new ConsentDialog(model) { Owner = _window }.ShowDialog();
     }
 
-    /// <summary>Opens one payload file, owned by the main window: "See what would be sent" and each row of "What's been sent".</summary>
+    /// <summary>Opens one payload file, owned by the main window: each row of "What's been sent".</summary>
     private void OpenPayload(string path)
     {
         if (_window is null) return;
         new PayloadWindow(path) { Owner = _window }.Show();
+    }
+
+    /// <summary>Add a PC from the Household page (households design §2), modeless and owned by the main window. Review
+    /// finding A4: reused while already open, rather than starting a second pairing gate alongside the first.</summary>
+    private void OpenAddPcWindow()
+    {
+        if (_addPcWindow is not null)
+        {
+            _addPcWindow.Activate();
+            return;
+        }
+        if (_window is null || _link is null || _threads is null) return;
+        _addPcWindow = new AddPcWindow(new AddPcViewModel(_link, _threads, TimeProvider.System)) { Owner = _window };
+        _addPcWindow.Closed += (_, _) => _addPcWindow = null;
+        _addPcWindow.Show();
+    }
+
+    /// <summary>Send feedback, from the rail's bug button: modeless, owned by the main window, single-instance like Add a PC.</summary>
+    private void OpenFeedbackWindow()
+    {
+        if (_feedbackWindow is not null)
+        {
+            _feedbackWindow.Activate();
+            return;
+        }
+        if (_window is null || _feedbackSender is null || _threads is null) return;
+        var model = new FeedbackViewModel(_feedbackSender, _threads, ReadFeedbackLog);
+        model.Closed += message =>
+        {
+            _feedbackWindow?.Close();
+            if (message is not null) _tray?.Notify("PowerLedger", message, null);
+        };
+        _feedbackWindow = new SendFeedbackWindow(model, _window, new ImagePicker()) { Owner = _window };
+        _feedbackWindow.Closed += (_, _) => _feedbackWindow = null;
+        _feedbackWindow.Show();
+    }
+
+    /// <summary>What's new, from the update card's own link: modeless, owned by the main window, single-instance like
+    /// Add a PC and Send feedback (owner's round: in-app instead of the browser).</summary>
+    private void OpenWhatsNewWindow()
+    {
+        if (_whatsNewWindow is not null)
+        {
+            _whatsNewWindow.Activate();
+            return;
+        }
+        if (_window is null || _updates is null) return;
+        var model = new WhatsNewViewModel(_updates.WhatsNewTitle, _updates.WhatsNewPoints, _updates.OpenNotes);
+        model.Closed += () => _whatsNewWindow?.Close();
+        _whatsNewWindow = new WhatsNewWindow(model) { Owner = _window };
+        _whatsNewWindow.Closed += (_, _) => _whatsNewWindow = null;
+        _whatsNewWindow.Show();
+    }
+
+    /// <summary>The last 300 lines of the App's own log and, if it can be read, of the service's (Send feedback's
+    /// attach-log tick), capped together at the Worker's own character limit.</summary>
+    private string? ReadFeedbackLog()
+    {
+        var appTail = FeedbackLog.TailLatestFile(AppLog.Folder, "app-*.log");
+        var serviceTail = _dataFolder is null ? null : FeedbackLog.TailLatestFile(Path.Combine(_dataFolder, "logs"), "service-*.log");
+        return FeedbackLog.Combined(appTail, serviceTail);
+    }
+
+    /// <summary>A pushed household notice (households design §9): a Join, Approve or Confirm join prompt opens a modal
+    /// on top of whatever is showing; a Withdraw (task 0.8) closes the one prompt it names; a pairing's own outcome
+    /// (review finding A4) shows in Add a PC while that is open, or else as a tray notification; anything else shows as
+    /// a tray notification. Raised off the UI thread.</summary>
+    private void OnHouseholdNotice(HouseholdNotice notice)
+    {
+        switch (notice.Kind)
+        {
+            case NoticeKind.JoinPrompt:
+                Dispatcher.InvokeAsync(() => OpenJoinPromptWindow(notice));
+                break;
+            case NoticeKind.ApprovePrompt:
+                Dispatcher.InvokeAsync(() => OpenApprovePromptWindow(notice));
+                break;
+            case NoticeKind.ConfirmJoin:
+                Dispatcher.InvokeAsync(() => OpenConfirmJoinWindow(notice));
+                break;
+            case NoticeKind.RecoveryCode:
+                Dispatcher.InvokeAsync(() => OpenRecoveryCodeWindow(notice));
+                break;
+            case NoticeKind.Withdraw:
+                Dispatcher.InvokeAsync(() => WithdrawPrompt(notice.PromptId));
+                break;
+            case NoticeKind.PairingProgress:
+                // Add a PC, while open, hears every notice itself (it subscribes on its own) and shows this there;
+                // closed, there is nowhere else for the pairing it started to say how it went.
+                Dispatcher.InvokeAsync(() =>
+                {
+                    if (_addPcWindow is null) _tray?.Notify("PowerLedger", notice.Text, null);
+                });
+                break;
+            case NoticeKind.Info:
+                Dispatcher.InvokeAsync(() => _tray?.Notify("PowerLedger", notice.Text, null));
+                break;
+        }
+    }
+
+    /// <summary>Review finding A4: closes the one open prompt <paramref name="promptId"/> names, if any, leaving any
+    /// other prompt open. Its connection or its pairing is gone, so nothing is sent back for it.</summary>
+    private void WithdrawPrompt(string? promptId)
+    {
+        if (promptId is null || !_openPrompts.TryGetValue(promptId, out var window)) return;
+        window.Close();
+    }
+
+    /// <summary>The Join prompt (households design §2, §3): modal, owned by the main window when it is open.</summary>
+    private void OpenJoinPromptWindow(HouseholdNotice notice)
+    {
+        if (_link is null || _threads is null) return;
+        var model = new JoinPromptViewModel(_link, _threads, TimeProvider.System, notice);
+        var window = new JoinPromptWindow(model) { Owner = _window };
+        TrackPrompt(notice.PromptId, window);
+        window.ShowDialog();
+    }
+
+    /// <summary>The Approve prompt (households design §7): modal, owned by the main window when it is open. Plan 0.9:
+    /// an unanswered prompt can come back at the service's next turn, under the same or a new PromptId, while the
+    /// request is still waiting — this never shows two windows for it, replacing whichever is already open. Review
+    /// round: the App has no name or device ID to tell requests apart by, so a prompt that replaces one still open, or
+    /// one that closed within the last two minutes, is taken as the same request having changed.</summary>
+    private void OpenApprovePromptWindow(HouseholdNotice notice)
+    {
+        if (_link is null || _threads is null) return;
+        var requestChanged = _approvePromptWindow is not null
+            || (_approvePromptClosedAt is { } closedAt && TimeProvider.System.GetUtcNow() - closedAt <= ApprovePromptRecentlyClosed);
+        _approvePromptWindow?.Close();
+        var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice, requestChanged);
+        var window = new ApprovePromptWindow(model) { Owner = _window };
+        _approvePromptWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (_approvePromptWindow == window) _approvePromptWindow = null;
+            _approvePromptClosedAt = TimeProvider.System.GetUtcNow();
+        };
+        TrackPrompt(notice.PromptId, window);
+        window.ShowDialog();
+    }
+
+    /// <summary>The Confirm join prompt (households design §7, task 0.8): modal, owned by the main window when it is
+    /// open. Service round, review: an unanswered ConfirmJoin can come back at R's next turn, under the same or a new
+    /// PromptId, while its request is still waiting — this never shows two windows for it, replacing whichever is
+    /// already open.</summary>
+    private void OpenConfirmJoinWindow(HouseholdNotice notice)
+    {
+        if (_link is null || _threads is null) return;
+        _confirmJoinWindow?.Close();
+        var model = new ConfirmJoinViewModel(_link, _threads, TimeProvider.System, notice);
+        var window = new ConfirmJoinWindow(model) { Owner = _window };
+        _confirmJoinWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (_confirmJoinWindow == window) _confirmJoinWindow = null;
+        };
+        TrackPrompt(notice.PromptId, window);
+        window.ShowDialog();
+    }
+
+    /// <summary>Review finding A4: keeps <see cref="_openPrompts"/> current so a Withdraw can find this window by its
+    /// promptId, for as long as it stays open however it closes (answered, timed out, or withdrawn).</summary>
+    private void TrackPrompt(string? promptId, Window window)
+    {
+        if (promptId is null) return;
+        _openPrompts[promptId] = window;
+        window.Closed += (_, _) => _openPrompts.Remove(promptId);
+    }
+
+    /// <summary>A first sign-in that linked a household, or Make a new recovery code, made one (households design §7,
+    /// task 0.8): shown once, modal and owned by the main window.</summary>
+    private void OpenRecoveryCodeWindow(HouseholdNotice notice)
+    {
+        if (_link is null) return;
+        var model = new RecoveryCodeViewModel(_link, notice, new FileSaver(), CopyToClipboard);
+        var window = new RecoveryCodeWindow(model) { Owner = _window };
+        TrackPrompt(notice.PromptId, window);
+        window.ShowDialog();
     }
 
     /// <summary>"What's been sent…" in Settings → Privacy (data-sharing design §2).</summary>
@@ -259,6 +474,7 @@ public partial class App : Application
     private async void ExitUi()
     {
         _exiting = true;
+        AppLog.Write("Exiting.");
         try
         {
             _consentGate?.Dispose();   // data-sharing design §2: a run still awaiting the service's answer must not open a dialog now
@@ -271,11 +487,15 @@ public partial class App : Application
             if (_updates is not null)
             {
                 _updates.PropertyChanged -= OnUpdatesChanged;
+                _updates.NotesRequested -= OpenWhatsNewWindow;
                 _updates.Dispose();
             }
             _monthly?.Dispose();
             _brightness?.Dispose();
             _brightnessReader?.Dispose();
+            _feedbackRetryTimer?.Dispose();
+            _feedbackWindow?.Close();
+            _whatsNewWindow?.Close();
             _window?.Close();
             _tray?.Dispose();
             if (_now is not null)
@@ -293,6 +513,7 @@ public partial class App : Application
             }
             _breakdown?.Dispose();
             _report?.Dispose();
+            _household?.Dispose();
             _settings?.Dispose();
             _wizard?.Dispose();
             if (_link is not null) await _link.DisposeAsync();

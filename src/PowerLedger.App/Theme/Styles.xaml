@@ -2,10 +2,15 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:local="clr-namespace:PowerLedger.App">
 
-    <!-- Spec §9 type: the bundled faces first, then Windows' own. -->
-    <FontFamily x:Key="Font.Ui">/Fonts/#Archivo, Bahnschrift, Segoe UI</FontFamily>
-    <FontFamily x:Key="Font.Narrow">/Fonts/#Archivo Narrow, Bahnschrift</FontFamily>
-    <FontFamily x:Key="Font.Numbers">/Fonts/#Martian Mono, Cascadia Mono, Consolas</FontFamily>
+    <!-- Spec §9 type: the bundled faces first (a folder a family under Fonts, static 400–700 instances), then Windows' own. -->
+    <FontFamily x:Key="Font.Ui">/Fonts/Archivo/#Archivo, Bahnschrift, Segoe UI</FontFamily>
+    <!-- Archivo Narrow's files: DirectWrite reads "Narrow" as a width, so they are the family Archivo at the semi-condensed
+         stretch, which Text.Eyebrow asks for. -->
+    <FontFamily x:Key="Font.Narrow">/Fonts/ArchivoNarrow/#Archivo, Bahnschrift</FontFamily>
+    <FontFamily x:Key="Font.Numbers">/Fonts/MartianMono/#Martian Mono, Cascadia Mono, Consolas</FontFamily>
+    <!-- The second pairing, bundled for the same screens: Manrope for text and JetBrains Mono for figures. -->
+    <FontFamily x:Key="Font.Ui2">/Fonts/Manrope/#Manrope, Segoe UI</FontFamily>
+    <FontFamily x:Key="Font.Numbers2">/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono</FontFamily>
     <FontFamily x:Key="Font.Glyphs">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <!-- The logo, as assets\brand\make-brand.ps1 draws it: a graphite P on an amber tile, its bowl a meter's dial with the
@@ -40,6 +45,7 @@
     <local:VisibleWhenStep x:Key="VisibleWhenStep" />
     <local:ValueIs x:Key="Is" />
     <local:UpperCase x:Key="Upper" />
+    <local:ShareWidth x:Key="ShareWidth" />
 
     <Style x:Key="Text.Body" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
@@ -290,6 +296,37 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Face" Background="Transparent" CornerRadius="2">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource Brush.Line}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Amber}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The rail's round Send-feedback button: a bug drawn as one Path (no new font, unlike CardClose's glyph font). -->
+    <Style x:Key="FeedbackButton" TargetType="Button">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink3}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="Transparent" CornerRadius="14">
+                        <Viewbox Width="15" Height="15">
+                            <Path Data="M6.5,3.5 A1.5,1.5 0 1 0 9.5,3.5 A1.5,1.5 0 1 0 6.5,3.5 Z M5,9.5 A3,4 0 1 0 11,9.5 A3,4 0 1 0 5,9.5 Z M7,2.2 L6,0.5 M9,2.2 L10,0.5 M5.3,7 L2,6 M5,9.5 L1.3,9.5 M5.3,12 L2,13 M10.7,7 L14,6 M11,9.5 L14.7,9.5 M10.7,12 L14,13"
+                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                        </Viewbox>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">

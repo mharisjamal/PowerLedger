@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace PowerLedger.App;
 
@@ -8,6 +9,7 @@ internal enum Page
     Now,
     Breakdown,
     Report,
+    Household,
     Settings,
 }
 
@@ -18,18 +20,20 @@ internal sealed class ShellViewModel : ObservableObject
     private bool _isSetup;
 
     public ShellViewModel(
-        NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, SettingsViewModel settings, WizardViewModel wizard, string version,
-        Updater? updates = null)
+        NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, HouseholdViewModel household, SettingsViewModel settings,
+        WizardViewModel wizard, string version, Updater? updates = null)
     {
         Now = now;
         Breakdown = breakdown;
         Report = report;
+        Household = household;
         Settings = settings;
         Wizard = wizard;
         Version = version;
         Updates = updates;
         Wizard.Finished += EndSetup;
         Settings.SetupRequested += BeginSetup;
+        Feedback = new RelayCommand(() => FeedbackRequested?.Invoke());
     }
 
     public NowViewModel Now { get; }
@@ -37,6 +41,8 @@ internal sealed class ShellViewModel : ObservableObject
     public BreakdownViewModel Breakdown { get; }
 
     public ReportViewModel Report { get; }
+
+    public HouseholdViewModel Household { get; }
 
     public SettingsViewModel Settings { get; }
 
@@ -46,6 +52,12 @@ internal sealed class ShellViewModel : ObservableObject
 
     /// <summary>The update card in the rail (spec §13); without one the card stays hidden.</summary>
     public Updater? Updates { get; }
+
+    /// <summary>The rail's Send feedback button.</summary>
+    public IRelayCommand Feedback { get; }
+
+    /// <summary>Raised when the rail's Send feedback button is pressed; the App opens the window.</summary>
+    public event Action? FeedbackRequested;
 
     /// <summary>The page shown. A screen that reads history or the service reads while it shows and stops when it does not.</summary>
     public Page Page
@@ -76,6 +88,7 @@ internal sealed class ShellViewModel : ObservableObject
         Page.Now => Now,
         Page.Breakdown => Breakdown,
         Page.Report => Report,
+        Page.Household => Household,
         _ => Settings,
     };
 
@@ -102,6 +115,8 @@ internal sealed class ShellViewModel : ObservableObject
         else Breakdown.Hide();
         if (shown == Page.Report) Report.Show();
         else Report.Hide();
+        if (shown == Page.Household) Household.Show();
+        else Household.Hide();
         if (shown == Page.Settings) Settings.Show();
         else Settings.Hide();
     }

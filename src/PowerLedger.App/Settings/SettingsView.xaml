@@ -348,6 +348,15 @@
                 </StackPanel>
             </StackPanel>
 
+            <Border Style="{StaticResource Section}"><TextBlock Style="{StaticResource Text.Eyebrow}" Text="HOUSEHOLD" /></Border>
+            <StackPanel DataContext="{Binding Household}">
+                <StackPanel Style="{StaticResource Row}">
+                    <TextBlock Style="{StaticResource Label}" Text="Discoverable" />
+                    <CheckBox Style="{StaticResource Tick}" Content="Let my other PCs find this one on the network" IsChecked="{Binding Discoverable}" />
+                </StackPanel>
+                <TextBlock Style="{StaticResource Said}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+            </StackPanel>
+
             <Border Style="{StaticResource Section}"><TextBlock Style="{StaticResource Text.Eyebrow}" Text="ABOUT" /></Border>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                 <Image Source="{StaticResource Brand.Mark}" Width="36" Height="36" VerticalAlignment="Center" />

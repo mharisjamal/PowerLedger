@@ -17,7 +17,9 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
 {
     public static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(1);
 
+    private readonly IServiceLink _link;
     private readonly IRangeHistory _history;
+    private readonly IHouseholdHistory _household;
     private readonly ISleepSettings _sleep;
     private readonly IFileSaver _saver;
     private readonly Func<ReportData, byte[]> _pdf;
@@ -26,6 +28,8 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
     private double _co2KgPerKwh;
+    private bool _includeHousehold;
+    private bool _hasHousehold;
     private ITimer? _timer;
     private int _reads;
     private DateRange? _range;
@@ -34,10 +38,12 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
     private string? _saved;
 
     public ReportViewModel(
-        IRangeHistory history, ISleepSettings sleep, IFileSaver saver, Func<ReportData, byte[]> pdf,
+        IServiceLink link, IRangeHistory history, IHouseholdHistory household, ISleepSettings sleep, IFileSaver saver, Func<ReportData, byte[]> pdf,
         UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, double co2KgPerKwh)
     {
+        _link = link;
         _history = history;
+        _household = household;
         _sleep = sleep;
         _saver = saver;
         _pdf = pdf;
@@ -87,6 +93,32 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>"Include my household" (households design §2): adds the household's total and a page per member PC,
+    /// from household_rows, to the PDF. Review finding A11: only offered while this PC is in a household right now — see
+    /// <see cref="HasHousehold"/> — since the App has nothing current to add otherwise.</summary>
+    public bool IncludeHousehold
+    {
+        get => _includeHousehold;
+        set
+        {
+            if (!SetProperty(ref _includeHousehold, value)) return;
+            if (_range is not null) Refresh();
+        }
+    }
+
+    /// <summary>Review finding A11: whether this PC is in a household right now, read the same way the Household page
+    /// does. Follows the service, so a household left while this page is open takes Include my household with it.</summary>
+    public bool HasHousehold
+    {
+        get => _hasHousehold;
+        private set
+        {
+            if (!SetProperty(ref _hasHousehold, value) || value || !_includeHousehold) return;
+            _includeHousehold = false;   // the backing field directly: this is a consequence, not a user click to react to
+            OnPropertyChanged(nameof(IncludeHousehold));
+        }
+    }
+
     /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
     public void Show()
     {
@@ -105,18 +137,31 @@ internal sealed class ReportViewModel : ObservableObject, IDisposable
     {
         var read = ++_reads;
         var range = Range.Resolve(_clock.GetUtcNow(), _zone, _culture);
-        _threads.Background(() =>
+        var includeHousehold = _includeHousehold;
+        _threads.Background(() => _ = RefreshAsync(read, range, includeHousehold));
+    }
+
+    /// <summary>Review finding A11: this PC's current household membership is read the same way as the range, so
+    /// Include my household is never honored for one it has since left, whatever the tick still says.</summary>
+    private async Task RefreshAsync(int read, DateRange range, bool includeHousehold)
+    {
+        var status = await _link.GetStatusAsync().ConfigureAwait(false);
+        var hasHousehold = status?.Household?.HouseholdId is not null;
+        var report = _history.Read(range, _zone);
+        var household = includeHousehold && hasHousehold ? _household.ReadReport(range) : null;
+        var data = report is null
+            ? null
+            : ReportData.From(
+                report, _sleep.Read(), _co2KgPerKwh, _zone, _culture,
+                household is null ? null : HouseholdReportData.From(household.Totals, household.Devices, household.Members, _culture));
+        _threads.Post(() =>
         {
-            var report = _history.Read(range, _zone);
-            var data = report is null ? null : ReportData.From(report, _sleep.Read(), _co2KgPerKwh, _zone, _culture);
-            _threads.Post(() =>
-            {
-                if (read != _reads) return;
-                _range = range;
-                Data = data ?? ReportData.Empty with { Title = range.Title };
-                Message = data is null ? "History can't be read right now. It comes back when the service is running."
-                    : data.HasData ? null : "No readings in this range.";
-            });
+            if (read != _reads) return;
+            _range = range;
+            HasHousehold = hasHousehold;
+            Data = data ?? ReportData.Empty with { Title = range.Title };
+            Message = data is null ? "History can't be read right now. It comes back when the service is running."
+                : data.HasData ? null : "No readings in this range.";
         });
     }
 

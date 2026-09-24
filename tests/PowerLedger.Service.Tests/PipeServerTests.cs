@@ -16,13 +16,17 @@ public sealed class PipeServerTests : IAsyncLifetime
     private readonly LiveFeed _feed = new();
     private readonly ServiceSignals _signals = new(TimeProvider.System);
     private readonly MonitorBoard _monitors = new(MonitorBoardTests.Catalogue, TimeProvider.System);
+    private readonly Households.NoticeHub _notices;
+    private uint _console = (uint)System.Diagnostics.Process.GetCurrentProcess().SessionId;
     private PipeServer _server = null!;
+
+    public PipeServerTests() => _notices = new Households.NoticeHub(() => _console);
 
     public async Task InitializeAsync()
     {
         var handler = new PipeHandler(
             new LoopCommands(), _board, _monitors, _signals, new TariffRepository(_database.Db), TimeProvider.System, new Sharing.SharingCommands());
-        _server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, _name);
+        _server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, _name, _notices);
         await _server.StartAsync(CancellationToken.None);
         await _server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
     }
@@ -32,6 +36,49 @@ public sealed class PipeServerTests : IAsyncLifetime
         await _server.StopAsync(CancellationToken.None);
         _server.Dispose();
         _database.Dispose();
+    }
+
+    [Fact]
+    public async Task A_subscriber_in_the_console_session_gets_the_households_notices_and_one_elsewhere_doesnt()
+    {
+        var notice = new HouseholdNotice(NoticeKind.JoinPrompt, "p1", "Join Desktop-7's household?", "Desktop-7", null, null);
+        await using var client = await ConnectAsync();
+        await client.WriteAsync(new SubscribeRequest(1));
+        (await client.ReadAsync()).ShouldBe(new OkReply(1));
+        await WaitFor.True(() => _notices.AnyoneAtTheScreen);
+
+        _notices.Publish(notice).ShouldBeTrue();
+        (await client.ReadAsync()).ShouldBe(notice);
+
+        _console += 1000;                                                          // someone else is at the screen now
+        _notices.Publish(notice).ShouldBeFalse();
+        _feed.Publish(PipeProtocolTests.Frame(12));
+        (await client.ReadAsync()).ShouldBeOfType<ReadingFrame>();
+    }
+
+    [Fact]
+    public async Task A_household_request_goes_with_the_session_of_the_client_that_sent_it()
+    {
+        uint? seen = 0;
+        var households = new SessionRecorder(session => seen = session);
+        var handler = new PipeHandler(
+            new LoopCommands(), _board, _monitors, _signals, new TariffRepository(_database.Db), TimeProvider.System, new Sharing.SharingCommands(), households);
+        var name = $"PowerLedger.test.{Guid.NewGuid():N}";
+        var server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, name, _notices);
+        await server.StartAsync(CancellationToken.None);
+        try
+        {
+            await server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
+            await using var client = await ConnectAsync(name);
+            await client.WriteAsync(new SetDiscoverableRequest(1, false));
+            (await client.ReadAsync()).ShouldBe(new HouseholdReply(1, true, "Done."));
+            seen.ShouldBe((uint)System.Diagnostics.Process.GetCurrentProcess().SessionId);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+            server.Dispose();
+        }
     }
 
     [Fact]
@@ -123,10 +170,53 @@ public sealed class PipeServerTests : IAsyncLifetime
         users.PipeAccessRights.HasFlag(PipeAccessRights.CreateNewInstance).ShouldBeFalse();
     }
 
-    private async Task<MessageChannel> ConnectAsync()
+    private async Task<MessageChannel> ConnectAsync(string? name = null)
     {
-        var pipe = new NamedPipeClientStream(".", _name, PipeDirection.InOut, PipeOptions.Asynchronous);
+        var pipe = new NamedPipeClientStream(".", name ?? _name, PipeDirection.InOut, PipeOptions.Asynchronous);
         await pipe.ConnectAsync(5000);
         return new MessageChannel(pipe);
+    }
+
+    [Fact]
+    public async Task A_reply_over_64_KB_goes_as_an_error_and_the_connection_stays()
+    {
+        var huge = new FoundPcsReply(1, [.. Enumerable.Range(0, 1000).Select(n => new FoundPc(new string('a', 60) + n, new string('b', 40), false))]);
+        var handler = new PipeHandler(
+            new LoopCommands(), _board, _monitors, _signals, new TariffRepository(_database.Db), TimeProvider.System, new Sharing.SharingCommands(),
+            new Answering(request => request is BrowsePcsRequest ? huge : new HouseholdReply(request.Id, true, "Done.")));
+        var name = $"PowerLedger.test.{Guid.NewGuid():N}";
+        var server = new PipeServer(handler, _feed, _signals, NullLogger<PipeServer>.Instance, name, _notices);
+        await server.StartAsync(CancellationToken.None);
+        try
+        {
+            await server.Listening.WaitAsync(TimeSpan.FromSeconds(5));
+            await using var client = await ConnectAsync(name);
+
+            await client.WriteAsync(new BrowsePcsRequest(1));
+            (await client.ReadAsync()).ShouldBeOfType<ErrorReply>().Id.ShouldBe(1);
+            await client.WriteAsync(new SetDiscoverableRequest(2, false));
+            (await client.ReadAsync()).ShouldBe(new HouseholdReply(2, true, "Done."));   // still connected
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+            server.Dispose();
+        }
+    }
+
+    /// <summary>Household requests answered as the test says.</summary>
+    private sealed class Answering(Func<PipeRequest, PipeMessage> answer) : Households.IHouseholdRequests
+    {
+        public Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel) => Task.FromResult(answer(request));
+    }
+
+    /// <summary>Household requests answered at once, noting the session each came from.</summary>
+    private sealed class SessionRecorder(Action<uint?> seen) : Households.IHouseholdRequests
+    {
+        public Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel)
+        {
+            seen(session);
+            return Task.FromResult<PipeMessage>(new HouseholdReply(request.Id, true, "Done."));
+        }
     }
 }

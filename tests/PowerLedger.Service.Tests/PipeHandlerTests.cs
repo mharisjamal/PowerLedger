@@ -300,7 +300,74 @@ public sealed class PipeHandlerTests : IDisposable
         (await Send(new OkReply(17))).ShouldBeOfType<ErrorReply>().Id.ShouldBeNull();
     }
 
+    public static TheoryData<PipeRequest> HouseholdRequests() =>
+    [
+        new BrowsePcsRequest(40), new AddPcRequest(41, "a1"), new StartCodePairingRequest(42), new JoinByCodeRequest(43, "K7QM-2XHD-9PW4-R8TA"),
+        new AnswerPromptRequest(44, "p1", true), new RemovePcRequest(45, "0123456789abcdef0123456789abcdef"), new LeaveHouseholdRequest(46),
+        new RenamePcRequest(47, "Study PC"), new SetDiscoverableRequest(48, false), new SignInRequest(49, "microsoft", "token", "salt"),
+        new SignOutRequest(50), new DeleteAccountRequest(51), new CancelPairingRequest(52), new NewRecoveryCodeRequest(53),
+        new RemoveOldRowsRequest(54, "0123456789abcdef0123456789abcdef"),
+    ];
+
+    [Theory]
+    [MemberData(nameof(HouseholdRequests))]
+    public async Task A_household_request_goes_to_the_household_worker_and_its_answer_comes_back(PipeRequest request)
+    {
+        var households = new FakeHouseholds(request => Task.FromResult<PipeMessage>(new HouseholdReply(request.Id, true, "Done.")));
+        var handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock, _sharing, households);
+
+        (await handler.HandleAsync(request, "client-1", CancellationToken.None, session: 3)).ShouldBe(new HouseholdReply(request.Id, true, "Done."));
+        households.Received.ShouldBe([request]);
+        households.Sessions.ShouldBe([(uint?)3]);                              // the client's session goes with it
+        (await Send(request)).ShouldBe(new ErrorReply(request.Id, "The service does not handle that request."));
+    }
+
+    [Fact]
+    public async Task A_household_request_the_worker_doesnt_answer_in_eight_seconds_is_told_so()
+    {
+        var households = new FakeHouseholds(_ => new TaskCompletionSource<PipeMessage>().Task);
+        var handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock, _sharing, households);
+
+        var reply = handler.HandleAsync(new BrowsePcsRequest(52), "client-1", CancellationToken.None);
+        await WaitFor.True(() => households.Received.Count == 1);
+        _clock.Advance(Households.HouseholdWorker.AppWait);
+
+        (await reply).ShouldBe(new ErrorReply(52, PipeHandler.NoAnswer));
+    }
+
     public void Dispose() => _database.Dispose();
 
     private Task<PipeMessage> Send(PipeMessage message) => _handler.HandleAsync(message, "client-1", CancellationToken.None);
+
+    private sealed class FakeHouseholds(Func<PipeRequest, Task<PipeMessage>> answer) : Households.IHouseholdRequests
+    {
+        private readonly List<PipeRequest> _received = [];
+        private readonly List<uint?> _sessions = [];
+
+        public List<PipeRequest> Received
+        {
+            get
+            {
+                lock (_received) return [.. _received];
+            }
+        }
+
+        public List<uint?> Sessions
+        {
+            get
+            {
+                lock (_received) return [.. _sessions];
+            }
+        }
+
+        public Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel)
+        {
+            lock (_received)
+            {
+                _received.Add(request);
+                _sessions.Add(session);
+            }
+            return answer(request);
+        }
+    }
 }

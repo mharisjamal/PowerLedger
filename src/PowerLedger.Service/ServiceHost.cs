@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -6,6 +7,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.EventLog;
 using PowerLedger.Contracts;
 using PowerLedger.Sensors;
+using PowerLedger.Service.Households;
+using PowerLedger.Service.Households.Relay;
 using PowerLedger.Service.Sharing;
 using PowerLedger.Storage;
 using Serilog;
@@ -77,6 +80,19 @@ internal static class ServiceHost
         services.AddSingleton(paths);                           // Program writes the service's crash files under it
         services.AddSingleton<SharingCommands>();
         services.AddSingleton<ISharingClient>(_ => new SharingClient(SharingEndpoint.Resolve()));
+        services.AddSingleton(_ => new NoticeHub());
+        services.AddSingleton(provider =>
+        {
+            var log = provider.GetRequiredService<ILogger<HouseholdWorker>>();
+            return new HouseholdEnvironment(
+                new WindowsDiscovery(log), new WindowsNetworkCategory(log),
+                new RelayClient(SharingEndpoint.Resolve(), provider.GetRequiredService<TimeProvider>()), IPAddress.IPv6Any);
+        });
+        services.AddSingleton(provider => new HouseholdWorker(
+            provider.GetRequiredService<SqliteDatabase>(), provider.GetRequiredService<StatusBoard>(), provider.GetRequiredService<NoticeHub>(),
+            provider.GetRequiredService<HouseholdEnvironment>(), provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<ILogger<HouseholdWorker>>()));
+        services.AddSingleton<IHouseholdRequests>(provider => provider.GetRequiredService<HouseholdWorker>());
         services.AddSingleton<PipeHandler>();
         services.AddHostedService<PowerNotifications>();
         services.AddSingleton<SamplingLoop>();                  // also resolved by Program and the lifetime, to see whether it failed
@@ -85,9 +101,11 @@ internal static class ServiceHost
             provider.GetRequiredService<SqliteDatabase>(), provider.GetRequiredService<StatusBoard>(), provider.GetRequiredService<SharingCommands>(),
             provider.GetRequiredService<ISharingClient>(), SharingEnvironment.For(paths), provider.GetRequiredService<TimeProvider>(),
             provider.GetRequiredService<ILogger<SharingWorker>>()));
+        services.AddHostedService(provider => provider.GetRequiredService<HouseholdWorker>());
         services.AddHostedService(provider => new PipeServer(
             provider.GetRequiredService<PipeHandler>(), provider.GetRequiredService<LiveFeed>(),
-            provider.GetRequiredService<ServiceSignals>(), provider.GetRequiredService<ILogger<PipeServer>>(), pipeName));
+            provider.GetRequiredService<ServiceSignals>(), provider.GetRequiredService<ILogger<PipeServer>>(), pipeName,
+            provider.GetRequiredService<NoticeHub>()));
         return builder.Build();
     }
 

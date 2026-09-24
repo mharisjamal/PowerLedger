@@ -50,7 +50,9 @@ public class ReleaseFeedTests
                 { "name": "PowerLedger-{{version}}-setup-x64.exe", "size": 58000000,
                   "browser_download_url": "{{Downloads}}{{tag}}/PowerLedger-{{version}}-setup-x64.exe", "digest": "sha256:{{Sha}}" },
                 { "name": "PowerLedger-{{version}}-setup-arm64.exe", "size": 60000000,
-                  "browser_download_url": "{{Downloads}}{{tag}}/PowerLedger-{{version}}-setup-arm64.exe", "digest": "sha256:{{Sha}}" }
+                  "browser_download_url": "{{Downloads}}{{tag}}/PowerLedger-{{version}}-setup-arm64.exe", "digest": "sha256:{{Sha}}" },
+                { "name": "PowerLedger-{{version}}-setup-x86.exe", "size": 52000000,
+                  "browser_download_url": "{{Downloads}}{{tag}}/PowerLedger-{{version}}-setup-x86.exe", "digest": "sha256:{{Sha}}" }
               ]
             }
             """);
@@ -97,7 +99,7 @@ public class ReleaseFeedTests
     [Theory]
     [InlineData(Architecture.X64, "PowerLedger-0.3.0-setup-x64.exe", 58000000L)]
     [InlineData(Architecture.Arm64, "PowerLedger-0.3.0-setup-arm64.exe", 60000000L)]
-    [InlineData(Architecture.X86, "PowerLedger-0.3.0-setup.exe", 100000000L)]
+    [InlineData(Architecture.X86, "PowerLedger-0.3.0-setup-x86.exe", 52000000L)]
     public void The_installer_for_this_PC_comes_first(Architecture architecture, string name, long size)
     {
         var release = GitHubReleaseFeed.Parse(AnswerWithArchitectures(), Downloads, architecture).ShouldNotBeNull();
@@ -109,7 +111,7 @@ public class ReleaseFeedTests
     [Fact]
     public void A_release_with_only_the_universal_installer_still_updates_every_PC()
     {
-        foreach (var architecture in new[] { Architecture.X64, Architecture.Arm64 })
+        foreach (var architecture in new[] { Architecture.X64, Architecture.Arm64, Architecture.X86 })
         {
             GitHubReleaseFeed.Parse(Answer(), Downloads, architecture).ShouldNotBeNull().FileName.ShouldBe("PowerLedger-0.2.0-setup.exe");
         }

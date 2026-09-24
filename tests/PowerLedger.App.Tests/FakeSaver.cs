@@ -9,15 +9,21 @@ internal sealed class FakeSaver : IFileSaver, IDisposable
 
     public bool Cancel { get; set; }
 
+    /// <summary>When set, points into a folder that is never created, so a write there fails with a real
+    /// <see cref="IOException"/> — for testing a guard against one, rather than mocking the failure.</summary>
+    public bool MissingFolder { get; set; }
+
     public string? Suggested { get; private set; }
 
+    private string TargetFolder => MissingFolder ? Path.Combine(_folder, "does-not-exist") : _folder;
+
     /// <summary>Where the last answer pointed.</summary>
-    public string Chosen => Path.Combine(_folder, Suggested ?? "nothing");
+    public string Chosen => Path.Combine(TargetFolder, Suggested ?? "nothing");
 
     public string? Ask(string name, string filter)
     {
         Suggested = name;
-        Directory.CreateDirectory(_folder);
+        if (!MissingFolder) Directory.CreateDirectory(_folder);
         return Cancel ? null : Chosen;
     }
 

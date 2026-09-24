@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-// Confirms 0001_init.sql and 0002_report_bodies.sql have been applied: the five tables exist with
-// the columns the rest of the Worker relies on.
+// Confirms 0001_init.sql, 0002_report_bodies.sql and 0005_feedback.sql have been applied: the tables
+// exist with the columns the rest of the Worker relies on.
 describe("the D1 schema", () => {
   it("creates installs, reports, requests, tombstones and report_bodies", async () => {
     const names = await env.DB.prepare(
@@ -10,7 +10,7 @@ describe("the D1 schema", () => {
     ).all<{ name: string }>();
 
     expect(names.results.map((row) => row.name)).toEqual(
-      expect.arrayContaining(["installs", "reports", "requests", "tombstones", "report_bodies"]),
+      expect.arrayContaining(["installs", "reports", "requests", "tombstones", "report_bodies", "feedback_addresses"]),
     );
   });
 

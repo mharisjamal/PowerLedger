@@ -1,5 +1,5 @@
-# Build, test outside the Hardware, UI and Installed categories, then make the installer and test it on x64 and on
-# Arm64 (spec §13).
+# Build, test outside the Hardware, UI, Installed and Worker categories (also as x86 for Core, Storage and the service),
+# then make the installers and test them on x64 and on Arm64 (spec §13). The Worker category runs the households Worker locally with wrangler, which the lead runs by hand.
 name: CI
 
 on:
@@ -21,7 +21,19 @@ jobs:
         run: dotnet build -c Release
 
       - name: Test
-        run: dotnet test -c Release --no-build --filter "Category!=Hardware&Category!=UI&Category!=Installed"
+        run: dotnet test -c Release --no-build --filter "Category!=Hardware&Category!=UI&Category!=Installed&Category!=Worker"
+
+      # The 32-bit build: Core, Storage (SQLite's own x86 library) and the service's tests run in a 32-bit process, built
+      # self-contained for win-x86 so the runner needs no x86 .NET of its own. No hosted runner has 32-bit Windows, so the
+      # x86 installer is compiled below but installed nowhere.
+      - name: Test as x86
+        shell: pwsh
+        run: |
+          foreach ($project in 'Core', 'Storage', 'Service') {
+            dotnet test "tests/PowerLedger.$project.Tests" -c Release -r win-x86 -p:SelfContained=true `
+              --filter "Category!=Hardware&Category!=UI&Category!=Installed&Category!=Worker"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       - name: Install Inno Setup
         shell: pwsh
@@ -31,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           ./installer/build.ps1 -TestVariants
-          ./installer/build.ps1 -SkipPublish -Fast -For x64,arm64
+          ./installer/build.ps1 -SkipPublish -Fast -For x64,arm64,x86
 
       # The installer and its upgrade build, kept under installer/output so test/ stays a subfolder; the Arm64 job
       # installs them.

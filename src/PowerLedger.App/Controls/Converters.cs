@@ -50,3 +50,16 @@ internal sealed class UpperCase : IValueConverter
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
 }
+
+/// <summary>A 0-to-1 share to the width of a bar's fill, out of the track width the converter parameter gives (households
+/// design §2: a bar per PC).</summary>
+internal sealed class ShareWidth : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var track = parameter is string text ? double.Parse(text, CultureInfo.InvariantCulture) : 120.0;
+        return value is double share ? Math.Clamp(share, 0, 1) * track : 0.0;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
+}

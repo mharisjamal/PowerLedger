@@ -18,6 +18,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The household vectors the Worker's tests check with WebCrypto (households plan, Task 0.5). -->
+    <None Include="..\..\server\test\fixtures\households\vectors.json" Link="Contract\households-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\PowerLedger.Core\PowerLedger.Core.csproj" />
   </ItemGroup>
 

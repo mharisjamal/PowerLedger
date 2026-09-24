@@ -18,6 +18,9 @@
         <DataTemplate DataType="{x:Type local:ReportViewModel}">
             <local:ReportView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type local:HouseholdViewModel}">
+            <local:HouseholdView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type local:SettingsViewModel}">
             <local:SettingsView />
         </DataTemplate>
@@ -69,6 +72,11 @@
                 <Border Grid.Column="0" Background="{DynamicResource Brush.Ground}" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,0,1,0"
                         Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
                     <DockPanel Margin="0,14,0,0">
+                        <!-- Send feedback: at the foot of the rail, bottom-left, below the service's status. -->
+                        <Border DockPanel.Dock="Bottom" Padding="12,6">
+                            <Button Style="{StaticResource FeedbackButton}" HorizontalAlignment="Left" Command="{Binding Feedback}"
+                                    ToolTip="Send feedback or report a bug" AutomationProperties.Name="Send feedback" />
+                        </Border>
                         <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="18,12">
                             <StackPanel Orientation="Horizontal">
                                 <Ellipse Width="6" Height="6" VerticalAlignment="Center">
@@ -102,7 +110,7 @@
                                 <Button Style="{StaticResource Quiet}" Margin="0,9,0,0" HorizontalAlignment="Left" Content="{Binding ActionLabel}"
                                         Command="{Binding Act}" Visibility="{Binding ActionLabel, Converter={StaticResource VisibleWhenText}}" />
                                 <Button Style="{StaticResource Link}" Margin="0,8,0,0" HorizontalAlignment="Left" Content="What's new"
-                                        Command="{Binding OpenNotes}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
+                                        Command="{Binding ShowWhatsNew}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
                             </StackPanel>
                         </Border>
                         <StackPanel>
@@ -112,6 +120,8 @@
                                          IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Breakdown}}" />
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Report"
                                          IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Report}}" />
+                            <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Household"
+                                         IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Household}}" />
                             <RadioButton Style="{StaticResource Rail}" GroupName="Rail" Content="Settings"
                                          IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Settings}}" />
                         </StackPanel>

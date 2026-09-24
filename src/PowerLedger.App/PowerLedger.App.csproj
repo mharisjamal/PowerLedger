@@ -26,13 +26,23 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Fonts\*.ttf" />
+    <!-- Spec §9's faces, a folder a family, static instances only: WPF reads no variable font's axes. Each folder's OFL.txt is
+         its licence; THIRD-PARTY-NOTICES.md at the repo root lists them. A FontFamily names the folder: /Fonts/Archivo/#Archivo. -->
+    <Resource Include="Fonts\**\*.ttf" />
+    <None Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
     <!-- The window's icon: its taskbar button and Alt+Tab. -->
     <Resource Include="..\..\assets\brand\PowerLedger.ico" Link="Brand\PowerLedger.ico" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="PowerLedger.App.Tests" />
+  </ItemGroup>
+
+  <!-- The repo is public: Google's Desktop client secret never lands in source or in this file's own value, only in the
+       built assembly's metadata, from a property installer\build.ps1 passes on the command line. Empty when nobody
+       passes it, which SignInClients.GoogleSecret then reads as "not configured" (review: security round). -->
+  <ItemGroup>
+    <AssemblyMetadata Include="GoogleClientSecret" Value="$(PowerLedgerGoogleClientSecret)" />
   </ItemGroup>
 
   <!-- WinForms is here only for the tray icon and a screen's work area; its global usings would collide with WPF's Application, Color and more. -->

@@ -46,6 +46,99 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Browsing_and_household_requests_reach_the_service_and_come_back()
+    {
+        _service.FoundPcs = [new FoundPc("inst-1", "Laptop-2", InThisHousehold: false)];
+        _service.HouseholdCode = "K7QM-2XHD-9PW4-R8TA";
+
+        (await _link.BrowsePcsAsync()).Pcs.ShouldBe(_service.FoundPcs);
+
+        var added = await _link.AddPcAsync("inst-1");
+        added.ShouldBe(new HouseholdOutcome(true, "Done."));
+        _service.Requests.OfType<AddPcRequest>().Single().InstanceId.ShouldBe("inst-1");
+
+        var code = await _link.StartCodePairingAsync();
+        code.ShouldBe(new HouseholdOutcome(true, "Here's your code.", "K7QM-2XHD-9PW4-R8TA"));
+
+        var joined = await _link.JoinByCodeAsync("K7QM-2XHD-9PW4-R8TA");
+        joined.ShouldBe(new HouseholdOutcome(true, "Done."));
+        _service.Requests.OfType<JoinByCodeRequest>().Single().Code.ShouldBe("K7QM-2XHD-9PW4-R8TA");
+    }
+
+    [Fact]
+    public async Task A_household_refusal_comes_back_in_the_services_words()
+    {
+        _service.Refuse = "This household already has 16 PCs.";
+        (await _link.AddPcAsync("inst-1")).ShouldBe(new HouseholdOutcome(false, "This household already has 16 PCs."));
+    }
+
+    /// <summary>Service gap: a browse the service refuses, such as on Windows too old for network discovery, used to
+    /// come back as an ErrorReply the link turned into a bare null, dropping the reason.</summary>
+    [Fact]
+    public async Task A_browse_refusal_comes_back_in_the_services_words_too()
+    {
+        _service.Refuse = "Finding PCs on the network needs Windows 10 version 1903 or later.";
+        var result = await _link.BrowsePcsAsync();
+        result.Pcs.ShouldBeNull();
+        result.Error.ShouldBe("Finding PCs on the network needs Windows 10 version 1903 or later.");
+    }
+
+    /// <summary>Plan 0.9: AskAgainRequest answers as an ordinary HouseholdReply, over the real pipe, the same as every
+    /// other household request — including a refusal such as not being signed in.</summary>
+    [Fact]
+    public async Task Ask_again_answers_as_a_household_reply_with_the_services_words()
+    {
+        _service.Refuse = "Sign in first to ask to join your household.";
+        (await _link.AskAgainAsync()).ShouldBe(new HouseholdOutcome(false, "Sign in first to ask to join your household."));
+    }
+
+    /// <summary>Service round, review: any request can now come back with an oversized-reply ErrorReply — shown as a
+    /// message, never a crash.</summary>
+    [Fact]
+    public async Task An_answer_too_large_to_send_comes_back_as_a_message_not_a_crash()
+    {
+        _service.Refuse = "The answer was too large to send.";
+        (await _link.AddPcAsync("inst-1")).ShouldBe(new HouseholdOutcome(false, "The answer was too large to send."));
+    }
+
+    [Fact]
+    public async Task A_pushed_household_notice_reaches_the_app_without_closing_the_connection()
+    {
+        var notices = new ConcurrentQueue<HouseholdNotice>();
+        _link.HouseholdNoticeReceived += notices.Enqueue;
+
+        var notice = new HouseholdNotice(NoticeKind.JoinPrompt, "p1", "Join Desktop-7's household?", "Desktop-7", "482 913", DateTimeOffset.UnixEpoch.AddMinutes(2));
+        await _service.PushAsync(notice);
+
+        await WaitFor.True(() => !notices.IsEmpty);
+        notices.Single().ShouldBe(notice);
+        // The pipe reader kept running rather than treating the notice as an unknown message and closing: a normal
+        // request still gets an answer, and no spurious disconnect was recorded.
+        (await _link.GetStatusAsync()).ShouldNotBeNull();
+        _changes.ToArray().ShouldBe(new[] { true });
+    }
+
+    /// <summary>A server that failed the installed-service check is never trusted with a household notice either
+    /// (Plan N review finding A8), the same as it is never sent a household request.</summary>
+    [Fact]
+    public async Task A_pushed_household_notice_from_a_server_that_failed_the_check_is_ignored()
+    {
+        var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
+        await using var service = new FakeService(name);
+        await using var checkedLink = new PipeServiceLink(name, new FixedIdle(0), _clock, new RefuseAll());
+        var notices = new ConcurrentQueue<HouseholdNotice>();
+        checkedLink.HouseholdNoticeReceived += notices.Enqueue;
+        service.Start();
+        checkedLink.Start();
+        await WaitFor.True(() => checkedLink.IsConnected);
+
+        await service.PushAsync(new HouseholdNotice(NoticeKind.Info, null, "A PC was removed.", null, null, null));
+
+        await Task.Delay(50);   // give a wrongly-delivered notice a chance to arrive
+        notices.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Status_and_settings_come_back_for_the_request_that_asked()
     {
         (await _link.GetStatusAsync()).ShouldNotBeNull().Version.ShouldBe("0.1.0+b688a18");
@@ -133,8 +226,12 @@ public sealed class ServiceLinkTests : IAsyncLifetime
 
         (await checkedLink.SetTariffAsync(0.2m, "EUR", null)).Problem.ShouldBe(RefuseAll.Reason);
         (await checkedLink.ReportBrightnessAsync([new MonitorBrightness { Instance = Statuses.Dell.Instance, Brightness = 0.6 }], [], [])).Problem.ShouldBe(RefuseAll.Reason);
+        (await checkedLink.AddPcAsync("inst-1")).Message.ShouldBe(RefuseAll.Reason);
+        (await checkedLink.BrowsePcsAsync()).Error.ShouldBe(RefuseAll.Reason);
         service.Requests.OfType<SetTariffRequest>().ShouldBeEmpty();
         service.Requests.OfType<ReportBrightnessRequest>().ShouldBeEmpty();
+        service.Requests.OfType<AddPcRequest>().ShouldBeEmpty();
+        service.Requests.OfType<BrowsePcsRequest>().ShouldBeEmpty();
     }
 
     [Fact]
@@ -143,6 +240,8 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         await using var alone = new PipeServiceLink($"PowerLedger.nobody.{Guid.NewGuid():N}", new FixedIdle(0), _clock, new TrustAnyServer());
         (await alone.ResetCalibrationAsync()).ShouldBe(WriteResult.NotConnected);
         (await alone.SetConsentAsync(Consent.Unanswered)).ShouldBe(SharingOutcome.NotConnected);
+        (await alone.AddPcAsync("inst-1")).ShouldBe(HouseholdOutcome.NotConnected);
+        (await alone.BrowsePcsAsync()).Pcs.ShouldBeNull();
     }
 
     [Fact]

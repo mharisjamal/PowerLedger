@@ -37,8 +37,20 @@ public sealed class ArcSource : ISensorSource
     /// <summary>Test seam: any Level Zero, any way of asking whether Windows has the card it found switched off, and the
     /// option of reading integrated graphics, which only a hardware test wants.</summary>
     internal ArcSource(ISysman sysman, Func<SysmanDevice, Func<bool>> powerState, bool includeIntegrated = false)
+        : this(sysman, powerState, includeIntegrated, sysman is not LevelZeroSysman || Environment.Is64BitProcess)
+    {
+    }
+
+    /// <summary>Test seam: a 32-bit process never calls Level Zero, whose structures here are laid out for 64-bit.</summary>
+    internal ArcSource(ISysman sysman, Func<SysmanDevice, Func<bool>> powerState, bool includeIntegrated, bool is64BitProcess)
     {
         _sysman = sysman;
+        if (Bitness.SixtyFourBitOnly("Intel's Level Zero", is64BitProcess) is { } reason)
+        {
+            Unavailable = reason;
+            Supported = false;
+            return;
+        }
         try
         {
             if (Choose(sysman, includeIntegrated, out var unavailable) is { } card)

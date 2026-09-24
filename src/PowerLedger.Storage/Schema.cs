@@ -116,4 +116,33 @@ internal static class Schema
         );
         CREATE INDEX outbox_events_day ON outbox_events(day, kind);
         """;
+
+    /// <summary>Households (households design §1): every member PC's hour rows, this PC's own among them, and the members as
+    /// this PC knows them. A row is replaced only by one that changed later. A member's kind is its ChassisKind as a number.</summary>
+    public const string V3 = """
+        CREATE TABLE household_rows (
+            device_id    TEXT    NOT NULL,
+            hour_ms      INTEGER NOT NULL,
+            energy_wh    REAL NOT NULL, cpu_wh REAL NOT NULL, gpu_wh REAL NOT NULL, display_wh REAL NOT NULL, rest_wh REAL NOT NULL,
+            idle_on_wh   REAL NOT NULL, idle_off_wh REAL NOT NULL,
+            on_s         REAL NOT NULL, battery_s REAL NOT NULL, idle_s REAL NOT NULL,
+            measured_s   REAL NOT NULL, calibrated_s REAL NOT NULL, estimated_s REAL NOT NULL,
+            cost_micro   INTEGER,            -- null with no tariff
+            currency     TEXT,
+            changed_ms   INTEGER NOT NULL,
+            PRIMARY KEY (device_id, hour_ms)
+        );
+        CREATE INDEX household_rows_changed ON household_rows(device_id, changed_ms);
+
+        CREATE TABLE household_members (
+            device_id      TEXT PRIMARY KEY,
+            name           TEXT    NOT NULL,
+            kind           INTEGER NOT NULL,
+            sign_key       BLOB    NOT NULL,
+            dh_key         BLOB    NOT NULL,
+            added_ms       INTEGER NOT NULL,
+            left_ms        INTEGER,
+            last_synced_ms INTEGER
+        );
+        """;
 }

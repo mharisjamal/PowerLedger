@@ -14,7 +14,7 @@ and printed as PASS, FAIL or SKIP, and the exit code is the number of failures. 
 The default steps are silent, so CI can run them: Preflight, Install, Service, Data, Recovery, ServiceStop, Upgrade,
 UninstallKeep, Reinstall, Architecture, Cleanup. Upgrade runs setup as the App's Restart to update does, with /UPDATE=1, and checks
 that the App opens again; UninstallKeep then closes it. Architecture installs the per-architecture build an update would
-download, `-x64` or `-arm64` to match this PC, over what Reinstall left, and is skipped when that installer wasn't built.
+download, `-x64`, `-arm64` or `-x86` to match this PC, over what Reinstall left, and is skipped when that installer wasn't built.
 Three more need a desktop. InstallWizard and UninstallDelete
 start setup or the uninstaller and answer it themselves (InstallWizard installs with the wizard, as somebody new to
 PowerLedger would, for a clean Windows such as Windows Sandbox); DriveWizard waits for a setup somebody else started,
@@ -65,6 +65,7 @@ $UninstallKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{8E49
 $Shortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\PowerLedger.lnk'
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $EventSourceKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\PowerLedger'
+$FirewallRule = 'PowerLedger households'        # households design §3: the other PCs reach the service's listener
 $PipeScript = Join-Path $root 'scripts\pipe-status.ps1'
 $Silent = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
 $SetupProcess = 'PowerLedger-*-setup*'          # the installer and the setup.tmp it runs, which owns the wizard
@@ -75,7 +76,7 @@ $ExpectedRules = @(                             # what the service puts on the d
     'S-1-5-32-545 Allow ReadAndExecute, Synchronize (ContainerInherit, ObjectInherit; None)'
 )
 $MessageBoxIds = @{ Yes = '6'; No = '7'; OK = '1', '2'; Cancel = '2' }   # control ids of a message box's buttons
-$PeMachines = @{ X64 = 0x8664; Arm64 = 0xAA64 }  # a PE header's machine field, for each Windows PowerLedger has a build for
+$PeMachines = @{ X64 = 0x8664; Arm64 = 0xAA64; X86 = 0x014C }  # a PE header's machine field, for each Windows PowerLedger has a build for
 
 $ResultsFile = Join-Path $Results 'results.jsonl'
 $PreflightMarker = Join-Path $Results 'preflight-found-no-data.txt'
@@ -219,7 +220,24 @@ function Get-ServiceLog { Get-ChildItem (Join-Path $DataDir 'logs') -Filter 'ser
 
 function Get-SetAside { Get-ChildItem $DataDir -File -ErrorAction SilentlyContinue | Where-Object Name -match '^power\.(untrusted|corrupt)-' }
 
-# The machine a program is built for, from its PE header: 0x8664 for x64, 0xAA64 for Arm64.
+# The households firewall rules, by the name the installer gives them: one while PowerLedger is installed, none after.
+function Get-FirewallRules { @(Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue) }
+
+# The one households rule as the installer adds it: inbound TCP allowed to the service's program, on Private networks only,
+# from the local subnet only.
+function Test-FirewallRule {
+    $rules = Get-FirewallRules
+    if ($rules.Count -ne 1) { throw "$($rules.Count) rules named '$FirewallRule'." }
+    $rule = $rules[0]
+    $program = ($rule | Get-NetFirewallApplicationFilter).Program
+    $protocol = ($rule | Get-NetFirewallPortFilter).Protocol
+    $remote = "$(($rule | Get-NetFirewallAddressFilter).RemoteAddress)"
+    Assert ("$($rule.Direction)" -eq 'Inbound' -and "$($rule.Action)" -eq 'Allow' -and "$($rule.Profile)" -eq 'Private' -and
+        "$($rule.Enabled)" -eq 'True' -and $program -eq $ServiceExe -and $protocol -eq 'TCP' -and $remote -eq 'LocalSubnet') `
+        "$($rule.Direction) $($rule.Action), profile $($rule.Profile), enabled $($rule.Enabled), $program, $protocol, from $remote"
+}
+
+# The machine a program is built for, from its PE header: 0x8664 for x64, 0xAA64 for Arm64, 0x014C for x86.
 function Get-PeMachine([string]$Path) {
     $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($Path))
     try {
@@ -494,6 +512,7 @@ function Step-Preflight {
     Check Preflight 'no uninstall entry' { Assert (-not (Test-Path $UninstallKey)) (Get-Presence $UninstallKey) }
     Check Preflight 'no program folder' { Assert (-not (Test-Path $AppDir)) (Get-Presence $AppDir) }
     Check Preflight 'no data folder' { Assert (-not (Test-Path $DataDir)) (Get-Presence $DataDir) }
+    Check Preflight 'no households firewall rule' { $count = (Get-FirewallRules).Count; Assert ($count -eq 0) "$count rules named '$FirewallRule'" }
     if (Test-Path $DataDir) {
         Write-Host "  $DataDir may hold somebody's history, so the run stops here. Move it away and run again." -ForegroundColor Red
         $script:StopRun = $true
@@ -543,6 +562,7 @@ function Step-Service {
         Assert ($service.StartMode -eq 'Auto' -and $service.StartName -eq 'LocalSystem') "$($service.StartMode), $($service.StartName)"
     }
     Check Service 'has a description' { Assert $service.Description "'$($service.Description)'" }
+    Check Service 'households firewall rule: inbound TCP to the service, Private networks only' { Test-FirewallRule }
     Check Service 'running within 30 s' { Assert (Wait-ServiceRunning 30) (Get-ServiceState) }
     Check Service 'restarts three times, 5 s apart, counted over a day' {
         $failure = (& sc.exe qfailure $ServiceName) -join "`n"
@@ -641,6 +661,7 @@ function Step-Upgrade {
         Assert ($shown -eq (Get-SetupVersion $Upgrade)) "DisplayVersion $shown"
     }
     Check Upgrade 'service running' { Assert (Wait-ServiceRunning 30) (Get-ServiceState) }
+    Check Upgrade 'households firewall rule replaced, not doubled' { Test-FirewallRule }
     Confirm-HistoryKept Upgrade $before
 }
 
@@ -657,6 +678,7 @@ function Step-UninstallKeep {
     Check UninstallKeep 'uninstall entry removed' { Assert (-not (Test-Path $UninstallKey)) (Get-Presence $UninstallKey) }
     Check UninstallKeep 'start-with-Windows entry removed' { $value = Get-RunValue; Assert ($null -eq $value) "Run\PowerLedger: $($value ?? 'absent')" }
     Check UninstallKeep 'event log source removed' { Assert (-not (Test-Path $EventSourceKey)) (Get-Presence $EventSourceKey) }
+    Check UninstallKeep 'households firewall rule removed' { $count = (Get-FirewallRules).Count; Assert ($count -eq 0) "$count rules named '$FirewallRule'" }
     Check UninstallKeep 'history kept' { Assert (Test-Path $Database) (Get-Presence $Database) }
 }
 
@@ -670,10 +692,10 @@ function Step-Reinstall {
 
 # The per-architecture installer an update downloads: it must install over what is already there, on this PC's architecture.
 function Step-Architecture {
-    $architecture = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'x64' }
+    $architecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) { 'Arm64' { 'arm64' } 'X86' { 'x86' } default { 'x64' } }
     $own = Join-Path $output "PowerLedger-$version-setup-$architecture.exe"
     if (-not (Test-Path $own)) {
-        Skip Architecture "the $architecture installer installs over what is there" "no $([IO.Path]::GetFileName($own)); build it with installer\build.ps1 -For both,x64,arm64"
+        Skip Architecture "the $architecture installer installs over what is there" "no $([IO.Path]::GetFileName($own)); build it with installer\build.ps1 -For both,x64,arm64,x86"
         return
     }
     Check Architecture "the $architecture installer exits 0" { $code = Invoke-Setup $own $Silent; Assert ($code -eq 0) "exit code $code" }
@@ -697,6 +719,7 @@ function Step-UninstallDelete {
     Check UninstallDelete 'uninstaller finished' { $code = Wait-Exit $uninstaller 60; Wait-Uninstaller; Assert ($code -eq 0) "exit code $code" }
     Check UninstallDelete 'history deleted' { Assert (-not (Test-Path $DataDir)) (Get-Presence $DataDir) }
     Check UninstallDelete 'service removed' { Assert (Wait-Until { (Get-ScQueryCode) -eq 1060 } -Seconds 30) "sc.exe query: exit code $(Get-ScQueryCode)" }
+    Check UninstallDelete 'households firewall rule removed' { $count = (Get-FirewallRules).Count; Assert ($count -eq 0) "$count rules named '$FirewallRule'" }
 }
 
 # The installer's wizard end to end, in a setup this run starts, as somebody new to PowerLedger would install it.

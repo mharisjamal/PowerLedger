@@ -1,0 +1,99 @@
+<Window x:Class="PowerLedger.App.AddPcWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:PowerLedger.App"
+        xmlns:contracts="clr-namespace:PowerLedger.Contracts;assembly=PowerLedger.Contracts"
+        Title="Add a PC" Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{DynamicResource Brush.Panel}" Foreground="{DynamicResource Brush.Ink}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <Style x:Key="Section" TargetType="StackPanel">
+            <Setter Property="Margin" Value="0,18,0,0" />
+        </Style>
+    </Window.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="24">
+            <UniformGrid Rows="1" Columns="3">
+                <RadioButton Style="{StaticResource Segment}" Content="On this network" GroupName="AddPcTab" HorizontalContentAlignment="Center"
+                             IsChecked="{Binding Tab, Converter={StaticResource Is}, ConverterParameter={x:Static local:AddPcTab.OnThisNetwork}}" />
+                <RadioButton Style="{StaticResource Segment}" Content="Somewhere else" GroupName="AddPcTab" HorizontalContentAlignment="Center"
+                             IsChecked="{Binding Tab, Converter={StaticResource Is}, ConverterParameter={x:Static local:AddPcTab.SomewhereElse}}" />
+                <RadioButton Style="{StaticResource Segment}" Content="Join with a code" GroupName="AddPcTab" HorizontalContentAlignment="Center"
+                             IsChecked="{Binding Tab, Converter={StaticResource Is}, ConverterParameter={x:Static local:AddPcTab.JoinWithCode}}" />
+            </UniformGrid>
+
+            <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" Margin="0,14,0,0" Text="{Binding PairingText}"
+                       Visibility="{Binding HasPairingText, Converter={StaticResource VisibleWhen}}" />
+            <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{DynamicResource Brush.Amber}"
+                       Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
+
+            <!-- Review finding A1: the adder's own check, once the key exchange is done; the pairing is not finished
+                 until this is answered either way. -->
+            <StackPanel Style="{StaticResource Section}" Visibility="{Binding IsConfirming, Converter={StaticResource VisibleWhen}}">
+                <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" Text="{Binding ConfirmQuestion}" />
+                <TextBlock Style="{StaticResource Text.Body}" FontFamily="{StaticResource Font.Numbers}" FontSize="28"
+                           HorizontalAlignment="Center" Margin="0,10,0,0" Text="{Binding ConfirmCode}" />
+                <UniformGrid Rows="1" Columns="2" Margin="0,14,0,0">
+                    <Button Style="{StaticResource Quiet}" Content="Cancel" Command="{Binding ConfirmCancel}" Margin="0,0,6,0" HorizontalContentAlignment="Center" />
+                    <Button Style="{StaticResource Quiet}" Content="Codes match" Command="{Binding CodesMatch}" Margin="6,0,0,0" HorizontalContentAlignment="Center" />
+                </UniformGrid>
+            </StackPanel>
+
+            <!-- Review finding A3: an Add or a made code out there can be called off, other than while the confirm
+                 check above is showing, which already settles it its own way. -->
+            <Button Style="{StaticResource Quiet}" Content="Cancel pairing" Margin="0,10,0,0" HorizontalAlignment="Left"
+                    Command="{Binding CancelPairing}" Visibility="{Binding CanCancelPairing, Converter={StaticResource VisibleWhen}}" />
+
+            <StackPanel Style="{StaticResource Section}"
+                        Visibility="{Binding Tab, Converter={StaticResource VisibleWhenStep}, ConverterParameter={x:Static local:AddPcTab.OnThisNetwork}}">
+                <TextBlock Style="{StaticResource Text.Muted}" Text="Looking for PowerLedger PCs on this network…"
+                           Visibility="{Binding NoneFound, Converter={StaticResource VisibleWhen}}" />
+                <ItemsControl ItemsSource="{Binding Found}" Focusable="False">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type contracts:FoundPc}">
+                            <Border BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,0,0,1" Padding="0,10">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource Quiet}" Content="Add"
+                                            Command="{Binding DataContext.Add, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" Visibility="{Binding InThisHousehold, Converter={StaticResource HiddenWhen}}" />
+                                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Muted}" Margin="0,0,12,0" VerticalAlignment="Center"
+                                               Text="In this household" Visibility="{Binding InThisHousehold, Converter={StaticResource VisibleWhen}}" />
+                                    <TextBlock Style="{StaticResource Text.Body}" VerticalAlignment="Center" Text="{Binding Name}" />
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
+            <!-- Review finding A3: no code is made just by opening this tab; Make a code asks for one explicitly. -->
+            <StackPanel Style="{StaticResource Section}"
+                        Visibility="{Binding Tab, Converter={StaticResource VisibleWhenStep}, ConverterParameter={x:Static local:AddPcTab.SomewhereElse}}">
+                <TextBlock Style="{StaticResource Text.Eyebrow}" Text="A CODE FOR THE OTHER PC" />
+                <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,6,0,10"
+                           Text="Make a code, then type it on the other PC, in Add a PC → Join with a code." />
+                <Button Style="{StaticResource Quiet}" Content="Make a code" HorizontalAlignment="Left" Command="{Binding MakeCode}"
+                        Visibility="{Binding HasCode, Converter={StaticResource HiddenWhen}}" />
+                <StackPanel Visibility="{Binding HasCode, Converter={StaticResource VisibleWhen}}">
+                    <TextBox Style="{StaticResource Field}" IsReadOnly="True" FontFamily="{StaticResource Font.Numbers}" FontSize="22"
+                             HorizontalContentAlignment="Center" Padding="0,10" Text="{Binding Code, Mode=OneWay}" />
+                    <TextBlock Style="{StaticResource Text.Muted}" Margin="0,6,0,0" Text="{Binding Remaining, StringFormat='Expires in {0:mm\\:ss}'}" />
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel Style="{StaticResource Section}"
+                        Visibility="{Binding Tab, Converter={StaticResource VisibleWhenStep}, ConverterParameter={x:Static local:AddPcTab.JoinWithCode}}">
+                <TextBlock Style="{StaticResource Text.Eyebrow}" Text="JOIN A HOUSEHOLD WITH A CODE" />
+                <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,6,0,10"
+                           Text="Have a code from another PC? Type it here." />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Quiet}" Content="Join" Margin="8,0,0,0"
+                            Command="{Binding Join}" />
+                    <TextBox Style="{StaticResource Field}" Text="{Binding JoinCode, UpdateSourceTrigger=PropertyChanged}" />
+                </DockPanel>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

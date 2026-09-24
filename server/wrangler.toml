@@ -18,5 +18,20 @@ name = "ADDRESS_LIMIT"
 namespace_id = "1001"
 simple = { limit = 60, period = 60 }
 
+# Starting a pairing-by-code meeting, per address: far more than anyone pairing needs, far fewer than a flood.
+[[ratelimits]]
+name = "MEETING_LIMIT"
+namespace_id = "1002"
+simple = { limit = 10, period = 60 }
+
 [triggers]
 crons = ["17 3 * * *"]
+
+# Sign-in (households design §7): the public client IDs of the owner's Azure app registration and Google OAuth client, filled in when they exist. Empty turns that provider's sign-in off.
+[vars]
+MS_CLIENT_ID = ""
+GOOGLE_CLIENT_ID = ""
+
+# In-app feedback (src/feedback.ts): the owner's PRIVATE repo, "owner/name", that feedback is filed in as issues, with its
+# images committed. The token for it is a secret (tools/set-feedback-token.ps1). Either empty turns feedback off (503).
+FEEDBACK_REPO = "mharisjamal/PowerLedger-feedback"

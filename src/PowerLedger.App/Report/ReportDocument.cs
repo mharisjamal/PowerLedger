@@ -33,34 +33,105 @@ internal static class ReportDocument
         QuestPDF.Settings.ThrowOnMissingFontFamilies = false;       // a script font missing from this Windows is skipped
     }
 
-    /// <summary>The PDF's bytes.</summary>
+    /// <summary>The PDF's bytes: the main report, then a page per household member when "Include my household" is ticked
+    /// (Plan N task A5).</summary>
     public static byte[] Generate(ReportData data, string version, DateTimeOffset made, CultureInfo culture)
-        => Document.Create(document => document.Page(page =>
+        => Document.Create(document =>
         {
-            page.Size(PageSizes.A4);
-            page.Margin(40);
-            page.PageColor(Colors.White);
-            page.DefaultTextStyle(style => style.FontFamily(Fonts).FontSize(9.5f).FontColor(Ink));
-            page.Header().Column(header =>
+            document.Page(page =>
             {
-                header.Item().Text("POWERLEDGER · ENERGY REPORT").FontSize(8).SemiBold().FontColor(Amber).LetterSpacing(0.08f);
-                header.Item().PaddingTop(4).Text(data.Title).FontSize(22).SemiBold();
-                header.Item().Text(data.Period).FontColor(Ink2);
-            });
-            page.Content().PaddingTop(18).Column(column => Body(column, data, culture));
-            page.Footer().Row(row =>
-            {
-                row.RelativeItem().Text($"PowerLedger {version} · made {made.ToString("d MMM yyyy HH:mm", culture)}").FontSize(7.5f).FontColor(Ink3);
-                row.AutoItem().Text(text =>
+                page.Size(PageSizes.A4);
+                page.Margin(40);
+                page.PageColor(Colors.White);
+                page.DefaultTextStyle(style => style.FontFamily(Fonts).FontSize(9.5f).FontColor(Ink));
+                page.Header().Column(header =>
                 {
-                    text.DefaultTextStyle(style => style.FontSize(7.5f).FontColor(Ink3));
-                    text.Span("page ");
-                    text.CurrentPageNumber();
-                    text.Span(" of ");
-                    text.TotalPages();
+                    header.Item().Text("POWERLEDGER · ENERGY REPORT").FontSize(8).SemiBold().FontColor(Amber).LetterSpacing(0.08f);
+                    header.Item().PaddingTop(4).Text(data.Title).FontSize(22).SemiBold();
+                    header.Item().Text(data.Period).FontColor(Ink2);
                 });
+                page.Content().PaddingTop(18).Column(column => Body(column, data, culture));
+                Footer(page, version, made, culture);
             });
-        })).GeneratePdf();
+            if (data.Household is { } household)
+            {
+                foreach (var member in household.Members) document.Page(page => MemberPage(page, data, member, version, made, culture));
+            }
+        }).GeneratePdf();
+
+    /// <summary>One household member's own simple page: its energy, cost and the four bands, from household_rows.</summary>
+    private static void MemberPage(PageDescriptor page, ReportData data, HouseholdMemberReportData member, string version, DateTimeOffset made, CultureInfo culture)
+    {
+        page.Size(PageSizes.A4);
+        page.Margin(40);
+        page.PageColor(Colors.White);
+        page.DefaultTextStyle(style => style.FontFamily(Fonts).FontSize(9.5f).FontColor(Ink));
+        page.Header().Column(header =>
+        {
+            header.Item().Text("POWERLEDGER · HOUSEHOLD MEMBER").FontSize(8).SemiBold().FontColor(Amber).LetterSpacing(0.08f);
+            header.Item().PaddingTop(4).Text(member.Name).FontSize(22).SemiBold();
+            header.Item().Text($"{member.Kind} · {data.Period}").FontColor(Ink2);
+        });
+        page.Content().PaddingTop(18).Column(column =>
+        {
+            column.Spacing(18);
+            column.Item().Column(bill =>
+            {
+                Heading(bill, "Bill");
+                bill.Item().BorderBottom(0.5f).BorderColor(Rule).PaddingVertical(4).Row(hero =>
+                {
+                    hero.RelativeItem().AlignBottom().Text("Energy").FontColor(Ink2);
+                    hero.AutoItem().Text(text =>
+                    {
+                        text.Span(member.Energy).FontSize(24).Light();
+                        text.Span(" kWh").FontColor(Ink3);
+                    });
+                });
+                if (member.Costs.Count == 0) Line(bill, "Cost", Format.Missing, "no tariff set");
+                foreach (var cost in member.Costs) Line(bill, "Cost", cost.Cost, cost.Currency);
+            });
+            column.Item().Column(parts =>
+            {
+                Heading(parts, "By component");
+                if (member.Parts.Any(p => p.Fraction > 0))
+                {
+                    parts.Item().PaddingVertical(6).Height(8).Row(bar =>
+                    {
+                        for (var i = 0; i < member.Parts.Count; i++)
+                        {
+                            if (member.Parts[i].Fraction > 0) bar.RelativeItem((float)member.Parts[i].Fraction).Background(PartColours[i]);
+                        }
+                    });
+                }
+                for (var i = 0; i < member.Parts.Count; i++)
+                {
+                    var part = member.Parts[i];
+                    parts.Item().BorderBottom(0.5f).BorderColor(Rule).PaddingVertical(4).Row(line =>
+                    {
+                        line.ConstantItem(14).AlignMiddle().AlignLeft().Width(7).Height(7).Background(PartColours[i]);
+                        line.RelativeItem().Text(part.Name).FontColor(Ink2);
+                        line.AutoItem().Text(part.Energy + " kWh").SemiBold();
+                        line.ConstantItem(40).AlignRight().Text(part.Share).FontColor(Ink3);
+                    });
+                }
+            });
+        });
+        Footer(page, version, made, culture);
+    }
+
+    private static void Footer(PageDescriptor page, string version, DateTimeOffset made, CultureInfo culture)
+        => page.Footer().Row(row =>
+        {
+            row.RelativeItem().Text($"PowerLedger {version} · made {made.ToString("d MMM yyyy HH:mm", culture)}").FontSize(7.5f).FontColor(Ink3);
+            row.AutoItem().Text(text =>
+            {
+                text.DefaultTextStyle(style => style.FontSize(7.5f).FontColor(Ink3));
+                text.Span("page ");
+                text.CurrentPageNumber();
+                text.Span(" of ");
+                text.TotalPages();
+            });
+        });
 
     private static void Body(ColumnDescriptor column, ReportData data, CultureInfo culture)
     {
@@ -189,6 +260,26 @@ internal static class ReportDocument
                 quality.Item().PaddingTop(4).Text(ReportData.QualityLegend).FontSize(7.5f).FontColor(Ink3);
             });
         });
+
+        if (data.Household is { } household)
+        {
+            column.Item().Column(combined =>
+            {
+                Heading(combined, "Household");
+                combined.Item().BorderBottom(0.5f).BorderColor(Rule).PaddingVertical(4).Row(hero =>
+                {
+                    hero.RelativeItem().AlignBottom().Text("Combined energy, every PC").FontColor(Ink2);
+                    hero.AutoItem().Text(text =>
+                    {
+                        text.Span(household.Energy).FontSize(24).Light();
+                        text.Span(" kWh").FontColor(Ink3);
+                    });
+                });
+                if (household.Costs.Count == 0) Line(combined, "Combined cost", Format.Missing, "no tariff set on any PC");
+                foreach (var cost in household.Costs) Line(combined, "Combined cost", cost.Cost, cost.Currency);
+                combined.Item().PaddingTop(2).Text($"A page follows for each of the {household.Members.Count} member PCs.").FontSize(7.5f).FontColor(Ink3);
+            });
+        }
     }
 
     private static void Heading(ColumnDescriptor column, string text)

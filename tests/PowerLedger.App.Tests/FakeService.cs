@@ -22,6 +22,12 @@ internal sealed class FakeService(string name) : IAsyncDisposable
     /// <summary>When set, the service refuses every change with this message, as it does a value out of range.</summary>
     public string? Refuse { get; set; }
 
+    /// <summary>What a browse answers with (households design §3).</summary>
+    public IReadOnlyList<FoundPc> FoundPcs { get; set; } = [];
+
+    /// <summary>What starting a code pairing answers with (households design §4).</summary>
+    public string HouseholdCode { get; set; } = "K7QM-2XHD-9PW4-R8TA";
+
     /// <summary>The path a preview upload answers with.</summary>
     public string PreviewPath { get; set; } = @"C:\ProgramData\PowerLedger\Sent\preview.json";
 
@@ -128,6 +134,15 @@ internal sealed class FakeService(string name) : IAsyncDisposable
         PreviewUploadRequest r => new SharingReply(r.Id, true, "Written.", PreviewPath),
         SendNowRequest r => new SharingReply(r.Id, true, "Sent."),
         DeleteMyDataRequest r => new SharingReply(r.Id, true, "Your data has been deleted from the server."),
+        BrowsePcsRequest or AddPcRequest or StartCodePairingRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest
+            or LeaveHouseholdRequest or RenamePcRequest or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest
+            or CancelPairingRequest or NewRecoveryCodeRequest or RemoveOldRowsRequest or AskAgainRequest
+            when Refuse is { } refusal => new ErrorReply(request.Id, refusal),
+        BrowsePcsRequest r => new FoundPcsReply(r.Id, FoundPcs),
+        StartCodePairingRequest r => new HouseholdReply(r.Id, true, "Here's your code.", HouseholdCode),
+        AddPcRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest or LeaveHouseholdRequest or RenamePcRequest
+            or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest or CancelPairingRequest
+            or NewRecoveryCodeRequest or RemoveOldRowsRequest or AskAgainRequest => new HouseholdReply(request.Id, true, "Done."),
         _ => new OkReply(request.Id),
     };
 }

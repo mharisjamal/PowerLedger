@@ -80,8 +80,13 @@ internal sealed unsafe class Adlx : IAmdGpu
     public string? DeviceId { get; }
 
     /// <summary>ADLX on this machine, opened on its first discrete Radeon. Never throws.</summary>
-    public static AmdOpening Open()
-        => AdlxLibrary.Installed is { } library
+    public static AmdOpening Open() => Open(Environment.Is64BitProcess);
+
+    /// <summary>Test seam: a 32-bit process never loads ADLX, which PowerLedger reads only as amdadlx64.dll.</summary>
+    internal static AmdOpening Open(bool is64BitProcess)
+        => Bitness.SixtyFourBitOnly("AMD's ADLX", is64BitProcess) is { } reason
+            ? new AmdOpening(AmdLibrary.NotInstalled, null, reason)
+            : AdlxLibrary.Installed is { } library
             ? Open(library)
             : new AmdOpening(AmdLibrary.NotInstalled, null, "AMD's ADLX library is not installed");
 

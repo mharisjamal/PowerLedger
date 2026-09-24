@@ -1,0 +1,39 @@
+<Window x:Class="PowerLedger.App.ApprovePromptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:PowerLedger.App"
+        Title="Approve a PC" Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
+        Background="{DynamicResource Brush.Panel}" Foreground="{DynamicResource Brush.Ink}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+
+    <!-- The buttons have a row of their own, so however short the screen, they stay in view while the text above scrolls
+         (the same shape as the Join prompt and the consent dialog). -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <StackPanel Margin="28,24,28,8">
+                <TextBlock Style="{StaticResource Text.Body}" FontSize="16" TextWrapping="Wrap" Text="{Binding Heading}" />
+                <!-- Review round: this replaced a prompt for what the App takes as the same request, open or just
+                     closed within the last two minutes — the code shown may not be the one already compared. -->
+                <TextBlock Style="{StaticResource Text.Secondary}" TextWrapping="Wrap" Margin="0,10,0,0"
+                           Text="{x:Static local:ApprovePromptViewModel.RequestChangedWarning}"
+                           Visibility="{Binding RequestChanged, Converter={StaticResource VisibleWhen}}" />
+                <StackPanel Margin="0,16,0,0" Visibility="{Binding HasComparisonCode, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Style="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Text="{Binding ComparisonCaption}" />
+                    <TextBlock Style="{StaticResource Text.Body}" FontFamily="{StaticResource Font.Numbers}" FontSize="28" Margin="0,4,0,0"
+                               HorizontalAlignment="Center" Text="{Binding ComparisonCode}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+        <StackPanel Grid.Row="1" Margin="28,4,28,20">
+            <UniformGrid Rows="1" Columns="2">
+                <Button Style="{StaticResource Quiet}" Content="Don't approve" Command="{Binding DontApprove}" Margin="0,0,6,0" HorizontalContentAlignment="Center" />
+                <Button Style="{StaticResource Quiet}" Content="Approve" Command="{Binding Approve}" Margin="6,0,0,0" HorizontalContentAlignment="Center" />
+            </UniformGrid>
+        </StackPanel>
+    </Grid>
+</Window>

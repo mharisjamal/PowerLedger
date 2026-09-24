@@ -279,10 +279,14 @@ internal sealed unsafe class AdlLibrary
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
     private static nint Allocate(int size) => size <= 0 ? 0 : (nint)NativeMemory.Alloc((nuint)size);
 
+    /// <summary>ADL's library for this process: atiadlxx.dll in a 64-bit one, atiadlxy.dll in a 32-bit one. ADL's
+    /// structures hold no pointers, so the same layouts serve both.</summary>
+    internal static string FileName(bool is64BitProcess) => is64BitProcess ? "atiadlxx.dll" : "atiadlxy.dll";
+
     private static AdlLibrary? Load()
     {
         // System32 and nowhere else: a service running as LocalSystem must not be talked into loading someone else's DLL.
-        if (!NativeLibrary.TryLoad("atiadlxx.dll", typeof(AdlLibrary).Assembly, DllImportSearchPath.System32, out var library))
+        if (!NativeLibrary.TryLoad(FileName(Environment.Is64BitProcess), typeof(AdlLibrary).Assembly, DllImportSearchPath.System32, out var library))
         {
             return null;
         }

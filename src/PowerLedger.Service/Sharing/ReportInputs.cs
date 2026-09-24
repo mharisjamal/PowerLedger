@@ -40,7 +40,7 @@ internal sealed record ReportInputs(
 /// <summary>What the PC running the service says of itself.</summary>
 /// <param name="App">The service's version, <c>X.Y.Z</c>.</param>
 /// <param name="Windows">Windows' version, <c>major.minor.build</c>.</param>
-/// <param name="Arch"><c>x64</c> or <c>arm64</c>.</param>
+/// <param name="Arch"><c>x64</c>, <c>arm64</c> or <c>x86</c>: Windows' own architecture.</param>
 /// <param name="Threads">Logical processors.</param>
 /// <param name="MemoryGb">Memory, in GiB to a tenth.</param>
 internal sealed record HostFacts(string App, string Windows, string Arch, int Threads, double? MemoryGb)
@@ -52,11 +52,18 @@ internal sealed record HostFacts(string App, string Windows, string Arch, int Th
         return new HostFacts(
             ServiceVersion.Short,
             string.Create(CultureInfo.InvariantCulture, $"{windows.Major}.{windows.Minor}.{windows.Build}"),
-            // PowerLedger is built for 64-bit Windows; the server knows no other.
-            RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64",
+            ArchName(RuntimeInformation.OSArchitecture),
             Environment.ProcessorCount,
             memory > 0 ? Math.Round(memory / (double)(1L << 30), 1) : null);
     }
+
+    /// <summary>The report schema's name for a Windows architecture; PowerLedger is built for these three only.</summary>
+    internal static string ArchName(Architecture architecture) => architecture switch
+    {
+        Architecture.Arm64 => "arm64",
+        Architecture.X86 => "x86",
+        _ => "x64",
+    };
 }
 
 /// <summary>What the outbox holds for one day besides its minutes.</summary>

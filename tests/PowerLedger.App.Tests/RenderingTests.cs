@@ -12,9 +12,11 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
+using PowerLedger.Storage;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -41,6 +43,7 @@ public class RenderingTests
         (Page.Breakdown, "breakdown", shell => shell.Breakdown.Range.Choice = RangeChoice.SevenDays, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Breakdown, "custom", shell => shell.Breakdown.Range.Choice = RangeChoice.Custom, shell => new BreakdownView { DataContext = shell.Breakdown }),
         (Page.Report, "report", _ => { }, shell => new ReportView { DataContext = shell.Report }),
+        (Page.Household, "household", _ => { }, shell => new HouseholdView { DataContext = shell.Household }),
         (Page.Settings, "settings", SavedSettings, shell => new SettingsView { DataContext = shell.Settings }),
         (Page.Now, "wizard", shell => shell.BeginSetup(), shell => new WizardView { DataContext = shell.Wizard }),
         (Page.Now, "wizard-machine", MachineStep, shell => new WizardView { DataContext = shell.Wizard }),
@@ -58,6 +61,7 @@ public class RenderingTests
         ("now", Page.Now, _ => { }, 560, true),
         ("breakdown", Page.Breakdown, shell => shell.Breakdown.Range.Choice = RangeChoice.SevenDays, 560, true),
         ("report", Page.Report, _ => { }, 560, true),
+        ("household", Page.Household, _ => { }, 560, true),
         ("settings", Page.Settings, _ => { }, 560, true),
         ("wizard", Page.Now, MachineStep, 560, false),
         ("wizard-laptop", Page.Now, LaptopStep, 560, false),
@@ -491,7 +495,7 @@ public class RenderingTests
                     co2KgPerKwh: 0.38, startService: () => { });
                 now.Start();
                 nowLink.Connect(true);
-                var shell = new ShellViewModel(now, BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.1.0");
+                var shell = new ShellViewModel(now, BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.1.0");
                 shell.Page = Page.Now;
                 var nowWindow = new MainWindow
                 {
@@ -576,7 +580,7 @@ public class RenderingTests
                 UseTheme(theme);
                 foreach (var (name, updates) in new[] { ("ready", ReadyUpdate()), ("available", AvailableUpdate()), ("updated", UpdatedApp()) })
                 {
-                    var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.2.0", updates);
+                    var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.2.0", updates);
                     var window = new MainWindow
                     {
                         DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
@@ -600,8 +604,8 @@ public class RenderingTests
         new FileInfo(Path.Combine(Folder, "update-ready-Dark.png")).Length.ShouldBeGreaterThan(30_000);
     }
 
-    /// <summary>Plan M: the consent dialog first shown and with detail open, Settings scrolled to Privacy with sharing under
-    /// way, and What's been sent listing two files with the newest selected.</summary>
+    /// <summary>Owner's round: the consent dialog is one screen with only Allow all and Decline; plus Settings scrolled
+    /// to Privacy with sharing under way, and What's been sent listing two files with the newest selected.</summary>
     [Fact]
     public void The_consent_dialog_the_privacy_section_and_the_sent_list_draw_in_both_themes()
     {
@@ -617,50 +621,33 @@ public class RenderingTests
             {
                 UseTheme(theme);
 
-                // 1. The consent dialog: as first shown, all off; then with Hardware and power + Share on and "What's sent" open.
+                // 1. The consent dialog (owner's round): the four purposes as a short list, the sold/given line, and
+                // only two buttons — Allow all and Decline.
                 var consentLink = new FakeLink();
                 consentLink.Connect(true);
-                var consentFirst = new ConsentViewModel(consentLink, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { });
-                var dialogFirst = new ConsentDialog(consentFirst)
+                var consent = new ConsentViewModel(consentLink, UiThreads.Inline, _ => { });
+                var dialog = new ConsentDialog(consent)
                 {
-                    Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                    Width = 560, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
                     ShowInTaskbar = false, ShowActivated = false,
                 };
-                dialogFirst.Show();
+                dialog.Show();
                 try
                 {
                     Pump(TimeSpan.FromMilliseconds(300));
-                    Find<CheckBox>(dialogFirst, box => box.Content is TextBlock text && text.Text == "Share my detailed data")
-                        .ShouldNotBeNull(theme.ToString()).IsChecked.ShouldBe((bool?)false, theme.ToString());
-                    Save(dialogFirst, (int)dialogFirst.ActualWidth, (int)dialogFirst.ActualHeight, $"consent-first-{theme}.png");
+                    Find<TextBlock>(dialog, t => t.Text == "Help make PowerLedger better").ShouldNotBeNull(theme.ToString());
+                    foreach (var title in new[] { "Crash and sensor reports", "Usage", "Hardware and power", "Share my detailed data" })
+                        Find<TextBlock>(dialog, t => t.Text.StartsWith(title, StringComparison.Ordinal)).ShouldNotBeNull($"{title} on {theme}");
+                    Find<TextBlock>(dialog, t => t.Text.Contains("given or sold")).ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(dialog, t => t.Text == "You can change each choice any time in Settings → Privacy.").ShouldNotBeNull(theme.ToString());
+                    Find<Button>(dialog, b => Equals(b.Content, "Privacy policy")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(dialog, b => Equals(b.Content, "Allow all")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(dialog, b => Equals(b.Content, "Decline")).ShouldNotBeNull(theme.ToString());
+                    Save(dialog, (int)dialog.ActualWidth, (int)dialog.ActualHeight, $"consent-{theme}.png");
                 }
                 finally
                 {
-                    dialogFirst.Close();
-                }
-
-                var consentOpen = new ConsentViewModel(consentLink, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { })
-                {
-                    Power = true, Share = true,
-                };
-                var dialogOpen = new ConsentDialog(consentOpen)
-                {
-                    Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
-                    ShowInTaskbar = false, ShowActivated = false,
-                };
-                dialogOpen.Show();
-                try
-                {
-                    Pump(TimeSpan.FromMilliseconds(300));
-                    foreach (var expander in AllOf<Expander>(dialogOpen)) expander.IsExpanded = true;
-                    Pump(TimeSpan.FromMilliseconds(300));
-                    Find<CheckBox>(dialogOpen, box => box.Content is TextBlock text && text.Text == "Share my detailed data")
-                        .ShouldNotBeNull(theme.ToString()).IsChecked.ShouldBe((bool?)true, theme.ToString());
-                    Save(dialogOpen, (int)dialogOpen.ActualWidth, (int)dialogOpen.ActualHeight, $"consent-open-{theme}.png");
-                }
-                finally
-                {
-                    dialogOpen.Close();
+                    dialog.Close();
                 }
 
                 // 2. Settings, scrolled to Privacy: consent all on, an install id, and a status line with a last-sent size and days waiting.
@@ -726,17 +713,6 @@ public class RenderingTests
                 }
             }
         });
-
-        static IEnumerable<T> AllOf<T>(DependencyObject root)
-            where T : DependencyObject
-        {
-            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-            {
-                var child = VisualTreeHelper.GetChild(root, i);
-                if (child is T match) yield return match;
-                foreach (var deeper in AllOf<T>(child)) yield return deeper;
-            }
-        }
     }
 
     /// <summary>0.3.0 downloaded and waiting, on 0.2.0.</summary>
@@ -797,7 +773,7 @@ public class RenderingTests
     }
 
     /// <summary>On a screen shorter than the dialog (a 1366 × 768 laptop's work area is about 728 pixels high), the text
-    /// scrolls and the three buttons stay in view, so the choice can always be made.</summary>
+    /// scrolls and the two buttons stay in view, so the choice can always be made.</summary>
     [Fact]
     public void The_consent_dialogs_buttons_stay_in_view_when_the_screen_is_too_short_for_all_of_it()
     {
@@ -806,9 +782,9 @@ public class RenderingTests
             UseTheme(Theme.Light);
             var link = new FakeLink();
             link.Connect(true);
-            var dialog = new ConsentDialog(new ConsentViewModel(link, UiThreads.Inline, Consent.Unanswered, _ => { }, _ => { }))
+            var dialog = new ConsentDialog(new ConsentViewModel(link, UiThreads.Inline, _ => { }))
             {
-                Width = 640, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
+                Width = 560, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
                 ShowInTaskbar = false, ShowActivated = false,
             };
             dialog.MaxHeight = 420;
@@ -818,7 +794,7 @@ public class RenderingTests
                 Pump(TimeSpan.FromMilliseconds(300));
                 dialog.ActualHeight.ShouldBeLessThanOrEqualTo(420);
                 var content = (FrameworkElement)dialog.Content;
-                foreach (var label in new[] { "Allow all", "Allow none", "Save choices" })
+                foreach (var label in new[] { "Allow all", "Decline" })
                 {
                     var button = Find<Button>(dialog, candidate => candidate.Content as string == label).ShouldNotBeNull(label);
                     button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, label);
@@ -827,6 +803,670 @@ public class RenderingTests
             finally
             {
                 dialog.Close();
+            }
+        });
+    }
+
+    /// <summary>The Join prompt (households design §2, §3): the service's own wording, which already carries the leave
+    /// warning for a PC already in one, the comparison code, and its buttons fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void The_join_prompt_shows_the_household_name_the_code_and_the_leave_warning()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink
+                {
+                    Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "This-PC", ChassisKind.Desktop, true, [], null) },
+                };
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.JoinPrompt, "p1", "Join Desktop-7's household? Joining leaves the household this PC is in now.", "Desktop-7", "482 913",
+                    Now.AddMinutes(2));
+                var model = new JoinPromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new JoinPromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Join Desktop-7's household? Joining leaves the household this PC is in now.").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Check Desktop-7 shows this code").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Don't join", "Join" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 420, (int)window.ActualHeight, $"join-prompt-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Service gap C reported: a code pairing's Join prompt has no FromName and no comparison code — the
+    /// window shows the service's own no-name wording, nothing that reads "null" or empty quotes, and fits a short
+    /// screen, in both themes.</summary>
+    [Fact]
+    public void The_join_prompt_for_a_code_pairing_shows_no_name_and_no_null_or_empty_quotes()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.JoinPrompt, "p1", "Join the household of the PC that made this code?", null, null, Now.AddMinutes(2));
+                var model = new JoinPromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new JoinPromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Join the household of the PC that made this code?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text != null && t.Text.Contains("null")).ShouldBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    Save(window, 420, (int)window.ActualHeight, $"join-prompt-code-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>The Approve prompt (households design §7, review finding A2): the service's own wording, with the
+    /// approver's own check code shown prominently, and its buttons fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void The_approve_prompt_shows_the_comparison_code_prominently()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.ApprovePrompt, "p2", "A PC signed in as you asks to join your household. Approve it?", null, "482 913", Now.AddMinutes(2));
+                var model = new ApprovePromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new ApprovePromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "A PC signed in as you asks to join your household. Approve it?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "Check the other PC shows this code").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Don't approve", "Approve" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    // Review round: Approve can't be pressed before the code is even read.
+                    Find<Button>(window, b => Equals(b.Content, "Approve")).ShouldNotBeNull(theme.ToString()).IsEnabled.ShouldBeFalse(theme.ToString());
+                    Save(window, 420, (int)window.ActualHeight, $"approve-prompt-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Review round: the App has no name or device ID to tell requests apart by, so a prompt replacing one that
+    /// closed within the last two minutes shows a line above the code that it may have changed, in both themes.</summary>
+    [Fact]
+    public void The_approve_prompt_shows_a_warning_when_the_request_changed()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.ApprovePrompt, "p2", "A PC signed in as you asks to join your household. Approve it?", null, "482 913", Now.AddMinutes(2));
+                var model = new ApprovePromptViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice, requestChanged: true);
+                var window = new ApprovePromptWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == ApprovePromptViewModel.RequestChangedWarning).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Visible, theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    Save(window, 420, (int)window.ActualHeight, $"approve-prompt-request-changed-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>The Confirm join prompt (households design §7, plan 0.9): sent before the approver has actually
+    /// approved anything, so its heading never says "approved"; the comparison code shows prominently, and its buttons
+    /// fit a short screen, in both themes.</summary>
+    [Fact]
+    public void The_confirm_join_prompt_shows_the_heading_and_the_comparison_code()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.ConfirmJoin, "p3", "Does your other PC show 482 913? Approve it there too.", null, "482 913",
+                    Now.AddMinutes(2));
+                var model = new ConfirmJoinViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now), notice);
+                var window = new ConfirmJoinWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Does your other PC show 482 913? Approve it there too.").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text != null && t.Text.Contains("approved")).ShouldBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "They don't match", "Codes match" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 420, (int)window.ActualHeight, $"confirm-join-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Add a PC (households design §2, §3, §4, review findings A1/A3): once the key exchange with a PC on this
+    /// network is done, the adder's own confirm check shows its question and code prominently and fits a short screen.</summary>
+    [Fact]
+    public void Add_a_pc_shows_the_confirm_check_prominently_and_it_fits_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var model = new AddPcViewModel(link, UiThreads.Inline, new FakeTimeProvider(Now));
+                link.PushNotice(new HouseholdNotice(NoticeKind.ConfirmCode, "confirm-1", "Does Laptop-2 show 482 913?", "Laptop-2", "482 913", Now.AddMinutes(2)));
+                var window = new AddPcWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Does Laptop-2 show 482 913?").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "482 913").ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Codes match")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Cancel pairing")).ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    Save(window, 480, (int)window.ActualHeight, $"add-pc-confirm-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>The recovery code (households design §7, task 0.8, review finding A6): shown once from its own pushed
+    /// notice, with Copy, Save as text file and OK fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void The_recovery_code_shows_once_with_its_buttons_fitting_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var notice = new HouseholdNotice(
+                    NoticeKind.RecoveryCode, "recovery-1", "Here's your recovery code.", null, null, null, "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE");
+                var model = new RecoveryCodeViewModel(link, notice, new FakeSaver(), _ => { });
+                var window = new RecoveryCodeWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBox>(window, t => t.Text == "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE").ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Copy", "Save as text file", "OK" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 440, (int)window.ActualHeight, $"recovery-code-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Task 0.8's removeOldRows, review follow-up: a left member offers Remove its rows, and asking shows what
+    /// will happen with Cancel and Confirm, in both themes.</summary>
+    [Fact]
+    public void Removing_a_left_members_rows_shows_its_confirm_text_and_buttons()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink
+                {
+                    Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) },
+                };
+                link.Connect(true);
+                var history = new FakeHouseholdHistory
+                {
+                    Answer = _ => new HouseholdSnapshot(
+                        new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], []),
+                        [
+                            new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-40), null, Now),
+                            new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-20), Now.AddDays(-3), Now.AddDays(-3)),
+                        ]),
+                };
+                var model = new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
+                model.Show();
+                model.AskRemove.Execute(model.Members.Single(m => m.DeviceId == "bbbb"));
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Remove Laptop-2's rows? This can't be undone.").ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Cancel")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Confirm")).ShouldNotBeNull(theme.ToString());
+                    Save(window, 480, (int)window.ActualHeight, $"remove-left-member-rows-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Task 0.8's removeOldRows with no device named, review follow-up: with no household but old rows on
+    /// file, Remove the old household's rows shows what will happen with Cancel and Confirm, in both themes.</summary>
+    [Fact]
+    public void Removing_the_old_households_rows_shows_its_confirm_text_and_buttons()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink
+                {
+                    Status = Statuses.Running() with { Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) },
+                };
+                link.Connect(true);
+                var history = new FakeHouseholdHistory
+                {
+                    Answer = _ => FakeHouseholdHistory.Empty with
+                    {
+                        Members = [new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-20), Now.AddDays(-3), Now.AddDays(-3))],
+                    },
+                };
+                var model = new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
+                model.Show();
+                model.AskRemoveAllOldRows.Execute(null);
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Remove the old household's rows? This can't be undone.").ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Cancel")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Confirm")).ShouldNotBeNull(theme.ToString());
+                    Save(window, 480, (int)window.ActualHeight, $"remove-old-household-rows-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Plan 0.9: a typed recovery code warns before the browser opens, since it removes the household's other
+    /// PCs, with Continue and Cancel fitting a short screen, in both themes.</summary>
+    [Fact]
+    public void A_recovery_code_sign_in_shows_its_warning_and_buttons()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var signIn = new SignIn(() => new FakeLoopbackServer(), _ => { }, new System.Net.Http.HttpClient(), new FakeTimeProvider(Now));
+                var account = new SignInViewModel(link, new FakeUiSettings(), signIn, UiThreads.Inline, "ms-client", "google-client");
+                var model = new HouseholdViewModel(link, new FakeHouseholdHistory(), UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, account);
+                model.Show();
+                account.RecoveryCodeInput = "K7QM-2XHD-9PW4-R8TA-VMNP-3QWE";
+                account.SignInWithMicrosoft.Execute(null);
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == SignInViewModel.RecoveryWarning).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Cancel")).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Continue")).ShouldNotBeNull(theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(560);
+                    Save(window, 480, (int)window.ActualHeight, $"recovery-sign-in-warning-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Security round, review: with no Google secret built in, only Microsoft is offered — no Google button,
+    /// and no "isn't set up yet" placeholder either.</summary>
+    [Fact]
+    public void With_only_a_microsoft_client_id_only_microsoft_is_offered()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var signIn = new SignIn(() => new FakeLoopbackServer(), _ => { }, new System.Net.Http.HttpClient(), new FakeTimeProvider(Now));
+                var account = new SignInViewModel(link, new FakeUiSettings(), signIn, UiThreads.Inline, "ms-client", "");
+                var model = new HouseholdViewModel(link, new FakeHouseholdHistory(), UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, account);
+                model.Show();
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    // Find walks the visual tree regardless of Visibility, so a Collapsed element is still findable —
+                    // the check that matters is its Visibility, not whether Find returns it at all.
+                    Find<Button>(window, b => Equals(b.Content, "Sign in with Microsoft")).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Visible, theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Sign in with Google")).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == SignInViewModel.Unavailable).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
+                    Save(window, 480, (int)window.ActualHeight, $"sign-in-only-microsoft-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Security round, review: with no client at all, the section explains sign-in isn't available in this
+    /// build instead of showing any button.</summary>
+    [Fact]
+    public void With_no_client_at_all_sign_in_explains_it_is_unavailable()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var link = new FakeLink();
+                link.Connect(true);
+                var signIn = new SignIn(() => new FakeLoopbackServer(), _ => { }, new System.Net.Http.HttpClient(), new FakeTimeProvider(Now));
+                var account = new SignInViewModel(link, new FakeUiSettings(), signIn, UiThreads.Inline, "", "");
+                var model = new HouseholdViewModel(link, new FakeHouseholdHistory(), UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, account);
+                model.Show();
+
+                var window = new Window
+                {
+                    Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 560,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    // Find walks the visual tree regardless of Visibility, so a Collapsed element is still findable —
+                    // the check that matters is its Visibility, not whether Find returns it at all.
+                    Find<TextBlock>(window, t => t.Text == SignInViewModel.Unavailable).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Visible, theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Sign in with Microsoft")).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
+                    Find<Button>(window, b => Equals(b.Content, "Sign in with Google")).ShouldNotBeNull(theme.ToString())
+                        .Visibility.ShouldBe(Visibility.Collapsed, theme.ToString());
+                    Save(window, 480, (int)window.ActualHeight, $"sign-in-unavailable-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Send feedback's rail button (bug-icon glyph, spec's feedback feature): sits at the foot of the rail,
+    /// its tooltip names what it's for, and pressing it fires the App's own open request.</summary>
+    [Fact]
+    public void The_rails_feedback_button_shows_and_asks_to_open_the_window()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.2.0");
+                var window = new MainWindow
+                {
+                    DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    var button = Find<Button>(window, b => AutomationProperties.GetName(b) == "Send feedback").ShouldNotBeNull(theme.ToString());
+                    button.IsVisible.ShouldBeTrue(theme.ToString());
+                    button.ToolTip.ShouldBe("Send feedback or report a bug", theme.ToString());
+                    // App.xaml.cs wires FeedbackRequested to open the window (ShellViewModelTests covers the command
+                    // itself); this only checks the button in the rail is bound to it.
+                    button.Command.ShouldBeSameAs(shell.Feedback, theme.ToString());
+                    Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"feedback-button-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Send feedback (spec's feedback feature): its heading, images row, log tick and Send/Cancel fit a short
+    /// screen, in both themes.</summary>
+    [Fact]
+    public void Send_feedback_shows_its_fields_and_fits_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var sender = new FeedbackSender(
+                    new FakeHttp().Client(), Path.Combine(Path.GetTempPath(), "pl-feedback-render-tests"), new FakeTimeProvider(Now));
+                var model = new FeedbackViewModel(sender, UiThreads.Inline, () => null);
+                var window = new SendFeedbackWindow(model, null, new FakeImagePicker())
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Tell us what's wrong, or what you'd like").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "This goes to the developer's private issue tracker on GitHub.").ShouldNotBeNull(theme.ToString());
+                    Find<CheckBox>(window, c => Equals(c.Content, "Attach the log, it helps with bugs")).ShouldNotBeNull(theme.ToString())
+                        .IsChecked.ShouldBe(true, theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Cancel", "Send" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 460, (int)window.ActualHeight, $"send-feedback-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>What's new (owner's round): the title, its plain points and the GitHub link, fitting a short screen, in
+    /// both themes.</summary>
+    [Fact]
+    public void Whats_new_shows_its_points_and_fits_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        var points = WhatsNew.Releases.Single(r => r.Version == "0.7.0").Points;
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var opened = 0;
+                var model = new WhatsNewViewModel("What's new in 0.7.0", points, new RelayCommand(() => opened++));
+                var window = new WhatsNewWindow(model)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "What's new in 0.7.0").ShouldNotBeNull(theme.ToString());
+                    foreach (var point in points) Find<TextBlock>(window, t => t.Text == point).ShouldNotBeNull(theme.ToString());
+                    var link = Find<Button>(window, b => Equals(b.Content, "Full notes on GitHub")).ShouldNotBeNull(theme.ToString());
+                    link.Command.Execute(null);
+                    opened.ShouldBe(1, theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    var close = Find<Button>(window, b => Equals(b.Content, "Close")).ShouldNotBeNull(theme.ToString());
+                    close.TranslatePoint(new Point(0, close.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, theme.ToString());
+                    Save(window, 440, (int)window.ActualHeight, $"whats-new-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
             }
         });
     }
@@ -875,7 +1515,7 @@ public class RenderingTests
     }
 
     /// <summary>Runs <paramref name="work"/> on the application's thread, and throws here what it threw there.</summary>
-    private static void OnUi(Action work)
+    internal static void OnUi(Action work)
     {
         ExceptionDispatchInfo? failure = null;
         Ui.Value.Invoke(() =>
@@ -948,7 +1588,7 @@ public class RenderingTests
     }
 
     private static ShellViewModel Shell(FakeSaver saver)
-        => new(NowScreen(), BreakdownScreen(), ReportScreen(saver), SettingsScreen(), WizardScreen(), "0.1.0");
+        => new(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.1.0");
 
     private static void Save(Visual visual, int width, int height, string name)
     {
@@ -1000,8 +1640,33 @@ public class RenderingTests
     private static ReportViewModel ReportScreen(FakeSaver saver)
     {
         var history = new FakeRangeHistory { Answer = Month };
-        return new ReportViewModel(history, new FakeSleep(), saver, _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
-            TimeZoneInfo.Utc, English, 0.38);
+        return new ReportViewModel(new FakeLink(), history, new FakeHouseholdHistory(), new FakeSleep(), saver, _ => [], UiThreads.Inline,
+            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, 0.38);
+    }
+
+    /// <summary>A household of two PCs: this desktop, well ahead this month, and a laptop last seen three days ago.</summary>
+    private static HouseholdViewModel HouseholdScreen()
+    {
+        var link = new FakeLink
+        {
+            Status = Statuses.Running() with
+            {
+                Household = new HouseholdStatus("hh1", "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null),
+            },
+        };
+        link.Connect(true);
+        var history = new FakeHouseholdHistory
+        {
+            Answer = _ => new HouseholdSnapshot(
+                new HouseholdRangeTotals(1.62, [new CurrencyCost("USD", 0.28m)], []),
+                new HouseholdRangeTotals(11.4, [new CurrencyCost("USD", 1.94m)], []),
+                new HouseholdRangeTotals(46.8, [new CurrencyCost("USD", 7.96m)], [new DeviceEnergy("aaaa", 34.2), new DeviceEnergy("bbbb", 12.6)]),
+                [
+                    new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-40), null, Now.AddMinutes(-2)),
+                    new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-20), null, Now.AddDays(-3)),
+                ]),
+        };
+        return new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
     }
 
     /// <summary>Settings against a running service, with a tariff, this laptop's detection, two external monitors — one in

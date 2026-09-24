@@ -27,8 +27,10 @@ The core loop is: **sample sensors once per second → convert to a whole-system
 - Smart-plug or PSU telemetry integration (planned v1.1).
 - Time-of-use tariffs (schema leaves room; UI later).
 - macOS and Linux.
-- Cloud sync and accounts. (Sending data, by the user's choice only, came in 0.6.0:
-  `2026-09-24-powerledger-data-sharing-design.md`.)
+- Cloud sync and accounts. Some came later:
+  - sending data, by the user's choice only, in 0.6.0 (`2026-09-24-powerledger-data-sharing-design.md`);
+  - households of paired PCs with end-to-end encrypted sync, and optional sign-in, in 0.7.0
+    (`2026-09-24-powerledger-households-design.md`).
 
 ## 2. Users and scope decisions
 
@@ -226,6 +228,7 @@ Chassis type from `Win32_SystemEnclosure.ChassisTypes` decides laptop vs desktop
 
 - Engine: SQLite via `Microsoft.Data.Sqlite`, hand-written SQL (no EF Core), WAL mode, `synchronous=NORMAL`, `auto_vacuum=INCREMENTAL`.
 - File: `C:\ProgramData\PowerLedger\power.db`. ACL: SYSTEM and Administrators full control, Users read and execute, inherited by everything in the folder and nothing inherited from above. A database users could edit would feed crafted input to a SYSTEM process. A read-only SQLite connection reads a WAL database whose `-wal` and `-shm` it cannot write (verified with SQLite 3.51), so the App can read history while the service runs; with the service stopped the App shows it as not running. The service keeps the write-ahead log and shared-memory files after closing (`SQLITE_FCNTL_PERSIST_WAL`), because the App reads with Users' read-only access to the folder and could not create them, so history stays readable while the service is stopped. The service refuses a data folder another account owns, because anyone may create folders in ProgramData, and sets aside database files another account owns.
+- Version 3 (0.7.0) adds `household_rows` and `household_members` (households design §1).
 - Version 2 (0.6.0) adds `total_source`, `gpu_scope` and `measured_mask` to `samples_raw`, and the sharing outbox,
   `outbox_minutes` and `outbox_events`, emptied as it is sent (data-sharing design §4).
 - Writes are batched: 60 samples per transaction (one per minute). The buffer flushes on suspend, shutdown and service stop. `ServiceBase` offers no preshutdown hook; a minute of readings writes in milliseconds, well inside the shutdown allowance.
@@ -263,6 +266,10 @@ Cost is computed at query time as `Σ energy × tariff effective at that time`, 
 - Newline-delimited JSON with `System.Text.Json` source generation. Messages carry `type` and, for requests, `id`. Max message 64 KB.
 - Messages: `subscribe` (the server pushes a `reading` frame each tick, saying which parts were measured, and, in `ReadingFrame.Total`, whether the total came from the model, the battery, a UPS, a power supply's DC output or a power supply's own wall figure, with `ReadingFrame.GpuScope` for what a measured graphics figure covered: the board, the chip alone or the package), `getStatus` (service version, per-source health and suspect counts, sensor restarts, calibration progress, DB size, write problems, each UPS and power supply the sample read in `ServiceStatus.PowerDevices` — its kind, the name it reports, its watts where it gave usable ones, and how they were found ("real output power", "load of its rated watts", "load of its rated VA, estimated", "wall power, as the supply reports it", "DC output, all rails"), since a wall figure and a DC output are not the same reading — and each external monitor with its key and device instance, name, size and resolution, on, sleep and off watts, where its figure came from, whether it counts and whether it has a plug of its own, what the service takes both to be when the user hasn't said, its brightness, whether it said it is on, on standby or off, the refresh rate Windows drives it at and the watts that adds, whether HDR is on, and what it draws now), `getSettings`, `setSettings`, `setTariff` (inserts a `tariffs` row; `effectiveFrom` defaults to now and may be backdated by the user), `resetCalibration`, `reportActivity` (the App's idle seconds every few seconds, because the service in session 0 cannot see input), and `reportBrightness` (what the App read of the monitors the service lists: their brightness, their power states, and the refresh rate and HDR state Windows drives each at, a minute after it starts and every minute, because session 0 can't reach the monitors or the user's display settings).
 - `reportBrightness` carries three lists, each of at most 16 readings naming a device instance of 1 to 260 characters: `monitors`, each with a brightness from 0 to 1; `power`, each with a state of on, standby or off; and `displays`, each with a refresh rate from 1 to 1000 Hz and whether HDR is on. A report is refused whole otherwise. One from an App before power states and displays carries `monitors` alone, and the service keeps what it had of the others. The service keeps a reading only for a monitor attached now, and ages the readings only while its own readings say the displays are on: a brightness counts as unknown after 15 minutes of that, and a power state, refresh rate or HDR state after 3. A service from before monitors lists none in its status and disconnects a client that sends a kind it doesn't know, so the App reports brightness only to a service whose status lists monitors.
+- Households (households design §9): browse, add, add by code, join by code, answer a prompt, remove, leave, rename,
+  be found or not, and N2's sign-in, sign-out and account deletion. Prompts and news are pushed as
+  `householdNotice`, only to the App in the console session. `ServiceStatus.Household` says where the household
+  stands.
 - Sharing (data-sharing design §5):
   - `setConsent` records the user's answer.
   - `reportUsage` and `reportCrash` pass the App's counts and crashes, ignored unless allowed.
@@ -361,6 +368,13 @@ Logging: Serilog rolling files in `C:\ProgramData\PowerLedger\logs`, 7 days or 5
 - The App reads monitors over DDC/CI with three Get requests and no others, `GetMonitorCapabilities`, `GetMonitorBrightness` and `GetVCPFeatureAndVCPFeatureReply` for VCP code D6, the power mode, alone; nothing is ever written to a monitor. A monitor is read only when its capabilities report brightness, and is asked for its capabilities once a session; then its power mode at every read and its brightness every five minutes, with 50 ms between one request and the next. A monitor that says it is off or on standby isn't asked its brightness while it says so. One whose power-mode request fails three reads in a row, while its brightness answers, isn't asked its power mode again until a display change or a resume. One that reports no brightness, or fails a call before it has given a brightness, isn't asked anything again while the App runs, until a display change or a resume from sleep. One that has given a brightness and then fails is asked again at the next read, and each failure in a row doubles the wait, up to an hour. A display change or a resume forgets what every monitor has answered, capabilities, failures and waits included, so the next read asks each afresh; it only marks a reset, which the read carries out, so the App's UI thread never waits for a read. The App reads a minute after it starts and every minute, off the UI thread, not while the displays are off, and only while Settings allows it; every handle a read opens is destroyed before it returns.
 - The App reads each monitor's refresh rate and HDR state from Windows' display configuration with `QueryDisplayConfig` and `DisplayConfigGetDeviceInfo` alone: it describes the displays and never changes them, and sends no monitor anything.
 - The service keeps a brightness, a power state or a display reading only for a monitor attached now, from a report of at most 16 checked readings in each list (§8), so a client can't fill its memory with monitors it made up. The monitor table ships inside the program: nothing about monitors is fetched or sent over the network.
+- Households (households design) are joined only by confirming on the joining PC:
+  - a six-digit comparison code on the network, or a one-time 80-bit code;
+  - what they sync is sealed with AES-256-GCM under a key only members hold, so the server sees IDs, public keys,
+    sizes and times;
+  - removing a PC changes the key.
+- The service listens on the LAN only while it may be found, and the installer's firewall rule allows Private
+  networks only.
 - Nothing leaves the machine unless the user turns on a sharing switch (data-sharing design):
   - Consent covers the whole machine, is off until given, and has a version.
   - The service sends only the sections switched on, built field by field.

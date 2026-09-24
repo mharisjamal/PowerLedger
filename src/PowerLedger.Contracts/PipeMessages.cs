@@ -23,6 +23,25 @@ namespace PowerLedger.Contracts;
 [JsonDerivedType(typeof(SendNowRequest), "sendNow")]
 [JsonDerivedType(typeof(DeleteMyDataRequest), "deleteMyData")]
 [JsonDerivedType(typeof(SharingReply), "sharing")]
+[JsonDerivedType(typeof(BrowsePcsRequest), "browsePcs")]
+[JsonDerivedType(typeof(FoundPcsReply), "foundPcs")]
+[JsonDerivedType(typeof(AddPcRequest), "addPc")]
+[JsonDerivedType(typeof(StartCodePairingRequest), "startCodePairing")]
+[JsonDerivedType(typeof(JoinByCodeRequest), "joinByCode")]
+[JsonDerivedType(typeof(AnswerPromptRequest), "answerPrompt")]
+[JsonDerivedType(typeof(RemovePcRequest), "removePc")]
+[JsonDerivedType(typeof(LeaveHouseholdRequest), "leaveHousehold")]
+[JsonDerivedType(typeof(RenamePcRequest), "renamePc")]
+[JsonDerivedType(typeof(SetDiscoverableRequest), "setDiscoverable")]
+[JsonDerivedType(typeof(SignInRequest), "signIn")]
+[JsonDerivedType(typeof(SignOutRequest), "signOut")]
+[JsonDerivedType(typeof(DeleteAccountRequest), "deleteAccount")]
+[JsonDerivedType(typeof(HouseholdReply), "household")]
+[JsonDerivedType(typeof(HouseholdNotice), "householdNotice")]
+[JsonDerivedType(typeof(CancelPairingRequest), "cancelPairing")]
+[JsonDerivedType(typeof(NewRecoveryCodeRequest), "newRecoveryCode")]
+[JsonDerivedType(typeof(RemoveOldRowsRequest), "removeOldRows")]
+[JsonDerivedType(typeof(AskAgainRequest), "askAgain")]
 [JsonDerivedType(typeof(OkReply), "ok")]
 [JsonDerivedType(typeof(ErrorReply), "error")]
 [JsonDerivedType(typeof(StatusReply), "status")]
@@ -130,3 +149,60 @@ public sealed record DeleteMyDataRequest(long Id) : PipeRequest(Id);
 
 /// <summary>What a sharing request did, in words the App can show, and for a preview the file it was written to.</summary>
 public sealed record SharingReply(long Id, bool Ok, string Message, string? Path = null) : PipeMessage;
+
+/// <summary>Look for PowerLedger PCs on this network (households design §3), answered with a <see cref="FoundPcsReply"/>.</summary>
+public sealed record BrowsePcsRequest(long Id) : PipeRequest(Id);
+
+public sealed record FoundPcsReply(long Id, IReadOnlyList<FoundPc> Pcs) : PipeMessage;
+
+/// <summary>Start adding a PC found on this network. The reply says it started; how it goes is pushed as
+/// <see cref="HouseholdNotice"/>s, its comparison code first.</summary>
+public sealed record AddPcRequest(long Id, string InstanceId) : PipeRequest(Id);
+
+/// <summary>Make a one-time code for adding a PC that isn't on this network (households design §4); the reply carries it.</summary>
+public sealed record StartCodePairingRequest(long Id) : PipeRequest(Id);
+
+/// <summary>Join a household with the code another PC showed.</summary>
+public sealed record JoinByCodeRequest(long Id, string Code) : PipeRequest(Id);
+
+/// <summary>The user's answer to a pushed Join or Approve prompt.</summary>
+public sealed record AnswerPromptRequest(long Id, string PromptId, bool Accept) : PipeRequest(Id);
+
+/// <summary>Remove another PC from the household; the household key changes (households design §6).</summary>
+public sealed record RemovePcRequest(long Id, string DeviceId) : PipeRequest(Id);
+
+public sealed record LeaveHouseholdRequest(long Id) : PipeRequest(Id);
+
+/// <summary>This PC's name in the household, 1 to 40 characters.</summary>
+public sealed record RenamePcRequest(long Id, string Name) : PipeRequest(Id);
+
+/// <summary>Whether other PCs on a Private network can find this one.</summary>
+public sealed record SetDiscoverableRequest(long Id, bool On) : PipeRequest(Id);
+
+/// <summary>N2: sign in with an ID token the App got from the provider in the browser, and a recovery code when the user
+/// is restoring a household (households design §7).</summary>
+public sealed record SignInRequest(long Id, string Provider, string IdToken, string Nonce, string? RecoveryCode = null)
+    : PipeRequest(Id);
+
+public sealed record SignOutRequest(long Id) : PipeRequest(Id);
+
+public sealed record DeleteAccountRequest(long Id) : PipeRequest(Id);
+
+/// <summary>What a household request did, in words the App can show, and for StartCodePairing the code to show. A
+/// recovery code comes as a <see cref="NoticeKind.RecoveryCode"/> notice instead, kept until the App says it was seen.</summary>
+public sealed record HouseholdReply(long Id, bool Ok, string Message, string? Code = null) : PipeMessage;
+
+/// <summary>Stop the pairing this PC is part of, on either side, and free it for another (households design §3–§4).</summary>
+public sealed record CancelPairingRequest(long Id) : PipeRequest(Id);
+
+/// <summary>N2: make a new recovery code for the linked household, replacing any earlier one; it comes as a notice.</summary>
+public sealed record NewRecoveryCodeRequest(long Id) : PipeRequest(Id);
+
+/// <summary>Delete the rows this PC keeps from a PC no longer in its household, one that left or was removed, named by
+/// <paramref name="DeviceId"/>; with none named, every such PC's, which after leaving is all of them (households design
+/// §6). Refused for this PC and for a current member. The PC stays known as removed, so it is never added back.</summary>
+public sealed record RemoveOldRowsRequest(long Id, string? DeviceId = null) : PipeRequest(Id);
+
+/// <summary>N2: ask the household again to let this PC in, after its request ended unanswered or was refused. Only the
+/// user asks again, so the server can't make this PC answer approval after approval (plan 0.9).</summary>
+public sealed record AskAgainRequest(long Id) : PipeRequest(Id);

@@ -11,11 +11,12 @@ namespace PowerLedger.Service;
 /// file or runs a command (spec §11). Anything that changes what the loop is doing goes to the loop as a command, and
 /// the reply waits until the loop has done it. Data sharing's requests go to the sharing worker the same way, except the
 /// App's usage counts and crashes: those are acknowledged once queued, so the App never sends them twice. A sharing request
-/// the App is told got no answer in time is never carried out.
+/// the App is told got no answer in time is never carried out. The household's requests go to the household worker, which
+/// answers within <see cref="Households.HouseholdWorker.AppWait"/> and carries on with a pairing after its answer.
 /// </summary>
 internal sealed partial class PipeHandler(
     LoopCommands commands, StatusBoard board, MonitorBoard monitors, ServiceSignals signals, TariffRepository tariffs, TimeProvider clock,
-    SharingCommands sharing)
+    SharingCommands sharing, Households.IHouseholdRequests? households = null)
 {
     /// <summary>How long a request waits for the loop before the client is told it did not answer.</summary>
     public static readonly TimeSpan LoopTimeout = TimeSpan.FromSeconds(10);
@@ -27,7 +28,8 @@ internal sealed partial class PipeHandler(
     private static readonly DateTimeOffset EarliestTariff = new(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     /// <param name="client">The connection the request came on, so idle reports stay per client.</param>
-    public async Task<PipeMessage> HandleAsync(PipeMessage message, string client, CancellationToken cancel)
+    /// <param name="session">The Windows session of the client, for the household's requests; null when Windows wouldn't say.</param>
+    public async Task<PipeMessage> HandleAsync(PipeMessage message, string client, CancellationToken cancel, uint? session = null)
     {
         switch (message)
         {
@@ -72,6 +74,10 @@ internal sealed partial class PipeHandler(
                 return await ShareAsync(new SendNowCommand(request.Id), cancel).ConfigureAwait(false);
             case DeleteMyDataRequest request:
                 return await ShareAsync(new DeleteMyDataCommand(request.Id), cancel).ConfigureAwait(false);
+            case BrowsePcsRequest or AddPcRequest or StartCodePairingRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest
+                or LeaveHouseholdRequest or RenamePcRequest or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest
+                or CancelPairingRequest or NewRecoveryCodeRequest or RemoveOldRowsRequest:
+                return await HouseholdAsync((PipeRequest)message, session, cancel).ConfigureAwait(false);
             case PipeRequest request:
                 return new ErrorReply(request.Id, "The service does not handle that request.");
             default:
@@ -118,6 +124,21 @@ internal sealed partial class PipeHandler(
             throw;
         }
         return await command.Reply.WaitAsync(cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>Hands the request to the household worker and answers with what it did, or says it didn't answer in time.</summary>
+    private async Task<PipeMessage> HouseholdAsync(PipeRequest request, uint? session, CancellationToken cancel)
+    {
+        if (households is null) return new ErrorReply(request.Id, "The service does not handle that request.");
+        try
+        {
+            return await households.HandleAsync(request, session, cancel).WaitAsync(Households.HouseholdWorker.AppWait, clock, cancel)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            return new ErrorReply(request.Id, NoAnswer);
+        }
     }
 
     /// <summary>Hands the request to the sharing worker and acknowledges it at once.</summary>

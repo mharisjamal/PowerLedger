@@ -16,8 +16,8 @@ It is two programs:
 - **The service** (`PowerLedger.Service`) runs as a Windows service, samples the machine every second through
   interfaces Windows already provides (no kernel driver), and keeps the history in SQLite under
   `C:\ProgramData\PowerLedger`.
-- **The App** (`PowerLedger.exe`) lives in the tray and opens a window with four screens: Now, Breakdown, Report and
-  Settings. It reads the history, talks to the service over a local named pipe, and writes a PDF report for each
+- **The App** (`PowerLedger.exe`) lives in the tray and opens a window with five screens: Now, Breakdown, Report,
+  Household and Settings. It reads the history, talks to the service over a local named pipe, and writes a PDF report for each
   finished month to `Documents\PowerLedger`.
 
 Readings say how they were known: *measured* on battery from Windows' battery report, *calibrated* when plugged in
@@ -83,6 +83,23 @@ country. [PRIVACY.md](PRIVACY.md) has the details.
 The service sends one upload a day to PowerLedger's server, a Cloudflare Worker whose code is in `server/`. It comes
 from the service rather than from you, so a proxy set only for your Windows account isn't used, and a PC that reaches
 the internet only through such a proxy doesn't send.
+
+## Households
+
+Several PCs, one ledger. On the **Household** page, **Add a PC**:
+- **On this network:** the PCs found. Pick one; both PCs show the same six-digit code, and you confirm on both.
+- **Somewhere else:** a one-time code to type on the other PC.
+
+After that, each PC shows what the whole household used today, this week and this month, with a bar for each PC.
+
+- **How PCs sync:** directly on the network when they're together, and otherwise through PowerLedger's server. What
+  they send is encrypted with a key only the household's PCs hold, so the server can't read it.
+- **Signing in** with Microsoft or Google is optional. A PC that signs in joins once another PC in the household
+  approves it, after both show the same code, and a recovery code brings the household back to one PC if you lose every
+  other.
+
+[PRIVACY.md](PRIVACY.md) says what the server keeps. Finding PCs on the network needs a private network; the installer
+opens the service's port there only.
 
 ## Requirements
 
