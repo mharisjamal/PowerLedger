@@ -574,6 +574,99 @@ and the six-part `ApprovalCode`. The Contracts already have `AskAgainRequest` ("
 **Sign-in redirect.** Back to `http://127.0.0.1:{port}/`, for both the listener's prefix and the redirect URI (RFC 8252
 §7.3; a `localhost` prefix answers on every address). The owner registers `http://127.0.0.1` in the Azure
 app's manifest (`replyUrlsWithType`, type `InstalledClient`).
+
+### 0.10 Contract changes after review round 5 (they replace earlier sections where they differ)
+
+**The threat model, stated.**
+- **Safe against:**
+  - the server alone;
+  - a removed PC alone, once the server has taken its removal;
+  - a PC in the middle on the network.
+- **Not claimed:**
+  - a PC acting maliciously while it is a current member;
+  - a removed PC working together with the server.
+
+**Membership: the server's list says who is in, and introductions say whose keys to trust.** This replaces 0.9's merging
+of epochs from lists.
+- **A PC is current here when both hold:**
+  1. The server's latest member list says it is current, or it is this PC's own add still waiting for the server.
+  2. Its keys reached this PC through an introduction:
+     - this PC's own pairing or approval;
+     - the member list in its welcome, approval or recovery;
+     - or a sealed member list from a PC current here.
+- **A list entry about its own sender is ignored:** no keys, no epochs, no removal of itself.
+- **Removals in lists** do two things only:
+  - stop LAN sync with that PC at once;
+  - show it as left.
+
+  They never override the server's list, and never keep a PC the server lists as current out of a rotation.
+- **Epochs come from the server's list** (`addedEpoch`, `removedEpoch`), and so does the sealer rule. The sealer of epoch
+  N must pass all three:
+  - its keys were introduced here;
+  - its `addedEpoch` < N;
+  - it has no `removedEpoch`, or its `removedEpoch` ≥ N.
+
+  So a PC that removed another and then left is still taken as the sealer of the key it made.
+- **A PC the server lists as current that no introduction has reached within 3 days** is removed on the server, by the
+  first member that notices. That member shows an Info: "A PC this one was never told about was taken out of the
+  household. Add it again from a PC that has it."
+- **This PC's own removals** go to the server before any rotation that follows them.
+- **LAN sync** requires all of these:
+  - the other PC is current here;
+  - no current member's list has it as removed;
+  - the member list was read first, if it is more than 15 minutes old and the server answers.
+
+  It never takes rows for this PC's own device.
+
+**Rotation.**
+- **When the epoch is taken.**
+  - A 409 on `POST …/keys` carries `{"epoch": <the household's current epoch>}`.
+  - "Epoch taken" means a 409, or a 404 on that epoch's envelope for this PC. This PC then rotates to the server's
+    epoch + 1.
+  - A rotation started for a removal always rotates on after losing its epoch.
+- **Fetching never stops:** each turn fetches batches and envelopes, even while a rotation waits.
+- **No old key to a newcomer.** A welcome or approval never hands out a key while a rotation is waiting: the rotation
+  goes first, and a pairing that can't wait says it needs the server.
+- **A PC behind the server's epoch** (its `addedEpoch` on the server is above the epoch it holds) posts nothing until it
+  has fetched that epoch's key.
+
+**Pairing.**
+- **The joiner's `joined` write (code pairing).** The joiner retries it until it lands or the meeting ends, then waits for
+  `welcomed`, as on the network.
+- **Once `joined` is sent:** leaving, removal and every other household change wait for the pairing to finish.
+- **A first pairing** creates the household in the same step that records the member. A cancel before that step leaves
+  no household.
+- **The user's own pairing actions** (Add a PC, Make a code, Join by code) cancel a stranger's incoming pairing that
+  hasn't shown a prompt yet.
+- **A cancelled code.** The adder writes `{"type":"cancelled"}` into the meeting's `welcome` slot, sealed like a welcome.
+  The joiner reads the meeting before asking its user, and withdraws the prompt if the code was cancelled.
+- **What this leaves.** A PC in the middle gets at most about 20 silent tries against a joiner per 10 minutes, about 1 in
+  50,000 per pairing. The design says so.
+
+**N2 approvals.**
+- **Pinning.** P pins R's device, signing and key-agreement keys when it commits, and R's nonce when it first reads it.
+  - The code and the sealing use only the pinned values.
+  - A listing that differs from the pins ends that approval: P deletes the request and shows an Info.
+- **The sealed body** is kept until the approve succeeds. A retry posts the same body to the same pinned keys; P never
+  seals again to other keys.
+- **The prompt first.** P shows its `ApprovePrompt` before it posts its reveal, so every code the server can learn has
+  already been shown to the user.
+- **The daily 5 on P** counts an approval when P commits.
+- **R's requests.** A waiting request lapses on the server after 24 hours, and R never renews it by itself.
+- **Pace.** While an approval is under way (P from its commit, R from its nonce), the PC checks every 10 seconds, for up
+  to 10 minutes. `ApprovePrompt` and `ConfirmJoin` stay up for 10 minutes, so both are on screen together.
+- **An approval R never confirms.** When its approved request lapses, R removes itself from the household on the server,
+  and offers Ask again.
+
+**N2 recovery.**
+- **Recovering.** Before calling recover, the PC keeps the opened recovery (DPAPI) and marks itself as recovering. It
+  retries a recover whose answer was lost. On the Worker, recover is idempotent: for the same device within 10 minutes it
+  answers the same result.
+- **Putting a code.** A new code is kept (DPAPI) before it is put. A put whose answer was lost is retried as the same
+  put. The `RecoveryCode` notice comes once the put succeeds.
+- **RecoveryMissing** also covers a PC that the server says is the holder but that holds no key.
+- **The App** reads the recovery-code box once, when Sign in is pressed. It then locks the box until the sign-in ends,
+  and the warning applies to that value.
 ---
 
 ## Wave 1 — three agents in parallel
