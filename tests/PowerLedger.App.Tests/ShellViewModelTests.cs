@@ -90,4 +90,16 @@ public class ShellViewModelTests
         shell.IsSetup.ShouldBeTrue();
         shell.Wizard.Step.ShouldBe(SetupStep.Tariff);
     }
+
+    [Fact]
+    public void The_rails_feedback_button_asks_the_app_to_open_the_window()
+    {
+        var shell = Shell();
+        var raised = 0;
+        shell.FeedbackRequested += () => raised++;
+
+        shell.Feedback.Execute(null);
+
+        raised.ShouldBe(1);
+    }
 }
