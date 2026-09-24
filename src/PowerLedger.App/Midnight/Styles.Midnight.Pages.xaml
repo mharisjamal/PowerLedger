@@ -10,6 +10,7 @@
         <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Midnight/Styles.Midnight.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
+    <app:WidthLess x:Key="M.WidthLess" />
     <Thickness x:Key="M.Page.Margin">24,8,24,24</Thickness>
     <Thickness x:Key="M.Card.Gap">0,16,0,0</Thickness>
     <sys:Double x:Key="M.ShareTrack.Width" xmlns:sys="clr-namespace:System;assembly=System.Runtime">120</sys:Double>
@@ -24,14 +25,18 @@
         <Setter Property="TextWrapping" Value="Wrap" />
         <Setter Property="Margin" Value="0,4,0,0" />
     </Style>
+    <!-- In the secondary ink, a step up from the notes: Midnight's amber means Estimating, and its accent is under 4.5:1 as
+         text on a dark card. -->
     <Style x:Key="M.Said" TargetType="TextBlock" BasedOn="{StaticResource M.Note}">
-        <Setter Property="Foreground" Value="{DynamicResource M.Warn}" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
     </Style>
 
-    <!-- A settings row: the label in a fixed column, the control beside it. -->
+    <!-- A settings row: the label in a fixed column, the control beside it; at least a pill track tall, so rows of switches
+         keep the rhythm of rows of pills and buttons. -->
     <Style x:Key="M.Settings.Row" TargetType="StackPanel">
         <Setter Property="Orientation" Value="Horizontal" />
         <Setter Property="Margin" Value="0,6" />
+        <Setter Property="MinHeight" Value="34" />
     </Style>
     <Style x:Key="M.Settings.Label" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Secondary}">
         <Setter Property="Width" Value="208" />
@@ -65,14 +70,17 @@
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" MinWidth="12" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Style="{StaticResource M.Text.Secondary}" Text="{TemplateBinding Key}" VerticalAlignment="Bottom" />
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
-                                <TextBlock x:Name="Value" Style="{StaticResource M.Text.Number}" Text="{TemplateBinding Value}" VerticalAlignment="Bottom" />
-                                <TextBlock x:Name="Note" Style="{StaticResource M.Text.Muted}" Margin="6,0,0,1" Text="{TemplateBinding Note}" VerticalAlignment="Bottom" />
-                            </StackPanel>
+                            <!-- A value too wide for its card shrinks rather than runs past it: a hero figure in a short window's
+                                 half-width card, or a big month's. -->
+                            <Viewbox Grid.Column="1" Margin="12,0,0,0" StretchDirection="DownOnly" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="Value" Style="{StaticResource M.Text.Number}" Text="{TemplateBinding Value}" VerticalAlignment="Bottom" />
+                                    <TextBlock x:Name="Note" Style="{StaticResource M.Text.Muted}" Margin="6,0,0,1" Text="{TemplateBinding Note}" VerticalAlignment="Bottom" />
+                                </StackPanel>
+                            </Viewbox>
                         </Grid>
                     </Border>
                     <ControlTemplate.Triggers>

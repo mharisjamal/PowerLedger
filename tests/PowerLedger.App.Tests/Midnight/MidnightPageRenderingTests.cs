@@ -244,10 +244,23 @@ public class MidnightPageRenderingTests
                     Find<TextBox>(view, box => System.Windows.Automation.AutomationProperties.GetName(box) == $"Watts for {monitor.Name}").ShouldNotBeNull($"{monitor.Name} on {theme}")
                         .IsVisible.ShouldBeTrue($"{monitor.Name} on {theme}");
                 }
-                Find<TextBlock>(view, t => t.Text == "Saved.").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
+                var saved = Find<TextBlock>(view, t => t.Text == "Saved.").ShouldNotBeNull(theme.ToString());
+                saved.IsVisible.ShouldBeTrue(theme.ToString());
+                // How a save went, in the secondary ink: Midnight's amber means Estimating, and its accent is under 4.5:1 as text on a dark card.
+                saved.Foreground.ShouldBe(view.FindResource("M.Ink2"), theme.ToString());
+                // A switch's words take the card's width before they wrap: the monitors' line fits on one at this width.
+                var oneLine = Find<TextBlock>(view, t => t.Text == "In the tray, when you sign in").ShouldNotBeNull(theme.ToString()).ActualHeight;
+                Find<TextBlock>(view, t => t.Text.StartsWith("Read monitors' brightness", StringComparison.Ordinal)).ShouldNotBeNull(theme.ToString())
+                    .ActualHeight.ShouldBe(oneLine, theme.ToString());
                 page.Render($"midnight-settings-{theme}.png");
 
-                // The look is chosen as the theme is, through SettingsViewModel.Look (F6).
+                // The look sits under the theme, as in Classic's Settings, and is chosen as the theme is, through SettingsViewModel.Look (F6).
+                double Top(string label) => Find<TextBlock>(view, t => t.Text == label).ShouldNotBeNull(label).TranslatePoint(default, view).Y;
+                Top("Look").ShouldBeGreaterThan(Top("Theme"), theme.ToString());
+                Top("Look").ShouldBeLessThan(Top("Start with Windows"), theme.ToString());
+                // Rows of pills and rows of switches keep one rhythm.
+                (Top("Start with Windows") - Top("Look")).ShouldBe(Top("Look") - Top("Theme"), 1, theme.ToString());
+                (Top("Monitors") - Top("Start with Windows")).ShouldBe(Top("Look") - Top("Theme"), 1, theme.ToString());
                 var looks = AllOf<RadioButton>(view).Where(p => p.Content is "Classic" or "Midnight").ToList();
                 looks.Single(p => p.IsChecked == true).Content.ShouldBe("Classic", theme.ToString());
                 looks.Single(p => Equals(p.Content, "Midnight")).IsChecked = true;
@@ -316,9 +329,11 @@ public class MidnightPageRenderingTests
                     var scroller = view.Content.ShouldBeOfType<ScrollViewer>(name);
                     (scroller.ExtentHeight > scroller.ViewportHeight).ShouldBeTrue($"{name} is {scroller.ExtentHeight:0} tall in a view {scroller.ViewportHeight:0} tall");
                     scroller.ComputedVerticalScrollBarVisibility.ShouldBe(Visibility.Visible, name);
-                    foreach (var element in AllOf<FrameworkElement>((DependencyObject)scroller.Content).Where(e => e.IsVisible && e is TextBlock or Button or Border))
+                    RenderWhole(view, window.Background, $"midnight-short-{name}-whole.png");
+                    CutOff(view).ShouldBeEmpty(name);
+                    foreach (var note in AllOf<TextBlock>(view).Where(t => t.IsVisible && t.Text.Contains("brightness", StringComparison.Ordinal) && t.Text.Contains(" · ", StringComparison.Ordinal)))
                     {
-                        element.TranslatePoint(new Point(element.ActualWidth, 0), scroller).X.ShouldBeLessThanOrEqualTo(scroller.ViewportWidth + 0.5, $"{name}: {Describe(element)} runs past the side");
+                        note.ActualWidth.ShouldBeGreaterThan(200, $"{name}: a monitor's notes wrap under its figure rather than into a sliver");
                     }
                     Render(window, (int)ShortWidth, (int)ShortHeight, $"midnight-short-{name}.png");
                     scroller.ScrollToEnd();
@@ -452,6 +467,52 @@ public class MidnightPageRenderingTests
         }
     }
 
+    /// <summary>
+    /// What <paramref name="view"/> cuts off: anything that runs past the side of the page's scroller or past the inside of
+    /// its card, and any one-line text wider than the room it was given, which is clipped without an ellipsis.
+    /// </summary>
+    private static List<string> CutOff(FrameworkElement view)
+    {
+        var problems = new List<string>();
+        var scroller = Find<ScrollViewer>(view)!;
+        var flat = (Style)scroller.FindResource("M.Card.Flat");
+        foreach (var element in AllOf<FrameworkElement>((DependencyObject)scroller.Content).Where(e => e.IsVisible && e is TextBlock or Button or Border))
+        {
+            var right = element.TranslatePoint(new Point(element.ActualWidth, 0), scroller).X;
+            if (right > scroller.ViewportWidth + 0.5) problems.Add($"{Describe(element)} runs past the side");
+            if (Ancestor<Border>(element, b => IsCard(b, flat)) is { } card
+                && right > card.TranslatePoint(new Point(card.ActualWidth - card.BorderThickness.Right - card.Padding.Right, 0), scroller).X + 0.5)
+            {
+                problems.Add($"{Describe(element)} runs past its card");
+            }
+            if (element is TextBlock { TextWrapping: TextWrapping.NoWrap, TextTrimming: TextTrimming.None } line && line.Text.Length > 0)
+            {
+                // Wider than its own width, or than the slot its panel gave it, which WPF clips to.
+                var room = Math.Min(line.ActualWidth, LayoutInformation.GetLayoutSlot(line).Width - line.Margin.Left - line.Margin.Right);
+                if (Written(line) > room + 1) problems.Add($"{Describe(line)} is cut off at {room:0} of {Written(line):0}");
+            }
+        }
+        return problems;
+    }
+
+    /// <summary>How wide <paramref name="line"/>'s text is set in its own face and size, padding included.</summary>
+    private static double Written(TextBlock line)
+    {
+        var face = new Typeface(line.FontFamily, line.FontStyle, line.FontWeight, line.FontStretch);
+        var text = new FormattedText(line.Text, CultureInfo.CurrentUICulture, line.FlowDirection, face, line.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(line).PixelsPerDip);
+        return text.WidthIncludingTrailingWhitespace + line.Padding.Left + line.Padding.Right;
+    }
+
+    /// <summary>Whether <paramref name="border"/> is a card: its style is <paramref name="flat"/> or built on it, as M.Card and the Report's two-column cards are.</summary>
+    private static bool IsCard(Border border, Style flat)
+    {
+        for (var style = border.Style; style is not null; style = style.BasedOn)
+        {
+            if (style == flat) return true;
+        }
+        return false;
+    }
+
     private static string Describe(FrameworkElement element) => element switch
     {
         TextBlock text => $"text \"{text.Text}\"",
@@ -481,27 +542,34 @@ public class MidnightPageRenderingTests
         return new PageHost(host, window);
     }
 
+    /// <summary>
+    /// The whole of the page under <paramref name="root"/> to <paramref name="name"/> on <paramref name="ground"/>: what the
+    /// page's scroller holds, at its full length, which a window no taller than the screen, or a short one, would cut off.
+    /// </summary>
+    private static void RenderWhole(FrameworkElement root, Brush ground, string name)
+    {
+        root.UpdateLayout();
+        var content = (FrameworkElement)Find<ScrollViewer>(root)!.Content;
+        var width = (int)Math.Ceiling(root.ActualWidth);
+        var height = (int)Math.Ceiling(content.ActualHeight + content.Margin.Top + content.Margin.Bottom);
+        var back = new DrawingVisual();
+        using (var context = back.RenderOpen()) context.DrawRectangle(ground, null, new Rect(0, 0, width, height));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(back);
+        bitmap.Render(content);   // at its offset in the scroller, the page's margin
+        var png = new PngBitmapEncoder();
+        png.Frames.Add(BitmapFrame.Create(bitmap));
+        using var file = File.Create(Path.Combine(Folder, name));
+        png.Save(file);
+    }
+
     private sealed record PageHost(Border Host, Window Window) : IDisposable
     {
-        /// <summary>
-        /// The whole page to <paramref name="name"/> on Midnight's ground: what the page's scroller holds, at its full length,
-        /// which the host window, kept no taller than the screen, would cut off.
-        /// </summary>
+        /// <summary>The whole page to <paramref name="name"/> on Midnight's ground, then what it cuts off, of which there is nothing.</summary>
         public void Render(string name)
         {
-            Host.UpdateLayout();
-            var content = (FrameworkElement)Find<ScrollViewer>(Host)!.Content;
-            var width = (int)Math.Ceiling(Host.ActualWidth);
-            var height = (int)Math.Ceiling(content.ActualHeight + content.Margin.Top + content.Margin.Bottom);
-            var ground = new DrawingVisual();
-            using (var context = ground.RenderOpen()) context.DrawRectangle(Host.Background, null, new Rect(0, 0, width, height));
-            var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(ground);
-            bitmap.Render(content);   // at its offset in the scroller, the page's margin
-            var png = new PngBitmapEncoder();
-            png.Frames.Add(BitmapFrame.Create(bitmap));
-            using var file = File.Create(Path.Combine(Folder, name));
-            png.Save(file);
+            RenderWhole(Host, Host.Background, name);
+            CutOff(Host).ShouldBeEmpty(name);
         }
 
         public void Dispose() => Window.Close();

@@ -27,10 +27,12 @@
             <Style x:Key="SwitchNote" TargetType="TextBlock" BasedOn="{StaticResource M.Note}">
                 <Setter Property="Margin" Value="46,4,0,0" />
             </Style>
-            <!-- A preference switch's words, which wrap in a narrow page: the switch lays its content out on one line otherwise. -->
+            <!-- A preference switch's words, which wrap at the card's edge: the switch lays its content out on one line otherwise.
+                 Their room is the card's width less its edges (2), its padding (40), the label column (208), the switch (36)
+                 and the gap after it (10). -->
             <Style x:Key="SwitchText" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
                 <Setter Property="TextWrapping" Value="Wrap" />
-                <Setter Property="MaxWidth" Value="340" />
+                <Setter Property="MaxWidth" Value="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=Border}, Converter={StaticResource M.WidthLess}, ConverterParameter=296}" />
             </Style>
             <!-- A monitor's "Count it". One that runs off the PC always counts, so its box shows ticked, can't be unticked, and says why. -->
             <Style x:Key="Counts" TargetType="CheckBox" BasedOn="{StaticResource M.Tick}">
@@ -72,13 +74,13 @@
                     </ItemsControl>
                     <WrapPanel DataContext="{Binding Tariff}">
                         <TextBlock Style="{StaticResource M.Text.Secondary}" Text="Price per kWh" VerticalAlignment="Center" Margin="0,0,8,6" />
-                        <TextBox Style="{StaticResource Field}" Width="90" Margin="0,0,0,6" Text="{Binding Price, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Price per kWh" />
-                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="Currency" VerticalAlignment="Center" Margin="16,0,8,6" />
-                        <TextBox Style="{StaticResource Field}" Width="72" Margin="0,0,0,6" MaxLength="3" CharacterCasing="Upper" Text="{Binding Currency, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Style="{StaticResource Field}" Width="90" Margin="0,0,16,6" Text="{Binding Price, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Price per kWh" />
+                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="Currency" VerticalAlignment="Center" Margin="0,0,8,6" />
+                        <TextBox Style="{StaticResource Field}" Width="72" Margin="0,0,16,6" MaxLength="3" CharacterCasing="Upper" Text="{Binding Currency, UpdateSourceTrigger=PropertyChanged}"
                                  AutomationProperties.Name="Currency" />
-                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="From" VerticalAlignment="Center" Margin="16,0,8,6" />
-                        <DatePicker Style="{StaticResource M.Field.Date}" Width="132" Margin="0,0,0,6" SelectedDate="{Binding From}" AutomationProperties.Name="First day of the tariff" />
-                        <Button Style="{StaticResource M.Button.Outline}" Content="Save tariff" Command="{Binding Save}" Margin="16,0,0,6" />
+                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="From" VerticalAlignment="Center" Margin="0,0,8,6" />
+                        <DatePicker Style="{StaticResource M.Field.Date}" Width="132" Margin="0,0,16,6" SelectedDate="{Binding From}" AutomationProperties.Name="First day of the tariff" />
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Save tariff" Command="{Binding Save}" Margin="0,0,0,6" />
                     </WrapPanel>
                     <TextBlock Style="{StaticResource Said}" DataContext="{Binding Tariff}" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource VisibleWhenText}}" />
                     <TextBlock Style="{StaticResource Note}" Text="Energy already recorded is priced again from the day a tariff starts, so a tariff may start in the past." />
@@ -141,30 +143,35 @@
                                     <Grid Margin="0,6">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="208" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Style="{StaticResource Label}" TextTrimming="CharacterEllipsis">
-                                            <Run Text="{Binding Name, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Size, Mode=OneWay}" FontSize="12" Foreground="{DynamicResource M.Ink3}" />
-                                        </TextBlock>
-                                        <TextBox Grid.Column="1" Style="{StaticResource Field}" Width="72" Text="{Binding Watts, UpdateSourceTrigger=LostFocus}"
-                                                 AutomationProperties.Name="{Binding Name, StringFormat=Watts for {0}}" />
-                                        <TextBlock Grid.Column="2" Style="{StaticResource Aside}" Text="W" Margin="8,0,0,0" />
-                                        <StackPanel Grid.Column="3" Margin="16,0,0,0" VerticalAlignment="Center">
-                                            <CheckBox Style="{StaticResource Counts}" Content="Count it" IsChecked="{Binding Counted}" IsEnabled="{Binding OwnPlug}"
-                                                      ToolTipService.ShowOnDisabled="True" AutomationProperties.Name="{Binding Name, StringFormat=Count {0}}" />
-                                            <CheckBox Style="{StaticResource Plug}" Content="has its own plug" Margin="0,6,0,0" IsChecked="{Binding OwnPlug}"
-                                                      AutomationProperties.Name="{Binding Name, StringFormat={}{0} has its own plug}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="4" Margin="16,0,0,0" VerticalAlignment="Center">
-                                            <TextBlock Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap" Text="{Binding Source}"
-                                                       Visibility="{Binding Source, Converter={StaticResource VisibleWhenText}}" />
-                                            <TextBlock Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap">
-                                                <Run Text="{Binding Now, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Brightness, Mode=OneWay}" />
+                                        <!-- The name centred on the figure's line, which the notes may wrap under. -->
+                                        <Border Height="{Binding ActualHeight, ElementName=Figure}" VerticalAlignment="Top">
+                                            <TextBlock Style="{StaticResource Label}" TextTrimming="CharacterEllipsis">
+                                                <Run Text="{Binding Name, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Size, Mode=OneWay}" FontSize="12" Foreground="{DynamicResource M.Ink3}" />
                                             </TextBlock>
-                                        </StackPanel>
+                                        </Border>
+                                        <!-- The notes sit beside the figure and the ticks, or under them in a narrow page rather than in a sliver. -->
+                                        <WrapPanel Grid.Column="1">
+                                            <StackPanel x:Name="Figure" Orientation="Horizontal" Margin="0,0,16,0">
+                                                <TextBox Style="{StaticResource Field}" Width="72" VerticalAlignment="Center" Text="{Binding Watts, UpdateSourceTrigger=LostFocus}"
+                                                         AutomationProperties.Name="{Binding Name, StringFormat=Watts for {0}}" />
+                                                <TextBlock Style="{StaticResource Aside}" Text="W" Margin="8,0,0,0" />
+                                                <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                                                    <CheckBox Style="{StaticResource Counts}" Content="Count it" IsChecked="{Binding Counted}" IsEnabled="{Binding OwnPlug}"
+                                                              ToolTipService.ShowOnDisabled="True" AutomationProperties.Name="{Binding Name, StringFormat=Count {0}}" />
+                                                    <CheckBox Style="{StaticResource Plug}" Content="has its own plug" Margin="0,6,0,0" IsChecked="{Binding OwnPlug}"
+                                                              AutomationProperties.Name="{Binding Name, StringFormat={}{0} has its own plug}" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                            <StackPanel VerticalAlignment="Center" Margin="0,4,0,0">
+                                                <TextBlock Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap" Text="{Binding Source}"
+                                                           Visibility="{Binding Source, Converter={StaticResource VisibleWhenText}}" />
+                                                <TextBlock Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap">
+                                                    <Run Text="{Binding Now, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Brightness, Mode=OneWay}" />
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </WrapPanel>
                                     </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -309,23 +316,23 @@
                     </StackPanel>
                     <TextBlock Style="{StaticResource Note}" Margin="208,0,0,0" Text="Use your electricity supplier's figure for its grid; 0.40 is the world average." />
                     <TextBlock Style="{StaticResource Said}" Text="{Binding Co2Message}" Visibility="{Binding Co2Message, Converter={StaticResource VisibleWhenText}}" />
-                    <!-- The Midnight look design §1: the look, in both looks, next to the theme. -->
                     <StackPanel Style="{StaticResource Row}" Margin="0,14,0,6">
-                        <TextBlock Style="{StaticResource Label}" Text="Look" />
-                        <Border Style="{StaticResource Choices}">
-                            <StackPanel Orientation="Horizontal">
-                                <RadioButton Style="{StaticResource Choice}" Content="Classic" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Classic}}" />
-                                <RadioButton Style="{StaticResource Choice}" Content="Midnight" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Midnight}}" />
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-                    <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Theme" />
                         <Border Style="{StaticResource Choices}">
                             <StackPanel Orientation="Horizontal">
                                 <RadioButton Style="{StaticResource Choice}" Content="Like Windows" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.System}}" />
                                 <RadioButton Style="{StaticResource Choice}" Content="Dark" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Dark}}" />
                                 <RadioButton Style="{StaticResource Choice}" Content="Light" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Light}}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                    <!-- The Midnight look design §1: the look, in both looks, under the theme. -->
+                    <StackPanel Style="{StaticResource Row}">
+                        <TextBlock Style="{StaticResource Label}" Text="Look" />
+                        <Border Style="{StaticResource Choices}">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Style="{StaticResource Choice}" Content="Classic" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Classic}}" />
+                                <RadioButton Style="{StaticResource Choice}" Content="Midnight" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Midnight}}" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

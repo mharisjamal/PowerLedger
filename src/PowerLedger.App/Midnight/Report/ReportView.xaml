@@ -101,12 +101,12 @@
                                     <ColumnDefinition Width="20" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" SharedSizeGroup="Kwh" />
-                                    <ColumnDefinition Width="72" />
-                                    <ColumnDefinition Width="48" />
+                                    <ColumnDefinition Width="60" />
+                                    <ColumnDefinition Width="36" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="PART" />
                                 <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" />
-                                <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Margin="16,0,0,0" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Margin="12,0,0,0" />
                             </Grid>
                         </Border>
                         <ItemsControl ItemsSource="{Binding Data.Parts}" Focusable="False">
@@ -118,13 +118,13 @@
                                                 <ColumnDefinition Width="20" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" SharedSizeGroup="Kwh" />
-                                                <ColumnDefinition Width="72" />
-                                                <ColumnDefinition Width="48" />
+                                                <ColumnDefinition Width="60" />
+                                                <ColumnDefinition Width="36" />
                                             </Grid.ColumnDefinitions>
                                             <Ellipse x:Name="Swatch" Style="{StaticResource M.Legend.Dot}" HorizontalAlignment="Left" />
-                                            <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Secondary}" Text="{Binding Name}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Secondary}" Text="{Binding Name}" VerticalAlignment="Center" Margin="0,0,8,0" />
                                             <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Number}" Text="{Binding Energy}" VerticalAlignment="Center" />
-                                            <app:ShareBar x:Name="Share" Grid.Column="3" Style="{StaticResource M.ShareBar}" Width="56" Margin="16,0,0,0" VerticalAlignment="Center"
+                                            <app:ShareBar x:Name="Share" Grid.Column="3" Style="{StaticResource M.ShareBar}" Width="48" Margin="12,0,0,0" VerticalAlignment="Center"
                                                           Value="{Binding Fraction}" FillBrush="{DynamicResource M.PartRest}"
                                                           AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}" />
                                             <TextBlock Grid.Column="4" Style="{StaticResource M.Text.Number}" Foreground="{DynamicResource M.Ink3}" Text="{Binding Share}"
