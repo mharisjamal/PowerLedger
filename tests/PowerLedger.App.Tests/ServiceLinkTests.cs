@@ -83,6 +83,24 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         result.Error.ShouldBe("Finding PCs on the network needs Windows 10 version 1903 or later.");
     }
 
+    /// <summary>Plan 0.9: AskAgainRequest answers as an ordinary HouseholdReply, over the real pipe, the same as every
+    /// other household request — including a refusal such as not being signed in.</summary>
+    [Fact]
+    public async Task Ask_again_answers_as_a_household_reply_with_the_services_words()
+    {
+        _service.Refuse = "Sign in first to ask to join your household.";
+        (await _link.AskAgainAsync()).ShouldBe(new HouseholdOutcome(false, "Sign in first to ask to join your household."));
+    }
+
+    /// <summary>Service round, review: any request can now come back with an oversized-reply ErrorReply — shown as a
+    /// message, never a crash.</summary>
+    [Fact]
+    public async Task An_answer_too_large_to_send_comes_back_as_a_message_not_a_crash()
+    {
+        _service.Refuse = "The answer was too large to send.";
+        (await _link.AddPcAsync("inst-1")).ShouldBe(new HouseholdOutcome(false, "The answer was too large to send."));
+    }
+
     [Fact]
     public async Task A_pushed_household_notice_reaches_the_app_without_closing_the_connection()
     {

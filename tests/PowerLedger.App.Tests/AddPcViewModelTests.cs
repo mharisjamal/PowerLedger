@@ -277,6 +277,27 @@ public class AddPcViewModelTests
         model.CanCancelPairing.ShouldBeFalse();
     }
 
+    /// <summary>Service round, review: CancelPairingRequest can take up to 5 s to answer, since the pairing unwinds
+    /// first; the button greys out for the whole wait, so an impatient second click sends nothing more.</summary>
+    [Fact]
+    public void A_second_cancel_click_while_the_first_is_still_out_sends_nothing_more()
+    {
+        _link.Connect(true);
+        var model = Model();
+        model.Start();
+        model.Add.Execute(new FoundPc("inst-1", "Laptop-2", false));
+        _link.HouseholdGate = new TaskCompletionSource<HouseholdOutcome>();
+
+        model.CancelPairing.Execute(null);
+        model.CanCancelPairing.ShouldBeFalse();   // greyed out for the whole 5 s wait
+        model.CancelPairing.Execute(null);        // an impatient second click
+
+        _link.HouseholdRequests.Count(r => Equals(r, "cancelPairing")).ShouldBe(1);
+
+        _link.HouseholdGate.SetResult(new HouseholdOutcome(true, "Cancelled."));
+        model.CanCancelPairing.ShouldBeFalse();
+    }
+
     /// <summary>Review finding A3: closing the window (Dispose) cancels a pairing still under way.</summary>
     [Fact]
     public void Disposing_while_a_pairing_is_under_way_cancels_it()

@@ -37,6 +37,7 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
     private int _browseAgain;
     private DateTimeOffset? _codeExpires;
     private bool _pairingActive;
+    private bool _cancellingPairing;
     private string? _confirmPromptId;
     private string? _confirmQuestion;
     private string? _confirmCode;
@@ -155,8 +156,10 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Review finding A3: an Add or a made code is out there, and can be called off — but not while
-    /// <see cref="IsConfirming"/>, whose own Codes match / Cancel already settles it.</summary>
-    public bool CanCancelPairing => _pairingActive && !IsConfirming;
+    /// <see cref="IsConfirming"/>, whose own Codes match / Cancel already settles it, and not while a cancel already
+    /// sent is still out (service round, review: CancelPairingRequest can take up to 5 s to answer, since the pairing
+    /// unwinds first, and a second click meanwhile must not send a second one).</summary>
+    public bool CanCancelPairing => _pairingActive && !IsConfirming && !_cancellingPairing;
 
     public IRelayCommand<FoundPc> Add { get; }
 
@@ -305,11 +308,18 @@ internal sealed class AddPcViewModel : ObservableObject, IDisposable
         });
     }
 
+    /// <summary>Service round, review: this can take up to 5 s to answer, since the pairing unwinds first; the button
+    /// greys out for that whole wait, so an impatient second click sends nothing more.</summary>
     private async Task CancelPairingAsync()
     {
+        if (_cancellingPairing) return;
+        _cancellingPairing = true;
+        OnPropertyChanged(nameof(CanCancelPairing));
+        CancelPairing.NotifyCanExecuteChanged();
         var result = await _link.CancelPairingAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
+            _cancellingPairing = false;
             ResetPairing();
             Message = result.Message;
         });
