@@ -10,6 +10,8 @@ public sealed class AppPreferencesTests : IDisposable
     private readonly string _runKey = $@"Software\PowerLedger.Tests.{Guid.NewGuid():N}";
     private readonly List<ThemeChoice> _themes = [];
     private readonly List<double> _factors = [];
+    private readonly List<Look> _looks = [];
+    private string? _lookProblem;
 
     public void Dispose()
     {
@@ -20,7 +22,12 @@ public sealed class AppPreferencesTests : IDisposable
     private UiPreferencesStore Store => new(Path.Combine(_folder, "ui.json"));
 
     private AppPreferences Preferences() => new(
-        Store, UiPreferences.Default, _themes.Add, _factors.Add, new StartWithWindows(@"C:\Program Files\PowerLedger\PowerLedger.exe", _runKey));
+        Store, UiPreferences.Default, _themes.Add, _factors.Add, new StartWithWindows(@"C:\Program Files\PowerLedger\PowerLedger.exe", _runKey),
+        look =>
+        {
+            _looks.Add(look);
+            return _lookProblem;
+        });
 
     [Fact]
     public void A_theme_applies_at_once_and_is_saved()
@@ -136,6 +143,30 @@ public sealed class AppPreferencesTests : IDisposable
 
         preferences.Current.ReadMonitorBrightness.ShouldBeFalse();
         Store.Load().ReadMonitorBrightness.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_look_switches_the_window_first_and_is_then_saved()
+    {
+        var preferences = Preferences();
+
+        preferences.SetLook(Look.Midnight).ShouldBeNull();
+
+        _looks.ShouldBe(new[] { Look.Midnight });
+        preferences.Current.Look.ShouldBe(Look.Midnight);
+        Store.Load().Look.ShouldBe(Look.Midnight);
+    }
+
+    [Fact]
+    public void A_look_whose_window_would_not_open_is_not_saved_and_the_reason_comes_back()
+    {
+        _lookProblem = "Couldn't open the Midnight look: no window.";
+        var preferences = Preferences();
+
+        preferences.SetLook(Look.Midnight).ShouldBe("Couldn't open the Midnight look: no window.");
+
+        preferences.Current.Look.ShouldBe(Look.Classic);
+        Store.Load().Look.ShouldBe(Look.Classic);
     }
 
     [Fact]

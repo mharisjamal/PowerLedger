@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.IO;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -10,13 +9,12 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Threading;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
+using static PowerLedger.App.Tests.UiHarness;
 
 namespace PowerLedger.App.Tests;
 
@@ -28,13 +26,9 @@ namespace PowerLedger.App.Tests;
 [Trait("Category", "UI")]
 public class RenderingTests
 {
-    public static readonly string Folder = Path.Combine(Path.GetTempPath(), "powerledger-renders");
+    public static readonly string Folder = UiHarness.Folder;
     private static readonly DateTimeOffset Now = new(2026, 9, 8, 14, 32, 7, TimeSpan.Zero);
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
-    private static readonly Lazy<Dispatcher> Ui = new(StartUi);
-    private static ResourceDictionary? _palette;
-    private static bool _working;
-    private static Exception? _stray;
 
     private static readonly (Page Page, string Name, Action<ShellViewModel> Prepare, Func<ShellViewModel, FrameworkElement> View)[] Pages =
     [
@@ -1374,6 +1368,88 @@ public class RenderingTests
         });
     }
 
+    /// <summary>Send feedback's rail button (bug-icon glyph, spec's feedback feature): sits at the foot of the rail,
+    /// its tooltip names what it's for, and pressing it fires the App's own open request.</summary>
+    [Fact]
+    public void The_rails_feedback_button_shows_and_asks_to_open_the_window()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.2.0");
+                var window = new MainWindow
+                {
+                    DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    var button = Find<Button>(window, b => AutomationProperties.GetName(b) == "Send feedback").ShouldNotBeNull(theme.ToString());
+                    button.IsVisible.ShouldBeTrue(theme.ToString());
+                    button.ToolTip.ShouldBe("Send feedback or report a bug", theme.ToString());
+                    // App.xaml.cs wires FeedbackRequested to open the window (ShellViewModelTests covers the command
+                    // itself); this only checks the button in the rail is bound to it.
+                    button.Command.ShouldBeSameAs(shell.Feedback, theme.ToString());
+                    Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"feedback-button-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
+    /// <summary>Send feedback (spec's feedback feature): its heading, images row, log tick and Send/Cancel fit a short
+    /// screen, in both themes.</summary>
+    [Fact]
+    public void Send_feedback_shows_its_fields_and_fits_a_short_screen()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                var sender = new FeedbackSender(
+                    new FakeHttp().Client(), Path.Combine(Path.GetTempPath(), "pl-feedback-render-tests"), new FakeTimeProvider(Now));
+                var model = new FeedbackViewModel(sender, UiThreads.Inline, () => null);
+                var window = new SendFeedbackWindow(model, null, new FakeImagePicker())
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    MaxHeight = 420,
+                };
+                window.Show();
+                try
+                {
+                    Pump(TimeSpan.FromMilliseconds(300));
+                    Find<TextBlock>(window, t => t.Text == "Tell us what's wrong, or what you'd like").ShouldNotBeNull(theme.ToString());
+                    Find<TextBlock>(window, t => t.Text == "This goes to the developer's private issue tracker on GitHub.").ShouldNotBeNull(theme.ToString());
+                    Find<CheckBox>(window, c => Equals(c.Content, "Attach the log, it helps with bugs")).ShouldNotBeNull(theme.ToString())
+                        .IsChecked.ShouldBe(true, theme.ToString());
+                    window.ActualHeight.ShouldBeLessThanOrEqualTo(420);
+                    var content = (FrameworkElement)window.Content;
+                    foreach (var label in new[] { "Cancel", "Send" })
+                    {
+                        var button = Find<Button>(window, b => Equals(b.Content, label)).ShouldNotBeNull($"{label} on {theme}");
+                        button.TranslatePoint(new Point(0, button.ActualHeight), content).Y.ShouldBeLessThanOrEqualTo(content.ActualHeight, $"{label} on {theme}");
+                    }
+                    Save(window, 460, (int)window.ActualHeight, $"send-feedback-{theme}.png");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        });
+    }
+
     private static void Render()
     {
         using var saver = new FakeSaver();
@@ -1417,91 +1493,10 @@ public class RenderingTests
         File.WriteAllBytes(Path.Combine(Folder, "report.pdf"), ReportDocument.Generate(shell.Report.Data, "0.1.0", Now, English));
     }
 
-    /// <summary>Runs <paramref name="work"/> on the application's thread, and throws here what it threw there.</summary>
-    private static void OnUi(Action work)
-    {
-        ExceptionDispatchInfo? failure = null;
-        Ui.Value.Invoke(() =>
-        {
-            _working = true;
-            try
-            {
-                if (_stray is { } stray) ExceptionDispatchInfo.Capture(stray).Throw();
-                work();
-            }
-            catch (Exception error)
-            {
-                failure = ExceptionDispatchInfo.Capture(error);
-            }
-            finally
-            {
-                _working = false;
-                _stray = null;
-            }
-        });
-        failure?.Throw();
-    }
-
-    /// <summary>
-    /// Starts the application, with the App's styles, on an STA thread that runs its dispatcher until the process ends.
-    /// A failure while no test is running is kept for the next test to throw rather than ending the process.
-    /// </summary>
-    private static Dispatcher StartUi()
-    {
-        var started = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-                application.Resources.MergedDictionaries.Add(new ResourceDictionary
-                {
-                    Source = new Uri("pack://application:,,,/PowerLedger;component/Theme/Styles.xaml", UriKind.Absolute),
-                });
-                application.DispatcherUnhandledException += (_, e) =>
-                {
-                    if (_working) return;
-                    _stray = e.Exception;
-                    e.Handled = true;
-                };
-                started.SetResult(Dispatcher.CurrentDispatcher);
-            }
-            catch (Exception error)
-            {
-                started.SetException(error);
-                return;
-            }
-            Dispatcher.Run();
-        })
-        {
-            IsBackground = true,
-        };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        return started.Task.GetAwaiter().GetResult();
-    }
-
-    /// <summary>Puts <paramref name="theme"/>'s palette first among the application's dictionaries, where the App keeps it.</summary>
-    private static void UseTheme(Theme theme)
-    {
-        var merged = Application.Current.Resources.MergedDictionaries;
-        if (_palette is not null) merged.Remove(_palette);
-        _palette = ThemeManager.Palette(theme);
-        merged.Insert(0, _palette);
-    }
-
     private static ShellViewModel Shell(FakeSaver saver)
         => new(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.1.0");
 
-    private static void Save(Visual visual, int width, int height, string name)
-    {
-        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
-        var png = new PngBitmapEncoder();
-        png.Frames.Add(BitmapFrame.Create(bitmap));
-        using var file = File.Create(Path.Combine(Folder, name));
-        png.Save(file);
-    }
+    private static void Save(Visual visual, int width, int height, string name) => UiHarness.Render(visual, width, height, name);
 
     /// <summary>A Tuesday afternoon eight days into September: asleep until 07:30, a working morning, an idle patch, a peak at
     /// 14:00; and now, on battery, the two external monitors Settings lists: the Dell, on a plug of its own, counted on top of
@@ -1665,32 +1660,6 @@ public class RenderingTests
                 });
         }
         return series;
-    }
-
-    /// <summary>The first <typeparamref name="T"/> under <paramref name="root"/>, outermost first, that <paramref name="match"/> accepts.</summary>
-    private static T? Find<T>(DependencyObject root, Func<T, bool>? match = null)
-        where T : DependencyObject
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is T found && (match is null || match(found))) return found;
-            if (Find(child, match) is { } deeper) return deeper;
-        }
-        return null;
-    }
-
-    private static void Pump(TimeSpan duration)
-    {
-        var frame = new DispatcherFrame();
-        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = duration };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            frame.Continue = false;
-        };
-        timer.Start();
-        Dispatcher.PushFrame(frame);
     }
 
     private const int NearestMonitor = 2;

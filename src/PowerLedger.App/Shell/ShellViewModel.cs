@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace PowerLedger.App;
 
@@ -32,6 +33,7 @@ internal sealed class ShellViewModel : ObservableObject
         Updates = updates;
         Wizard.Finished += EndSetup;
         Settings.SetupRequested += BeginSetup;
+        Feedback = new RelayCommand(() => FeedbackRequested?.Invoke());
     }
 
     public NowViewModel Now { get; }
@@ -50,6 +52,12 @@ internal sealed class ShellViewModel : ObservableObject
 
     /// <summary>The update card in the rail (spec §13); without one the card stays hidden.</summary>
     public Updater? Updates { get; }
+
+    /// <summary>The rail's Send feedback button.</summary>
+    public IRelayCommand Feedback { get; }
+
+    /// <summary>Raised when the rail's Send feedback button is pressed; the App opens the window.</summary>
+    public event Action? FeedbackRequested;
 
     /// <summary>The page shown. A screen that reads history or the service reads while it shows and stops when it does not.</summary>
     public Page Page

@@ -12,6 +12,10 @@ internal interface IUiSettings
 
     string? Choose(ThemeChoice theme);
 
+    /// <summary>Switches the window to <paramref name="look"/>, then saves it (Midnight look design §1). When the new
+    /// window can't open, the old one stays, the choice is left as it was, and the answer says why.</summary>
+    string? SetLook(Look look);
+
     string? UseCo2(double kgPerKwh);
 
     string? StartWithWindows(bool enabled);
@@ -39,11 +43,13 @@ internal interface IUiSettings
 
 /// <summary>
 /// The App's live preferences. A theme goes to <paramref name="applyTheme"/>, a CO₂ factor to <paramref name="applyCo2"/>
-/// (the screens that show CO₂), and starting with Windows to the Run entry; each is then saved. A change applies even
-/// when ui.json cannot be written, and the answer says so.
+/// (the screens that show CO₂), starting with Windows to the Run entry, and a look to <paramref name="switchLook"/>
+/// (the look switcher, which answers with a message when the new window can't open; none means nothing to switch); each
+/// is then saved. A change applies even when ui.json cannot be written, and the answer says so.
 /// </summary>
 internal sealed class AppPreferences(
-    UiPreferencesStore store, UiPreferences initial, Action<ThemeChoice> applyTheme, Action<double> applyCo2, StartWithWindows autostart) : IUiSettings
+    UiPreferencesStore store, UiPreferences initial, Action<ThemeChoice> applyTheme, Action<double> applyCo2, StartWithWindows autostart,
+    Func<Look, string?>? switchLook = null) : IUiSettings
 {
     public UiPreferences Current { get; private set; } = initial;
 
@@ -53,6 +59,12 @@ internal sealed class AppPreferences(
     {
         applyTheme(theme);
         return Save(Current with { Theme = theme });
+    }
+
+    public string? SetLook(Look look)
+    {
+        if (switchLook?.Invoke(look) is { } problem) return problem;   // the old window stays, and so does the saved choice
+        return Save(Current with { Look = look });
     }
 
     public string? UseCo2(double kgPerKwh)
