@@ -1,4 +1,5 @@
 import { handleAdmin } from "./admin";
+import { handleHouseholdRoutes } from "./households/routes";
 import { handleConsent, handleDelete } from "./install";
 import { handleReport } from "./report";
 import { runRetention } from "./retention";
@@ -19,6 +20,9 @@ export default {
     if (url.pathname.startsWith("/admin/")) {
       return handleAdmin(request, env);
     }
+
+    const household = await handleHouseholdRoutes(request, env);
+    if (household) return household;
 
     return Response.json({ error: "Not found." }, { status: 404 });
   },
