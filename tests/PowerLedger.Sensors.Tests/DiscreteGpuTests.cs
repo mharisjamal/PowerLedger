@@ -215,4 +215,44 @@ public class DiscreteGpuTests
 
         DiscreteGpu.PreferredName([]).ShouldBeNull();
     }
+
+    [Fact]
+    public void The_inventory_names_every_card_nvidias_first()
+    {
+        VideoController Row(string name, string vendor, string pnp, ulong ram = 0) => new(name, vendor, pnp, ram);
+
+        DiscreteGpu.InventoryName(
+        [
+            Row("NVIDIA Quadro 6000", "NVIDIA", @"PCI\VEN_10DE&DEV_06D8"),
+            Row("NVIDIA GeForce GTX 1080", "NVIDIA", @"PCI\VEN_10DE&DEV_1B80"),
+        ]).ShouldBe("NVIDIA Quadro 6000 + NVIDIA GeForce GTX 1080");
+
+        DiscreteGpu.InventoryName(
+        [
+            Row("AMD Radeon RX 6800M", "Advanced Micro Devices, Inc.", @"PCI\VEN_1002&DEV_73DF"),
+            Row("NVIDIA GeForce RTX 4070", "NVIDIA", @"PCI\VEN_10DE&DEV_2786"),
+        ]).ShouldBe("NVIDIA GeForce RTX 4070 + AMD Radeon RX 6800M");
+
+        // The development laptop: its processor's graphics are not a card.
+        DiscreteGpu.InventoryName(
+        [
+            Row("Intel(R) Iris(R) Xe Graphics", "Intel Corporation", @"PCI\VEN_8086&DEV_9A49", 2147479552UL),
+            Row("NVIDIA GeForce MX330", "NVIDIA", @"PCI\VEN_10DE&DEV_1D16", 2147483648UL),
+        ]).ShouldBe("NVIDIA GeForce MX330");
+    }
+
+    [Fact]
+    public void Without_a_card_the_inventory_names_what_windows_lists_first()
+    {
+        DiscreteGpu.InventoryName(
+        [
+            new VideoController("Intel(R) Iris(R) Xe Graphics", "Intel Corporation", @"PCI\VEN_8086&DEV_9A49"),
+            new VideoController("Microsoft Remote Display Adapter", "(Standard display types)", @"SWD\REMOTEDISPLAYENUM\1"),
+        ]).ShouldBe("Intel(R) Iris(R) Xe Graphics");
+
+        // A card whose driver is not installed yet reads as Windows' stand-in.
+        DiscreteGpu.InventoryName([new VideoController("Microsoft Basic Display Adapter", "(Standard display types)", @"PCI\VEN_10DE&DEV_06D8")])
+            .ShouldBe("Microsoft Basic Display Adapter");
+        DiscreteGpu.InventoryName([]).ShouldBeNull();
+    }
 }

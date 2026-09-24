@@ -112,4 +112,37 @@ public class InventoryFactsTests
         Laptop().GpuTdpW.ShouldBe(10);
         (Laptop() with { CpuName = "Unknown Chip" }).CpuTdpW.ShouldBeNull();
     }
+
+    [Fact]
+    public void Several_cards_are_named_together_and_the_first_rates_the_machine()
+    {
+        // Feedback issue #4's workstation, with a second card beside its Quadro.
+        var workstation = Laptop() with
+        {
+            Chassis = ChassisKind.Desktop, CpuName = "Intel(R) Xeon(R) CPU E5-1650 0 @ 3.20GHz",
+            GpuName = "NVIDIA Quadro 6000 + NVIDIA GeForce GTX 1080",
+        };
+
+        workstation.GpuNames.ShouldBe(["NVIDIA Quadro 6000", "NVIDIA GeForce GTX 1080"]);
+        workstation.GpuTdpW.ShouldBe(204);
+        workstation.CpuTdpW.ShouldBe(130);
+        workstation.GpuTdpRough.ShouldBeFalse();
+        Laptop().GpuNames.ShouldBe(["NVIDIA GeForce MX330"]);
+        (Laptop() with { GpuName = null }).GpuNames.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_card_the_table_does_not_know_makes_the_gpu_rating_rough_and_the_app_is_told()
+    {
+        var odd = Laptop() with { GpuName = "NVIDIA Quadro 6000 + Matrox C900" };
+
+        odd.GpuTdpRough.ShouldBeTrue();
+        odd.GpuTdpW.ShouldBe(204);
+        Laptop().GpuTdpRough.ShouldBeFalse();
+        (Laptop() with { GpuName = null }).GpuTdpRough.ShouldBeFalse();
+
+        // The App reads the stored inventory, not the table, so the flag travels in the JSON.
+        odd.ToJson().ShouldContain("\"GpuTdpRough\":true");
+        odd.ToJson().ShouldNotContain("GpuNames");
+    }
 }

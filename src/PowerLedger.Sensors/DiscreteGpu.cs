@@ -102,9 +102,20 @@ public static partial class DiscreteGpu
     /// <summary>The PCI device id in a Plug and Play id such as "PCI\VEN_10DE&amp;DEV_06D8", or 0 when it has none.</summary>
     public static uint DeviceIdIn(string? pnpId) => Hex(DevicePart(), pnpId);
 
-    /// <summary>The graphics name the inventory records and the TDP is looked up by: an NVIDIA card first, then an AMD or
-    /// Intel card, then whatever Windows lists first. Processor graphics come last because their watts are already
-    /// inside the processor's.</summary>
+    /// <summary>The graphics name the inventory records: every card, NVIDIA's first and then the rest in the order Windows
+    /// lists them, joined with <see cref="InventoryFacts.NameSeparator"/>, as "NVIDIA Quadro 6000 + NVIDIA GeForce GTX
+    /// 1080"; or, with no card, <see cref="PreferredName"/>'s choice.</summary>
+    public static string? InventoryName(IReadOnlyList<VideoController> controllers)
+    {
+        var cards = controllers.Where(IsCard).OrderBy(card => VendorOf(card) == NvidiaVendor ? 0 : 1).Select(card => card.Name!).ToList();
+        return cards.Count > 0
+            ? string.Join(InventoryFacts.NameSeparator, cards)
+            : PreferredName(controllers.Select(controller => (controller.Name, controller.Vendor)));
+    }
+
+    /// <summary>The graphics name the inventory records when there is no card, and the one it recorded before every card
+    /// was: an NVIDIA card first, then an AMD or Intel card, then whatever Windows lists first. Processor graphics come
+    /// last because their watts are already inside the processor's.</summary>
     /// <param name="adapters">Each adapter's name and its vendor as Windows words it, e.g. "Advanced Micro Devices, Inc.".</param>
     public static string? PreferredName(IEnumerable<(string? Name, string? Vendor)> adapters)
     {

@@ -88,8 +88,7 @@ public static class HardwareInventory
         var cpuName = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT Name FROM Win32_Processor", rows =>
             rows.Count > 0 ? (rows[0]["Name"] as string)?.Trim() : null, null);
 
-        var gpuName = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT Name, AdapterCompatibility FROM Win32_VideoController", rows =>
-            DiscreteGpu.PreferredName(rows.Select(row => ((row["Name"] as string)?.Trim(), row["AdapterCompatibility"] as string))), null);
+        var gpuName = DiscreteGpu.ReadVideoControllers() is { } controllers ? DiscreteGpu.InventoryName(controllers) : null;
 
         var (sticks, ddr5) = Wmi.ReadOr(@"\\.\root\cimv2", "SELECT SMBIOSMemoryType FROM Win32_PhysicalMemory", rows =>
         {
