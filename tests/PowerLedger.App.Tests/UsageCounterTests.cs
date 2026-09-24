@@ -312,6 +312,7 @@ public partial class UsageCounterTests
     [InlineData("report")]
     [InlineData("settings")]
     [InlineData("theme")]
+    [InlineData("look")]
     [InlineData("startWithWindows")]
     [InlineData("readMonitorBrightness")]
     [InlineData("tariff")]

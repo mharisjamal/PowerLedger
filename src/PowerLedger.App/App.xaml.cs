@@ -197,6 +197,7 @@ public partial class App : Application
         var name = e.PropertyName switch
         {
             nameof(SettingsViewModel.Theme) => "theme",
+            nameof(SettingsViewModel.Look) => "look",
             nameof(SettingsViewModel.StartWithWindows) => "startWithWindows",
             nameof(SettingsViewModel.ReadMonitorBrightness) => "readMonitorBrightness",
             _ => null,
