@@ -1,0 +1,797 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:PowerLedger.App"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!-- Plan O 0.3: Midnight's styles, merged into MidnightWindow's resources so the implicit ones stay inside that window.
+         Every colour is a palette brush (Theme/Palette.Midnight.*.xaml) through DynamicResource, so the theme toggle
+         repaints in place; the numbers and the motion below are the tokens of 0.2 and 0.5. -->
+
+    <!-- Type: the bundled faces (Fonts\, plan O F1), then Windows' own. The pack form resolves from the App and from a test host alike. -->
+    <FontFamily x:Key="M.Font.Ui">pack://application:,,,/PowerLedger;component/Fonts/#Manrope, Segoe UI Variable, Segoe UI</FontFamily>
+    <FontFamily x:Key="M.Font.Numbers">pack://application:,,,/PowerLedger;component/Fonts/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
+    <FontFamily x:Key="M.Font.Glyphs">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+    <!-- The numbers of 0.2. A Border wants its radius as a CornerRadius, so the card's and the control's are also here in
+         that form; a pill's (999) is not, because a WPF Border clamps each corner per axis and draws an ellipse: a pill
+         Border sets local:Rounding.Pill and takes half its height (Rounding.cs). -->
+    <sys:Double x:Key="M.Radius.Card">14</sys:Double>
+    <sys:Double x:Key="M.Radius.Pill">999</sys:Double>
+    <sys:Double x:Key="M.Radius.Control">8</sys:Double>
+    <sys:Double x:Key="M.Blur.Tooltip">12</sys:Double>
+    <sys:Double x:Key="M.Elevation.Card">12</sys:Double>
+    <sys:Double x:Key="M.Elevation.Tooltip">20</sys:Double>
+    <CornerRadius x:Key="M.Corner.Card">14</CornerRadius>
+    <CornerRadius x:Key="M.Corner.Control">8</CornerRadius>
+
+    <!-- Motion (0.5), the lengths Motion.cs keeps. A storyboard asks {local:Motion Fast} for its Duration, so reduced motion makes the travel zero. -->
+    <Duration x:Key="M.Motion.Fast">0:0:0.15</Duration>
+    <Duration x:Key="M.Motion.Base">0:0:0.22</Duration>
+    <Duration x:Key="M.Motion.Slow">0:0:0.32</Duration>
+    <CubicEase x:Key="M.Ease.In" EasingMode="EaseOut" />
+    <CubicEase x:Key="M.Ease.Out" EasingMode="EaseIn" />
+    <BackEase x:Key="M.Ease.Pill" EasingMode="EaseOut" Amplitude="0.2" />
+
+    <!-- Text. WPF has no letter spacing on a TextBlock, so the eyebrow's air comes from its weight, its size and the Upper converter. -->
+    <Style x:Key="M.Text.Body" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+    </Style>
+    <Style x:Key="M.Text.Secondary" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+    </Style>
+    <Style x:Key="M.Text.Muted" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink3}" />
+    </Style>
+    <Style x:Key="M.Text.Heading" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="M.Text.Title" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+        <Setter Property="FontSize" Value="20" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="M.Text.Eyebrow" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink3}" />
+    </Style>
+    <Style x:Key="M.Text.Number" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Numbers}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
+    </Style>
+    <Style x:Key="M.Text.Display" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Number}">
+        <Setter Property="FontSize" Value="36" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="M.Text.Glyph" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Glyphs}" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- The focus ring (0.2 M.Focus): 2 px outside the control, for every Midnight control and, through the system key, anything else in the window. -->
+    <Style x:Key="M.Focus.Ring">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Rectangle Margin="-3" Stroke="{DynamicResource M.Focus}" StrokeThickness="2" RadiusX="8" RadiusY="8" SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="{x:Static SystemParameters.FocusVisualStyleKey}" BasedOn="{StaticResource M.Focus.Ring}" />
+
+    <!-- Surfaces. A card floats on a shadow the palette colours (Elevation); hovering lifts it by 4 (0.5). -->
+    <Style x:Key="M.Card.Flat" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource M.Panel}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource M.LineStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource M.Corner.Card}" />
+        <Setter Property="Padding" Value="20" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+    <Style x:Key="M.Card" TargetType="Border" BasedOn="{StaticResource M.Card.Flat}">
+        <Setter Property="local:Elevation.Shadow" Value="{DynamicResource M.Shadow}" />
+        <Setter Property="local:Elevation.Depth" Value="{StaticResource M.Elevation.Card}" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Trigger.EnterActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetProperty="(local:Elevation.Depth)" To="16" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.In}" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetProperty="(local:Elevation.Depth)" To="12" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.Out}" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.ExitActions>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Glass (CLAUDE.md): a translucent fill over content with a 1 px edge, worn only by the top bar and tooltips. The 1 px
+         highlight along the inside of the top edge, where light catches a polished rim, is a Rectangle in M.Glass.Highlight
+         as the first child, because a Border draws one background and one edge. -->
+    <Style x:Key="M.Glass" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource M.GlassFill}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource M.GlassBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource M.Corner.Control}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+    <Style x:Key="M.Glass.Highlight" TargetType="Rectangle">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="VerticalAlignment" Value="Top" />
+        <Setter Property="Margin" Value="6,0" />
+        <Setter Property="Fill" Value="{DynamicResource M.GlassHighlight}" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+    </Style>
+
+    <!-- Navigation. The pill behind the current item is one Border in M.NavPill that the sidebar moves (0.5), so an item
+         paints only its glyph and label: in M.Ink2 at rest, over a raised wash under the pointer, and in M.OnAccent when
+         checked, crossfading over the pill's travel so white text is never alone on a light panel. -->
+    <Style x:Key="M.NavGroup" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Eyebrow}">
+        <Setter Property="Margin" Value="24,18,16,6" />
+    </Style>
+    <Style x:Key="M.NavPill" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource M.Accent}" />
+        <Setter Property="local:Rounding.Pill" Value="True" />
+        <Setter Property="Height" Value="40" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+    </Style>
+    <Style x:Key="M.NavItem" TargetType="RadioButton">
+        <Setter Property="Height" Value="40" />
+        <Setter Property="Margin" Value="12,0,12,2" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource M.Focus.Ring}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Hover" Background="{DynamicResource M.Raised}" local:Rounding.Pill="True" Opacity="0" />
+                        <Grid Margin="{TemplateBinding Padding}">
+                            <StackPanel x:Name="Rest" Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource M.Text.Glyph}" Width="20" Text="{TemplateBinding Tag}" Foreground="{TemplateBinding Foreground}" />
+                                <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel x:Name="Active" Orientation="Horizontal" Opacity="0" TextElement.Foreground="{DynamicResource M.OnAccent}">
+                                <TextBlock Style="{StaticResource M.Text.Glyph}" Width="20" Text="{TemplateBinding Tag}" Foreground="{DynamicResource M.OnAccent}" />
+                                <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Hover" Property="Visibility" Value="Collapsed" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Active" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Base, Fade=True}" EasingFunction="{StaticResource M.Ease.In}" />
+                                        <DoubleAnimation Storyboard.TargetName="Rest" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Base, Fade=True}" EasingFunction="{StaticResource M.Ease.In}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Active" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                                        <DoubleAnimation Storyboard.TargetName="Rest" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="M.Badge" TargetType="ContentControl">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Border Background="{DynamicResource M.Accent}" local:Rounding.Pill="True" MinWidth="18" Height="18" Padding="5,0">
+                        <TextBlock Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" FontFamily="{StaticResource M.Font.Numbers}" FontSize="10.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource M.OnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <!-- Nothing to count, nothing to show. -->
+            <Trigger Property="Content" Value="{x:Null}">
+                <Setter Property="Visibility" Value="Collapsed" />
+            </Trigger>
+            <DataTrigger Binding="{Binding Content, RelativeSource={RelativeSource Self}}" Value="0">
+                <Setter Property="Visibility" Value="Collapsed" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Buttons (0.5): the pointer lights a wash over the face, a press squeezes it to 0.97 about its centre, and the
+         release springs back. The wash is a layer that fades (Wash), so no palette brush is ever animated. -->
+    <ControlTemplate x:Key="M.Button.Face" TargetType="Button">
+        <Border x:Name="Face" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{Binding (local:Wash.Corner), RelativeSource={RelativeSource TemplatedParent}}"
+                SnapsToDevicePixels="True" RenderTransformOrigin="0.5,0.5">
+            <Border.RenderTransform>
+                <ScaleTransform x:Name="Press" ScaleX="1" ScaleY="1" />
+            </Border.RenderTransform>
+            <Grid>
+                <Border x:Name="Wash" Opacity="0" CornerRadius="{Binding CornerRadius, ElementName=Face}">
+                    <Border Background="{Binding (local:Wash.Brush), RelativeSource={RelativeSource TemplatedParent}}"
+                            Opacity="{Binding (local:Wash.Strength), RelativeSource={RelativeSource TemplatedParent}}"
+                            CornerRadius="{Binding CornerRadius, ElementName=Face}" />
+                </Border>
+                <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True" />
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Trigger.EnterActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Trigger.EnterActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.Out}" />
+                            <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.Out}" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleX" To="1" Duration="{local:Motion Base}" EasingFunction="{StaticResource M.Ease.Pill}" />
+                            <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="ScaleY" To="1" Duration="{local:Motion Base}" EasingFunction="{StaticResource M.Ease.Pill}" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.5" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+    <Style x:Key="M.Button.Quiet" TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="local:Wash.Corner" Value="{StaticResource M.Corner.Control}" />
+        <Setter Property="local:Wash.Brush" Value="{DynamicResource M.Raised}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource M.Focus.Ring}" />
+        <Setter Property="Template" Value="{StaticResource M.Button.Face}" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="M.Button.Outline" TargetType="Button" BasedOn="{StaticResource M.Button.Quiet}">
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource M.LineStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="14,0" />
+    </Style>
+    <Style x:Key="M.Button.Primary" TargetType="Button" BasedOn="{StaticResource M.Button.Quiet}">
+        <Setter Property="Foreground" Value="{DynamicResource M.OnAccent}" />
+        <Setter Property="Background" Value="{DynamicResource M.Accent}" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="local:Wash.Brush" Value="{DynamicResource M.OnAccent}" />
+        <Setter Property="local:Wash.Strength" Value="0.14" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource M.OnAccent}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="M.IconButton" TargetType="Button" BasedOn="{StaticResource M.Button.Quiet}">
+        <Setter Property="Width" Value="36" />
+        <Setter Property="Height" Value="36" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Glyphs}" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="local:Wash.Corner" Value="18" />
+    </Style>
+
+    <!-- Range pills: a row of radio buttons on a raised track (M.PillTrack); the chosen one is filled with the accent. -->
+    <Style x:Key="M.PillTrack" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource M.Raised}" />
+        <Setter Property="local:Rounding.Pill" Value="True" />
+        <Setter Property="Padding" Value="3" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="M.Pill" TargetType="RadioButton">
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource M.Focus.Ring}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Grid>
+                        <Border x:Name="Face" Background="Transparent" local:Rounding.Pill="True" SnapsToDevicePixels="True" />
+                        <Border x:Name="Hover" Background="{DynamicResource M.Line}" local:Rounding.Pill="True" Opacity="0" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="1" Duration="{local:Motion Fast, Fade=True}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity" To="0" Duration="{local:Motion Fast, Fade=True}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource M.Accent}" />
+                            <Setter TargetName="Hover" Property="Visibility" Value="Collapsed" />
+                            <Setter Property="Foreground" Value="{DynamicResource M.OnAccent}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A switch: a track that turns accent and a knob that slides 16 px (0.5). -->
+    <Style x:Key="M.Switch" TargetType="ToggleButton">
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource M.Focus.Ring}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <Grid Width="36" Height="20" VerticalAlignment="Center">
+                            <Border x:Name="Track" Background="{DynamicResource M.LineStrong}" local:Rounding.Pill="True" />
+                            <Border Width="14" Height="14" Margin="3,0" HorizontalAlignment="Left" Background="{DynamicResource M.OnAccent}" local:Rounding.Pill="True">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="Knob" X="0" />
+                                </Border.RenderTransform>
+                            </Border>
+                        </Grid>
+                        <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource M.Accent}" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="X" To="16" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.In}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="X" To="0" Duration="{local:Motion Fast}" EasingFunction="{StaticResource M.Ease.In}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A typed value: a well in the ground colour that takes the accent edge while it has the keyboard. -->
+    <Style x:Key="M.Field" TargetType="TextBox">
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Numbers}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource M.Ink}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource M.AccentSoft}" />
+        <Setter Property="Background" Value="{DynamicResource M.Ground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource M.LineStrong}" />
+        <Setter Property="Padding" Value="8,5" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource M.Corner.Control}" SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource M.Ink3}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource M.Accent}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A yes or no: a rounded square that fills with the accent and a tick. -->
+    <Style x:Key="M.Tick" TargetType="CheckBox">
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource M.Focus.Ring}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <Border x:Name="Box" Width="16" Height="16" BorderBrush="{DynamicResource M.LineStrong}" BorderThickness="1" CornerRadius="4"
+                                Background="{DynamicResource M.Ground}" VerticalAlignment="Center" SnapsToDevicePixels="True">
+                            <Path x:Name="Mark" Data="M3.5,8 L6.5,11 L12.5,4.5" Stroke="{DynamicResource M.OnAccent}" StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed" />
+                        </Border>
+                        <ContentPresenter Margin="9,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource M.Ink3}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource M.Accent}" />
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource M.Accent}" />
+                            <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Quality chips, in the manner of the reference's stage chips: a tinted pill with the quality's own ink. -->
+    <ControlTemplate x:Key="M.Chip.Face" TargetType="ContentControl">
+        <Border Background="{TemplateBinding Background}" local:Rounding.Pill="True" Height="22" Padding="9,0" SnapsToDevicePixels="True">
+            <TextBlock Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" FontFamily="{StaticResource M.Font.Ui}" FontSize="11" FontWeight="SemiBold"
+                       Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
+        </Border>
+    </ControlTemplate>
+    <Style x:Key="M.Chip.Measured" TargetType="ContentControl">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="Content" Value="Measured" />
+        <Setter Property="Background" Value="{DynamicResource M.ChipMeasured}" />
+        <Setter Property="Foreground" Value="{DynamicResource M.ChipMeasuredText}" />
+        <Setter Property="Template" Value="{StaticResource M.Chip.Face}" />
+    </Style>
+    <Style x:Key="M.Chip.Calibrated" TargetType="ContentControl" BasedOn="{StaticResource M.Chip.Measured}">
+        <Setter Property="Content" Value="Calibrated" />
+        <Setter Property="Background" Value="{DynamicResource M.ChipCalibrated}" />
+        <Setter Property="Foreground" Value="{DynamicResource M.ChipCalibratedText}" />
+    </Style>
+    <Style x:Key="M.Chip.Estimated" TargetType="ContentControl" BasedOn="{StaticResource M.Chip.Measured}">
+        <Setter Property="Content" Value="Estimated" />
+        <Setter Property="Background" Value="{DynamicResource M.ChipEstimated}" />
+        <Setter Property="Foreground" Value="{DynamicResource M.ChipEstimatedText}" />
+    </Style>
+    <!-- The same chip chosen by a Quality, for a row whose quality is data. -->
+    <Style x:Key="M.Chip" TargetType="local:QualityBadge">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="Background" Value="{DynamicResource M.ChipMeasured}" />
+        <Setter Property="Foreground" Value="{DynamicResource M.ChipMeasuredText}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="local:QualityBadge">
+                    <Border x:Name="Root" Background="{TemplateBinding Background}" local:Rounding.Pill="True" Height="22" Padding="9,0" SnapsToDevicePixels="True">
+                        <TextBlock x:Name="Label" Text="Measured" FontFamily="{StaticResource M.Font.Ui}" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Quality" Value="{x:Null}">
+                            <Setter TargetName="Root" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="Quality" Value="Calibrated">
+                            <Setter Property="Background" Value="{DynamicResource M.ChipCalibrated}" />
+                            <Setter Property="Foreground" Value="{DynamicResource M.ChipCalibratedText}" />
+                            <Setter TargetName="Label" Property="Text" Value="Calibrated" />
+                        </Trigger>
+                        <Trigger Property="Quality" Value="Estimated">
+                            <Setter Property="Background" Value="{DynamicResource M.ChipEstimated}" />
+                            <Setter Property="Foreground" Value="{DynamicResource M.ChipEstimatedText}" />
+                            <Setter TargetName="Label" Property="Text" Value="Estimated" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Status pills: a coloured dot (the Foreground) and the words in ink on a raised pill. -->
+    <ControlTemplate x:Key="M.StatusPill.Face" TargetType="ContentControl">
+        <Border Background="{DynamicResource M.Raised}" BorderBrush="{DynamicResource M.Line}" BorderThickness="1" local:Rounding.Pill="True"
+                Height="26" Padding="10,0,12,0" SnapsToDevicePixels="True">
+            <StackPanel Orientation="Horizontal">
+                <Ellipse Width="8" Height="8" Fill="{TemplateBinding Foreground}" VerticalAlignment="Center" />
+                <TextBlock Margin="7,0,0,0" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" FontFamily="{StaticResource M.Font.Ui}" FontSize="12"
+                           FontWeight="SemiBold" Foreground="{DynamicResource M.Ink}" VerticalAlignment="Center" />
+            </StackPanel>
+        </Border>
+    </ControlTemplate>
+    <Style x:Key="M.StatusPill.Good" TargetType="ContentControl">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Good}" />
+        <Setter Property="Template" Value="{StaticResource M.StatusPill.Face}" />
+    </Style>
+    <Style x:Key="M.StatusPill.Warn" TargetType="ContentControl" BasedOn="{StaticResource M.StatusPill.Good}">
+        <Setter Property="Foreground" Value="{DynamicResource M.Warn}" />
+    </Style>
+    <Style x:Key="M.StatusPill.Bad" TargetType="ContentControl" BasedOn="{StaticResource M.StatusPill.Good}">
+        <Setter Property="Foreground" Value="{DynamicResource M.Bad}" />
+    </Style>
+
+    <!-- Tables: an eyebrow header over a hairline, rows 44 px tall that lift under the pointer, and the track a share bar runs in. -->
+    <Style x:Key="M.Table.Header" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="0,0,0,10" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+    <Style x:Key="M.Table.Row" TargetType="Border">
+        <Setter Property="MinHeight" Value="44" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource M.Raised}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <!-- The track takes the hairline colour: raised on white would not show in the light theme. -->
+    <Style x:Key="M.ShareTrack" TargetType="Border">
+        <Setter Property="Height" Value="6" />
+        <Setter Property="Background" Value="{DynamicResource M.Line}" />
+        <Setter Property="local:Rounding.Pill" Value="True" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- Implicit styles, scoped to the window this dictionary is merged into. -->
+    <Style TargetType="Button" BasedOn="{StaticResource M.Button.Quiet}" />
+    <Style TargetType="TextBox" BasedOn="{StaticResource M.Field}" />
+    <Style TargetType="CheckBox" BasedOn="{StaticResource M.Tick}" />
+
+    <!-- Thin scroll bars: a strong-hairline thumb, no arrows, 8 px. -->
+    <Style x:Key="M.ScrollThumb" TargetType="Thumb">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border CornerRadius="4" Background="{DynamicResource M.LineStrong}" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="M.ScrollPage" TargetType="RepeatButton">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="Transparent" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="ScrollBar">
+        <Setter Property="Width" Value="8" />
+        <Setter Property="MinWidth" Value="8" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Track x:Name="PART_Track" IsDirectionReversed="True" Margin="1,4">
+                        <Track.DecreaseRepeatButton>
+                            <RepeatButton Style="{StaticResource M.ScrollPage}" Command="ScrollBar.PageUpCommand" />
+                        </Track.DecreaseRepeatButton>
+                        <Track.IncreaseRepeatButton>
+                            <RepeatButton Style="{StaticResource M.ScrollPage}" Command="ScrollBar.PageDownCommand" />
+                        </Track.IncreaseRepeatButton>
+                        <Track.Thumb>
+                            <Thumb Style="{StaticResource M.ScrollThumb}" />
+                        </Track.Thumb>
+                    </Track>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Height" Value="8" />
+                <Setter Property="MinHeight" Value="8" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ScrollBar">
+                            <Track x:Name="PART_Track" Margin="4,1">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource M.ScrollPage}" Command="ScrollBar.PageLeftCommand" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource M.ScrollPage}" Command="ScrollBar.PageRightCommand" />
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource M.ScrollThumb}" />
+                                </Track.Thumb>
+                            </Track>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Tooltips: glass over a frosted snapshot of what they cover (Glass), lifted on a shadow, fading in (0.5). The 8 px margin is the shadow's room. -->
+    <Style TargetType="ToolTip">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="HasDropShadow" Value="False" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Grid x:Name="Root" Margin="8" Opacity="0">
+                        <Grid local:Glass.Backdrop="True" local:Glass.Blur="{StaticResource M.Blur.Tooltip}" local:Glass.Radius="{StaticResource M.Radius.Control}" />
+                        <Border Style="{StaticResource M.Glass}" Padding="{TemplateBinding Padding}"
+                                local:Elevation.Shadow="{DynamicResource M.Shadow}" local:Elevation.Depth="{StaticResource M.Elevation.Tooltip}">
+                            <Grid>
+                                <Rectangle Style="{StaticResource M.Glass.Highlight}" />
+                                <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <EventTrigger RoutedEvent="Loaded">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="{local:Motion Fast, Fade=True}" EasingFunction="{StaticResource M.Ease.In}" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Menus: a raised panel on a shadow; items light under the pointer. Glass stays with the top bar and tooltips (CLAUDE.md). -->
+    <Style TargetType="ContextMenu">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="HasDropShadow" Value="False" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContextMenu">
+                    <Border Margin="8" Background="{DynamicResource M.Panel}" BorderBrush="{DynamicResource M.LineStrong}" BorderThickness="1"
+                            CornerRadius="{StaticResource M.Corner.Control}" Padding="4" SnapsToDevicePixels="True"
+                            local:Elevation.Shadow="{DynamicResource M.Shadow}" local:Elevation.Depth="{StaticResource M.Elevation.Tooltip}">
+                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="MenuItem">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border x:Name="Face" Background="Transparent" CornerRadius="6" Padding="10,6" SnapsToDevicePixels="True">
+                        <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource M.Raised}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>
