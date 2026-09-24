@@ -111,6 +111,7 @@ internal sealed partial class GitHubReleaseFeed(HttpClient http, Uri latest, str
         {
             Architecture.X64 => [$"PowerLedger-{number}-setup-x64.exe", universal],
             Architecture.Arm64 => [$"PowerLedger-{number}-setup-arm64.exe", universal],
+            Architecture.X86 => [$"PowerLedger-{number}-setup-x86.exe", universal],
             _ => [universal],
         };
     }

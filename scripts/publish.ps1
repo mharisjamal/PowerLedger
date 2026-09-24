@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Publishes the App and the service, self-contained, for x64 and Arm64 Windows (spec §13), into
+Publishes the App and the service, self-contained, for x64, Arm64 and 32-bit x86 Windows (spec §13), into
 artifacts\publish\<runtime>.
 
 .DESCRIPTION
@@ -14,7 +14,7 @@ artifacts\publish is emptied first, so an installer is never built from two diff
 The configuration to publish; Release by default.
 
 .PARAMETER Runtime
-The runtimes to publish for; win-x64 and win-arm64 by default. The installer needs both.
+The runtimes to publish for; win-x64, win-arm64 and win-x86 by default. The installer needs all three.
 
 .PARAMETER GoogleClientSecret
 Google's Desktop OAuth client secret (households design §7), built into the App's own assembly metadata
@@ -24,7 +24,7 @@ machine building; this script never prints it.
 #>
 param(
     [string]$Configuration = 'Release',
-    [string[]]$Runtime = @('win-x64', 'win-arm64'),
+    [string[]]$Runtime = @('win-x64', 'win-arm64', 'win-x86'),
     [string]$GoogleClientSecret = ''
 )
 

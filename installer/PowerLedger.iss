@@ -34,10 +34,14 @@ OutputBaseFilename=PowerLedger-{#AppVersion}-setup-x64
 ArchitecturesAllowed=arm64
 ArchitecturesInstallIn64BitMode=arm64
 OutputBaseFilename=PowerLedger-{#AppVersion}-setup-arm64
+#elif Architecture == "x86"
+; 32-bit Windows only: a 64-bit Windows gets its own native build from the other installers.
+ArchitecturesAllowed=x86os
+OutputBaseFilename=PowerLedger-{#AppVersion}-setup-x86
 #else
-; A native build for each: x64 Windows gets the x64 build, Arm64 Windows 10 and 11 the Arm64 build (see [Files]).
-; 32-bit Windows is refused with Inno Setup's own message.
-ArchitecturesAllowed=x64os or arm64
+; A native build for each: x64 Windows gets the x64 build, Arm64 Windows 10 and 11 the Arm64 build, and 32-bit Windows
+; the x86 build, installed in 32-bit mode (see [Files]).
+ArchitecturesAllowed=x64os or arm64 or x86os
 ArchitecturesInstallIn64BitMode=x64os or arm64
 OutputBaseFilename=PowerLedger-{#AppVersion}-setup
 #endif
@@ -75,15 +79,19 @@ UninstallLogging=yes
 
 [Files]
 ; Each build carries its own runtime; the Check installs the one for this PC. x64 comes first, so x64 PCs, most of
-; them, unpack only their own build; Arm64 PCs read through the x64 build first, a few seconds. One stream, rather than
-; a chunk per build, keeps the installer 12 MB smaller, because the builds share many identical files.
-#if Architecture != "arm64"
-Source: "{#Publish}\win-x64\App\*"; DestDir: "{app}"; Check: not IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#Publish}\win-x64\Service\*"; DestDir: "{app}\Service"; Check: not IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
+; them, unpack only their own build; Arm64 and x86 PCs read through the builds before theirs first, a few seconds. One
+; stream, rather than a chunk per build, keeps the installer smaller, because the builds share many identical files.
+#if Architecture == "both" || Architecture == "x64"
+Source: "{#Publish}\win-x64\App\*"; DestDir: "{app}"; Check: IsX64OS; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Publish}\win-x64\Service\*"; DestDir: "{app}\Service"; Check: IsX64OS; Flags: ignoreversion recursesubdirs createallsubdirs
 #endif
-#if Architecture != "x64"
+#if Architecture == "both" || Architecture == "arm64"
 Source: "{#Publish}\win-arm64\App\*"; DestDir: "{app}"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#Publish}\win-arm64\Service\*"; DestDir: "{app}\Service"; Check: IsArm64; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
+#if Architecture == "both" || Architecture == "x86"
+Source: "{#Publish}\win-x86\App\*"; DestDir: "{app}"; Check: IsX86OS; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Publish}\win-x86\Service\*"; DestDir: "{app}\Service"; Check: IsX86OS; Flags: ignoreversion recursesubdirs createallsubdirs
 #endif
 
 [Icons]
@@ -275,6 +283,8 @@ function BuildName: string;
 begin
   if IsArm64 then
     Result := 'Arm64'
+  else if IsX86OS then
+    Result := 'x86'
   else
     Result := 'x64';
 end;

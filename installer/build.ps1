@@ -7,7 +7,7 @@ Needs Inno Setup 7.1 or later (https://jrsoftware.org/isinfo.php); installer\get
 Inno Setup 6's 32-bit compiler can't use the 256 MB compression dictionary the script sets. Uses -Iscc when given, else
 Inno Setup 7 installed for this user or for everyone, else an ISCC.exe on PATH that is Inno Setup 7; it refuses older ones.
 The version comes from Directory.Build.props, so the installer and the programs always agree.
-The installer holds the x64 and the Arm64 build, each with its own .NET runtime, and downloads nothing. Its strong
+The installer holds the x64, the Arm64 and the 32-bit x86 build, each with its own .NET runtime, and downloads nothing. Its strong
 compression takes a few minutes; -Fast is quicker and makes a bigger installer.
 Google's Desktop OAuth client secret comes from POWERLEDGER_GOOGLE_CLIENT_SECRET, else
 %USERPROFILE%\.powerledger\google-client-secret.txt, and is never printed; with neither, the build still succeeds, with
@@ -30,7 +30,7 @@ Also compiles the build the installer test needs into installer\output\test: the
 It is compressed with lzma2/fast, since the test doesn't care about its size.
 
 .PARAMETER For
-Which installers to compile: `both` holds every build, `x64` and `arm64` only their own and are about 40% smaller,
+Which installers to compile: `both` holds every build, `x64`, `arm64` and `x86` only their own and are much smaller,
 which is what an update downloads.
 #>
 param(
@@ -39,7 +39,7 @@ param(
     [switch]$SkipPublish,
     [switch]$Fast,
     [switch]$TestVariants,
-    [ValidateSet('both', 'x64', 'arm64')]
+    [ValidateSet('both', 'x64', 'arm64', 'x86')]
     [string[]]$For = @('both')
 )
 
@@ -113,6 +113,7 @@ function Payload([string]$Architecture) {
     $bytes = switch ($Architecture) {
         'x64' { $sizes['win-x64'] }
         'arm64' { $sizes['win-arm64'] }
+        'x86' { $sizes['win-x86'] }
         default { ($sizes.Values | Measure-Object -Maximum).Maximum }
     }
     "/DPayloadBytes=$([long]$bytes)"

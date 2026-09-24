@@ -6,9 +6,9 @@ as an update.
 
 .DESCRIPTION
 Run it from main, clean and pushed: the release is tagged at that commit. It refuses a version already released, builds
-the universal installer and one per architecture with installer\build.ps1 -For both,x64,arm64 (or uses the ones already
+the universal installer and one per architecture with installer\build.ps1 -For both,x64,arm64,x86 (or uses the ones already
 in installer\output with -SkipBuild), since an update downloads whichever matches the PC, creates the release vX.Y.Z with
-the notes in -Notes and all three installers attached, and checks that the SHA-256 GitHub lists for each is the local
+the notes in -Notes and all four installers attached, and checks that the SHA-256 GitHub lists for each is the local
 file's, since every installed copy checks its download against that digest (spec §13). -Draft makes a draft, which
 nobody is offered until it is published on GitHub.
 
@@ -43,6 +43,7 @@ $installers = @(
     Join-Path $root "installer\output\PowerLedger-$version-setup.exe"
     Join-Path $root "installer\output\PowerLedger-$version-setup-x64.exe"
     Join-Path $root "installer\output\PowerLedger-$version-setup-arm64.exe"
+    Join-Path $root "installer\output\PowerLedger-$version-setup-x86.exe"
 )
 
 # The release is tagged at the commit that was built, which must be main as GitHub has it.
@@ -56,8 +57,8 @@ if ($head -ne $pushed) { throw "main ($head) isn't what GitHub has ($pushed); pu
 gh release view $tag --repo $Repo --json tagName *> $null
 if ($LASTEXITCODE -eq 0) { throw "$tag is already released; raise <Version> in Directory.Build.props for a new one." }
 
-if (-not $SkipBuild) { & (Join-Path $root 'installer\build.ps1') -For both,x64,arm64 }
-foreach ($file in $installers) { if (-not (Test-Path $file)) { throw "There is no installer at $file; build it with installer\build.ps1 -For both,x64,arm64." } }
+if (-not $SkipBuild) { & (Join-Path $root 'installer\build.ps1') -For both,x64,arm64,x86 }
+foreach ($file in $installers) { if (-not (Test-Path $file)) { throw "There is no installer at $file; build it with installer\build.ps1 -For both,x64,arm64,x86." } }
 $shas = @{}
 foreach ($file in $installers) { $shas[(Split-Path $file -Leaf)] = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() }
 

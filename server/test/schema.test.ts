@@ -16,6 +16,13 @@ describe("firstSchemaError", () => {
     expect(typeof error?.error).toBe("string");
   });
 
+  it("accepts each architecture PowerLedger is built for, and no other", () => {
+    for (const arch of ["x64", "arm64", "x86"]) {
+      expect(firstSchemaError({ ...validFull, arch })).toBeNull();
+    }
+    expect(firstSchemaError({ ...validFull, arch: "arm32" })).not.toBeNull();
+  });
+
   it("refuses share without power", () => {
     expect(firstSchemaError(invalidShareWithoutPower)).not.toBeNull();
   });

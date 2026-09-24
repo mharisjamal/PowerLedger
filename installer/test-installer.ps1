@@ -14,7 +14,7 @@ and printed as PASS, FAIL or SKIP, and the exit code is the number of failures. 
 The default steps are silent, so CI can run them: Preflight, Install, Service, Data, Recovery, ServiceStop, Upgrade,
 UninstallKeep, Reinstall, Architecture, Cleanup. Upgrade runs setup as the App's Restart to update does, with /UPDATE=1, and checks
 that the App opens again; UninstallKeep then closes it. Architecture installs the per-architecture build an update would
-download, `-x64` or `-arm64` to match this PC, over what Reinstall left, and is skipped when that installer wasn't built.
+download, `-x64`, `-arm64` or `-x86` to match this PC, over what Reinstall left, and is skipped when that installer wasn't built.
 Three more need a desktop. InstallWizard and UninstallDelete
 start setup or the uninstaller and answer it themselves (InstallWizard installs with the wizard, as somebody new to
 PowerLedger would, for a clean Windows such as Windows Sandbox); DriveWizard waits for a setup somebody else started,
@@ -76,7 +76,7 @@ $ExpectedRules = @(                             # what the service puts on the d
     'S-1-5-32-545 Allow ReadAndExecute, Synchronize (ContainerInherit, ObjectInherit; None)'
 )
 $MessageBoxIds = @{ Yes = '6'; No = '7'; OK = '1', '2'; Cancel = '2' }   # control ids of a message box's buttons
-$PeMachines = @{ X64 = 0x8664; Arm64 = 0xAA64 }  # a PE header's machine field, for each Windows PowerLedger has a build for
+$PeMachines = @{ X64 = 0x8664; Arm64 = 0xAA64; X86 = 0x014C }  # a PE header's machine field, for each Windows PowerLedger has a build for
 
 $ResultsFile = Join-Path $Results 'results.jsonl'
 $PreflightMarker = Join-Path $Results 'preflight-found-no-data.txt'
@@ -237,7 +237,7 @@ function Test-FirewallRule {
         "$($rule.Direction) $($rule.Action), profile $($rule.Profile), enabled $($rule.Enabled), $program, $protocol, from $remote"
 }
 
-# The machine a program is built for, from its PE header: 0x8664 for x64, 0xAA64 for Arm64.
+# The machine a program is built for, from its PE header: 0x8664 for x64, 0xAA64 for Arm64, 0x014C for x86.
 function Get-PeMachine([string]$Path) {
     $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($Path))
     try {
@@ -692,10 +692,10 @@ function Step-Reinstall {
 
 # The per-architecture installer an update downloads: it must install over what is already there, on this PC's architecture.
 function Step-Architecture {
-    $architecture = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'x64' }
+    $architecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) { 'Arm64' { 'arm64' } 'X86' { 'x86' } default { 'x64' } }
     $own = Join-Path $output "PowerLedger-$version-setup-$architecture.exe"
     if (-not (Test-Path $own)) {
-        Skip Architecture "the $architecture installer installs over what is there" "no $([IO.Path]::GetFileName($own)); build it with installer\build.ps1 -For both,x64,arm64"
+        Skip Architecture "the $architecture installer installs over what is there" "no $([IO.Path]::GetFileName($own)); build it with installer\build.ps1 -For both,x64,arm64,x86"
         return
     }
     Check Architecture "the $architecture installer exits 0" { $code = Invoke-Setup $own $Silent; Assert ($code -eq 0) "exit code $code" }

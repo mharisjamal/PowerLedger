@@ -132,6 +132,7 @@ public sealed class UpdateDownloaderTests : IDisposable
             "PowerLedger-0.3.0-setup.exe", "PowerLedger-0.3.0-setup.exe.partial", "notes.txt",
             "PowerLedger-0.1.0-setup-x64.exe", "PowerLedger-0.2.0-setup-x64.exe", "PowerLedger-0.2.0-setup-x64.log",
             "PowerLedger-0.1.0-setup-arm64.exe", "PowerLedger-0.3.0-setup-arm64.exe",
+            "PowerLedger-0.1.0-setup-x86.exe", "PowerLedger-0.3.0-setup-x86.exe",
         })
         {
             File.WriteAllText(Path.Combine(_folder, name), name);
@@ -142,7 +143,7 @@ public sealed class UpdateDownloaderTests : IDisposable
         Files().ShouldBe(new[]
         {
             "PowerLedger-0.2.0-setup-x64.log", "PowerLedger-0.2.0-setup.log", "PowerLedger-0.3.0-setup-arm64.exe",
-            "PowerLedger-0.3.0-setup.exe", "notes.txt",
+            "PowerLedger-0.3.0-setup-x86.exe", "PowerLedger-0.3.0-setup.exe", "notes.txt",
         });
     }
 
