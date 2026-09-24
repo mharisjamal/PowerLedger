@@ -195,6 +195,28 @@ public partial class UsageCounterTests
     }
 
     [Fact]
+    public async Task A_status_read_from_before_the_users_own_answer_does_not_undo_it()
+    {
+        _link.Connect(true);
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, false, false, false));
+        var gate = new TaskCompletionSource<ServiceStatus?>();
+        _link.StatusGate = gate;
+        var counter = Model();
+        var flush = counter.FlushAsync();                                          // a status read under way, from before
+
+        counter.ConsentChanged(new Consent(ConsentText.Version, false, true, false, false));   // the user turns Usage on
+        counter.CountAppOpen();                                                    // counted after consent
+        gate.SetResult(_link.Status);                                              // the old read comes back: off
+        await flush;
+
+        _link.StatusGate = null;
+        _link.Status = Statuses.WithSharing(new Consent(ConsentText.Version, false, true, false, false));
+        await counter.FlushAsync();
+
+        _link.Writes.OfType<UsageCounts>().Single().AppOpens.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task A_count_made_while_a_flush_is_in_flight_survives_it()
     {
         _link.Connect(true);

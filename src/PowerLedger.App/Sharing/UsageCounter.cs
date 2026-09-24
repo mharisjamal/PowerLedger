@@ -24,6 +24,7 @@ internal sealed class UsageCounter : IDisposable
     private readonly Lock _gate = new();
     private ITimer? _periodic;
     private ITimer? _midnight;
+    private int _answers;     // the user's own answers seen, so a status read begun before one is known to be older than it
     private bool? _usageOn;   // the last consent this counter saw for Usage: null until Start, a flush or ConsentChanged first says
 
     private string _day;
@@ -68,6 +69,7 @@ internal sealed class UsageCounter : IDisposable
         {
             if (!usageOn || _usageOn != true) Reset();
             _usageOn = usageOn;
+            _answers++;
         }
     }
 
@@ -104,7 +106,12 @@ internal sealed class UsageCounter : IDisposable
     internal async Task FlushAsync()
     {
         UsageCounts snapshot;
-        lock (_gate) snapshot = Snapshot();
+        int answers;
+        lock (_gate)
+        {
+            snapshot = Snapshot();
+            answers = _answers;
+        }
 
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         if (status?.Sharing is not { } sharing) return;   // the service is unreachable, or older and sends no Sharing status: try again later
@@ -114,6 +121,7 @@ internal sealed class UsageCounter : IDisposable
         bool sendable;
         lock (_gate)
         {
+            if (_answers != answers) return;   // the user answered while it was read: what it says is older than their answer
             // on, and not a fresh change from a known off: what is held can't be from before consent (a first-ever
             // observation of on, with nothing known before it, is trusted, so an already-consented session sends normally)
             sendable = usageOn && _usageOn != false;
@@ -129,8 +137,14 @@ internal sealed class UsageCounter : IDisposable
     /// swallowed the same way a flush's own status read would be: try again at the next flush.</summary>
     private async Task SeedAsync()
     {
+        int answers;
+        lock (_gate) answers = _answers;
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
-        if (status?.Sharing is { } sharing) lock (_gate) Observe(sharing.Consent.Answered && sharing.Consent.Usage);
+        if (status?.Sharing is not { } sharing) return;
+        lock (_gate)
+        {
+            if (_answers == answers) Observe(sharing.Consent.Answered && sharing.Consent.Usage);   // not older than the user's answer
+        }
     }
 
     private static void Bump(Dictionary<string, int> counts, string name) => counts[name] = counts.GetValueOrDefault(name) + 1;
