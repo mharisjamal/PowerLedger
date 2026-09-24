@@ -33,29 +33,32 @@ public sealed class ReportQueries(SqliteDatabase db)
     /// the rows the totals read, so a chart and its totals agree. A row counts wholly in the bucket where it starts, so a
     /// bucket shorter than an hour wants a range short enough to read minute rows. AvgW is each bucket's energy over its
     /// on-time. GapSeconds is laid back: each sleep is spread backwards from the moment the machine woke over the buckets
-    /// it covered, so a chart shows it where it happened, and no bucket holds more sleep than its own length.
+    /// it covered, so a chart shows it where it happened, and no bucket holds more sleep than its own length. Given
+    /// <paramref name="zone"/>, day buckets are cut at its local midnights instead, so across a clock change each is still
+    /// one calendar day, of 23 or 25 hours; shorter buckets ignore it.
     /// </summary>
-    public List<Aggregate> Series(DateTimeOffset from, DateTimeOffset to, TimeSpan bucket)
+    public List<Aggregate> Series(DateTimeOffset from, DateTimeOffset to, TimeSpan bucket, TimeZoneInfo? zone = null)
     {
-        var count = Math.Max(1, (int)Math.Ceiling((to - from) / bucket));
+        var cut = new Cut(from, bucket, bucket == TimeSpan.FromDays(1) ? zone : null);
+        var count = cut.Count(to);
         var buckets = new Aggregate[count];
         var asleep = new double[count];
-        for (var i = 0; i < count; i++) buckets[i] = Aggregate.Empty(from + i * bucket);
+        for (var i = 0; i < count; i++) buckets[i] = Aggregate.Empty(cut.Start(i));
 
         var window = Load(from, to);
         var rows = window.Hours.Select(h => (Row: h, Length: Hour)).Concat(window.Minutes.Select(m => (Row: m, Length: Minute)));
         foreach (var (row, length) in rows)
         {
-            var index = Math.Clamp((int)Math.Floor((row.Start - from) / bucket), 0, count - 1);
+            var index = Math.Clamp(cut.Index(row.Start), 0, count - 1);
             buckets[index] = buckets[index].Plus(row with { GapSeconds = 0 });
             // A sleep is stored in the row where the machine woke, and the time on in that row came after the wake.
             var woke = row.Start + length - TimeSpan.FromSeconds(Math.Min(row.OnSeconds, length.TotalSeconds));
-            LayBack(asleep, woke, row.GapSeconds, from, bucket);
+            LayBack(asleep, woke, row.GapSeconds, from, cut);
         }
         return [.. buckets.Select((b, i) => b with
         {
             AvgW = b.OnSeconds > 0 ? b.EnergyWh * 3600 / b.OnSeconds : 0,
-            GapSeconds = Math.Min(asleep[i], bucket.TotalSeconds),
+            GapSeconds = Math.Min(asleep[i], (cut.Start(i + 1) - cut.Start(i)).TotalSeconds),
         })];
     }
 
@@ -89,13 +92,13 @@ public sealed class ReportQueries(SqliteDatabase db)
 
     /// <summary>Spreads a sleep of <paramref name="seconds"/> that ended at <paramref name="end"/> backwards over the buckets
     /// it covered. Sleep before the range is dropped.</summary>
-    private static void LayBack(double[] asleep, DateTimeOffset end, double seconds, DateTimeOffset from, TimeSpan bucket)
+    private static void LayBack(double[] asleep, DateTimeOffset end, double seconds, DateTimeOffset from, Cut cut)
     {
         var cursor = end;
         while (seconds > 0 && cursor > from)
         {
-            var index = (int)Math.Floor((cursor - from - TimeSpan.FromTicks(1)) / bucket);
-            var start = from + index * bucket;
+            var index = cut.Index(cursor - TimeSpan.FromTicks(1));
+            var start = cut.Start(index);
             var taken = Math.Min(seconds, (cursor - start).TotalSeconds);
             if (index < asleep.Length) asleep[index] += taken;
             seconds -= taken;
@@ -172,6 +175,35 @@ public sealed class ReportQueries(SqliteDatabase db)
     }
 
     private static double Share(double part, double whole) => whole > 0 ? part / whole : 0;
+
+    /// <summary>Where a series' buckets begin: every <c>bucket</c> from the range's start, or, given a zone, at each of its
+    /// local midnights, the first bucket starting at the range's own start.</summary>
+    private sealed class Cut(DateTimeOffset from, TimeSpan bucket, TimeZoneInfo? zone)
+    {
+        private readonly DateOnly _firstDay = zone is null ? default : LocalDay(from, zone);
+
+        /// <summary>How many buckets a range ending at <paramref name="to"/> holds; one at least.</summary>
+        public int Count(DateTimeOffset to) => zone is null
+            ? Math.Max(1, (int)Math.Ceiling((to - from) / bucket))
+            : to > from ? Math.Max(1, Index(to - TimeSpan.FromTicks(1)) + 1) : 1;
+
+        /// <summary>The bucket <paramref name="at"/> falls in, counted from the first; outside the range, past either end.</summary>
+        public int Index(DateTimeOffset at) => zone is null
+            ? (int)Math.Floor((at - from) / bucket)
+            : LocalDay(at, zone).DayNumber - _firstDay.DayNumber;
+
+        public DateTimeOffset Start(int index) => zone is null || index <= 0 ? from + index * bucket : Midnight(_firstDay.AddDays(index), zone);
+
+        private static DateOnly LocalDay(DateTimeOffset at, TimeZoneInfo zone) => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(at, zone).DateTime);
+
+        /// <summary>A day's local midnight, or the first valid time after it where a clock change skips midnight.</summary>
+        private static DateTimeOffset Midnight(DateOnly day, TimeZoneInfo zone)
+        {
+            var wall = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+            while (zone.IsInvalidTime(wall)) wall = wall.AddMinutes(15);
+            return new DateTimeOffset(wall, zone.GetUtcOffset(wall));
+        }
+    }
 
     /// <summary>The rows a range reads, hour rows and minute rows apart so a series knows each row's length.</summary>
     private sealed record Window(DateTimeOffset From, DateTimeOffset To, List<Aggregate> Hours, List<Aggregate> Minutes)

@@ -154,6 +154,22 @@ public class RangesTests
         none.Title.ShouldBe("Since 8 Sep 2026");
     }
 
+    /// <summary>Review round: a day-bucket range holds a bucket a day however long a clock change made its days; from
+    /// 1 October to 1 November in London is 32 days and an hour.</summary>
+    [Fact]
+    public void A_day_bucket_range_across_a_clock_change_holds_one_bucket_a_day()
+    {
+        var london = TimeZoneInfo.TryFindSystemTimeZoneById("GMT Standard Time", out var windows) ? windows : TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+        var now = new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
+
+        var all = Ranges.All(new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero), now, london, English);
+
+        (all.Through - all.From).ShouldBe(TimeSpan.FromDays(32) + TimeSpan.FromHours(1));
+        all.Capacity.ShouldBe(32);
+        Ranges.LastYear(now, london, English).Capacity.ShouldBe(365);
+        Ranges.Today(new DateTimeOffset(2026, 10, 25, 12, 0, 0, TimeSpan.Zero), london, English).Capacity.ShouldBe(300);   // 25 hours of 5 minutes, as before
+    }
+
     [Fact]
     public void A_minute_bucket_has_its_names()
     {

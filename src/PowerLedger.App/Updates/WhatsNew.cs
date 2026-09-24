@@ -13,6 +13,11 @@ internal static class WhatsNew
             "A new look: a dashboard with your power, today's energy and idle waste at a glance. Prefer the classic look? Switch back any time in Settings → Preferences.",
             "The chart shows the last hour to all your history, with a tooltip for any moment.",
         ]),
+        ("0.7.1",
+        [
+            "Sign in with Google to add a PC to your household from anywhere: your other PC approves it after both show the same code.",
+            "A recovery code gets your household back if you ever lose every PC.",
+        ]),
         ("0.7.0",
         [
             "See all your PCs together: add a PC on your network or with a code, and the Household page shows their total.",

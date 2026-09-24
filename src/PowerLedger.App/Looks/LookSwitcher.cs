@@ -21,31 +21,36 @@ internal sealed class LookSwitcher(Func<Look, IShellWindow> open, ThemeManager t
     public Look Look => theme.Look;
 
     /// <summary>Switches to <paramref name="target"/>. Null when it went well, or when nothing changes; otherwise what
-    /// went wrong opening the new window, which is then closed again, the old one and its palette staying (design §5).</summary>
+    /// went wrong loading its palette or opening its window, which is then closed again, the old one staying with its
+    /// palette and on its page (design §5).</summary>
     public string? Switch(Look target)
     {
         if (target == Look) return null;
         var previous = Look;
         var old = _current;
-        theme.Apply(target);
-        if (old is null) return null;   // nothing open yet: the first window opens in the new look
-
+        var page = old?.Page;   // the shell is shared: the new window may move it to its own look's page as it opens
         IShellWindow? next = null;
         try
         {
-            next = open(target);
-            next.Bounds = old.Bounds;
-            next.State = old.State;
-            next.Page = old.Page;
-            next.Show();
+            theme.Apply(target);
+            if (old is not null)
+            {
+                next = open(target);
+                next.Bounds = old.Bounds;
+                next.State = old.State;
+                next.Page = old.Page;
+                next.Show();
+            }
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
             log($"The {target} look didn't open: {error}");
             theme.Apply(previous);
             TryClose(next);
+            if (old is not null && page is { } was) old.Page = was;
             return $"Couldn't open the {target} look: {error.Message}";
         }
+        if (old is null || next is null) return null;   // nothing open yet: the first window opens in the new look
         _current = next;
         retarget(next);
         old.CloseForSwitch();

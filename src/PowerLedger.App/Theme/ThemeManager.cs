@@ -30,12 +30,15 @@ internal sealed class ThemeManager : IDisposable
     private const string PersonalizeKey = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 
     private readonly Application _application;
+    private readonly Func<Uri, ResourceDictionary> _load;
     private ThemeChoice _choice;
     private ResourceDictionary? _palette;
 
-    public ThemeManager(Application application, ThemeChoice choice, Look look = Look.Classic)
+    /// <param name="load">Loads a palette from its pack URI; a test gives one that fails, to see a look that won't open.</param>
+    public ThemeManager(Application application, ThemeChoice choice, Look look = Look.Classic, Func<Uri, ResourceDictionary>? load = null)
     {
         _application = application;
+        _load = load ?? (source => new ResourceDictionary { Source = source });
         _choice = choice;
         Look = look;
         Apply();
@@ -85,7 +88,7 @@ internal sealed class ThemeManager : IDisposable
         var theme = ThemeRules.Resolve(_choice, WindowsUsesLight());
         var source = LookRules.PaletteFor(Look, theme);
         if (_palette?.Source == source) return;
-        var palette = new ResourceDictionary { Source = source };
+        var palette = _load(source);
         var merged = _application.Resources.MergedDictionaries;
         if (_palette is not null) merged.Remove(_palette);
         merged.Insert(0, palette);

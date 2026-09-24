@@ -45,6 +45,18 @@ public class WhatsNewTests
     }
 
     [Fact]
+    public void The_0_7_1_points_match_exactly()
+        => PointsOf("0.7.1").ShouldBe(
+        [
+            "Sign in with Google to add a PC to your household from anywhere: your other PC approves it after both show the same code.",
+            "A recovery code gets your household back if you ever lose every PC.",
+        ]);
+
+    [Fact]
+    public void Updating_from_0_7_0_shows_only_what_0_7_1_added()
+        => WhatsNew.Since("0.7.0", "0.7.1").ShouldBe(PointsOf("0.7.1"));
+
+    [Fact]
     public void The_0_7_0_points_match_exactly()
         => PointsOf("0.7.0").ShouldBe(
         [
@@ -76,16 +88,16 @@ public class WhatsNewTests
     }
 
     [Fact]
-    public void From_0_7_0_to_0_8_0_the_new_looks_points_come_alone()
-        => WhatsNew.Since("0.7.0", "0.8.0").ShouldBe(PointsOf("0.8.0"));
+    public void From_0_7_1_to_0_8_0_the_new_looks_points_come_alone()
+        => WhatsNew.Since("0.7.1", "0.8.0").ShouldBe(PointsOf("0.8.0"));
 
     [Fact]
-    public void From_0_6_0_to_0_8_0_both_releases_come_headed_newest_first()
+    public void From_0_7_0_to_0_8_0_both_releases_come_headed_newest_first()
     {
         var expected = new List<string> { "0.8.0" };
         expected.AddRange(PointsOf("0.8.0"));
-        expected.Add("0.7.0");
-        expected.AddRange(PointsOf("0.7.0"));
-        WhatsNew.Since("0.6.0", "0.8.0").ShouldBe(expected);
+        expected.Add("0.7.1");
+        expected.AddRange(PointsOf("0.7.1"));
+        WhatsNew.Since("0.7.0", "0.8.0").ShouldBe(expected);
     }
 }

@@ -83,7 +83,11 @@ public class MidnightDialogRenderingTests
     /// <summary>The dialogs as the Classic render tests set them up, in the order of <see cref="Dialogs"/>.</summary>
     private static IEnumerable<(string Name, Func<Window> Open)> Windows(string sentFolder)
     {
-        yield return ("consent", () => new ConsentDialog(new ConsentViewModel(Connected(), UiThreads.Inline, _ => { })) { Width = 640 });   // 0.7.0's one screen
+        yield return ("consent", () =>
+        {
+            var link = Connected();
+            return new ConsentDialog(new ConsentViewModel(link, UiThreads.Inline, _ => { })) { Width = 640 };
+        });
         yield return ("join-prompt", () =>
         {
             var link = new FakeLink
