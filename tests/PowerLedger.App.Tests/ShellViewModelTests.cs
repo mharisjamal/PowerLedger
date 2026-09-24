@@ -54,6 +54,27 @@ public class ShellViewModelTests
         _history.Reads.Count.ShouldBe(read);
     }
 
+    /// <summary>Review round: in the tray no page reads, so the Dashboard's minute reads stop with the window, and start
+    /// again, at once, when it shows.</summary>
+    [Fact]
+    public void A_shell_hidden_in_the_tray_reads_no_page_until_it_shows_again()
+    {
+        var shell = ShellWithDashboard();
+        shell.Page = Page.Dashboard;
+        var read = _history.Reads.Count;
+
+        shell.IsShown = false;
+        _clock.Advance(DashboardViewModel.RefreshEvery * 3);
+        _history.Reads.Count.ShouldBe(read);
+
+        shell.IsShown = true;
+        _history.Reads.Count.ShouldBeGreaterThan(read);
+        shell.Current.ShouldBe(shell.Dashboard);
+        read = _history.Reads.Count;
+        _clock.Advance(DashboardViewModel.RefreshEvery);
+        _history.Reads.Count.ShouldBeGreaterThan(read);
+    }
+
     [Fact]
     public void Without_a_dashboard_its_page_shows_now()
     {

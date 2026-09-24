@@ -253,7 +253,8 @@ public partial class App : Application
 
     /// <summary>A shell window in <paramref name="look"/> over the one shell (Midnight look design §2). Closing it hides
     /// it to the tray while it is the current one; the service keeps logging either way. On exit, and once a switch has
-    /// moved on to another window, a close is a close.</summary>
+    /// moved on to another window, a close is a close. The shell's pages read only while the current window shows; a
+    /// switch's two windows showing and closing leave that alone, since neither is the current one as it happens.</summary>
     private IShellWindow OpenWindow(Look look)
     {
         IShellWindow window = look == Look.Midnight
@@ -261,12 +262,18 @@ public partial class App : Application
             : new MainWindow { DataContext = _shell };
         window.Window.Closing += (_, args) =>
         {
-            if (_exiting || _looks?.IsOpen != true || _looks.Current != window) return;
+            if (_exiting || !IsCurrent(window)) return;
             args.Cancel = true;
             window.Window.Hide();
         };
+        window.Window.IsVisibleChanged += (_, _) =>
+        {
+            if (IsCurrent(window) && _shell is not null) _shell.IsShown = window.Window.IsVisible;
+        };
         return window;
     }
+
+    private bool IsCurrent(IShellWindow window) => _looks is { IsOpen: true } looks && looks.Current == window;
 
     /// <summary>A switch has a new window: the modeless windows the old one owned go to it, before the old one closes and
     /// would take them with it.</summary>
