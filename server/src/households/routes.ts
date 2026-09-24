@@ -13,6 +13,7 @@ import {
   handleRequestNonce,
   handleReveal,
   handleSignout,
+  handleWithdrawRequest,
 } from "./account";
 import { checkMember, checkSession, finishMember, finishSession, type MemberRow, type SessionRow } from "./auth";
 import { handleGetBatches, handlePostBatch, readBatch } from "./batches";
@@ -135,6 +136,7 @@ const ROUTES: Route[] = [
   { method: "POST", path: /^\/v1\/account\/household$/, handle: asSession(handleLink) },
   { method: "POST", path: /^\/v1\/account\/requests$/, handle: asSession((env, session) => handleAskToJoin(env, session)) },
   { method: "GET", path: /^\/v1\/account\/requests$/, handle: asSession((env, session) => handleOwnRequests(env, session)) },
+  { method: "DELETE", path: /^\/v1\/account\/requests$/, handle: asSession((env, session) => handleWithdrawRequest(env, session)) },
   { method: "POST", path: /^\/v1\/account\/requests\/nonce$/, handle: asSession(handleRequestNonce) },
   { method: "PUT", path: /^\/v1\/account\/recovery$/, handle: asSession(handlePutRecovery, readMedium) },
   { method: "GET", path: /^\/v1\/account\/recovery$/, handle: asSession((env, session) => handleGetRecovery(env, session)) },

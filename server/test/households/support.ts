@@ -142,6 +142,56 @@ export async function joinProof(device: TestDevice, householdId: string, sign = 
   return base64urlEncode(new Uint8Array(signature));
 }
 
+const REAL = Symbol("the real statement");
+
+/**
+ * `target` with `hook` run once, just before the first statement whose SQL matches `pattern` is executed, alone or in a
+ * batch: the moment between a handler's check and its write, for a race to happen in. The hook uses the real database.
+ */
+export function hookBefore(target: Cloudflare.Env, pattern: RegExp, hook: () => Promise<unknown>): Cloudflare.Env {
+  let fired = false;
+  const sqlOf = new WeakMap<object, string>();
+  const fire = async (sql: string | undefined) => {
+    if (!fired && sql !== undefined && pattern.test(sql)) {
+      fired = true;
+      await hook();
+    }
+  };
+  const wrap = (statement: D1PreparedStatement, sql: string): D1PreparedStatement => {
+    const wrapped = new Proxy(statement, {
+      get(object, property) {
+        if (property === REAL) return object;
+        if (property === "bind") return (...values: unknown[]) => wrap(object.bind(...values), sql);
+        if (property === "first" || property === "run" || property === "all" || property === "raw") {
+          return async (...args: unknown[]) => {
+            await fire(sql);
+            return (object as unknown as Record<string, (...rest: unknown[]) => unknown>)[property](...args);
+          };
+        }
+        const value = Reflect.get(object, property);
+        return typeof value === "function" ? value.bind(object) : value;
+      },
+    });
+    sqlOf.set(wrapped, sql);
+    return wrapped;
+  };
+  const db = new Proxy(target.DB, {
+    get(object, property) {
+      if (property === "prepare") return (sql: string) => wrap(object.prepare(sql), sql);
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          for (const statement of statements) await fire(sqlOf.get(statement));
+          const real = statements.map((statement) => (statement as unknown as Record<symbol, D1PreparedStatement>)[REAL] ?? statement);
+          return object.batch(real);
+        };
+      }
+      const value = Reflect.get(object, property);
+      return typeof value === "function" ? value.bind(object) : value;
+    },
+  });
+  return { ...target, DB: db };
+}
+
 /** `by`, a member, adds `device`, with its proof. */
 export async function addMember(householdId: string, by: TestDevice, device: TestDevice): Promise<void> {
   const body = { sign: device.sign, dh: device.dh, proof: await joinProof(device, householdId) };

@@ -2,7 +2,6 @@ import { sha256hex, timingSafeEqualStrings } from "../auth";
 import { checkSession, finishSession, type MemberRow, type SessionRow, sessionToken } from "./auth";
 import { base64urlDecode, hex, sha256 } from "./encoding";
 import {
-  addMemberStatement,
   currentEpoch,
   HOUSEHOLD_ID,
   isEnvelopeBody,
@@ -17,8 +16,10 @@ import { errorResponse, ok, overAddressLimit, parseObject } from "./http";
 export const MAX_WAITING = 16;
 /** At most this many PCs of one account wait at a time, so one account can't fill a household's list. */
 export const MAX_WAITING_PER_ACCOUNT = 2;
-/** A join request lasts this long, approved or not (the daily cron clears it). */
+/** A join request waits this long for its approval (the daily cron clears it). */
 export const JOIN_REQUEST_LIFETIME_MS = 24 * 60 * 60 * 1000;
+/** An approved request stays this long from its approval, or until its PC withdraws it. */
+export const APPROVED_REQUEST_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RECOVERY_CHARS = MAX_SEALED_LIST_CHARS;
 const VERIFIER_BYTES = 32;
 /** An approval's commit, nonce and reveal (plan 0.9). */
@@ -63,10 +64,15 @@ export async function handleAskToJoin(env: Cloudflare.Env, session: SessionRow):
   if (!household) return errorResponse(409, "This account isn't linked to a household yet.");
   if (await isCurrentMember(env, household, session.device)) return errorResponse(409, "This PC is already in the household.");
 
+  // Only requests still waiting count: an approved one, kept until its PC withdraws it, isn't.
+  const waitingSince = Date.now() - JOIN_REQUEST_LIFETIME_MS;
   const [forHousehold, forAccount] = await env.DB.batch<{ n: number }>([
-    env.DB.prepare("SELECT COUNT(*) AS n FROM join_requests WHERE household = ? AND device != ?").bind(household, session.device),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM join_requests WHERE account = ? AND device != ? AND created > ?")
-      .bind(session.account, session.device, Date.now() - JOIN_REQUEST_LIFETIME_MS),
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM join_requests WHERE household = ? AND device != ? AND approved_epoch IS NULL AND created > ?",
+    ).bind(household, session.device, waitingSince),
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM join_requests WHERE account = ? AND device != ? AND approved_epoch IS NULL AND created > ?",
+    ).bind(session.account, session.device, waitingSince),
   ]);
   if (forHousehold.results[0].n >= MAX_WAITING) return errorResponse(409, "Too many PCs are already waiting to join this household.");
   if (forAccount.results[0].n >= MAX_WAITING_PER_ACCOUNT) {
@@ -77,7 +83,7 @@ export async function handleAskToJoin(env: Cloudflare.Env, session: SessionRow):
     `INSERT INTO join_requests (household, device, account, sign_key, dh_key, created) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (household, device) DO UPDATE SET
        account = excluded.account, sign_key = excluded.sign_key, dh_key = excluded.dh_key, created = excluded.created,
-       approver = NULL, commitment = NULL, nonce = NULL, reveal = NULL, approved_epoch = NULL`,
+       approver = NULL, commitment = NULL, nonce = NULL, reveal = NULL, approved_epoch = NULL, approved_at = NULL`,
   )
     .bind(household, session.device, session.account, session.sign_key, session.dh_key, Date.now())
     .run();
@@ -138,12 +144,28 @@ export async function handleListRequests(env: Cloudflare.Env, member: MemberRow)
   );
 }
 
-/** DELETE /v1/households/{hid}/requests/{device}: a member denies a waiting PC; 404 when none is waiting. */
+/** DELETE /v1/households/{hid}/requests/{device}: a member denies a waiting PC; 404 when none is waiting, and 409 once
+ * it's approved, since the approved PC needs its request to enter. */
 export async function handleDenyRequest(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
-  const denied = await env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ? RETURNING device")
+  const denied = await env.DB.prepare(
+    "DELETE FROM join_requests WHERE household = ? AND device = ? AND approved_epoch IS NULL RETURNING device",
+  )
     .bind(member.household, device)
     .first();
-  return denied ? ok() : errorResponse(404, "That PC isn't waiting to join this household.");
+  if (denied) return ok();
+  const approved = await env.DB.prepare("SELECT 1 FROM join_requests WHERE household = ? AND device = ?")
+    .bind(member.household, device)
+    .first();
+  return approved
+    ? errorResponse(409, "That PC has already been approved.")
+    : errorResponse(404, "That PC isn't waiting to join this household.");
+}
+
+/** DELETE /v1/account/requests: this PC withdraws its own request, waiting or approved: when its user says the codes
+ * don't match, or once it has entered. Done whether there was one or not. */
+export async function handleWithdrawRequest(env: Cloudflare.Env, session: SessionRow): Promise<Response> {
+  await env.DB.prepare("DELETE FROM join_requests WHERE device = ? AND account = ?").bind(session.device, session.account).run();
+  return ok();
 }
 
 /** A posted commit, nonce or reveal: base64url of 32 bytes, kept as sent; null otherwise. */
@@ -216,18 +238,22 @@ export async function handleReveal(env: Cloudflare.Env, member: MemberRow, devic
   return set || request.reveal === reveal ? ok() : errorResponse(409, "The approver has already revealed.");
 }
 
+/** A request not yet lapsed: waiting for less than 24 hours, or approved less than 7 days ago. */
+const UNLAPSED = `((r.approved_epoch IS NULL AND r.created > ?3) OR (r.approved_epoch IS NOT NULL AND r.approved_at > ?4))`;
+
 /**
  * GET /v1/account/requests: this PC's own requests, as {"requests":[{"device","household","approver":{"device","sign",
- * "dh"}|null,"commit","reveal","approved":{"epoch"}|null,"expires"}]}, expires being unix ms. An approved request is
- * given here once: reading it ends it.
+ * "dh"}|null,"commit","reveal","approved":{"epoch"}|null,"expires"}]}, expires being unix ms. An approved request stays,
+ * read as often as need be, until the PC withdraws it (DELETE /v1/account/requests) or 7 days after its approval.
  */
 export async function handleOwnRequests(env: Cloudflare.Env, session: SessionRow): Promise<Response> {
+  const now = Date.now();
   const rows = await env.DB.prepare(
-    `SELECT r.household, r.created, r.approver, r.commitment, r.reveal, r.approved_epoch, m.sign_key, m.dh_key
+    `SELECT r.household, r.created, r.approver, r.commitment, r.reveal, r.approved_epoch, r.approved_at, m.sign_key, m.dh_key
      FROM join_requests r LEFT JOIN members m ON m.household = r.household AND m.device = r.approver
-     WHERE r.device = ? AND r.account = ? AND r.created > ? ORDER BY r.created`,
+     WHERE r.device = ?1 AND r.account = ?2 AND ${UNLAPSED} ORDER BY r.created`,
   )
-    .bind(session.device, session.account, Date.now() - JOIN_REQUEST_LIFETIME_MS)
+    .bind(session.device, session.account, now - JOIN_REQUEST_LIFETIME_MS, now - APPROVED_REQUEST_LIFETIME_MS)
     .all<{
       household: string;
       created: number;
@@ -235,18 +261,10 @@ export async function handleOwnRequests(env: Cloudflare.Env, session: SessionRow
       commitment: string | null;
       reveal: string | null;
       approved_epoch: number | null;
+      approved_at: number | null;
       sign_key: string | null;
       dh_key: string | null;
     }>();
-
-  const approved = rows.results.filter((row) => row.approved_epoch !== null).map((row) => row.household);
-  if (approved.length > 0) {
-    await env.DB.prepare(
-      `DELETE FROM join_requests WHERE device = ? AND approved_epoch IS NOT NULL AND household IN (SELECT value FROM json_each(?))`,
-    )
-      .bind(session.device, JSON.stringify(approved))
-      .run();
-  }
 
   return Response.json({
     requests: rows.results.map((row) => ({
@@ -256,18 +274,31 @@ export async function handleOwnRequests(env: Cloudflare.Env, session: SessionRow
       commit: row.commitment,
       reveal: row.reveal,
       approved: row.approved_epoch === null ? null : { epoch: row.approved_epoch },
-      expires: row.created + JOIN_REQUEST_LIFETIME_MS,
+      expires: row.approved_at === null ? row.created + JOIN_REQUEST_LIFETIME_MS : row.approved_at + APPROVED_REQUEST_LIFETIME_MS,
     })),
   });
+}
+
+/**
+ * The condition every write of an approval holds under, its parameters from ?first on: the request still as the approval
+ * read it (the same approver and reveal, not asked again since, not yet approved) and the household's key still at the
+ * epoch it read. Parameters: household, device, approver, reveal, created, epoch.
+ */
+function asRead(first: number): string {
+  const [household, device, approver, reveal, created, epoch] = [0, 1, 2, 3, 4, 5].map((i) => `?${first + i}`);
+  return `EXISTS (SELECT 1 FROM join_requests WHERE household = ${household} AND device = ${device} AND approver = ${approver}
+      AND reveal = ${reveal} AND created = ${created} AND approved_epoch IS NULL)
+    AND (SELECT epoch FROM households WHERE id = ${household}) = ${epoch}`;
 }
 
 /**
  * POST /v1/households/{hid}/requests/{device}/approve: {"epoch","body"}, the household key at its current epoch sealed
  * for the waiting PC (with the member list, HouseholdCrypto.WrapFor, from the approving member). Only the member that
  * committed may approve (403), and only after its reveal (409). In one step the PC becomes a member, its envelope is kept
- * and its request is marked approved at that epoch, staying so until the PC reads it; a full household leaves all three
- * as they were. Any epoch but the current one is 409, and so is an envelope the PC already has at it: one is never
- * overwritten.
+ * and its request is marked approved at that epoch, staying so until the PC withdraws it; a full household leaves all
+ * three as they were. Any epoch but the current one is 409, and so is an envelope the PC already has at it: one is never
+ * overwritten. The step holds only if nothing changed since the look: a rotation, a denial or the PC asking again in
+ * between gives 409. An identical retry of an approval already made is done.
  */
 export async function handleApprove(env: Cloudflare.Env, member: MemberRow, device: string, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
@@ -276,7 +307,7 @@ export async function handleApprove(env: Cloudflare.Env, member: MemberRow, devi
   }
 
   const request = await waitingRequest(env, member.household, device);
-  if (!request) return errorResponse(404, "That PC isn't waiting to join this household.");
+  if (!request) return afterApproval(env, member, device, posted.epoch, posted.body);
   if (request.approver !== member.device) return errorResponse(403, "Only the member that committed can approve.");
   if (request.reveal === null) return errorResponse(409, "The approval's reveal hasn't been made yet.");
 
@@ -289,25 +320,58 @@ export async function handleApprove(env: Cloudflare.Env, member: MemberRow, devi
   if (sealedAlready) return errorResponse(409, "That PC already has a key at this epoch.");
 
   const now = Date.now();
+  const read = [member.household, device, member.device, request.reveal, request.created, epoch];
   const alreadyIn = await isCurrentMember(env, member.household, device);
   const results = await env.DB.batch([
-    ...(alreadyIn ? [] : [addMemberStatement(env, member.household, device, request.sign_key, request.dh_key, now)]),
+    env.DB.prepare(`SELECT 1 AS unchanged WHERE ${asRead(1)}`).bind(...read),
+    ...(alreadyIn
+      ? []
+      : [
+          env.DB.prepare(
+            `INSERT INTO members (household, device, sign_key, dh_key, added, removed, added_epoch, removed_epoch)
+             SELECT ?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL
+             WHERE (SELECT COUNT(*) FROM members WHERE household = ?1 AND removed IS NULL) < ?7 AND ${asRead(8)}
+             ON CONFLICT (household, device) DO UPDATE SET
+               sign_key = excluded.sign_key, dh_key = excluded.dh_key, added = excluded.added, removed = NULL,
+               added_epoch = excluded.added_epoch, removed_epoch = NULL
+             RETURNING device`,
+          ).bind(member.household, device, request.sign_key, request.dh_key, now, epoch, MAX_MEMBERS, ...read),
+        ]),
     env.DB.prepare(
       `INSERT INTO key_envelopes (household, epoch, device, from_device, body, created)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6
-       WHERE EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?3 AND removed IS NULL)
+       WHERE EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?3 AND removed IS NULL) AND ${asRead(7)}
        ON CONFLICT (household, epoch, device) DO NOTHING
        RETURNING device`,
-    ).bind(member.household, epoch, device, member.device, posted.body, now),
+    ).bind(member.household, epoch, device, member.device, posted.body, now, ...read),
     env.DB.prepare(
-      `UPDATE join_requests SET approved_epoch = ?3 WHERE household = ?1 AND device = ?2
-       AND EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?2 AND removed IS NULL)`,
-    ).bind(member.household, device, epoch),
+      `UPDATE join_requests SET approved_epoch = ?1, approved_at = ?2 WHERE household = ?3 AND device = ?4
+       AND EXISTS (SELECT 1 FROM members WHERE household = ?3 AND device = ?4 AND removed IS NULL) AND ${asRead(5)}`,
+    ).bind(epoch, now, member.household, device, ...read),
   ]);
-  if (!alreadyIn && results[0].results.length === 0) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
+  if (results[0].results.length === 0) {
+    return errorResponse(409, "The request or the household's key changed meanwhile; look again.");
+  }
+  if (!alreadyIn && results[1].results.length === 0) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
   // Another member's approval sealed one first, between the look above and this: that one stays.
-  if (results[alreadyIn ? 0 : 1].results.length === 0) return errorResponse(409, "That PC already has a key at this epoch.");
+  if (results[alreadyIn ? 1 : 2].results.length === 0) return errorResponse(409, "That PC already has a key at this epoch.");
   return ok();
+}
+
+/** An approval posted for a PC not waiting: done when it's the very approval already made (its answer was lost), 409 for
+ * any other once the PC is approved, and 404 when it isn't. */
+async function afterApproval(env: Cloudflare.Env, member: MemberRow, device: string, epoch: number, body: string): Promise<Response> {
+  const approved = await env.DB.prepare(
+    `SELECT r.approver, r.approved_epoch, k.from_device, k.body FROM join_requests r
+     LEFT JOIN key_envelopes k ON k.household = r.household AND k.epoch = r.approved_epoch AND k.device = r.device
+     WHERE r.household = ? AND r.device = ? AND r.approved_epoch IS NOT NULL`,
+  )
+    .bind(member.household, device)
+    .first<{ approver: string; approved_epoch: number; from_device: string | null; body: string | null }>();
+  if (!approved) return errorResponse(404, "That PC isn't waiting to join this household.");
+  const same = approved.approver === member.device && approved.approved_epoch === epoch &&
+    approved.from_device === member.device && approved.body === body;
+  return same ? ok() : errorResponse(409, "That PC has already been approved.");
 }
 
 function isSealed(value: unknown, maxChars: number): value is string {
@@ -346,28 +410,37 @@ export async function handlePutRecovery(env: Cloudflare.Env, session: SessionRow
   const epoch = await currentEpoch(env, household);
   if (posted!.epoch !== epoch) return errorResponse(409, `The household's key is at epoch ${epoch}; seal the recovery at that one.`);
 
-  const verifierHash = hex(await sha256(verifier));
-  const now = Date.now();
-  if (replace) {
-    await env.DB.prepare(
-      `INSERT INTO recovery (account, body, verifier_hash, epoch, holder, updated) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (account) DO UPDATE SET
-         body = excluded.body, verifier_hash = excluded.verifier_hash, epoch = excluded.epoch, holder = excluded.holder,
-         updated = excluded.updated`,
-    )
-      .bind(session.account, posted!.body, verifierHash, epoch, session.device, now)
-      .run();
-    return ok();
-  }
+  // The write holds only while the caller is still a current member and the key still at that epoch, however either
+  // changed since the checks above: a removed PC is never left holding a recovery, nor one sealed at an old epoch.
+  const stillSo = `EXISTS (SELECT 1 FROM members WHERE household = ?7 AND device = ?5 AND removed IS NULL)
+     AND (SELECT epoch FROM households WHERE id = ?7) = ?4`;
+  const values = [session.account, posted!.body, hex(await sha256(verifier)), epoch, session.device, Date.now(), household];
+  const written = replace
+    ? await env.DB.prepare(
+        `INSERT INTO recovery (account, body, verifier_hash, epoch, holder, updated)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE ${stillSo}
+         ON CONFLICT (account) DO UPDATE SET
+           body = excluded.body, verifier_hash = excluded.verifier_hash, epoch = excluded.epoch, holder = excluded.holder,
+           updated = excluded.updated
+         RETURNING holder`,
+      )
+        .bind(...values)
+        .first()
+    : // Without replace, only the holder's own recovery is renewed; a first one is a new code, so it needs replace too.
+      await env.DB.prepare(
+        `UPDATE recovery SET body = ?2, verifier_hash = ?3, epoch = ?4, updated = ?6
+         WHERE account = ?1 AND holder = ?5 AND ${stillSo} RETURNING holder`,
+      )
+        .bind(...values)
+        .first();
+  if (written) return ok();
 
-  // Without replace, only the holder's own recovery is renewed; a first one is a new code, so it needs replace too.
-  const renewed = await env.DB.prepare(
-    `UPDATE recovery SET body = ?1, verifier_hash = ?2, epoch = ?3, updated = ?4
-     WHERE account = ?5 AND holder = ?6 RETURNING holder`,
-  )
-    .bind(posted!.body, verifierHash, epoch, now, session.account, session.device)
-    .first();
-  return renewed ? ok() : errorResponse(409, "This PC doesn't hold this account's recovery code; a new code must replace it.");
+  if (!(await isCurrentMember(env, household, session.device))) {
+    return errorResponse(403, "Only a PC in the household can set how to recover it.");
+  }
+  const now = await currentEpoch(env, household);
+  if (now !== epoch) return errorResponse(409, `The household's key is at epoch ${now}; seal the recovery at that one.`);
+  return errorResponse(409, "This PC doesn't hold this account's recovery code; a new code must replace it.");
 }
 
 /** GET /v1/account/recovery: {"body","epoch","holder"} (the holder being the PC that holds the code), for any PC signed
@@ -391,9 +464,11 @@ export async function handleRecover(env: Cloudflare.Env, session: SessionRow, bo
   const verifier = readVerifier(parseObject(body)?.verifier);
   if (!verifier) return errorResponse(400, "verifier must be 32 bytes, as base64url.");
 
+  // Only a recovery whose holder is still a current member counts: a removed PC's code must never bring it back.
   const row = await env.DB.prepare(
     `SELECT r.verifier_hash, l.household, h.epoch AS current
      FROM recovery r JOIN account_households l ON l.account = r.account JOIN households h ON h.id = l.household
+     JOIN members m ON m.household = l.household AND m.device = r.holder AND m.removed IS NULL
      WHERE r.account = ?`,
   )
     .bind(session.account)
@@ -403,18 +478,43 @@ export async function handleRecover(env: Cloudflare.Env, session: SessionRow, bo
     return errorResponse(403, "That isn't this account's recovery verifier.");
   }
 
-  const now = Date.now();
-  const alreadyIn = await isCurrentMember(env, row.household, session.device);
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE members SET removed = ?1, removed_epoch = ?2
-       WHERE household = ?3 AND device != ?4 AND removed IS NULL`,
-    ).bind(now, row.current, row.household, session.device),
-    ...(alreadyIn ? [] : [addMemberStatement(env, row.household, session.device, session.sign_key, session.dh_key, now)]),
-    env.DB.prepare("DELETE FROM recovery WHERE account = ?").bind(session.account),
-    env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(row.household, session.device),
+  // One transaction, every write in it conditioned on the code just checked still being there: of two recovers racing,
+  // the second finds it used up, changes nothing and gets 404.
+  const hid = row.household;
+  const unused = "EXISTS (SELECT 1 FROM recovery WHERE account = ?8 AND verifier_hash = ?9)";
+  const bind = (statement: D1PreparedStatement) =>
+    statement.bind(hid, session.device, session.sign_key, session.dh_key, Date.now(), null, null, session.account, row.verifier_hash);
+  const results = await env.DB.batch([
+    bind(env.DB.prepare(`SELECT 1 AS unused WHERE ${unused}`)),
+    // The requests of the PCs about to be removed (theirs, approved or not, and those they committed to), and the caller's.
+    bind(env.DB.prepare(
+      `DELETE FROM join_requests WHERE household = ?1 AND ${unused} AND (device = ?2
+         OR device IN (SELECT device FROM members WHERE household = ?1 AND device != ?2 AND removed IS NULL)
+         OR approver IN (SELECT device FROM members WHERE household = ?1 AND device != ?2 AND removed IS NULL))`,
+    )),
+    // Every other member removed, at the household's current epoch.
+    bind(env.DB.prepare(
+      `UPDATE members SET removed = ?5, removed_epoch = (SELECT epoch FROM households WHERE id = ?1)
+       WHERE household = ?1 AND device != ?2 AND removed IS NULL AND ${unused}`,
+    )),
+    // The caller added, or added back if it was removed; a current caller is left as it is.
+    bind(env.DB.prepare(
+      `INSERT INTO members (household, device, sign_key, dh_key, added, removed, added_epoch, removed_epoch)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, (SELECT epoch FROM households WHERE id = ?1), ?7 WHERE ${unused}
+       ON CONFLICT (household, device) DO UPDATE SET
+         sign_key = excluded.sign_key, dh_key = excluded.dh_key, added = excluded.added, removed = NULL,
+         added_epoch = excluded.added_epoch, removed_epoch = NULL
+       WHERE members.removed IS NOT NULL`,
+    )),
+    // Every recovery of the household goes, not this account's alone: the others' holders were just removed.
+    bind(env.DB.prepare(
+      `DELETE FROM recovery WHERE ${unused} AND account IN (SELECT account FROM account_households WHERE household = ?1)`,
+    )),
+    env.DB.prepare("SELECT epoch FROM households WHERE id = ?").bind(hid),
   ]);
-  return Response.json({ household: row.household, epoch: row.current });
+  if (results[0].results.length === 0) return errorResponse(404, "This account has nothing to recover.");
+  const epoch = (results[5].results[0] as { epoch: number }).epoch;
+  return Response.json({ household: hid, epoch });
 }
 
 /** POST /v1/auth/signout: ends this PC's session, signed by the PC it was given to. A session already ended is done. */

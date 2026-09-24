@@ -164,12 +164,14 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
   }
 
   // Accounts are left alone (a PC can remove itself for reasons that have nothing to do with them), but the recovery the
-  // removed PC held for this household goes: the one PC that holds a code must be a member.
+  // removed PC held for this household goes: the one PC that holds a code must be a member. So do its own request to
+  // join, and the waiting requests it had committed to approve, which only it could finish: their PCs may ask again.
   await env.DB.batch([
     env.DB.prepare(
       "DELETE FROM recovery WHERE holder = ? AND account IN (SELECT account FROM account_households WHERE household = ?)",
     ).bind(device, hid),
     env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(hid, device),
+    env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND approver = ? AND approved_epoch IS NULL").bind(hid, device),
   ]);
 
   const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM members WHERE household = ? AND removed IS NULL")
@@ -256,9 +258,10 @@ export async function currentEpoch(env: Cloudflare.Env, household: string): Prom
 
 /**
  * POST /v1/households/{hid}/keys: {"epoch","envelopes":[{"device","body"}]}, the household key of a new epoch sealed to
- * current members. The Worker keeps each household's epoch: only current + 1 is taken, and it becomes current with its
- * envelopes. An identical retry of the current epoch's keys by the PC that sealed them is taken as done, since its first
- * answer may have been lost; anything else at another epoch gets 409.
+ * exactly the current members: one for a PC that isn't current is 400, and a current one left out is 409, as are
+ * members changing before the epoch moves. The Worker keeps each household's epoch: only current + 1 is taken, and it
+ * becomes current with its envelopes in one step. An identical retry of the current epoch's keys by the PC that sealed
+ * them is taken as done, since its first answer may have been lost; anything else at another epoch gets 409.
  */
 export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
@@ -289,29 +292,42 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
   if (!envelopes.every((item) => currentIds.has(item.device))) {
     return errorResponse(400, "Every envelope must be for a current member.");
   }
+  if (envelopes.length !== currentIds.size) {
+    return errorResponse(409, "Every current member needs the new key; look at the members again.");
+  }
 
   if (at === null || epoch !== at + 1) {
     return errorResponse(409, `The household's key is at epoch ${at}; new keys are for epoch ${(at ?? 0) + 1} only.`);
   }
-  // Claim the epoch first: of two members rotating at once, one moves it and the other gets 409.
-  const moved = await env.DB.prepare("UPDATE households SET epoch = ?2 WHERE id = ?1 AND epoch = ?3 RETURNING epoch")
-    .bind(member.household, epoch, at)
-    .first();
-  if (!moved) return errorResponse(409, `Epoch ${epoch} already has its keys.`);
 
+  // The envelopes and the epoch's move are one transaction, each holding only while the key is still at the epoch before
+  // and the envelopes are for exactly the current members: of two members rotating at once one moves it, and a PC added
+  // or removed meanwhile makes it 409, so no current member goes without the new key and no removed one gets it.
+  const devices = JSON.stringify(envelopes.map((item) => item.device));
+  const holds = `(SELECT epoch FROM households WHERE id = ?1) = ?2 - 1
+    AND NOT EXISTS (SELECT 1 FROM members WHERE household = ?1 AND removed IS NULL AND device NOT IN (SELECT value FROM json_each(?3)))
+    AND NOT EXISTS (SELECT 1 FROM json_each(?3) AS posted WHERE NOT EXISTS
+      (SELECT 1 FROM members WHERE household = ?1 AND device = posted.value AND removed IS NULL))`;
   const now = Date.now();
+  let results: D1Result[];
   try {
-    await env.DB.batch(
-      envelopes.map((item) =>
+    results = await env.DB.batch([
+      env.DB.prepare(`SELECT 1 AS holds WHERE ${holds}`).bind(member.household, epoch, devices),
+      ...envelopes.map((item) =>
         env.DB.prepare(
-          "INSERT INTO key_envelopes (household, epoch, device, from_device, body, created) VALUES (?, ?, ?, ?, ?, ?)",
-        ).bind(member.household, epoch, item.device, member.device, item.body, now),
+          `INSERT INTO key_envelopes (household, epoch, device, from_device, body, created)
+           SELECT ?1, ?2, ?4, ?5, ?6, ?7 WHERE ${holds}`,
+        ).bind(member.household, epoch, devices, item.device, member.device, item.body, now),
       ),
-    );
+      env.DB.prepare(`UPDATE households SET epoch = ?2 WHERE id = ?1 AND ${holds}`).bind(member.household, epoch, devices),
+    ]);
   } catch (error) {
-    // Nothing kept: put the epoch back, so the household isn't left at an epoch with no keys.
-    await env.DB.prepare("UPDATE households SET epoch = ?3 WHERE id = ?1 AND epoch = ?2").bind(member.household, epoch, at).run();
+    // Envelopes already at that epoch: another member's keys for it.
+    if (String(error).includes("UNIQUE constraint failed")) return errorResponse(409, `Epoch ${epoch} already has its keys.`);
     throw error;
+  }
+  if (results[0].results.length === 0) {
+    return errorResponse(409, "The household's key or its members changed meanwhile; look again.");
   }
   return ok();
 }

@@ -521,11 +521,30 @@ and the six-part `ApprovalCode`. The Contracts already have `AskAgainRequest` ("
    - An unanswered `ConfirmJoin` comes back at R's next turn.
    - A request that is refused or expires sets `CanAskAgain`.
 - **Worker side:**
-  - The commit, nonce and reveal are each written once per request.
-  - Only the PC that committed may reveal, and only after R's nonce.
-  - Only that PC may approve, and only after its reveal.
-  - Requests expire after 24 hours.
-  - An approved request stays, marked approved with its epoch, until R has read it or it expires.
+  - **Once each.** The commit, nonce and reveal are each written once per request. An identical retry by the same PC
+    answers 200, and so does an identical approve.
+  - **Who moves it on.** Only the PC that committed may reveal, and only after R's nonce. Only that PC may approve, and
+    only after its reveal.
+  - **Checks at the write.**
+    - The approve's write checks the request is still as it read it.
+    - It also checks the household's epoch hasn't changed.
+    - A rotation's epoch claim needs envelopes for exactly the current members at the moment of the claim. A PC added
+      or removed in between gets 409, which asks the rotating PC to look again.
+    - That PC still never seals to a member it doesn't hold as current itself. Until the others' sealed lists tell it
+      of the member, its rotation stays queued, and nothing is posted under the old key.
+  - **How long a request lasts.**
+    - A waiting request expires after 24 hours.
+    - An approved one stays until R deletes it, or for 7 days after the approval. Deny is refused once a request is
+      approved.
+  - **R's own request.** `DELETE /v1/account/requests` deletes it. R calls it when its user says the codes don't match,
+    and once after entering.
+  - **When the committing PC is removed,** the requests it committed to are deleted, and R may ask again.
+- **Size.** The member list in an approval or recovery body carries:
+  - the current members with their keys;
+  - at most the 64 most recent removals, as ID and epochs only.
+
+  Older removals come from the server's member list, which keeps every removed row. Bodies are at most 16384
+  characters.
 
 **N2 recovery: one holder, a code used once, and a verifier from the code.**
 - **One holder.** Only the PC that made the code keeps the code's key, and it alone puts the recovery. No other PC holds
@@ -539,7 +558,10 @@ and the six-part `ApprovalCode`. The Contracts already have `AskAgainRequest` ("
 - **The body** carries the key and the member list, with its epochs.
 - **`GET /v1/account/recovery`** returns `{body, epoch, holder}`.
 - **Recovering** (`POST /v1/account/recover`, which checks the verifier):
+  - needs the stored holder to be a current member;
+  - works once, conditioned on that recovery still existing;
   - works at any stored epoch;
+  - deletes every recovery of the household, and the requests of the PCs it removes;
   - makes the recovering PC the household's only current member, removing all others at the current epoch;
   - uses up the code: the recovery is deleted, and the recovering PC makes a new code, shows it (a `RecoveryCode`
     notice) and rotates the key.
