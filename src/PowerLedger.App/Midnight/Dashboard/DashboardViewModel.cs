@@ -299,8 +299,9 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         ChartTitle = read.ChartRange.Title;
         ChartFrom = read.ChartRange.From;
         Chart = Charts.Build(read.ChartRange, read.Chart?.Series ?? [], ChartUnit.Watts, _zone, _culture);
+        // Review 8: the history gives every range its buckets, so an empty chart is one whose every bucket is empty.
         ChartMessage = read.Chart is not { } chart ? "Couldn't read the history"
-            : chart.Totals.OnHours > 0 || chart.Totals.AsleepHours > 0 ? null : "No history yet";
+            : chart.Series.Any(bucket => bucket.OnSeconds > 0 || bucket.GapSeconds > 0 || bucket.EnergyWh > 0) ? null : "No history yet";
     }
 
     /// <summary>Power now: the live watts over the meter's scale, with how the reading is got as the chip; "No reading" and

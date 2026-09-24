@@ -214,7 +214,7 @@
                                 </StackPanel>
                             </DockPanel>
                             <local:AreaChart Style="{StaticResource M.AreaChart}" Margin="0,16,0,0" Model="{Binding Chart}" From="{Binding ChartFrom}" Zone="{Binding Zone}" Culture="{Binding Culture}"
-                                             EmptyText="{Binding ChartMessage, TargetNullValue='No history yet'}" />
+                                             Message="{Binding ChartMessage}" />
                             <WrapPanel Margin="0,10,0,0">
                                 <WrapPanel.Resources>
                                     <Style TargetType="TextBlock" BasedOn="{StaticResource M.Text.Secondary}">

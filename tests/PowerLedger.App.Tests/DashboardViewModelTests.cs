@@ -269,6 +269,26 @@ public sealed class DashboardViewModelTests : IDisposable
         _history.Reads.Count(range => range.Title == title).ShouldBe(0, "a chart read well is kept for the rest of the day");
     }
 
+    /// <summary>Review 8: the history answers every range with its buckets, empty or not, so an empty chart is one whose
+    /// every bucket is empty, whatever the range's totals say.</summary>
+    [Fact]
+    public void A_chart_whose_every_bucket_is_empty_says_there_is_no_history_yet()
+    {
+        _history.Answer = range => Reports.Typical(range) with
+        {
+            Series = [.. Enumerable.Range(0, 12).Select(i => Core.Aggregate.Empty(range.From + i * range.Bucket))],
+        };
+        var dashboard = Dashboard();
+        dashboard.Show();
+
+        dashboard.Chart.Buckets.ShouldNotBeEmpty();
+        dashboard.ChartMessage.ShouldBe("No history yet");
+
+        _history.Answer = Reports.Typical;
+        dashboard.Range = RangePill.Hour;
+        dashboard.ChartMessage.ShouldBeNull();
+    }
+
     /// <summary>Review 7: a kept week is kept only for the day it was cut on; the first minute after midnight cuts it again.</summary>
     [Fact]
     public void A_kept_chart_is_cut_again_after_midnight()

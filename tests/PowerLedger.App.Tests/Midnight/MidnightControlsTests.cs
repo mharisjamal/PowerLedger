@@ -177,6 +177,43 @@ public class MidnightControlsTests
         stops[2].Color.A.ShouldBe((byte)0);
     }
 
+    /// <summary>Review 8: the history gives a range its buckets even when they are all empty, so the chart's message is
+    /// drawn, and read out, whenever it is set, not only when there are no buckets at all.</summary>
+    [Fact]
+    [Trait("Category", "UI")]
+    public void The_charts_message_is_drawn_over_empty_buckets_and_only_while_it_is_set()
+        => UiHarness.OnUi(() =>
+        {
+            var today = MidnightFixtures.Today();
+            var empty = Enumerable.Range(0, 12).Select(i => Core.Aggregate.Empty(today.From + i * today.Bucket)).ToList();
+            var chart = new AreaChart { Model = Charts.Build(today, empty, ChartUnit.Watts, TimeZoneInfo.Utc, CultureInfo.GetCultureInfo("en-US")) };
+            string Drawn()
+            {
+                chart.Measure(new Size(600, 400));
+                chart.Arrange(new Rect(0, 0, 600, 300));
+                chart.UpdateLayout();
+                return string.Join("|", GlyphRuns(VisualTreeHelper.GetDrawing(chart)).Select(run => new string([.. run.Characters])));
+            }
+            chart.Model.Buckets.ShouldNotBeEmpty();
+            Drawn().ShouldNotContain("No history yet");
+
+            chart.Message = "No history yet";
+            Drawn().ShouldContain("No history yet");
+            chart.Describe().ShouldEndWith("No history yet.");
+
+            chart.Message = null;
+            Drawn().ShouldNotContain("No history yet");
+            chart.Model = ChartModel.Empty;
+            Drawn().ShouldContain("No history yet", customMessage: "no buckets at all: the empty text, as before");
+        });
+
+    private static IEnumerable<GlyphRun> GlyphRuns(Drawing? drawing) => drawing switch
+    {
+        GlyphRunDrawing text => [text.GlyphRun],
+        DrawingGroup group => group.Children.SelectMany(GlyphRuns),
+        _ => [],
+    };
+
     [Fact]
     public void The_bars_and_the_disc_describe_themselves()
         => Sta.Run(() =>

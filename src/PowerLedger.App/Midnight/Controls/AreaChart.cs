@@ -26,6 +26,7 @@ internal sealed class AreaChart : Instrument
     public static readonly DependencyProperty FillBottomBrushProperty = Register<Brush>(nameof(FillBottomBrush), Brushes.Transparent, typeof(AreaChart));
     public static readonly DependencyProperty HatchBrushProperty = Register<Brush>(nameof(HatchBrush), Brushes.Gray, typeof(AreaChart));
     public static readonly DependencyProperty EmptyTextProperty = Register(nameof(EmptyText), "No history yet", typeof(AreaChart));
+    public static readonly DependencyProperty MessageProperty = Register<string?>(nameof(Message), null, typeof(AreaChart));
     public static readonly DependencyProperty CultureProperty = Register(nameof(Culture), CultureInfo.CurrentCulture, typeof(AreaChart));
 
     private const double Left = 48;
@@ -63,8 +64,12 @@ internal sealed class AreaChart : Instrument
 
     public Brush HatchBrush { get => (Brush)GetValue(HatchBrushProperty); set => SetValue(HatchBrushProperty, value); }
 
-    /// <summary>What the plot says when there is nothing to draw.</summary>
+    /// <summary>What the plot says when it has no buckets at all.</summary>
     public string EmptyText { get => (string)GetValue(EmptyTextProperty); set => SetValue(EmptyTextProperty, value); }
+
+    /// <summary>Why the chart is empty ("No history yet", "Couldn't read the history"), drawn over the plot and read out
+    /// whenever it is set, buckets or none (review 8: the history gives a range its buckets, all of them empty or not).</summary>
+    public string? Message { get => (string?)GetValue(MessageProperty); set => SetValue(MessageProperty, value); }
 
     /// <summary>The culture the axis and the tooltip write in: the page's, which built the model's ticks, not the thread's.</summary>
     public CultureInfo Culture { get => (CultureInfo)GetValue(CultureProperty); set => SetValue(CultureProperty, value); }
@@ -78,7 +83,8 @@ internal sealed class AreaChart : Instrument
     /// <summary>What the tooltip says, its lines joined: "12:00 Power: 92 W".</summary>
     internal string TipText => _tip?.Content is StackPanel lines ? string.Join(" ", lines.Children.OfType<TextBlock>().Select(line => line.Text)) : "";
 
-    internal override string Describe() => Model.Description + (_hover >= 0 && _hover < Model.Buckets.Count ? $" At {HoverLabel(_hover)}." : "");
+    internal override string Describe() => Model.Description + (_hover >= 0 && _hover < Model.Buckets.Count ? $" At {HoverLabel(_hover)}." : "")
+        + (string.IsNullOrEmpty(Message) ? "" : $" {Message}.");
 
     /// <summary>Puts the crosshair on <paramref name="index"/>, or takes it away with -1.</summary>
     internal void Hover(int index)
@@ -120,9 +126,10 @@ internal sealed class AreaChart : Instrument
             var room = (i + 1 < model.Ticks.Count ? X(model.Ticks[i + 1].At) : right) - x;
             if (label.Width + 8 <= room) dc.DrawText(label, new Point(x + 4, bottom + 8));
         }
+        var message = !string.IsNullOrEmpty(Message) ? Message : buckets.Count == 0 ? EmptyText : null;
         if (buckets.Count == 0)
         {
-            DrawText(dc, EmptyText, (Left + right) / 2, (Top + bottom) / 2 - 7, LabelBrush, TextAlignment.Center, 12);
+            DrawText(dc, message!, (Left + right) / 2, (Top + bottom) / 2 - 7, LabelBrush, TextAlignment.Center, 12);
             return;
         }
 
@@ -163,6 +170,8 @@ internal sealed class AreaChart : Instrument
             dc.DrawLine(dotted, new Point(Left, at.Y), new Point(right, at.Y));
             dc.DrawEllipse(AccentBrush, new Pen(RingBrush ?? InkBrush, 2), at, 5, 5);
         }
+
+        if (message is not null) DrawText(dc, message, (Left + right) / 2, (Top + bottom) / 2 - 7, LabelBrush, TextAlignment.Center, 12);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
