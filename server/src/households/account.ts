@@ -109,6 +109,14 @@ export async function handleApprove(env: Cloudflare.Env, member: MemberRow, devi
     .first<{ sign_key: string; dh_key: string }>();
   if (!request) return errorResponse(404, "That PC isn't waiting to join this household.");
 
+  // An approver that hasn't fetched the latest key yet would hand over one the newer batches can't be opened with.
+  const latest = await env.DB.prepare("SELECT MAX(epoch) AS epoch FROM key_envelopes WHERE household = ?")
+    .bind(member.household)
+    .first<{ epoch: number | null }>();
+  if (latest?.epoch != null && posted.epoch < latest.epoch) {
+    return errorResponse(409, `The household's key is at epoch ${latest.epoch} now; approve with that one.`);
+  }
+
   const alreadyIn = await isCurrentMember(env, member.household, device);
   const results = await env.DB.batch([
     ...(alreadyIn ? [] : [addMemberStatement(env, member.household, device, request.sign_key, request.dh_key, now)]),

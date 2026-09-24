@@ -159,6 +159,24 @@ describe("join requests", () => {
     expect(await isMember(hid, laptop.device.id)).toBe(false);
   });
 
+  it("gives 409 for an approval sealing a key older than the household's latest epoch", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const rotated = await signedFetch(owner.device, "POST", `/v1/households/${hid}/keys`, {
+      epoch: 3,
+      envelopes: [{ device: owner.device.id, body: envelope() }],
+    });
+    expect(rotated.status).toBe(200);
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    const approve = (epoch: number) =>
+      signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, { epoch, body: envelope() });
+
+    expect((await approve(2)).status).toBe(409);
+    expect(await isMember(hid, laptop.device.id)).toBe(false);
+    expect((await approve(3)).status).toBe(200);
+    expect(await isMember(hid, laptop.device.id)).toBe(true);
+  });
+
   it("keeps a request waiting when the household is full", async () => {
     const { hid, owner } = await linkedHousehold();
     for (let i = 0; i < 15; i++) await addMember(hid, owner.device, await newDevice());
