@@ -134,13 +134,10 @@ export async function handleAddMember(env: Cloudflare.Env, member: MemberRow, bo
 }
 
 /**
- * DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave. A PC taken out (a lost
- * laptop, say) mustn't keep a way back in, so with it go:
- * - every linked account's recovery envelope, whose key is about to be replaced anyway;
- * - the link of each account the removed PC was signed in as, and those sessions of it (accounts linked to another
- *   household are left alone, so one household can't reach into another's by adding and removing a PC);
- * - any request of the PC's to join this household.
- * The household ends with its last member.
+ * DELETE /v1/households/{hid}/members/{device}: a member removes another, or itself to leave (plan 0.9). The row stays,
+ * marked removed at the household's current epoch. Accounts are left alone, sessions and links included, except that a
+ * recovery the removed PC holds goes; so does its request to join this household, if it had one. Removing a PC already
+ * removed is done (200). The household ends with its last member.
  */
 export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow, device: string): Promise<Response> {
   const hid = member.household;
@@ -156,19 +153,12 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
     return was ? ok() : errorResponse(404, "That PC isn't a member of this household.");
   }
 
-  // Read before the sessions go: the accounts the removed PC was signed in as, linked to this household.
-  const signedIn = await env.DB.prepare(
-    `SELECT s.account FROM sessions s JOIN account_households l ON l.account = s.account AND l.household = ?
-     WHERE s.device = ?`,
-  )
-    .bind(hid, device)
-    .all<{ account: string }>();
-  const accounts = JSON.stringify(signedIn.results.map((row) => row.account));
+  // Accounts are left alone (a PC can remove itself for reasons that have nothing to do with them), but the recovery the
+  // removed PC held for this household goes: the one PC that holds a code must be a member.
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)").bind(hid),
-    env.DB.prepare("DELETE FROM sessions WHERE device = ? AND account IN (SELECT value FROM json_each(?))").bind(device, accounts),
-    env.DB.prepare("DELETE FROM account_households WHERE household = ? AND account IN (SELECT value FROM json_each(?))")
-      .bind(hid, accounts),
+    env.DB.prepare(
+      "DELETE FROM recovery WHERE holder = ? AND account IN (SELECT account FROM account_households WHERE household = ?)",
+    ).bind(device, hid),
     env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(hid, device),
   ]);
 
