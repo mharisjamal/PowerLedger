@@ -35,6 +35,7 @@ public partial class App : Application
     private BrightnessReporter? _brightness;
     private Updater? _updates;
     private ShellViewModel? _shell;
+    private DashboardViewModel? _dashboard;
     private TrayIcon? _tray;
     private MainWindow? _window;
     private AddPcWindow? _addPcWindow;
@@ -126,7 +127,8 @@ public partial class App : Application
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
-        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates);
+        _dashboard = new DashboardViewModel(_now, history, history, TimeProvider.System, zone, culture, threads);
+        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard);
         _shell.FeedbackRequested += OpenFeedbackWindow;
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
@@ -183,6 +185,7 @@ public partial class App : Application
         _usage?.CountPage(_shell.Page switch
         {
             Page.Now => "now",
+            Page.Dashboard => "dashboard",
             Page.Breakdown => "breakdown",
             Page.Report => "report",
             Page.Household => "household",
@@ -490,6 +493,7 @@ public partial class App : Application
                 _settings.Tariff.Saved -= CountTariffChanged;
                 _settings.Service.Saved -= CountMachineChanged;
             }
+            _dashboard?.Dispose();
             _breakdown?.Dispose();
             _report?.Dispose();
             _household?.Dispose();
