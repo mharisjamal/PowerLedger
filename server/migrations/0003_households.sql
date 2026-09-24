@@ -3,7 +3,8 @@
 CREATE TABLE households (
   id      TEXT PRIMARY KEY,                   -- 32 lower-case hex, made by the PC that creates the household
   created INTEGER NOT NULL,                   -- ms
-  epoch   INTEGER NOT NULL DEFAULT 1          -- the household key's current epoch: new keys are posted for epoch + 1 only
+  epoch   INTEGER NOT NULL DEFAULT 1,         -- the household key's current epoch: new keys are posted for epoch + 1 only
+  next_seq INTEGER NOT NULL DEFAULT 1         -- the next batch number: taken with each batch, never reset by retention
 );
 CREATE TABLE members (
   household TEXT NOT NULL,

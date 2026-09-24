@@ -65,8 +65,8 @@ export async function readBatch(request: Request): Promise<Uint8Array | Response
  * POST /v1/households/{hid}/batches: {"device","epoch","seq","body","sig"} (plan 0.6, 0.8), where seq is the sender's
  * own sequence number, part of the sealed body's associated data, and sig is the sender's ECDSA signature (P1363, 64
  * bytes, base64url) over BatchToSign(BatchAad(…), body). The Worker doesn't check sig, members do; it keeps it and
- * hands it on as sent. The Worker numbers the household's batches in arrival order, max + 1, which is what GET's
- * cursor counts; the sealed body goes to the body store. Each PC may post 200 batches and 5 MB a UTC day (429), and
+ * hands it on as sent. The Worker numbers the household's batches in arrival order from households.next_seq, never
+ * repeating a number, which is what GET's cursor counts; the sealed body goes to the body store. Each PC may post 200 batches and 5 MB a UTC day (429), and
  * the server takes 2 GB a day in all (503).
  */
 export async function handlePostBatch(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
@@ -91,12 +91,15 @@ export async function handlePostBatch(env: Cloudflare.Env, member: MemberRow, bo
   const key = `batches/v1/${member.household}/${crypto.randomUUID()}`;
   await putBody(env, key, sealedBytes, { contentType: "application/octet-stream", receivedAt: received });
   try {
-    await env.DB.prepare(
-      `INSERT INTO batches (household, seq, device, epoch, device_seq, bytes, received, r2_key, sig)
-       SELECT ?1, COALESCE(MAX(seq), 0) + 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 FROM batches WHERE household = ?1`,
-    )
-      .bind(member.household, member.device, posted.epoch, posted.seq, sealedBytes.byteLength, received, key, sig)
-      .run();
+    // The number comes from the household's own counter, taken and used in one transaction: it never repeats, even once
+    // retention has taken every batch there was, so no member's cursor stalls.
+    await env.DB.batch([
+      env.DB.prepare("UPDATE households SET next_seq = next_seq + 1 WHERE id = ?").bind(member.household),
+      env.DB.prepare(
+        `INSERT INTO batches (household, seq, device, epoch, device_seq, bytes, received, r2_key, sig)
+         SELECT ?1, next_seq - 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 FROM households WHERE id = ?1`,
+      ).bind(member.household, member.device, posted.epoch, posted.seq, sealedBytes.byteLength, received, key, sig),
+    ]);
   } catch (error) {
     await deleteBodies(env, [key]);
     throw error;

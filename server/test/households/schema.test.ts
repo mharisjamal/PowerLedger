@@ -9,7 +9,7 @@ async function columns(table: string): Promise<string[]> {
 // 0003_households.sql: the tables the household routes rely on (households design §8).
 describe("the households schema", () => {
   it("creates the household tables with their columns", async () => {
-    expect(await columns("households")).toEqual(["id", "created", "epoch"]);
+    expect(await columns("households")).toEqual(["id", "created", "epoch", "next_seq"]);
     expect(await columns("members")).toEqual([
       "household", "device", "sign_key", "dh_key", "added", "removed", "added_epoch", "removed_epoch",
     ]);
