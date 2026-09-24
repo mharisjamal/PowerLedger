@@ -183,6 +183,22 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     /// queues a request; a second slow sharing request written while the first is still outstanding could be carried out
     /// after the App has already given up on it (finding 6). The App must wait for one to answer before writing the
     /// next.</summary>
+    /// <summary>A sharing request still waiting when the App exits is let go by the link's shutdown and finishes after it;
+    /// letting its turn go then must not throw, or a crash report would be written for an ordinary exit.</summary>
+    [Fact]
+    public async Task A_sharing_request_still_waiting_when_the_link_shuts_down_finishes_without_throwing()
+    {
+        _service.HoldReplyTo = request => request is SendNowRequest;
+        var waiting = _link.SendNowAsync();
+        var queued = _link.DeleteMyDataAsync();                          // waiting its turn behind the first
+        await WaitFor.True(() => _service.Requests.OfType<SendNowRequest>().Any());
+
+        await _link.DisposeAsync();
+
+        await Should.NotThrowAsync(async () => await waiting);
+        await Should.NotThrowAsync(async () => await queued);
+    }
+
     [Fact]
     public async Task A_second_sharing_request_is_not_written_until_the_first_has_answered()
     {

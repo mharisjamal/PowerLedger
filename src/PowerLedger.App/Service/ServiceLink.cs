@@ -126,7 +126,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentDictionary<long, TaskCompletionSource<PipeMessage>> _pending = new();
-    private readonly SemaphoreSlim _sharingGate = new(1, 1);
+    private readonly SemaphoreSlim _sharingGate = new(1, 1);   // never disposed: a request let go at shutdown still releases it
+    private volatile bool _disposed;
+    private int _disposing;
     private long _lastId;
     private volatile MessageChannel? _channel;
     private volatile string? _refusal;
@@ -179,10 +181,11 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposing, 1) == 1) return;                  // once, however often it is asked
+        _disposed = true;
         await _stop.CancelAsync().ConfigureAwait(false);
         if (_run is not null) await _run.ConfigureAwait(false);
         _stop.Dispose();
-        _sharingGate.Dispose();
     }
 
     private long NextId() => Interlocked.Increment(ref _lastId);
@@ -327,6 +330,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         await _sharingGate.WaitAsync(cancel).ConfigureAwait(false);
         try
         {
+            if (_disposed) return SharingOutcome.NotConnected;                  // its turn came after the App began to exit
             return await SendAsync(request, cancel).ConfigureAwait(false) switch
             {
                 SharingReply reply => new SharingOutcome(reply.Ok, reply.Message, reply.Path),
