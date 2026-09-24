@@ -166,7 +166,7 @@ async function readyToApprove(hid: string, by: TestDevice, pc: SignedIn): Promis
 }
 
 describe("join requests", () => {
-  it("run ask, commit, nonce, reveal and approve, each side seeing the other's steps, the PC reading its approval once", async () => {
+  it("run ask, commit, nonce, reveal and approve, each side seeing the other's steps, the PC's approval kept until it withdraws it", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);
 
@@ -247,6 +247,42 @@ describe("join requests", () => {
     expect(await ownRequests(laptop)).toEqual([]);
     await runRetention(env, new Date());
     expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE device = ?").bind(laptop.device.id).first()).toBeNull();
+  });
+
+  it("let a PC approved but never entered leave by itself once its approval lapses, then ask again and be approved afresh", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    await readyToApprove(hid, owner.device, laptop);
+    expect((await approveAs(hid, owner.device, laptop)).status).toBe(200);
+
+    // It never enters, and 7 days on its approval lapses: it takes itself out, its session and link left as they were.
+    await env.DB.prepare("UPDATE join_requests SET approved_at = ? WHERE device = ?")
+      .bind(Date.now() - 7 * DAY_MS - 1, laptop.device.id)
+      .run();
+    expect(await ownRequests(laptop)).toEqual([]);
+    expect((await signedFetch(laptop.device, "DELETE", `/v1/households/${hid}/members/${laptop.device.id}`)).status).toBe(200);
+    expect(await isMember(hid, laptop.device.id)).toBe(false);
+
+    const asked = await asAccount(laptop, "POST", "/v1/account/requests");
+    expect(asked.status).toBe(200);
+    expect(await asked.json()).toEqual({ ok: true, householdId: hid });
+    expect(await ownRequests(laptop)).toMatchObject([{ household: hid, approver: null, reveal: null, approved: null }]);
+    expect(await memberList(hid, owner.device)).toMatchObject([{ device: laptop.device.id, approver: null }]);
+
+    // Its envelope at epoch 1 is never sealed again: the rotation its leaving calls for comes first.
+    await readyToApprove(hid, owner.device, laptop);
+    expect((await approveAs(hid, owner.device, laptop, 1)).status).toBe(409);
+    await rotate(hid, owner.device, 2);
+    const body = envelope();
+    expect((await approveAs(hid, owner.device, laptop, 2, body)).status).toBe(200);
+    expect(await isMember(hid, laptop.device.id)).toBe(true);
+    expect(await (await signedFetch(laptop.device, "GET", `/v1/households/${hid}/keys/2`)).json()).toEqual({
+      epoch: 2,
+      from: owner.device.id,
+      body,
+    });
+    expect(await ownRequests(laptop)).toMatchObject([{ approved: { epoch: 2 } }]);
   });
 
   it("are withdrawn by the waiting PC itself, as when its user says the codes don't match", async () => {
