@@ -818,6 +818,25 @@ describe("removing a member", () => {
       .toEqual({ household: homeHid });
   });
 
+  it("clears the requests the removed PC committed to, so their PCs can ask again, keeping those it approved", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const second = await newDevice();
+    await addMember(hid, owner.device, second);
+    const approved = await signIn(undefined, owner.account);
+    await asAccount(approved, "POST", "/v1/account/requests");
+    await readyToApprove(hid, second, approved);
+    expect((await approveAs(hid, second, approved)).status).toBe(200);
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    expect((await commitAs(hid, second, laptop)).status).toBe(200);
+
+    expect((await signedFetch(owner.device, "DELETE", `/v1/households/${hid}/members/${second.id}`)).status).toBe(200);
+
+    expect(await ownRequests(laptop)).toEqual([]);
+    expect((await asAccount(laptop, "POST", "/v1/account/requests")).status).toBe(200);
+    expect(await ownRequests(approved)).toMatchObject([{ approved: { epoch: 1 } }]);
+  });
+
   it("clears a request the removed PC had waiting for the household", async () => {
     const { hid, owner } = await linkedHousehold();
     const laptop = await signIn(undefined, owner.account);

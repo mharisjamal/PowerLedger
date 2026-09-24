@@ -164,12 +164,14 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
   }
 
   // Accounts are left alone (a PC can remove itself for reasons that have nothing to do with them), but the recovery the
-  // removed PC held for this household goes: the one PC that holds a code must be a member.
+  // removed PC held for this household goes: the one PC that holds a code must be a member. So do its own request to
+  // join, and the waiting requests it had committed to approve, which only it could finish: their PCs may ask again.
   await env.DB.batch([
     env.DB.prepare(
       "DELETE FROM recovery WHERE holder = ? AND account IN (SELECT account FROM account_households WHERE household = ?)",
     ).bind(device, hid),
     env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(hid, device),
+    env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND approver = ? AND approved_epoch IS NULL").bind(hid, device),
   ]);
 
   const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM members WHERE household = ? AND removed IS NULL")
