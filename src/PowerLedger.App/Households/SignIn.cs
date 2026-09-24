@@ -42,7 +42,8 @@ internal static class Pkce
     public static string NonceHash(string deviceId, string salt) => Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes($"{deviceId}:{salt}")));
 }
 
-/// <summary>Starts on an OS-chosen free port on localhost and waits for the browser's one redirect (RFC 8252).</summary>
+/// <summary>Starts on an OS-chosen free port on 127.0.0.1 and waits for the browser's one redirect (plan 0.9, RFC 8252
+/// §7.3: a localhost prefix answers on every address, so 127.0.0.1 itself is the tighter, more precise target).</summary>
 internal interface ILoopbackServer : IDisposable
 {
     int Port { get; }
@@ -63,7 +64,7 @@ internal sealed class HttpLoopbackServer : ILoopbackServer
     {
         Port = FreePort();
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://localhost:{Port}/");
+        _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
         _listener.Start();
     }
 
@@ -143,7 +144,7 @@ internal sealed class SignIn(Func<ILoopbackServer> newServer, Action<Uri> openBr
         var nonce = Pkce.NonceHash(deviceId, salt);
 
         using var server = newServer();
-        var redirectUri = $"http://localhost:{server.Port}/";
+        var redirectUri = $"http://127.0.0.1:{server.Port}/";
         var url = new UriBuilder(authorize)
         {
             Query = Encode(new Dictionary<string, string>
