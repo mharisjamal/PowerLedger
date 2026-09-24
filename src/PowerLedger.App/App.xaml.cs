@@ -34,6 +34,7 @@ public partial class App : Application
     private TrayIcon? _tray;
     private MainWindow? _window;
     private AddPcWindow? _addPcWindow;
+    private ApprovePromptWindow? _approvePromptWindow;
 
     /// <summary>Review finding A4, follow-up: every open Join/Approve/Confirm join/Recovery code prompt, by its
     /// promptId, so a pushed <see cref="NoticeKind.Withdraw"/> can close the one it names and leave any others
@@ -319,12 +320,20 @@ public partial class App : Application
         window.ShowDialog();
     }
 
-    /// <summary>The Approve prompt (households design §7): modal, owned by the main window when it is open.</summary>
+    /// <summary>The Approve prompt (households design §7): modal, owned by the main window when it is open. Plan 0.9:
+    /// an unanswered prompt can come back at the service's next turn, under the same or a new PromptId, while the
+    /// request is still waiting — this never shows two windows for it, replacing whichever is already open.</summary>
     private void OpenApprovePromptWindow(HouseholdNotice notice)
     {
         if (_link is null || _threads is null) return;
+        _approvePromptWindow?.Close();
         var model = new ApprovePromptViewModel(_link, _threads, TimeProvider.System, notice);
         var window = new ApprovePromptWindow(model) { Owner = _window };
+        _approvePromptWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (_approvePromptWindow == window) _approvePromptWindow = null;
+        };
         TrackPrompt(notice.PromptId, window);
         window.ShowDialog();
     }

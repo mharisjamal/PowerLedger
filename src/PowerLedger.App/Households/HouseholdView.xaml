@@ -159,16 +159,27 @@
             <TextBlock Style="{StaticResource Text.Eyebrow}" Margin="0,28,0,10" Text="SIGN IN" />
             <StackPanel DataContext="{Binding Account}">
                 <StackPanel Visibility="{Binding SignedIn, Converter={StaticResource HiddenWhen}}">
-                    <StackPanel Orientation="Horizontal">
+                    <StackPanel Orientation="Horizontal" Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource HiddenWhen}}">
                         <Button Style="{StaticResource Quiet}" Content="{Binding MicrosoftButtonText}" Command="{Binding SignInWithMicrosoft}" />
                         <Button Style="{StaticResource Quiet}" Content="{Binding GoogleButtonText}" Command="{Binding SignInWithGoogle}" Margin="8,0,0,0" />
                     </StackPanel>
-                    <DockPanel Margin="0,10,0,0" MaxWidth="420" HorizontalAlignment="Left">
+                    <DockPanel Margin="0,10,0,0" MaxWidth="420" HorizontalAlignment="Left" Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource HiddenWhen}}">
                         <TextBlock DockPanel.Dock="Left" Style="{StaticResource Text.Muted}" Text="Recovery code" Margin="0,0,10,0" VerticalAlignment="Center" />
                         <TextBox Style="{StaticResource Field}" Text="{Binding RecoveryCodeInput, UpdateSourceTrigger=PropertyChanged}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,4,0,0"
-                               Text="Have a recovery code? Type it here, then sign in, to get your household back without waiting for another PC to approve you." />
+                               Text="Have a recovery code? Type it here, then sign in, to get your household back without waiting for another PC to approve you."
+                               Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource HiddenWhen}}" />
+                    <!-- Plan 0.9: a typed recovery code warns before the browser opens at all, since it removes the
+                         household's other PCs. -->
+                    <StackPanel Margin="0,10,0,0" Visibility="{Binding ConfirmingRecoverySignIn, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" MaxWidth="420" HorizontalAlignment="Left"
+                                   Text="{x:Static local:SignInViewModel.RecoveryWarning}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Style="{StaticResource Quiet}" Content="Cancel" Command="{Binding CancelRecoverySignIn}" />
+                            <Button Style="{StaticResource Quiet}" Content="Continue" Command="{Binding ContinueRecoverySignIn}" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </StackPanel>
                 </StackPanel>
                 <StackPanel Visibility="{Binding SignedIn, Converter={StaticResource VisibleWhen}}">
                     <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Email}" />
