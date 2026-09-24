@@ -19,10 +19,11 @@
             </Style>
             <DataTemplate x:Key="Period">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="{Binding Title, Converter={StaticResource Upper}}" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="{Binding Title}" />
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Style="{StaticResource M.Text.Display}" Text="{Binding Energy}" />
-                        <TextBlock Style="{StaticResource M.Text.Secondary}" Text="kWh" Margin="8,0,0,7" VerticalAlignment="Bottom" />
+                        <TextBlock x:Name="Unit" Style="{StaticResource M.Text.Display}" FontSize="20" Foreground="{DynamicResource M.Ink3}" Text="kWh" Margin="6,0,0,5"
+                                   VerticalAlignment="Bottom" />
                     </StackPanel>
                     <ItemsControl ItemsSource="{Binding Costs}" Focusable="False" Margin="0,4,0,0">
                         <ItemsControl.ItemTemplate>
@@ -35,6 +36,12 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
+                <DataTemplate.Triggers>
+                    <!-- No value, no unit: "N/A", not "N/A kWh". -->
+                    <DataTrigger Binding="{Binding Energy}" Value="{x:Static app:Format.Missing}">
+                        <Setter TargetName="Unit" Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </DataTemplate.Triggers>
             </DataTemplate>
         </ResourceDictionary>
     </UserControl.Resources>
@@ -45,7 +52,7 @@
             <!-- Before a household exists: the explanation and Add a PC (households design §2). -->
             <Border Style="{StaticResource M.Card}" Visibility="{Binding HasHousehold, Converter={StaticResource HiddenWhen}}">
                 <StackPanel Style="{StaticResource Measure}">
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="HOUSEHOLD" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="Household" />
                     <TextBlock Style="{StaticResource Prose}" FontSize="15" Text="{Binding Message}" />
                     <!-- Task 0.8's removeOldRows: household_rows/household_members still name this PC from one it has since
                          left; Remove the old household's rows deletes every left PC's rows named here. -->
@@ -82,24 +89,25 @@
                            Visibility="{Binding HasProblem, Converter={StaticResource VisibleWhen}}" />
 
                 <!-- The three ledgers as small cards. -->
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="16" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="16" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Style="{StaticResource M.Card}">
-                        <ContentControl Content="{Binding Today}" ContentTemplate="{StaticResource Period}" Focusable="False" />
-                    </Border>
-                    <Border Grid.Column="2" Style="{StaticResource M.Card}">
-                        <ContentControl Content="{Binding Week}" ContentTemplate="{StaticResource Period}" Focusable="False" />
-                    </Border>
-                    <Border Grid.Column="4" Style="{StaticResource M.Card}">
-                        <ContentControl Content="{Binding Month}" ContentTemplate="{StaticResource Period}" Focusable="False" />
-                    </Border>
-                </Grid>
+                <!-- The three ledgers as cells of one section divided by hairlines, as the Dashboard's KPIs. -->
+                <Border Style="{StaticResource M.Card}" Padding="0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Padding="20">
+                            <ContentControl Content="{Binding Today}" ContentTemplate="{StaticResource Period}" Focusable="False" />
+                        </Border>
+                        <Border Grid.Column="1" Padding="20" BorderBrush="{DynamicResource M.Line}" BorderThickness="1,0,0,0">
+                            <ContentControl Content="{Binding Week}" ContentTemplate="{StaticResource Period}" Focusable="False" />
+                        </Border>
+                        <Border Grid.Column="2" Padding="20" BorderBrush="{DynamicResource M.Line}" BorderThickness="1,0,0,0">
+                            <ContentControl Content="{Binding Month}" ContentTemplate="{StaticResource Period}" Focusable="False" />
+                        </Border>
+                    </Grid>
+                </Border>
 
                 <!-- The members: a row per PC with its kind, when it synced, its share of the month and its energy. -->
                 <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" Padding="20,20,20,12">
@@ -107,7 +115,7 @@
                          all of them. The PC takes the room it needs and when it synced gives way, trimmed, in a narrow page. -->
                     <StackPanel Grid.IsSharedSizeScope="True">
                         <DockPanel Margin="0,0,0,12">
-                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Eyebrow}" VerticalAlignment="Center" Text="SHARE OF THIS MONTH" />
+                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Column}" VerticalAlignment="Center" Text="Share of this month" />
                             <TextBlock Style="{StaticResource M.Text.Heading}" Text="Your PCs" />
                         </DockPanel>
                         <Border Style="{StaticResource M.Table.Header}">
@@ -119,10 +127,10 @@
                                     <ColumnDefinition Width="72" />
                                     <ColumnDefinition Width="Auto" SharedSizeGroup="Actions" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Style="{StaticResource M.Text.Eyebrow}" Text="PC" />
-                                <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Eyebrow}" Text="LAST SYNCED" HorizontalAlignment="Right" Margin="12,0,16,0" />
-                                <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Eyebrow}" Text="SHARE" Width="64" Margin="0,0,16,0" />
-                                <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Eyebrow}" Text="KWH" HorizontalAlignment="Right" />
+                                <TextBlock Style="{StaticResource M.Text.Column}" Text="PC" />
+                                <TextBlock Grid.Column="1" Style="{StaticResource M.Text.Column}" Text="Last synced" HorizontalAlignment="Right" Margin="12,0,16,0" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource M.Text.Column}" Text="Share" Width="64" Margin="0,0,16,0" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource M.Text.Column}" Text="kWh" HorizontalAlignment="Right" />
                             </Grid>
                         </Border>
                         <ItemsControl ItemsSource="{Binding Members}" Focusable="False">
@@ -176,7 +184,7 @@
 
                 <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
                     <StackPanel Style="{StaticResource Measure}">
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="MANAGE THIS HOUSEHOLD" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="Manage this household" />
                         <StackPanel Visibility="{Binding IsConfirming, Converter={StaticResource HiddenWhen}}">
                             <DockPanel>
                                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Secondary}" Text="This PC's name" Margin="0,0,12,0" VerticalAlignment="Center" />
@@ -203,7 +211,7 @@
             <!-- N2's sign-in (Plan N tasks A6, A7): works whether or not this PC is in a household. -->
             <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" DataContext="{Binding Account}">
                 <StackPanel Style="{StaticResource Measure}">
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="SIGN IN" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="Sign in" />
                     <StackPanel Visibility="{Binding SignedIn, Converter={StaticResource HiddenWhen}}">
                         <!-- Security round, review: a provider with no client ID (or, for Google, no secret) is not offered
                              at all; with neither available, this explains why instead of showing anything to press. -->

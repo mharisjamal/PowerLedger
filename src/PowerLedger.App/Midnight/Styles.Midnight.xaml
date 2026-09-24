@@ -7,23 +7,23 @@
          Every colour is a palette brush (Theme/Palette.Midnight.*.xaml) through DynamicResource, so the theme toggle
          repaints in place; the numbers and the motion below are the tokens of 0.2 and 0.5. -->
 
-    <!-- Type: the bundled faces (a folder a family under Fonts\), then Windows' own. The pack form resolves from the App and from a test host alike. -->
+    <!-- Type: the bundled faces (a folder a family under Fonts\), then Windows' own. The pack form resolves from the App and
+         from a test host alike. Figures are in the text face too, as the reference sets them, with tabular numerals
+         (Typography.NumeralAlignment) where they line up or tick over, not in a monospace face. -->
     <FontFamily x:Key="M.Font.Ui">pack://application:,,,/PowerLedger;component/Fonts/Manrope/#Manrope, Segoe UI Variable, Segoe UI</FontFamily>
-    <FontFamily x:Key="M.Font.Numbers">pack://application:,,,/PowerLedger;component/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
+    <FontFamily x:Key="M.Font.Numbers">pack://application:,,,/PowerLedger;component/Fonts/Manrope/#Manrope, Segoe UI Variable, Segoe UI</FontFamily>
     <FontFamily x:Key="M.Font.Glyphs">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
-    <!-- The numbers of 0.2. A Border wants its radius as a CornerRadius, so the card's and the control's are also here in
-         that form; a pill's (999) is not, because a WPF Border clamps each corner per axis and draws an ellipse: a pill
+    <!-- The numbers of 0.2, tightened in 0.8.1 to the reference's: small corners on a grid of hairline-framed sections, not
+         rounded floating cards. A Border wants its radius as a CornerRadius, so the card's and the control's are also here
+         in that form; a pill's (999) is not, because a WPF Border clamps each corner per axis and draws an ellipse: a pill
          Border sets local:Rounding.Pill and takes half its height (Rounding.cs). -->
-    <sys:Double x:Key="M.Radius.Card">14</sys:Double>
+    <sys:Double x:Key="M.Radius.Card">10</sys:Double>
     <sys:Double x:Key="M.Radius.Pill">999</sys:Double>
-    <sys:Double x:Key="M.Radius.Control">8</sys:Double>
-    <sys:Double x:Key="M.Blur.Tooltip">12</sys:Double>
-    <sys:Double x:Key="M.Elevation.Card">12</sys:Double>
-    <sys:Double x:Key="M.Elevation.Card.Hover">16</sys:Double>
-    <sys:Double x:Key="M.Elevation.Tooltip">20</sys:Double>
-    <CornerRadius x:Key="M.Corner.Card">14</CornerRadius>
-    <CornerRadius x:Key="M.Corner.Control">8</CornerRadius>
+    <sys:Double x:Key="M.Radius.Control">6</sys:Double>
+    <sys:Double x:Key="M.Elevation.Tooltip">14</sys:Double>
+    <CornerRadius x:Key="M.Corner.Card">10</CornerRadius>
+    <CornerRadius x:Key="M.Corner.Control">6</CornerRadius>
 
     <!-- Motion (0.5), the lengths Motion.cs keeps. A storyboard's animation is a local:MotionAnimation with a Speed (and
          Fade for an opacity fade) that asks Motion each time it starts, so reduced motion, turned on even mid-session, makes
@@ -64,6 +64,12 @@
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{DynamicResource M.Ink3}" />
     </Style>
+    <!-- A table's column heading: small, muted, in sentence case, as the reference's are. -->
+    <Style x:Key="M.Text.Column" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Body}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink3}" />
+    </Style>
     <Style x:Key="M.Text.Number" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource M.Font.Numbers}" />
         <Setter Property="FontSize" Value="13" />
@@ -71,9 +77,10 @@
         <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
         <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
     </Style>
+    <!-- The big figures: large and light, the unit beside them smaller and dimmer (the view's Run). -->
     <Style x:Key="M.Text.Display" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Number}">
         <Setter Property="FontSize" Value="36" />
-        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontWeight" Value="Normal" />
     </Style>
     <Style x:Key="M.Text.Glyph" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource M.Font.Glyphs}" />
@@ -94,74 +101,41 @@
     </Style>
     <Style x:Key="{x:Static SystemParameters.FocusVisualStyleKey}" BasedOn="{StaticResource M.Focus.Ring}" />
 
-    <!-- Surfaces. A card (local:Card) floats on a shadow it paints behind itself in the palette's colour; hovering lifts it
-         by 4 (0.5). No Effect: the card's text keeps ClearType and a redraw inside it stays inside it. M.Card on a plain
-         Border sets properties only a Card draws, so that Border is flat. -->
+    <!-- Surfaces (0.8.1): a section is the panel framed by a hairline with a small corner, flat on the ground: no shadow and
+         nothing that moves under the pointer, so the page reads as one crisp grid. M.Card and M.Card.Flat are the same
+         surface; M.Card stays the key the pages' sections use. M.Divider is the hairline between two parts of a section. -->
     <Style x:Key="M.Card.Flat" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource M.Panel}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource M.LineStrong}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="{StaticResource M.Corner.Card}" />
         <Setter Property="Padding" Value="20" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
-    <Style x:Key="M.Card" TargetType="Border" BasedOn="{StaticResource M.Card.Flat}">
-        <Setter Property="local:Card.Shadow" Value="{DynamicResource M.Shadow}" />
-        <Setter Property="local:Card.Depth" Value="{StaticResource M.Elevation.Card}" />
-        <Style.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-                <Trigger.EnterActions>
-                    <BeginStoryboard>
-                        <Storyboard>
-                            <local:MotionAnimation Storyboard.TargetProperty="(local:Card.Depth)" To="{StaticResource M.Elevation.Card.Hover}" Speed="Fast" EasingFunction="{StaticResource M.Ease.In}" />
-                        </Storyboard>
-                    </BeginStoryboard>
-                </Trigger.EnterActions>
-                <Trigger.ExitActions>
-                    <BeginStoryboard>
-                        <Storyboard>
-                            <local:MotionAnimation Storyboard.TargetProperty="(local:Card.Depth)" To="{StaticResource M.Elevation.Card}" Speed="Fast" EasingFunction="{StaticResource M.Ease.Out}" />
-                        </Storyboard>
-                    </BeginStoryboard>
-                </Trigger.ExitActions>
-            </Trigger>
-        </Style.Triggers>
-    </Style>
-
-    <!-- Glass (CLAUDE.md): a translucent fill over content with a 1 px edge, worn only by the top bar and tooltips. The 1 px
-         highlight along the inside of the top edge, where light catches a polished rim, is a Rectangle in M.Glass.Highlight
-         as the first child, because a Border draws one background and one edge. -->
-    <Style x:Key="M.Glass" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource M.GlassFill}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource M.GlassBorder}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="{StaticResource M.Corner.Control}" />
+    <Style x:Key="M.Card" TargetType="Border" BasedOn="{StaticResource M.Card.Flat}" />
+    <Style x:Key="M.Divider" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
-    <Style x:Key="M.Glass.Highlight" TargetType="Rectangle">
-        <Setter Property="Height" Value="1" />
-        <Setter Property="VerticalAlignment" Value="Top" />
-        <Setter Property="Margin" Value="6,0" />
-        <Setter Property="Fill" Value="{DynamicResource M.GlassHighlight}" />
-        <Setter Property="IsHitTestVisible" Value="False" />
-    </Style>
 
-    <!-- Navigation. The pill behind the current item is one Border in M.NavPill that the sidebar moves (0.5), so an item
-         paints only its glyph and label: in M.Ink2 at rest, over a raised wash under the pointer, and in M.OnAccent when
-         checked, crossfading over the pill's travel so white text is never alone on a light panel. -->
+    <!-- Navigation. The current item's row is one local:NavGlow in M.NavPill that the sidebar moves (0.5): the full width of
+         the sidebar, square, washed from the accent at the left into the violet, with a bright left edge, as the reference
+         marks its current page. An item paints only its glyph and label: in M.Ink2 at rest, over a raised wash under the
+         pointer, and in M.Ink when checked, crossfading over the row's travel. -->
     <Style x:Key="M.NavGroup" TargetType="TextBlock" BasedOn="{StaticResource M.Text.Eyebrow}">
         <Setter Property="Margin" Value="24,18,16,6" />
     </Style>
-    <Style x:Key="M.NavPill" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource M.Accent}" />
-        <Setter Property="local:Rounding.Pill" Value="True" />
+    <Style x:Key="M.NavPill" TargetType="local:NavGlow">
+        <Setter Property="AccentBrush" Value="{DynamicResource M.Accent}" />
+        <Setter Property="SecondBrush" Value="{DynamicResource M.Accent2}" />
         <Setter Property="Height" Value="40" />
         <Setter Property="IsHitTestVisible" Value="False" />
     </Style>
     <Style x:Key="M.NavItem" TargetType="RadioButton">
         <Setter Property="Height" Value="40" />
-        <Setter Property="Margin" Value="12,0,12,2" />
-        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Margin" Value="0,0,0,2" />
+        <Setter Property="Padding" Value="24,0" />
         <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
         <Setter Property="FontSize" Value="13.5" />
         <Setter Property="FontWeight" Value="Medium" />
@@ -172,15 +146,15 @@
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid Background="Transparent">
-                        <Border x:Name="Hover" Background="{DynamicResource M.Raised}" local:Rounding.Pill="True" Opacity="0" />
+                        <Border x:Name="Hover" Background="{DynamicResource M.Raised}" Opacity="0" />
                         <Grid Margin="{TemplateBinding Padding}">
                             <StackPanel x:Name="Rest" Orientation="Horizontal">
                                 <TextBlock Style="{StaticResource M.Text.Glyph}" Width="20" Text="{TemplateBinding Tag}" Foreground="{TemplateBinding Foreground}" />
-                                <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
+                                <ContentPresenter Margin="12,0,0,0" VerticalAlignment="Center" />
                             </StackPanel>
-                            <StackPanel x:Name="Active" Orientation="Horizontal" Opacity="0" TextElement.Foreground="{DynamicResource M.OnAccent}">
-                                <TextBlock Style="{StaticResource M.Text.Glyph}" Width="20" Text="{TemplateBinding Tag}" Foreground="{DynamicResource M.OnAccent}" />
-                                <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
+                            <StackPanel x:Name="Active" Orientation="Horizontal" Opacity="0" TextElement.Foreground="{DynamicResource M.Ink}">
+                                <TextBlock Style="{StaticResource M.Text.Glyph}" Width="20" Text="{TemplateBinding Tag}" Foreground="{DynamicResource M.Ink}" />
+                                <ContentPresenter Margin="12,0,0,0" VerticalAlignment="Center" />
                             </StackPanel>
                         </Grid>
                     </Grid>
@@ -229,8 +203,8 @@
     <!-- A sidebar item that acts rather than navigates (Support): the item's rest look on a button. -->
     <Style x:Key="M.NavButton" TargetType="Button">
         <Setter Property="Height" Value="40" />
-        <Setter Property="Margin" Value="12,0,12,2" />
-        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Margin" Value="0,0,0,2" />
+        <Setter Property="Padding" Value="24,0" />
         <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
         <Setter Property="FontSize" Value="13.5" />
         <Setter Property="FontWeight" Value="Medium" />
@@ -241,10 +215,10 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid Background="Transparent">
-                        <Border x:Name="Hover" Background="{DynamicResource M.Raised}" local:Rounding.Pill="True" Opacity="0" />
+                        <Border x:Name="Hover" Background="{DynamicResource M.Raised}" Opacity="0" />
                         <StackPanel Margin="{TemplateBinding Padding}" Orientation="Horizontal">
                             <TextBlock Style="{StaticResource M.Text.Glyph}" Width="20" Text="{TemplateBinding Tag}" Foreground="{TemplateBinding Foreground}" />
-                            <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
+                            <ContentPresenter Margin="12,0,0,0" VerticalAlignment="Center" />
                         </StackPanel>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -392,18 +366,27 @@
             </Trigger>
         </Style.Triggers>
     </Style>
+    <!-- An icon button: a small square with a hairline edge and the control's corner, as the reference's bell and gear. -->
     <Style x:Key="M.IconButton" TargetType="Button" BasedOn="{StaticResource M.Button.Quiet}">
-        <Setter Property="Width" Value="36" />
-        <Setter Property="Height" Value="36" />
-        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="MinHeight" Value="32" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="FontFamily" Value="{StaticResource M.Font.Glyphs}" />
         <Setter Property="FontSize" Value="14" />
-        <Setter Property="local:Wash.Corner" Value="18" />
+        <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <!-- The same without the edge: the caption's buttons and a notice's dismiss. -->
+    <Style x:Key="M.IconButton.Quiet" TargetType="Button" BasedOn="{StaticResource M.IconButton}">
+        <Setter Property="Width" Value="36" />
+        <Setter Property="Height" Value="36" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="BorderThickness" Value="0" />
     </Style>
 
     <!-- The close button of the caption: the icon button whose wash is the palette's red, so it warns like Windows' own. -->
-    <Style x:Key="M.Caption.Close" TargetType="Button" BasedOn="{StaticResource M.IconButton}">
+    <Style x:Key="M.Caption.Close" TargetType="Button" BasedOn="{StaticResource M.IconButton.Quiet}">
         <Setter Property="local:Wash.Brush" Value="{DynamicResource M.Bad}" />
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
@@ -412,29 +395,31 @@
         </Style.Triggers>
     </Style>
 
-    <!-- Range pills: a row of radio buttons on a raised track (M.PillTrack); the chosen one is filled with the accent. -->
+    <!-- Range choices: a row of small words (M.PillTrack holds them, with no track of its own); the chosen one sits on a
+         small accent rectangle with the control's corner, as the reference's 1H 1D 1W. -->
     <Style x:Key="M.PillTrack" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource M.Raised}" />
-        <Setter Property="local:Rounding.Pill" Value="True" />
-        <Setter Property="Padding" Value="3" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="0" />
         <Setter Property="HorizontalAlignment" Value="Left" />
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style x:Key="M.Pill" TargetType="RadioButton">
-        <Setter Property="Height" Value="28" />
-        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="MinWidth" Value="30" />
+        <Setter Property="Margin" Value="2,0,0,0" />
+        <Setter Property="Padding" Value="9,0" />
         <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Foreground" Value="{DynamicResource M.Ink2}" />
+        <Setter Property="Foreground" Value="{DynamicResource M.Ink3}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{StaticResource M.Focus.Ring}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
-                        <Border x:Name="Face" Background="Transparent" local:Rounding.Pill="True" SnapsToDevicePixels="True" />
-                        <Border x:Name="Hover" Background="{DynamicResource M.Line}" local:Rounding.Pill="True" Opacity="0" />
+                        <Border x:Name="Face" Background="Transparent" CornerRadius="{StaticResource M.Corner.Control}" SnapsToDevicePixels="True" />
+                        <Border x:Name="Hover" Background="{DynamicResource M.Raised}" CornerRadius="{StaticResource M.Corner.Control}" Opacity="0" />
                         <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -590,9 +575,9 @@
         </Setter>
     </Style>
 
-    <!-- Quality chips, in the manner of the reference's stage chips: a tinted pill with the quality's own ink. -->
+    <!-- Quality chips, in the manner of the reference's stage chips: a small tag with the control's corner, tinted, in the quality's own ink. -->
     <ControlTemplate x:Key="M.Chip.Face" TargetType="ContentControl">
-        <Border Background="{TemplateBinding Background}" local:Rounding.Pill="True" Height="22" Padding="9,0" SnapsToDevicePixels="True">
+        <Border Background="{TemplateBinding Background}" CornerRadius="{StaticResource M.Corner.Control}" Height="22" Padding="8,0" SnapsToDevicePixels="True">
             <TextBlock Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" FontFamily="{StaticResource M.Font.Ui}" FontSize="11" FontWeight="SemiBold"
                        Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
         </Border>
@@ -626,7 +611,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="local:QualityBadge">
-                    <Border x:Name="Root" Background="{TemplateBinding Background}" local:Rounding.Pill="True" Height="22" Padding="9,0" SnapsToDevicePixels="True">
+                    <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="{StaticResource M.Corner.Control}" Height="22" Padding="8,0" SnapsToDevicePixels="True">
                         <TextBlock x:Name="Label" Text="Measured" FontFamily="{StaticResource M.Font.Ui}" FontSize="11" FontWeight="SemiBold"
                                    Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
                     </Border>
@@ -650,13 +635,13 @@
         </Setter>
     </Style>
 
-    <!-- Status pills: a coloured dot (the Foreground) and the words in ink on a raised pill. -->
+    <!-- Status pills: a small coloured dot (the Foreground) and the words in ink on a raised pill with a hairline edge. -->
     <ControlTemplate x:Key="M.StatusPill.Face" TargetType="ContentControl">
         <Border Background="{DynamicResource M.Raised}" BorderBrush="{DynamicResource M.Line}" BorderThickness="1" local:Rounding.Pill="True"
-                Height="26" Padding="10,0,12,0" SnapsToDevicePixels="True">
+                Height="24" Padding="9,0,11,0" SnapsToDevicePixels="True">
             <StackPanel Orientation="Horizontal">
-                <Ellipse Width="8" Height="8" Fill="{TemplateBinding Foreground}" VerticalAlignment="Center" />
-                <TextBlock Margin="7,0,0,0" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" FontFamily="{StaticResource M.Font.Ui}" FontSize="12"
+                <Ellipse Width="7" Height="7" Fill="{TemplateBinding Foreground}" VerticalAlignment="Center" />
+                <TextBlock Margin="6,0,0,0" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" FontFamily="{StaticResource M.Font.Ui}" FontSize="11.5"
                            FontWeight="SemiBold" Foreground="{DynamicResource M.Ink}" VerticalAlignment="Center" />
             </StackPanel>
         </Border>
@@ -675,7 +660,7 @@
         <Setter Property="Foreground" Value="{DynamicResource M.Bad}" />
     </Style>
 
-    <!-- Tables: an eyebrow header over a hairline, rows 44 px tall that lift under the pointer, and the track a share bar runs in. -->
+    <!-- Tables: small muted column headings over a hairline, rows 48 px tall that lift under the pointer, and the track a thin share bar runs in. -->
     <Style x:Key="M.Table.Header" TargetType="Border">
         <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
         <Setter Property="BorderThickness" Value="0,0,0,1" />
@@ -683,7 +668,7 @@
         <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
     <Style x:Key="M.Table.Row" TargetType="Border">
-        <Setter Property="MinHeight" Value="44" />
+        <Setter Property="MinHeight" Value="48" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
         <Setter Property="BorderThickness" Value="0,0,0,1" />
@@ -697,7 +682,7 @@
     </Style>
     <!-- The track takes the hairline colour: raised on white would not show in the light theme. -->
     <Style x:Key="M.ShareTrack" TargetType="Border">
-        <Setter Property="Height" Value="6" />
+        <Setter Property="Height" Value="4" />
         <Setter Property="Background" Value="{DynamicResource M.Line}" />
         <Setter Property="local:Rounding.Pill" Value="True" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -720,16 +705,26 @@
         <Setter Property="RestBrush" Value="{DynamicResource M.PartRest}" />
         <Setter Property="NumberFont" Value="{StaticResource M.Font.Numbers}" />
     </Style>
+    <!-- A KPI's bar: accent stripes over the accent's soft tint on a dark track, an ink marker at the value. -->
     <Style x:Key="M.HatchBar" TargetType="local:HatchBar" BasedOn="{StaticResource M.Instrument}">
         <Setter Property="FillBrush" Value="{DynamicResource M.Accent}" />
-        <Setter Property="HatchBrush" Value="{DynamicResource M.Hatch}" />
+        <Setter Property="SoftBrush" Value="{DynamicResource M.AccentSoft}" />
         <Setter Property="TrackBrush" Value="{DynamicResource M.Line}" />
+        <Setter Property="MarkerBrush" Value="{DynamicResource M.Ink}" />
+    </Style>
+    <!-- The chart key's swatch for sleep: the track hatched as the chart hatches it, nothing done, no marker. -->
+    <Style x:Key="M.SleepKey" TargetType="local:HatchBar" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="HatchBrush" Value="{DynamicResource M.Ink3}" />
+        <Setter Property="TrackBrush" Value="{DynamicResource M.Raised}" />
+        <Setter Property="Value" Value="0" />
     </Style>
     <Style x:Key="M.ShareBar" TargetType="local:ShareBar" BasedOn="{StaticResource M.Instrument}">
         <Setter Property="FillBrush" Value="{DynamicResource M.Accent}" />
         <Setter Property="TrackBrush" Value="{DynamicResource M.Line}" />
     </Style>
     <Style x:Key="M.AreaChart" TargetType="local:AreaChart" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="SecondBrush" Value="{DynamicResource M.Accent2}" />
+        <Setter Property="RingBrush" Value="{DynamicResource M.Tip}" />
         <Setter Property="FillTopBrush" Value="{DynamicResource M.ChartFillTop}" />
         <Setter Property="FillBottomBrush" Value="{DynamicResource M.ChartFillBottom}" />
         <Setter Property="HatchBrush" Value="{DynamicResource M.Hatch}" />
@@ -875,26 +870,25 @@
         </Style.Triggers>
     </Style>
 
-    <!-- Tooltips: glass over a frosted snapshot of what they cover (Glass), lifted on a shadow, fading in (0.5). The 8 px margin is the shadow's room. -->
+    <!-- Tooltips: a solid bubble, white on the dark page and dark on the light one, with the control's corner, set off by a
+         soft shadow and fading in (0.5); no glass. The 8 px margin is the shadow's room. M.Tip.Muted is a tooltip's quieter
+         line, as the chart's time over its figure. -->
     <Style TargetType="ToolTip">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="HasDropShadow" Value="False" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+        <Setter Property="Background" Value="{DynamicResource M.Tip}" />
+        <Setter Property="Foreground" Value="{DynamicResource M.TipText}" />
         <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
         <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Padding" Value="10,6" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToolTip">
                     <Grid x:Name="Root" Margin="8" Opacity="0">
-                        <Grid local:Glass.Backdrop="True" local:Glass.Blur="{StaticResource M.Blur.Tooltip}" local:Glass.Radius="{StaticResource M.Radius.Control}" />
-                        <Border Style="{StaticResource M.Glass}" Padding="{TemplateBinding Padding}"
-                                local:Elevation.Shadow="{DynamicResource M.Shadow}" local:Elevation.Depth="{StaticResource M.Elevation.Tooltip}">
-                            <Grid>
-                                <Rectangle Style="{StaticResource M.Glass.Highlight}" />
-                                <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}" />
-                            </Grid>
+                        <Border x:Name="Bubble" Background="{TemplateBinding Background}" CornerRadius="{StaticResource M.Corner.Control}" Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True" local:Elevation.Shadow="{DynamicResource M.Shadow}" local:Elevation.Depth="{StaticResource M.Elevation.Tooltip}">
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}" />
                         </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -910,8 +904,14 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <Style x:Key="M.Tip.Muted" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource M.Font.Ui}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Foreground" Value="{DynamicResource M.TipMuted}" />
+    </Style>
 
-    <!-- Menus: a raised panel on a shadow; items light under the pointer. Glass stays with the top bar and tooltips (CLAUDE.md). -->
+    <!-- Menus: a panel on a shadow with a hairline edge; items light under the pointer. -->
     <Style TargetType="ContextMenu">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="HasDropShadow" Value="False" />
@@ -921,7 +921,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ContextMenu">
-                    <Border Margin="8" Background="{DynamicResource M.Panel}" BorderBrush="{DynamicResource M.LineStrong}" BorderThickness="1"
+                    <Border Margin="8" Background="{DynamicResource M.Panel}" BorderBrush="{DynamicResource M.Line}" BorderThickness="1"
                             CornerRadius="{StaticResource M.Corner.Control}" Padding="4" SnapsToDevicePixels="True"
                             local:Elevation.Shadow="{DynamicResource M.Shadow}" local:Elevation.Depth="{StaticResource M.Elevation.Tooltip}">
                         <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />

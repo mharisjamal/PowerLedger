@@ -64,7 +64,7 @@
 
             <Border Style="{StaticResource M.Card}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="TARIFF" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="Tariff" />
                     <ItemsControl ItemsSource="{Binding TariffHistory}" Margin="0,0,0,8" Focusable="False">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -92,7 +92,7 @@
             <StackPanel DataContext="{Binding Service}" IsEnabled="{Binding IsLoaded}" app:SettingsEntry.SavesOnEnter="True">
                 <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="MACHINE" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="Machine" />
                         <TextBlock Style="{StaticResource M.Text.Muted}" TextWrapping="Wrap" Margin="0,0,0,6"
                                    Text="{Binding DataContext.Detected, RelativeSource={RelativeSource AncestorType=UserControl}, StringFormat=Detected: {0}}" />
                         <StackPanel Style="{StaticResource Row}">
@@ -261,7 +261,7 @@
 
                 <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource M.Card.Title}" Text="SAMPLING AND HISTORY" />
+                        <TextBlock Style="{StaticResource M.Card.Title}" Text="Sampling and history" />
                         <StackPanel Style="{StaticResource Row}">
                             <TextBlock Style="{StaticResource Label}" Text="Idle after, minutes" />
                             <TextBox Style="{StaticResource Field}" Width="72" Text="{Binding IdleMinutes, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Idle after, minutes" />
@@ -295,7 +295,7 @@
 
             <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="CALIBRATION" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="Calibration" />
                     <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" Text="{Binding Calibration}" />
                     <StackPanel Orientation="Horizontal" Margin="0,12,0,0" Visibility="{Binding ConfirmingReset, Converter={StaticResource HiddenWhen}}">
                         <Button Style="{StaticResource M.Button.Outline}" Content="Reset calibration" Command="{Binding ResetCalibration}" />
@@ -311,7 +311,7 @@
 
             <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="PREFERENCES" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="Preferences" />
                     <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="CO₂ per kWh, kg" />
                         <TextBox Style="{StaticResource Field}" Width="72" Text="{Binding Co2, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Kilograms of CO2 per kWh" />
@@ -375,7 +375,7 @@
 
             <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" DataContext="{Binding Privacy}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="PRIVACY" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="Privacy" />
                     <StackPanel>
                         <ToggleButton Style="{StaticResource Switch}" Content="Crash and sensor reports" IsChecked="{Binding Diagnostics}" />
                         <TextBlock Style="{StaticResource SwitchNote}"
@@ -424,7 +424,7 @@
 
             <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}" DataContext="{Binding Household}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="HOUSEHOLD" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="Household" />
                     <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Discoverable" />
                         <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding Discoverable}">
@@ -437,7 +437,7 @@
 
             <Border Style="{StaticResource M.Card}" Margin="{StaticResource M.Card.Gap}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource M.Card.Title}" Text="ABOUT" />
+                    <TextBlock Style="{StaticResource M.Card.Title}" Text="About" />
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                         <Image Source="{StaticResource Brand.Mark}" Width="36" Height="36" VerticalAlignment="Center" />
                         <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">

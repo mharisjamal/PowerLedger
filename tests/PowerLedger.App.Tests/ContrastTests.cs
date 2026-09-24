@@ -15,18 +15,19 @@ public class ContrastTests
 {
     private static readonly string[] Texts = ["M.Ink", "M.Ink2", "M.Ink3"];
     private static readonly string[] Grounds = ["M.Ground", "M.Panel", "M.Raised"];
-    private static readonly string[] Marks = ["M.Accent", "M.Good", "M.Bad", "M.Warn", "M.PartCpu", "M.PartGpu", "M.PartDisplay", "M.PartRest", "M.LineStrong", "M.Focus"];
+    private static readonly string[] Marks = ["M.Accent", "M.Good", "M.Bad", "M.Warn", "M.PartCpu", "M.PartGpu", "M.PartDisplay", "M.PartRest", "M.LineStrong", "M.Focus", "M.Tip"];
     private static readonly string[] Chips = ["M.ChipMeasured", "M.ChipCalibrated", "M.ChipEstimated"];
 
     /// <summary>Text set in a colour, and where it sits: white on the accent (the active pill, primary buttons, the
-    /// badge), the trends' green and red on the cards and hovered rows, and the accent's text tint (the chart's "now"
-    /// label and other small accent labels) there too.</summary>
+    /// badge), the trends' green and red on the cards and hovered rows, the accent's text tint (the chart's "now"
+    /// label and other small accent labels) there too, and the tooltip's words on its bubble.</summary>
     private static readonly (string Text, string Ground)[] ColouredText =
     [
         ("M.OnAccent", "M.Accent"),
         ("M.Good", "M.Panel"), ("M.Good", "M.Raised"),
         ("M.Bad", "M.Panel"), ("M.Bad", "M.Raised"),
         ("M.AccentText", "M.Panel"), ("M.AccentText", "M.Raised"),
+        ("M.TipText", "M.Tip"), ("M.TipMuted", "M.Tip"),
     ];
 
     [Theory]
@@ -83,6 +84,18 @@ public class ContrastTests
         }
         palette["Brush.PartCpu"].ShouldBe(palette["M.PartCpu"], theme);
         palette["Brush.Amber"].ShouldBe(palette["M.Accent"], theme);
+    }
+
+    /// <summary>0.8.1: the sidebar's current page is its words in ink over the accent's wash, at its strongest behind them.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void The_current_pages_words_read_on_the_sidebars_wash(string theme)
+    {
+        var palette = Midnight(Enum.Parse<Theme>(theme));
+        var accent = palette["M.Accent"];
+        var wash = Contrast.Over(Color.FromArgb((byte)Math.Round(255 * NavGlow.Strength), accent.R, accent.G, accent.B), palette["M.Panel"]);
+        Contrast.Ratio(palette["M.Ink"], wash).ShouldBeGreaterThanOrEqualTo(4.5, theme);
     }
 
     [Theory]

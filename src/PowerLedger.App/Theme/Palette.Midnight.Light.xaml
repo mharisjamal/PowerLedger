@@ -3,7 +3,7 @@
     <!-- Midnight, light: the design's §3 tokens, laid out as the dark palette is. Ink3, LineStrong and Warn sit a little
          past the design's first figures, where the contrast tests (text 4.5:1, borders and marks 3:1 on white) put them;
          Good and Bad a little darker, since the trends are text. The CPU is teal, not the accent's blue, so its band
-         stays apart from the accent's total line. -->
+         stays apart from the accent's total line. The tooltip turns the dark page's white bubble round: dark, white words. -->
     <SolidColorBrush x:Key="Brush.Ground" Color="#F3F4FA" />
     <SolidColorBrush x:Key="Brush.Panel" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Brush.Raised" Color="#F7F8FD" />
@@ -36,6 +36,7 @@
     <SolidColorBrush x:Key="M.AccentSoft" Color="#243A5BFF" />
     <SolidColorBrush x:Key="M.OnAccent" Color="#FFFFFF" />
     <SolidColorBrush x:Key="M.AccentText" Color="#3A5BFF" />
+    <SolidColorBrush x:Key="M.Accent2" Color="#7C3AED" />
     <SolidColorBrush x:Key="M.Good" Color="#147F57" />
     <SolidColorBrush x:Key="M.Bad" Color="#CC3B3B" />
     <SolidColorBrush x:Key="M.Warn" Color="#C28511" />
@@ -50,10 +51,10 @@
     <SolidColorBrush x:Key="M.ChipCalibratedText" Color="#7A5A08" />
     <SolidColorBrush x:Key="M.ChipEstimated" Color="#DDEFFA" />
     <SolidColorBrush x:Key="M.ChipEstimatedText" Color="#0E5A85" />
-    <!-- Glass (the top bar and tooltips over content), shadow, hatch, the area chart's gradient and the focus ring. -->
-    <SolidColorBrush x:Key="M.GlassFill" Color="#B3FFFFFF" />
-    <SolidColorBrush x:Key="M.GlassBorder" Color="#14151A33" />
-    <SolidColorBrush x:Key="M.GlassHighlight" Color="#E6FFFFFF" />
+    <SolidColorBrush x:Key="M.Tip" Color="#151A33" />
+    <SolidColorBrush x:Key="M.TipText" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="M.TipMuted" Color="#A9AFCC" />
+    <!-- Shadow (menus and tooltips), hatch, the area chart's gradient and the focus ring. -->
     <SolidColorBrush x:Key="M.Shadow" Color="#29151A33" />
     <SolidColorBrush x:Key="M.Hatch" Color="#1A151A33" />
     <SolidColorBrush x:Key="M.ChartFillTop" Color="#473A5BFF" />
