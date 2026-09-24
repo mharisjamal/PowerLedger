@@ -571,6 +571,22 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_network_turning_public_stops_the_listener_and_the_announcement_within_a_minute_though_windows_says_nothing()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Worker.Port.ShouldBeGreaterThan(0);
+
+        desktop.Category.Quietly(isPrivate: false);                               // a category changed in Settings changes no address
+        _clock.Advance(HouseholdWorker.NetworkEvery);
+
+        await WaitFor.True(() => desktop.Worker.Port == 0);
+        _network.Announced.ShouldNotContain(service => service.Instance == desktop.Worker.InstanceId);
+        desktop.Category.Quietly(isPrivate: true);
+        _clock.Advance(HouseholdWorker.NetworkEvery);
+        await WaitFor.True(() => desktop.Worker.Port > 0);
+    }
+
+    [Fact]
     public async Task Off_a_private_network_nothing_listens_and_nothing_is_announced()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);

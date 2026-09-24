@@ -70,4 +70,8 @@ internal sealed class FakeNetworkCategory(bool isPrivate = true) : INetworkCateg
     }
 
     public event Action? Changed;
+
+    /// <summary>Changes the category without raising <see cref="Changed"/>, as Windows says nothing when only the category of a
+    /// network changes.</summary>
+    public void Quietly(bool isPrivate) => Volatile.Write(ref _isPrivate, isPrivate);
 }

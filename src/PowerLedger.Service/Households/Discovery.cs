@@ -145,7 +145,7 @@ internal sealed class Announcer : IDisposable
 /// The network's category from Windows' Network List Manager: Private when some connected network is Private and none is
 /// Public. A domain network alone counts as neither, as the firewall rule is for Private networks only. Address changes
 /// raise <see cref="Changed"/>; changing a network's category in Settings changes no address, so the worker also asks
-/// again with each turn.
+/// again every minute (plan 0.9).
 /// </summary>
 internal sealed class WindowsNetworkCategory : INetworkCategory, IDisposable
 {

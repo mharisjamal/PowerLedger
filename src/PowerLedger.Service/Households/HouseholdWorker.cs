@@ -53,6 +53,10 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>The longest syncing on the network takes in a turn.</summary>
     internal static readonly TimeSpan LanBudget = TimeSpan.FromMinutes(2);
 
+    /// <summary>How often the network's category is looked at again (plan 0.9): Windows says nothing when only a network's
+    /// category changes, so the listener and the announcement stop within this long of the network turning Public.</summary>
+    internal static readonly TimeSpan NetworkEvery = TimeSpan.FromMinutes(1);
+
     /// <summary>The most members found on the network synced with in a turn: twice the most a household has.</summary>
     internal const int MaxFound = 2 * Wire.MaxMembers;
 
@@ -92,6 +96,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private readonly SemaphoreSlim _kick = new(0);
     private readonly Lock _listening = new();
     private LanListener? _listener;
+    private ITimer? _networkCheck;
     private long _rowsBuiltForHour = -1;
 
     public HouseholdWorker(
@@ -138,6 +143,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     {
         _environment.Network.Changed += Announce;
         Announce();
+        _networkCheck = _clock.CreateTimer(_ => Announce(), null, NetworkEvery, NetworkEvery);
         Publish();
         await base.StartAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -152,6 +158,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         finally
         {
             _environment.Network.Changed -= Announce;
+            if (_networkCheck is not null) await _networkCheck.DisposeAsync().ConfigureAwait(false);
             _announcer.Dispose();
             LanListener? listener;
             lock (_listening) (listener, _listener) = (_listener, null);
