@@ -48,17 +48,30 @@ public sealed class CodePairingTests : IDisposable
         var added = await adding;
 
         joined.ShouldBeOfType<PairingOutcome.Joined>().Other.Id.ShouldBe(_adderKeys.DeviceId);
+        joined.Text.ShouldBe("This PC joined Desktop-7's household.");
+        ((PairingOutcome.Joined)joined).Other.Name.ShouldBe("Desktop-7");                 // from the sealed welcome
         added.ShouldBeOfType<PairingOutcome.Joined>().Other.Id.ShouldBe(_joinerKeys.DeviceId);
+        ((PairingOutcome.Joined)added).Other.Name.ShouldBe("Laptop-2");                   // from the sealed answer
+        ((PairingOutcome.Joined)added).Other.Kind.ShouldBe(ChassisKind.Laptop);
         Wire.IsJoinProof(((PairingOutcome.Joined)added).Other, Household, ((PairingOutcome.Joined)added).Proof).ShouldBeTrue();
         added.Text.ShouldBe("Laptop-2 joined your household.");
         asked.ShouldNotBeNull().ComparisonCode.ShouldBeNull();
-        (asked.FromName, asked.LeavesHousehold).ShouldBe(("Desktop-7", true));
+        (asked.FromName, asked.LeavesHousehold).ShouldBe(((string?)null, true));
         entered.ShouldNotBeNull().HouseholdId.ShouldBe(Household);
         entered.Key.ShouldBe(_key);
         var meetingId = PairingCode.MeetingId(PairingCode.Normalize(meeting.Code)!);
         _relay.Calls.ShouldContain($"PUT /v1/meetings/{meetingId}/welcome");
         _relay.Calls.ShouldContain($"PUT /v1/meetings/{meetingId}/welcomed");
         _relay.Calls.ShouldAllBe(call => !call.Contains(meeting.Code.Replace("-", ""), StringComparison.OrdinalIgnoreCase));
+
+        // What the server holds in the open is keys and MACs: no name, kind or instance.
+        foreach (var slot in new[] { "adder", "joiner" })
+        {
+            var held = LanMessages.Read(_relay.Slot(meetingId, slot)).ShouldNotBeNull();
+            (held.Name, held.Kind, held.Instance).ShouldBe(((string?)null, (string?)null, (string?)null));
+            held.Mac.ShouldNotBeNull();
+            System.Text.Encoding.UTF8.GetString(_relay.Slot(meetingId, slot)!).ShouldNotContain(slot == "adder" ? "Desktop-7" : "Laptop-2");
+        }
     }
 
     [Fact]
@@ -72,7 +85,7 @@ public sealed class CodePairingTests : IDisposable
             enter: (_, _) => throw new InvalidOperationException("never entered"), CancellationToken.None);
 
         joined.ShouldBeOfType<PairingOutcome.Refused>();
-        (await adding).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("Laptop-2 didn't join.");
+        (await adding).ShouldBeOfType<PairingOutcome.Refused>().Text.ShouldBe("The other PC didn't join.");
         welcomed.ShouldBeFalse();
     }
 

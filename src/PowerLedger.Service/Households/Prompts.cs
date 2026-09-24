@@ -25,9 +25,12 @@ internal sealed class HouseholdPrompts(NoticeHub notices, TimeProvider clock) : 
 
     public Task<bool> AskToJoinAsync(JoinQuestion question, CancellationToken cancel)
     {
-        var text = question.ComparisonCode is { } code
-            ? $"Join {question.FromName}'s household? Its code is {code}. Check it matches the code on {question.FromName}."
-            : $"Join {question.FromName}'s household?";
+        var text = question switch
+        {
+            { FromName: null } => "Join the household of the PC that made this code?",
+            { ComparisonCode: { } code } => $"Join {question.FromName}'s household? Its code is {code}. Check it matches the code on {question.FromName}.",
+            _ => $"Join {question.FromName}'s household?",
+        };
         if (question.LeavesHousehold) text += " Joining leaves the household this PC is in now.";
         return AskAsync(NoticeKind.JoinPrompt, text, question.FromName, question.ComparisonCode, cancel);
     }

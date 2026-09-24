@@ -11,9 +11,10 @@ internal sealed record PairingIdentity(DeviceKeys Keys, string Name, ChassisKind
 internal sealed record Welcome(string HouseholdId, int Epoch, byte[] Key, IReadOnlyList<MemberInfo> Members);
 
 /// <summary>What the user at the joining PC is asked.</summary>
+/// <param name="FromName">The adding PC's name; null for a pairing by code, whose meeting carries no names.</param>
 /// <param name="ComparisonCode">"482 913" on the network; null for a pairing by code, which the code vouches for.</param>
 /// <param name="LeavesHousehold">True when this PC is in a household that joining leaves.</param>
-internal sealed record JoinQuestion(string FromName, string? ComparisonCode, bool LeavesHousehold);
+internal sealed record JoinQuestion(string? FromName, string? ComparisonCode, bool LeavesHousehold);
 
 /// <summary>Asks the user at the screen (households design §3, §9). Cancelling a question's token withdraws it: its prompt
 /// closes, and the answer is no.</summary>

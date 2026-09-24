@@ -118,7 +118,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         (await laptop.Send<HouseholdReply>(new JoinByCodeRequest(3, code))).ShouldBe(new HouseholdReply(3, true, "Looking for the PC that made that code."));
 
         var prompt = await laptop.Next(NoticeKind.JoinPrompt);
-        (prompt.Text, prompt.ComparisonCode).ShouldBe(("Join Desktop-7's household?", (string?)null));
+        (prompt.Text, prompt.FromName, prompt.ComparisonCode).ShouldBe(("Join the household of the PC that made this code?", (string?)null, (string?)null));
         await laptop.Send<HouseholdReply>(new AnswerPromptRequest(4, prompt.PromptId!, true));
 
         (await laptop.Next(NoticeKind.PairingProgress)).Text.ShouldBe("This PC joined Desktop-7's household.");

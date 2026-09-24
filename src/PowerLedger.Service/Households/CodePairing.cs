@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using PowerLedger.Contracts;
 using PowerLedger.Core.Households;
 using PowerLedger.Service.Households.Lan;
 using PowerLedger.Service.Households.Relay;
@@ -29,12 +30,13 @@ internal sealed class CodeMeeting(string code, string normalized, ECDiffieHellma
 
 /// <summary>
 /// Pairing through the server with a one-time code (households design §4, plan 0.6), for a PC somewhere else. The adding PC
-/// makes a code of 80 random bits and puts its hello in the meeting's <c>adder</c> slot; the joining PC, given the code,
-/// reads it and puts its own in <c>joiner</c>. Each hello carries a MAC under a key made from the code, so the server, which
-/// only sees the meeting ID made from the code, can't put in keys of its own. Both then agree a secret from their ephemeral
-/// keys; the joining PC's user is asked, without a comparison code since the code vouches for the adder, and the answer,
-/// the welcome and the joining PC's proof of its join go through the <c>answer</c>, <c>welcome</c> and <c>joined</c> slots,
-/// sealed. The joining PC enters the household only once the adding PC, having recorded it, writes the sealed
+/// makes a code of 80 random bits and puts its keys in the meeting's <c>adder</c> slot; the joining PC, given the code,
+/// reads them and puts its own in <c>joiner</c>. Each carries a MAC under a key made from the code, so the server, which
+/// only sees the meeting ID made from the code, can't put in keys of its own; and nothing else, so the server never sees a
+/// PC's name (plan 0.8). Both then agree a secret from their ephemeral keys; the joining PC's user is asked, without a
+/// comparison code since the code vouches for the adder, and the answer with the joining PC's name, the welcome with the
+/// adding PC's, and the joining PC's proof of its join go through the <c>answer</c>, <c>welcome</c> and <c>joined</c>
+/// slots, sealed. The joining PC enters the household only once the adding PC, having recorded it, writes the sealed
 /// <c>welcomed</c> slot (plan 0.8); without it, nothing changes on the joining PC. A meeting lasts 10 minutes.
 /// </summary>
 /// <param name="wait">How a poll waits for the next; <see cref="PollEvery"/> on the clock when null.</param>
@@ -54,8 +56,7 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
     {
         var code = PairingCode.New();
         var meeting = new CodeMeeting(code, PairingCode.Normalize(code)!, ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256), clock.GetUtcNow());
-        var hello = Hello(meeting.EphPublic, me, meeting.CodeKey, "adder");
-        var put = await relay.PutSlotAsync(meeting.MeetingId, "adder", LanMessages.Write(hello), cancel).ConfigureAwait(false);
+        var put = await relay.PutSlotAsync(meeting.MeetingId, "adder", Keys(meeting.EphPublic, me, meeting.CodeKey, "adder"), cancel).ConfigureAwait(false);
         if (put.Ok) return meeting;
         meeting.Dispose();
         return null;
@@ -71,39 +72,43 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         var deadline = meeting.Opened + Lifetime;
         var slot = await PollAsync(meeting.MeetingId, "joiner", deadline, cancel).ConfigureAwait(false);
         if (slot is null) return new PairingOutcome.Failed("The code ran out before another PC used it.");
-        if (Checked(slot, meeting.CodeKey, "joiner") is not { } joiner)
+        if (Checked(slot, meeting.CodeKey, "joiner") is not { } keys)
         {
             return new PairingOutcome.Failed("A PC tried the code, but its keys didn't match it, so it wasn't added.");
         }
-        if (joiner.From.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That is this PC.");
-        var (toJoiner, toAdder) = Keys(meeting.Eph, joiner.Eph, meeting.EphPublic, joiner.Eph);
+        if (keys.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That is this PC.");
+        var (toJoiner, toAdder) = SessionKeys(meeting.Eph, keys.Eph, meeting.EphPublic, keys.Eph);
 
         var sealedAnswer = await PollAsync(meeting.MeetingId, "answer", deadline, cancel).ConfigureAwait(false);
-        if (sealedAnswer is null) return new PairingOutcome.Failed($"{joiner.From.Name} didn't answer before the code ran out.");
+        if (sealedAnswer is null) return new PairingOutcome.Failed("The other PC didn't answer before the code ran out.");
         var answer = Open(toAdder, sealedAnswer, "answer");
-        if (answer is not { Type: "answer" }) return new PairingOutcome.Failed($"{joiner.From.Name}'s answer didn't open, so it wasn't added.");
-        if (answer.Accept != true) return new PairingOutcome.Refused($"{joiner.From.Name} didn't join.");
+        if (answer is not { Type: "answer" }) return new PairingOutcome.Failed("The other PC's answer didn't open, so it wasn't added.");
+        if (answer.Accept != true) return new PairingOutcome.Refused("The other PC didn't join.");
+        if (Wire.Name(answer.Name) is not { } name || Wire.Kind(answer.Kind) is not { } kind)
+        {
+            return new PairingOutcome.Failed("The other PC's answer wasn't a good one, so it wasn't added.");
+        }
+        var joiner = new MemberInfo(keys.Id, name, kind, keys.Sign, keys.Dh);
 
-        var welcome = await welcomeFor(joiner.From).ConfigureAwait(false);
+        var welcome = await welcomeFor(joiner).ConfigureAwait(false);
         var sealedWelcome = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(PairingSession.WelcomeMessage(welcome)), Encoding.ASCII.GetBytes("welcome"));
         var put = await relay.PutSlotAsync(meeting.MeetingId, "welcome", sealedWelcome, cancel).ConfigureAwait(false);
-        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give {joiner.From.Name} the household: {put.Problem}.");
+        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give {name} the household: {put.Problem}.");
 
         var sealedProof = await PollAsync(meeting.MeetingId, "joined", deadline, cancel).ConfigureAwait(false);
-        if (sealedProof is null) return new PairingOutcome.Failed($"{joiner.From.Name} didn't finish joining before the code ran out.");
+        if (sealedProof is null) return new PairingOutcome.Failed($"{name} didn't finish joining before the code ran out.");
         var proof = OpenBytes(toAdder, sealedProof, "joined");
-        if (!Wire.IsJoinProof(joiner.From, welcome.HouseholdId, proof))
+        if (!Wire.IsJoinProof(joiner, welcome.HouseholdId, proof))
         {
-            return new PairingOutcome.Failed($"{joiner.From.Name} didn't sign its joining, so it wasn't added.");
+            return new PairingOutcome.Failed($"{name} didn't sign its joining, so it wasn't added.");
         }
-        await record(joiner.From, proof!).ConfigureAwait(false);
+        await record(joiner, proof!).ConfigureAwait(false);
         var welcomed = HouseholdCrypto.Seal(toJoiner, LanMessages.Write(new LanMessage { Type = "welcomed" }), Encoding.ASCII.GetBytes("welcomed"));
         if (!await PutUntilAsync(meeting.MeetingId, "welcomed", welcomed, deadline, cancel).ConfigureAwait(false))
         {
-            return new PairingOutcome.Failed(
-                $"Couldn't tell {joiner.From.Name} it was added. If it doesn't show your household, remove it here and add it again.");
+            return new PairingOutcome.Failed($"Couldn't tell {name} it was added. If it doesn't show your household, remove it here and add it again.");
         }
-        return new PairingOutcome.Joined(joiner.From, $"{joiner.From.Name} joined your household.", proof);
+        return new PairingOutcome.Joined(joiner, $"{name} joined your household.", proof);
     }
 
     /// <summary>The joining side, given the code as the user typed it.</summary>
@@ -125,57 +130,75 @@ internal sealed class CodePairing(RelayClient relay, TimeProvider clock, Func<Ti
         {
             return new PairingOutcome.Failed("That code doesn't match the other PC's, so nothing was changed.");
         }
-        if (adder.From.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That code was made on this PC. Type it on the other one.");
+        if (adder.Id == me.Keys.DeviceId) return new PairingOutcome.Failed("That code was made on this PC. Type it on the other one.");
 
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephPublic = eph.ExportSubjectPublicKeyInfo();
-        var put = await relay.PutSlotAsync(meetingId, "joiner", LanMessages.Write(Hello(ephPublic, me, codeKey, "joiner")), cancel).ConfigureAwait(false);
+        var put = await relay.PutSlotAsync(meetingId, "joiner", Keys(ephPublic, me, codeKey, "joiner"), cancel).ConfigureAwait(false);
         if (put.Status == 409) return new PairingOutcome.Failed("Another PC has already used that code.");
         if (!put.Ok) return new PairingOutcome.Failed($"Couldn't reach the server: {put.Problem}.");
-        var (toJoiner, toAdder) = Keys(eph, adder.Eph, adder.Eph, ephPublic);
+        var (toJoiner, toAdder) = SessionKeys(eph, adder.Eph, adder.Eph, ephPublic);
         var deadline = clock.GetUtcNow() + Lifetime;
 
-        var accept = await broker.AskToJoinAsync(new JoinQuestion(adder.From.Name, null, inHousehold), cancel).ConfigureAwait(false);
-        var answer = HouseholdCrypto.Seal(toAdder, LanMessages.Write(new LanMessage { Type = "answer", Accept = accept }), Encoding.ASCII.GetBytes("answer"));
+        var accept = await broker.AskToJoinAsync(new JoinQuestion(null, null, inHousehold), cancel).ConfigureAwait(false);
+        var answer = HouseholdCrypto.Seal(toAdder, LanMessages.Write(new LanMessage
+        {
+            Type = "answer", Accept = accept, Name = me.Name, Kind = Wire.Kind(me.Kind), Instance = me.Instance,
+        }), Encoding.ASCII.GetBytes("answer"));
         put = await relay.PutSlotAsync(meetingId, "answer", answer, cancel).ConfigureAwait(false);
-        if (!accept) return new PairingOutcome.Refused($"This PC didn't join {adder.From.Name}'s household.");
-        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give {adder.From.Name} the answer: {put.Problem}.");
+        if (!accept) return new PairingOutcome.Refused("This PC didn't join the other PC's household.");
+        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't give the other PC the answer: {put.Problem}.");
 
         var sealedWelcome = await PollAsync(meetingId, "welcome", deadline, cancel).ConfigureAwait(false);
-        if (sealedWelcome is null) return new PairingOutcome.Failed($"{adder.From.Name} didn't finish adding this PC in time, so nothing was changed.");
-        if (Open(toJoiner, sealedWelcome, "welcome") is not { Type: "welcome" } message || PairingSession.ReadWelcome(message, adder.From) is not { } welcome)
+        if (sealedWelcome is null) return new PairingOutcome.Failed("The other PC didn't finish adding this PC in time, so nothing was changed.");
+        var keysOnly = new MemberInfo(adder.Id, "", ChassisKind.Desktop, adder.Sign, adder.Dh);
+        if (Open(toJoiner, sealedWelcome, "welcome") is not { Type: "welcome" } message || PairingSession.ReadWelcome(message, keysOnly) is not { } welcome)
         {
-            return new PairingOutcome.Failed($"{adder.From.Name} sent a household that wasn't a good one, so nothing was changed.");
+            return new PairingOutcome.Failed("The other PC sent a household that wasn't a good one, so nothing was changed.");
         }
+        var from = welcome.Members.First(member => member.Id == adder.Id);
         var joined = HouseholdCrypto.Seal(toAdder, Wire.SignJoin(me.Keys, welcome.HouseholdId), Encoding.ASCII.GetBytes("joined"));
         put = await relay.PutSlotAsync(meetingId, "joined", joined, cancel).ConfigureAwait(false);
-        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't tell {adder.From.Name} this PC is joining: {put.Problem}. Nothing was changed.");
+        if (!put.Ok) return new PairingOutcome.Failed($"Couldn't tell {from.Name} this PC is joining: {put.Problem}. Nothing was changed.");
         var sealedWelcomed = await PollAsync(meetingId, "welcomed", deadline, cancel).ConfigureAwait(false);
         if (sealedWelcomed is null || Open(toJoiner, sealedWelcomed, "welcomed") is not { Type: "welcomed" })
         {
-            return new PairingOutcome.Failed($"{adder.From.Name} didn't finish adding this PC in time, so nothing was changed.");
+            return new PairingOutcome.Failed($"{from.Name} didn't finish adding this PC in time, so nothing was changed.");
         }
-        await enter(welcome, adder.From).ConfigureAwait(false);
-        return new PairingOutcome.Joined(adder.From, $"This PC joined {adder.From.Name}'s household.");
+        await enter(welcome, from).ConfigureAwait(false);
+        return new PairingOutcome.Joined(from, $"This PC joined {from.Name}'s household.");
     }
 
-    private static LanMessage Hello(byte[] ephPublic, PairingIdentity me, byte[] codeKey, string side) =>
-        LanMessages.Hello(Lan.Hello.Pair, ephPublic, me.Keys, me.Name, me.Kind, me.Instance) with
-        {
-            Mac = Wire.Encode(PairingCode.Mac(codeKey, side, ephPublic, me.Keys.SignPublic, me.Keys.DhPublic)),
-        };
-
-    /// <summary>The hello in a slot, when its MAC under the code's key is right for <paramref name="side"/>.</summary>
-    private static Hello? Checked(byte[] slot, byte[] codeKey, string side)
+    /// <summary>A PC's keys as its meeting slot carries them: its ephemeral key, its device keys and the MAC over them under
+    /// the code's key; no name, kind or instance, which go sealed.</summary>
+    private static byte[] Keys(byte[] ephPublic, PairingIdentity me, byte[] codeKey, string side) => LanMessages.Write(new LanMessage
     {
-        var message = LanMessages.Read(slot);
-        if (Lan.Hello.Of(message) is not { Purpose: Lan.Hello.Pair } hello || Wire.Decode(message!.Mac) is not { } mac) return null;
-        var expected = PairingCode.Mac(codeKey, side, hello.Eph, hello.From.Sign, hello.From.Dh);
-        return CryptographicOperations.FixedTimeEquals(mac, expected) ? hello : null;
+        Type = "hello",
+        V = LanMessages.Version,
+        Purpose = Lan.Hello.Pair,
+        Eph = Wire.Encode(ephPublic),
+        Sign = Wire.Encode(me.Keys.SignPublic),
+        Dh = Wire.Encode(me.Keys.DhPublic),
+        Mac = Wire.Encode(PairingCode.Mac(codeKey, side, ephPublic, me.Keys.SignPublic, me.Keys.DhPublic)),
+    });
+
+    /// <summary>The keys in a slot, when its MAC under the code's key is right for <paramref name="side"/>.</summary>
+    private static SlotKeys? Checked(byte[] slot, byte[] codeKey, string side)
+    {
+        if (LanMessages.Read(slot) is not { Type: "hello", V: LanMessages.Version, Purpose: Lan.Hello.Pair } message) return null;
+        if (Wire.PublicKey(message.Eph) is not { } eph || Wire.PublicKey(message.Sign) is not { } sign || Wire.PublicKey(message.Dh) is not { } dh
+            || Wire.Decode(message.Mac) is not { } mac)
+        {
+            return null;
+        }
+        var expected = PairingCode.Mac(codeKey, side, eph, sign, dh);
+        return CryptographicOperations.FixedTimeEquals(mac, expected) ? new SlotKeys(HouseholdCrypto.DeviceIdOf(sign), eph, sign, dh) : null;
     }
+
+    private sealed record SlotKeys(string Id, byte[] Eph, byte[] Sign, byte[] Dh);
 
     /// <summary>The keys each way, from the ephemeral keys' shared secret, the adder's key first.</summary>
-    private static (byte[] ToJoiner, byte[] ToAdder) Keys(ECDiffieHellman mine, byte[] theirs, byte[] ephAdder, byte[] ephJoiner)
+    private static (byte[] ToJoiner, byte[] ToAdder) SessionKeys(ECDiffieHellman mine, byte[] theirs, byte[] ephAdder, byte[] ephJoiner)
     {
         var shared = HouseholdCrypto.Agree(mine, theirs);
         byte[] salt = [.. ephAdder, .. ephJoiner];

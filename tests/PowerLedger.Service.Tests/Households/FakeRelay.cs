@@ -96,6 +96,12 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
         lock (_gate) _meetings[(meeting, slot)] = (body, clock.GetUtcNow());
     }
 
+    /// <summary>What a meeting slot holds, as the server sees it; null while it is empty.</summary>
+    public byte[]? Slot(string meeting, string slot)
+    {
+        lock (_gate) return _meetings.TryGetValue((meeting, slot), out var kept) ? kept.Body : null;
+    }
+
     /// <summary>N2: an ID token as the fake checks it: the provider, the subject and the nonce it was made for.</summary>
     public static string IdToken(string provider, string subject, string deviceId, string salt) => $"{provider}|{subject}|{BoundNonce(deviceId, salt)}";
 
