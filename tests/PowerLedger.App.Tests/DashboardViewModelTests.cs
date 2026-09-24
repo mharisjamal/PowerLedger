@@ -210,10 +210,31 @@ public sealed class DashboardViewModelTests : IDisposable
     {
         var answer = _history.Answer;
         _history.Answer = range => range.Title == "Last month to date" ? Reports.Empty(range) : answer(range);
+        _summary.First = new DateTimeOffset(2026, 9, 3, 18, 0, 0, TimeSpan.Zero);   // the history starts this month
         var dashboard = Dashboard();
         dashboard.Show();
 
         dashboard.Kpis[2].Trend.ShouldBe("first month");
+        dashboard.Kpis[2].Kind.ShouldBe(TrendKind.Text);
+        dashboard.Kpis[2].Big.ShouldBe("0.210 kWh");
+    }
+
+    /// <summary>Review 9: an empty stretch of last month is not a first month. The morning of the 1st on a PC that was
+    /// off overnight has nothing yet from the 1st of last month, and a PC installed late last month has nothing from its
+    /// start; both have history from before this month, so neither is told this is its first.</summary>
+    [Theory]
+    [InlineData("2026-10-01T08:00:00Z", "2026-07-20T08:00:00Z")]   // off overnight: last month to date is 1 Sep, midnight to 08:00
+    [InlineData("2026-09-08T14:32:07Z", "2026-08-15T10:00:00Z")]   // installed on 15 Aug: nothing in 1 to 8 Aug
+    public void An_empty_start_of_last_month_is_no_first_month_when_the_history_began_before_this_one(string now, string first)
+    {
+        _clock.SetUtcNow(DateTimeOffset.Parse(now, CultureInfo.InvariantCulture));
+        _summary.First = DateTimeOffset.Parse(first, CultureInfo.InvariantCulture);
+        var answer = _history.Answer;
+        _history.Answer = range => range.Title == "Last month to date" ? Reports.Empty(range) : answer(range);
+        var dashboard = Dashboard();
+        dashboard.Show();
+
+        dashboard.Kpis[2].Trend.ShouldBeNull("nothing to compare with, but not a first month");
         dashboard.Kpis[2].Kind.ShouldBe(TrendKind.Text);
         dashboard.Kpis[2].Big.ShouldBe("0.210 kWh");
     }

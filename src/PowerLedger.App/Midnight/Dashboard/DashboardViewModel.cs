@@ -45,9 +45,10 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <param name="Recent">The last 31 days, whose complete days make the average day.</param>
     /// <param name="LastMonth">Last month up to the same day and time as now.</param>
     /// <param name="Before">The parts' range a period back, for their trends.</param>
+    /// <param name="FirstRow">When the history begins, or null with none: this month is the first only when it begins in it.</param>
     private sealed record Reading(
         RangePill Pill, DateTimeOffset LocalNow, HistorySnapshot? Snapshot, RangeReport? Recent, RangeReport? LastMonth,
-        DateRange ChartRange, RangeReport? Chart, DateRange PartsWindow, RangeReport? Parts, RangeReport? Before);
+        DateRange ChartRange, RangeReport? Chart, DateRange PartsWindow, RangeReport? Parts, RangeReport? Before, DateTimeOffset? FirstRow = null);
 
     public DashboardViewModel(
         NowViewModel now, IRangeHistory history, IHistory summary, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, UiThreads threads)
@@ -188,7 +189,8 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             kept is not null ? kept.Chart : _history.Read(chartRange, _zone),
             partsRange,
             _history.Read(partsRange, _zone),
-            _history.Read(Before(partsRange, DaysOf(parts), _zone), _zone));
+            _history.Read(Before(partsRange, DaysOf(parts), _zone), _zone),
+            _summary.FirstRow());
     }
 
     /// <summary>A reading of nothing, for a pass that threw: the chart's range as well as it can be named, and no data.</summary>
@@ -338,7 +340,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         var last = read.LastMonth;
         var lastIdle = last is { Days.Count: > 0 } ? (last.Totals.IdleOnKwh + last.Totals.IdleOffKwh) * 1000 : (double?)null;
         var change = DashboardMaths.MonthTrend(idle * 1000, lastIdle);
-        var (trend, kind) = last is { Days.Count: 0 } ? ("first month", TrendKind.Text)
+        var (trend, kind) = IsFirstMonth(read) ? ("first month", TrendKind.Text)
             : (Trend(change), change is { } c ? DashboardMaths.Kind(c) : TrendKind.Text);
         return new KpiCard(
             label,
@@ -346,6 +348,16 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             month.Currency is { } currency ? Money.Format(decimal.Round((decimal)idle * price, 2), currency, _culture) : "no tariff set",
             trend, kind,
             DashboardMaths.Fill(idle, month.EnergyKwh)) { LowerIsBetter = true };
+    }
+
+    /// <summary>Review 9: this month is the first when the history begins in it. An empty stretch of last month isn't
+    /// one: the 1st's morning on a PC that was off overnight, or a PC installed late last month, has history from before
+    /// this month. With no first row to go by, an empty last month says so, as before.</summary>
+    private bool IsFirstMonth(Reading read)
+    {
+        if (read.FirstRow is not { } first) return read.LastMonth is { Days.Count: 0 };
+        var local = read.LocalNow.DateTime;
+        return first >= Ranges.Midnight(new DateOnly(local.Year, local.Month, 1), _zone);
     }
 
     /// <summary>The parts over the chosen range: watts now from the live budget, energy and share from the range, the
