@@ -37,6 +37,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private ChartModel _chart = ChartModel.Empty;
     private string _chartTitle = "";
     private string? _chartMessage;
+    private DateTimeOffset? _chartFrom;
     private IReadOnlyList<DashboardPart> _parts = [];
 
     /// <summary>One pass over the history, read together so every card agrees on the moment.</summary>
@@ -91,6 +92,12 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
 
     /// <summary>Why the chart is empty, or null (design §5).</summary>
     public string? ChartMessage { get => _chartMessage; private set => SetProperty(ref _chartMessage, value); }
+
+    /// <summary>When the chart's first bucket starts, null before the first read: the chart's tooltip counts its time from it.</summary>
+    public DateTimeOffset? ChartFrom { get => _chartFrom; private set => SetProperty(ref _chartFrom, value); }
+
+    /// <summary>The zone the ranges are cut in, so the tooltip tells the time as the axis does.</summary>
+    public TimeZoneInfo Zone => _zone;
 
     /// <summary>The parts table's range; a change reads it again at once.</summary>
     public PartsRange PartsRange
@@ -209,7 +216,8 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         if (_read is { } read)
         {
             ChartTitle = read.ChartRange.Title;
-            Chart = Charts.Build(read.ChartRange, read.Chart?.Series ?? [], ChartUnit.Watts, _zone, _culture);
+            ChartFrom = read.ChartRange.From;
+            Chart =Charts.Build(read.ChartRange, read.Chart?.Series ?? [], ChartUnit.Watts, _zone, _culture);
             ChartMessage = read.Chart is not { } chart ? "Couldn't read the history"
                 : chart.Totals.OnHours > 0 || chart.Totals.AsleepHours > 0 ? null : "No history yet";
         }

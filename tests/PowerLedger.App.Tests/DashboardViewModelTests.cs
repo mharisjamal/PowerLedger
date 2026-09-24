@@ -119,6 +119,19 @@ public sealed class DashboardViewModelTests : IDisposable
     }
 
     [Fact]
+    public void The_chart_says_when_it_starts_and_in_which_zone_so_its_tooltip_can_tell_the_time()
+    {
+        var dashboard = Dashboard();
+        dashboard.ChartFrom.ShouldBeNull("nothing is read until the page shows");
+        dashboard.Show();
+        dashboard.ChartFrom.ShouldBe(new DateTimeOffset(2026, 9, 8, 0, 0, 0, TimeSpan.Zero));
+        dashboard.Zone.ShouldBe(TimeZoneInfo.Utc);
+
+        dashboard.Range = RangePill.Hour;
+        dashboard.ChartFrom.ShouldBe(Ranges.LastHour(Now, TimeZoneInfo.Utc, English).From);
+    }
+
+    [Fact]
     public void Every_minute_the_page_reads_again_but_the_chart_only_while_it_moves_by_the_minute()
     {
         var dashboard = Dashboard();
