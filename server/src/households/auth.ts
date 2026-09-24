@@ -1,3 +1,4 @@
+import { sha256hex } from "../auth";
 import { base64urlDecode, hex, sha256 } from "./encoding";
 import { errorResponse } from "./http";
 
@@ -166,6 +167,51 @@ export async function verifySigned(
       : null;
     if (!member || member.removed !== null) return errorResponse(403, "This PC isn't a member of this household.");
     return { signKey: member.sign_key, signer: member };
+  });
+}
+
+export interface SessionRow {
+  token_hash: string;
+  account: string;
+  device: string;
+  sign_key: string;
+  dh_key: string;
+  created: number;
+}
+
+const SESSION_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+
+/** The token from `Authorization: Session <token>`, when it's there and well formed. */
+export function sessionToken(request: Request): string | null {
+  const header = request.headers.get("Authorization");
+  if (!header?.startsWith("Session ")) return null;
+  const token = header.slice("Session ".length);
+  return SESSION_TOKEN.test(token) ? token : null;
+}
+
+/**
+ * An account request (households design §7): `Authorization: Session <token>` naming a current session, and the
+ * request signed by the PC that session was given to, with the key it signed in with. The session's row, or the
+ * refusal to send back (401).
+ */
+export async function verifySession(
+  request: Request,
+  env: Cloudflare.Env,
+  body: Uint8Array,
+  options: { now?: number } = {},
+): Promise<SessionRow | Response> {
+  const token = sessionToken(request);
+  if (!token) return errorResponse(401, "This request needs a session: sign in first.");
+  const tokenHash = await sha256hex(token);
+  return authenticate(request, env, body, options.now ?? Date.now(), async (device) => {
+    const session = await env.DB.prepare(
+      "SELECT token_hash, account, device, sign_key, dh_key, created FROM sessions WHERE token_hash = ?",
+    )
+      .bind(tokenHash)
+      .first<SessionRow>();
+    if (!session) return errorResponse(401, "This session has ended: sign in again.");
+    if (session.device !== device) return errorResponse(401, "This session is another PC's.");
+    return { signKey: session.sign_key, signer: session };
   });
 }
 

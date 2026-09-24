@@ -1,5 +1,6 @@
 import { utcDateString } from "../day";
 import { deleteBodies } from "../store";
+import { JOIN_REQUEST_LIFETIME_MS } from "./account";
 import { TIME_WINDOW_SECONDS } from "./auth";
 import { MEETING_LIFETIME_MS } from "./meetings";
 
@@ -18,7 +19,8 @@ interface BatchKeyRow {
 
 /**
  * The households' part of the daily cron (households design §5, §8): batches and their bodies past 90 days, meetings
- * past their 10 minutes, per-PC request counts past 2 days, and seen signatures past the time window. Batches are worked
+ * past their 10 minutes, join requests past 7 days, per-PC request counts past 2 days, and seen signatures past the
+ * time window. Batches are worked
  * off 1000 at a time, at most 10 batches a run, like reports.
  */
 export async function runHouseholdRetention(env: Cloudflare.Env, now: Date): Promise<void> {
@@ -41,6 +43,7 @@ export async function runHouseholdRetention(env: Cloudflare.Env, now: Date): Pro
 
   await env.DB.batch([
     env.DB.prepare("DELETE FROM meetings WHERE created <= ?").bind(now.getTime() - MEETING_LIFETIME_MS),
+    env.DB.prepare("DELETE FROM join_requests WHERE created <= ?").bind(now.getTime() - JOIN_REQUEST_LIFETIME_MS),
     env.DB.prepare("DELETE FROM device_requests WHERE utc_day < ?").bind(utcDateString(-REQUEST_RETENTION_DAYS, now)),
     env.DB.prepare("DELETE FROM seen_signatures WHERE seen < ?").bind(now.getTime() - SEEN_RETENTION_MS),
   ]);

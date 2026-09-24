@@ -1,4 +1,13 @@
-import { type MemberRow, verifySigned } from "./auth";
+import {
+  handleApprove,
+  handleAskToJoin,
+  handleGetRecovery,
+  handleLink,
+  handleListRequests,
+  handlePutRecovery,
+  handleRecover,
+} from "./account";
+import { type MemberRow, type SessionRow, verifySession, verifySigned } from "./auth";
 import { handleGetBatches, handlePostBatch, readBatch } from "./batches";
 import {
   handleAddMember,
@@ -37,6 +46,17 @@ function asMember(
     const member = await verifySigned(request, env, body, { household: params[0] });
     if (member instanceof Response) return member;
     return act(env, member, body, params, request);
+  };
+}
+
+/** An account route (N2): a current session, and the request signed by that session's PC. */
+function asSession(act: (env: Cloudflare.Env, session: SessionRow, body: Uint8Array) => Promise<Response>): Handler {
+  return async (request, env) => {
+    const body = await readSmall(request);
+    if (body instanceof Response) return body;
+    const session = await verifySession(request, env, body);
+    if (session instanceof Response) return session;
+    return act(env, session, body);
   };
 }
 
@@ -88,6 +108,21 @@ const ROUTES: Route[] = [
     handle: (request, env, params) => handleGetSlot(request, env, params[0], params[1]),
   },
   { method: "POST", path: /^\/v1\/auth\/signin$/, handle: (request, env) => handleSignin(request, env) },
+  { method: "POST", path: /^\/v1\/account\/household$/, handle: asSession(handleLink) },
+  { method: "POST", path: /^\/v1\/account\/requests$/, handle: asSession((env, session) => handleAskToJoin(env, session)) },
+  { method: "PUT", path: /^\/v1\/account\/recovery$/, handle: asSession(handlePutRecovery) },
+  { method: "GET", path: /^\/v1\/account\/recovery$/, handle: asSession((env, session) => handleGetRecovery(env, session)) },
+  { method: "POST", path: /^\/v1\/account\/recover$/, handle: asSession(handleRecover) },
+  {
+    method: "GET",
+    path: new RegExp(`^/v1/households/${HID}/requests$`),
+    handle: asMember((env, member) => handleListRequests(env, member)),
+  },
+  {
+    method: "POST",
+    path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}/approve$`),
+    handle: asMember((env, member, body, params) => handleApprove(env, member, params[1], body)),
+  },
 ];
 
 /** The households routes (households design §5 to §8), or null when the request is for none of them. */

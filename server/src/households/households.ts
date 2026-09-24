@@ -113,11 +113,15 @@ export async function handleRemoveMember(env: Cloudflare.Env, member: MemberRow,
   return ok();
 }
 
-/** Deletes everything kept for a household: its batches and their bodies, key envelopes, members and itself. */
+/** Deletes everything kept for a household: its batches and their bodies, key envelopes, members and itself, and for
+ * sign-in the accounts' links to it, their recovery envelopes and the PCs waiting to join. */
 export async function endHousehold(env: Cloudflare.Env, household: string): Promise<void> {
   const bodies = await env.DB.prepare("SELECT r2_key FROM batches WHERE household = ?").bind(household).all<{ r2_key: string }>();
   await deleteBodies(env, bodies.results.map((row) => row.r2_key));
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM recovery WHERE account IN (SELECT account FROM account_households WHERE household = ?)").bind(household),
+    env.DB.prepare("DELETE FROM account_households WHERE household = ?").bind(household),
+    env.DB.prepare("DELETE FROM join_requests WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM batches WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM key_envelopes WHERE household = ?").bind(household),
     env.DB.prepare("DELETE FROM members WHERE household = ?").bind(household),
