@@ -329,6 +329,46 @@ with 100,000 iterations, the salt `"powerledger recovery"` and 32 bytes; the cod
   - unlinks the accounts that had a session on the removed PC;
   - deletes that PC's sessions for those accounts and its join requests.
 
+### 0.8 Contract changes after the whole-branch review (they replace earlier sections where they differ)
+
+- **Two-sided code check.**
+  - After the key exchange, the adder pushes `ConfirmCode`: "Does {name} show {code}?", answered with Codes match or
+    Cancel.
+  - The welcome goes only after both this confirmation and the joiner's `answer:accept`. A cancel on either side sends
+    `{"type":"cancel"}`, and the other side withdraws its prompt.
+  - The code and both frame keys use `Transcript(adderHello, joinerHello)`, the hello frames' bytes, as HKDF salt.
+- **Committing a join.** The joiner stages the welcome and commits only when the adder acknowledges `joined`, with
+  `{"type":"welcomed"}` on the LAN or a sealed `welcomed` meeting slot. Otherwise it rolls back.
+- **Signed batches.**
+  - A batch posts `{"device","epoch","seq","body","sig"}`, where `sig` signs `BatchToSign(BatchAad(…), body)`. The
+    Worker stores `sig` and returns it.
+  - A receiver verifies it with the local member's sign key before opening the batch. It skips any device it doesn't
+    know, and caps `changed` at now + 1 day.
+- **Introducing members.** A new member is learned only:
+  - from pairing;
+  - from a proven LAN peer;
+  - from a signed batch whose sealed payload carries `members:[{id,sign,dh,name,kind,added}]`.
+
+  A batch's device key never introduces anyone.
+- **Tombstones.** A removed member is kept with its time of removal and never re-added. `have` and the batch `members`
+  list carry these removals.
+- **Keys.**
+  - Only a current member's envelope is taken.
+  - A PC that leaves just removes itself; a staying member rotates the key when it sees the removal.
+  - Rotation seals only to members the server lists as current.
+  - A PC takes on the new epoch only once the server has taken the keys.
+- **N2 approvals.**
+  - The approver's `ApprovePrompt` carries `ApprovalCode(req.sign, req.dh, approver.dh)`.
+  - The approved PC then pushes `ConfirmJoin` with the same code, worked out from the sealer's key, and joins only once
+    its user confirms.
+- **Recovery (N2).**
+  - The code comes as a `RecoveryCode` notice, kept DPAPI-protected until it is answered.
+  - `RecoveryMissing` in the status leads to `NewRecoveryCodeRequest`.
+  - The recovery envelope's associated data includes the epoch.
+  - Signing out clears this PC's recovery key.
+- **Cancelling.** `CancelPairingRequest` stops a pairing, including a code meeting, and frees the pairing gate.
+- **Withdrawing a prompt.** A `Withdraw` notice closes a prompt whose connection has gone.
+- **Sessions.** Household changes are refused from a pipe client outside the console session.
 ---
 
 ## Wave 1 — three agents in parallel
