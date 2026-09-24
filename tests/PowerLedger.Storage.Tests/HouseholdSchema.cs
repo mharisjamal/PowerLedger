@@ -1,58 +1,15 @@
-using Microsoft.Data.Sqlite;
 using PowerLedger.Storage;
 
 namespace PowerLedger.Storage.Tests;
 
 /// <summary>
-/// Stands in for Storage V3 (Plan N task C1, built by the service agent in a worktree this one can't see): the exact
-/// column list the households plan gives for household_rows and household_members. Tests exec this by hand since the
-/// Migrator here has no V3 yet; once C1 lands and the two branches merge, this file's columns must still match it.
+/// Test data for the households tables of Storage V3 (Plan N task C1): a migrated test database, and rows put straight
+/// into household_members and household_rows.
 /// </summary>
 internal static class HouseholdSchema
 {
-    public const string Sql = """
-        CREATE TABLE household_rows (
-            device_id    TEXT    NOT NULL,
-            hour_ms      INTEGER NOT NULL,
-            energy_wh    REAL    NOT NULL,
-            cpu_wh       REAL    NOT NULL,
-            gpu_wh       REAL    NOT NULL,
-            display_wh   REAL    NOT NULL,
-            rest_wh      REAL    NOT NULL,
-            idle_on_wh   REAL    NOT NULL,
-            idle_off_wh  REAL    NOT NULL,
-            on_s         REAL    NOT NULL,
-            battery_s    REAL    NOT NULL,
-            idle_s       REAL    NOT NULL,
-            measured_s   REAL    NOT NULL,
-            calibrated_s REAL    NOT NULL,
-            estimated_s  REAL    NOT NULL,
-            cost_micro   INTEGER,
-            currency     TEXT,
-            changed_ms   INTEGER NOT NULL,
-            PRIMARY KEY (device_id, hour_ms)
-        );
-
-        CREATE TABLE household_members (
-            device_id      TEXT PRIMARY KEY,
-            name           TEXT    NOT NULL,
-            kind           INTEGER NOT NULL,
-            sign_key       BLOB    NOT NULL,
-            dh_key         BLOB    NOT NULL,
-            added_ms       INTEGER NOT NULL,
-            left_ms        INTEGER,
-            last_synced_ms INTEGER
-        );
-        """;
-
-    /// <summary>A fresh <see cref="TestDatabase"/> with the households tables created.</summary>
-    public static TestDatabase Create()
-    {
-        var t = new TestDatabase();
-        using var c = t.Db.Open();
-        Migrator.Exec(c, Sql);
-        return t;
-    }
+    /// <summary>A fresh, migrated <see cref="TestDatabase"/>; V3 made the households tables.</summary>
+    public static TestDatabase Create() => new();
 
     public static void AddMember(
         TestDatabase t, string deviceId, string name, int kind, byte[] signKey, byte[] dhKey, long addedMs, long? leftMs = null,
