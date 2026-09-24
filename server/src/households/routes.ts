@@ -1,13 +1,17 @@
 import {
   handleApprove,
   handleAskToJoin,
+  handleCommit,
   handleDeleteAccount,
   handleDenyRequest,
   handleGetRecovery,
   handleLink,
   handleListRequests,
+  handleOwnRequests,
   handlePutRecovery,
   handleRecover,
+  handleRequestNonce,
+  handleReveal,
   handleSignout,
 } from "./account";
 import { checkMember, checkSession, finishMember, finishSession, type MemberRow, type SessionRow } from "./auth";
@@ -126,6 +130,8 @@ const ROUTES: Route[] = [
   { method: "POST", path: /^\/v1\/auth\/signin$/, handle: (request, env) => handleSignin(request, env) },
   { method: "POST", path: /^\/v1\/account\/household$/, handle: asSession(handleLink) },
   { method: "POST", path: /^\/v1\/account\/requests$/, handle: asSession((env, session) => handleAskToJoin(env, session)) },
+  { method: "GET", path: /^\/v1\/account\/requests$/, handle: asSession((env, session) => handleOwnRequests(env, session)) },
+  { method: "POST", path: /^\/v1\/account\/requests\/nonce$/, handle: asSession(handleRequestNonce) },
   { method: "PUT", path: /^\/v1\/account\/recovery$/, handle: asSession(handlePutRecovery) },
   { method: "GET", path: /^\/v1\/account\/recovery$/, handle: asSession((env, session) => handleGetRecovery(env, session)) },
   { method: "POST", path: /^\/v1\/account\/recover$/, handle: asSession(handleRecover) },
@@ -140,6 +146,16 @@ const ROUTES: Route[] = [
     method: "POST",
     path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}/approve$`),
     handle: asMember((env, member, body, params) => handleApprove(env, member, params[1], body)),
+  },
+  {
+    method: "POST",
+    path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}/commit$`),
+    handle: asMember((env, member, body, params) => handleCommit(env, member, params[1], body)),
+  },
+  {
+    method: "POST",
+    path: new RegExp(`^/v1/households/${HID}/requests/${DEVICE}/reveal$`),
+    handle: asMember((env, member, body, params) => handleReveal(env, member, params[1], body)),
   },
   {
     method: "DELETE",

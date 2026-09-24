@@ -27,7 +27,10 @@ describe("the households schema", () => {
     expect(await columns("accounts")).toEqual(["id", "provider", "subject", "created"]);
     expect(await columns("sessions")).toEqual(["token_hash", "account", "device", "sign_key", "dh_key", "created"]);
     expect(await columns("account_households")).toEqual(["account", "household", "linked"]);
-    expect(await columns("join_requests")).toEqual(["household", "device", "account", "sign_key", "dh_key", "created"]);
+    expect(await columns("join_requests")).toEqual([
+      "household", "device", "account", "sign_key", "dh_key", "created", "approver", "commitment", "nonce", "reveal",
+      "approved_epoch",
+    ]);
     expect(await columns("recovery")).toEqual(["account", "body", "verifier_hash", "epoch", "holder", "updated"]);
   });
 
