@@ -4,7 +4,8 @@
          and the update card take Midnight's colours without a change; the amber keys carry the accent, as the brand mark
          alone stays amber. Ink3 and LineStrong sit a little above the design's first figures, where the contrast tests
          (text 4.5:1, borders 3:1 on the panel) put them. The accent is a touch deeper than #4C6FFF so white reads on it
-         at 4.5:1; so deep, it can't also read as small text on the panel, so accent text takes AccentText, a lighter tint. -->
+         at 4.5:1; so deep, it can't also read as small text on the panel, so accent text takes AccentText, a lighter tint.
+         The CPU is teal, not a second blue, so its band stays apart from the accent's total line. -->
     <SolidColorBrush x:Key="Brush.Ground" Color="#0B0E1C" />
     <SolidColorBrush x:Key="Brush.Panel" Color="#10142A" />
     <SolidColorBrush x:Key="Brush.Raised" Color="#161B36" />
@@ -19,7 +20,7 @@
     <SolidColorBrush x:Key="Brush.Measured" Color="#D9E27F" />
     <SolidColorBrush x:Key="Brush.Calibrated" Color="#F1D57A" />
     <SolidColorBrush x:Key="Brush.Estimated" Color="#7CC4F5" />
-    <SolidColorBrush x:Key="Brush.PartCpu" Color="#6D8CFF" />
+    <SolidColorBrush x:Key="Brush.PartCpu" Color="#2DD4BF" />
     <SolidColorBrush x:Key="Brush.PartGpu" Color="#A78BFA" />
     <SolidColorBrush x:Key="Brush.PartDisplay" Color="#38BDF8" />
     <SolidColorBrush x:Key="Brush.PartRest" Color="#7C86A8" />
@@ -40,7 +41,7 @@
     <SolidColorBrush x:Key="M.Good" Color="#34D399" />
     <SolidColorBrush x:Key="M.Bad" Color="#F87171" />
     <SolidColorBrush x:Key="M.Warn" Color="#F5B942" />
-    <SolidColorBrush x:Key="M.PartCpu" Color="#6D8CFF" />
+    <SolidColorBrush x:Key="M.PartCpu" Color="#2DD4BF" />
     <SolidColorBrush x:Key="M.PartGpu" Color="#A78BFA" />
     <SolidColorBrush x:Key="M.PartDisplay" Color="#38BDF8" />
     <SolidColorBrush x:Key="M.PartRest" Color="#7C86A8" />

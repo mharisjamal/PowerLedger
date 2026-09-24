@@ -69,6 +69,22 @@ public class ContrastTests
         }
     }
 
+    /// <summary>Review round: the area chart draws the total in the accent over the parts' bands, so the CPU's band must
+    /// not read as the accent, nor as another part; and Classic's keys carry the same values for the shared views.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void The_cpu_band_stands_apart_from_the_accent_and_the_other_parts(string theme)
+    {
+        var palette = Midnight(Enum.Parse<Theme>(theme));
+        foreach (var other in new[] { "M.Accent", "M.PartGpu", "M.PartDisplay", "M.PartRest" })
+        {
+            Contrast.Difference(palette["M.PartCpu"], palette[other]).ShouldBeGreaterThanOrEqualTo(25, $"M.PartCpu and {other}, {theme}");
+        }
+        palette["Brush.PartCpu"].ShouldBe(palette["M.PartCpu"], theme);
+        palette["Brush.Amber"].ShouldBe(palette["M.Accent"], theme);
+    }
+
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
@@ -106,6 +122,16 @@ public class ContrastTests
         Contrast.Luminance(Color.FromRgb(0x80, 0x80, 0x80)).ShouldBe(0.2159, 0.001);
         Contrast.Over(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF), Colors.Black).ShouldBe(Color.FromRgb(0x80, 0x80, 0x80));
     }
+
+    [Fact]
+    public void The_colour_difference_is_cie76_in_lab()
+    {
+        Contrast.Difference(Colors.Black, Colors.White).ShouldBe(100, 0.05);
+        Contrast.Difference(Color.FromRgb(0xFF, 0, 0), Color.FromRgb(0, 0xFF, 0)).ShouldBe(170.6, 0.1);
+        Contrast.Difference(Color.FromRgb(0x80, 0x80, 0x80), Colors.White).ShouldBe(46.4, 0.1);
+        Contrast.Difference(Colors.Teal, Colors.Teal).ShouldBe(0);
+    }
+
     /// <summary>The colours of a Midnight palette, by key; a translucent one laid over the panel, as the screen shows it.
     /// Read on the application's thread, which owns the brushes.</summary>
     private static Dictionary<string, Color> Midnight(Theme theme) => UiHarness.OnUi(() =>
