@@ -195,15 +195,30 @@ public sealed class PowerModel
         return idle + (tdp - idle) * Load(s.CpuLoad);
     }
 
+    /// <summary>Every discrete card's watts added up, or the one card's when the sample does not list them.</summary>
     private double GpuWatts(Sample s)
     {
-        if (!s.DGpuPresent) return 0;
-        if (Finite(s.DGpuW) is { } w)
+        if (s.Gpus is { Count: > 0 } cards)
         {
-            return Math.Max(0, w) * (s.DGpuScope is GpuPowerScope.ChipOnly or GpuPowerScope.Package ? RestOfCardFactor : 1);
+            var sum = 0.0;
+            foreach (var card in cards) sum += CardWatts(card.Watts, card.Scope, card.Load, card.RatedW, onlyCard: cards.Count == 1);
+            return sum;
         }
-        var tdp = Math.Max(GpuIdleW + 1, _profile.GpuTdpOverrideW ?? _facts.GpuTdpW);
-        return GpuIdleW + (tdp - GpuIdleW) * Load(s.DGpuLoad ?? 0);
+        return s.DGpuPresent ? CardWatts(s.DGpuW, s.DGpuScope, s.DGpuLoad, rated: null, onlyCard: true) : 0;
+    }
+
+    /// <summary>A card's watts: measured ones as they are, with the rest of the card added to a chip or package figure; the
+    /// others idle plus the load's share of the rating above idle. The user's figure rates the card when there is one; with
+    /// several it rates only those without a rating of their own, since one figure cannot be every card's.</summary>
+    private double CardWatts(double? watts, GpuPowerScope scope, double? load, double? rated, bool onlyCard)
+    {
+        if (Finite(watts) is { } w)
+        {
+            return Math.Max(0, w) * (scope is GpuPowerScope.ChipOnly or GpuPowerScope.Package ? RestOfCardFactor : 1);
+        }
+        var rating = (onlyCard ? _profile.GpuTdpOverrideW : null) ?? Finite(rated) ?? _profile.GpuTdpOverrideW ?? _facts.GpuTdpW;
+        var tdp = Math.Max(GpuIdleW + 1, rating);
+        return GpuIdleW + (tdp - GpuIdleW) * Load(load ?? 0);
     }
 
     private double RamWatts() => _profile.RamSticks * (_profile.RamIsDdr5 ? Ddr5StickW : Ddr4StickW);

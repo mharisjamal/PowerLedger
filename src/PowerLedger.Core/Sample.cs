@@ -21,6 +21,9 @@ namespace PowerLedger.Core;
 /// that rather than their DC output; null otherwise. This is wall power already: it is the total, like a UPS's
 /// reading, and must never be divided by an efficiency. At most one of this and <paramref name="PsuOutputW"/> is set.</param>
 /// <param name="PsuName">The power supply's name, for the status screen.</param>
+/// <param name="Gpus">Each discrete graphics card on its own, when the sensors read them card by card; the model then adds
+/// them up and <paramref name="DGpuW"/>, <paramref name="DGpuLoad"/>, <paramref name="DGpuPresent"/> and
+/// <paramref name="DGpuScope"/> are their <see cref="GpuCard.Totals"/>. Null for a sample that has only those four.</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -44,7 +47,8 @@ public sealed record Sample(
     string? UpsName = null,
     double? PsuOutputW = null,
     string? PsuName = null,
-    double? PsuWallW = null)
+    double? PsuWallW = null,
+    IReadOnlyList<GpuCard>? Gpus = null)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>
