@@ -21,13 +21,32 @@ internal static class MidnightFixtures
         return shell;
     }
 
-    /// <summary>The Dashboard over today's five-minute readings, the week's hourly ones for the longer ranges, and a month of days.</summary>
+    /// <summary>
+    /// The Dashboard over today's five-minute readings and the hourly ones for the longer ranges, with the totals of the Now
+    /// screen's day (0.284 kWh), an average day of 0.3 kWh over the last 31, and a day before whose parts split differently,
+    /// so each trend says something of its own.
+    /// </summary>
     public static DashboardViewModel DashboardScreen(NowViewModel now)
     {
         var day = new DateTimeOffset(Now.Date, TimeSpan.Zero);
         var history = new FakeRangeHistory
         {
-            Answer = range => Reports.Typical(range) with { Series = range.Bucket == TimeSpan.FromMinutes(5) ? DaySeries(day) : WeekSeries(range) },
+            Answer = range =>
+            {
+                var report = range.Title switch
+                {
+                    "Today" => Reports.Typical(range, 0.284),
+                    "Last 31 days" => Reports.Typical(range, 31 * 0.3),
+                    "Before" => Reports.Typical(range, 0.26),
+                    _ => Reports.Typical(range),
+                };
+                if (range.Title == "Before")
+                {
+                    var parts = report.Totals;
+                    report = report with { Totals = parts with { CpuKwh = parts.CpuKwh * 0.85, GpuKwh = parts.GpuKwh * 1.35, RestKwh = parts.RestKwh * 1.08 } };
+                }
+                return report with { Series = range.Bucket == TimeSpan.FromMinutes(5) ? DaySeries(day) : WeekSeries(range) };
+            },
         };
         var summary = new FakeHistory { Snapshot = Snapshots.Typical(Now, DaySeries(day)), First = Now.AddDays(-40) };
         return new DashboardViewModel(now, history, summary, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, UiThreads.Inline);
@@ -45,8 +64,8 @@ internal static class MidnightFixtures
         var before = app.Count;
         var manager = new ThemeManager(Application.Current, theme == Theme.Dark ? ThemeChoice.Dark : ThemeChoice.Light);
         if (app.Count == before + 1) app.RemoveAt(0);
-        var looks = new LookSwitcher(_ => throw new InvalidOperationException("No switch in a render."), manager, _ => { });
-        var window = new MidnightWindow(shell, looks, manager, updates, feedback ?? (() => { }))
+        var looks = new LookSwitcher(_ => throw new InvalidOperationException("No switch in a render."), manager, _ => { }, _ => { });
+        var window = new MidnightWindow(shell, looks, manager, updates ?? IdleUpdates(), feedback ?? (() => { }))
         {
             WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
         };
@@ -58,12 +77,17 @@ internal static class MidnightFixtures
     /// <summary>0.9.0 downloaded and ready to install, so the update card shows with its Restart button.</summary>
     public static Updater ReadyUpdate()
     {
-        var feed = new FakeFeed { Latest = UpdaterTests.Release("0.9.0") };
-        var updater = new Updater(feed, new FakeDownloader(), new FakeSetup(), new FakeCost(), new FakeUiSettings(), UiThreads.Inline,
-            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 8, 0), (_, _) => { }, _ => { });
+        var updater = Updates(new FakeFeed { Latest = UpdaterTests.Release("0.9.0") });
         updater.CheckAsync().GetAwaiter().GetResult();
         return updater;
     }
+
+    /// <summary>An updater that has not looked yet, so the update card stays hidden.</summary>
+    public static Updater IdleUpdates() => Updates(new FakeFeed());
+
+    private static Updater Updates(FakeFeed feed)
+        => new(feed, new FakeDownloader(), new FakeSetup(), new FakeCost(), new FakeUiSettings(), UiThreads.Inline,
+            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 8, 0), (_, _) => { }, _ => { });
 
     /// <summary>The Now screen as RenderingTests draws it: on battery with two external monitors, a minute of readings, today's history.</summary>
     public static NowViewModel NowScreen()

@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -8,8 +7,8 @@ using System.Windows.Media.Animation;
 namespace PowerLedger.App;
 
 /// <summary>
-/// The Midnight shell (Midnight look design §1, plan O M1-3), over the same ViewModels as Classic's MainWindow. Closing
-/// hides it to the tray, as the App does with Classic's; only <see cref="CloseForSwitch"/> closes it for good.
+/// The Midnight shell (Midnight look design §1, plan O M1-3), over the same ViewModels as Classic's MainWindow. A close is a
+/// close here, as there: the App's Closing handler hides the current window to the tray (plan O 0.4).
 /// </summary>
 internal partial class MidnightWindow : Window, IShellWindow
 {
@@ -19,9 +18,12 @@ internal partial class MidnightWindow : Window, IShellWindow
     private readonly Action _feedback;
     private readonly Extent _size;
     private readonly Extent _minimum;
-    private bool _closeForGood;
 
-    internal MidnightWindow(ShellViewModel shell, LookSwitcher looks, ThemeManager theme, Updater? updates, Action feedback)
+    /// <param name="looks">For the top bar's Switch look button.</param>
+    /// <param name="theme">For the top bar's sun and moon.</param>
+    /// <param name="updates">For the foot's update card.</param>
+    /// <param name="feedback">Opens the Send feedback window, from the sidebar's Support item and the bug button.</param>
+    internal MidnightWindow(ShellViewModel shell, LookSwitcher looks, ThemeManager theme, Updater updates, Action feedback)
     {
         _shell = shell;
         _looks = looks;
@@ -41,9 +43,11 @@ internal partial class MidnightWindow : Window, IShellWindow
         StateChanged += (_, _) => MaximizeButton.Content = WindowState == WindowState.Maximized ? "" : "";
     }
 
+    /// <summary>The bounds a switch carries over: the restored ones once shown, so a maximised window hands on the size it
+    /// comes back to. Setting them places the window by hand, so it no longer fits itself to the screen it opens on.</summary>
     public Rect Bounds
     {
-        get => new(Left, Top, Width, Height);
+        get => RestoreBounds.IsEmpty ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         set
         {
             WindowStartupLocation = WindowStartupLocation.Manual;
@@ -68,11 +72,8 @@ internal partial class MidnightWindow : Window, IShellWindow
     /// <summary>The pill behind the current sidebar item, for a test to check where it sits.</summary>
     internal Border Pill => NavPill;
 
-    public void CloseForSwitch()
-    {
-        _closeForGood = true;
-        Close();
-    }
+    /// <summary>Closes for good: the App's Closing handler hides a window to the tray only while it is the current one.</summary>
+    public void CloseForSwitch() => Close();
 
     /// <summary>Sizes and places the window inside <paramref name="workArea"/>, given in the window's units (see <see cref="WindowFit"/>).</summary>
     internal void FitTo(Bounds workArea)
@@ -90,14 +91,6 @@ internal partial class MidnightWindow : Window, IShellWindow
     {
         FitToScreen();
         base.OnSourceInitialized(e);
-    }
-
-    protected override void OnClosing(CancelEventArgs e)
-    {
-        base.OnClosing(e);
-        if (_closeForGood || e.Cancel) return;
-        e.Cancel = true;   // closing hides to the tray; the service keeps logging either way
-        Hide();
     }
 
     /// <summary>As MainWindow.FitToScreen: once, before the window first shows, on the monitor Windows chose, at that monitor's DPI.</summary>

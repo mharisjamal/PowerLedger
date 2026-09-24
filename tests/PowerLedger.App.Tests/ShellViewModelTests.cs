@@ -24,6 +24,82 @@ public class ShellViewModelTests
         new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         "0.1.0");
 
+    /// <summary>A shell with Midnight's Dashboard as well, over the same history.</summary>
+    private ShellViewModel ShellWithDashboard()
+    {
+        var now = new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { });
+        return new ShellViewModel(
+            now,
+            new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
+            new ReportViewModel(_link, _history, _householdHistory, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4),
+            new HouseholdViewModel(_link, _householdHistory, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, FakeAccount.Model(_link)),
+            new SettingsViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
+            new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
+            "0.1.0",
+            dashboard: new DashboardViewModel(now, _history, new FakeHistory(), _clock, TimeZoneInfo.Utc, English, UiThreads.Inline));
+    }
+
+    [Fact]
+    public void The_dashboard_page_shows_the_dashboard_which_reads_only_while_it_shows()
+    {
+        var shell = ShellWithDashboard();
+        shell.Page = Page.Dashboard;
+        shell.Current.ShouldBe(shell.Dashboard);
+        _history.Reads.Select(range => range.Title).ShouldContain("Today");
+        var read = _history.Reads.Count;
+
+        shell.Page = Page.Now;
+        shell.Current.ShouldBe(shell.Now);
+        _clock.Advance(DashboardViewModel.RefreshEvery * 3);
+        _history.Reads.Count.ShouldBe(read);
+    }
+
+    [Fact]
+    public void Without_a_dashboard_its_page_shows_now()
+    {
+        var shell = Shell();
+        shell.Dashboard.ShouldBeNull();
+        shell.Page = Page.Dashboard;
+        shell.Current.ShouldBe(shell.Now);
+    }
+
+    [Fact]
+    public void Switch_look_chooses_the_other_look_through_settings_and_says_which_it_offers()
+    {
+        var shell = Shell();
+        var raised = new List<string?>();
+        shell.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        shell.SwitchLookTip.ShouldBe("Switch to the Midnight look");
+
+        shell.SwitchLook.Execute(null);
+
+        _ui.Current.Look.ShouldBe(Look.Midnight);
+        _ui.Changes.ShouldContain("look Midnight");
+        shell.SwitchLookTip.ShouldBe("Switch to the Classic look");
+        raised.ShouldContain(nameof(ShellViewModel.SwitchLookTip));
+
+        shell.SwitchLook.Execute(null);
+        _ui.Current.Look.ShouldBe(Look.Classic);
+    }
+
+    [Fact]
+    public void Setup_ends_on_the_dashboard_under_midnight_and_on_now_under_classic()
+    {
+        _ui.Current = UiPreferences.Default with { Look = Look.Midnight };
+        var midnight = ShellWithDashboard();
+        midnight.BeginSetup();
+        midnight.Wizard.Finish.Execute(null);
+        midnight.Page.ShouldBe(Page.Dashboard);
+        midnight.Current.ShouldBe(midnight.Dashboard);
+
+        _ui.Current = UiPreferences.Default;
+        var classic = ShellWithDashboard();
+        classic.Page = Page.Report;
+        classic.BeginSetup();
+        classic.Wizard.Finish.Execute(null);
+        classic.Page.ShouldBe(Page.Now);
+    }
+
     [Fact]
     public void A_history_screen_reads_only_while_it_shows()
     {

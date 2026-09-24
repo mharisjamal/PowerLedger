@@ -47,8 +47,9 @@ public partial class SendFeedbackWindow : Window
 
     private void AddScreenshotClick(object sender, RoutedEventArgs e)
     {
-        if (_mainWindow is null || !_model.CanAddMoreImages) return;
-        if (CaptureScreenshot(_mainWindow) is { } bytes) _model.TryAddImage(bytes);
+        // The owner first: a look switch hands this window to the new shell window, and the one it opened over has closed.
+        if ((Owner ?? _mainWindow) is not { } shell || !_model.CanAddMoreImages) return;
+        if (CaptureScreenshot(shell) is { } bytes) _model.TryAddImage(bytes);
     }
 
     private void OnDrop(object sender, DragEventArgs e)

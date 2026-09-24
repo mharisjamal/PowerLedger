@@ -308,6 +308,7 @@ public partial class UsageCounterTests
 
     [Theory]
     [InlineData("now")]
+    [InlineData("dashboard")]
     [InlineData("breakdown")]
     [InlineData("report")]
     [InlineData("settings")]

@@ -274,6 +274,12 @@
                 <RadioButton Style="{StaticResource Choice}" Content="Dark" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static local:ThemeChoice.Dark}}" />
                 <RadioButton Style="{StaticResource Choice}" Content="Light" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static local:ThemeChoice.Light}}" />
             </StackPanel>
+            <!-- Midnight look design §1: the window is replaced in place when chosen; the title bar's Switch look chooses here too. -->
+            <StackPanel Style="{StaticResource Row}">
+                <TextBlock Style="{StaticResource Label}" Text="Look" />
+                <RadioButton Style="{StaticResource Choice}" Content="Classic" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static local:Look.Classic}}" />
+                <RadioButton Style="{StaticResource Choice}" Content="Midnight" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static local:Look.Midnight}}" />
+            </StackPanel>
             <StackPanel Style="{StaticResource Row}">
                 <TextBlock Style="{StaticResource Label}" Text="Start with Windows" />
                 <CheckBox Style="{StaticResource Tick}" Content="In the tray, when you sign in" IsChecked="{Binding StartWithWindows}" />
