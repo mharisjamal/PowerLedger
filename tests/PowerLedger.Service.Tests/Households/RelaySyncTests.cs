@@ -161,7 +161,7 @@ public sealed class RelaySyncTests : IDisposable
         _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100), Row(_desktop.Id, 1, 11, changed: 100)]);
         _desktop.Store.PostedThrough = 100;
         using var study = DeviceKeys.Create();
-        _desktop.Members.Add(new MemberInfo(study.DeviceId, "Study PC", ChassisKind.Desktop, study.SignPublic, study.DhPublic), 1,
+        _desktop.Members.Introduce(new MemberInfo(study.DeviceId, "Study PC", ChassisKind.Desktop, study.SignPublic, study.DhPublic),
             Now.ToUnixTimeMilliseconds());                                          // a new member, an hour after the last snapshot
         _clock.Advance(TimeSpan.FromHours(1));
 
@@ -476,7 +476,7 @@ public sealed class RelaySyncTests : IDisposable
             [_desktop.AsMember(), _laptop.AsMember(), study.AsMember()]), CancellationToken.None)).Ok.ShouldBeTrue();
         _desktop.Members.Remove(study.Id, Now.ToUnixTimeMilliseconds());           // then the desktop removed it, still at epoch 1
         _desktop.Store.AddPending(new PendingOp(PendingOp.Remove, Household, Device: study.Id));
-        _desktop.Sync.StartRotation(Household);
+        _desktop.Sync.StartRotation(Household, forRemoval: true);
 
         (await _desktop.RunAsync()).Problem.ShouldBeNull();
 
@@ -487,20 +487,21 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
-    public async Task A_rotation_that_loses_its_epoch_to_a_key_sealed_by_a_pc_removed_here_takes_nothing_and_rotates_on()
+    public async Task A_rotation_for_a_removal_that_loses_its_epoch_to_the_removed_pcs_own_key_reads_under_it_and_rotates_on()
     {
         using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
         _relay.Seed(Household, study.Keys);
         _desktop.Household.SaveMember(study.AsMember());
-        (await study.Client.PostKeysAsync(study.Keys, Household, 2, KeyWrap.For(study.Keys, Household, 2, HouseholdCrypto.NewKey(),
+        var theirs = HouseholdCrypto.NewKey();                                    // made while it was a member: its to hand over
+        (await study.Client.PostKeysAsync(study.Keys, Household, 2, KeyWrap.For(study.Keys, Household, 2, theirs,
             [_desktop.AsMember(), _laptop.AsMember(), study.AsMember()]), CancellationToken.None)).Ok.ShouldBeTrue();
         _desktop.Members.Remove(study.Id, Now.ToUnixTimeMilliseconds());
         _desktop.Store.AddPending(new PendingOp(PendingOp.Remove, Household, Device: study.Id));
-        _desktop.Sync.StartRotation(Household);
+        _desktop.Sync.StartRotation(Household, forRemoval: true);
 
         (await _desktop.RunAsync()).Problem.ShouldBeNull();
 
-        _desktop.Store.KeyFor(2).ShouldBeNull();
+        _desktop.Store.KeyFor(2).ShouldBe(theirs);
         _desktop.Store.Epoch.ShouldBe(3);
         _relay.Sealed(Household, 3).ShouldBe([_desktop.Id, _laptop.Id], ignoreOrder: true);
     }
@@ -697,18 +698,21 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
-    public async Task A_key_sealed_by_a_pc_removed_here_isnt_taken_even_for_the_epoch_after_its_removal()
+    public async Task A_key_is_taken_from_a_pc_that_went_for_an_epoch_before_its_removal_and_never_for_one_after()
     {
         _desktop.Sync.StartRotation(Household);
         await _desktop.RunAsync();                                                  // epoch 2, sealed to the laptop too
-        _relay.Remove(Household, _desktop.Id);
-        _laptop.Members.Remove(_desktop.Id, Now.ToUnixTimeMilliseconds());          // removed here while the laptop was at epoch 1
+        _relay.Remove(Household, _desktop.Id);                                     // then it left, at epoch 2
+        var chosen = Wire.Encode(HouseholdCrypto.WrapFor(_desktop.Keys.Dh, _laptop.Keys.DhPublic, HouseholdCrypto.NewKey(), KeyWrap.Context(Household, 3)));
+        _relay.Intercept = (request, _) => request.RequestUri!.AbsolutePath.EndsWith("/keys/3", StringComparison.Ordinal)
+            ? FakeRelay.Json(new System.Text.Json.Nodes.JsonObject { ["epoch"] = 3, ["from"] = _desktop.Id, ["body"] = chosen })
+            : null;
 
-        (await _laptop.Client.GetKeyAsync(_laptop.Keys, Household, 2, CancellationToken.None)).Ok.ShouldBeTrue();
-        await _laptop.Sync.CatchUpAsync(_laptop.Keys, CancellationToken.None);
+        (await _laptop.RunAsync()).Notices.ShouldBe(["Desktop-7 is no longer in the household."]);
 
-        _laptop.Store.Epoch.ShouldBe(1);                                            // it knows that key: nothing goes under it
-        _laptop.Store.KeyFor(2).ShouldBeNull();
+        _laptop.Store.KeyFor(2).ShouldBe(_desktop.Store.KeyFor(2));               // the key it made while it was in
+        _laptop.Store.KeyFor(3).ShouldBeNull();                                    // but none it seals once it has gone
+        _laptop.Store.Epoch.ShouldBe(2);
     }
 
     [Fact]
@@ -717,7 +721,7 @@ public sealed class RelaySyncTests : IDisposable
         using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
         _relay.Seed(Household, study.Keys);
         _laptop.Household.SaveMember(study.AsMember());
-        _laptop.Members.Remove(study.Id, Now.ToUnixTimeMilliseconds());             // removed at epoch 1
+        _relay.Remove(Household, study.Id);                                       // removed at epoch 1
         var k2 = HouseholdCrypto.NewKey();
         _laptop.Store.AddKey(2, k2);                                                // the new key it was left out of
         using var ghost = DeviceKeys.Create();

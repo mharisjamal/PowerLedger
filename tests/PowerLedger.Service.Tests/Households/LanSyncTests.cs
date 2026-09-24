@@ -29,8 +29,10 @@ public sealed class LanSyncTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        var key = HouseholdCrypto.NewKey();
         foreach (var pc in new[] { _desktop, _laptop })
         {
+            pc.Store.EnterHousehold(Household, 1, key);
             foreach (var member in new[] { _desktop, _laptop }) pc.Household.SaveMember(member.AsMember(Now));
             pc.Start();
         }
@@ -102,50 +104,44 @@ public sealed class LanSyncTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_pc_removed_here_isnt_taken_back_from_a_member_that_hasnt_heard_and_that_member_learns_of_the_removal()
+    public async Task A_pc_removed_here_isnt_brought_back_by_a_member_that_hasnt_heard_and_that_member_stops_syncing_with_it()
     {
         using var study = DeviceKeys.Create();
         var info = new MemberInfo(study.DeviceId, "Study PC", ChassisKind.Desktop, study.SignPublic, study.DhPublic);
-        foreach (var pc in new[] { _desktop, _laptop })
-        {
-            pc.Store.EnterHousehold(Household, 1, HouseholdCrypto.NewKey());
-            pc.Members.Add(info, 1, Now.ToUnixTimeMilliseconds());               // the laptop hasn't heard of the removal
-        }
+        foreach (var pc in new[] { _desktop, _laptop }) pc.Members.Introduce(info, Now.ToUnixTimeMilliseconds());   // the laptop hasn't heard of the removal
         _desktop.Members.Remove(study.DeviceId, Now.ToUnixTimeMilliseconds() - 60_000).ShouldBeTrue();
         _desktop.Members.ForgetRows(study.DeviceId);                              // and its rows went too
 
         (await _desktop.SyncWith(_laptop)).Ok.ShouldBeTrue();
         await WaitFor.True(() => _laptop.Household.Member(study.DeviceId)?.LeftMs is not null);
 
-        _desktop.Household.Member(study.DeviceId).ShouldBeNull();                 // not back as a current member
-        _desktop.Members.EpochsOf(study.DeviceId).ShouldBe(new MemberEpochs(1, 1));
-        _laptop.Members.EpochsOf(study.DeviceId).ShouldBe(new MemberEpochs(1, 1));
+        _desktop.Household.Member(study.DeviceId).ShouldBeNull();                 // not back on the laptop's word
+        _laptop.Members.MaySync(study.DeviceId).ShouldBeFalse();                  // the desktop's removal stops sync with it at once
         (await _laptop.SyncWith(_desktop)).ShouldSatisfyAllConditions(
             again => again.Ok.ShouldBeTrue(), again => again.Removed.ShouldNotBeNull().ShouldBeEmpty());
     }
 
     [Fact]
-    public async Task A_pc_added_back_at_a_newer_epoch_stays_in_though_a_member_that_hasnt_heard_removed_it_later_by_its_clock()
+    public async Task A_pc_the_server_added_back_after_a_members_removal_is_synced_with_again()
     {
         using var study = DeviceKeys.Create();
         var info = new MemberInfo(study.DeviceId, "Study PC", ChassisKind.Desktop, study.SignPublic, study.DhPublic);
-        foreach (var pc in new[] { _desktop, _laptop })
-        {
-            pc.Store.EnterHousehold(Household, 1, HouseholdCrypto.NewKey());
-            pc.Members.Add(info, 1, Now.ToUnixTimeMilliseconds());
-        }
-        _desktop.Members.Remove(study.DeviceId, Now.ToUnixTimeMilliseconds());
-        _laptop.Members.Remove(study.DeviceId, Now.AddMinutes(3).ToUnixTimeMilliseconds());   // at epoch 1 too, its clock 3 minutes ahead
-        _desktop.Store.AddKey(2, HouseholdCrypto.NewKey());                        // the new key without it
-        _desktop.Members.Add(info, 2, Now.AddMinutes(1).ToUnixTimeMilliseconds()).ShouldBeTrue();   // then its user added it back
-
-        (await _laptop.SyncWith(_desktop)).Ok.ShouldBeTrue();
+        foreach (var pc in new[] { _desktop, _laptop }) pc.Members.Introduce(info, Now.ToUnixTimeMilliseconds());
+        _laptop.Members.Remove(study.DeviceId, Now.AddMinutes(3).ToUnixTimeMilliseconds());   // at epoch 1
         (await _desktop.SyncWith(_laptop)).Ok.ShouldBeTrue();
+        _laptop.Members.MaySync(study.DeviceId).ShouldBeFalse();                  // its own removal stands against the desktop's list
+        _desktop.Members.MaySync(study.DeviceId).ShouldBeFalse();                 // and the desktop stops syncing with it too
 
-        _desktop.Members.Current(study.DeviceId).ShouldNotBeNull();               // the laptop's later clock changes nothing
-        _desktop.Members.EpochsOf(study.DeviceId).ShouldBe(new MemberEpochs(2, 1));
-        _laptop.Members.Current(study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBeNull();   // and it learns the PC is back
-        _laptop.Members.EpochsOf(study.DeviceId).ShouldBe(new MemberEpochs(2, 1));
+        foreach (var pc in new[] { _desktop, _laptop })                           // then the study PC was added again, at epoch 2
+        {
+            pc.Members.TakeServerList(
+                [MemberBookTests.Listed(_desktop.Keys, 1), MemberBookTests.Listed(_laptop.Keys, 1), MemberBookTests.Listed(study, 2)], pc.Id,
+                Now.AddMinutes(4).ToUnixTimeMilliseconds());
+        }
+
+        _laptop.Members.MaySync(study.DeviceId).ShouldBeTrue();                   // the server's list: added again after that removal
+        _laptop.Household.Member(study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBeNull();
+        _desktop.Members.MaySync(study.DeviceId).ShouldBeTrue();
     }
 
     [Fact]

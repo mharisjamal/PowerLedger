@@ -248,12 +248,8 @@ internal sealed partial class HouseholdWorker
         {
             return;
         }
+        if (!await RotationFirstAsync(householdId, approving.Device, cancel).ConfigureAwait(false)) return;   // no old key to a newcomer
         var epoch = _store.Epoch;
-        if (_members.EpochsOf(approving.Device)?.Removed >= epoch)
-        {
-            await _relaySync.FinishRotationAsync(_keys, cancel).ConfigureAwait(false);   // removed at this epoch: back only at a newer one
-            return;
-        }
         if (!approving.Revealed)
         {
             if (!await RevealAsync(householdId, approving, cancel).ConfigureAwait(false)) return;
@@ -269,7 +265,9 @@ internal sealed partial class HouseholdWorker
         if (result.Ok)
         {
             _store.Approving = null;
-            _members.Add(new MemberInfo(approving.Device, NewPcName, ChassisKind.Desktop, sign, dh), epoch, Now);
+            _members.ServerAdded(approving.Device, epoch);
+            var known = _household.Member(approving.Device);
+            _members.Introduce(new MemberInfo(approving.Device, known?.Name ?? NewPcName, known?.Kind ?? ChassisKind.Desktop, sign, dh), Now);
             Volatile.Write(ref _waitingApprovals, Math.Max(0, Volatile.Read(ref _waitingApprovals) - 1));
             _log.LogInformation("Approved {Device} into the household", approving.Device);
             Info("The PC signed in as you is now in your household.");
@@ -430,7 +428,8 @@ internal sealed partial class HouseholdWorker
             return;
         }
         CancelPairingUnderWay();                                               // plan 0.9: joining by sign-in stops a pairing under way
-        EnterLocked(householdId, approved.Epoch, sealedList.Key, sealedList.Members, answering.Approver);
+        EnterLocked(householdId, approved.Epoch, sealedList.Key, sealedList.Members, answering.Approver,
+            new MemberInfo(answering.Approver, NewPcName, ChassisKind.Desktop, Wire.PublicKey(answering.Sign)!, Wire.PublicKey(answering.Dh)!));
         _store.RelayConfirmed = true;
         _store.Answering = null;
         _store.CanAskAgain = false;

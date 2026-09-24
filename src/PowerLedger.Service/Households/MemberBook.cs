@@ -1,18 +1,15 @@
+using PowerLedger.Core.Households;
+using PowerLedger.Service.Households.Relay;
 using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Households;
 
-/// <summary>A member's place in the household's epochs (plan 0.9), which order membership where clocks can't.</summary>
-/// <param name="Added">The household epoch the PC that added it was at.</param>
-/// <param name="Removed">The epoch the PC that removed it was at; null while it never was.</param>
-internal sealed record MemberEpochs(int Added, int? Removed = null)
+/// <summary>A PC as the server's member list last gave it (plan 0.10): the household's epoch when the server added it, and the
+/// epoch and time it removed it at, if it did.</summary>
+/// <param name="Unknown">When this PC first saw it listed as current with no introduction, unix milliseconds.</param>
+internal sealed record ServerEntry(int Added, int? Removed = null, long? RemovedMs = null, long? Unknown = null)
 {
-    /// <summary>Never removed, or added again after its removal.</summary>
-    public bool Current => Removed is not { } removed || Added > removed;
-
-    /// <summary>Two accounts of one member together: the higher value of each field.</summary>
-    public MemberEpochs Merge(MemberEpochs other) =>
-        new(Math.Max(Added, other.Added), Removed is { } mine && other.Removed is { } theirs ? Math.Max(mine, theirs) : Removed ?? other.Removed);
+    public bool Current => Removed is null;
 }
 
 /// <summary>A current member whose batches still come under an older epoch than this PC's (plan 0.8).</summary>
@@ -21,194 +18,324 @@ internal sealed record MemberEpochs(int Added, int? Removed = null)
 internal sealed record Lag(long Since, int? RotatedAt = null);
 
 /// <summary>What learning a member list changed here.</summary>
-/// <param name="Removed">Members this PC had as current that the list says were removed: each means a new key.</param>
-/// <param name="Added">Members this PC didn't know, or knew as removed and were added again since.</param>
+/// <param name="Removed">PCs shown as in until now that are shown as left from now on, so no longer synced with on the network.</param>
+/// <param name="Added">PCs the list introduced.</param>
 internal sealed record Learned(IReadOnlyList<string> Removed, IReadOnlyList<string> Added);
 
+/// <summary>What reading the server's member list changed here.</summary>
+/// <param name="Gone">PCs current here until now that the server has removed: each means a new key.</param>
+/// <param name="Left">PCs shown as in until now that are shown as left from now on.</param>
+/// <param name="Unknown">PCs the server has listed as current for <see cref="MemberBook.IntroductionWait"/> or more that no
+/// introduction has reached: each is to be taken out.</param>
+internal sealed record ServerLearned(IReadOnlyList<string> Gone, IReadOnlyList<string> Left, IReadOnlyList<string> Unknown);
+
 /// <summary>
-/// The household's members as this PC knows them (households design §1, plan 0.9). Membership is ordered by epochs, not
-/// clocks: each member carries the epoch the PC that added it was at, and once removed the epoch the PC that removed it
-/// was at. It is current while never removed, or added again at a higher epoch than its removal. Two accounts of a member
-/// merge by taking the higher of each, so a removal stands against every add as old as it, and only a newer add, which
-/// the adding PC makes above the removal, brings a PC back: by pairing or approval, never by gossip. The times kept with
-/// them are for display only. A removed PC's epochs outlive its rows while this PC is in the household, so no list brings
-/// it back; each change of membership is also kept in the member's row, which is left while the PC isn't current.
+/// The household's members as this PC knows them (households design §6, plan 0.10). The server's member list says who is in,
+/// and introductions say whose keys to trust: this PC's own pairings and approvals, the member list in its welcome, approval
+/// or recovery, and the sealed lists of PCs current here. A PC is current here when both agree: the server's latest list has
+/// it as current, or it is this PC's own add still waiting for the server; and its keys, kept with its row, came in an
+/// introduction. Before this PC has read the server's list for its household, the introductions alone decide. A list's
+/// entry about its own sender counts for nothing, and nobody's list says anything about this PC. Removals in lists, this
+/// PC's own among them, only stop sync on the network with that PC and show it as left: they never override the server's
+/// list. The server's list also gives the epochs, which decide who may hand this PC a key.
 /// </summary>
 internal sealed class MemberBook(HouseholdStore store, HouseholdRepository household)
 {
-    /// <summary>At most this many removed PCs are kept without their rows, those removed earliest going first.</summary>
+    /// <summary>At most this many removals are kept from each list, the latest first.</summary>
     public const int MaxRemoved = 64;
 
-    /// <summary>A member's epochs as this PC knows them; null for a PC it never knew. A member kept before it had any counts as
-    /// added at epoch 0, and removed then if it has left.</summary>
-    public MemberEpochs? EpochsOf(string id) =>
-        store.MemberEpochs.TryGetValue(id, out var epochs) ? epochs
-        : household.Member(id) is { } member ? new MemberEpochs(0, member.LeftMs is null ? null : 0)
-        : null;
+    /// <summary>How long a PC the server lists as current may go without an introduction before a member takes it out.</summary>
+    public static readonly TimeSpan IntroductionWait = TimeSpan.FromDays(3);
 
-    /// <summary>The member of that ID while it is current; null when it is unknown or was removed.</summary>
-    public HouseholdMember? Current(string id) => household.Member(id) is { } member && EpochsOf(id) is { Current: true } ? member : null;
+    /// <summary>Whose removals are this PC's own, among the lists' removals kept.</summary>
+    internal const string Own = "own";
 
-    /// <summary>A PC this PC's user adds, by pairing or approval, at <paramref name="epoch"/>, this PC's own (plan 0.9). It must
-    /// be above any removal of the PC known here: a PC removed at this PC's epoch comes back only once the key has moved on.</summary>
-    /// <returns>False when it was removed at that epoch or later, and so isn't added.</returns>
-    public bool Add(MemberInfo member, int epoch, long nowMs)
+    /// <summary>The member of that ID while it is current here; null when it isn't.</summary>
+    public HouseholdMember? Current(string id)
     {
-        var known = EpochsOf(member.Id);
-        if (known?.Removed is { } removed && epoch <= removed) return false;
-        household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
-        Set(member.Id, (known ?? new MemberEpochs(epoch)).Merge(new MemberEpochs(epoch)));
-        store.SnapshotWanted = true;                                           // the new member reads the history (plan 0.9)
-        return true;
+        var view = View();
+        return view.Row(id) is { } row && view.IsCurrent(id) ? row : null;
     }
 
-    /// <summary>This PC's own place in the household it enters: added at the epoch it entered at.</summary>
-    public void Self(string id, int epoch) => Set(id, new MemberEpochs(epoch));
+    /// <summary>True when the server's latest list has the PC as current, or it is this PC's own add waiting for the server.</summary>
+    public bool ServerCurrent(string id) => View().ServerCurrent(id);
 
-    /// <summary>This PC removes a member: removed at its own epoch, or at the member's add if that is higher, so the removal
-    /// stands (plan 0.9). The new key follows.</summary>
-    /// <returns>True when it was current until now.</returns>
-    public bool Remove(string id, long nowMs)
-    {
-        var known = EpochsOf(id) ?? new MemberEpochs(0);
-        Set(id, known.Merge(new MemberEpochs(0, Math.Max(store.Epoch, known.Added))));
-        household.MarkLeft(id, nowMs);
-        return known.Current;
-    }
+    /// <summary>True when a current member's list, this PC's own removals among them, has the PC as removed since the server
+    /// last added it.</summary>
+    public bool ShownRemoved(string id) => View().ShownRemoved(id);
 
-    /// <summary>This PC recovered the household (plan 0.9): every other member it knows is removed at <paramref name="epoch"/>,
-    /// the household's epoch at the recovery, as the server removed them then.</summary>
-    public void RemoveAllBut(string selfId, int epoch, long nowMs)
-    {
-        foreach (var member in household.Members().Where(member => member.DeviceId != selfId && Current(member.DeviceId) is not null))
-        {
-            var known = EpochsOf(member.DeviceId)!;
-            Set(member.DeviceId, known.Merge(new MemberEpochs(0, Math.Max(epoch, known.Added))));
-            household.MarkLeft(member.DeviceId, nowMs);
-        }
-    }
+    /// <summary>True when this PC may sync with the PC on the network (plan 0.10): it is current here and no current member's
+    /// list has it as removed. It is shown as in on the Household page just when this is true.</summary>
+    public bool MaySync(string id) => View().MaySync(id);
+
+    /// <summary>The PC as the server's list last gave it; null when that list didn't have it, or none was read.</summary>
+    public ServerEntry? ServerEntryOf(string id) => store.ServerMembers?.GetValueOrDefault(id);
+
+    /// <summary>The highest epoch the server's list shows, at an add or a removal; 0 when none was read.</summary>
+    public int ServerEpoch => store.ServerMembers?.Values.Select(entry => Math.Max(entry.Added, entry.Removed ?? 0)).DefaultIfEmpty().Max() ?? 0;
 
     /// <summary>
-    /// The server lists a member as removed (plan 0.9): removed at the higher of its add and this PC's epoch, unless a higher
-    /// removal is known. The server's word only ever removes. A removal the server made before an add known here, at an
-    /// epoch this PC can place, is an old one, and changes nothing; a PC this PC never knew is kept as removed at the
-    /// server's epoch, so no list that hasn't heard brings it in.
+    /// True when <paramref name="sealerId"/> may hand this PC the key of <paramref name="epoch"/> (plan 0.10): its keys were
+    /// introduced here, and by the server's list it was added before that epoch and not removed before it. So a PC that
+    /// removed another and then left is still the sealer of the key it made.
     /// </summary>
-    /// <param name="serverEpoch">The household's epoch at the removal, as the server gives it.</param>
-    /// <param name="serverAdded">The household's epoch when the server added it.</param>
-    /// <returns>True when it was current until now.</returns>
-    public bool RemovedByServer(string id, long removedMs, int? serverEpoch, int? serverAdded = null)
+    public bool MaySeal(string sealerId, int epoch) =>
+        household.Member(sealerId) is not null && ServerEntryOf(sealerId) is { } entry && entry.Added < epoch && (entry.Removed is not { } removed || removed >= epoch);
+
+    /// <summary>True when the rows of a batch from <paramref name="senderId"/> under <paramref name="epoch"/> may be kept: it is
+    /// current here, or the server removed it at that epoch or later.</summary>
+    public bool MayHavePosted(string senderId, int epoch) =>
+        Current(senderId) is not null || (household.Member(senderId) is not null && ServerEntryOf(senderId) is { Removed: { } removed } && epoch <= removed);
+
+    /// <summary>
+    /// Takes the server's member list (plan 0.10): who is current, and each PC's epochs. A PC listed as current that no
+    /// introduction has reached is noted, and after <see cref="IntroductionWait"/> it is to be taken out.
+    /// </summary>
+    public ServerLearned TakeServerList(IEnumerable<ServerMember> members, string selfId, long nowMs)
     {
-        var placed = serverEpoch is { } at && at >= 0 && at <= store.Epoch + 1 ? at : (int?)null;
-        if (EpochsOf(id) is not { } known)
+        if (store.HouseholdId is null) return new ServerLearned([], [], []);
+        var before = View();
+        var wasCurrent = before.Rows.Select(row => row.DeviceId).Where(id => id != selfId && before.IsCurrent(id)).ToList();
+        var taken = new Dictionary<string, ServerEntry>(StringComparer.Ordinal);
+        List<string> unknown = [];
+        foreach (var member in members.Where(member => Wire.IsDeviceId(member.Device)))
         {
-            var removedAt = placed ?? store.Epoch;
-            if (store.HouseholdId is not null && Wire.IsDeviceId(id)) Set(id, new MemberEpochs(Math.Clamp(serverAdded ?? 0, 0, removedAt), removedAt));
-            return false;
+            int? removed = member.Removed is null ? null : member.RemovedEpoch ?? member.AddedEpoch;
+            long? since = null;
+            if (removed is null && member.Device != selfId && before.Row(member.Device) is null && !before.Adds.Contains(member.Device))
+            {
+                since = before.Server?.GetValueOrDefault(member.Device)?.Unknown ?? nowMs;
+                if (nowMs - since >= (long)IntroductionWait.TotalMilliseconds) unknown.Add(member.Device);
+            }
+            taken[member.Device] = new ServerEntry(member.AddedEpoch, removed, member.Removed, since);
         }
-        if (!known.Current || (placed is { } before && known.Added > before)) return false;   // removed here already, or an old removal
-        Set(id, known.Merge(new MemberEpochs(0, Math.Max(Math.Max(known.Added, store.Epoch), placed ?? 0))));
-        household.MarkLeft(id, removedMs);
-        return true;
+        store.ServerMembers = taken;
+        var after = View();
+        var gone = wasCurrent.Where(id => !after.ServerCurrent(id) && taken.ContainsKey(id)).ToList();
+        return new ServerLearned(gone, Refresh(nowMs), unknown);
     }
 
-    /// <summary>Takes a PC's rows off this PC, and its entry off the Household page; its epochs stay while this PC is in the
-    /// household, so it is never taken back on another PC's word.</summary>
+    /// <summary>The server took this PC's add or approval of the PC (plan 0.10): current from now on, as the next list says.</summary>
+    public void ServerAdded(string id, int epoch)
+    {
+        if (store.ServerMembers is not { } server) return;
+        store.ServerMembers = new Dictionary<string, ServerEntry>(server, StringComparer.Ordinal) { [id] = new ServerEntry(epoch) };
+    }
+
+    /// <summary>The server took a removal this PC made (plan 0.10): removed at this PC's epoch at the least, as the next list says.</summary>
+    public void ServerRemoved(string id, int epoch, long nowMs)
+    {
+        if (store.ServerMembers is not { } server) return;
+        var added = server.GetValueOrDefault(id)?.Added ?? 0;
+        store.ServerMembers = new Dictionary<string, ServerEntry>(server, StringComparer.Ordinal) { [id] = new ServerEntry(added, Math.Max(epoch, added), nowMs) };
+        Refresh(nowMs);
+    }
+
+    /// <summary>This PC recovered the household (plan 0.9): the server removed every other member at <paramref name="epoch"/>.</summary>
+    public void RemoveAllBut(string selfId, int epoch, long nowMs)
+    {
+        var view = View();
+        var server = new Dictionary<string, ServerEntry>(view.Server ?? new Dictionary<string, ServerEntry>(), StringComparer.Ordinal);
+        foreach (var id in view.Rows.Select(row => row.DeviceId).Concat(server.Keys).Distinct(StringComparer.Ordinal).Where(id => id != selfId).ToList())
+        {
+            if (server.GetValueOrDefault(id) is not { Current: false }) server[id] = new ServerEntry(server.GetValueOrDefault(id)?.Added ?? 0, epoch, nowMs);
+        }
+        server[selfId] = server.GetValueOrDefault(selfId) is { Current: true } self ? self : new ServerEntry(epoch);
+        store.ServerMembers = server;
+        Refresh(nowMs);
+    }
+
+    /// <summary>A PC this PC's own pairing or approval brings in: its keys are introduced here, and any removal of it this PC
+    /// made is forgotten. Its add goes to the server first, so it is current.</summary>
+    public void Introduce(MemberInfo member, long nowMs)
+    {
+        household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, nowMs, null, null));
+        var own = new Dictionary<string, int>(Claims(Own), StringComparer.Ordinal);
+        if (own.Remove(member.Id)) SetClaims(Own, own);
+        store.SnapshotWanted = true;                                           // the new member reads the history (plan 0.9)
+        Refresh(nowMs);
+    }
+
+    /// <summary>This PC's user removes a member (plan 0.10): sync on the network with it stops at once, and it shows as left.
+    /// The removal goes to the server, which decides the rest.</summary>
+    /// <returns>True when it was shown as in until now.</returns>
+    public bool Remove(string id, long nowMs)
+    {
+        var view = View();
+        var wasIn = view.MaySync(id);
+        var own = new Dictionary<string, int>(Claims(Own), StringComparer.Ordinal)
+        {
+            [id] = Math.Max(store.Epoch, view.Server?.GetValueOrDefault(id)?.Added ?? 0),
+        };
+        SetClaims(Own, own);
+        Refresh(nowMs);
+        return wasIn;
+    }
+
+    /// <summary>Takes a PC's rows off this PC, and its entry off the Household page. What the server's list and the lists'
+    /// removals say of it stays, so no list brings it back.</summary>
     public void ForgetRows(string id)
     {
-        if (store.HouseholdId is not null && EpochsOf(id) is { } epochs) Set(id, epochs);
         household.DeleteRows(id);
         household.DeleteMember(id);
     }
 
-    /// <summary>True when <paramref name="sealerId"/> may hand this PC the key for <paramref name="epoch"/> (plan 0.9): it is
-    /// current here, and was added before that epoch. There is no other allowance: a removed PC holds every key it sealed.</summary>
-    public bool MaySeal(string sealerId, int epoch) => Current(sealerId) is not null && EpochsOf(sealerId)!.Added < epoch;
-
-    /// <summary>True when the rows of a batch from <paramref name="senderId"/> under <paramref name="epoch"/> may be kept: it is
-    /// current, or the batch's epoch is no later than its removal (plan 0.9).</summary>
-    public bool MayHavePosted(string senderId, int epoch) => EpochsOf(senderId) is { } epochs && (epochs.Current || epoch <= epochs.Removed);
-
-    /// <summary>The members this PC knows, as a welcome, an approval, a recovery, a <c>have</c> and a batch carry them, each
-    /// with its epochs: every current one with its keys, name and kind, then at most <see cref="MaxRemoved"/> removed ones,
-    /// the most recently removed first, by ID. With <paramref name="compact"/>, as an approval's or a recovery's sealed body
-    /// carries them, a removed one has its epochs alone.</summary>
+    /// <summary>The members this PC knows, as a welcome, an approval, a recovery, a <c>have</c> and a batch carry them: each PC
+    /// shown as in with its keys, name and kind, and the epoch the server added it at; then at most <see cref="MaxRemoved"/>
+    /// PCs shown as removed, the latest removed first, by ID with their epochs. With <paramref name="compact"/>, as an
+    /// approval's or a recovery's sealed body carries them, a removed one has its epochs alone.</summary>
     public List<WireMember> Entries(bool compact = false)
     {
+        var view = View();
         var current = new List<WireMember>();
         var removed = new List<WireMember>();
-        var known = household.Members();
-        foreach (var member in known)
+        foreach (var row in view.Rows.Where(row => view.MaySync(row.DeviceId)))
         {
-            var epochs = EpochsOf(member.DeviceId)!;
-            if (epochs.Current) current.Add(Wire.Member(member) with { Added = member.AddedMs, AddedEpoch = epochs.Added });
-            else removed.Add(new WireMember(member.DeviceId, null, null, Removed: compact ? null : member.LeftMs, AddedEpoch: epochs.Added, RemovedEpoch: epochs.Removed));
+            current.Add(Wire.Member(row) with { Added = row.AddedMs, AddedEpoch = view.Server?.GetValueOrDefault(row.DeviceId)?.Added });
         }
-        foreach (var (id, epochs) in store.MemberEpochs.Where(pair => !pair.Value.Current && known.All(member => member.DeviceId != pair.Key)))
+        var known = view.Rows.Select(row => row.DeviceId).Concat(view.Server?.Keys ?? []).Concat(view.Claims.Values.SelectMany(claims => claims.Keys));
+        foreach (var id in known.Distinct(StringComparer.Ordinal).Where(id => current.All(entry => entry.Id != id)))
         {
-            removed.Add(new WireMember(id, null, null, AddedEpoch: epochs.Added, RemovedEpoch: epochs.Removed));
+            var entry = view.Server?.GetValueOrDefault(id);
+            if ((entry?.Removed ?? view.RemovedAt(id)) is not { } at) continue;
+            removed.Add(new WireMember(id, null, null, Removed: compact ? null : entry?.RemovedMs ?? view.Row(id)?.LeftMs, AddedEpoch: entry?.Added, RemovedEpoch: at));
         }
         return [.. current, .. removed.OrderByDescending(entry => entry.RemovedEpoch).Take(MaxRemoved)];
     }
 
     /// <summary>
-    /// Learns from a member list this PC may take it from (plan 0.9): a welcome's, an approval's or a recovery's, a batch's
-    /// whose sender is current here, or a current member's on the network. Each entry merges with what is known here, and
-    /// one with an epoch above this PC's own + 1 is passed over; a PC this PC didn't know comes in only with its keys, and
-    /// the list's own PC gives its name and kind. Nobody's list changes this PC's own entry, or a member's keys.
+    /// Learns from a member list (plan 0.10): a welcome's, an approval's or a recovery's, or a PC's current here. A PC this
+    /// PC doesn't know comes in with its keys, unless this PC or the server removed it; a member's keys never change. The
+    /// list's removals are kept as its PC's, in place of those its last list had, and count while that PC is current here.
+    /// The list's entry about its own PC gives its name and kind, and nothing else; nobody's list says anything about this PC.
     /// </summary>
-    /// <param name="fromId">The PC whose list it is.</param>
+    /// <param name="fromId">The PC whose list it is; null for a recovery's, which the code vouches for as a whole.</param>
     /// <param name="selfId">This PC.</param>
     public Learned Learn(IEnumerable<WireMember> entries, string? fromId, string selfId, long nowMs)
     {
-        List<string> removed = [];
-        List<string> added = [];
-        var ceiling = store.Epoch + 1;
-        foreach (var entry in entries.Take(MaxRemoved + Wire.MaxMembers))
+        if (store.HouseholdId is null) return new Learned([], []);
+        var list = entries.Take(MaxRemoved + Wire.MaxMembers).Where(entry => Wire.IsDeviceId(entry.Id) && entry.Id != selfId).ToList();
+        if (fromId is not null)
         {
-            if (entry.Id == selfId || !Wire.IsDeviceId(entry.Id)) continue;
-            var incoming = new MemberEpochs(entry.AddedEpoch ?? 0, entry.RemovedEpoch);
-            if (incoming.Added is < 0 || incoming.Added > ceiling || incoming.Removed is < 0 || incoming.Removed > ceiling) continue;
-            var before = EpochsOf(entry.Id);
-            var merged = before?.Merge(incoming) ?? incoming;
-            var row = household.Member(entry.Id);
-            if (merged.Current && (row is null || before is not { Current: true }))
+            SetClaims(fromId, list.Where(entry => entry.Id != fromId && entry.RemovedEpoch is >= 0)
+                .GroupBy(entry => entry.Id, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Max(entry => entry.RemovedEpoch!.Value), StringComparer.Ordinal));
+        }
+        var view = View();
+        List<string> added = [];
+        foreach (var entry in list.Where(entry => entry.Id != fromId && entry.RemovedEpoch is null && entry.Removed is null))
+        {
+            if (view.Row(entry.Id) is not null || Wire.Member(entry) is not { } member) continue;   // a member's keys never change
+            if (view.Server?.GetValueOrDefault(entry.Id) is { Current: false } || view.Claims.GetValueOrDefault(Own)?.ContainsKey(entry.Id) == true)
             {
-                if (row is null)
-                {
-                    if (Wire.Member(entry) is not { } member) continue;             // current, but without keys to know it by
-                    household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, entry.Added ?? nowMs, null, null));
-                }
-                else
-                {
-                    household.SaveMember(row with { LeftMs = null });
-                }
-                added.Add(entry.Id);
+                continue;                                                      // removed here: not brought back on a list's word
             }
-            else if (!merged.Current && before is { Current: true })
-            {
-                household.MarkLeft(entry.Id, entry.Removed is > 0 and var at ? at : nowMs);
-                removed.Add(entry.Id);
-            }
-            if (merged != before) Set(entry.Id, merged);
-            if (entry.Id == fromId && merged.Current && household.Member(entry.Id) is { } sender && Wire.Member(entry) is { } own
-                && sender.SignKey.AsSpan().SequenceEqual(own.Sign) && sender.DhKey.AsSpan().SequenceEqual(own.Dh) && (sender.Name != own.Name || sender.Kind != own.Kind))
-            {
-                household.SaveMember(sender with { Name = own.Name, Kind = own.Kind });
-            }
+            household.SaveMember(new HouseholdMember(member.Id, member.Name, member.Kind, member.Sign, member.Dh, entry.Added ?? nowMs, null, null));
+            added.Add(entry.Id);
+        }
+        if (fromId is not null && list.FirstOrDefault(entry => entry.Id == fromId && entry.RemovedEpoch is null) is { } own && Wire.Member(own) is { } ownInfo
+            && household.Member(fromId) is { } sender && sender.SignKey.AsSpan().SequenceEqual(ownInfo.Sign) && sender.DhKey.AsSpan().SequenceEqual(ownInfo.Dh)
+            && (sender.Name != ownInfo.Name || sender.Kind != ownInfo.Kind))
+        {
+            household.SaveMember(sender with { Name = ownInfo.Name, Kind = ownInfo.Kind });   // for the Household page only
         }
         if (added.Count > 0) store.SnapshotWanted = true;
-        return new Learned(removed, added);
+        return new Learned(Refresh(nowMs), added);
     }
 
-    private void Set(string id, MemberEpochs epochs)
+    /// <summary>Marks each member as left, or as back, as it is shown now.</summary>
+    /// <returns>The PCs shown as in until now that are shown as left from now on.</returns>
+    private List<string> Refresh(long nowMs)
     {
-        var all = new Dictionary<string, MemberEpochs>(store.MemberEpochs, StringComparer.Ordinal) { [id] = epochs };
-        var rowless = all.Where(pair => !pair.Value.Current && household.Member(pair.Key) is null).ToList();
-        foreach (var (earliest, _) in rowless.OrderBy(pair => pair.Value.Removed).ThenBy(pair => pair.Value.Added).Take(Math.Max(0, rowless.Count - MaxRemoved)))
+        if (store.HouseholdId is null) return [];
+        var view = View();
+        List<string> left = [];
+        foreach (var row in view.Rows)
         {
-            all.Remove(earliest);
+            var shownIn = view.MaySync(row.DeviceId);
+            if (shownIn && row.LeftMs is not null)
+            {
+                household.SaveMember(row with { LeftMs = null });
+                store.SnapshotWanted = true;
+            }
+            else if (!shownIn && row.LeftMs is null)
+            {
+                household.MarkLeft(row.DeviceId, view.Server?.GetValueOrDefault(row.DeviceId)?.RemovedMs ?? nowMs);
+                left.Add(row.DeviceId);
+            }
         }
-        store.MemberEpochs = all;
+        return left;
+    }
+
+    private IReadOnlyDictionary<string, int> Claims(string claimant) =>
+        store.RemovalClaims.TryGetValue(claimant, out var claims) ? claims : new Dictionary<string, int>();
+
+    /// <summary>Keeps <paramref name="claimant"/>'s removals in place of those it had, at most <see cref="MaxRemoved"/>, the
+    /// latest; those of PCs whose rows went are dropped.</summary>
+    private void SetClaims(string claimant, IReadOnlyDictionary<string, int> removals)
+    {
+        var all = store.RemovalClaims
+            .Where(pair => pair.Key != claimant && (pair.Key == Own || household.Member(pair.Key) is not null))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        if (removals.Count > 0)
+        {
+            all[claimant] = removals.OrderByDescending(pair => pair.Value).Take(MaxRemoved).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        }
+        store.RemovalClaims = all;
+    }
+
+    /// <summary>This PC's own adds the server hasn't taken yet, by device ID.</summary>
+    private HashSet<string> AddsWaiting() => store.HouseholdId is not { } householdId
+        ? []
+        : [.. store.Pending.Where(op => op.Kind == PendingOp.Add && op.Household == householdId).Select(op => Wire.PublicKey(op.Sign)).OfType<byte[]>()
+            .Select(HouseholdCrypto.DeviceIdOf)];
+
+    private Snapshot View() => new(
+        store.HouseholdId is null ? [] : household.Members(), store.ServerMembers, store.RemovalClaims, AddsWaiting());
+
+    /// <summary>What decides membership, read once for one question.</summary>
+    private sealed class Snapshot(
+        IReadOnlyList<HouseholdMember> rows, IReadOnlyDictionary<string, ServerEntry>? server,
+        IReadOnlyDictionary<string, Dictionary<string, int>> claims, HashSet<string> adds)
+    {
+        public IReadOnlyList<HouseholdMember> Rows => rows;
+
+        public IReadOnlyDictionary<string, ServerEntry>? Server => server;
+
+        public IReadOnlyDictionary<string, Dictionary<string, int>> Claims => claims;
+
+        public HashSet<string> Adds => adds;
+
+        public HouseholdMember? Row(string id) => rows.FirstOrDefault(row => row.DeviceId == id);
+
+        public bool ServerCurrent(string id) => adds.Contains(id) || server?.GetValueOrDefault(id) is { Current: true };
+
+        /// <summary>Current here: introduced, and current by the server's list; before any list, not shown as removed.</summary>
+        public bool IsCurrent(string id) => Row(id) is not null && (server is null ? !ShownRemoved(id) : ServerCurrent(id));
+
+        public bool MaySync(string id) => IsCurrent(id) && !ShownRemoved(id);
+
+        public bool ShownRemoved(string id) => RemovedAt(id) is not null;
+
+        /// <summary>The latest epoch a removal of the PC that counts was made at: one by this PC, or in the list of a PC current
+        /// here, made no earlier than the server's latest add of it. Null when there is none.</summary>
+        public int? RemovedAt(string id)
+        {
+            int? at = null;
+            foreach (var (claimant, removals) in claims)
+            {
+                if (claimant == id || !removals.TryGetValue(id, out var epoch)) continue;
+                if (server?.GetValueOrDefault(id) is { } entry && epoch < entry.Added) continue;   // an older removal: added again since
+                if (!Counts(claimant)) continue;
+                at = Math.Max(at ?? epoch, epoch);
+            }
+            return at;
+        }
+
+        /// <summary>This PC's own removals count; another PC's while it is introduced and current by the server's list, or before
+        /// any list while this PC hasn't removed it.</summary>
+        private bool Counts(string claimant) =>
+            claimant == Own
+            || (Row(claimant) is not null && (server is null ? claims.GetValueOrDefault(Own)?.ContainsKey(claimant) != true : ServerCurrent(claimant)));
     }
 }

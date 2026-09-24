@@ -67,6 +67,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>A PC found on the network and not seen again for this long is forgotten.</summary>
     internal static readonly TimeSpan FoundFor = TimeSpan.FromMinutes(10);
 
+    /// <summary>A member list older than this is read again before a sync on the network (plan 0.10).</summary>
+    internal static readonly TimeSpan MembersFreshFor = TimeSpan.FromMinutes(15);
+
+    /// <summary>How long a sync that came in waits for the member list to be read again before it goes on without.</summary>
+    private static readonly TimeSpan FreshenWait = TimeSpan.FromSeconds(5);
+
     internal const string Busy = "The household is busy. Try again in a moment.";
     internal const string NotInOne = "This PC isn't in a household.";
     internal const string NotAtTheScreen = "Only someone at this PC's screen can change its household.";
@@ -454,10 +460,10 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         var (channel, hello) = (call.Channel, call.Hello);
         if (call.Message.Purpose == Hello.Sync)
         {
+            await FreshenMembersAsync(stopping.Token).ConfigureAwait(false);
             if (_store.HouseholdId is { } householdId)
             {
-                var synced = await _lanSync.RespondAsync(channel, hello, Identity(), stopping.Token, () => _store.HouseholdId == householdId).ConfigureAwait(false);
-                if (synced.Removed is { Count: > 0 }) _relaySync.StartRotation(householdId);   // a member went: a new key, as this PC stays
+                await _lanSync.RespondAsync(channel, hello, Identity(), stopping.Token, () => _store.HouseholdId == householdId).ConfigureAwait(false);
             }
             return;
         }
@@ -494,8 +500,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     }
 
     /// <summary>The welcome for a PC being added, making the household first when this PC is in none (households design
-    /// §1: it is made when a PC adds its first other PC). A PC removed at this PC's epoch can come back only at a newer one
-    /// (plan 0.9), so the new key its removal started goes to the server first; null while it can't.</summary>
+    /// §1: it is made when a PC adds its first other PC). No old key goes to a newcomer (plan 0.10): a new key waiting for the
+    /// server goes first; null while it can't.</summary>
     private async Task<Welcome?> WelcomeForAsync(MemberInfo joiner)
     {
         using var entered = await EnterGateAsync(_stopping.Token, PairingGateWait).ConfigureAwait(false);
@@ -507,18 +513,14 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             KeepOnlyRemovalsOfOthers(householdId);
             _store.EnterHousehold(householdId, 1, HouseholdCrypto.NewKey());
             SaveSelf(now);
-            _members.Self(_keys.DeviceId, 1);
             BuildRows(now);
             _store.PostedThrough = _household.LatestChange(_keys.DeviceId);   // the year goes as the first snapshot
             _store.AddPending(new PendingOp(PendingOp.Create, householdId));
             _log.LogInformation("Made a household to add {Name} to", joiner.Name);
         }
-        else if (_members.EpochsOf(joiner.Id)?.Removed >= _store.Epoch)
+        else if (!await RotationFirstAsync(_store.HouseholdId, joiner.Id, _stopping.Token).ConfigureAwait(false))
         {
-            using var limit = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-            limit.CancelAfter(GateWait);
-            await _relaySync.FinishRotationAsync(_keys, limit.Token).ConfigureAwait(false);
-            if (_members.EpochsOf(joiner.Id)?.Removed >= _store.Epoch) return null;
+            return null;
         }
         var members = _household.Members()
             .Where(member => _members.Current(member.DeviceId) is not null && member.DeviceId != joiner.Id)
@@ -528,8 +530,23 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         return new Welcome(_store.HouseholdId!, _store.Epoch, _store.CurrentKey!, members, [.. _members.Entries().Where(entry => entry.Id != joiner.Id)]);
     }
 
-    /// <summary>Records a PC this one is adding, in one step before it is told it is in (plan 0.9): the new member here, added
-    /// at this PC's epoch, and the add queued for the server. The pairing's cancel stops it only while it waits for the gate:
+    /// <summary>
+    /// No old key to a newcomer (plan 0.10): a new key waiting for the server goes to it before a welcome or an approval
+    /// hands out the household's key, and a PC the server removed at this PC's epoch comes back only at a newer one, so a new
+    /// key is made for it first.
+    /// </summary>
+    /// <returns>False while the new key can't go, as with the server out of reach.</returns>
+    private async Task<bool> RotationFirstAsync(string householdId, string device, CancellationToken cancel)
+    {
+        if (_members.ServerEntryOf(device) is { Removed: { } removed } && removed >= _store.Epoch) _relaySync.StartRotation(householdId);
+        if (!_relaySync.RotationPending) return true;
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        limit.CancelAfter(GateWait);
+        return await _relaySync.FinishRotationAsync(_keys, limit.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>Records a PC this one is adding, in one step before it is told it is in (plan 0.10): the add queued for the
+    /// server, and the new member's keys introduced here. The pairing's cancel stops it only while it waits for the gate:
     /// before the step, nothing is left behind.</summary>
     /// <returns>What went wrong when it couldn't be added, as when this PC's household is no longer the welcome's; else null.</returns>
     private async Task<string?> RecordAsync(Welcome welcome, MemberInfo joiner, byte[] proof, CancellationToken cancel)
@@ -540,9 +557,9 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             {
                 return $"This PC's household changed while {joiner.Name} was joining, so it wasn't added. Try again.";
             }
-            if (!_members.Add(joiner, _store.Epoch, _clock.GetUtcNow().ToUnixTimeMilliseconds())) return PairingSession.NotYet(joiner.Name);
             _store.AddPending(new PendingOp(PendingOp.Add, welcome.HouseholdId, Sign: Wire.Encode(joiner.Sign), Dh: Wire.Encode(joiner.Dh),
                 Proof: Wire.Encode(proof)));
+            _members.Introduce(joiner, _clock.GetUtcNow().ToUnixTimeMilliseconds());
             Announce();
         }
         Kick();
@@ -569,7 +586,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                 _log.LogInformation("This PC's household changed while it was joining {Name}'s, so it didn't join", adder.Name);
                 return false;
             }
-            EnterLocked(welcome.HouseholdId, welcome.Epoch, welcome.Key, welcome.AllEntries, adder.Id);
+            EnterLocked(welcome.HouseholdId, welcome.Epoch, welcome.Key, welcome.AllEntries, adder.Id, adder);
             _log.LogInformation("Joined {Name}'s household", adder.Name);
         }
         Kick();
@@ -577,10 +594,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     }
 
     /// <summary>Takes this PC into a household with its key, inside the gate, leaving any other first (see
-    /// <see cref="EnterAsync"/>), added at <paramref name="epoch"/>. The members in <paramref name="entries"/>, with their
-    /// epochs, are learned from then on (plan 0.9). In a household new to it, this PC's year goes as its first snapshot.</summary>
-    /// <param name="fromId">The PC whose list it is, which gives its own name and kind.</param>
-    private void EnterLocked(string householdId, int epoch, byte[] key, IReadOnlyList<WireMember> entries, string? fromId)
+    /// <see cref="EnterAsync"/>), at <paramref name="epoch"/>. The PC that let it in is introduced by the pairing or the
+    /// approval itself, and the members in <paramref name="entries"/> by its list (plan 0.10), until this PC reads the
+    /// server's. In a household new to it, this PC's year goes as its first snapshot.</summary>
+    /// <param name="fromId">The PC whose list it is, which gives its own name and kind; null for a recovery's.</param>
+    /// <param name="introduce">The PC that let this one in, with the keys the pairing or approval checked.</param>
+    private void EnterLocked(string householdId, int epoch, byte[] key, IReadOnlyList<WireMember> entries, string? fromId, MemberInfo? introduce)
     {
         var now = _clock.GetUtcNow();
         var nowMs = now.ToUnixTimeMilliseconds();
@@ -596,10 +615,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             _store.AddKey(epoch, key);
             _store.RelayConfirmed = false;                                     // added again, maybe after a removal it hadn't heard of
+            _store.ServerMembers = null;                                       // its list is read again
+            _store.MembersCheckedAt = null;
         }
         _store.AskedToJoin = null;
         SaveSelf(now);
-        _members.Self(_keys.DeviceId, epoch);
+        if (introduce is not null) _members.Introduce(introduce, nowMs);
         _members.Learn(entries, fromId, _keys.DeviceId, nowMs);
         BuildRows(now);
         if (entering) _store.PostedThrough = _household.LatestChange(_keys.DeviceId);
@@ -616,19 +637,24 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             return Reply(request.Id, false, "That PC isn't in this household.");
         }
-        if (_members.Current(member.DeviceId) is null)
+        var householdId = _store.HouseholdId;
+        var removing = _store.Pending.Any(op => op.Kind == PendingOp.Remove && op.Household == householdId && op.Device == member.DeviceId);
+        if (removing || (!_members.ServerCurrent(member.DeviceId) && _members.Current(member.DeviceId) is null))
         {
-            _members.ForgetRows(member.DeviceId);                              // its epochs stay
+            _members.ForgetRows(member.DeviceId);                              // what the server and the lists say of it stays
             return Reply(request.Id, true, $"{member.Name}'s rows were removed.");
         }
 
-        // Households design §6, plan 0.8: the removal goes to the server first, then a new key under the next epoch, sealed to
-        // the members the server lists as current once the removal is in, this PC among them, so the server moves to the
-        // epoch even when no other PC stays. This PC takes the new key on once the server has taken it.
-        var householdId = _store.HouseholdId;
+        // Households design §6, plan 0.10: the removal goes to the server before any new key, even for a PC already shown as
+        // left that the server still lists; then a new key under the next epoch, sealed to the members the server lists as
+        // current once the removal is in, this PC among them, so the server moves to the epoch even when no other PC stays.
+        // This PC takes the new key on once the server has taken it.
         _members.Remove(member.DeviceId, _clock.GetUtcNow().ToUnixTimeMilliseconds());
-        _store.AddPending(new PendingOp(PendingOp.Remove, householdId, Device: member.DeviceId));
-        _relaySync.StartRotation(householdId);
+        var pending = _store.Pending.ToList();
+        var keysAt = pending.FindIndex(op => op.Kind == PendingOp.Keys && op.Household == householdId);
+        pending.Insert(keysAt < 0 ? pending.Count : keysAt, new PendingOp(PendingOp.Remove, householdId, Device: member.DeviceId));
+        _store.Pending = pending;
+        _relaySync.StartRotation(householdId, forRemoval: true);
         Announce();
         Kick();
         _log.LogInformation("Removed {Name} from the household; a new key waits to go to the server", member.Name);
@@ -638,7 +664,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>
     /// Deletes the rows this PC keeps from PCs no longer in its household (plan 0.8, "Old rows"): the one named, which must
     /// have left or been removed, or with none named every such PC's, which after leaving is all of them, this PC's own
-    /// too. A removed PC's epochs stay, so it is never taken back on another PC's word.
+    /// too. What the server and the lists' removals say of a PC stays, so it is never taken back on another PC's word.
     /// </summary>
     private async Task<PipeMessage> RemoveOldRowsAsync(RemoveOldRowsRequest request, CancellationToken cancel)
     {
@@ -647,7 +673,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         if (request.DeviceId is { } device)
         {
             if (device == _keys.DeviceId) return Reply(request.Id, false, "This PC's own rows stay while it is in the household.");
-            if (_store.HouseholdId is not null && _members.Current(device) is { } current)
+            if (_store.HouseholdId is not null && _members.MaySync(device) && _household.Member(device) is { } current)
             {
                 return Reply(request.Id, false, $"{current.Name} is still in the household. Remove it first.");
             }
@@ -658,7 +684,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
         var stay = _store.HouseholdId is null
             ? []
-            : _household.Members().Where(member => _members.Current(member.DeviceId) is not null).Select(member => member.DeviceId).Append(_keys.DeviceId)
+            : _household.Members().Where(member => _members.MaySync(member.DeviceId)).Select(member => member.DeviceId).Append(_keys.DeviceId)
                 .ToHashSet(StringComparer.Ordinal);
         var old = withRows.Union(_household.Members().Select(member => member.DeviceId)).Where(id => !stay.Contains(id)).ToList();
         foreach (var id in old) _members.ForgetRows(id);
@@ -733,14 +759,16 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             var members = found
                 .Where(service => service.Instance != _store.InstanceId && service.Address is not null && InThisHousehold(service, key))
                 .DistinctBy(service => service.Instance)
-                .Take(MaxFound);
+                .Take(MaxFound)
+                .ToList();
+            if (members.Count == 0) return;
+            if (Took(await _relaySync.FreshenMembersAsync(_keys, MembersFreshFor, budget.Token).ConfigureAwait(false))) return;   // plan 0.10: the list first
             foreach (var member in members)
             {
                 try
                 {
                     await using var channel = await LanConnector.ConnectAsync(member.Address!, member.Port, ConnectTimeout, budget.Token).ConfigureAwait(false);
                     var outcome = await _lanSync.SyncAsync(channel, Identity(), budget.Token).ConfigureAwait(false);
-                    if (outcome.Removed is { Count: > 0 } && _store.HouseholdId is { } householdId) _relaySync.StartRotation(householdId);
                     _log.LogDebug("Synced with {Instance} on the network: {Outcome}", member.Instance, outcome);
                 }
                 catch (IOException error)
@@ -753,6 +781,45 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             _log.LogDebug("Syncing on the network took its whole time this turn; the rest goes next turn");
         }
+    }
+
+    /// <summary>Before a sync that came in, reads the member list again when it is older than <see cref="MembersFreshFor"/>
+    /// (plan 0.10): inside the gate, and within <see cref="FreshenWait"/>, after which the sync goes on with the list as it is.</summary>
+    private async Task FreshenMembersAsync(CancellationToken cancel)
+    {
+        if (_store.HouseholdId is null || _store.MembersCheckedAt is { } checkedAt
+            && _clock.GetUtcNow().ToUnixTimeMilliseconds() - checkedAt < (long)MembersFreshFor.TotalMilliseconds)
+        {
+            return;
+        }
+        try
+        {
+            using (await EnterGateAsync(cancel, FreshenWait).ConfigureAwait(false))
+            {
+                using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+                limit.CancelAfter(FreshenWait);
+                Took(await _relaySync.FreshenMembersAsync(_keys, MembersFreshFor, limit.Token).ConfigureAwait(false));
+            }
+        }
+        catch (GateTimeout)
+        {
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            Publish();
+        }
+    }
+
+    /// <summary>Tells the App what reading the member list found.</summary>
+    /// <returns>True when it found this PC removed.</returns>
+    private bool Took(RelayRun run)
+    {
+        if (run.Removed) CancelPairingUnderWay();
+        foreach (var notice in run.Notices) Info(notice);
+        return run.Removed;
     }
 
     private void BuildRowsIfDue()

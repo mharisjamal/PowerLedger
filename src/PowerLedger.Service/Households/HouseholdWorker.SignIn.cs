@@ -266,10 +266,10 @@ internal sealed partial class HouseholdWorker
         if (!recovered.Ok || recovered.Value!.Household != householdId) return Reply(id, false, $"Couldn't recover your household: {recovered.Problem}.");
         var epoch = recovered.Value.Epoch;
         CancelPairingUnderWay();                                               // plan 0.9: joining by sign-in stops a pairing under way
-        EnterLocked(householdId, got.Value!.Epoch, sealedList.Key, sealedList.Members, got.Value.Holder);
+        EnterLocked(householdId, got.Value!.Epoch, sealedList.Key, sealedList.Members, null, null);   // the code vouches for the whole list
         _members.RemoveAllBut(_keys.DeviceId, epoch, _clock.GetUtcNow().ToUnixTimeMilliseconds());   // as the server removed them
         _store.RelayConfirmed = true;
-        _relaySync.StartRotation(householdId, atLeast: epoch + 1);
+        _relaySync.StartRotation(householdId, atLeast: epoch + 1, forRemoval: true);
         var next = RecoveryCode.New();
         _store.RecoveryKey = RecoveryCode.Key(RecoveryCode.Normalize(next)!);
         _store.AddPending(new PendingOp(PendingOp.RecoveryEnvelope, householdId, Replace: true));   // after the new key

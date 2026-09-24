@@ -398,15 +398,16 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         await desktop.Worker.RunOnceAsync(CancellationToken.None);
 
         desktop.Worker.Store.Epoch.ShouldBe(2);
-        Members(desktop).EpochsOf(laptop.Worker.DeviceId).ShouldBe(new MemberEpochs(2, 1));
-        Members(laptop).EpochsOf(laptop.Worker.DeviceId).ShouldBe(new MemberEpochs(2));
+        Members(desktop).Current(laptop.Worker.DeviceId).ShouldNotBeNull();
+        Members(desktop).ServerEntryOf(laptop.Worker.DeviceId).ShouldBe(new ServerEntry(2));
+        laptop.Worker.Store.Epoch.ShouldBe(2);
         laptop.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);
         _relay.Members(household)[laptop.Worker.DeviceId].ShouldSatisfyAllConditions(
             member => member.Removed.ShouldBeNull(), member => member.AddedEpoch.ShouldBe(2));
     }
 
     [Fact]
-    public async Task The_welcome_carries_every_member_with_its_epochs_the_removed_ones_by_their_id_alone()
+    public async Task The_welcome_introduces_every_member_with_its_keys_and_carries_the_removed_ones_by_their_id_alone()
     {
         var (desktop, laptop, study) = await Household();
         await desktop.Send<HouseholdReply>(new RemovePcRequest(1, study.Worker.DeviceId));
@@ -416,13 +417,13 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         await WorkerPc.Pair(desktop, den);
 
         var members = Members(den);
-        members.EpochsOf(den.Worker.DeviceId).ShouldBe(new MemberEpochs(2));
-        members.EpochsOf(desktop.Worker.DeviceId).ShouldBe(new MemberEpochs(1));
-        members.EpochsOf(laptop.Worker.DeviceId).ShouldBe(new MemberEpochs(1));
-        members.EpochsOf(study.Worker.DeviceId).ShouldBe(new MemberEpochs(1, 1));  // never to be taken back on a stale list
-        den.Household.Member(study.Worker.DeviceId).ShouldBeNull();
+        members.Current(desktop.Worker.DeviceId).ShouldNotBeNull();                 // by the pairing itself
+        members.Current(laptop.Worker.DeviceId).ShouldNotBeNull();                  // by the desktop's list
         den.Household.Member(laptop.Worker.DeviceId).ShouldNotBeNull().DhKey.ShouldBe(laptop.Household.Member(laptop.Worker.DeviceId)!.DhKey);
-        Members(desktop).EpochsOf(den.Worker.DeviceId).ShouldBe(new MemberEpochs(2));
+        den.Household.Member(study.Worker.DeviceId).ShouldBeNull();
+        members.ShownRemoved(study.Worker.DeviceId).ShouldBeTrue();                 // never synced with on a stale list's word
+        den.Worker.Store.Epoch.ShouldBe(2);
+        Members(desktop).Current(den.Worker.DeviceId).ShouldNotBeNull();            // its add, waiting for the server
     }
 
     [Fact]
@@ -470,7 +471,10 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     {
         var (desktop, laptop, _) = await Household();
         desktop.Household.Upsert([Row(laptop.Worker.DeviceId, 0, 5, changed: 1)]);
-        Members(desktop).Remove(laptop.Worker.DeviceId, 1);
+        await laptop.Send<HouseholdReply>(new LeaveHouseholdRequest(9));
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);                   // its leaving reaches the server
+        _clock.Advance(RelaySync.MembersEvery);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
 
         (await desktop.Send<HouseholdReply>(new RemovePcRequest(1, laptop.Worker.DeviceId))).ShouldBe(
             new HouseholdReply(1, true, "Laptop-2's rows were removed."));
@@ -479,8 +483,30 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         desktop.Household.Member(laptop.Worker.DeviceId).ShouldBeNull();
         desktop.Household.Row(laptop.Worker.DeviceId, Hour(0)).ShouldBeNull();
-        Members(desktop).EpochsOf(laptop.Worker.DeviceId).ShouldBe(new MemberEpochs(1, 1));   // never taken back on another's word
-        desktop.Worker.Store.Epoch.ShouldBe(1);
+        Members(desktop).ServerEntryOf(laptop.Worker.DeviceId).ShouldNotBeNull().Current.ShouldBeFalse();   // never taken back on another's word
+        desktop.Worker.Store.Pending.ShouldNotContain(op => op.Kind == PendingOp.Remove);
+    }
+
+    [Fact]
+    public async Task A_pc_shown_as_left_that_the_server_still_lists_is_taken_out_there_when_its_user_removes_it()
+    {
+        var (desktop, laptop, study) = await Household();
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                  // the members read
+        new MemberBook(desktop.Worker.Store, desktop.Household).Learn(
+            [new WireMember(laptop.Worker.DeviceId, null, null, AddedEpoch: 1, RemovedEpoch: 1)], study.Worker.DeviceId, desktop.Worker.DeviceId,
+            Now.ToUnixTimeMilliseconds());                                          // the study PC's list says it was removed; the server doesn't
+        desktop.Worker.Store.Pending = [new PendingOp(PendingOp.Keys, desktop.Worker.Store.HouseholdId!, Epoch: 2)];   // a new key already waits
+        desktop.Worker.Store.RotationKey = (2, HouseholdCrypto.NewKey());
+
+        (await desktop.Send<HouseholdReply>(new RemovePcRequest(1, laptop.Worker.DeviceId))).ShouldBe(
+            new HouseholdReply(1, true, "Laptop-2 was removed from the household."));
+
+        desktop.Worker.Store.Pending.Select(op => op.Kind).ShouldBe([PendingOp.Remove, PendingOp.Keys]);   // the removal goes first
+        desktop.Worker.Store.Pending[1].Removal.ShouldBe(true);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        var household = desktop.Worker.Store.HouseholdId!;
+        _relay.Members(household)[laptop.Worker.DeviceId].Removed.ShouldNotBeNull();
+        _relay.Sealed(household, 2).ShouldBe([desktop.Worker.DeviceId, study.Worker.DeviceId], ignoreOrder: true);
     }
 
     [Fact]
@@ -498,7 +524,7 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
         desktop.Household.Row(laptop.Worker.DeviceId, Hour(0)).ShouldBeNull();
         desktop.Household.Member(laptop.Worker.DeviceId).ShouldBeNull();
         desktop.Board.Household!.Members.ShouldNotContain(member => member.DeviceId == laptop.Worker.DeviceId);
-        Members(desktop).EpochsOf(laptop.Worker.DeviceId).ShouldNotBeNull().Current.ShouldBeFalse();   // never added back on another PC's word
+        Members(desktop).ShownRemoved(laptop.Worker.DeviceId).ShouldBeTrue();      // never shown as in again on another PC's word
         desktop.Household.Row(study.Worker.DeviceId, Hour(0)).ShouldNotBeNull();     // a current member's stay
     }
 
@@ -626,6 +652,28 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
 
         desktop.Household.Row(laptop.Worker.DeviceId, Hour(3)).ShouldNotBeNull().EnergyWh.ShouldBe(9);
         desktop.Board.Household!.Problem.ShouldNotBeNull().ShouldStartWith("Couldn't reach the server");
+    }
+
+    [Fact]
+    public async Task A_sync_on_the_network_reads_a_member_list_older_than_15_minutes_first_so_a_pc_the_server_removed_is_refused()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        await WorkerPc.Pair(desktop, laptop);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);                  // the add reaches the server, and the members are read
+        var household = desktop.Worker.Store.HouseholdId!;
+        _relay.Remove(household, laptop.Worker.DeviceId);                          // taken out by another member; neither has heard
+        _clock.Advance(HouseholdWorker.MembersFreshFor);
+        desktop.Household.Upsert([Row(desktop.Worker.DeviceId, 3, 9, changed: _clock.GetUtcNow().ToUnixTimeMilliseconds())]);
+        _relay.Intercept = (request, _) => request.Headers.TryGetValues("X-PL-Device", out var from) && from.Single() == laptop.Worker.DeviceId
+            ? FakeRelay.Error(503, "The server is busy; try again later.")        // the laptop can't reach the server
+            : null;
+
+        await laptop.Worker.RunOnceAsync(CancellationToken.None);                   // so it tries the desktop on the network
+
+        laptop.Household.Row(desktop.Worker.DeviceId, Hour(3)).ShouldBeNull();
+        desktop.Household.Member(laptop.Worker.DeviceId).ShouldNotBeNull().LeftMs.ShouldNotBeNull();
+        desktop.Worker.Store.MembersCheckedAt.ShouldBe(_clock.GetUtcNow().ToUnixTimeMilliseconds());
     }
 
     public static TheoryData<PipeRequest> Changes() =>

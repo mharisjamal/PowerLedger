@@ -43,7 +43,8 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string SnapshotAtKey = "household.snapshot-at";
     internal const string SnapshotWantedKey = "household.snapshot-wanted";
     internal const string SnapshotFromKey = "household.snapshot-from";
-    internal const string MemberEpochsKey = "household.member-epochs";
+    internal const string ServerMembersKey = "household.server-members";
+    internal const string RemovalClaimsKey = "household.removal-claims";
     internal const string RotationKeyKey = "household.rotation-key";
     internal const string RotationPostKey = "household.rotation-post";
     internal const string RecoveryCodeKey = "household.recovery-code";
@@ -58,7 +59,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     private static readonly string[] OfTheHousehold =
         [
             IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, SnapshotEpochKey, SnapshotAtKey, SnapshotWantedKey,
-            SnapshotFromKey, ConfirmedKey, MembersCheckedKey, ProblemKey, WaitingKey, MemberEpochsKey, RotationKeyKey, RotationPostKey, LaggingKey,
+            SnapshotFromKey, ConfirmedKey, MembersCheckedKey, ProblemKey, WaitingKey, ServerMembersKey, RemovalClaimsKey, RotationKeyKey, RotationPostKey, LaggingKey,
             ApprovingKey,
         ];
 
@@ -285,12 +286,21 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         set => WriteText(MembersCheckedKey, value?.ToString(CultureInfo.InvariantCulture));
     }
 
-    /// <summary>The household's members' epochs as this PC knows them, by device ID (plan 0.9), the removed ones among them:
-    /// kept when a removed PC's rows go, so none is taken back on the word of a PC that hasn't heard.</summary>
-    public IReadOnlyDictionary<string, MemberEpochs> MemberEpochs
+    /// <summary>The server's member list as this PC last read it, by device ID (plan 0.10), which says who is in and gives the
+    /// epochs; null before this PC has read it for its household.</summary>
+    public IReadOnlyDictionary<string, ServerEntry>? ServerMembers
     {
-        get => HouseholdJson.Read(settings.Get(MemberEpochsKey), HouseholdJson.Default.DictionaryStringMemberEpochs) ?? [];
-        set => WriteText(MemberEpochsKey, value.Count == 0 ? null : HouseholdJson.Write(new Dictionary<string, MemberEpochs>(value), HouseholdJson.Default.DictionaryStringMemberEpochs));
+        get => HouseholdJson.Read(settings.Get(ServerMembersKey), HouseholdJson.Default.DictionaryStringServerEntry);
+        set => WriteText(ServerMembersKey, value is null ? null : HouseholdJson.Write(new Dictionary<string, ServerEntry>(value), HouseholdJson.Default.DictionaryStringServerEntry));
+    }
+
+    /// <summary>The removals in the members' latest lists, by the PC whose list it is, <see cref="MemberBook.Own"/> for this
+    /// PC's own: each removed PC's device ID with the epoch it was removed at (plan 0.10).</summary>
+    public IReadOnlyDictionary<string, Dictionary<string, int>> RemovalClaims
+    {
+        get => HouseholdJson.Read(settings.Get(RemovalClaimsKey), HouseholdJson.Default.DictionaryStringDictionaryStringInt32) ?? [];
+        set => WriteText(RemovalClaimsKey, value.Count == 0 ? null
+            : HouseholdJson.Write(new Dictionary<string, Dictionary<string, int>>(value), HouseholdJson.Default.DictionaryStringDictionaryStringInt32));
     }
 
     /// <summary>Current members whose batches still come under an older epoch than this PC's, by device ID: since when, unix

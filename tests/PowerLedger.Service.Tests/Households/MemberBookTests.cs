@@ -1,13 +1,14 @@
 using PowerLedger.Contracts;
 using PowerLedger.Core.Households;
 using PowerLedger.Service.Households;
+using PowerLedger.Service.Households.Relay;
 using PowerLedger.Storage;
 using Shouldly;
 
 namespace PowerLedger.Service.Tests;
 
-/// <summary>Membership ordered by epochs, not clocks (plan 0.9): adding, removing, adding back, what a list teaches, what the
-/// server's list may change, and who may hand over a key.</summary>
+/// <summary>Membership as plan 0.10 has it: the server's list says who is in, introductions say whose keys to trust, lists'
+/// removals only stop sync on the network and show a PC as left, and the server's epochs say who may hand over a key.</summary>
 public sealed class MemberBookTests : IDisposable
 {
     private const string Household = "5e1f0c2a9b8d4e3f5e1f0c2a9b8d4e3f";
@@ -27,156 +28,125 @@ public sealed class MemberBookTests : IDisposable
         _household = new HouseholdRepository(_database.Db);
         _members = new MemberBook(_store, _household);
         _store.EnterHousehold(Household, 1, HouseholdCrypto.NewKey());
-        _members.Add(Info(_other, "Laptop-2"), 1, Now);
+        _household.SaveMember(new HouseholdMember(_self.DeviceId, "Desktop-7", ChassisKind.Desktop, _self.SignPublic, _self.DhPublic, Now - 1, null, null));
+        _members.Introduce(Info(_other, "Laptop-2"), Now);
     }
 
     [Fact]
-    public void A_removed_pc_comes_back_only_when_added_at_an_epoch_above_its_removal()
+    public void A_pc_is_current_only_when_the_servers_list_has_it_and_an_introduction_brought_its_keys()
     {
-        _members.Add(Info(_study), 1, Now).ShouldBeTrue();
-        _members.Remove(_study.DeviceId, Now + 1).ShouldBeTrue();
+        using var planted = DeviceKeys.Create();
 
-        _members.EpochsOf(_study.DeviceId).ShouldBe(new MemberEpochs(1, 1));
-        _members.Current(_study.DeviceId).ShouldBeNull();
-        _household.Member(_study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBe(Now + 1);
-        _members.Add(Info(_study), 1, Now + 2).ShouldBeFalse();                    // not at the epoch it was removed at
-        _members.Current(_study.DeviceId).ShouldBeNull();
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(planted, 1)], _self.DeviceId, Now);
 
-        _store.AddKey(2, HouseholdCrypto.NewKey());                                // the new key without it
-        _members.Add(Info(_study), 2, Now + 3).ShouldBeTrue();
+        _members.Current(_other.DeviceId).ShouldNotBeNull();
+        _members.Current(planted.DeviceId).ShouldBeNull();                          // the server's word alone brings in nobody
+        _household.Member(planted.DeviceId).ShouldBeNull();
+        _members.Introduce(Info(_study), Now);
+        _members.Current(_study.DeviceId).ShouldBeNull();                           // introduced, but the server doesn't have it
 
-        _members.EpochsOf(_study.DeviceId).ShouldBe(new MemberEpochs(2, 1));
-        _members.Current(_study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBeNull();
+        _store.AddPending(new PendingOp(PendingOp.Add, Household, Sign: Wire.Encode(_study.SignPublic), Dh: Wire.Encode(_study.DhPublic)));
+
+        _members.Current(_study.DeviceId).ShouldNotBeNull();                        // this PC's own add, waiting for the server
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1, removedAt: 1, at: Now + 1)], _self.DeviceId, Now + 2);
+        _members.Current(_other.DeviceId).ShouldBeNull();
+        _household.Member(_other.DeviceId).ShouldNotBeNull().LeftMs.ShouldBe(Now + 1);   // as the server removed it
     }
 
     [Fact]
-    public void A_list_that_hasnt_heard_of_a_removal_changes_nothing_however_far_ahead_its_clock()
+    public void Before_this_pc_reads_the_servers_list_the_introductions_alone_decide()
     {
-        _members.Add(Info(_study), 1, Now);
-        _members.Remove(_study.DeviceId, Now);
-        var stale = Wire.Member(Info(_study)) with { Added = Now + 3 * 60_000, AddedEpoch = 1 };
+        _members.Current(_other.DeviceId).ShouldNotBeNull();
 
-        var learned = _members.Learn([stale], _other.DeviceId, _self.DeviceId, Now);
+        _members.Learn([Removal(_other, removedAt: 1)], _study.DeviceId, _self.DeviceId, Now);   // from a PC not introduced here
+        _members.Current(_other.DeviceId).ShouldNotBeNull();
 
-        learned.Added.ShouldBeEmpty();
-        _members.Current(_study.DeviceId).ShouldBeNull();
-        _members.EpochsOf(_study.DeviceId).ShouldBe(new MemberEpochs(1, 1));
+        _members.Remove(_other.DeviceId, Now + 2).ShouldBeTrue();
+        _members.Current(_other.DeviceId).ShouldBeNull();
+        _household.Member(_other.DeviceId).ShouldNotBeNull().LeftMs.ShouldBe(Now + 2);
     }
 
     [Fact]
-    public void A_removal_in_a_list_counts_by_its_epoch_however_far_behind_its_clock()
+    public void A_lists_entry_about_its_own_pc_counts_for_nothing_and_no_list_says_anything_of_this_pc()
     {
-        _members.Add(Info(_study), 1, Now);
-        var removal = new WireMember(_study.DeviceId, null, null, Removed: Now - 3 * 60_000, AddedEpoch: 1, RemovedEpoch: 1);
-
-        var learned = _members.Learn([removal], _other.DeviceId, _self.DeviceId, Now);
-
-        learned.Removed.ShouldBe([_study.DeviceId]);
-        _members.Current(_study.DeviceId).ShouldBeNull();
-        _household.Member(_study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBe(Now - 3 * 60_000);
-    }
-
-    [Fact]
-    public void An_epoch_above_this_pcs_own_plus_one_is_passed_over_so_no_list_makes_a_pc_current_for_good()
-    {
-        _members.Add(Info(_study), 1, Now);
-        _members.Remove(_study.DeviceId, Now);
-        using var ghost = DeviceKeys.Create();
-
-        _members.Learn([Wire.Member(Info(_study)) with { AddedEpoch = 1_000_000 }], _other.DeviceId, _self.DeviceId, Now).Added.ShouldBeEmpty();
-        _members.Learn([Wire.Member(Info(ghost)) with { AddedEpoch = 3 }], _other.DeviceId, _self.DeviceId, Now).Added.ShouldBeEmpty();
-
-        _members.EpochsOf(_study.DeviceId).ShouldBe(new MemberEpochs(1, 1));
-        _household.Member(ghost.DeviceId).ShouldBeNull();
-        _members.Learn([Wire.Member(Info(ghost)) with { AddedEpoch = 2 }], _other.DeviceId, _self.DeviceId, Now).Added.ShouldBe([ghost.DeviceId]);
-    }
-
-    [Fact]
-    public void A_list_never_changes_this_pcs_own_entry_nor_a_members_keys_and_its_own_pc_gives_its_name()
-    {
-        _members.Self(_self.DeviceId, 1);
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1)], _self.DeviceId, Now);
         using var impostor = DeviceKeys.Create();
         List<WireMember> list =
         [
-            new(_self.DeviceId, null, null, AddedEpoch: 1, RemovedEpoch: 1),
-            Wire.Member(Info(_other, "Laptop-3")) with { AddedEpoch = 1, Dh = Wire.Encode(impostor.DhPublic) },
+            Removal(_self, removedAt: 5),
+            Wire.Member(Info(_other, "Laptop-3")) with { AddedEpoch = 9, Dh = Wire.Encode(impostor.DhPublic) },
+            Removal(_other, removedAt: 9),
         ];
 
         _members.Learn(list, _other.DeviceId, _self.DeviceId, Now);
 
-        _members.EpochsOf(_self.DeviceId).ShouldBe(new MemberEpochs(1));
+        _members.ShownRemoved(_other.DeviceId).ShouldBeFalse();                     // no removal of itself
+        _members.ShownRemoved(_self.DeviceId).ShouldBeFalse();
         var other = _household.Member(_other.DeviceId).ShouldNotBeNull();
-        other.DhKey.ShouldBe(_other.DhPublic);
-        other.Name.ShouldBe("Laptop-2");                                            // its keys aren't the ones this PC knows it by
-        _members.Learn([Wire.Member(Info(_other, "Laptop-3")) with { AddedEpoch = 1 }], _other.DeviceId, _self.DeviceId, Now);
-        _household.Member(_other.DeviceId).ShouldNotBeNull().Name.ShouldBe("Laptop-3");
+        other.DhKey.ShouldBe(_other.DhPublic);                                     // no keys of its own
+        other.Name.ShouldBe("Laptop-2");
+        _members.Learn([Wire.Member(Info(_other, "Laptop-3"))], _other.DeviceId, _self.DeviceId, Now);
+        _household.Member(_other.DeviceId).ShouldNotBeNull().Name.ShouldBe("Laptop-3");   // its name and kind, with the keys known here
     }
 
     [Fact]
-    public void The_server_removes_a_current_member_at_the_higher_of_its_add_and_this_pcs_epoch_and_never_adds_one()
+    public void A_removal_in_a_current_members_list_stops_sync_and_shows_the_pc_as_left_but_the_server_still_has_it_in()
     {
-        _store.AddKey(2, HouseholdCrypto.NewKey());
-        _store.AddKey(3, HouseholdCrypto.NewKey());                                // this PC at epoch 3
-        _members.Add(Info(_study), 2, Now);
+        _members.Introduce(Info(_study), Now);
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 1)], _self.DeviceId, Now);
 
-        _members.RemovedByServer(_study.DeviceId, Now + 5, serverEpoch: null).ShouldBeTrue();
+        var learned = _members.Learn([Removal(_study, removedAt: 1, at: Now - 3 * 60_000)], _other.DeviceId, _self.DeviceId, Now);
 
-        _members.EpochsOf(_study.DeviceId).ShouldBe(new MemberEpochs(2, 3));
-        _household.Member(_study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBe(Now + 5);
-        _members.RemovedByServer(_study.DeviceId, Now + 6, serverEpoch: 4).ShouldBeFalse();   // removed here already: it stays as it is
-        _members.EpochsOf(_study.DeviceId).ShouldBe(new MemberEpochs(2, 3));
+        learned.Removed.ShouldBe([_study.DeviceId]);
+        _members.MaySync(_study.DeviceId).ShouldBeFalse();
+        _household.Member(_study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBe(Now);
+        _members.Current(_study.DeviceId).ShouldNotBeNull();                        // current for the next key, as the server lists it
+        _members.ServerCurrent(_study.DeviceId).ShouldBeTrue();
     }
 
     [Fact]
-    public void A_removal_the_server_made_before_an_add_known_here_is_an_old_one()
+    public void A_lists_removal_counts_while_its_pc_is_current_until_the_server_adds_the_pc_again_or_the_list_drops_it()
     {
-        _store.AddKey(2, HouseholdCrypto.NewKey());
-        _store.AddKey(3, HouseholdCrypto.NewKey());
-        _members.Add(Info(_study), 3, Now);                                        // added back at 3; the server hasn't heard
+        _members.Introduce(Info(_study), Now);
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 1)], _self.DeviceId, Now);
+        _members.Learn([Removal(_study, removedAt: 1)], _other.DeviceId, _self.DeviceId, Now);
+        _members.ShownRemoved(_study.DeviceId).ShouldBeTrue();
 
-        _members.RemovedByServer(_study.DeviceId, Now, serverEpoch: 2).ShouldBeFalse();
+        _members.TakeServerList([Listed(_self, 2), Listed(_other, 1), Listed(_study, 2)], _self.DeviceId, Now);   // added again at 2
+        _members.ShownRemoved(_study.DeviceId).ShouldBeFalse();
+        _household.Member(_study.DeviceId).ShouldNotBeNull().LeftMs.ShouldBeNull();
 
-        _members.Current(_study.DeviceId).ShouldNotBeNull();
+        _members.Learn([Removal(_study, removedAt: 2)], _other.DeviceId, _self.DeviceId, Now);
+        _members.ShownRemoved(_study.DeviceId).ShouldBeTrue();
+        _members.Learn([Wire.Member(Info(_other, "Laptop-2"))], _other.DeviceId, _self.DeviceId, Now);   // its next list without it
+        _members.ShownRemoved(_study.DeviceId).ShouldBeFalse();
+
+        _members.Learn([Removal(_study, removedAt: 2)], _other.DeviceId, _self.DeviceId, Now);
+        _members.TakeServerList([Listed(_self, 2), Listed(_other, 1, removedAt: 2), Listed(_study, 2)], _self.DeviceId, Now);
+        _members.ShownRemoved(_study.DeviceId).ShouldBeFalse();                    // its PC is no longer current
     }
 
     [Fact]
-    public void A_pc_the_server_lists_as_removed_that_this_pc_never_knew_is_kept_as_removed_at_the_servers_epoch()
+    public void Only_a_pc_introduced_here_and_added_before_an_epoch_and_not_removed_before_it_may_hand_over_its_key()
     {
-        _store.AddKey(2, HouseholdCrypto.NewKey());
+        _members.Introduce(Info(_study), Now);
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 2, removedAt: 4)], _self.DeviceId, Now);
 
-        _members.RemovedByServer(_study.DeviceId, Now, serverEpoch: 1, serverAdded: 1).ShouldBeFalse();
-
-        _household.Member(_study.DeviceId).ShouldBeNull();
-        _members.EpochsOf(_study.DeviceId).ShouldBe(new MemberEpochs(1, 1));
-        _members.Learn([Wire.Member(Info(_study)) with { AddedEpoch = 1 }], _other.DeviceId, _self.DeviceId, Now).Added.ShouldBeEmpty();
-        _members.Learn([Wire.Member(Info(_study)) with { AddedEpoch = 2 }], _other.DeviceId, _self.DeviceId, Now).Added.ShouldBe([_study.DeviceId]);
-    }
-
-    [Fact]
-    public void Only_a_member_current_here_and_added_before_an_epoch_may_hand_over_its_key()
-    {
-        _store.AddKey(2, HouseholdCrypto.NewKey());
-        _members.Add(Info(_study), 2, Now);
-
-        _members.MaySeal(_study.DeviceId, 3).ShouldBeTrue();
         _members.MaySeal(_study.DeviceId, 2).ShouldBeFalse();                      // it was given that key
-        _members.MaySeal(_other.DeviceId, 2).ShouldBeTrue();
-        _members.Remove(_study.DeviceId, Now);                                      // removed at 2
-        _members.MaySeal(_study.DeviceId, 3).ShouldBeFalse();                      // no allowance: it holds whatever it sealed
-        _members.MaySeal("0000000000000000000000000000dead", 3).ShouldBeFalse();
-
-        _store.AddKey(3, HouseholdCrypto.NewKey());
-        _members.Add(Info(_study), 3, Now);                                        // added back at 3
-        _members.MaySeal(_study.DeviceId, 4).ShouldBeTrue();
-        _members.MaySeal(_study.DeviceId, 3).ShouldBeFalse();
+        _members.MaySeal(_study.DeviceId, 3).ShouldBeTrue();
+        _members.MaySeal(_study.DeviceId, 4).ShouldBeTrue();                       // the key it made before it went is still its own
+        _members.MaySeal(_study.DeviceId, 5).ShouldBeFalse();
+        _members.MaySeal(_other.DeviceId, 5).ShouldBeTrue();
+        using var planted = DeviceKeys.Create();
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(planted, 1)], _self.DeviceId, Now);
+        _members.MaySeal(planted.DeviceId, 3).ShouldBeFalse();                     // never introduced here
     }
 
     [Fact]
-    public void A_removed_pcs_rows_count_only_under_epochs_up_to_its_removal()
+    public void A_removed_pcs_rows_count_only_under_epochs_up_to_its_removal_on_the_server()
     {
-        _members.Add(Info(_study), 1, Now);
-        _store.AddKey(2, HouseholdCrypto.NewKey());
-        _members.Remove(_study.DeviceId, Now);                                      // removed at 2
+        _members.Introduce(Info(_study), Now);
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 1, removedAt: 2)], _self.DeviceId, Now);
 
         (_members.MayHavePosted(_study.DeviceId, 1), _members.MayHavePosted(_study.DeviceId, 2), _members.MayHavePosted(_study.DeviceId, 3))
             .ShouldBe((true, true, false));
@@ -185,41 +155,65 @@ public sealed class MemberBookTests : IDisposable
     }
 
     [Fact]
-    public void Entries_carry_every_member_with_its_epochs_the_current_first_with_their_keys()
+    public void Entries_carry_each_pc_shown_as_in_with_its_keys_then_each_removed_one_with_its_epochs()
     {
-        _members.Self(_self.DeviceId, 1);
-        _household.SaveMember(new HouseholdMember(_self.DeviceId, "Desktop-7", ChassisKind.Desktop, _self.SignPublic, _self.DhPublic, Now - 1, null, null));
-        _members.Add(Info(_study), 1, Now);
+        _members.Introduce(Info(_study), Now);
+        using var gone = DeviceKeys.Create();
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 2), Listed(gone, 1, removedAt: 1, at: Now - 5)], _self.DeviceId, Now);
         _members.Remove(_study.DeviceId, Now + 1);
 
         var entries = _members.Entries();
 
-        entries.Select(entry => entry.Id).ShouldBe([_self.DeviceId, _other.DeviceId, _study.DeviceId], ignoreOrder: false);
+        entries.Select(entry => entry.Id).ShouldBe([_self.DeviceId, _other.DeviceId, _study.DeviceId, gone.DeviceId], ignoreOrder: false);
         entries[1].ShouldBe(Wire.Member(Info(_other, "Laptop-2")) with { Added = Now, AddedEpoch = 1 });
-        entries[2].ShouldBe(new WireMember(_study.DeviceId, null, null, Removed: Now + 1, AddedEpoch: 1, RemovedEpoch: 1));
-        _members.Entries(compact: true)[2].ShouldBe(new WireMember(_study.DeviceId, null, null, AddedEpoch: 1, RemovedEpoch: 1));
+        entries[2].ShouldBe(new WireMember(_study.DeviceId, null, null, Removed: Now + 1, AddedEpoch: 2, RemovedEpoch: 2));
+        entries[3].ShouldBe(new WireMember(gone.DeviceId, null, null, Removed: Now - 5, AddedEpoch: 1, RemovedEpoch: 1));
+        _members.Entries(compact: true)[2].ShouldBe(new WireMember(_study.DeviceId, null, null, AddedEpoch: 2, RemovedEpoch: 2));
     }
 
     [Fact]
-    public void A_removed_pc_is_kept_without_its_rows_and_only_the_64_removed_latest_are()
+    public void A_pc_the_server_lists_that_nobody_introduces_is_to_be_taken_out_after_three_days()
     {
-        _members.Add(Info(_study), 1, Now);
+        using var planted = DeviceKeys.Create();
+        var day = (long)TimeSpan.FromDays(1).TotalMilliseconds;
+
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(planted, 1)], _self.DeviceId, Now).Unknown.ShouldBeEmpty();
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(planted, 1)], _self.DeviceId, Now + 2 * day).Unknown.ShouldBeEmpty();
+
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(planted, 1)], _self.DeviceId, Now + 3 * day).Unknown.ShouldBe([planted.DeviceId]);
+        _members.Learn([Wire.Member(Info(planted, "Den PC"))], _other.DeviceId, _self.DeviceId, Now + 3 * day);   // introduced at last
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(planted, 1)], _self.DeviceId, Now + 4 * day).Unknown.ShouldBeEmpty();
+        _members.Current(planted.DeviceId).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void A_pc_removed_here_or_on_the_server_isnt_brought_back_by_a_list_once_its_rows_went()
+    {
+        _members.Introduce(Info(_study), Now);
         _members.Remove(_study.DeviceId, Now);
         _members.ForgetRows(_study.DeviceId);
+        using var gone = DeviceKeys.Create();
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 1), Listed(gone, 1, removedAt: 1)], _self.DeviceId, Now);
+
+        _members.Learn([Wire.Member(Info(_study)), Wire.Member(Info(gone, "Den PC"))], _other.DeviceId, _self.DeviceId, Now).Added.ShouldBeEmpty();
 
         _household.Member(_study.DeviceId).ShouldBeNull();
-        _members.EpochsOf(_study.DeviceId).ShouldBe(new MemberEpochs(1, 1));
-        _members.Learn([Wire.Member(Info(_study)) with { AddedEpoch = 1 }], _other.DeviceId, _self.DeviceId, Now).Added.ShouldBeEmpty();
+        _household.Member(gone.DeviceId).ShouldBeNull();
+        _members.Introduce(Info(_study), Now);                                     // this PC's own pairing brings it back
+        _members.ShownRemoved(_study.DeviceId).ShouldBeFalse();
+    }
 
-        for (var epoch = 2; epoch <= MemberBook.MaxRemoved + 1; epoch++)
-        {
-            _store.AddKey(epoch, HouseholdCrypto.NewKey());
-            _members.Learn([new WireMember(Id(epoch), null, null, AddedEpoch: 1, RemovedEpoch: epoch)], _other.DeviceId, _self.DeviceId, Now);
-        }
+    [Fact]
+    public void A_pc_current_here_that_the_server_removes_is_gone_and_one_removed_earlier_isnt()
+    {
+        _members.Introduce(Info(_study), Now);
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 1)], _self.DeviceId, Now);
 
-        _members.EpochsOf(_study.DeviceId).ShouldBeNull();                          // removed earliest, so it went first
-        _members.EpochsOf(Id(2)).ShouldNotBeNull();
-        _members.Entries().Count(entry => entry.RemovedEpoch is not null).ShouldBe(MemberBook.MaxRemoved);
+        var learned = _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 1, removedAt: 1)], _self.DeviceId, Now);
+
+        learned.Gone.ShouldBe([_study.DeviceId]);
+        learned.Left.ShouldBe([_study.DeviceId]);
+        _members.TakeServerList([Listed(_self, 1), Listed(_other, 1), Listed(_study, 1, removedAt: 1)], _self.DeviceId, Now).Gone.ShouldBeEmpty();
     }
 
     public void Dispose()
@@ -228,7 +222,12 @@ public sealed class MemberBookTests : IDisposable
         _database.Dispose();
     }
 
-    private static string Id(int n) => n.ToString("x32", System.Globalization.CultureInfo.InvariantCulture);
+    /// <summary>A PC as the server lists it, added at <paramref name="added"/> and removed at <paramref name="removedAt"/>.</summary>
+    internal static ServerMember Listed(DeviceKeys keys, int added, int? removedAt = null, long? at = null) =>
+        new(keys.DeviceId, Wire.Encode(keys.SignPublic), Wire.Encode(keys.DhPublic), Now, removedAt is null ? null : at ?? Now, added, removedAt);
+
+    private static WireMember Removal(DeviceKeys keys, int removedAt, long? at = null) =>
+        new(keys.DeviceId, null, null, Removed: at, AddedEpoch: 1, RemovedEpoch: removedAt);
 
     private static MemberInfo Info(DeviceKeys keys, string name = "Study PC") => new(keys.DeviceId, name, ChassisKind.Desktop, keys.SignPublic, keys.DhPublic);
 }
