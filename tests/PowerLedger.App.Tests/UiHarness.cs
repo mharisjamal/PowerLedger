@@ -45,8 +45,19 @@ internal static class UiHarness
         failure?.Throw();
     }
 
-    /// <summary>Puts <paramref name="theme"/>'s palette first among the application's dictionaries, where the App keeps it.</summary>
-    public static void UseTheme(Theme theme) => UsePalette(ThemeManager.Palette(theme));
+    /// <summary>Runs <paramref name="work"/> on the application's thread and brings back what it returns.</summary>
+    public static T OnUi<T>(Func<T> work)
+    {
+        T result = default!;
+        OnUi(() =>
+        {
+            result = work();   // a block, so this binds to the Action overload rather than to itself
+        });
+        return result;
+    }
+
+    /// <summary>Puts <paramref name="look"/>'s palette for <paramref name="theme"/> first among the application's dictionaries, where the App keeps it.</summary>
+    public static void UseTheme(Theme theme, Look look = Look.Classic) => UsePalette(ThemeManager.Palette(look, theme));
 
     /// <summary>Draws <paramref name="visual"/> at <paramref name="width"/> × <paramref name="height"/> to <paramref name="name"/> under <see cref="Folder"/>.</summary>
     public static void Render(Visual visual, int width, int height, string name)
