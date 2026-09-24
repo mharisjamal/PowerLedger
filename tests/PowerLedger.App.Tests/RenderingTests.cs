@@ -1224,8 +1224,8 @@ public class RenderingTests
     private static ReportViewModel ReportScreen(FakeSaver saver)
     {
         var history = new FakeRangeHistory { Answer = Month };
-        return new ReportViewModel(history, new FakeHouseholdHistory(), new FakeSleep(), saver, _ => [], UiThreads.Inline, new FakeTimeProvider(Now),
-            TimeZoneInfo.Utc, English, 0.38);
+        return new ReportViewModel(new FakeLink(), history, new FakeHouseholdHistory(), new FakeSleep(), saver, _ => [], UiThreads.Inline,
+            new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, 0.38);
     }
 
     /// <summary>A household of two PCs: this desktop, well ahead this month, and a laptop last seen three days ago.</summary>

@@ -18,7 +18,7 @@ public class ShellViewModelTests
     private ShellViewModel Shell() => new(
         new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { }),
         new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
-        new ReportViewModel(_history, _householdHistory, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4),
+        new ReportViewModel(_link, _history, _householdHistory, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4),
         new HouseholdViewModel(_link, _householdHistory, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, FakeAccount.Model(_link)),
         new SettingsViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
@@ -47,11 +47,12 @@ public class ShellViewModelTests
         var shell = Shell();
         shell.Page = Page.Household;
         shell.Current.ShouldBe(shell.Household);
-        _householdHistory.Reads.ShouldBeEmpty();          // no household in the fake status: nothing is read from storage
+        // Review finding A11: storage is read once even with no household in the fake status, to check for old rows.
+        _householdHistory.Reads.Count.ShouldBe(1);
 
         shell.Page = Page.Now;
         _clock.Advance(HouseholdViewModel.RefreshEvery * 3);
-        _householdHistory.Reads.ShouldBeEmpty();           // stopped once hidden, so no read arrives late
+        _householdHistory.Reads.Count.ShouldBe(1);         // stopped once hidden, so no further read arrives late
     }
 
     [Fact]

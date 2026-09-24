@@ -66,6 +66,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private string? _problem;
     private bool _recoveryMissing;
     private string? _recoveryMessage;
+    private bool _hasOldRows;
 
     public HouseholdViewModel(
         IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
@@ -99,6 +100,11 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
 
     /// <summary>False before a household exists, or once this PC has left one; the page shows the explanation instead.</summary>
     public bool HasHousehold { get => _hasHousehold; private set => SetProperty(ref _hasHousehold, value); }
+
+    /// <summary>Review finding A11: household_rows or household_members still names this PC although it is in no
+    /// household right now — from one it has since left — always false while it is in one. The App never writes these
+    /// tables, so this only points the rows out; it offers no way to remove them.</summary>
+    public bool HasOldRows { get => _hasOldRows; private set => SetProperty(ref _hasOldRows, value); }
 
     public HouseholdPeriod Today { get => _today; private set => SetProperty(ref _today, value); }
 
@@ -219,9 +225,9 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         var household = status?.Household;
         var now = _clock.GetUtcNow();
-        // Nothing is asked of storage before there is a household to read, since old rows could linger from one this PC
-        // has since left (households design §1: a left member's rows stay until the user removes them).
-        var snapshot = household?.HouseholdId is not null ? _history.Read(now, _zone) : null;
+        // Review finding A11: read even with no current household, so old rows left behind by one this PC has since
+        // left (households design §1: a left member's rows stay until the user removes them) can still be pointed out.
+        var snapshot = _history.Read(now, _zone);
         _threads.Post(() =>
         {
             if (read != _reads) return;
@@ -242,8 +248,12 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
             Month = Empty("This month");
             Members = [];
             Message = Explanation;
+            // Review finding A11: this PC never writes the database, so there is no Remove button here — only pointing
+            // the rows out, which a member row still on file, from a household this PC has since left, is a sign of.
+            HasOldRows = snapshot is { Members.Count: > 0 };
             return;
         }
+        HasOldRows = false;
         if (snapshot is null)
         {
             Message = CantRead;

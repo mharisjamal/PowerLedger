@@ -25,8 +25,10 @@ public class HouseholdViewModelTests
     private static HouseholdSnapshot SnapshotWith(IReadOnlyList<HouseholdMemberRow> members, IReadOnlyList<DeviceEnergy>? month = null) => new(
         new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], []), new HouseholdRangeTotals(0, [], month ?? []), members);
 
+    /// <summary>Review finding A11: storage is read even with no current household, so old rows left behind by one this
+    /// PC has since left can still be pointed out — there just are none here.</summary>
     [Fact]
-    public void With_no_household_the_page_explains_the_feature_and_reads_nothing_from_storage()
+    public void With_no_household_the_page_explains_the_feature_and_still_checks_storage_for_old_rows()
     {
         _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) };
         _link.Connect(true);
@@ -38,7 +40,26 @@ public class HouseholdViewModelTests
         model.Message.ShouldBe(HouseholdViewModel.Explanation);
         model.HasMessage.ShouldBeTrue();
         model.Members.ShouldBeEmpty();
-        _history.Reads.ShouldBeEmpty();
+        model.HasOldRows.ShouldBeFalse();
+        _history.Reads.Count.ShouldBe(1);
+    }
+
+    /// <summary>Review finding A11: the App never writes household_rows, so this only says the rows are there.</summary>
+    [Fact]
+    public void With_no_household_a_member_row_still_on_file_shows_as_old_rows()
+    {
+        _link.Status = Statuses.Running() with { Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) };
+        _link.Connect(true);
+        _history.Answer = _ => FakeHouseholdHistory.Empty with
+        {
+            Members = [new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now, null, Now)],
+        };
+        var model = Model();
+
+        model.Show();
+
+        model.HasHousehold.ShouldBeFalse();
+        model.HasOldRows.ShouldBeTrue();
     }
 
     [Fact]

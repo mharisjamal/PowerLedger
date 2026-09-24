@@ -10,6 +10,11 @@
                 <TextBlock Style="{StaticResource Text.Eyebrow}" Text="HOUSEHOLD" />
                 <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" Margin="0,10,0,16" MaxWidth="480" HorizontalAlignment="Left"
                            Text="{Binding Message}" />
+                <!-- Review finding A11: household_rows/household_members still name this PC from one it has since left;
+                     the App never writes these tables, so this only says so — no Remove button. -->
+                <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" Margin="0,0,0,16" MaxWidth="480" HorizontalAlignment="Left"
+                           Text="This PC still holds rows from a household it left."
+                           Visibility="{Binding HasOldRows, Converter={StaticResource VisibleWhen}}" />
                 <Button Style="{StaticResource Quiet}" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
             </StackPanel>
 
