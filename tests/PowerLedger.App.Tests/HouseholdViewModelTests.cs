@@ -108,7 +108,8 @@ public class HouseholdViewModelTests
         _link.Connect(true);
         _history.Answer = _ => SnapshotWith(
             [
-                new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-30), null, Now.AddMinutes(-2)),
+                // This PC has no "last synced" of its own to report (households design §2, review finding A9).
+                new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-30), null, null),
                 new HouseholdMemberRow("bbbb", "Laptop-2", ChassisKind.Laptop, Now.AddDays(-10), null, Now.AddDays(-3)),
             ],
             [new DeviceEnergy("aaaa", 12.0), new DeviceEnergy("bbbb", 4.0)]);
@@ -123,7 +124,7 @@ public class HouseholdViewModelTests
         mine.IsThisPc.ShouldBeTrue();
         mine.Energy.ShouldBe("12.0");
         mine.Share.ShouldBe(1.0);              // the busiest PC's bar is full
-        mine.Status.ShouldBe("synced 2 minutes ago");
+        mine.Status.ShouldBe("");
 
         var theirs = model.Members.Single(m => m.DeviceId == "bbbb");
         theirs.IsThisPc.ShouldBeFalse();

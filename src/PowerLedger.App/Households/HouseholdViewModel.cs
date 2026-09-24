@@ -257,15 +257,18 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
             .Select(m =>
             {
                 var energy = energyByDevice.GetValueOrDefault(m.DeviceId);
+                var isThisPc = m.DeviceId == household.DeviceId;
                 return new HouseholdMemberDisplay(
-                    m.DeviceId, m.Name, m.Kind == ChassisKind.Laptop ? "Laptop" : "Desktop", m.DeviceId == household.DeviceId,
-                    Format.Kwh(energy, _culture), busiest > 0 ? energy / busiest : 0, StatusOf(m, now));
+                    m.DeviceId, m.Name, m.Kind == ChassisKind.Laptop ? "Laptop" : "Desktop", isThisPc,
+                    Format.Kwh(energy, _culture), busiest > 0 ? energy / busiest : 0, isThisPc ? "" : StatusOf(m, now));
             })
             .ToList();
     }
 
     /// <summary>"left" once removed or gone by choice; otherwise when it last synced, worded as recent ("synced … ago")
-    /// or stale ("last seen … ago") at a day, and "not synced yet" for one that never has (households design §2).</summary>
+    /// or stale ("last seen … ago") at a day, and "not synced yet" for one that never has (households design §2). This
+    /// PC's own row shows none of this (households design §2, review finding A9): it has no "last synced" of its own to
+    /// report, and <see cref="Rows"/> never calls this for it.</summary>
     internal string StatusOf(HouseholdMemberRow member, DateTimeOffset now)
     {
         if (member.Left is not null) return "left";
