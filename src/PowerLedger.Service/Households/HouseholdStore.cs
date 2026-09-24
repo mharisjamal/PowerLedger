@@ -43,6 +43,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     internal const string HistoryHourKey = "household.history-hour";
     internal const string MemberEpochsKey = "household.member-epochs";
     internal const string RotationKeyKey = "household.rotation-key";
+    internal const string RotationPostKey = "household.rotation-post";
     internal const string RecoveryCodeKey = "household.recovery-code";
     internal const string LaggingKey = "household.lagging";
 
@@ -51,7 +52,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     private static readonly string[] OfTheHousehold =
         [
             IdKey, EpochKey, KeysKey, CursorKey, SequenceKey, PostedThroughKey, PostedHourKey, HistoryKey, HistoryHourKey, ConfirmedKey,
-            MembersCheckedKey, ProblemKey, WaitingKey, MemberEpochsKey, RotationKeyKey, LaggingKey,
+            MembersCheckedKey, ProblemKey, WaitingKey, MemberEpochsKey, RotationKeyKey, RotationPostKey, LaggingKey,
         ];
 
     /// <summary>Mixed into every encryption, so no other program running as the same account reads them back by chance.</summary>
@@ -137,7 +138,8 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
     }
 
     /// <summary>A key this PC made for the next epoch, kept until the server takes it (plan 0.8): it isn't used before, so this
-    /// PC never moves to an epoch the server doesn't have. Null while there is none.</summary>
+    /// PC never moves to an epoch the server doesn't have. Null while there is none. Setting it forgets the envelopes sealed
+    /// for the one before (<see cref="RotationPost"/>).</summary>
     public (int Epoch, byte[] Key)? RotationKey
     {
         get => Unprotect(settings.Get(RotationKeyKey)) is { Length: 4 + HouseholdCrypto.KeyLength } kept
@@ -145,6 +147,7 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
             : null;
         set
         {
+            settings.Remove(RotationPostKey);
             if (value is not { } pending)
             {
                 settings.Remove(RotationKeyKey);
@@ -155,6 +158,15 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
             pending.Key.CopyTo(kept, 4);
             settings.Set(RotationKeyKey, Protect(kept));
         }
+    }
+
+    /// <summary>The envelopes the waiting new key was sealed in, as last posted (plan 0.9): posted again as they are, so a
+    /// retry after an answer that was lost is the very same request, which the server takes as done. Null before the first
+    /// post.</summary>
+    public Relay.PostKeysBody? RotationPost
+    {
+        get => HouseholdJson.Read(settings.Get(RotationPostKey), HouseholdJson.Default.PostKeysBody);
+        set => WriteText(RotationPostKey, value is null ? null : HouseholdJson.Write(value, HouseholdJson.Default.PostKeysBody));
     }
 
     /// <summary>Forgets the household: its ID, its keys and the progress of relay sync. This PC's own keys stay.</summary>

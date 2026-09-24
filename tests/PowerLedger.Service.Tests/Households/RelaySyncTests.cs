@@ -358,7 +358,7 @@ public sealed class RelaySyncTests : IDisposable
     }
 
     [Fact]
-    public async Task Two_rotations_to_the_same_epoch_settle_by_rotating_again_after_the_one_the_server_took()
+    public async Task Two_rotations_to_the_same_epoch_settle_on_the_one_the_server_took_when_its_sealer_may_hand_it_over()
     {
         var theirs = HouseholdCrypto.NewKey();
         await _laptop.Client.PostKeysAsync(_laptop.Keys, Household, 2, KeyWrap.For(_laptop.Keys, Household, 2, theirs, [_desktop.AsMember()]),
@@ -368,10 +368,99 @@ public sealed class RelaySyncTests : IDisposable
         (await _desktop.RunAsync()).Problem.ShouldBeNull();
 
         _desktop.Store.KeyFor(2).ShouldBe(theirs);
-        _desktop.Store.Epoch.ShouldBe(3);
-        _relay.Epoch(Household).ShouldBe(3);
+        _desktop.Store.Epoch.ShouldBe(2);
+        _relay.Epoch(Household).ShouldBe(2);
         _desktop.Store.Pending.ShouldBeEmpty();
         _desktop.Store.RotationKey.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_rotation_that_loses_its_epoch_to_a_key_a_pc_removed_here_may_hold_rotates_on_to_the_next()
+    {
+        using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
+        _relay.Seed(Household, study.Keys);
+        _desktop.Household.SaveMember(study.AsMember());
+        var theirs = HouseholdCrypto.NewKey();                                    // the laptop's new key, sealed to the study PC too
+        (await _laptop.Client.PostKeysAsync(_laptop.Keys, Household, 2, KeyWrap.For(_laptop.Keys, Household, 2, theirs,
+            [_desktop.AsMember(), _laptop.AsMember(), study.AsMember()]), CancellationToken.None)).Ok.ShouldBeTrue();
+        _desktop.Members.Remove(study.Id, Now.ToUnixTimeMilliseconds());           // then the desktop removed it, still at epoch 1
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Remove, Household, Device: study.Id));
+        _desktop.Sync.StartRotation(Household);
+
+        (await _desktop.RunAsync()).Problem.ShouldBeNull();
+
+        _desktop.Store.KeyFor(2).ShouldBe(theirs);                                 // read what came under it
+        _desktop.Store.Epoch.ShouldBe(3);                                          // but post under one the study PC never had
+        _relay.Sealed(Household, 3).ShouldBe([_desktop.Id, _laptop.Id], ignoreOrder: true);
+        _desktop.Store.Pending.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_rotation_that_loses_its_epoch_to_a_key_sealed_by_a_pc_removed_here_takes_nothing_and_rotates_on()
+    {
+        using var study = new RelayPc("Study PC", ChassisKind.Desktop, _relay, _clock);
+        _relay.Seed(Household, study.Keys);
+        _desktop.Household.SaveMember(study.AsMember());
+        (await study.Client.PostKeysAsync(study.Keys, Household, 2, KeyWrap.For(study.Keys, Household, 2, HouseholdCrypto.NewKey(),
+            [_desktop.AsMember(), _laptop.AsMember(), study.AsMember()]), CancellationToken.None)).Ok.ShouldBeTrue();
+        _desktop.Members.Remove(study.Id, Now.ToUnixTimeMilliseconds());
+        _desktop.Store.AddPending(new PendingOp(PendingOp.Remove, Household, Device: study.Id));
+        _desktop.Sync.StartRotation(Household);
+
+        (await _desktop.RunAsync()).Problem.ShouldBeNull();
+
+        _desktop.Store.KeyFor(2).ShouldBeNull();
+        _desktop.Store.Epoch.ShouldBe(3);
+        _relay.Sealed(Household, 3).ShouldBe([_desktop.Id, _laptop.Id], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task A_new_key_the_server_refuses_stays_queued_and_nothing_goes_up_under_the_old_key_meanwhile()
+    {
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100)]);
+        _laptop.Household.Upsert([Row(_laptop.Id, 0, 20, changed: 100)]);
+        await _laptop.RunAsync();
+        _desktop.Sync.StartRotation(Household);
+        _relay.Intercept = (request, _) => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/keys", StringComparison.Ordinal)
+            ? FakeRelay.Error(403, "Not now")
+            : null;
+
+        var refused = await _desktop.RunAsync();
+
+        refused.Problem.ShouldNotBeNull().ShouldContain("Not now");
+        _desktop.Store.Pending.ShouldHaveSingleItem().Kind.ShouldBe(PendingOp.Keys);
+        _desktop.Store.RotationKey.ShouldNotBeNull().Epoch.ShouldBe(2);
+        _relay.Batches.ShouldAllBe(batch => batch.Device != _desktop.Id);          // nothing under the old key
+        refused.RowsIn.ShouldBe(1);                                                 // what the others sent still comes in
+
+        _relay.Intercept = null;
+        var run = await _desktop.RunAsync();
+
+        run.Problem.ShouldBeNull();
+        _desktop.Store.Epoch.ShouldBe(2);
+        _relay.Batches.Single(batch => batch.Device == _desktop.Id).Epoch.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_retried_rotation_posts_the_very_bytes_of_its_first_try_so_a_lost_answer_counts_as_taken()
+    {
+        _desktop.Sync.StartRotation(Household);
+        _relay.LoseAnswer = request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/keys", StringComparison.Ordinal);
+        (await _desktop.RunAsync()).Problem.ShouldNotBeNull();                     // the server took it; the answer went astray
+        _relay.Epoch(Household).ShouldBe(2);
+        _desktop.Store.Epoch.ShouldBe(1);
+        _relay.LoseAnswer = null;
+
+        (await _desktop.RunAsync()).Problem.ShouldBeNull();
+
+        _desktop.Store.Epoch.ShouldBe(2);                                          // taken as it was, with no rotation after it
+        _relay.Epoch(Household).ShouldBe(2);
+        var posts = _relay.Sent.Where(sent => sent.Call.EndsWith("/keys", StringComparison.Ordinal)).Select(sent => sent.Body).ToList();
+        posts.Count.ShouldBe(2);
+        posts[1].ShouldBe(posts[0]);
+        (await _laptop.RunAsync()).Problem.ShouldBeNull();
+        await _laptop.Sync.CatchUpAsync(_laptop.Keys, CancellationToken.None);
+        _laptop.Store.CurrentKey.ShouldBe(_desktop.Store.CurrentKey);
     }
 
     [Fact]

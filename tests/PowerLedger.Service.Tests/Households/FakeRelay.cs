@@ -31,6 +31,7 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     private readonly Dictionary<(string Meeting, string Slot), (byte[] Body, DateTimeOffset Created)> _meetings = [];
     private readonly HashSet<string> _seen = [];
     private readonly List<string> _calls = [];
+    private readonly List<(string Call, byte[] Body)> _sent = [];
     private readonly Dictionary<(string Provider, string Subject), string> _accounts = [];
     private readonly Dictionary<string, Session> _sessions = [];
     private readonly Dictionary<string, string> _links = [];
@@ -42,6 +43,18 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
 
     /// <summary>Answers a request before the routes do, when it returns one.</summary>
     public Func<HttpRequestMessage, byte[], HttpResponseMessage?>? Intercept { get; set; }
+
+    /// <summary>Requests the server carries out but whose answer is lost on the way back, when it says so.</summary>
+    public Func<HttpRequestMessage, bool>? LoseAnswer { get; set; }
+
+    /// <summary>The bodies of every request as sent, with "METHOD /path", in order.</summary>
+    public List<(string Call, byte[] Body)> Sent
+    {
+        get
+        {
+            lock (_gate) return [.. _sent];
+        }
+    }
 
     /// <summary>"METHOD /path" of every request, in order.</summary>
     public List<string> Calls
@@ -178,11 +191,16 @@ internal sealed partial class FakeRelay(TimeProvider clock) : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
     {
         var body = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancel);
-        lock (_gate) _calls.Add($"{request.Method} {request.RequestUri!.AbsolutePath}");
+        lock (_gate)
+        {
+            _calls.Add($"{request.Method} {request.RequestUri!.AbsolutePath}");
+            _sent.Add(($"{request.Method} {request.RequestUri!.AbsolutePath}", body));
+        }
         if (Down) throw new HttpRequestException("No such host is known.");
         HttpResponseMessage response;
         if (Intercept?.Invoke(request, body) is { } intercepted) response = intercepted;
         else lock (_gate) response = Route(request, body);
+        if (LoseAnswer?.Invoke(request) == true) throw new HttpRequestException("The connection was reset.");
         response.Headers.Date = clock.GetUtcNow();                             // the server's own clock, as the Worker's answers carry it
         return response;
     }
