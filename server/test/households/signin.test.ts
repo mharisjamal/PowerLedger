@@ -169,7 +169,7 @@ describe("POST /v1/auth/signin", () => {
     const hid = randomHouseholdId();
     await env.DB.batch([
       env.DB.prepare("INSERT INTO account_households (account, household, linked) VALUES (?, ?, 1)").bind(account!.id, hid),
-      env.DB.prepare("INSERT INTO recovery (account, body, verifier, epoch, updated) VALUES (?, 'b', 'v', 1, 1)").bind(account!.id),
+      env.DB.prepare("INSERT INTO recovery (account, body, verifier_hash, epoch, updated) VALUES (?, 'b', 'h', 1, 1)").bind(account!.id),
     ]);
 
     const again = await signIn();

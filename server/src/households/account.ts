@@ -1,6 +1,6 @@
-import { sha256hex } from "../auth";
+import { sha256hex, timingSafeEqualStrings } from "../auth";
 import { checkSession, finishSession, type MemberRow, type SessionRow, sessionToken } from "./auth";
-import { base64urlDecode } from "./encoding";
+import { base64urlDecode, hex, sha256 } from "./encoding";
 import { addMemberStatement, currentEpoch, HOUSEHOLD_ID, isEnvelopeBody, isEpoch, MAX_MEMBERS, readSmall } from "./households";
 import { errorResponse, ok, overAddressLimit, parseObject } from "./http";
 
@@ -156,18 +156,23 @@ function isSealed(value: unknown, maxChars: number): value is string {
   return bytes !== null && bytes.byteLength >= 28;
 }
 
+/** A posted verifier: base64url of exactly 32 bytes; null otherwise. */
+function readVerifier(value: unknown): Uint8Array | null {
+  const bytes = typeof value === "string" ? base64urlDecode(value) : null;
+  return bytes && bytes.byteLength === VERIFIER_BYTES ? bytes : null;
+}
+
 /**
- * PUT /v1/account/recovery: {"body","verifier","epoch"?} from a member of the linked household. The body is the household
- * key sealed under the recovery code's key; the verifier is 32 bytes the PC makes from the household key, which is what
- * POST /v1/account/recover checks its proof with, since the Worker never has the key. A later PUT replaces it.
+ * PUT /v1/account/recovery: {"body","verifier"} from a member of the linked household. The body is the household key
+ * sealed under the recovery code's key; the verifier is 32 bytes the PC makes from the household key, which recover must
+ * send back. Only SHA-256 of the verifier is kept, never the verifier, along with the household's current epoch. A later
+ * PUT replaces it.
  */
 export async function handlePutRecovery(env: Cloudflare.Env, session: SessionRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
-  const verifier = typeof posted?.verifier === "string" ? base64urlDecode(posted.verifier) : null;
-  const epoch = posted?.epoch ?? null;
+  const verifier = readVerifier(posted?.verifier);
   if (!isSealed(posted?.body, MAX_RECOVERY_CHARS)) return errorResponse(400, "body must be the sealed household key, as base64url.");
-  if (!verifier || verifier.byteLength !== VERIFIER_BYTES) return errorResponse(400, "verifier must be 32 bytes, as base64url.");
-  if (epoch !== null && !isEpoch(epoch)) return errorResponse(400, "epoch must be a whole number.");
+  if (!verifier) return errorResponse(400, "verifier must be 32 bytes, as base64url.");
 
   const household = await linkOf(env, session.account);
   if (!household) return errorResponse(409, "This account isn't linked to a household yet.");
@@ -176,49 +181,52 @@ export async function handlePutRecovery(env: Cloudflare.Env, session: SessionRow
   }
 
   await env.DB.prepare(
-    `INSERT INTO recovery (account, body, verifier, epoch, updated) VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO recovery (account, body, verifier_hash, epoch, updated)
+     SELECT ?1, ?2, ?3, epoch, ?4 FROM households WHERE id = ?5
      ON CONFLICT (account) DO UPDATE SET
-       body = excluded.body, verifier = excluded.verifier, epoch = excluded.epoch, updated = excluded.updated`,
+       body = excluded.body, verifier_hash = excluded.verifier_hash, epoch = excluded.epoch, updated = excluded.updated`,
   )
-    .bind(session.account, posted!.body, posted!.verifier, epoch, Date.now())
+    .bind(session.account, posted!.body, hex(await sha256(verifier)), Date.now(), household)
     .run();
   return ok();
 }
 
-/** GET /v1/account/recovery: {"householdId","epoch","body"}, for any PC signed in as the account; never the verifier. */
+/** GET /v1/account/recovery: {"householdId","epoch","body"}, for any PC signed in as the account. */
 export async function handleGetRecovery(env: Cloudflare.Env, session: SessionRow): Promise<Response> {
   const row = await env.DB.prepare(
     `SELECT r.body, r.epoch, l.household FROM recovery r LEFT JOIN account_households l ON l.account = r.account
      WHERE r.account = ?`,
   )
     .bind(session.account)
-    .first<{ body: string; epoch: number | null; household: string | null }>();
+    .first<{ body: string; epoch: number; household: string | null }>();
   if (!row) return errorResponse(404, "This account has no recovery envelope.");
   return Response.json({ householdId: row.household, epoch: row.epoch, body: row.body });
 }
 
 /**
- * POST /v1/account/recover: {"proof"}, HMAC-SHA256 of this PC's device ID under the recovery verifier, which only a PC
- * that opened the recovery envelope can make. On the account's authority, with no approval, this PC becomes a member of
- * the linked household.
+ * POST /v1/account/recover: {"verifier"}, the 32 bytes only a PC that opened the recovery envelope can make; SHA-256 of
+ * it must be what PUT kept, and the envelope must be from the household's current epoch (a key since replaced gives
+ * 409). On the account's authority, with no approval, this PC then becomes a member of the linked household. Like every
+ * signed request, it's taken once.
  */
 export async function handleRecover(env: Cloudflare.Env, session: SessionRow, body: Uint8Array): Promise<Response> {
-  const posted = parseObject(body);
-  const proof = typeof posted?.proof === "string" ? base64urlDecode(posted.proof) : null;
-  if (!proof || proof.byteLength !== 32) {
-    return errorResponse(400, "proof must be HMAC-SHA256 of this PC's device ID under the recovery verifier, as base64url.");
-  }
+  const verifier = readVerifier(parseObject(body)?.verifier);
+  if (!verifier) return errorResponse(400, "verifier must be 32 bytes, as base64url.");
 
   const row = await env.DB.prepare(
-    `SELECT r.verifier, l.household FROM recovery r JOIN account_households l ON l.account = r.account WHERE r.account = ?`,
+    `SELECT r.verifier_hash, r.epoch, l.household, h.epoch AS current
+     FROM recovery r JOIN account_households l ON l.account = r.account JOIN households h ON h.id = l.household
+     WHERE r.account = ?`,
   )
     .bind(session.account)
-    .first<{ verifier: string; household: string }>();
+    .first<{ verifier_hash: string; epoch: number; household: string; current: number }>();
   if (!row) return errorResponse(404, "This account has nothing to recover.");
 
-  const key = await crypto.subtle.importKey("raw", base64urlDecode(row.verifier)!, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
-  if (!(await crypto.subtle.verify("HMAC", key, proof, new TextEncoder().encode(session.device)))) {
-    return errorResponse(403, "The recovery proof doesn't match.");
+  if (!timingSafeEqualStrings(hex(await sha256(verifier)), row.verifier_hash)) {
+    return errorResponse(403, "That isn't this account's recovery verifier.");
+  }
+  if (row.epoch !== row.current) {
+    return errorResponse(409, "The household's key has changed since this recovery was set; a PC in the household must set it again.");
   }
 
   if (!(await isCurrentMember(env, row.household, session.device))) {

@@ -34,9 +34,10 @@ function envelope(): string {
   return base64urlEncode(crypto.getRandomValues(new Uint8Array(60)));
 }
 
-async function proofFor(verifier: Uint8Array, deviceId: string): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", verifier, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return base64urlEncode(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(deviceId))));
+/** `by` moves the household's key on to `epoch`. */
+async function rotate(hid: string, by: TestDevice, epoch: number): Promise<void> {
+  const response = await signedFetch(by, "POST", `/v1/households/${hid}/keys`, { epoch, envelopes: [{ device: by.id, body: envelope() }] });
+  expect(response.status).toBe(200);
 }
 
 /** A household whose first PC is signed in and has linked it to its account. */
@@ -277,21 +278,28 @@ describe("join requests", () => {
 });
 
 describe("recovery", () => {
-  it("keeps the envelope a member puts, for any PC signed in as the account, without the verifier", async () => {
+  it("keeps the envelope a member puts at the household's current epoch, and only a hash of the verifier", async () => {
     const { hid, owner } = await linkedHousehold();
     const body = envelope();
-    const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+    const verifier = base64urlEncode(verifierBytes);
 
-    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body, verifier, epoch: 2 })).status).toBe(200);
+    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body, verifier, epoch: 7 })).status).toBe(200);
 
     const newPc = await signIn(undefined, owner.account);
     const fetched = await asAccount(newPc, "GET", "/v1/account/recovery");
     expect(fetched.status).toBe(200);
-    expect(await fetched.json()).toEqual({ householdId: hid, epoch: 2, body });
+    expect(await fetched.json()).toEqual({ householdId: hid, epoch: 1, body });
 
+    const stored = await env.DB.prepare("SELECT * FROM recovery WHERE account = ?").bind(owner.account).first<Record<string, unknown>>();
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", verifierBytes));
+    expect(stored?.verifier_hash).toBe([...digest].map((byte) => byte.toString(16).padStart(2, "0")).join(""));
+    expect(Object.values(stored!)).not.toContain(verifier);
+
+    await rotate(hid, owner.device, 2);
     const replaced = envelope();
     expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body: replaced, verifier })).status).toBe(200);
-    expect(await (await asAccount(newPc, "GET", "/v1/account/recovery")).json()).toEqual({ householdId: hid, epoch: null, body: replaced });
+    expect(await (await asAccount(newPc, "GET", "/v1/account/recovery")).json()).toEqual({ householdId: hid, epoch: 2, body: replaced });
   });
 
   it("is only put by a member of the linked household, with a 32-byte verifier", async () => {
@@ -307,20 +315,19 @@ describe("recovery", () => {
       { body: envelope() },
       { body: envelope(), verifier: base64urlEncode(new Uint8Array(16)) },
       { body: "AAAA", verifier: good.verifier },
-      { body: envelope(), verifier: good.verifier, epoch: -1 },
     ]) {
       expect((await asAccount(owner, "PUT", "/v1/account/recovery", body)).status, JSON.stringify(body)).toBe(400);
     }
   });
 
-  it("adds a PC that proves it holds the household key, with no approval", async () => {
+  it("adds a PC that sends the verifier, with no approval", async () => {
     const { hid, owner } = await linkedHousehold();
-    const verifier = crypto.getRandomValues(new Uint8Array(32));
-    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(verifier), epoch: 1 });
+    const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier });
     const newPc = await signIn(undefined, owner.account);
     await asAccount(newPc, "POST", "/v1/account/requests");
 
-    const recovered = await asAccount(newPc, "POST", "/v1/account/recover", { proof: await proofFor(verifier, newPc.device.id) });
+    const recovered = await asAccount(newPc, "POST", "/v1/account/recover", { verifier });
     expect(recovered.status).toBe(200);
     expect(await recovered.json()).toEqual({ ok: true, householdId: hid });
 
@@ -328,21 +335,23 @@ describe("recovery", () => {
     expect(await env.DB.prepare("SELECT 1 FROM join_requests WHERE device = ?").bind(newPc.device.id).first()).toBeNull();
   });
 
-  it("refuses a proof made for another PC or with another key, and an account with nothing to recover", async () => {
+  it("refuses another verifier, one from before the key changed, and an account with nothing to recover", async () => {
     const { hid, owner } = await linkedHousehold();
-    const verifier = crypto.getRandomValues(new Uint8Array(32));
-    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: base64urlEncode(verifier) });
+    const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier });
     const newPc = await signIn(undefined, owner.account);
+    const other = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
 
-    const forOwner = await asAccount(newPc, "POST", "/v1/account/recover", { proof: await proofFor(verifier, owner.device.id) });
-    expect(forOwner.status).toBe(403);
-    const otherKey = await proofFor(crypto.getRandomValues(new Uint8Array(32)), newPc.device.id);
-    expect((await asAccount(newPc, "POST", "/v1/account/recover", { proof: otherKey })).status).toBe(403);
+    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier: other })).status).toBe(403);
     expect((await asAccount(newPc, "POST", "/v1/account/recover", {})).status).toBe(400);
+    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier: base64urlEncode(new Uint8Array(16)) })).status).toBe(400);
+
+    await rotate(hid, owner.device, 2);
+    expect((await asAccount(newPc, "POST", "/v1/account/recover", { verifier })).status).toBe(409);
     expect(await isMember(hid, newPc.device.id)).toBe(false);
 
     const lonely = await signIn();
-    expect((await asAccount(lonely, "POST", "/v1/account/recover", { proof: otherKey })).status).toBe(404);
+    expect((await asAccount(lonely, "POST", "/v1/account/recover", { verifier: other })).status).toBe(404);
   });
 });
 
