@@ -50,6 +50,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private static readonly TimeSpan DefaultBrowseTime = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>The longest syncing on the network takes in a turn.</summary>
+    internal static readonly TimeSpan LanBudget = TimeSpan.FromMinutes(2);
+
+    /// <summary>The most members found on the network synced with in a turn: twice the most a household has.</summary>
+    internal const int MaxFound = 2 * Wire.MaxMembers;
+
     internal const string Busy = "The household is busy. Try again in a moment.";
     internal const string NotInOne = "This PC isn't in a household.";
     internal const string NotAtTheScreen = "Only someone at this PC's screen can change its household.";
@@ -202,12 +208,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
             }
             SaveSelf(_clock.GetUtcNow());                                      // its name and kind as they are now
             BuildRowsIfDue();
-            await SyncOnNetworkAsync(lease.Attention).ConfigureAwait(false);
-            var run = await _relaySync.RunAsync(_keys, _store.Name, Kind(), lease.Attention).ConfigureAwait(false);
+            var run = await _relaySync.RunAsync(_keys, _store.Name, Kind(), lease.Attention).ConfigureAwait(false);   // the server first
             if (run.Notices.Count > 0) Publish();                              // the status first, then the App is told
             foreach (var notice in run.Notices) Info(notice);
             Announce();                                                        // a new key, or none, changes the tag
             if (!run.Removed && run.Problem is null) await PollRequestsAsync(lease.Attention).ConfigureAwait(false);
+            if (!run.Removed) await SyncOnNetworkAsync(lease.Attention).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!stop.IsCancellationRequested)
         {
@@ -418,7 +424,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             if (_store.HouseholdId is { } householdId)
             {
-                var synced = await _lanSync.RespondAsync(channel, hello, Identity(), stopping.Token).ConfigureAwait(false);
+                var synced = await _lanSync.RespondAsync(channel, hello, Identity(), stopping.Token, () => _store.HouseholdId == householdId).ConfigureAwait(false);
                 if (synced.Removed is { Count: > 0 }) _relaySync.StartRotation(householdId);   // a member went: a new key, as this PC stays
             }
             return;
@@ -640,34 +646,51 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         return Reply(request.Id, true, request.On ? "Other PCs on your network can find this one." : "Other PCs on your network can no longer find this one.");
     }
 
-    /// <summary>Syncs directly with each member found on the network: its tag shows it is in this household.</summary>
+    /// <summary>
+    /// Syncs directly with each member found on the network, whose tag shows it is in this household: once each, however
+    /// often it is announced, at most <see cref="MaxFound"/> of them, and within <see cref="LanBudget"/> in all, after the
+    /// server's sync (plan 0.8), so members on the network, or announcements posing as them, can't hold the turn up.
+    /// </summary>
     private async Task SyncOnNetworkAsync(CancellationToken cancel)
     {
         var key = _store.CurrentKey;
         if (key is null) return;
-        IReadOnlyList<FoundService> found;
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        budget.CancelAfter(LanBudget);
         try
         {
-            found = await _environment.Discovery.BrowseAsync(_environment.BrowseTime ?? DefaultBrowseTime, cancel).ConfigureAwait(false);
-        }
-        catch (Exception error) when (error is not OperationCanceledException)
-        {
-            _log.LogDebug(error, "Browsing the network failed");
-            return;
-        }
-        foreach (var member in found.Where(service => service.Instance != _store.InstanceId && service.Address is not null && InThisHousehold(service, key)))
-        {
+            IReadOnlyList<FoundService> found;
             try
             {
-                await using var channel = await LanConnector.ConnectAsync(member.Address!, member.Port, ConnectTimeout, cancel).ConfigureAwait(false);
-                var outcome = await _lanSync.SyncAsync(channel, Identity(), cancel).ConfigureAwait(false);
-                if (outcome.Removed is { Count: > 0 } && _store.HouseholdId is { } householdId) _relaySync.StartRotation(householdId);
-                _log.LogDebug("Synced with {Instance} on the network: {Outcome}", member.Instance, outcome);
+                found = await _environment.Discovery.BrowseAsync(_environment.BrowseTime ?? DefaultBrowseTime, budget.Token).ConfigureAwait(false);
             }
-            catch (IOException error)
+            catch (Exception error) when (error is not OperationCanceledException)
             {
-                _log.LogDebug(error, "A member on the network couldn't be reached");
+                _log.LogDebug(error, "Browsing the network failed");
+                return;
             }
+            var members = found
+                .Where(service => service.Instance != _store.InstanceId && service.Address is not null && InThisHousehold(service, key))
+                .DistinctBy(service => service.Instance)
+                .Take(MaxFound);
+            foreach (var member in members)
+            {
+                try
+                {
+                    await using var channel = await LanConnector.ConnectAsync(member.Address!, member.Port, ConnectTimeout, budget.Token).ConfigureAwait(false);
+                    var outcome = await _lanSync.SyncAsync(channel, Identity(), budget.Token).ConfigureAwait(false);
+                    if (outcome.Removed is { Count: > 0 } && _store.HouseholdId is { } householdId) _relaySync.StartRotation(householdId);
+                    _log.LogDebug("Synced with {Instance} on the network: {Outcome}", member.Instance, outcome);
+                }
+                catch (IOException error)
+                {
+                    _log.LogDebug(error, "A member on the network couldn't be reached");
+                }
+            }
+        }
+        catch (OperationCanceledException) when (budget.IsCancellationRequested && !cancel.IsCancellationRequested)
+        {
+            _log.LogDebug("Syncing on the network took its whole time this turn; the rest goes next turn");
         }
     }
 

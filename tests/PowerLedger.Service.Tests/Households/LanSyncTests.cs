@@ -155,6 +155,31 @@ public sealed class LanSyncTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_sync_that_came_in_keeps_nothing_once_this_pc_has_left_the_household_it_began_in()
+    {
+        _desktop.Household.Upsert([Row(_desktop.Id, 0, 10, changed: 100)]);
+        _laptop.StillIn = false;                                                   // the laptop left while the sync was on its way
+
+        (await _desktop.SyncWith(_laptop)).Ok.ShouldBeFalse();
+
+        _laptop.Household.Row(_desktop.Id, Hour(0)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task At_most_two_connections_at_once_are_served_from_one_address()
+    {
+        var port = _laptop.Listener!.Port;
+        await using var first = await LanConnector.ConnectAsync(IPAddress.Loopback, port, TimeSpan.FromSeconds(5));
+        await using var second = await LanConnector.ConnectAsync(IPAddress.Loopback, port, TimeSpan.FromSeconds(5));
+        await Task.Delay(100);
+        await using var third = await LanConnector.ConnectAsync(IPAddress.Loopback, port, TimeSpan.FromSeconds(5));
+
+        (await third.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5))).ShouldBeNull();   // turned away at once
+        var waiting = first.ReceiveAsync();
+        (await Task.WhenAny(waiting, Task.Delay(300))).ShouldNotBe(waiting);                // still served, waiting for its hello
+    }
+
+    [Fact]
     public async Task A_member_that_has_left_is_refused()
     {
         _laptop.Household.MarkLeft(_desktop.Id, Now.ToUnixTimeMilliseconds());
@@ -233,6 +258,9 @@ public sealed class LanSyncTests : IAsyncLifetime
 
         public MemberBook Members { get; }
 
+        /// <summary>Whether this PC is still in the household, as a sync that came in asks before keeping anything.</summary>
+        public bool StillIn { get; set; } = true;
+
         public string Name { get; }
 
         public ChassisKind Kind { get; }
@@ -254,7 +282,7 @@ public sealed class LanSyncTests : IAsyncLifetime
             var sync = new LanSync(Household, Members, _clock);
             Listener = new LanListener(IPAddress.Loopback, async (call, cancel) =>
             {
-                if (call.Message.Purpose == "sync") await sync.RespondAsync(call.Channel, call.Hello, Identity, cancel);
+                if (call.Message.Purpose == "sync") await sync.RespondAsync(call.Channel, call.Hello, Identity, cancel, () => StillIn);
             }, NullLogger.Instance);
             Listener.Start();
         }

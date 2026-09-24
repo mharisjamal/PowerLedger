@@ -492,6 +492,43 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_turn_syncs_with_the_server_first_then_once_with_each_pc_announced_on_the_network()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        await WorkerPc.Pair(desktop, laptop);
+        var household = desktop.Worker.Store.HouseholdId!;
+        desktop.Household.Upsert([Row(desktop.Worker.DeviceId, 3, 9, changed: Now.ToUnixTimeMilliseconds() + 5)]);
+
+        // Another PC announced twice under one name, with the household's tag, whose port counts who comes.
+        using var ghost = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        ghost.Start();
+        var port = ((IPEndPoint)ghost.LocalEndpoint).Port;
+        const string Instance = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+        var txt = new Dictionary<string, string> { ["v"] = "1", ["name"] = "Ghost", ["tag"] = HouseholdCrypto.HouseholdTag(desktop.Worker.Store.CurrentKey!, Instance) };
+        _network.Join().Register(Instance, port, txt);
+        _network.Join().Register(Instance, port, txt);
+        var came = 0;
+        var serverFirst = false;
+        var accepting = Task.Run(async () =>
+        {
+            while (true)
+            {
+                using var client = await ghost.AcceptTcpClientAsync();
+                serverFirst = _relay.Posted($"POST /v1/households/{household}/batches") > 0;
+                Interlocked.Increment(ref came);
+            }
+        });
+
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        came.ShouldBe(1);
+        serverFirst.ShouldBeTrue();
+        ghost.Stop();
+        await Should.ThrowAsync<Exception>(accepting);
+    }
+
+    [Fact]
     public async Task Signing_out_or_deleting_the_account_while_signed_out_says_so()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);

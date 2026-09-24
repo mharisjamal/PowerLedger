@@ -51,7 +51,7 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
             var theirs = await talk.ReceiveAsync("have", cancel).ConfigureAwait(false);
             var learned = Learn(theirs, hello.From.Id, me);
             var sent = await SendRowsAsync(talk, theirs, cancel).ConfigureAwait(false);
-            var received = await ReceiveRowsAsync(talk, hello.From.Id, cancel).ConfigureAwait(false);
+            var received = await ReceiveRowsAsync(talk, hello.From.Id, null, cancel).ConfigureAwait(false);
             return new SyncOutcome(true, hello.From.Id, received, sent, Removed: learned.Removed);
         }
         catch (LanException error)
@@ -61,7 +61,9 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
     }
 
     /// <summary>The side that was connected to and has read the other's hello, <paramref name="hello"/> as it came.</summary>
-    public async Task<SyncOutcome> RespondAsync(IFrameChannel channel, byte[] hello, PairingIdentity me, CancellationToken cancel)
+    /// <param name="stillIn">Asked again before anything the other side sent is kept, since a sync that came in runs beside
+    /// the household's changes (plan 0.8): false when this PC has since left the household the sync began in.</param>
+    public async Task<SyncOutcome> RespondAsync(IFrameChannel channel, byte[] hello, PairingIdentity me, CancellationToken cancel, Func<bool>? stillIn = null)
     {
         if (Hello.Of(LanMessages.Read(hello)) is not { Purpose: Hello.Sync } theirHello) return Refused("its hello wasn't a good one");
         if (Member(theirHello) is null) return Refused("it isn't in this household");
@@ -79,9 +81,10 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
             await CheckProofAsync(talk, theirHello, proof, cancel).ConfigureAwait(false);
             await talk.SendAsync(Prove(me, proof), cancel).ConfigureAwait(false);
             var theirs = await talk.ReceiveAsync("have", cancel).ConfigureAwait(false);
+            StillIn(theirHello.From.Id, stillIn);
             var learned = Learn(theirs, theirHello.From.Id, me);
             await talk.SendAsync(Have(), cancel).ConfigureAwait(false);
-            var received = await ReceiveRowsAsync(talk, theirHello.From.Id, cancel).ConfigureAwait(false);
+            var received = await ReceiveRowsAsync(talk, theirHello.From.Id, stillIn, cancel).ConfigureAwait(false);
             var sent = await SendRowsAsync(talk, theirs, cancel).ConfigureAwait(false);
             return new SyncOutcome(true, theirHello.From.Id, received, sent, Removed: learned.Removed);
         }
@@ -152,7 +155,7 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
 
     /// <summary>Takes rows until done: each for a current member, checked, and kept when newer than the one here. The PC
     /// synced with was heard from now; any other member as of the newest change among its rows.</summary>
-    private async Task<int> ReceiveRowsAsync(LanConversation talk, string peerId, CancellationToken cancel)
+    private async Task<int> ReceiveRowsAsync(LanConversation talk, string peerId, Func<bool>? stillIn, CancellationToken cancel)
     {
         var nowMs = clock.GetUtcNow().ToUnixTimeMilliseconds();
         var taken = 0;
@@ -162,6 +165,7 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
             if (message.Type == "done") break;
             if (message.Type != "rows") throw new LanException(LanProblem.Broken);
             if (message.Device is not { } device || household.Member(device) is not { LeftMs: null }) continue;
+            StillIn(peerId, stillIn);
             var rows = Wire.CapChanged((message.Rows ?? []).Select(row => Wire.Row(device, row)).OfType<HouseholdRow>(), nowMs);
             taken += household.Upsert(rows);
             if (rows.Count > 0 && device != peerId) household.Synced(device, Math.Min(nowMs, rows.Max(row => row.ChangedMs)));
@@ -171,4 +175,10 @@ internal sealed class LanSync(HouseholdRepository household, MemberBook members,
     }
 
     private static SyncOutcome Refused(string problem) => new(false, null, 0, 0, problem);
+
+    /// <summary>Ends a sync that came in once this PC has left the household it began in, or the other PC has gone from it.</summary>
+    private void StillIn(string peerId, Func<bool>? stillIn)
+    {
+        if (stillIn?.Invoke() == false || household.Member(peerId) is not { LeftMs: null }) throw new LanException(LanProblem.NotAMember);
+    }
 }

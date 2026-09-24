@@ -17,6 +17,9 @@ internal sealed record LanCall(IFrameChannel Channel, byte[] Hello, LanMessage M
 internal sealed class LanListener : IAsyncDisposable
 {
     public const int MaxConnections = 8;
+
+    /// <summary>The most connections served at once from one address (plan 0.8).</summary>
+    public const int MaxPerAddress = 2;
     private static readonly TimeSpan HelloTimeout = TimeSpan.FromSeconds(10);
 
     private readonly IPAddress _address;
@@ -26,6 +29,7 @@ internal sealed class LanListener : IAsyncDisposable
     private readonly SemaphoreSlim _slots = new(MaxConnections, MaxConnections);
     private readonly List<Task> _connections = [];
     private readonly Lock _gate = new();
+    private readonly Dictionary<IPAddress, int> _perAddress = [];
     private TcpListener? _listener;
     private Task? _accepting;
 
@@ -77,8 +81,15 @@ internal sealed class LanListener : IAsyncDisposable
                 _log.LogDebug(error, "Accepting a connection failed");
                 continue;
             }
+            var from = Address(client);
+            if (!TakeAddress(from))
+            {
+                client.Dispose();                                             // too many at once from there: turned away
+                continue;
+            }
             if (!_slots.Wait(0))
             {
+                LeaveAddress(from);
                 client.Dispose();                                             // too many at once: turned away
                 continue;
             }
@@ -88,9 +99,36 @@ internal sealed class LanListener : IAsyncDisposable
                 done =>
                 {
                     lock (_gate) _connections.Remove(done);
+                    LeaveAddress(from);
                     _slots.Release();
                 },
                 CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+    }
+
+    private static IPAddress? Address(TcpClient client) =>
+        (client.Client.RemoteEndPoint as IPEndPoint)?.Address is { } address && address.IsIPv4MappedToIPv6 ? address.MapToIPv4()
+            : (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
+
+    private bool TakeAddress(IPAddress? from)
+    {
+        if (from is null) return true;
+        lock (_gate)
+        {
+            var open = _perAddress.GetValueOrDefault(from);
+            if (open >= MaxPerAddress) return false;
+            _perAddress[from] = open + 1;
+            return true;
+        }
+    }
+
+    private void LeaveAddress(IPAddress? from)
+    {
+        if (from is null) return;
+        lock (_gate)
+        {
+            if (_perAddress.GetValueOrDefault(from) <= 1) _perAddress.Remove(from);
+            else _perAddress[from]--;
         }
     }
 
@@ -109,8 +147,7 @@ internal sealed class LanListener : IAsyncDisposable
                     first = await channel.ReceiveAsync(limit.Token).ConfigureAwait(false);
                 }
                 if (first is null || LanMessages.Read(first) is not { Type: "hello" } hello) return;
-                var from = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
-                await _handle(new LanCall(channel, first, hello, from is { IsIPv4MappedToIPv6: true } ? from.MapToIPv4() : from), stop).ConfigureAwait(false);
+                await _handle(new LanCall(channel, first, hello, Address(client)), stop).ConfigureAwait(false);
             }
             catch (Exception error) when (error is OperationCanceledException or IOException or InvalidDataException or ObjectDisposedException or SocketException)
             {
