@@ -224,6 +224,38 @@ public class ReportQueriesTests
         series.Sum(b => b.GapSeconds).ShouldBe(600, 1e-9);        // 12:00 to 12:10
     }
 
+    /// <summary>Review round: day buckets given a zone start at each local midnight, so across a clock change each
+    /// calendar day is still one bucket (London's Sunday 25 October 2026 is 25 hours long), a row late on a day stays in
+    /// it, and a sleep over midnight is laid back either side of that midnight. Without a zone, buckets stay a fixed
+    /// length from the start, as every shorter bucket does.</summary>
+    [Fact]
+    public void Day_buckets_in_a_zone_start_at_each_local_midnight_across_a_clock_change()
+    {
+        var london = TimeZoneInfo.TryFindSystemTimeZoneById("GMT Standard Time", out var windows) ? windows : TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+        var from = new DateTimeOffset(2026, 10, 23, 0, 0, 0, TimeSpan.FromHours(1));   // Friday's midnight, summer time
+        var to = new DateTimeOffset(2026, 10, 28, 0, 0, 0, TimeSpan.Zero);             // Wednesday's, winter time
+        using var t = new TestDatabase();
+        var hours = new AggregateRepository(t.Db);
+        hours.UpsertHour(Aggregate.Empty(new DateTimeOffset(2026, 10, 23, 11, 0, 0, TimeSpan.Zero)) with { EnergyWh = 10, OnSeconds = 3600 });
+        hours.UpsertHour(Aggregate.Empty(new DateTimeOffset(2026, 10, 26, 23, 0, 0, TimeSpan.Zero)) with { EnergyWh = 20, OnSeconds = 3600 });   // Monday, 23:00
+        hours.UpsertHour(Aggregate.Empty(new DateTimeOffset(2026, 10, 27, 0, 0, 0, TimeSpan.Zero)) with { EnergyWh = 40, OnSeconds = 3600 });    // Tuesday, 00:00
+        // Asleep Monday 22:00 to Tuesday 02:00, stored in the hour it woke, on for that whole hour.
+        hours.UpsertHour(Aggregate.Empty(new DateTimeOffset(2026, 10, 27, 2, 0, 0, TimeSpan.Zero)) with { OnSeconds = 3600, GapSeconds = 4 * 3600 });
+        var queries = new ReportQueries(t.Db);
+
+        var series = queries.Series(from, to, TimeSpan.FromDays(1), london);
+
+        series.Select(b => TimeZoneInfo.ConvertTime(b.Start, london).DateTime).ShouldBe(
+            [new DateTime(2026, 10, 23), new DateTime(2026, 10, 24), new DateTime(2026, 10, 25), new DateTime(2026, 10, 26), new DateTime(2026, 10, 27)]);
+        (series[3].Start - series[2].Start).ShouldBe(TimeSpan.FromHours(25));
+        series.Select(b => b.EnergyWh).ShouldBe([10, 0, 0, 20, 40]);
+        series.Select(b => b.GapSeconds).ShouldBe([0, 0, 0, 7200, 7200]);
+
+        queries.Series(from, to, TimeSpan.FromDays(1)).Select(b => b.Start).ShouldBe(Enumerable.Range(0, 6).Select(i => from.AddDays(i)));
+        queries.Series(from, to, TimeSpan.FromHours(6), london).Select(b => b.Start)
+            .ShouldBe(Enumerable.Range(0, 21).Select(i => from.AddHours(6 * i)));
+    }
+
     [Fact]
     public void The_first_minute_row_says_where_history_begins()
     {

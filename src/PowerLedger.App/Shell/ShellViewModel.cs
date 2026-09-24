@@ -20,6 +20,7 @@ internal sealed class ShellViewModel : ObservableObject
 {
     private Page _page = Page.Now;
     private bool _isSetup;
+    private bool _isShown = true;
 
     public ShellViewModel(
         NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, HouseholdViewModel household, SettingsViewModel settings,
@@ -100,6 +101,17 @@ internal sealed class ShellViewModel : ObservableObject
         }
     }
 
+    /// <summary>Whether a window shows the shell. Hidden in the tray, no page reads; shown again, the page on show reads
+    /// at once.</summary>
+    public bool IsShown
+    {
+        get => _isShown;
+        set
+        {
+            if (SetProperty(ref _isShown, value)) ShowPage();
+        }
+    }
+
     public object Current => IsSetup ? Wizard : Page switch
     {
         Page.Now => Now,
@@ -125,10 +137,10 @@ internal sealed class ShellViewModel : ObservableObject
         IsSetup = false;
     }
 
-    /// <summary>Lets only the screen on show read, and none while the wizard runs.</summary>
+    /// <summary>Lets only the screen on show read, and none while the wizard runs or the window is in the tray.</summary>
     private void ShowPage()
     {
-        var shown = IsSetup ? (Page?)null : Page;
+        var shown = IsSetup || !IsShown ? (Page?)null : Page;
         if (shown == Page.Dashboard) Dashboard?.Show();
         else Dashboard?.Hide();
         if (shown == Page.Breakdown) Breakdown.Show();

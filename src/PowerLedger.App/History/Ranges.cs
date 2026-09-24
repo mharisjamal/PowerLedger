@@ -11,8 +11,11 @@ namespace PowerLedger.App;
 /// <param name="Bucket">The chart bucket that suits its length.</param>
 internal sealed record DateRange(DateTimeOffset From, DateTimeOffset To, DateTimeOffset Through, string Title, TimeSpan Bucket)
 {
-    /// <summary>How many buckets the chart's width holds.</summary>
-    public int Capacity => Math.Max(1, (int)Math.Ceiling((Through - From) / Bucket));
+    /// <summary>How many buckets the chart's width holds. Day buckets are local days, cut at local midnights (see
+    /// <see cref="ReportQueries.Series"/>), so a clock change's hour either way doesn't make another.</summary>
+    public int Capacity => Math.Max(1, Bucket == TimeSpan.FromDays(1)
+        ? (int)Math.Round((Through - From) / Bucket)
+        : (int)Math.Ceiling((Through - From) / Bucket));
 }
 
 /// <summary>The ranges the history screens offer, and the local-clock arithmetic behind them.</summary>
