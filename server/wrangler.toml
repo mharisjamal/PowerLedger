@@ -31,3 +31,7 @@ crons = ["17 3 * * *"]
 [vars]
 MS_CLIENT_ID = ""
 GOOGLE_CLIENT_ID = ""
+
+# In-app feedback (src/feedback.ts): the owner's PRIVATE repo, "owner/name", that feedback is filed in as issues, with its
+# images committed. The token for it is a secret (tools/set-feedback-token.ps1). Either empty turns feedback off (503).
+FEEDBACK_REPO = ""

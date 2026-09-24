@@ -1,4 +1,5 @@
 import { utcDateString, utcDateYearsAgo } from "./day";
+import { utcHour } from "./feedback";
 import { RETENTION_BUDGET_MS, type RetentionOptions, retentionPart, runHouseholdRetention, workThrough } from "./households/retention";
 import { deleteBodies } from "./store";
 
@@ -12,8 +13,9 @@ interface ReportKeyRow {
 }
 
 /**
- * The daily cron: deletes reports (and their R2 objects) whose day is more than 3 years old, and
- * request counts more than 2 days old; then the households' own (households/retention.ts). Old
+ * The daily cron: deletes reports (and their R2 objects) whose day is more than 3 years old,
+ * request counts more than 2 days old and feedback's address counts for the hours that have
+ * passed; then the households' own (households/retention.ts). Old
  * reports are worked through 1000 at a time for as long as the run's 20 s budget lasts, so a large
  * backlog simply continues on the next run. Each part is on its own: one failing doesn't stop the rest.
  */
@@ -43,6 +45,9 @@ export async function runRetention(env: Cloudflare.Env, now: Date = new Date(), 
 
   await retentionPart("request counts", () =>
     env.DB.prepare("DELETE FROM requests WHERE utc_day < ?").bind(utcDateString(-REQUEST_RETENTION_DAYS, now)).run(),
+  );
+  await retentionPart("feedback counts", () =>
+    env.DB.prepare("DELETE FROM feedback_addresses WHERE utc_hour < ?").bind(utcHour(now.getTime())).run(),
   );
 
   await runHouseholdRetention(env, now, options, deadline);

@@ -16,8 +16,10 @@ for the design.
   refused.
 - `GET /admin/stats`, `GET /admin/list` and `GET /admin/object`, all behind `ADMIN_TOKEN`, are for the owner only:
   install and upload counts, a paged list of stored reports, and streaming one report's bytes back out.
-- A daily cron (`retention.ts`) drops reports whose day is more than 3 years old, and request counts more than 2
-  days old.
+- `POST /v1/feedback` takes what a user writes in the App's feedback box and files it as an issue in the owner's
+  PRIVATE GitHub repo (see Feedback, below).
+- A daily cron (`retention.ts`) drops reports whose day is more than 3 years old, request counts more than 2 days
+  old, and feedback's per-address counts for the hours that have passed.
 
 ## Households
 
@@ -136,6 +138,39 @@ npx wrangler d1 migrations apply powerledger-index --remote
 npx wrangler deploy
 ```
 
+## Feedback
+
+`POST /v1/feedback`, JSON, unsigned, 8 MB at most (413):
+`{"text","email","app","os","arch","log","images":[{"name","contentType","data"}]}`. `text` is required, 1 to 10000
+characters; `email` (254 at most, something@something) and `log` (200 KB at most) may be null or left out; `app` is
+the version (`0.7.0+sha`, 64 at most); `os` up to 100 characters; `arch` is `x64`, `arm64` or `x86`; `images` up to 5,
+each a PNG (`image/png`, a name ending `.png`) or JPEG (`image/jpeg`, `.jpg` or `.jpeg`) as standard base64, 1 MB
+decoded at most, its name up to 80 of `A-Z a-z 0-9 . _ -`, no two the same. Control and bidi characters are stripped
+from every field before use. A bad field is 400 `{"error"}` with what's wrong; an address gets 10 an hour (an IPv6
+one by its /64), then 429; and 503 (`{"error"}`) when feedback isn't set up on the server or GitHub fails, which the
+App takes as "try again later".
+
+Each piece gets an id, `yyyyMMdd-HHmmss-xxxx` (UTC). Its images, and its log when over 60k characters, are committed
+to `feedback/<id>/<name>` on the repo's default branch, one commit each; then an issue is opened, labelled
+`feedback`, titled with the text's first 60 characters and the app, os and arch, its body a table of the metadata
+(id, app, os, arch, email or "not given", time UTC), the text in a fenced block, the images, and the log in a
+`<details>` block or a link to its file. User text never lands in markdown as itself: the table's cells are inline
+code, and the fences are longer than any run of backticks in the text. The answer is 202 `{"id","issue"}`. A GitHub
+failure after some files were committed leaves them; the App's retry gets a new id.
+
+To set it up (once):
+
+1. Make a PRIVATE repo for it, say `PowerLedger-feedback`, and set `FEEDBACK_REPO = "<owner>/<repo>"` in
+   `wrangler.toml`.
+2. Make a fine-grained personal access token (GitHub → Settings → Developer settings → Fine-grained tokens) for that
+   one repo, with **Contents: read and write** and **Issues: read and write**, nothing else.
+3. Run `tools/set-feedback-token.ps1` yourself in `server\`. It asks for the token without showing it and sets it as
+   the Worker secret `FEEDBACK_GITHUB_TOKEN`; nothing keeps it.
+4. `npx wrangler d1 migrations apply powerledger-index --remote` (0005 adds the per-address counts) and
+   `npx wrangler deploy`.
+
+Until both are set, the route answers 503 "Feedback isn't set up on the server yet."
+
 ## Running the tests
 
 ```
@@ -189,4 +224,5 @@ current consent has `share` on.
 
 `ADMIN_TOKEN` and the salt used for `pc` live only in `%USERPROFILE%\.powerledger\admin.json`, on the owner's own
 PC. They are never committed, logged, or sent anywhere but Cloudflare (the token, as a Worker secret, by
-`set-admin-token.ps1`).
+`set-admin-token.ps1`). `FEEDBACK_GITHUB_TOKEN` lives only as a Worker secret (`set-feedback-token.ps1` asks for it
+and keeps nothing).
