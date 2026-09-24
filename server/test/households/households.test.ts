@@ -265,19 +265,23 @@ describe("the household's keys", () => {
     expect((await signedFetch(first, "GET", `/v1/households/${hid}/keys/3`)).status).toBe(404);
   });
 
-  it("takes an epoch's keys once: the same post again is done, other keys for it or an older epoch are 409", async () => {
+  it("takes only the household's next epoch, current + 1, which then becomes current", async () => {
     const first = await newDevice();
     const hid = await createHousehold(first);
-    const keys = { epoch: 3, envelopes: [{ device: first.id, body: envelope() }] };
+    const keysAt = (epoch: number) => ({ epoch, envelopes: [{ device: first.id, body: envelope() }] });
+    const post = (epoch: number) => signedFetch(first, "POST", `/v1/households/${hid}/keys`, keysAt(epoch));
+    const current = async () =>
+      (await env.DB.prepare("SELECT epoch FROM households WHERE id = ?").bind(hid).first<{ epoch: number }>())!.epoch;
 
-    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
-    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, keys)).status).toBe(200);
+    expect(await current()).toBe(1);
+    expect((await post(1)).status).toBe(409);
+    expect((await post(3)).status).toBe(409);
+    expect((await post(2)).status).toBe(200);
+    expect(await current()).toBe(2);
 
-    const other = { epoch: 3, envelopes: [{ device: first.id, body: envelope() }] };
-    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, other)).status).toBe(409);
-
-    const older = { epoch: 2, envelopes: [{ device: first.id, body: envelope() }] };
-    expect((await signedFetch(first, "POST", `/v1/households/${hid}/keys`, older)).status).toBe(409);
+    expect((await post(2)).status).toBe(409);
+    expect((await post(3)).status).toBe(200);
+    expect(await current()).toBe(3);
   });
 
   it("refuses envelopes for PCs that aren't current members, and malformed ones", async () => {

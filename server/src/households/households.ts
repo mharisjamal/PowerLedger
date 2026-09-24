@@ -194,8 +194,17 @@ export function isEpoch(value: unknown): value is number {
   return isWholeNumber(value, MAX_EPOCH);
 }
 
-/** POST /v1/households/{hid}/keys: {"epoch","envelopes":[{"device","body"}]}, the household key of a new epoch sealed to
- * current members. An epoch takes its keys once, and only when it's later than every epoch already here. */
+/** The household's current epoch (households.epoch, 1 at creation). */
+export async function currentEpoch(env: Cloudflare.Env, household: string): Promise<number | null> {
+  const row = await env.DB.prepare("SELECT epoch FROM households WHERE id = ?").bind(household).first<{ epoch: number }>();
+  return row?.epoch ?? null;
+}
+
+/**
+ * POST /v1/households/{hid}/keys: {"epoch","envelopes":[{"device","body"}]}, the household key of a new epoch sealed to
+ * current members. The Worker keeps each household's epoch: only current + 1 is taken (409 otherwise, an identical
+ * retry included), and it becomes current with its envelopes.
+ */
 export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
   const epoch = posted?.epoch;
@@ -221,22 +230,15 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
     return errorResponse(400, "Every envelope must be for a current member.");
   }
 
-  const existing = await env.DB.prepare("SELECT device, body FROM key_envelopes WHERE household = ? AND epoch = ?")
-    .bind(member.household, epoch)
-    .all<Envelope>();
-  if (existing.results.length > 0) {
-    const same =
-      existing.results.length === envelopes.length &&
-      envelopes.every((item) => existing.results.some((row) => row.device === item.device && row.body === item.body));
-    return same ? ok() : errorResponse(409, `Epoch ${epoch} already has its keys.`);
+  const at = await currentEpoch(env, member.household);
+  if (at === null || epoch !== at + 1) {
+    return errorResponse(409, `The household's key is at epoch ${at}; new keys are for epoch ${(at ?? 0) + 1} only.`);
   }
-
-  const latest = await env.DB.prepare("SELECT MAX(epoch) AS epoch FROM key_envelopes WHERE household = ?")
-    .bind(member.household)
-    .first<{ epoch: number | null }>();
-  if (latest?.epoch != null && epoch <= latest.epoch) {
-    return errorResponse(409, `Keys for epoch ${latest.epoch} are already here; a new epoch must be later.`);
-  }
+  // Claim the epoch first: of two members rotating at once, one moves it and the other gets 409.
+  const moved = await env.DB.prepare("UPDATE households SET epoch = ?2 WHERE id = ?1 AND epoch = ?3 RETURNING epoch")
+    .bind(member.household, epoch, at)
+    .first();
+  if (!moved) return errorResponse(409, `Epoch ${epoch} already has its keys.`);
 
   const now = Date.now();
   try {
@@ -247,9 +249,10 @@ export async function handlePostKeys(env: Cloudflare.Env, member: MemberRow, bod
         ).bind(member.household, epoch, item.device, member.device, item.body, now),
       ),
     );
-  } catch {
-    // Another member's keys for this epoch landed first.
-    return errorResponse(409, `Epoch ${epoch} already has its keys.`);
+  } catch (error) {
+    // Nothing kept: put the epoch back, so the household isn't left at an epoch with no keys.
+    await env.DB.prepare("UPDATE households SET epoch = ?3 WHERE id = ?1 AND epoch = ?2").bind(member.household, epoch, at).run();
+    throw error;
   }
   return ok();
 }

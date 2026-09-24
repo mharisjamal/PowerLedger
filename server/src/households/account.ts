@@ -1,7 +1,7 @@
 import { sha256hex } from "../auth";
 import { checkSession, finishSession, type MemberRow, type SessionRow, sessionToken } from "./auth";
 import { base64urlDecode } from "./encoding";
-import { addMemberStatement, HOUSEHOLD_ID, isEnvelopeBody, isEpoch, MAX_MEMBERS, readSmall } from "./households";
+import { addMemberStatement, currentEpoch, HOUSEHOLD_ID, isEnvelopeBody, isEpoch, MAX_MEMBERS, readSmall } from "./households";
 import { errorResponse, ok, overAddressLimit, parseObject } from "./http";
 
 /** At most this many PCs wait to join one household at a time. */
@@ -93,9 +93,10 @@ export async function handleListRequests(env: Cloudflare.Env, member: MemberRow)
 }
 
 /**
- * POST /v1/households/{hid}/requests/{device}/approve: {"epoch","body"}, the household key sealed for the waiting PC
- * (HouseholdCrypto.WrapFor, from the approving member). In one step the PC becomes a member, its envelope is kept and
- * its request is done; a full household leaves all three as they were.
+ * POST /v1/households/{hid}/requests/{device}/approve: {"epoch","body"}, the household key at its current epoch sealed
+ * for the waiting PC (HouseholdCrypto.WrapFor, from the approving member). In one step the PC becomes a member, its
+ * envelope is kept and its request is done; a full household leaves all three as they were. Any epoch but the current
+ * one is 409, and so is an envelope the PC already has at it: one is never overwritten.
  */
 export async function handleApprove(env: Cloudflare.Env, member: MemberRow, device: string, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
@@ -109,13 +110,13 @@ export async function handleApprove(env: Cloudflare.Env, member: MemberRow, devi
     .first<{ sign_key: string; dh_key: string }>();
   if (!request) return errorResponse(404, "That PC isn't waiting to join this household.");
 
-  // An approver that hasn't fetched the latest key yet would hand over one the newer batches can't be opened with.
-  const latest = await env.DB.prepare("SELECT MAX(epoch) AS epoch FROM key_envelopes WHERE household = ?")
-    .bind(member.household)
-    .first<{ epoch: number | null }>();
-  if (latest?.epoch != null && posted.epoch < latest.epoch) {
-    return errorResponse(409, `The household's key is at epoch ${latest.epoch} now; approve with that one.`);
-  }
+  // An approver that hasn't fetched the current key would hand over one the newer batches can't be opened with.
+  const epoch = await currentEpoch(env, member.household);
+  if (posted.epoch !== epoch) return errorResponse(409, `The household's key is at epoch ${epoch}; approve with that one.`);
+  const sealedAlready = await env.DB.prepare("SELECT 1 FROM key_envelopes WHERE household = ? AND epoch = ? AND device = ?")
+    .bind(member.household, epoch, device)
+    .first();
+  if (sealedAlready) return errorResponse(409, "That PC already has a key at this epoch.");
 
   const alreadyIn = await isCurrentMember(env, member.household, device);
   const results = await env.DB.batch([
@@ -124,15 +125,17 @@ export async function handleApprove(env: Cloudflare.Env, member: MemberRow, devi
       `INSERT INTO key_envelopes (household, epoch, device, from_device, body, created)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6
        WHERE EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?3 AND removed IS NULL)
-       ON CONFLICT (household, epoch, device) DO UPDATE SET
-         from_device = excluded.from_device, body = excluded.body, created = excluded.created`,
-    ).bind(member.household, posted.epoch, device, member.device, posted.body, now),
+       ON CONFLICT (household, epoch, device) DO NOTHING
+       RETURNING device`,
+    ).bind(member.household, epoch, device, member.device, posted.body, now),
     env.DB.prepare(
       `DELETE FROM join_requests WHERE household = ?1 AND device = ?2
        AND EXISTS (SELECT 1 FROM members WHERE household = ?1 AND device = ?2 AND removed IS NULL)`,
     ).bind(member.household, device),
   ]);
   if (!alreadyIn && results[0].results.length === 0) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
+  // Another member's approval sealed one first, between the look above and this: that one stays.
+  if (results[alreadyIn ? 0 : 1].results.length === 0) return errorResponse(409, "That PC already has a key at this epoch.");
   return ok();
 }
 

@@ -2,7 +2,8 @@
 -- name or any row: names and rows travel inside the batches, sealed with a key the server never sees.
 CREATE TABLE households (
   id      TEXT PRIMARY KEY,                   -- 32 lower-case hex, made by the PC that creates the household
-  created INTEGER NOT NULL                    -- ms
+  created INTEGER NOT NULL,                   -- ms
+  epoch   INTEGER NOT NULL DEFAULT 1          -- the household key's current epoch: new keys are posted for epoch + 1 only
 );
 CREATE TABLE members (
   household TEXT NOT NULL,

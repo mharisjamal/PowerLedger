@@ -159,10 +159,10 @@ describe("join requests", () => {
     expect(await isMember(hid, laptop.device.id)).toBe(false);
   });
 
-  it("gives 409 for an approval sealing a key older than the household's latest epoch", async () => {
+  it("gives 409 for an approval sealing any epoch but the household's current one", async () => {
     const { hid, owner } = await linkedHousehold();
     const rotated = await signedFetch(owner.device, "POST", `/v1/households/${hid}/keys`, {
-      epoch: 3,
+      epoch: 2,
       envelopes: [{ device: owner.device.id, body: envelope() }],
     });
     expect(rotated.status).toBe(200);
@@ -171,10 +171,34 @@ describe("join requests", () => {
     const approve = (epoch: number) =>
       signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, { epoch, body: envelope() });
 
-    expect((await approve(2)).status).toBe(409);
+    expect((await approve(1)).status).toBe(409);
+    expect((await approve(3)).status).toBe(409);
     expect(await isMember(hid, laptop.device.id)).toBe(false);
-    expect((await approve(3)).status).toBe(200);
+    expect((await approve(2)).status).toBe(200);
     expect(await isMember(hid, laptop.device.id)).toBe(true);
+  });
+
+  it("never overwrites an envelope: an approval whose PC already has one at the epoch is 409, and changes nothing", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const laptop = await signIn(undefined, owner.account);
+    await asAccount(laptop, "POST", "/v1/account/requests");
+    const kept = envelope();
+    await env.DB.prepare(
+      "INSERT INTO key_envelopes (household, epoch, device, from_device, body, created) VALUES (?, 1, ?, ?, ?, 1)",
+    )
+      .bind(hid, laptop.device.id, owner.device.id, kept)
+      .run();
+
+    const approve = await signedFetch(owner.device, "POST", `/v1/households/${hid}/requests/${laptop.device.id}/approve`, {
+      epoch: 1,
+      body: envelope(),
+    });
+    expect(approve.status).toBe(409);
+    expect(await isMember(hid, laptop.device.id)).toBe(false);
+    const row = await env.DB.prepare("SELECT body FROM key_envelopes WHERE household = ? AND device = ?")
+      .bind(hid, laptop.device.id)
+      .first<{ body: string }>();
+    expect(row?.body).toBe(kept);
   });
 
   it("keeps a request waiting when the household is full", async () => {
