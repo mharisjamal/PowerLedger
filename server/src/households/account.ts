@@ -346,28 +346,37 @@ export async function handlePutRecovery(env: Cloudflare.Env, session: SessionRow
   const epoch = await currentEpoch(env, household);
   if (posted!.epoch !== epoch) return errorResponse(409, `The household's key is at epoch ${epoch}; seal the recovery at that one.`);
 
-  const verifierHash = hex(await sha256(verifier));
-  const now = Date.now();
-  if (replace) {
-    await env.DB.prepare(
-      `INSERT INTO recovery (account, body, verifier_hash, epoch, holder, updated) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (account) DO UPDATE SET
-         body = excluded.body, verifier_hash = excluded.verifier_hash, epoch = excluded.epoch, holder = excluded.holder,
-         updated = excluded.updated`,
-    )
-      .bind(session.account, posted!.body, verifierHash, epoch, session.device, now)
-      .run();
-    return ok();
-  }
+  // The write holds only while the caller is still a current member and the key still at that epoch, however either
+  // changed since the checks above: a removed PC is never left holding a recovery, nor one sealed at an old epoch.
+  const stillSo = `EXISTS (SELECT 1 FROM members WHERE household = ?7 AND device = ?5 AND removed IS NULL)
+     AND (SELECT epoch FROM households WHERE id = ?7) = ?4`;
+  const values = [session.account, posted!.body, hex(await sha256(verifier)), epoch, session.device, Date.now(), household];
+  const written = replace
+    ? await env.DB.prepare(
+        `INSERT INTO recovery (account, body, verifier_hash, epoch, holder, updated)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE ${stillSo}
+         ON CONFLICT (account) DO UPDATE SET
+           body = excluded.body, verifier_hash = excluded.verifier_hash, epoch = excluded.epoch, holder = excluded.holder,
+           updated = excluded.updated
+         RETURNING holder`,
+      )
+        .bind(...values)
+        .first()
+    : // Without replace, only the holder's own recovery is renewed; a first one is a new code, so it needs replace too.
+      await env.DB.prepare(
+        `UPDATE recovery SET body = ?2, verifier_hash = ?3, epoch = ?4, updated = ?6
+         WHERE account = ?1 AND holder = ?5 AND ${stillSo} RETURNING holder`,
+      )
+        .bind(...values)
+        .first();
+  if (written) return ok();
 
-  // Without replace, only the holder's own recovery is renewed; a first one is a new code, so it needs replace too.
-  const renewed = await env.DB.prepare(
-    `UPDATE recovery SET body = ?1, verifier_hash = ?2, epoch = ?3, updated = ?4
-     WHERE account = ?5 AND holder = ?6 RETURNING holder`,
-  )
-    .bind(posted!.body, verifierHash, epoch, now, session.account, session.device)
-    .first();
-  return renewed ? ok() : errorResponse(409, "This PC doesn't hold this account's recovery code; a new code must replace it.");
+  if (!(await isCurrentMember(env, household, session.device))) {
+    return errorResponse(403, "Only a PC in the household can set how to recover it.");
+  }
+  const now = await currentEpoch(env, household);
+  if (now !== epoch) return errorResponse(409, `The household's key is at epoch ${now}; seal the recovery at that one.`);
+  return errorResponse(409, "This PC doesn't hold this account's recovery code; a new code must replace it.");
 }
 
 /** GET /v1/account/recovery: {"body","epoch","holder"} (the holder being the PC that holds the code), for any PC signed

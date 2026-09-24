@@ -36,8 +36,9 @@ function envelope(): string {
 }
 
 /** `by` moves the household's key on to `epoch`. */
-async function rotate(hid: string, by: TestDevice, epoch: number): Promise<void> {
-  const response = await signedFetch(by, "POST", `/v1/households/${hid}/keys`, { epoch, envelopes: [{ device: by.id, body: envelope() }] });
+async function rotate(hid: string, by: TestDevice, epoch: number, to: TestDevice[] = [by]): Promise<void> {
+  const envelopes = to.map((pc) => ({ device: pc.id, body: envelope() }));
+  const response = await signedFetch(by, "POST", `/v1/households/${hid}/keys`, { epoch, envelopes });
   expect(response.status).toBe(200);
 }
 
@@ -476,6 +477,42 @@ describe("recovery", () => {
     expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body: replaced, verifier, epoch: 3 })).status).toBe(409);
     expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body: replaced, verifier, epoch: 2 })).status).toBe(200);
     expect(await (await asAccount(newPc, "GET", "/v1/account/recovery")).json()).toEqual({ body: replaced, epoch: 2, holder: owner.device.id });
+  });
+
+  it("isn't kept when its PC is removed, or the key moves on, between the put's checks and its write", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const other = await newDevice();
+    await addMember(hid, owner.device, other);
+    const put = async (epoch: number, replace: boolean, hook: () => Promise<unknown>) => {
+      const body = JSON.stringify({ body: envelope(), verifier: nonce(), epoch, replace });
+      const request = await signedRequest(owner.device, "PUT", "/v1/account/recovery", body, {
+        headers: { Authorization: `Session ${owner.session}` },
+      });
+      return (await handleHouseholdRoutes(request, hookBefore(env, /INSERT INTO recovery|UPDATE recovery/, hook)))!.status;
+    };
+
+    expect(await put(1, true, () => rotate(hid, other, 2, [owner.device, other]))).toBe(409);
+    expect((await asAccount(owner, "GET", "/v1/account/recovery")).status).toBe(404);
+
+    expect((await asAccount(owner, "PUT", "/v1/account/recovery", { body: envelope(), verifier: nonce(), epoch: 2, replace: true })).status).toBe(200);
+    expect(await put(2, false, () => signedFetch(other, "DELETE", `/v1/households/${hid}/members/${owner.device.id}`))).toBe(403);
+    expect((await asAccount(owner, "GET", "/v1/account/recovery")).status).toBe(404);
+  });
+
+  it("isn't kept for a new holder removed between the put's checks and its write", async () => {
+    const { hid, owner } = await linkedHousehold();
+    const other = await newDevice();
+    await addMember(hid, owner.device, other);
+    const body = JSON.stringify({ body: envelope(), verifier: nonce(), epoch: 1, replace: true });
+    const request = await signedRequest(owner.device, "PUT", "/v1/account/recovery", body, {
+      headers: { Authorization: `Session ${owner.session}` },
+    });
+    const raced = hookBefore(env, /INSERT INTO recovery/, () =>
+      signedFetch(other, "DELETE", `/v1/households/${hid}/members/${owner.device.id}`),
+    );
+
+    expect((await handleHouseholdRoutes(request, raced))!.status).toBe(403);
+    expect(await env.DB.prepare("SELECT 1 FROM recovery WHERE account = ?").bind(owner.account).first()).toBeNull();
   });
 
   it("is put only by its holder, unless replace hands it to a new holder with a new code", async () => {
