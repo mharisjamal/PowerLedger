@@ -163,78 +163,98 @@ function readVerifier(value: unknown): Uint8Array | null {
 }
 
 /**
- * PUT /v1/account/recovery: {"body","verifier"} from a member of the linked household. The body is the household key
- * sealed under the recovery code's key; the verifier is 32 bytes the PC makes from the household key, which recover must
- * send back. Only SHA-256 of the verifier is kept, never the verifier, along with the household's current epoch. A later
- * PUT replaces it.
+ * PUT /v1/account/recovery: {"body","verifier","epoch","replace"} from a current member of the linked household (plan
+ * 0.9). The body is the key and member list sealed under the recovery code's key; the verifier is 32 bytes made from the
+ * code, which recover must send back, and only its SHA-256 is kept. 409 unless both hold: epoch is the household's
+ * current epoch, and the caller holds the recovery, or replace is true, which is a new code and makes the caller the
+ * holder. So a PC putting an old code again can't overwrite a newer one.
  */
 export async function handlePutRecovery(env: Cloudflare.Env, session: SessionRow, body: Uint8Array): Promise<Response> {
   const posted = parseObject(body);
   const verifier = readVerifier(posted?.verifier);
-  if (!isSealed(posted?.body, MAX_RECOVERY_CHARS)) return errorResponse(400, "body must be the sealed household key, as base64url.");
+  const replace = posted?.replace ?? false;
+  if (!isSealed(posted?.body, MAX_RECOVERY_CHARS)) return errorResponse(400, "body must be the sealed recovery, as base64url.");
   if (!verifier) return errorResponse(400, "verifier must be 32 bytes, as base64url.");
+  if (!isEpoch(posted?.epoch)) return errorResponse(400, "epoch must be the epoch the body was sealed at.");
+  if (typeof replace !== "boolean") return errorResponse(400, "replace must be true or false.");
 
   const household = await linkOf(env, session.account);
   if (!household) return errorResponse(409, "This account isn't linked to a household yet.");
   if (!(await isCurrentMember(env, household, session.device))) {
     return errorResponse(403, "Only a PC in the household can set how to recover it.");
   }
+  const epoch = await currentEpoch(env, household);
+  if (posted!.epoch !== epoch) return errorResponse(409, `The household's key is at epoch ${epoch}; seal the recovery at that one.`);
 
-  await env.DB.prepare(
-    `INSERT INTO recovery (account, body, verifier_hash, epoch, updated)
-     SELECT ?1, ?2, ?3, epoch, ?4 FROM households WHERE id = ?5
-     ON CONFLICT (account) DO UPDATE SET
-       body = excluded.body, verifier_hash = excluded.verifier_hash, epoch = excluded.epoch, updated = excluded.updated`,
+  const verifierHash = hex(await sha256(verifier));
+  const now = Date.now();
+  if (replace) {
+    await env.DB.prepare(
+      `INSERT INTO recovery (account, body, verifier_hash, epoch, holder, updated) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (account) DO UPDATE SET
+         body = excluded.body, verifier_hash = excluded.verifier_hash, epoch = excluded.epoch, holder = excluded.holder,
+         updated = excluded.updated`,
+    )
+      .bind(session.account, posted!.body, verifierHash, epoch, session.device, now)
+      .run();
+    return ok();
+  }
+
+  // Without replace, only the holder's own recovery is renewed; a first one is a new code, so it needs replace too.
+  const renewed = await env.DB.prepare(
+    `UPDATE recovery SET body = ?1, verifier_hash = ?2, epoch = ?3, updated = ?4
+     WHERE account = ?5 AND holder = ?6 RETURNING holder`,
   )
-    .bind(session.account, posted!.body, hex(await sha256(verifier)), Date.now(), household)
-    .run();
-  return ok();
+    .bind(posted!.body, verifierHash, epoch, now, session.account, session.device)
+    .first();
+  return renewed ? ok() : errorResponse(409, "This PC doesn't hold this account's recovery code; a new code must replace it.");
 }
 
-/** GET /v1/account/recovery: {"householdId","epoch","body"}, for any PC signed in as the account. */
+/** GET /v1/account/recovery: {"body","epoch","holder"} (the holder being the PC that holds the code), for any PC signed
+ * in as the account; 404 when there's none. */
 export async function handleGetRecovery(env: Cloudflare.Env, session: SessionRow): Promise<Response> {
-  const row = await env.DB.prepare(
-    `SELECT r.body, r.epoch, l.household FROM recovery r LEFT JOIN account_households l ON l.account = r.account
-     WHERE r.account = ?`,
-  )
+  const row = await env.DB.prepare("SELECT body, epoch, holder FROM recovery WHERE account = ?")
     .bind(session.account)
-    .first<{ body: string; epoch: number; household: string | null }>();
-  if (!row) return errorResponse(404, "This account has no recovery envelope.");
-  return Response.json({ householdId: row.household, epoch: row.epoch, body: row.body });
+    .first<{ body: string; epoch: number; holder: string }>();
+  if (!row) return errorResponse(404, "This account has no recovery.");
+  return Response.json({ body: row.body, epoch: row.epoch, holder: row.holder });
 }
 
 /**
- * POST /v1/account/recover: {"verifier"}, the 32 bytes only a PC that opened the recovery envelope can make; SHA-256 of
- * it must be what PUT kept, and the envelope must be from the household's current epoch (a key since replaced gives
- * 409). On the account's authority, with no approval, this PC then becomes a member of the linked household. Like every
- * signed request, it's taken once.
+ * POST /v1/account/recover: {"verifier"}, which SHA-256 must match what PUT kept, at whatever epoch the recovery was
+ * sealed. On the account's authority, with no approval, the calling PC becomes the household's only current member:
+ * every other is removed at the current epoch. The code is used up: the recovery is deleted, and the PC makes a new code
+ * and rotates the key. Answers {"household","epoch"}, the epoch being the household's current one. Like every signed
+ * request, it's taken once.
  */
 export async function handleRecover(env: Cloudflare.Env, session: SessionRow, body: Uint8Array): Promise<Response> {
   const verifier = readVerifier(parseObject(body)?.verifier);
   if (!verifier) return errorResponse(400, "verifier must be 32 bytes, as base64url.");
 
   const row = await env.DB.prepare(
-    `SELECT r.verifier_hash, r.epoch, l.household, h.epoch AS current
+    `SELECT r.verifier_hash, l.household, h.epoch AS current
      FROM recovery r JOIN account_households l ON l.account = r.account JOIN households h ON h.id = l.household
      WHERE r.account = ?`,
   )
     .bind(session.account)
-    .first<{ verifier_hash: string; epoch: number; household: string; current: number }>();
+    .first<{ verifier_hash: string; household: string; current: number }>();
   if (!row) return errorResponse(404, "This account has nothing to recover.");
-
   if (!timingSafeEqualStrings(hex(await sha256(verifier)), row.verifier_hash)) {
     return errorResponse(403, "That isn't this account's recovery verifier.");
   }
-  if (row.epoch !== row.current) {
-    return errorResponse(409, "The household's key has changed since this recovery was set; a PC in the household must set it again.");
-  }
 
-  if (!(await isCurrentMember(env, row.household, session.device))) {
-    const added = await addMemberStatement(env, row.household, session.device, session.sign_key, session.dh_key, Date.now()).first();
-    if (!added) return errorResponse(409, `This household already has ${MAX_MEMBERS} PCs.`);
-  }
-  await env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(row.household, session.device).run();
-  return ok({ householdId: row.household });
+  const now = Date.now();
+  const alreadyIn = await isCurrentMember(env, row.household, session.device);
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE members SET removed = ?1, removed_epoch = ?2
+       WHERE household = ?3 AND device != ?4 AND removed IS NULL`,
+    ).bind(now, row.current, row.household, session.device),
+    ...(alreadyIn ? [] : [addMemberStatement(env, row.household, session.device, session.sign_key, session.dh_key, now)]),
+    env.DB.prepare("DELETE FROM recovery WHERE account = ?").bind(session.account),
+    env.DB.prepare("DELETE FROM join_requests WHERE household = ? AND device = ?").bind(row.household, session.device),
+  ]);
+  return Response.json({ household: row.household, epoch: row.current });
 }
 
 /** POST /v1/auth/signout: ends this PC's session, signed by the PC it was given to. A session already ended is done. */
