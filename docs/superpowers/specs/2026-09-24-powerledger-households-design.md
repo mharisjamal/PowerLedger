@@ -169,7 +169,8 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
 ## 8. Server
 
 New routes on the same Worker, with D1 tables:
-- `households(id, created)` and `members(household, device, sign_key, dh_key, name, kind, added, removed)`;
+- `households(id, created)` and `members(household, device, sign_key, dh_key, added, removed)`. Names and kinds travel
+  inside the encrypted batches, each PC's own with every batch it sends, so the server never has them;
 - `batches(household, seq, device, epoch, bytes, received)`, with the bodies in the same body store as reports (D1 until
   R2 is on);
 - `key_envelopes(household, epoch, device, body)` and `meetings(id, body, expires)` for pairing by code;
