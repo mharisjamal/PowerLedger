@@ -115,11 +115,6 @@ public static class HouseholdCrypto
         return mine.DeriveRawSecretAgreement(theirs.PublicKey);
     }
 
-    /// <summary>The first transcript-only form. The side that answers second could try hellos until the code matched one it
-    /// wanted; it goes once the service uses <see cref="ComparisonCode(byte[], byte[], byte[])"/> (plan 0.9).</summary>
-    public static string ComparisonCode(byte[] shared, byte[] transcript) =>
-        SixDigits(Hkdf(shared, transcript, "powerledger comparison code", 4));
-
     /// <summary>The 6-digit comparison code both screens show (households design §3, plan 0.9), as "482 913": from the
     /// shared secret, the hellos' transcript (<see cref="Transcript"/>) and the nonce the adder committed to in its hello
     /// and revealed only after the joiner's hello came. Neither side can steer it: the joiner answers before it knows the
