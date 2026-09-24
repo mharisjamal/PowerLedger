@@ -48,7 +48,7 @@ OutputBaseFilename=PowerLedger-{#AppVersion}-setup
 ; Low on purpose: a compatibility mode (set by the user, or by Windows after an earlier failed start) makes setup see an
 ; older Windows, and a Windows 10 minimum here refused Windows 11 with "does not support the version of Windows".
 ; InitializeSetup checks the real build instead.
-MinVersion=6.1sp1
+MinVersion=6.1
 ; Inno Setup doesn't count files picked per architecture (the Checks in [Files]) toward the disk space it asks for, so
 ; build.ps1 passes the bigger build's size; without it the destination page claimed a few MB.
 ExtraDiskSpaceRequired={#PayloadBytes}
@@ -231,7 +231,8 @@ const
   { Windows 10 version 1809, the oldest the App and the service are built and tested for. }
   OldestBuild = 17763;
 
-{ The Windows build as the registry has it, which a compatibility mode doesn't change; 0 when it can't be read. }
+{ The Windows build from the registry's CurrentBuild, which a compatibility mode leaves alone (it fakes CurrentBuildNumber
+  and GetWindowsVersion); 0 when it can't be read. }
 function RealWindowsBuild: Integer;
 var
   Root: Integer;
@@ -242,7 +243,7 @@ begin
     Root := HKLM64
   else
     Root := HKLM;
-  if RegQueryStringValue(Root, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion', 'CurrentBuildNumber', Build) then
+  if RegQueryStringValue(Root, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion', 'CurrentBuild', Build) then
     Result := StrToIntDef(Build, 0);
 end;
 
