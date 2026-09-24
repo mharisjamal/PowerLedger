@@ -123,6 +123,20 @@ approves it, and lets you get the household back with your recovery code if you 
 - **Deleting your account** (on the Household page) deletes the account, its link, its sessions and its recovery copy.
   Your household carries on without sign-in.
 
+## Feedback
+
+The bug button at the foot of the window sends a report only when you press **Send**, and only what the window shows.
+
+- **What a report carries:** what you typed; the images you added, including any PowerLedger screenshot you asked for;
+  the app version, your Windows version and whether the PC is x64, Arm64 or 32-bit; and, while the box is ticked, the
+  last lines of PowerLedger's logs. Your e-mail address goes only if you type it, and is used only to reply.
+- **Where it goes:** through PowerLedger's server to a private issue tracker on GitHub that only the controller can see.
+  GitHub, Inc. stores it there. The server keeps no copy; it uses your IP address only to limit how often it is called.
+- **How long:** until the controller has dealt with it and deletes it. Write to the address above to have a report
+  deleted sooner.
+- **Offline:** a report that couldn't be sent waits in `%LOCALAPPDATA%\PowerLedger\Feedback` on your PC, for up to 30
+  days, and goes when the PC is online. Delete the file to stop it.
+
 ## Changes
 
 When what a switch sends changes, the consent version goes up. PowerLedger then sends nothing until you have chosen
