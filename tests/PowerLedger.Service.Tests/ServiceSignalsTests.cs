@@ -22,6 +22,36 @@ public class ServiceSignalsTests
         => new ServiceSignals(new FakeTimeProvider()).UserIdleSeconds().ShouldBeNull();
 
     [Fact]
+    public void A_window_shows_in_a_session_while_any_app_there_says_so()
+    {
+        var signals = new ServiceSignals(new FakeTimeProvider());
+        signals.WindowShowingIn(1).ShouldBeFalse();                    // no App at all: nothing is showing
+        signals.ReportWindow("a", 1, visible: true);
+        signals.ReportWindow("b", 2, visible: false);
+        signals.WindowShowingIn(1).ShouldBeTrue();
+        signals.WindowShowingIn(2).ShouldBeFalse();
+        signals.ReportWindow("a", 1, visible: false);
+        signals.WindowShowingIn(1).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_client_that_leaves_takes_its_window_with_it()
+    {
+        var signals = new ServiceSignals(new FakeTimeProvider());
+        signals.ReportWindow("a", 1, visible: true);
+        signals.ForgetClient("a");
+        signals.WindowShowingIn(1).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_window_in_a_session_windows_wouldnt_name_counts_nowhere()
+    {
+        var signals = new ServiceSignals(new FakeTimeProvider());
+        signals.ReportWindow("a", null, visible: true);
+        signals.WindowShowingIn(1).ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_report_keeps_ageing_until_the_next_one_arrives()
     {
         var clock = new FakeTimeProvider();

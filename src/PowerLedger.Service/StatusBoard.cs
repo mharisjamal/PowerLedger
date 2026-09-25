@@ -5,7 +5,8 @@ namespace PowerLedger.Service;
 
 /// <summary>The latest status and settings the loop has published, for the pipe and the sharing worker to read from any
 /// thread, with the hardware it detected and whether its last reading found a discrete graphics card. The sharing and
-/// household workers publish how sharing and the household stand, which the status carries from the moment they change.</summary>
+/// household workers publish how sharing and the household stand, and the update worker how updates do (Plan Q §4), which the
+/// status carries from the moment they change.</summary>
 internal sealed class StatusBoard
 {
     private ServiceStatus? _status;
@@ -13,9 +14,10 @@ internal sealed class StatusBoard
     private InventoryFacts? _facts;
     private SharingStatus? _sharing;
     private HouseholdStatus? _household;
+    private UpdateStatus? _updates;
     private int _discreteGpu;
 
-    /// <summary>The loop's latest status with sharing's and the household's; null until the loop has published one.</summary>
+    /// <summary>The loop's latest status with sharing's, the household's and updates'; null until the loop has published one.</summary>
     public ServiceStatus? Status
     {
         get
@@ -24,7 +26,9 @@ internal sealed class StatusBoard
             if (status is null) return null;
             var sharing = Volatile.Read(ref _sharing);
             var household = Volatile.Read(ref _household);
+            var updates = Volatile.Read(ref _updates);
             if (sharing is not null) status = status with { Sharing = sharing };
+            if (updates is not null) status = status with { Updates = updates };
             return household is not null ? status with { Household = household } : status;
         }
     }
@@ -49,6 +53,9 @@ internal sealed class StatusBoard
     public void Publish(SharingStatus sharing) => Volatile.Write(ref _sharing, sharing);
 
     public void Publish(HouseholdStatus household) => Volatile.Write(ref _household, household);
+
+    /// <summary>How updates stand, from the update worker.</summary>
+    public void Publish(UpdateStatus updates) => Volatile.Write(ref _updates, updates);
 
     public void PublishDiscreteGpu(bool present) => Volatile.Write(ref _discreteGpu, present ? 1 : 0);
 }

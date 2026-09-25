@@ -28,7 +28,33 @@ public class PipeProtocolTests
         new ErrorReply(9, "no"),
         new ErrorReply(null, "unreadable"),
         Frame(),
+        new UiStateRequest(12, WindowVisible: true),
+        new UpdateNowRequest(13),
     };
+
+    [Fact]
+    public void The_Apps_window_state_and_update_now_have_their_wire_names()
+    {
+        Text(new UiStateRequest(1, true)).ShouldBe("""{"type":"uiState","windowVisible":true,"id":1}""" + "\n");
+        Text(new UpdateNowRequest(2)).ShouldBe("""{"type":"updateNow","id":2}""" + "\n");
+    }
+
+    [Fact]
+    public void A_status_carries_how_updates_stand()
+    {
+        var updates = new UpdateStatus(ServiceInstalls: true, Stage: "Downloading 0.9.1", MinVersion: "0.9.0", UpdateRequired: true);
+        var back = PipeProtocol.Deserialize(Trim(PipeProtocol.Serialize(new StatusReply(1, Status() with { Updates = updates }))))
+            .ShouldBeOfType<StatusReply>();
+        back.Status.Updates.ShouldBe(updates);
+    }
+
+    [Fact]
+    public void A_status_from_an_older_service_has_no_updates()
+    {
+        var json = JsonNode.Parse(Text(new StatusReply(1, Status())))!;
+        json["status"]!.AsObject().Remove("updates");
+        PipeProtocol.Deserialize(Encoding.UTF8.GetBytes(json.ToJsonString())).ShouldBeOfType<StatusReply>().Status.Updates.ShouldBeNull();
+    }
 
     [Theory]
     [MemberData(nameof(SimpleMessages))]

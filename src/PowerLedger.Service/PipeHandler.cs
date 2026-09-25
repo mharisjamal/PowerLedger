@@ -12,11 +12,12 @@ namespace PowerLedger.Service;
 /// the reply waits until the loop has done it. Data sharing's requests go to the sharing worker the same way, except the
 /// App's usage counts and crashes: those are acknowledged once queued, so the App never sends them twice. A sharing request
 /// the App is told got no answer in time is never carried out. The household's requests go to the household worker, which
-/// answers within <see cref="Households.HouseholdWorker.AppWait"/> and carries on with a pairing after its answer.
+/// answers within <see cref="Households.HouseholdWorker.AppWait"/> and carries on with a pairing after its answer. The App's
+/// window state goes to the signals, and Update now to the update worker (Plan Q §3, §4).
 /// </summary>
 internal sealed partial class PipeHandler(
     LoopCommands commands, StatusBoard board, MonitorBoard monitors, ServiceSignals signals, TariffRepository tariffs, TimeProvider clock,
-    SharingCommands sharing, Households.IHouseholdRequests? households = null)
+    SharingCommands sharing, Households.IHouseholdRequests? households = null, Updates.IUpdateRequests? updates = null)
 {
     /// <summary>How long a request waits for the loop before the client is told it did not answer.</summary>
     public static readonly TimeSpan LoopTimeout = TimeSpan.FromSeconds(10);
@@ -74,6 +75,14 @@ internal sealed partial class PipeHandler(
                 return await ShareAsync(new SendNowCommand(request.Id), cancel).ConfigureAwait(false);
             case DeleteMyDataRequest request:
                 return await ShareAsync(new DeleteMyDataCommand(request.Id), cancel).ConfigureAwait(false);
+            case UiStateRequest request:
+                signals.ReportWindow(client, session, request.WindowVisible);
+                return new OkReply(request.Id);
+            case UpdateNowRequest request:
+                if (updates is null) return new ErrorReply(request.Id, "This service doesn't install updates itself.");
+                return await updates.InstallNowAsync(cancel).ConfigureAwait(false) is { } cannot
+                    ? new ErrorReply(request.Id, cannot)
+                    : new OkReply(request.Id);
             case BrowsePcsRequest or AddPcRequest or StartCodePairingRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest
                 or LeaveHouseholdRequest or RenamePcRequest or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest
                 or CancelPairingRequest or NewRecoveryCodeRequest or RemoveOldRowsRequest:

@@ -335,9 +335,45 @@ public sealed class PipeHandlerTests : IDisposable
         (await reply).ShouldBe(new ErrorReply(52, PipeHandler.NoAnswer));
     }
 
+    [Fact]
+    public async Task The_apps_window_state_reaches_the_signals_with_its_session()
+    {
+        (await _handler.HandleAsync(new UiStateRequest(60, true), "client-1", CancellationToken.None, session: 2)).ShouldBe(new OkReply(60));
+        _signals.WindowShowingIn(2).ShouldBeTrue();
+        (await _handler.HandleAsync(new UiStateRequest(61, false), "client-1", CancellationToken.None, session: 2)).ShouldBe(new OkReply(61));
+        _signals.WindowShowingIn(2).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Update_now_goes_to_the_update_worker_and_its_refusal_comes_back()
+    {
+        var updates = new FakeUpdateRequests { Answer = null };
+        var handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock, _sharing, updates: updates);
+
+        (await handler.HandleAsync(new UpdateNowRequest(62), "client-1", CancellationToken.None)).ShouldBe(new OkReply(62));
+        updates.Asked.ShouldBe(1);
+        updates.Answer = "This PowerLedger can't install updates itself.";
+        (await handler.HandleAsync(new UpdateNowRequest(63), "client-1", CancellationToken.None))
+            .ShouldBe(new ErrorReply(63, "This PowerLedger can't install updates itself."));
+        (await Send(new UpdateNowRequest(64))).ShouldBeOfType<ErrorReply>();   // no update worker: a console run
+    }
+
     public void Dispose() => _database.Dispose();
 
     private Task<PipeMessage> Send(PipeMessage message) => _handler.HandleAsync(message, "client-1", CancellationToken.None);
+
+    private sealed class FakeUpdateRequests : Updates.IUpdateRequests
+    {
+        public string? Answer { get; set; }
+
+        public int Asked { get; private set; }
+
+        public Task<string?> InstallNowAsync(CancellationToken cancel)
+        {
+            Asked++;
+            return Task.FromResult(Answer);
+        }
+    }
 
     private sealed class FakeHouseholds(Func<PipeRequest, Task<PipeMessage>> answer) : Households.IHouseholdRequests
     {
