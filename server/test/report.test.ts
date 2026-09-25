@@ -1,7 +1,9 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { utcDateString } from "../src/day";
+import { gunzipBounded } from "../src/gzip";
 import { discardIfDeleted, handleReport } from "../src/report";
+import { getBody } from "../src/store";
 import { gzip, gzipJson, randomAddress, randomInstallId, randomKey, withoutR2 } from "./support";
 import validFull from "./fixtures/valid-full.json";
 import validDiagnosticsOnly from "./fixtures/valid-diagnostics-only.json";
@@ -175,6 +177,35 @@ describe("POST /v1/report", () => {
       .bind(report.installId)
       .all<{ complete: number }>();
     expect(rows.results).toEqual([{ complete: 1 }]);
+  });
+
+  it.each([
+    ["R2", (e: Cloudflare.Env) => e],
+    ["D1", withoutR2],
+  ])("keeps the day's hardware (%s) when a later upload of the day comes without it", async (_store, envOf) => {
+    const report = freshReport(validFull);
+    const key = randomKey();
+    const power = report.power as { hardware: unknown; minutes: unknown };
+    expect(power.hardware).not.toBeNull();
+    const call = (value: Report) =>
+      gzipJson(value).then((body) =>
+        handleReport(
+          new Request("https://example.com/v1/report", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${key}`, "Content-Encoding": "gzip", "CF-Connecting-IP": randomAddress() },
+            body,
+          }),
+          envOf(env),
+        ),
+      );
+
+    expect((await call({ ...report, complete: false })).status).toBe(200);
+    expect((await call({ ...report, power: { ...power, hardware: null }, complete: true })).status).toBe(200);
+
+    const stored = await getBody(envOf(env), `reports/v1/${report.installId}/${report.day}.json.gz`);
+    const kept = JSON.parse(new TextDecoder().decode((await gunzipBounded(stored!, 8 * 1024 * 1024))!));
+    expect(kept.power.hardware).toEqual(power.hardware);
+    expect(kept.complete).toBe(true);
   });
 
   it("gives 400 for a complete that isn't true or false", async () => {

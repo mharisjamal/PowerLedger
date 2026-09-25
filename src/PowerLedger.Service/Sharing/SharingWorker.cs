@@ -730,7 +730,7 @@ internal sealed class SharingWorker : BackgroundService
 
                 var inputs = Inputs(day, consent, id, consent.Power ? _outbox.Minutes(day) : [], OutboxEvents.Read(_outbox, day), withHardware: false, now);
                 var hash = consent.Power ? ReportJson.Hash(ReportBuilder.Hardware(inputs)) : null;
-                var report = ReportBuilder.Build(inputs with { WithHardware = hash is not null && hash != _store.HardwareHash });
+                var report = ReportBuilder.Build(inputs with { WithHardware = CarriesHardware(day, hash) });
                 if (report is { Diagnostics: null, Usage: null, Power: null })
                 {
                     _outbox.DeleteDay(day);                                            // nothing the switches allow is left in it
@@ -815,7 +815,7 @@ internal sealed class SharingWorker : BackgroundService
         var inputs = Inputs(day, consent, id, consent.Power ? _outbox.Minutes(day) : [], OutboxEvents.Read(_outbox, day), withHardware: false, now)
             with { Complete = false };
         var hash = consent.Power ? ReportJson.Hash(ReportBuilder.Hardware(inputs)) : null;
-        var report = ReportBuilder.Build(inputs with { WithHardware = hash is not null && hash != _store.HardwareHash });
+        var report = ReportBuilder.Build(inputs with { WithHardware = CarriesHardware(day, hash) });
         if (report is { Diagnostics: null, Usage: null, Power: null })
         {
             _store.LastPartialRun = nowMs;                                    // nothing yet today the switches allow
@@ -942,8 +942,16 @@ internal sealed class SharingWorker : BackgroundService
         Note(null);
         _store.Backoff = null;
         Posted();                                                              // the report carried the consent as it is now
-        if (hardwareHash is not null) _store.HardwareHash = hardwareHash;
+        if (hardwareHash is null) return;
+        _store.HardwareHash = hardwareHash;
+        _store.HardwareDay = day;
     }
+
+    /// <summary>Whether an upload of <paramref name="day"/> carries the hardware: when it changed since it last went, and on
+    /// every later upload of the day that last carried it, since the server keeps only a day's last upload and would
+    /// otherwise lose it with the next hour's.</summary>
+    private bool CarriesHardware(string day, string? hash) =>
+        hash is not null && (hash != _store.HardwareHash || day == _store.HardwareDay);
 
     /// <summary>How the last upload went, for the status. A problem that lasts, which trying again won't clear, is kept over
     /// it until the user answers again (<see cref="SetConsentAsync"/>), so it is there to be read.</summary>

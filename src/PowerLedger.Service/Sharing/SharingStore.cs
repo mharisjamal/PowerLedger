@@ -41,6 +41,7 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     internal const string ProblemKey = "sharing.problem";
     internal const string BackoffKey = "sharing.backoff";
     internal const string HardwareHashKey = "sharing.hardware-hash";
+    internal const string HardwareDayKey = "sharing.hardware-day";
     internal const string ConsentPendingKey = "sharing.consent-pending";
     internal const string ConsentBackoffKey = "sharing.consent-backoff";
     internal const string LastRunKey = "sharing.last-run";
@@ -61,13 +62,14 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     /// so does the <see cref="PreviousId"/>, which only writing in can have the server forget.</summary>
     private static readonly string[] Forgotten =
     [
-        IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, ConsentBackoffKey, LastRunKey,
-        SentThroughKey, LastPartialRunKey, HistoryUntilKey, HistoryThroughKey, HistoryBackoffKey,
+        IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, HardwareDayKey, ConsentPendingKey, ConsentBackoffKey,
+        LastRunKey, SentThroughKey, LastPartialRunKey, HistoryUntilKey, HistoryThroughKey, HistoryBackoffKey,
     ];
 
     /// <summary>What a new ID starts without: what was kept of the one before about the server. What this PC collected, and
     /// when it last ran, stay.</summary>
-    private static readonly string[] OfTheId = [LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, ConsentBackoffKey];
+    private static readonly string[] OfTheId =
+        [LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, HardwareDayKey, ConsentPendingKey, ConsentBackoffKey];
 
     /// <summary>Mixed into the key's encryption, so no other program running as the same account reads it back by chance.</summary>
     private static readonly byte[] KeyEntropy = "PowerLedger data sharing install key"u8.ToArray();
@@ -166,6 +168,14 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     {
         get => settings.Get(HardwareHashKey);
         set => WriteText(HardwareHashKey, value);
+    }
+
+    /// <summary>The day whose accepted upload last carried the hardware section. The server keeps only a day's last upload,
+    /// so every later upload of that day carries it too.</summary>
+    public string? HardwareDay
+    {
+        get => settings.Get(HardwareDayKey);
+        set => WriteText(HardwareDayKey, value);
     }
 
     /// <summary>True while a consent change hasn't reached the server.</summary>

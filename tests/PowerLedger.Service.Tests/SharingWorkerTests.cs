@@ -108,7 +108,9 @@ public sealed class SharingWorkerTests : IDisposable
         _h.Outbox.Days().ShouldBeEmpty();
         var copy = Path.Combine(_h.Sent, "2026-09-24.json.gz");
         File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last(call => call.Report?.Complete == true).Body);
-        _h.Store.LastSent.ShouldBe(new LastSent(Local(25, 1, 1).ToUnixTimeMilliseconds(), new FileInfo(copy).Length));
+        // Today so far went first at 00:44 with the hardware, so it goes again with it after yesterday.
+        _h.Client.Calls.Last().Report.ShouldNotBeNull().Day.ShouldBe("2026-09-25");
+        _h.Store.LastSent.ShouldBe(new LastSent(Local(25, 1, 1).ToUnixTimeMilliseconds(), _h.Client.Calls.Last().Body.Length));
     }
 
     [Fact]
@@ -143,7 +145,7 @@ public sealed class SharingWorkerTests : IDisposable
         await _h.TickAsync();
         var second = _h.Client.Partials.Last();
         second.Power.ShouldNotBeNull().Minutes.T.Length.ShouldBe(40);
-        second.Power.Hardware.ShouldBeNull();                                    // the parts went with the first
+        second.Power.Hardware.ShouldNotBeNull();                                 // the server keeps the day's last upload
         _h.Client.Reports.ShouldBeEmpty();
 
         _h.Clock.SetUtcNow(Local(25, 0, 50));
@@ -594,6 +596,32 @@ public sealed class SharingWorkerTests : IDisposable
         await _h.TickAsync();
 
         _h.Client.Reports.Select(report => report.Power!.Hardware?.Profile.FanCount).ShouldBe(new int?[] { 3, null, 5, null });
+    }
+
+    [Fact]
+    public async Task Every_upload_of_a_day_whose_first_carried_the_hardware_carries_it_as_the_server_keeps_only_the_last()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(Local(24, 10, 50));
+        await _h.TickAsync();
+        _h.Readings(Local(24, 11), TimeSpan.FromMinutes(10));
+        _h.Clock.SetUtcNow(Local(24, 11, 45));
+        await _h.TickAsync();
+        _h.Clock.SetUtcNow(Local(25, 0, 50));
+        await _h.TickAsync();
+        _h.Readings(Local(25, 1), TimeSpan.FromMinutes(10));
+        _h.Clock.SetUtcNow(Local(25, 1, 45));
+        await _h.TickAsync();
+
+        _h.Client.Calls.Where(call => call.Report is not null)
+            .Select(call => (call.Report!.Day, call.Report.Complete != false, call.Report.Power!.Hardware is not null))
+            .ShouldBe(new[]
+            {
+                ("2026-09-24", false, true), ("2026-09-24", false, true), ("2026-09-24", true, true),
+                ("2026-09-25", false, false),                                   // a new day, and the parts unchanged
+            });
     }
 
     [Fact]

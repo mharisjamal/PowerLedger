@@ -2,12 +2,16 @@ import { checkInstall, countRequest } from "./auth";
 import { dayInRange } from "./day";
 import { checkMinutes } from "./minutes";
 import { firstSchemaError } from "./schema";
-import { deleteBodies, putBody } from "./store";
+import { gunzipBounded, gzipBytes } from "./gzip";
+import { deleteBodies, getBody, putBody } from "./store";
 import { errorResponse, readUpload } from "./upload";
 import { belowMinimum, updateRequired } from "./version";
 
 // Today so far every hour, the complete day, and room for retries.
 const MAX_REQUESTS_PER_DAY = 60;
+
+// A stored body was an upload, so it unpacks within upload.ts's limit.
+const MAX_STORED_UNPACKED_BYTES = 8 * 1024 * 1024;
 
 interface ReportBody {
   schema: 1;
@@ -57,13 +61,15 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
 
   // 10. Store the body as sent, and index it. A day sent again replaces the first, since the R2
   // key and the reports row are both keyed by (install, day): so today so far (complete: false),
-  // sent every hour, is replaced by the next hour's and at last by the complete day.
+  // sent every hour, is replaced by the next hour's and at last by the complete day. The hardware a
+  // stored body of the day had stays when the new one comes without it (withStoredHardware).
   const r2Key = `reports/v1/${report.installId}/${report.day}.json.gz`;
   const country = request.cf?.country ? String(request.cf.country) : "XX";
   const receivedAt = Date.now();
   const sections = (["diagnostics", "usage", "power"] as const).filter((name) => name in report).join(",");
+  const stored = await withStoredHardware(env, r2Key, report, body);
 
-  await putBody(env, r2Key, body, { contentType: "application/json", receivedAt });
+  await putBody(env, r2Key, stored, { contentType: "application/json", receivedAt });
 
   await env.DB.prepare(
     `INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key, complete)
@@ -72,7 +78,7 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
        received_at = excluded.received_at, bytes = excluded.bytes, sections = excluded.sections,
        country = excluded.country, r2_key = excluded.r2_key, complete = excluded.complete`,
   )
-    .bind(report.installId, report.day, receivedAt, body.byteLength, sections, country, r2Key, report.complete === false ? 0 : 1)
+    .bind(report.installId, report.day, receivedAt, stored.byteLength, sections, country, r2Key, report.complete === false ? 0 : 1)
     .run();
 
   // checkInstall() guarantees a row already exists (created on first use, or already there).
@@ -100,6 +106,29 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
   }
 
   return Response.json({ ok: true });
+}
+
+/**
+ * The body to store for a day: the bytes as sent, unless they carry power without its hardware and the body stored for
+ * the same day had it. The app sends the hardware only when it changed, and a day sent again replaces the first, so
+ * without this a later upload of the day (the next hour's, or the complete day) would drop the hardware the first
+ * carried; the stored hardware goes into the new body instead.
+ */
+async function withStoredHardware(env: Cloudflare.Env, r2Key: string, report: ReportBody, body: Uint8Array): Promise<Uint8Array> {
+  if (!report.power || report.power.hardware != null) return body;
+  const previous = await getBody(env, r2Key);
+  if (!previous) return body;
+
+  let hardware: unknown = null;
+  try {
+    const unpacked = await gunzipBounded(previous, MAX_STORED_UNPACKED_BYTES);
+    if (unpacked) hardware = (JSON.parse(new TextDecoder().decode(unpacked)) as Partial<ReportBody>).power?.hardware ?? null;
+  } catch {
+    return body;                                                                // a stored body that can't be read is replaced as sent
+  }
+  if (hardware == null) return body;
+  const merged: ReportBody = { ...report, power: { ...report.power, hardware } };
+  return gzipBytes(new TextEncoder().encode(JSON.stringify(merged)));
 }
 
 /** Deletes one day's object and row when the install has a tombstone; true when it did. */

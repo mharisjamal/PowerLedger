@@ -1,3 +1,9 @@
+/** Compresses `bytes` as gzip. */
+export async function gzipBytes(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
 /**
  * Decompresses `bytes` as gzip, streaming so a zip bomb is caught before it grows unbounded: once
  * the decompressed output passes `max` bytes, the stream is cancelled and `null` is returned.
