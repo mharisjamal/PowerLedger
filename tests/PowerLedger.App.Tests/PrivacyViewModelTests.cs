@@ -72,9 +72,9 @@ public class PrivacyViewModelTests
     [Fact]
     public void An_answer_to_an_older_wording_shows_as_all_off_and_a_tick_sends_fresh_not_the_old_switches()
     {
-        // Consent.Answered is false for any version but the current one, whatever was ticked under that older wording.
+        // Consent.Answered is false for a version no longer standing, whatever was ticked under that older wording.
         var model = Model();
-        model.Apply(Statuses.WithSharing(new Consent(ConsentText.Version - 1, true, true, true, true)).Sharing);
+        model.Apply(Statuses.WithSharing(new Consent(ConsentText.Oldest - 1, true, true, true, true)).Sharing);
 
         model.Diagnostics.ShouldBeFalse();
         model.Usage.ShouldBeFalse();

@@ -94,11 +94,27 @@ public class SharingContractTests
         new Consent(ConsentText.Version, true, true, false, true).Validate().ShouldNotBeNull();
 
     [Fact]
-    public void AnAnswerToAnOlderWordingIsRefused() =>
-        new Consent(ConsentText.Version - 1, true, false, false, false).Validate().ShouldNotBeNull();
+    public void AnAnswerToAWordingNoLongerStandingIsRefused()
+    {
+        new Consent(ConsentText.Oldest - 1, true, false, false, false).Validate().ShouldNotBeNull();
+        new Consent(ConsentText.Version + 1, true, false, false, false).Validate().ShouldNotBeNull();
+    }
 
     [Fact]
-    public void NothingMayBeSentUntilTheCurrentWordingIsAnsweredWithASwitchOn()
+    public void TheWordingIsVersionTwoAndAnAnswerToVersionOneStillStands()
+    {
+        (ConsentText.Oldest, ConsentText.Version).ShouldBe((1, 2));
+        foreach (var version in new[] { 1, 2 })
+        {
+            var consent = new Consent(version, true, true, true, true);
+            consent.Validate().ShouldBeNull();
+            consent.Answered.ShouldBeTrue();
+            consent.AllowsAny.ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public void NothingMayBeSentUntilAStandingWordingIsAnsweredWithASwitchOn()
     {
         Consent.Unanswered.AllowsAny.ShouldBeFalse();
         Consent.Unanswered.Answered.ShouldBeFalse();

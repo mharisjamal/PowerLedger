@@ -3,10 +3,15 @@ using System.Text.RegularExpressions;
 namespace PowerLedger.Contracts;
 
 /// <summary>The consent text's version (data-sharing design §1). Raise it when the wording of any switch changes
-/// materially: consent given to an older wording then counts for nothing until the user answers again.</summary>
+/// materially. Consent given to a wording older than <see cref="Oldest"/> counts for nothing until the user answers again.</summary>
 public static class ConsentText
 {
-    public const int Version = 1;
+    /// <summary>The wording the App shows now. Version 2 (Plan Q §2) sends every hour and, when Hardware and power is turned
+    /// on under it, the hourly totals already on the PC once.</summary>
+    public const int Version = 2;
+
+    /// <summary>The oldest wording whose answer still stands: version 1 users aren't asked again.</summary>
+    public const int Oldest = 1;
 }
 
 /// <summary>What the user agreed to send, for the whole machine (data-sharing design §1). <see cref="Share"/> needs
@@ -21,15 +26,16 @@ public sealed record Consent(int Version, bool Diagnostics, bool Usage, bool Pow
     /// <summary>The state of a machine whose user has never answered: nothing may be sent.</summary>
     public static Consent Unanswered { get; } = new(0, false, false, false, false);
 
-    /// <summary>True when the user answered the current wording, whatever they answered.</summary>
-    public bool Answered => Version == ConsentText.Version;
+    /// <summary>True when the user answered a wording that still stands, from <see cref="ConsentText.Oldest"/> to
+    /// <see cref="ConsentText.Version"/>, whatever they answered.</summary>
+    public bool Answered => Version is >= ConsentText.Oldest and <= ConsentText.Version;
 
     /// <summary>True when anything at all may be sent.</summary>
     public bool AllowsAny => Answered && (Diagnostics || Usage || Power);
 
     /// <summary>Null when this is an answer the service can record; otherwise why not, in words the App can show.</summary>
     public string? Validate() =>
-        Version != ConsentText.Version ? "That answer is to an older wording of the choices. Please choose again."
+        !Answered ? "That answer is to an older wording of the choices. Please choose again."
         : Share && !Power ? "Sharing detailed data needs Hardware and power turned on."
         : null;
 }

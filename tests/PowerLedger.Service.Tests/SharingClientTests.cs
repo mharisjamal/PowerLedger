@@ -129,7 +129,7 @@ public class SharingClientTests
         request.Headers.Authorization.ShouldNotBeNull().ToString().ShouldBe($"Bearer {Key}");
         request.Content.ShouldNotBeNull().Headers.ContentEncoding.ShouldBeEmpty();
         JsonNode.DeepEquals(JsonNode.Parse(body), JsonNode.Parse($$$"""
-            {"installId":"{{{SharingFakes.InstallId}}}","consent":{"version":1,"diagnostics":true,"usage":false,"power":true,"share":false}}
+            {"installId":"{{{SharingFakes.InstallId}}}","consent":{"version":2,"diagnostics":true,"usage":false,"power":true,"share":false}}
             """)).ShouldBeTrue(Encoding.UTF8.GetString(body));
     }
 

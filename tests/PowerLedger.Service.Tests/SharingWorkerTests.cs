@@ -50,8 +50,8 @@ public sealed class SharingWorkerTests : IDisposable
     [Fact]
     public async Task An_answer_to_an_older_wording_sends_nothing_and_a_new_answer_collects_from_its_own_moment()
     {
-        // Every switch was turned on under the wording before this one; the ID, progress and a waiting day are from then.
-        var older = new Consent(ConsentText.Version - 1, true, true, true, true);
+        // Every switch was turned on under a wording no longer standing; the ID, progress and a waiting day are from then.
+        var older = new Consent(ConsentText.Oldest - 1, true, true, true, true);
         _h.Store.SaveConsent(new StoredConsent(older, Local(20, 10).ToUnixTimeMilliseconds(), Local(20, 10).ToUnixTimeMilliseconds()));
         _h.Store.Identity();
         _h.Store.CollectedTo = Local(23, 10).ToUnixTimeMilliseconds();
