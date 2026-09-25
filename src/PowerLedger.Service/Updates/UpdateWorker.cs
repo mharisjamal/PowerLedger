@@ -15,8 +15,8 @@ namespace PowerLedger.Service.Updates;
 /// checked, and installed when <see cref="InstallTiming"/> says: setup runs detached and silent, after the service has
 /// left itself a <see cref="RelaunchNote"/> and closed the Apps, and the service that starts next opens the App again.
 /// Nothing is installed without the release key's signature, from a folder that isn't locked, or that isn't newer than
-/// this service. A setup that ends with this service still running didn't install; that version isn't tried again until
-/// the service restarts, and the App's own updater remains.
+/// this service. A setup that ends with this service still running, or that stopped it and left it to start again, didn't
+/// install; that version is tried once more a day later (<see cref="FailedUpdate"/>), and the App's own updater remains.
 /// </summary>
 internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
 {
@@ -136,6 +136,13 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
         {
             _env.Installers.Clean(_env.Running);
             var release = await _env.Feed.LatestAsync(cancel).ConfigureAwait(false);
+            var now = _clock.GetUtcNow();
+            var failed = FailedUpdate.Read(_env.Folder.Path);
+            if (failed is not null && (!Version.TryParse(failed.Version, out var failedVersion) || failedVersion != release?.Version))
+            {
+                TryDelete(Path.Combine(_env.Folder.Path, FailedUpdate.FileName));   // another release starts afresh
+                failed = null;
+            }
             if (release is null || release.Version <= _env.Running)
             {
                 _found = null;
@@ -145,13 +152,19 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
                 return;
             }
             if (release.Version == _failed) return;
+            if (failed is not null && failed.Holds(release.Version, now))
+            {
+                Say(failed.Tries >= FailedUpdate.MaxTries
+                    ? $"PowerLedger {release.Name} didn't install twice, so the App offers it instead"
+                    : $"PowerLedger {release.Name} didn't install, so it's tried again in a day");
+                return;
+            }
             if (release.Signatures is not { } signatures)
             {
                 Say($"PowerLedger {release.Name} isn't signed, so the App offers it instead");
                 return;
             }
             if (_ready?.Release.Version == release.Version) return;
-            var now = _clock.GetUtcNow();
             if (_found?.Release.Version != release.Version) _found = new Found(release, now);
             if (!InstallTiming.MayDownload(_env.Cost.Metered, Urgent, _found!.FirstSeen, now))
             {
@@ -256,7 +269,7 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
         {
             Failed(release, "Setup couldn't start: " + error.Message);
         }
-        if (noted) RelaunchApp();
+        if (noted) RelaunchApp(atStart: false);
         return false;
     }
 
@@ -278,7 +291,7 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
             }
         }
         Failed(release, $"Setup ended without installing PowerLedger {release.Name} (code {code.ToString(CultureInfo.InvariantCulture)})");
-        RelaunchApp();
+        RelaunchApp(atStart: false);
     }
 
     private void Failed(Release release, string problem)
@@ -288,11 +301,29 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
         _installNow = false;
         _log.LogError("The update to {Version} failed: {Problem}", release.Name, problem);
         Say(problem);
+        NoteFailure(release.Name);
+    }
+
+    /// <summary>Records on disk that <paramref name="version"/> didn't install, so a restarted service backs off from it
+    /// (<see cref="FailedUpdate"/>).</summary>
+    private void NoteFailure(string version)
+    {
+        try
+        {
+            _env.Folder.Prepare();
+            FailedUpdate.After(FailedUpdate.Read(_env.Folder.Path), version, _clock.GetUtcNow()).Write(_env.Folder.Path);
+        }
+        catch (Exception error) when (error is UpdateException or IOException or UnauthorizedAccessException)
+        {
+            _log.LogWarning("The failed update to {Version} couldn't be recorded: {Problem}", version, error.Message);
+        }
     }
 
     /// <summary>Opens the App in the console user's session when a note asks for it, unless it is already running there,
-    /// and deletes the note either way.</summary>
-    internal void RelaunchApp()
+    /// and deletes the note either way. At start, a note for a version newer than this service means setup stopped the
+    /// service and then failed, since the service that started is the old one: that is recorded as a failure, so the same
+    /// installer isn't run again every few minutes.</summary>
+    internal void RelaunchApp(bool atStart = true)
     {
         RelaunchNote? note;
         try
@@ -306,6 +337,11 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
             return;
         }
         if (note is null) return;
+        if (atStart && Version.TryParse(note.Version, out var noted) && noted > _env.Running)
+        {
+            _log.LogError("Setup stopped the service but didn't install PowerLedger {Version}", note.Version);
+            NoteFailure(note.Version);
+        }
         try
         {
             var console = _env.System.ConsoleSession();

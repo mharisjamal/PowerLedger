@@ -354,6 +354,51 @@ public sealed class UpdateWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_note_for_a_version_newer_than_the_service_at_start_is_a_failed_setup_tried_once_more_a_day_later_then_left_to_the_App()
+    {
+        _feed.Latest = Release();
+        _folder.Prepare();
+        new RelaunchNote("0.9.1", WindowWasVisible: false).Write(_folder.Path);
+        var worker = Worker();
+
+        worker.RelaunchApp();                                                  // setup stopped this service and failed
+        await worker.CheckAsync(CancellationToken.None);
+        _installers.Downloads.ShouldBe(0);
+        worker.Stage.ShouldBe("PowerLedger 0.9.1 didn't install, so it's tried again in a day");
+
+        _clock.Advance(TimeSpan.FromHours(24));
+        await worker.CheckAsync(CancellationToken.None);
+        (await worker.TickAsync(CancellationToken.None)).ShouldBeTrue();
+
+        var again = Worker();                                                  // and failed again
+        again.RelaunchApp();
+        _clock.Advance(TimeSpan.FromDays(3));
+        await again.CheckAsync(CancellationToken.None);
+        _installers.Downloads.ShouldBe(1);
+        again.Stage.ShouldBe("PowerLedger 0.9.1 didn't install twice, so the App offers it instead");
+
+        _feed.Latest = Release("0.9.2");                                        // a newer release starts afresh
+        await again.CheckAsync(CancellationToken.None);
+        _installers.Downloads.ShouldBe(2);
+        File.Exists(Path.Combine(_folder.Path, FailedUpdate.FileName)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_note_for_the_version_now_running_is_a_setup_that_worked()
+    {
+        _feed.Latest = Release("0.9.2");
+        _folder.Prepare();
+        new RelaunchNote("0.9.1", WindowWasVisible: false).Write(_folder.Path);
+        var worker = Worker(running: "0.9.1");
+
+        worker.RelaunchApp();
+        await worker.CheckAsync(CancellationToken.None);
+
+        File.Exists(Path.Combine(_folder.Path, FailedUpdate.FileName)).ShouldBeFalse();
+        _installers.Downloads.ShouldBe(1);
+    }
+
+    [Fact]
     public void An_App_already_running_there_is_not_opened_twice_and_the_note_still_goes()
     {
         _folder.Prepare();
