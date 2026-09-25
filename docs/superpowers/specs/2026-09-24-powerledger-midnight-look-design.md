@@ -163,7 +163,8 @@ src/PowerLedger.App/
 ## 4. The Dashboard's data
 
 - **KPI 1, Power now:** `Live.Watts`, `Live.Quality`, and `Live.Budget` totals from `NowViewModel`. The bar is
-  `Watts / BudgetTotalW`, capped at 1.
+  `Watts / Live.Meter.Max` (the live meter's scale, which Classic's Now page draws the same reading against), capped
+  at 1.
 - **KPI 2, Today:** `Today.EnergyWh` and `Today.Cost` from `NowViewModel`. The average day is the mean of the last 30
   complete days' energy from the history reader (days with no rows are left out). Trend = today so far against the
   average day's energy up to the same time of day (the average day is scaled by the fraction of the day elapsed); the
@@ -192,7 +193,9 @@ disagree on a figure.
   page stays, as in Classic.
 - A look switch that fails to open the new window (an exception in construction) keeps the old window, reverts the
   saved choice and shows the error in Settings' message line.
-- `ui.json` with an unknown `Look` value reads as Classic.
+- `ui.json` with an unknown `Look` value reads as Midnight, the default look.
+- A saved look whose window fails to open or show at start opens Classic instead (0.8.1): the reason goes to the App's
+  log and Classic is saved, so the next start doesn't fail the same way.
 
 ## 6. Testing
 
