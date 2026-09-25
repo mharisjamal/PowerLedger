@@ -31,14 +31,56 @@ public class MidnightControlsTests
         names.Select(Initials.Slot).Distinct().Count().ShouldBeGreaterThan(2);
     }
 
+    /// <summary>Review 10: the letters are white or a fixed near-black, whichever stands off the disc more, never a
+    /// palette colour that turns pale in the light theme; so they reach 4.5:1 wherever either can, and no colour leaves
+    /// both under 4.4:1.</summary>
     [Fact]
-    public void Letters_go_light_on_a_deep_disc_and_dark_on_a_pale_one()
+    public void Letters_are_white_or_near_black_whichever_contrasts_more_with_the_disc()
     {
-        Initials.WantsLightLetters(Color.FromRgb(0x3A, 0x5B, 0xFF)).ShouldBeTrue();    // the light theme's accent
-        Initials.WantsLightLetters(Color.FromRgb(0x1E, 0x9E, 0x6C)).ShouldBeTrue();    // its green
-        Initials.WantsLightLetters(Color.FromRgb(0xF5, 0xB9, 0x42)).ShouldBeFalse();   // the dark theme's amber
-        Initials.WantsLightLetters(Color.FromRgb(0x38, 0xBD, 0xF8)).ShouldBeFalse();   // its cyan
+        Initials.LettersOn(Color.FromRgb(0x3A, 0x5B, 0xFF)).ShouldBe(Colors.White);   // a deep blue
+        Initials.LettersOn(Color.FromRgb(0xF5, 0xB9, 0x42)).ShouldBe(Initials.NearBlack);   // amber
+        Initials.LettersOn(Color.FromRgb(0x38, 0xBD, 0xF8)).ShouldBe(Initials.NearBlack);   // cyan
+        Initials.LettersOn(Colors.Black).ShouldBe(Colors.White);
+        Initials.LettersOn(Colors.White).ShouldBe(Initials.NearBlack);
+        for (var grey = 0; grey <= 255; grey++)
+        {
+            var disc = Color.FromRgb((byte)grey, (byte)grey, (byte)grey);
+            var letters = Initials.LettersOn(disc);
+            Contrast.Ratio(letters, disc).ShouldBe(Math.Max(Contrast.Ratio(Colors.White, disc), Contrast.Ratio(Initials.NearBlack, disc)), $"grey {grey}");
+            Contrast.Ratio(letters, disc).ShouldBeGreaterThanOrEqualTo(4.4, $"grey {grey}");
+        }
     }
+
+    /// <summary>Review 10: every colour in the ring, in both Midnight palettes, drawn as the header and the Household page
+    /// draw it, carries letters of at least 4.5:1: in the light theme too, where the ground was the dark letters' colour.</summary>
+    [Theory]
+    [Trait("Category", "UI")]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Every_ring_colours_letters_read_in_both_themes(string theme)
+        => UiHarness.OnUi(() =>
+        {
+            var host = new StackPanel { Orientation = Orientation.Horizontal };
+            host.Resources.MergedDictionaries.Add(MidnightStylesTests.Load());
+            host.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, Enum.Parse<Theme>(theme)));
+            var names = Enumerable.Range(0, 400).Select(i => $"PC {i}").GroupBy(Initials.Slot).OrderBy(slot => slot.Key).Select(slot => slot.First()).ToList();
+            names.Count.ShouldBe(Initials.RingSize);
+            foreach (var name in names) host.Children.Add(new Initials { Member = name });
+            host.Measure(new Size(600, 100));
+            host.Arrange(new Rect(0, 0, 600, 100));
+            host.UpdateLayout();
+            foreach (var disc in host.Children.OfType<Initials>())
+            {
+                var drawing = VisualTreeHelper.GetDrawing(disc)!;
+                var fill = ((SolidColorBrush)Drawings(drawing).OfType<GeometryDrawing>().First().Brush).Color;
+                var ink = ((SolidColorBrush)Drawings(drawing).OfType<GlyphRunDrawing>().Single().ForegroundBrush).Color;
+                ink.ShouldBe(Initials.LettersOn(fill), $"{disc.Member} on {theme}");
+                Contrast.Ratio(ink, fill).ShouldBeGreaterThanOrEqualTo(4.5, $"{disc.Member}'s {fill} disc on {theme}");
+            }
+        });
+
+    private static IEnumerable<Drawing> Drawings(Drawing drawing)
+        => drawing is DrawingGroup group ? group.Children.SelectMany(Drawings) : [drawing];
 
     [Fact]
     public void The_status_pill_reads_the_service_state_the_way_the_classic_status_bar_does()

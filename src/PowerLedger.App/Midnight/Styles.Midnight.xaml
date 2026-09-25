@@ -733,8 +733,6 @@
     <Style x:Key="M.Initials" TargetType="local:Initials" BasedOn="{StaticResource M.Instrument}">
         <Setter Property="GoodBrush" Value="{DynamicResource M.Good}" />
         <Setter Property="WarnBrush" Value="{DynamicResource M.Warn}" />
-        <Setter Property="LightLetterBrush" Value="{DynamicResource M.OnAccent}" />
-        <Setter Property="DarkLetterBrush" Value="{DynamicResource M.Ground}" />
         <Setter Property="NumberFont" Value="{StaticResource M.Font.Ui}" />
     </Style>
     <Style x:Key="M.StackedChart" TargetType="local:StackedChart" BasedOn="{StaticResource M.Instrument}" />

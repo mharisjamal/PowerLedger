@@ -5,8 +5,9 @@ namespace PowerLedger.App;
 
 /// <summary>
 /// A household member as a disc of one or two letters (plan O M1-2), the disc's colour picked from a ring of six by the
-/// name, so the same PC keeps its colour from one opening to the next and two PCs seldom share one. The letters are light
-/// or dark by the disc's luminance, so they read on a pastel and on a deep colour alike.
+/// name, so the same PC keeps its colour from one opening to the next and two PCs seldom share one. The letters are white
+/// or a fixed near-black, whichever contrasts more with the disc, so they read on a pastel and on a deep colour alike, in
+/// either theme.
 /// </summary>
 internal sealed class Initials : Instrument
 {
@@ -16,10 +17,11 @@ internal sealed class Initials : Instrument
         nameof(Size), typeof(double), typeof(Initials), new FrameworkPropertyMetadata(28.0, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsMeasure));
     public static readonly DependencyProperty GoodBrushProperty = Register<Brush>(nameof(GoodBrush), Brushes.Gray, typeof(Initials));
     public static readonly DependencyProperty WarnBrushProperty = Register<Brush>(nameof(WarnBrush), Brushes.Gray, typeof(Initials));
-    public static readonly DependencyProperty LightLetterBrushProperty = Register<Brush>(nameof(LightLetterBrush), Brushes.White, typeof(Initials));
-    public static readonly DependencyProperty DarkLetterBrushProperty = Register<Brush>(nameof(DarkLetterBrush), Brushes.Black, typeof(Initials));
 
     public const int RingSize = 6;
+
+    /// <summary>The dark letters' colour: fixed, not the palette's ground, which is pale in the light theme (review 10).</summary>
+    internal static readonly Color NearBlack = Color.FromRgb(0x0A, 0x0C, 0x10);
 
     /// <summary>The name the disc stands for.</summary>
     public string Member { get => (string)GetValue(MemberProperty); set => SetValue(MemberProperty, value); }
@@ -30,10 +32,6 @@ internal sealed class Initials : Instrument
     public Brush GoodBrush { get => (Brush)GetValue(GoodBrushProperty); set => SetValue(GoodBrushProperty, value); }
 
     public Brush WarnBrush { get => (Brush)GetValue(WarnBrushProperty); set => SetValue(WarnBrushProperty, value); }
-
-    public Brush LightLetterBrush { get => (Brush)GetValue(LightLetterBrushProperty); set => SetValue(LightLetterBrushProperty, value); }
-
-    public Brush DarkLetterBrush { get => (Brush)GetValue(DarkLetterBrushProperty); set => SetValue(DarkLetterBrushProperty, value); }
 
     /// <summary>The disc's letters: the first of the first and last words, or the first two of a single word, or "?" for no name.</summary>
     internal static string Letters(string? name)
@@ -56,8 +54,10 @@ internal sealed class Initials : Instrument
         return (int)(hash % RingSize);
     }
 
-    /// <summary>Whether letters on <paramref name="disc"/> should be light: its relative luminance (WCAG, as Contrast reckons it) is under 0.4.</summary>
-    internal static bool WantsLightLetters(Color disc) => Contrast.Luminance(disc) < 0.4;
+    /// <summary>The letters' colour on <paramref name="disc"/>: white or <see cref="NearBlack"/>, whichever has the higher
+    /// contrast ratio with it (WCAG, as Contrast reckons it), so 4.5:1 wherever either reaches it (review 10).</summary>
+    internal static Color LettersOn(Color disc)
+        => Contrast.Ratio(Colors.White, disc) >= Contrast.Ratio(NearBlack, disc) ? Colors.White : NearBlack;
 
     internal override string Describe() => string.IsNullOrWhiteSpace(Member) ? "Unnamed PC" : Member;
 
@@ -70,8 +70,9 @@ internal sealed class Initials : Instrument
         var disc = Disc();
         var centre = new Point(size / 2, size / 2);
         dc.DrawEllipse(disc, null, centre, size / 2, size / 2);
-        var light = disc is SolidColorBrush solid ? WantsLightLetters(solid.Color) : true;
-        var letters = Text(Letters(Member), Math.Round(size * 0.4), light ? LightLetterBrush : DarkLetterBrush, FontWeights.SemiBold);
+        var ink = new SolidColorBrush(disc is SolidColorBrush solid ? LettersOn(solid.Color) : Colors.White);
+        ink.Freeze();
+        var letters = Text(Letters(Member), Math.Round(size * 0.4), ink, FontWeights.SemiBold);
         dc.DrawText(letters, new Point(centre.X - letters.Width / 2, centre.Y - letters.Height / 2));
     }
 
