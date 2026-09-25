@@ -9,6 +9,7 @@ using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
 using PowerLedger.Service.Sharing;
+using PowerLedger.Service.Updates;
 using PowerLedger.Storage;
 using Shouldly;
 
@@ -17,7 +18,7 @@ namespace PowerLedger.Service.Tests;
 /// <summary>The collector and uploader (data-sharing design §4), with a fake server and a fake clock in a UTC+2 zone.</summary>
 public sealed class SharingWorkerTests : IDisposable
 {
-    private const int SendMinute = 60;                       // 01:00 local
+    private const int SendMinute = 45;                       // 00:45 local, and today so far at a quarter to every hour
     private readonly Harness _h = new();
 
     /// <summary>A local time on a day of September 2026, in the harness's UTC+2 zone.</summary>
@@ -50,8 +51,8 @@ public sealed class SharingWorkerTests : IDisposable
     [Fact]
     public async Task An_answer_to_an_older_wording_sends_nothing_and_a_new_answer_collects_from_its_own_moment()
     {
-        // Every switch was turned on under the wording before this one; the ID, progress and a waiting day are from then.
-        var older = new Consent(ConsentText.Version - 1, true, true, true, true);
+        // Every switch was turned on under a wording no longer standing; the ID, progress and a waiting day are from then.
+        var older = new Consent(ConsentText.Oldest - 1, true, true, true, true);
         _h.Store.SaveConsent(new StoredConsent(older, Local(20, 10).ToUnixTimeMilliseconds(), Local(20, 10).ToUnixTimeMilliseconds()));
         _h.Store.Identity();
         _h.Store.CollectedTo = Local(23, 10).ToUnixTimeMilliseconds();
@@ -91,7 +92,7 @@ public sealed class SharingWorkerTests : IDisposable
         await _h.Consent(false, false, true);
         _h.Clock.SetUtcNow(Local(24, 10, 40));
         await _h.TickAsync();
-        _h.Clock.SetUtcNow(Local(25, 0, 59));
+        _h.Clock.SetUtcNow(Local(25, 0, 44));
         await _h.TickAsync();
         _h.Client.Reports.ShouldBeEmpty();                                   // not before the minute
 
@@ -106,8 +107,224 @@ public sealed class SharingWorkerTests : IDisposable
         ReportSchema.Problems(ReportJson.Write(report)).ShouldBeNull();
         _h.Outbox.Days().ShouldBeEmpty();
         var copy = Path.Combine(_h.Sent, "2026-09-24.json.gz");
-        File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last().Body);
+        File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last(call => call.Report?.Complete == true).Body);
         _h.Store.LastSent.ShouldBe(new LastSent(Local(25, 1, 1).ToUnixTimeMilliseconds(), new FileInfo(copy).Length));
+    }
+
+    [Fact]
+    public async Task Today_so_far_goes_every_hour_at_the_send_minute_and_stays_in_the_outbox_until_the_day_goes_complete()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(Local(24, 10, 40));
+        await _h.TickAsync();
+        _h.Client.Calls.Where(call => call.Kind == "report").ShouldBeEmpty();   // the first goes at the next quarter to
+
+        _h.Clock.SetUtcNow(Local(24, 10, 50));
+        await _h.TickAsync();
+        var partial = _h.Client.Partials.ShouldHaveSingleItem();
+        (partial.Day, partial.Complete).ShouldBe(("2026-09-24", false));
+        partial.Power.ShouldNotBeNull().Minutes.T.ShouldBe(Enumerable.Range(600, 30).ToArray());
+        partial.Power.Hardware.ShouldNotBeNull();
+        ReportSchema.Problems(ReportJson.Write(partial)).ShouldBeNull();
+        _h.Outbox.Minutes("2026-09-24").Count.ShouldBe(30);                     // still there for the complete day
+        _h.Store.SentThrough.ShouldBeNull();
+        var copy = Path.Combine(_h.Sent, "2026-09-24.json.gz");
+        File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last().Body);
+        _h.Store.LastSent.ShouldBe(new LastSent(Local(24, 10, 50).ToUnixTimeMilliseconds(), new FileInfo(copy).Length));
+
+        _h.Clock.SetUtcNow(Local(24, 10, 55));
+        await _h.TickAsync();
+        _h.Client.Partials.Count().ShouldBe(1);                                  // once an hour
+
+        _h.Readings(Local(24, 11), TimeSpan.FromMinutes(10));
+        _h.Clock.SetUtcNow(Local(24, 11, 45));
+        await _h.TickAsync();
+        var second = _h.Client.Partials.Last();
+        second.Power.ShouldNotBeNull().Minutes.T.Length.ShouldBe(40);
+        second.Power.Hardware.ShouldBeNull();                                    // the parts went with the first
+        _h.Client.Reports.ShouldBeEmpty();
+
+        _h.Clock.SetUtcNow(Local(25, 0, 50));
+        await _h.TickAsync();
+        var complete = _h.Client.Reports.ShouldHaveSingleItem();
+        (complete.Day, complete.Complete).ShouldBe(("2026-09-24", true));
+        complete.Power.ShouldNotBeNull().Minutes.T.Length.ShouldBe(40);
+        _h.Client.Partials.Count().ShouldBe(2);                                  // nothing yet today to send
+        _h.Outbox.Days().ShouldBeEmpty();
+        _h.Store.SentThrough.ShouldBe("2026-09-24");
+        File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last(call => call.Report?.Complete == true).Body);
+        Directory.GetFiles(_h.Sent, "*.json.gz").ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task Today_so_far_that_fails_backs_off_like_a_day_and_keeps_today_in_the_outbox()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Client.Answer = _ => new SendOutcome.Unreachable("the server couldn't be reached");
+
+        _h.Clock.SetUtcNow(Local(24, 10, 50));
+        await _h.TickAsync();
+        _h.Store.Backoff.ShouldBe(new Backoff(1, Local(24, 11, 50).ToUnixTimeMilliseconds()));
+        _h.Store.Problem.ShouldBe(new SendProblem("the server couldn't be reached", Rejected: false));
+        _h.Clock.SetUtcNow(Local(24, 11, 45));
+        await _h.TickAsync();
+        _h.Client.Partials.Count().ShouldBe(1);                                  // the back-off holds it
+
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(24, 11, 50));
+        await _h.TickAsync();
+        _h.Client.Partials.Count().ShouldBe(2);
+        (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
+        _h.Outbox.Minutes("2026-09-24").Count.ShouldBe(30);
+    }
+
+    [Fact]
+    public async Task An_update_required_answer_records_the_minimum_and_nothing_is_sent_below_it_with_no_back_off_or_problem()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(true, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        _h.Client.Answer = call => call.Kind == "report" ? new SendOutcome.UpdateRequired("update required", "0.9.0") : new SendOutcome.Accepted();
+
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+        await _h.TickAsync();
+
+        _h.Policy.MinVersion.ShouldBe("0.9.0");
+        _h.Client.Calls.Count(call => call.Kind == "report").ShouldBe(1);         // the day, then nothing more that run
+        (_h.Store.Backoff, _h.Store.Problem, _h.Store.LastRun).ShouldBe((null, null, null));
+        _h.Outbox.MinuteDays().ShouldContain("2026-09-23");
+
+        var calls = _h.Client.Calls.Count;
+        await _h.Consent(false, false, true);                                      // a change isn't posted either
+        for (var now = Local(24, 1, 5); now < Local(24, 4); now = now.AddMinutes(5))
+        {
+            _h.Clock.SetUtcNow(now);
+            await _h.TickAsync();
+        }
+        (await _h.Run(new SendNowCommand(1))).ShouldBe(new SharingReply(1, false,
+            "This version of PowerLedger is out of date and has stopped sending data. Update it to send again."));
+        _h.Client.Calls.Count.ShouldBe(calls);
+        (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
+
+        _h.Policy.Set("0.6.0");                                                    // the server takes this version again
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(24, 4, 5));
+        await _h.TickAsync();
+        _h.Client.Reports.Last().Day.ShouldBe("2026-09-23");
+        _h.Client.Calls.ShouldContain(call => call.Kind == "consent");
+    }
+
+    [Fact]
+    public async Task An_update_required_answer_without_a_minimum_it_can_read_is_tried_again_as_any_refusal()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        _h.Client.Answer = _ => new SendOutcome.UpdateRequired("update required", null);
+
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+        await _h.TickAsync();
+
+        _h.Policy.MinVersion.ShouldBeNull();
+        _h.Store.Backoff.ShouldNotBeNull();
+        _h.Store.Problem.ShouldBe(new SendProblem("update required", Rejected: false));
+    }
+
+    [Fact]
+    public async Task Turning_power_on_under_version_2_sends_the_hours_from_before_once_oldest_first_in_chunks_of_31_days()
+    {
+        _h.Hours(Local(1, 0).AddMonths(-1), 24 * 55);                              // 1 August 00:00 to 24 September 23:00
+        _h.Clock.SetUtcNow(Local(24, 10, 20));
+        await _h.Consent(false, true, true);
+        var until = Local(24, 10);                                                 // the hours before the one the answer came in
+        _h.Store.HistoryUntilMs.ShouldBe(until.ToUnixTimeMilliseconds());
+
+        _h.Clock.SetUtcNow(Local(24, 10, 25));
+        await _h.TickAsync();
+
+        var chunks = _h.Client.Histories.ToList();
+        chunks.Count.ShouldBe(2);
+        var first = chunks[0];
+        first["schema"]!.GetValue<string>().ShouldBe("history-v1");
+        first["installId"]!.GetValue<string>().ShouldBe(_h.Store.InstallId);
+        first["app"]!.GetValue<string>().ShouldBe("0.6.0");
+        first["utcOffsetMinutes"]!.GetValue<int>().ShouldBe(120);
+        JsonNode.DeepEquals(first["consent"], JsonNode.Parse("""{"version":2,"diagnostics":false,"usage":true,"power":true,"share":false}""")).ShouldBeTrue();
+        JsonNode.DeepEquals(first["hours"]![0], JsonNode.Parse($$"""
+            {"t":{{Local(1, 0).AddMonths(-1).ToUnixTimeMilliseconds()}},"avgW":101.235,"maxW":150,"energyWh":101.235,"cpuWh":30.5,
+             "gpuWh":40.25,"displayWh":10,"restWh":20.485,"idleOnWh":5,"idleOffWh":1,"idleOnS":600,"idleOffS":60,"onS":3540,
+             "batteryS":120,"gapS":60,"sampleCount":3540,"measuredS":1800,"calibratedS":900,"estimatedS":840}
+            """)).ShouldBeTrue(first["hours"]![0]!.ToJsonString());
+        var starts = chunks.SelectMany(chunk => chunk["hours"]!.AsArray().Select(hour => hour!["t"]!.GetValue<long>())).ToList();
+        chunks[0]["hours"]!.AsArray().Count.ShouldBe(31 * 24);
+        starts.ShouldBe(Enumerable.Range(0, 24 * 54 + 10).Select(i => Local(1, 0).AddMonths(-1).AddHours(i).ToUnixTimeMilliseconds()));
+        _h.Client.Calls.Where(call => call.Kind == "history").ShouldAllBe(call => call.Key == _h.Store.Key);
+        _h.Store.HistoryThroughMs.ShouldBe(until.ToUnixTimeMilliseconds());
+
+        _h.Clock.SetUtcNow(Local(24, 12));
+        await _h.TickAsync();
+        _h.Client.Histories.Count().ShouldBe(2);                                   // once
+    }
+
+    [Fact]
+    public async Task History_goes_only_for_power_turned_on_under_version_2_and_turning_it_off_forgets_the_progress()
+    {
+        _h.Hours(Local(20, 0), 24);
+        // A version 1 answer with power on, from before 0.9.0: it stands, and sends no history.
+        _h.Store.SaveConsent(new StoredConsent(new Consent(1, false, false, true, false), Local(21, 9).ToUnixTimeMilliseconds()));
+        _h.Store.Identity();
+        _h.Clock.SetUtcNow(Local(24, 10, 5));
+        await _h.TickAsync();
+        await _h.Consent(false, true, true);                                        // power stays on: still no history
+        _h.Clock.SetUtcNow(Local(24, 10, 10));
+        await _h.TickAsync();
+        _h.Client.Histories.ShouldBeEmpty();
+        _h.Store.HistoryUntilMs.ShouldBeNull();
+
+        _h.Store.HistoryThroughMs = 1;
+        await _h.Consent(false, true, false);                                       // off: nothing kept
+        (_h.Store.HistoryUntilMs, _h.Store.HistoryThroughMs).ShouldBe((null, null));
+
+        await _h.Consent(false, true, true);                                        // on again, answering the new wording
+        _h.Clock.SetUtcNow(Local(24, 10, 15));
+        await _h.TickAsync();
+        _h.Client.Histories.ShouldHaveSingleItem()["hours"]!.AsArray().Count.ShouldBe(24);
+    }
+
+    [Fact]
+    public async Task An_old_server_without_history_holds_back_only_the_history_which_a_restart_carries_on()
+    {
+        _h.Hours(Local(1, 0).AddMonths(-1), 24 * 40);
+        _h.Clock.SetUtcNow(Local(24, 10, 20));
+        await _h.Consent(false, false, true);
+        var answers = new Queue<SendOutcome>([new SendOutcome.Accepted(), new SendOutcome.NotFound("the server answered 404 Not Found")]);
+        _h.Client.Answer = call => call.Kind == "history" ? answers.Dequeue() : new SendOutcome.Accepted();
+        _h.Readings(Local(24, 10, 20), TimeSpan.FromMinutes(30));
+
+        _h.Clock.SetUtcNow(Local(24, 10, 25));
+        await _h.TickAsync();
+        var firstEnd = Local(1, 0).AddMonths(-1).AddDays(31).ToUnixTimeMilliseconds();
+        _h.Store.HistoryThroughMs.ShouldBe(firstEnd);
+        _h.Store.HistoryBackoff.ShouldNotBeNull().NextMs.ShouldBe(Local(24, 11, 25).ToUnixTimeMilliseconds());
+        (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
+
+        _h.Clock.SetUtcNow(Local(24, 10, 50));
+        await _h.TickAsync();
+        _h.Client.Histories.Count().ShouldBe(2);                                   // waiting out its back-off
+        _h.Client.Partials.ShouldHaveSingleItem();                                 // while today so far goes on
+
+        _h.Restart();
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(24, 11, 30));
+        await _h.TickAsync();
+        var last = _h.Client.Histories.Last();
+        last["hours"]![0]!["t"]!.GetValue<long>().ShouldBe(firstEnd);              // on from where it stopped
+        _h.Store.HistoryThroughMs.ShouldBe(Local(24, 10).ToUnixTimeMilliseconds());
+        _h.Store.HistoryBackoff.ShouldBeNull();
     }
 
     [Fact]
@@ -1127,6 +1344,10 @@ public sealed class SharingWorkerTests : IDisposable
 
     private static UsageCounts Usage(string day) => new(day, 2, new Dictionary<string, int> { ["now"] = 1 }, new Dictionary<string, int>(), 0, 0, 3, "dark", "en-US");
 
+    /// <summary>An hour row with a figure in every column, some needing rounding.</summary>
+    private static Aggregate Hour(DateTimeOffset start) =>
+        new(start, 101.23456, 150, 101.23456, 30.5, 40.25, 10, 20.48456, 5, 1, 600, 60, 3540, 120, 60, 3540, 1800, 900, 840);
+
     private static CrashReport Crash(DateTimeOffset at) =>
         new(at, "app", "0.6.0", ["System.InvalidOperationException"], "Collection was modified.", "   at X()");
 
@@ -1181,11 +1402,13 @@ public sealed class SharingWorkerTests : IDisposable
             Board.PublishDiscreteGpu(true);
             Directory.CreateDirectory(Sent);
             Directory.CreateDirectory(Crashes);
-            var environment = new SharingEnvironment(Sent, Crashes, Names, () => SharingFakes.Host, () => SendMinute);
-            Worker = new SharingWorker(Database.Db, Board, Commands, Client, environment, Wall, NullLogger<SharingWorker>.Instance);
+            Worker = NewWorker();
         }
 
         public TestDatabase Database { get; } = new();
+
+        /// <summary>The server's minimum version as the service heard it; the harness's service is 0.6.0.</summary>
+        public AppPolicy Policy { get; } = new();
 
         public FakeTimeProvider Clock { get; } = new(Local(24, 0));
 
@@ -1197,7 +1420,17 @@ public sealed class SharingWorkerTests : IDisposable
 
         public FakeSharingClient Client { get; } = new();
 
-        public SharingWorker Worker { get; }
+        public SharingWorker Worker { get; private set; }
+
+        /// <summary>A new worker on the same database, server and clock, as after the service restarts.</summary>
+        public void Restart() => Worker = NewWorker();
+
+        /// <summary>Hour rows, one an hour from <paramref name="from"/>, as the rollups keep them forever.</summary>
+        public void Hours(DateTimeOffset from, int count)
+        {
+            var hours = new AggregateRepository(Database.Db);
+            for (var i = 0; i < count; i++) hours.UpsertHour(Hour(from.AddHours(i)));
+        }
 
         /// <summary>How many runs have started while a request the App waits on was queued: a run asks for the names to scrub
         /// first thing. (A request's handling asks after taking it, and a run's upload before it goes.)</summary>
@@ -1254,6 +1487,10 @@ public sealed class SharingWorkerTests : IDisposable
         public void CrashFile(DateTimeOffset at, string message = "Boom.") =>
             ServiceCrashes.TryWrite(Crashes, new InvalidOperationException(message), at, "0.6.0").ShouldNotBeNull();
 
+        private SharingWorker NewWorker() => new(
+            Database.Db, Board, Commands, Client, Policy, new SharingEnvironment(Sent, Crashes, Names, () => SharingFakes.Host, () => SendMinute),
+            Wall, NullLogger<SharingWorker>.Instance);
+
         private ScrubNames Names()
         {
             if (Commands.AppWaiting) Interlocked.Increment(ref _runsStartedWhileTheAppWaited);
@@ -1283,10 +1520,20 @@ internal sealed class FakeSharingClient : ISharingClient
     /// <summary>When set, answers in its own time instead of <see cref="Answer"/>, given the request's token.</summary>
     public Func<SharingCall, CancellationToken, Task<SendOutcome>>? AnswerAsync { get; set; }
 
-    public IEnumerable<ReportV1> Reports => Calls.Where(call => call.Report is not null).Select(call => call.Report!);
+    /// <summary>The complete days sent.</summary>
+    public IEnumerable<ReportV1> Reports => Calls.Where(call => call.Report is { Complete: not false }).Select(call => call.Report!);
+
+    /// <summary>Today so far, as sent each hour.</summary>
+    public IEnumerable<ReportV1> Partials => Calls.Where(call => call.Report is { Complete: false }).Select(call => call.Report!);
 
     public Task<SendOutcome> SendReportAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
         Record(new SharingCall("report", key, null, null, ReportJson.Read(Gunzip(gzipBody)), gzipBody), cancel);
+
+    public Task<SendOutcome> SendHistoryAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
+        Record(new SharingCall("history", key, null, null, null, gzipBody), cancel);
+
+    /// <summary>The history chunks sent, as their JSON.</summary>
+    public IEnumerable<JsonNode> Histories => Calls.Where(call => call.Kind == "history").Select(call => JsonNode.Parse(Gunzip(call.Body))!);
 
     public Task<SendOutcome> SendConsentAsync(string installId, string key, Consent consent, CancellationToken cancel = default) =>
         Record(new SharingCall("consent", key, installId, consent, null, []), cancel);
@@ -1308,7 +1555,7 @@ internal sealed class FakeSharingClient : ISharingClient
     }
 }
 
-/// <param name="Kind"><c>report</c>, <c>consent</c> or <c>delete</c>.</param>
+/// <param name="Kind"><c>report</c>, <c>history</c>, <c>consent</c> or <c>delete</c>.</param>
 internal sealed record SharingCall(string Kind, string Key, string? InstallId, Consent? Consent, ReportV1? Report, byte[] Body);
 
 /// <summary>A fake clock whose time can be set by <see cref="Step"/>, as Windows sets the PC's clock, while its timestamps

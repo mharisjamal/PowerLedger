@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
+using PowerLedger.Service.Updates;
 using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Sharing;
@@ -22,7 +23,8 @@ internal sealed record SharingEnvironment(string Sent, string Crashes, Func<Scru
 /// The collector and uploader (data-sharing design §4). Every five minutes, and at start, it builds the minutes completed
 /// since the last run into the outbox while Hardware and power is on, records the sources' failures and the service's
 /// crashes while Crash and sensor reports is on, drops days too old to send, posts a consent change the server hasn't
-/// heard, and sends each complete day once the schedule says so. Between runs it carries out the App's requests, one at a
+/// heard, sends each complete day once the schedule says so, today so far once an hour (Plan Q §1), and the hourly totals
+/// from before Hardware and power was turned on under consent version 2, once (Plan Q §2). Between runs it carries out the App's requests, one at a
 /// time, so nothing else touches the outbox or the sharing state and neither needs a lock. A request the App waits on
 /// doesn't wait for a run: the run gives way to it where nothing is half-done, cancelling a request to the server under
 /// way, and starts again once the App has its answer. So the App is answered within <see cref="AppWait"/> of asking, and a
@@ -38,6 +40,12 @@ internal sealed class SharingWorker : BackgroundService
     public static readonly TimeSpan AppWait = TimeSpan.FromSeconds(8);
 
     public const int MaxDaysPerRun = 7;
+
+    /// <summary>The most history chunks one run sends, about a year, so years of it go over a few runs.</summary>
+    public const int MaxHistoryChunksPerRun = 12;
+
+    /// <summary>The consent version whose Hardware and power, turned on, sends the history (Plan Q §2).</summary>
+    public const int HistoryConsentVersion = 2;
     public const int KeepDays = 14;
     public const int KeepSent = 30;
     public const int MaxCrashesPerDay = 20;
@@ -46,6 +54,7 @@ internal sealed class SharingWorker : BackgroundService
     private const long HourMs = 3_600_000;
     private const string NotInTime = "the server didn't answer in time";
     private const string NoTimeLeft = "the service was busy with another request";
+    private const string OutdatedReply = "This version of PowerLedger is out of date and has stopped sending data. Update it to send again.";
     private static readonly TimeSpan Minute = TimeSpan.FromMinutes(1);
 
     /// <summary>How far behind now the minutes are built: readings reach the database at each minute boundary.</summary>
@@ -57,6 +66,7 @@ internal sealed class SharingWorker : BackgroundService
     private readonly StatusBoard _board;
     private readonly SharingCommands _commands;
     private readonly ISharingClient _client;
+    private readonly AppPolicy _policy;
     private readonly SharingEnvironment _environment;
     private readonly TimeProvider _clock;
     private readonly ILogger<SharingWorker> _log;
@@ -64,6 +74,7 @@ internal sealed class SharingWorker : BackgroundService
     private readonly OutboxRepository _outbox;
     private readonly RawSampleRepository _raw;
     private readonly TariffRepository _tariffs;
+    private readonly AggregateRepository _hours;
 
     /// <summary>Each source's failure count at the last look, so only new failures are added to the day.</summary>
     private readonly Dictionary<string, int> _failures = new(StringComparer.Ordinal);
@@ -71,13 +82,18 @@ internal sealed class SharingWorker : BackgroundService
     /// <summary>True when the last run, or a consent change's post, gave way to the App: it starts again once the inbox is empty.</summary>
     private bool _resume;
 
+    /// <summary>True once the log has said the server has no <c>/v1/history</c>, so it says so once, not every try.</summary>
+    private bool _historyMissingLogged;
+
+    /// <param name="policy">The server's minimum version (Plan Q §3), shared with the update worker: below it nothing is sent.</param>
     public SharingWorker(
-        SqliteDatabase database, StatusBoard board, SharingCommands commands, ISharingClient client, SharingEnvironment environment,
-        TimeProvider clock, ILogger<SharingWorker> log)
+        SqliteDatabase database, StatusBoard board, SharingCommands commands, ISharingClient client, AppPolicy policy,
+        SharingEnvironment environment, TimeProvider clock, ILogger<SharingWorker> log)
     {
         _board = board;
         _commands = commands;
         _client = client;
+        _policy = policy;
         _environment = environment;
         _clock = clock;
         _log = log;
@@ -85,12 +101,17 @@ internal sealed class SharingWorker : BackgroundService
         _outbox = new OutboxRepository(database);
         _raw = new RawSampleRepository(database);
         _tariffs = new TariffRepository(database);
+        _hours = new AggregateRepository(database);
     }
 
     private TimeZoneInfo Zone => _clock.LocalTimeZone;
 
     /// <summary>True once the sampling loop has published what a report is built from.</summary>
     private bool LoopHasPublished => _board.Settings is not null && _board.Status is not null;
+
+    /// <summary>True while this version, the one every upload says it is, is older than the server takes (Plan Q §3):
+    /// nothing is sent, and it is neither a problem nor a back-off, since only an update can help.</summary>
+    private bool Outdated => _policy.IsBelowMinimum(_environment.Host().App);
 
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
@@ -187,11 +208,16 @@ internal sealed class SharingWorker : BackgroundService
         DropOldDays(now);
         if (!await PostPendingConsentAsync(now, atOnce: false, stop).ConfigureAwait(false)) return;
 
-        if (LoopHasPublished
-            && SendSchedule.Due(now, Zone, _store.SendMinute, _store.LastRun, _store.Backoff, CompleteDays(now, consent).Count > 0))
+        if (!LoopHasPublished || Outdated) return;
+        if (SendSchedule.Due(now, Zone, _store.SendMinute, _store.LastRun, _store.Backoff, CompleteDays(now, consent).Count > 0))
         {
             await SendAsync(now, answerBy: default, stop).ConfigureAwait(false);
         }
+        if (_store.Consent.AllowsAny && !Outdated && SendSchedule.PartialDue(now, Zone, _store.SendMinute, _store.LastPartialRun, _store.Backoff))
+        {
+            await SendTodayAsync(now, stop).ConfigureAwait(false);
+        }
+        await SendHistoryAsync(now, stop).ConfigureAwait(false);
     }
 
     /// <summary>Carries out one of the App's requests and answers it, unless the pipe has given up on it: the App was then told
@@ -307,12 +333,15 @@ internal sealed class SharingWorker : BackgroundService
         var before = _store.StoredConsent;
         var was = before?.Consent is { Answered: true } answered ? answered : AllOff;
         if (consent.AllowsAny) Identity(changing: true);                    // the first switch turned on makes the ID and key
+        if (consent.AllowsAny && !was.AllowsAny) _store.LastPartialRun = nowMs;  // today so far first goes at the next hour's minute
         if (consent.Power && !was.Power) _store.CollectedTo = nowMs;        // nothing from before the answer is collected
         if (!consent.Power)
         {
             _outbox.DeleteMinutes();
             _store.CollectedTo = null;
         }
+        if (consent.Power && !was.Power && consent.Version >= HistoryConsentVersion) StartHistory(nowMs);
+        if (!consent.Power) ForgetHistory();
         if (!consent.Diagnostics)
         {
             _outbox.DeleteEvents(OutboxEvents.Crash);
@@ -391,7 +420,7 @@ internal sealed class SharingWorker : BackgroundService
         var usage = events.Usage ?? new UsageCounts(day, 0, new Dictionary<string, int>(), new Dictionary<string, int>(), 0, 0, 0, "system", "en");
         var inputs = Inputs(
             day, AllOn, _store.InstallId ?? Guid.Empty.ToString("D"), [.. minutes.Where(minute => minute.Day == day)], events with { Usage = usage },
-            withHardware: true, now);
+            withHardware: true, now) with { Complete = false };
 
         var json = ReportJson.Indented(ReportJson.Write(ReportBuilder.Build(inputs)));
         Directory.CreateDirectory(_environment.Sent);
@@ -412,6 +441,11 @@ internal sealed class SharingWorker : BackgroundService
         if (!LoopHasPublished)
         {
             command.Answer(false, "The service is still starting. Try again in a moment.");
+            return;
+        }
+        if (Outdated)
+        {
+            command.Answer(false, OutdatedReply);
             return;
         }
         var now = _clock.GetUtcNow();
@@ -453,6 +487,7 @@ internal sealed class SharingWorker : BackgroundService
         }
         using var answerBy = AnswerBy(command);
         var outcome = await CallAsync(cancel => _client.DeleteAsync(id, key, cancel), stop, answerBy.Token).ConfigureAwait(false);
+        StopsForUpdate(outcome);
         if (outcome is SendOutcome.Accepted or SendOutcome.Gone)
         {
             _log.LogInformation("The server deleted this install's data; forgetting it");
@@ -582,9 +617,11 @@ internal sealed class SharingWorker : BackgroundService
             return true;
         }
         if (!atOnce && _store.ConsentBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return true;
+        if (Outdated) return true;                                             // it waits for the update
 
         var consent = _store.Consent;
         var outcome = await OwnCallAsync(cancel => _client.SendConsentAsync(id, key, consent, cancel), stop).ConfigureAwait(false);
+        if (StopsForUpdate(outcome)) return true;
         switch (outcome)
         {
             case SendOutcome.Accepted:
@@ -603,6 +640,20 @@ internal sealed class SharingWorker : BackgroundService
                 _store.ConsentBackoff = SendSchedule.After(_store.ConsentBackoff, now);
                 return true;
         }
+    }
+
+    /// <summary>
+    /// Whether the server's answer is a 426 that stops sending until the service is updated (Plan Q §3): its minimum goes to
+    /// the <see cref="AppPolicy"/>, which the update worker shares, and while this version is below it nothing more is sent.
+    /// A 426 without a minimum the policy can read stops nothing: it is then any other refusal.
+    /// </summary>
+    private bool StopsForUpdate(SendOutcome outcome)
+    {
+        if (outcome is not SendOutcome.UpdateRequired required) return false;
+        _policy.Set(required.MinVersion);
+        if (!Outdated) return false;
+        _log.LogWarning("The server takes {Min} and later, so nothing is sent until the service is updated", _policy.MinVersion);
+        return true;
     }
 
     /// <summary>The consent change needs posting no more.</summary>
@@ -692,6 +743,12 @@ internal sealed class SharingWorker : BackgroundService
                     ? await CallAsync(Send, stop, answerBy).ConfigureAwait(false)
                     : await OwnCallAsync(Send, stop).ConfigureAwait(false);
                 asked |= outcome is not OutOfTime { Asked: false };
+                if (StopsForUpdate(outcome))
+                {
+                    result.Outdated = true;
+                    asked = false;                                              // not the night's run: it goes once updated
+                    return result;
+                }
                 switch (outcome)
                 {
                     case SendOutcome.Accepted:
@@ -737,11 +794,149 @@ internal sealed class SharingWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Sends today so far (Plan Q §1), built as a complete day is, with <c>"complete": false</c>, and the hardware when it
+    /// changed since it last went. Today stays in the outbox, open, for the next hour's and for the complete day. A failure
+    /// backs off and is noted as a day's is; a refusal is noted, and today is kept, since the complete day may still go. A
+    /// day already closed, or one with nothing the switches allow, isn't sent. It gives way to the App as the run does.
+    /// </summary>
+    private async Task SendTodayAsync(DateTimeOffset now, CancellationToken stop)
+    {
+        if (_commands.AppWaiting) throw new GiveWay();
+        var nowMs = now.ToUnixTimeMilliseconds();
+        var day = Today(now);
+        var consent = _store.Consent;
+        if (_store.SentThrough is { } through && string.CompareOrdinal(day, through) <= 0)
+        {
+            _store.LastPartialRun = nowMs;
+            return;
+        }
+        var (id, key) = Identity();
+        var inputs = Inputs(day, consent, id, consent.Power ? _outbox.Minutes(day) : [], OutboxEvents.Read(_outbox, day), withHardware: false, now)
+            with { Complete = false };
+        var hash = consent.Power ? ReportJson.Hash(ReportBuilder.Hardware(inputs)) : null;
+        var report = ReportBuilder.Build(inputs with { WithHardware = hash is not null && hash != _store.HardwareHash });
+        if (report is { Diagnostics: null, Usage: null, Power: null })
+        {
+            _store.LastPartialRun = nowMs;                                    // nothing yet today the switches allow
+            return;
+        }
+
+        var body = SharingClient.Gzip(ReportJson.Write(report));
+        var outcome = await OwnCallAsync(cancel => _client.SendReportAsync(body, key, cancel), stop).ConfigureAwait(false);
+        if (StopsForUpdate(outcome)) return;                                  // it goes once updated
+        _store.LastPartialRun = nowMs;
+        switch (outcome)
+        {
+            case SendOutcome.Accepted:
+                Kept(day, body, report.Power?.Hardware is null ? null : hash, now);
+                break;
+            case SendOutcome.Rejected rejected:
+                _log.LogWarning("The server rejected today so far ({Day}): {Reason}", day, rejected.Text);
+                Note(new SendProblem(rejected.Text, Rejected: true));
+                break;
+            case SendOutcome.Gone:
+                _log.LogInformation("The server has deleted this install; forgetting it");
+                Forget(now);
+                break;
+            default:
+                var reason = outcome.Reason ?? "the server didn't take it";
+                _log.LogInformation("Sending today so far failed ({Reason}); trying again later", reason);
+                Note(new SendProblem(reason, Rejected: false));
+                _store.Backoff = SendSchedule.After(_store.Backoff, now);
+                break;
+        }
+    }
+
+    /// <summary>The history (Plan Q §2) is every hour row from before the hour Hardware and power was turned on in: the
+    /// minutes cover what comes after. It goes from the oldest.</summary>
+    private void StartHistory(long nowMs)
+    {
+        _store.HistoryUntilMs = nowMs / HourMs * HourMs;
+        _store.HistoryThroughMs = null;
+        _store.HistoryBackoff = null;
+    }
+
+    /// <summary>Hardware and power turned off stops the history and forgets how far it went.</summary>
+    private void ForgetHistory()
+    {
+        _store.HistoryUntilMs = null;
+        _store.HistoryThroughMs = null;
+        _store.HistoryBackoff = null;
+    }
+
+    /// <summary>
+    /// Sends the history (Plan Q §2) while Hardware and power is on and the server has heard the consent: the hours from
+    /// before the answer, oldest first, a chunk of at most <see cref="HistoryBuilder.ChunkDays"/> days at a time and at most
+    /// <see cref="MaxHistoryChunksPerRun"/> a run. Its progress is kept after each chunk, so a restart carries on. A chunk
+    /// refused for good is passed over. An old server without <c>/v1/history</c> (404), or any failure, holds back only
+    /// the history, on a back-off of its own, and is neither a problem nor a reason to hold the reports back. It gives way to
+    /// the App before each chunk.
+    /// </summary>
+    private async Task SendHistoryAsync(DateTimeOffset now, CancellationToken stop)
+    {
+        for (var chunks = 0; chunks < MaxHistoryChunksPerRun; chunks++)
+        {
+            var consent = _store.Consent;
+            if (!consent.AllowsAny || !consent.Power || _store.ConsentPending || Outdated) return;
+            if (_store.HistoryUntilMs is not { } untilMs || _store.HistoryThroughMs >= untilMs) return;
+            if (_store.HistoryBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return;
+            if (_commands.AppWaiting) throw new GiveWay();
+
+            var until = DateTimeOffset.FromUnixTimeMilliseconds(untilMs);
+            var from = DateTimeOffset.FromUnixTimeMilliseconds(_store.HistoryThroughMs ?? 0);
+            if (_hours.FirstHourStart(from, until) is not { } first)
+            {
+                _store.HistoryThroughMs = untilMs;                            // all of it has gone
+                _log.LogInformation("The history has all been sent");
+                return;
+            }
+            var to = HistoryBuilder.ChunkEnd(first, until);
+            var (id, key) = Identity();
+            var history = HistoryBuilder.Build(
+                id, _environment.Host().App, consent, (int)Zone.GetUtcOffset(now).TotalMinutes, _hours.ReadHours(first, to));
+            var body = SharingClient.Gzip(ReportJson.Write(history));
+            var outcome = await OwnCallAsync(cancel => _client.SendHistoryAsync(body, key, cancel), stop).ConfigureAwait(false);
+            if (StopsForUpdate(outcome)) return;
+            switch (outcome)
+            {
+                case SendOutcome.Accepted:
+                    _store.HistoryThroughMs = to.ToUnixTimeMilliseconds();
+                    _store.HistoryBackoff = null;
+                    break;
+                case SendOutcome.Rejected rejected:
+                    _log.LogWarning("The server rejected the history from {From} to {To}: {Reason}; it goes on after it", first, to, rejected.Text);
+                    _store.HistoryThroughMs = to.ToUnixTimeMilliseconds();
+                    break;
+                case SendOutcome.Gone:
+                    _log.LogInformation("The server has deleted this install; forgetting it");
+                    Forget(now);
+                    return;
+                case SendOutcome.NotFound:
+                    if (!_historyMissingLogged) _log.LogInformation("The server doesn't take the history yet; it will be tried again later");
+                    _historyMissingLogged = true;
+                    _store.HistoryBackoff = SendSchedule.After(_store.HistoryBackoff, now);
+                    return;
+                default:
+                    _log.LogInformation("Sending the history failed ({Reason}); trying again later", outcome.Reason);
+                    _store.HistoryBackoff = SendSchedule.After(_store.HistoryBackoff, now);
+                    return;
+            }
+        }
+    }
+
     /// <summary>The day leaves the outbox, and a copy of what went is kept for the user to see.</summary>
     private void Accepted(string day, byte[] body, string? hardwareHash, DateTimeOffset now)
     {
         _outbox.DeleteDay(day);
         Close(day);
+        Kept(day, body, hardwareHash, now);
+    }
+
+    /// <summary>What an accepted upload leaves: a copy of it, under its day's name, which a later upload of the same day
+    /// replaces, the last upload's time and size, and no problem or back-off.</summary>
+    private void Kept(string day, byte[] body, string? hardwareHash, DateTimeOffset now)
+    {
         WriteSent(day, body);
         _store.LastSent = new LastSent(now.ToUnixTimeMilliseconds(), body.Length);
         Note(null);
@@ -914,8 +1109,12 @@ internal sealed class SharingWorker : BackgroundService
 
         public bool Gone { get; set; }
 
+        /// <summary>True when the server answered that this version is older than it takes.</summary>
+        public bool Outdated { get; set; }
+
         public (bool Ok, string Message) Reply =>
             Gone ? (false, "The server has deleted this PC's data, so every switch is now off.")
+            : Outdated ? (false, OutdatedReply)
             : Failed is { } failed ? (false, $"Couldn't send: {failed}. Will try again.")
             : Rejected is { } rejected ? (false, $"Rejected by the server: {rejected}.")
             : Sent == 0 ? (true, "Nothing went in time; the rest will go at the next chance.")

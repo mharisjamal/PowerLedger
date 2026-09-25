@@ -41,8 +41,14 @@ public sealed class SharingStoreTests : IDisposable
         store.ConsentBackoff = new Backoff(2, 6_000);
         store.LastRun = 5_000;
         store.SentThrough = "2026-09-23";
+        store.LastPartialRun = 7_000;
+        store.HistoryUntilMs = 8_000;
+        store.HistoryThroughMs = 7_500;
+        store.HistoryBackoff = new Backoff(1, 9_000);
 
         var again = Store();
+        (again.LastPartialRun, again.HistoryUntilMs, again.HistoryThroughMs).ShouldBe((7_000L, 8_000L, 7_500L));
+        again.HistoryBackoff.ShouldBe(new Backoff(1, 9_000));
         again.StoredConsent.ShouldBe(consent);
         again.Consent.ShouldBe(consent.Consent);
         again.CollectedTo.ShouldBe(2_000);
@@ -63,24 +69,34 @@ public sealed class SharingStoreTests : IDisposable
     public void The_send_minute_is_chosen_once_and_kept()
     {
         var picks = 0;
-        var first = Store(() => ++picks == 1 ? 200 : 300);
+        var first = Store(() => ++picks == 1 ? 20 : 30);
 
-        first.SendMinute.ShouldBe(200);
-        first.SendMinute.ShouldBe(200);
-        Store(() => 300).SendMinute.ShouldBe(200);
+        first.SendMinute.ShouldBe(20);
+        first.SendMinute.ShouldBe(20);
+        Store(() => 30).SendMinute.ShouldBe(20);
         picks.ShouldBe(1);
     }
 
     [Fact]
-    public void Left_to_chance_the_send_minute_falls_between_ten_past_midnight_and_one_minute_to_six()
+    public void Left_to_chance_the_send_minute_falls_between_ten_past_midnight_and_one_minute_to_one()
     {
         using var other = new TestDatabase();
         foreach (var _ in Enumerable.Range(0, 50))
         {
             var settings = new SettingsRepository(other.Db);
             settings.Remove(SharingStore.MinuteKey);
-            new SharingStore(settings).SendMinute.ShouldBeInRange(10, 359);
+            new SharingStore(settings).SendMinute.ShouldBeInRange(10, 59);
         }
+    }
+
+    [Fact]
+    public void A_send_minute_chosen_before_uploads_went_hourly_is_chosen_again_inside_the_first_hour()
+    {
+        var settings = new SettingsRepository(_database.Db);
+        settings.Set(SharingStore.MinuteKey, "200");                         // 03:20, from before 0.9.0
+
+        Store(() => 35).SendMinute.ShouldBe(35);
+        settings.Get(SharingStore.MinuteKey).ShouldBe("35");
     }
 
     [Fact]
@@ -173,10 +189,15 @@ public sealed class SharingStoreTests : IDisposable
         store.ConsentBackoff = new Backoff(1, 7);
         store.LastRun = 6;
         store.SentThrough = "2026-09-20";
+        store.LastPartialRun = 8;
+        store.HistoryUntilMs = 9;
+        store.HistoryThroughMs = 8;
+        store.HistoryBackoff = new Backoff(1, 10);
 
         store.Forget(nowMs: 99);
 
         var after = Store(() => 7);
+        (after.LastPartialRun, after.HistoryUntilMs, after.HistoryThroughMs, after.HistoryBackoff).ShouldBe((null, null, null, null));
         after.StoredConsent.ShouldBe(new StoredConsent(new Consent(ConsentText.Version, false, false, false, false), 99, null));
         after.Consent.Answered.ShouldBeTrue();
         (after.InstallId, after.Key, after.CollectedTo, after.LastSent, after.Problem, after.Backoff).ShouldBe((null, null, null, null, null, null));

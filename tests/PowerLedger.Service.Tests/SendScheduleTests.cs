@@ -59,6 +59,32 @@ public class SendScheduleTests
     }
 
     [Fact]
+    public void Today_so_far_goes_once_an_hour_at_the_send_minutes_place_in_the_hour()
+    {
+        // Minute 90 goes at half past every local hour.
+        SendSchedule.HourSendTime(SendTime.AddMinutes(-1), Zone, 90).ShouldBe(SendTime.AddHours(-1));
+        SendSchedule.HourSendTime(SendTime, Zone, 90).ShouldBe(SendTime);
+        SendSchedule.HourSendTime(SendTime.AddMinutes(59), Zone, 90).ShouldBe(SendTime);
+        SendSchedule.HourSendTime(SendTime.AddHours(5).AddMinutes(1), Zone, 90).ShouldBe(SendTime.AddHours(5));
+
+        bool Due(DateTimeOffset now, long? last = null, Backoff? backoff = null) => SendSchedule.PartialDue(now, Zone, 90, last, backoff);
+        Due(SendTime).ShouldBeTrue();
+        Due(SendTime.AddMinutes(5), last: SendTime.ToUnixTimeMilliseconds()).ShouldBeFalse();
+        Due(SendTime.AddMinutes(59), last: SendTime.ToUnixTimeMilliseconds()).ShouldBeFalse();
+        Due(SendTime.AddHours(1), last: SendTime.ToUnixTimeMilliseconds()).ShouldBeTrue();          // the next hour
+        Due(SendTime.AddHours(3).AddMinutes(10), last: SendTime.ToUnixTimeMilliseconds()).ShouldBeTrue();  // a missed hour, caught up
+    }
+
+    [Fact]
+    public void Today_so_far_waits_out_a_back_off()
+    {
+        var backoff = new Backoff(2, SendTime.AddHours(2).AddMinutes(10).ToUnixTimeMilliseconds());
+        var last = SendTime.ToUnixTimeMilliseconds();
+        SendSchedule.PartialDue(SendTime.AddHours(1), Zone, 90, last, backoff).ShouldBeFalse();
+        SendSchedule.PartialDue(SendTime.AddHours(2).AddMinutes(10), Zone, 90, last, backoff).ShouldBeTrue();
+    }
+
+    [Fact]
     public void A_send_minute_the_clocks_skip_goes_at_the_first_time_after_it()
     {
         // 29 March 2026 in London: 01:00 GMT becomes 02:00 BST, so 01:30 never happens and 02:00 BST, 01:00 UTC, is next.

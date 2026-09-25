@@ -56,6 +56,10 @@
       "minimum": -840,
       "maximum": 840
     },
+    "complete": {
+      "description": "False for today so far, sent every hour; true, or absent from an older app, for a day that is over.",
+      "type": "boolean"
+    },
     "diagnostics": {
       "$ref": "#/$defs/diagnostics"
     },

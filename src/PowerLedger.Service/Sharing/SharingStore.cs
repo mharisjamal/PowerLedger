@@ -29,7 +29,7 @@ internal sealed record Backoff(int Failures, long NextMs);
 /// save can never overwrite it. The install key never leaves the service except to the server, and is kept encrypted with
 /// DPAPI for the account the service runs as: every local user can read the database, but only LocalSystem can read the key.
 /// </summary>
-/// <param name="pickMinute">Chooses the send minute, once; by default at random from 10 to 359, 00:10 to 05:59.</param>
+/// <param name="pickMinute">Chooses the send minute, once; by default at random from 10 to 59, 00:10 to 00:59.</param>
 internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickMinute = null)
 {
     internal const string ConsentKey = "sharing.consent";
@@ -46,16 +46,23 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     internal const string LastRunKey = "sharing.last-run";
     internal const string SentThroughKey = "sharing.sent-through";
     internal const string PreviousIdKey = "sharing.previous-id";
+    internal const string LastPartialRunKey = "sharing.last-partial";
+    internal const string HistoryUntilKey = "sharing.history-until";
+    internal const string HistoryThroughKey = "sharing.history-through";
+    internal const string HistoryBackoffKey = "sharing.history-backoff";
 
     public const int FirstSendMinute = 10;
-    public const int LastSendMinute = 359;
+
+    /// <summary>The last send minute, 00:59 (Plan Q §1): a complete day goes within the first hour. A minute kept from before,
+    /// up to 05:59, is chosen again.</summary>
+    public const int LastSendMinute = 59;
 
     /// <summary>What forgetting removes: everything the server knew this PC by and all progress. The send minute stays, and
     /// so does the <see cref="PreviousId"/>, which only writing in can have the server forget.</summary>
     private static readonly string[] Forgotten =
     [
         IdKey, KeyKey, CollectedToKey, LastSentKey, ProblemKey, BackoffKey, HardwareHashKey, ConsentPendingKey, ConsentBackoffKey, LastRunKey,
-        SentThroughKey,
+        SentThroughKey, LastPartialRunKey, HistoryUntilKey, HistoryThroughKey, HistoryBackoffKey,
     ];
 
     /// <summary>What a new ID starts without: what was kept of the one before about the server. What this PC collected, and
@@ -180,6 +187,35 @@ internal sealed class SharingStore(SettingsRepository settings, Func<int>? pickM
     {
         get => settings.Get(SentThroughKey);
         set => WriteText(SentThroughKey, value);
+    }
+
+    /// <summary>When today so far was last tried, UTC milliseconds (Plan Q §1).</summary>
+    public long? LastPartialRun
+    {
+        get => ReadLong(LastPartialRunKey);
+        set => WriteLong(LastPartialRunKey, value);
+    }
+
+    /// <summary>Where the history ends, UTC milliseconds (Plan Q §2): the start of the hour Hardware and power was turned on in,
+    /// under consent version 2. The hours before it go once. Null when there is no history to send.</summary>
+    public long? HistoryUntilMs
+    {
+        get => ReadLong(HistoryUntilKey);
+        set => WriteLong(HistoryUntilKey, value);
+    }
+
+    /// <summary>The history's progress, UTC milliseconds: the hours before this have gone. Null before the first chunk.</summary>
+    public long? HistoryThroughMs
+    {
+        get => ReadLong(HistoryThroughKey);
+        set => WriteLong(HistoryThroughKey, value);
+    }
+
+    /// <summary>The history's back-off, apart from the uploads', so an old server without it holds nothing else back.</summary>
+    public Backoff? HistoryBackoff
+    {
+        get => Read(HistoryBackoffKey, SharingJson.Default.Backoff);
+        set => Write(HistoryBackoffKey, value, SharingJson.Default.Backoff);
     }
 
     /// <summary>Forgets the ID, the key and every state about sending, and turns every switch off, as an answer to the

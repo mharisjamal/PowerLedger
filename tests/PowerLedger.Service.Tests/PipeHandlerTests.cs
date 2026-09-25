@@ -62,7 +62,7 @@ public sealed class PipeHandlerTests : IDisposable
 
     [Theory]
     [InlineData(ConsentText.Version, false, "Sharing detailed data needs Hardware and power turned on.")]
-    [InlineData(ConsentText.Version - 1, true, "That answer is to an older wording of the choices. Please choose again.")]
+    [InlineData(ConsentText.Oldest - 1, true, "That answer is to an older wording of the choices. Please choose again.")]
     public async Task A_consent_that_cannot_be_recorded_is_refused_without_bothering_the_worker(int version, bool power, string problem)
     {
         (await Send(new SetConsentRequest(35, new Consent(version, true, true, power, Share: true)))).ShouldBe(new ErrorReply(35, problem));

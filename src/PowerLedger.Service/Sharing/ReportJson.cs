@@ -5,13 +5,18 @@ using System.Text.Json.Serialization;
 
 namespace PowerLedger.Service.Sharing;
 
-/// <summary>The report's JSON, generated at build time: camelCase, with nulls written except for a section whose switch is off.</summary>
+/// <summary>The report's JSON, and the history's (Plan Q §2), generated at build time: camelCase, with nulls written except
+/// for a section whose switch is off.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ReportV1))]
+[JsonSerializable(typeof(HistoryV1))]
 internal sealed partial class ReportJson : JsonSerializerContext
 {
     /// <summary>The report as uploaded: compact UTF-8.</summary>
     public static byte[] Write(ReportV1 report) => JsonSerializer.SerializeToUtf8Bytes(report, Default.ReportV1);
+
+    /// <summary>A history chunk as uploaded: compact UTF-8.</summary>
+    public static byte[] Write(HistoryV1 history) => JsonSerializer.SerializeToUtf8Bytes(history, Default.HistoryV1);
 
     public static ReportV1 Read(ReadOnlySpan<byte> json) =>
         JsonSerializer.Deserialize(json, Default.ReportV1) ?? throw new JsonException("The report was empty.");

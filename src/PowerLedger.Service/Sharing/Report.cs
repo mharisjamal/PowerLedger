@@ -6,7 +6,9 @@ namespace PowerLedger.Service.Sharing;
 // Every field name, nesting and null is as in server/test/fixtures/valid-full.json. ReportBuilder fills these from named
 // fields only, so nothing added to a service type later can reach the server by accident.
 
-/// <summary>One PC's day: the header, then a section for each switch that is on and has something to say.</summary>
+/// <summary>One PC's day: the header, then a section for each switch that is on and has something to say.
+/// <see cref="Complete"/> (Plan Q §1) is false for today so far, sent every hour, and true for the day once it is over;
+/// the service always writes it, and a report without it, from an older app, is a complete day.</summary>
 internal sealed record ReportV1(
     int Schema,
     string InstallId,
@@ -17,6 +19,7 @@ internal sealed record ReportV1(
     ConsentDto Consent,
     string Day,
     int UtcOffsetMinutes,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Complete,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DiagnosticsDto? Diagnostics,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UsageDto? Usage,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PowerDto? Power);
