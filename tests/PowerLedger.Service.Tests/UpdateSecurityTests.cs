@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -108,6 +109,20 @@ public sealed class UpdateSecurityTests : IDisposable
     [InlineData("""["PowerLedger-0.9.1-setup-x64.exe"]""")]
     public void A_signatures_file_that_isnt_one_gives_nothing(string text)
         => ReleaseSignature.For(Encoding.UTF8.GetBytes(text), "PowerLedger-0.9.1-setup-x64.exe").ShouldBeNull();
+
+    // ---- Opening the App in the user's session
+
+    /// <summary>CreateProcessAsUser may write into its command line, so it gets a buffer of its own, ended by a null, and
+    /// never a string's own memory.</summary>
+    [Fact]
+    public void The_Apps_command_line_is_a_writable_buffer_ended_by_a_null()
+    {
+        var line = WindowsUpdateSystem.CommandLine(@"C:\Program Files\PowerLedger\PowerLedger.exe", "--after-update --tray");
+        line.ShouldBe((@"""C:\Program Files\PowerLedger\PowerLedger.exe"" --after-update --tray" + "\0").ToCharArray());
+        var parameter = typeof(WindowsUpdateSystem).GetMethod("CreateProcessAsUser", BindingFlags.NonPublic | BindingFlags.Static)!
+            .GetParameters().Single(p => p.Name == "commandLine");
+        parameter.ParameterType.ShouldBe(typeof(char[]));
+    }
 
     // ---- The check made while the file is held
 

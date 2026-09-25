@@ -131,8 +131,7 @@ internal sealed class WindowsUpdateSystem(ILogger log) : IUpdateSystem
                 try
                 {
                     var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>(), Desktop = @"winsta0\default" };
-                    var commandLine = $"\"{path}\" {arguments}";
-                    if (!CreateProcessAsUser(primary, path, commandLine, IntPtr.Zero, IntPtr.Zero, false, CreateUnicodeEnvironment, environment,
+                    if (!CreateProcessAsUser(primary, path, CommandLine(path, arguments), IntPtr.Zero, IntPtr.Zero, false, CreateUnicodeEnvironment, environment,
                             Path.GetDirectoryName(path), ref startup, out var started))
                         throw new Win32Exception(Marshal.GetLastWin32Error());
                     CloseHandle(started.Process);
@@ -145,6 +144,10 @@ internal sealed class WindowsUpdateSystem(ILogger log) : IUpdateSystem
             }
         }
     }
+
+    /// <summary>The App's command line for CreateProcessAsUser, which may write into it: a buffer of its own, ended by a
+    /// null, never a string's memory.</summary>
+    internal static char[] CommandLine(string path, string arguments) => $"\"{path}\" {arguments}\0".ToCharArray();
 
     /// <summary>Every running App, whichever session it is in.</summary>
     private static Process[] Apps() => Process.GetProcessesByName(AppProcess);
@@ -212,7 +215,7 @@ internal sealed class WindowsUpdateSystem(ILogger log) : IUpdateSystem
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateProcessAsUser(
-        SafeAccessTokenHandle token, string application, string commandLine, IntPtr processAttributes, IntPtr threadAttributes,
+        SafeAccessTokenHandle token, string application, [In, Out] char[] commandLine, IntPtr processAttributes, IntPtr threadAttributes,
         [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint flags, IntPtr environment, string? directory, ref StartupInfo startup,
         out ProcessInformation information);
 
