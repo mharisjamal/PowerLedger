@@ -83,6 +83,47 @@ public sealed class ApprovalTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task How_the_household_stood_as_the_approve_answer_came_never_lands_over_how_it_stands_once_the_pc_is_in()
+    {
+        var (desktop, study, _) = await BothAsked();
+        var (approve, confirm) = (await desktop.Next(NoticeKind.ApprovePrompt), await study.Next(NoticeKind.ConfirmJoin));
+        await study.Send<HouseholdReply>(new AnswerPromptRequest(9, confirm.PromptId!, true));
+        await study.Worker.Running;
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var answering = 0;
+        desktop.NameRead = () =>                                                    // the answer's publish, its members read, waits
+        {
+            if (Environment.CurrentManagedThreadId != Volatile.Read(ref answering) || !held.TrySetResult()) return;
+            release.Wait();
+        };
+        _relay.Intercept = (request, _) =>                                          // and the approval goes only once it has read them
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/approve", StringComparison.Ordinal)) held.Task.Wait(TimeSpan.FromSeconds(30));
+            return null;
+        };
+        var answered = Task.Factory.StartNew(() =>
+        {
+            Volatile.Write(ref answering, Environment.CurrentManagedThreadId);
+            return desktop.Send<HouseholdReply>(new AnswerPromptRequest(10, approve.PromptId!, true)).GetAwaiter().GetResult();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        try
+        {
+            await held.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await desktop.Worker.Running;                                           // in, and published so
+            desktop.Board.Household!.Members.ShouldContain(member => member.DeviceId == study.Worker.DeviceId);
+        }
+        finally
+        {
+            release.Set();
+        }
+        (await answered).Ok.ShouldBeTrue();
+
+        desktop.Board.Household!.Members.ShouldContain(member => member.DeviceId == study.Worker.DeviceId);
+        desktop.Board.Household!.PendingApprovals.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task A_nonce_the_server_lists_after_the_reveal_ends_the_approval_and_nothing_is_sealed()
     {
         var (desktop, study, household) = await BothAsked();

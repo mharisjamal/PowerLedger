@@ -101,9 +101,14 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _kick = new(0);
     private readonly Lock _listening = new();
+    private readonly Lock _statusLock = new();
     private LanListener? _listener;
     private ITimer? _networkCheck;
     private long _rowsBuiltForHour = -1;
+
+    /// <summary>How many publishes of the status have begun, and the number of the one that landed last.</summary>
+    private long _statusBegun;
+    private long _statusLanded;
 
     public HouseholdWorker(
         SqliteDatabase database, StatusBoard board, NoticeHub notices, HouseholdEnvironment environment, TimeProvider clock,
@@ -964,9 +969,12 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         }
     }
 
-    /// <summary>How the household stands, for the status. It never throws: the status keeps what was last published.</summary>
+    /// <summary>How the household stands, for the status. It never throws: the status keeps what was last published. Publishes
+    /// run on several threads at once, as a request's, when it answers, beside the work its answer set going: each is numbered
+    /// as it begins, before it reads anything, and never lands over one that began after it, which read the household later.</summary>
     private void Publish()
     {
+        var begun = Interlocked.Increment(ref _statusBegun);
         try
         {
             var me = _keys.DeviceId;
@@ -978,11 +986,17 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                     member.DeviceId, member.Name, member.Kind, member.DeviceId == me,
                     member.DeviceId == me || member.LastSyncedMs is not { } synced ? null : DateTimeOffset.FromUnixTimeMilliseconds(synced),
                     member.LeftMs is not null))];
-            _board.Publish(new HouseholdStatus(
+            var status = new HouseholdStatus(
                 householdId, me, _store.Name, Kind(), _store.Discoverable, members, householdId is null ? null : _store.Problem,
                 SignedIn: _store.Session is not null, PendingApprovals: householdId is null ? 0 : Volatile.Read(ref _waitingApprovals),
                 RecoveryMissing: householdId is not null && _store.Session is not null && _recoveryMissing,
-                CanAskAgain: householdId is null && _store.Session is not null && _store.CanAskAgain));
+                CanAskAgain: householdId is null && _store.Session is not null && _store.CanAskAgain);
+            lock (_statusLock)
+            {
+                if (_statusLanded > begun) return;                              // one that began later has landed: this one read older
+                _statusLanded = begun;
+                _board.Publish(status);
+            }
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
