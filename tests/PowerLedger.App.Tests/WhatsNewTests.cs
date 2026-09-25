@@ -75,11 +75,24 @@ public class WhatsNewTests
             "Optional data sharing: help improve the estimates by sharing anonymous readings; ask in Settings → Privacy.",
         ]);
 
+    [Fact]
+    public void The_0_8_1_points_match_exactly_and_come_first()
+    {
+        WhatsNew.Releases[0].Version.ShouldBe("0.8.1", "newest first");
+        PointsOf("0.8.1").ShouldBe(
+        [
+            "Every graphics card counts now, older NVIDIA cards such as the Quadro 6000 included, and a PC with several cards adds them all up.",
+            "The new look is closer to its design: one bordered row of figures, indigo charts, and a Start service button when the service is off.",
+            "What's new opens here in the app, and storage warnings show in the new look too.",
+        ]);
+        WhatsNew.Since("0.8.0", "0.8.1").ShouldBe(PointsOf("0.8.1"));
+    }
+
     /// <summary>0.8.0 is the Midnight look, and says the classic one is a switch away (Midnight look design §1).</summary>
     [Fact]
-    public void The_0_8_0_points_match_exactly_and_come_first()
+    public void The_0_8_0_points_match_exactly()
     {
-        WhatsNew.Releases[0].Version.ShouldBe("0.8.0", "newest first");
+        WhatsNew.Releases[1].Version.ShouldBe("0.8.0");
         PointsOf("0.8.0").ShouldBe(
         [
             "A new look: a dashboard with your power, today's energy and idle waste at a glance. Prefer the classic look? Switch back any time in Settings → Preferences.",

@@ -8,6 +8,12 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.8.1",
+        [
+            "Every graphics card counts now, older NVIDIA cards such as the Quadro 6000 included, and a PC with several cards adds them all up.",
+            "The new look is closer to its design: one bordered row of figures, indigo charts, and a Start service button when the service is off.",
+            "What's new opens here in the app, and storage warnings show in the new look too.",
+        ]),
         ("0.8.0",
         [
             "A new look: a dashboard with your power, today's energy and idle waste at a glance. Prefer the classic look? Switch back any time in Settings → Preferences.",
