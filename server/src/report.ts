@@ -4,6 +4,7 @@ import { checkMinutes } from "./minutes";
 import { firstSchemaError } from "./schema";
 import { deleteBodies, putBody } from "./store";
 import { errorResponse, readUpload } from "./upload";
+import { belowMinimum, updateRequired } from "./version";
 
 // Today so far every hour, the complete day, and room for retries.
 const MAX_REQUESTS_PER_DAY = 60;
@@ -30,6 +31,9 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
   const schemaError = firstSchemaError(parsed);
   if (schemaError) return errorResponse(400, `${schemaError.instanceLocation} ${schemaError.error}`);
   const report = parsed as ReportBody;
+
+  // 5a. The app that sent it must be at least the minimum version, as its header (checked in readUpload) must.
+  if (belowMinimum(report.app, env)) return updateRequired(env);
 
   // 6. The minutes, left to hand-written code to keep a report inside the CPU limit.
   if (report.power) {

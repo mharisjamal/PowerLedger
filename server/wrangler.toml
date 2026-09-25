@@ -35,3 +35,7 @@ GOOGLE_CLIENT_ID = "422411367198-3470upgqo0tubjqdpo4fuhhl00ce9qb9.apps.googleuse
 # In-app feedback (src/feedback.ts): the owner's PRIVATE repo, "owner/name", that feedback is filed in as issues, with its
 # images committed. The token for it is a secret (tools/set-feedback-token.ps1). Either empty turns feedback off (503).
 FEEDBACK_REPO = "mharisjamal/PowerLedger-feedback"
+
+# The oldest app version whose reports and history are taken (src/version.ts, Plan Q spec §3): older ones get 426 and
+# update themselves. GET /v1/app-policy gives it to the service. 0.0.0 takes every version; 0.9.0 once 0.9.0 is out.
+MIN_APP_VERSION = "0.0.0"

@@ -5,6 +5,7 @@ import { handleHouseholdRoutes } from "./households/routes";
 import { handleConsent, handleDelete } from "./install";
 import { handleReport } from "./report";
 import { runRetention } from "./retention";
+import { handleAppPolicy } from "./version";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -15,6 +16,9 @@ export default {
     }
     if (request.method === "POST" && url.pathname === "/v1/history") {
       return handleHistory(request, env);
+    }
+    if (request.method === "GET" && url.pathname === "/v1/app-policy") {
+      return handleAppPolicy(env);
     }
     if (request.method === "POST" && url.pathname === "/v1/consent") {
       return handleConsent(request, env);

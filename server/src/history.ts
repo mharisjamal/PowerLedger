@@ -3,6 +3,7 @@ import { checkHours } from "./hours";
 import { firstHistoryError } from "./schema";
 import { deleteBodies, putBody } from "./store";
 import { errorResponse, readUpload } from "./upload";
+import { belowMinimum, updateRequired } from "./version";
 
 const HOUR_MS = 3_600_000;
 // Three years of history is 36 chunks; this leaves room for retries, on its own count, not the reports'.
@@ -33,6 +34,9 @@ export async function handleHistory(request: Request, env: Cloudflare.Env): Prom
   const schemaError = firstHistoryError(parsed);
   if (schemaError) return errorResponse(400, `${schemaError.instanceLocation} ${schemaError.error}`);
   const history = parsed as HistoryBody;
+
+  // 5a. The app that sent it must be at least the minimum version, as its header (checked in readUpload) must.
+  if (belowMinimum(history.app, env)) return updateRequired(env);
 
   // 6. The hours, left to hand-written code to keep a chunk inside the CPU limit.
   const problem = checkHours(history.hours, Date.now());

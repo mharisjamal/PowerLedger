@@ -19,6 +19,9 @@ declare namespace Cloudflare {
     // tools/set-feedback-token.ps1). Either empty turns feedback off (503).
     FEEDBACK_REPO?: string;
     FEEDBACK_GITHUB_TOKEN?: string;
+    // The oldest app version whose uploads are taken (wrangler.toml's [vars], src/version.ts). Empty or not a
+    // version means 0.0.0, every version.
+    MIN_APP_VERSION?: string;
     // Test-only: the parsed migrations, set in vitest.config.ts and applied by
     // test/apply-migrations.ts.
     TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];
