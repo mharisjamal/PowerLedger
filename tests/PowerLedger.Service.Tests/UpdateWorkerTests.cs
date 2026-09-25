@@ -107,10 +107,31 @@ public sealed class UpdateWorkerTests : IDisposable
 
         var (path, arguments) = _system.Setups.ShouldHaveSingleItem();
         path.ShouldBe(Path.Combine(_folder.Path, Installer));
-        arguments.ShouldBe($"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /UPDATE=1 /SERVICEUPDATE=1 /LOG=\"{Path.Combine(_folder.Path, "setup-0.9.1.log")}\"");
+        var log = Path.Combine(_folder.Path, "PowerLedger-0.9.1-setup-x64.log");
+        arguments.ShouldBe($"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /UPDATE=1 /SERVICEUPDATE=1 /LOG=\"{log}\"");
         _system.Log.ShouldBe(["close apps", "start setup"]);
         RelaunchNote.Read(_folder.Path).ShouldBe(new RelaunchNote("0.9.1", WindowWasVisible: false));
         worker.Stage.ShouldBe("Installing PowerLedger 0.9.1");
+    }
+
+    [Fact]
+    public async Task Setups_log_is_named_as_the_installer_so_the_clean_removes_it_once_a_later_version_runs()
+    {
+        _feed.Latest = Release();
+        var worker = Worker();
+        await worker.CheckAsync(CancellationToken.None);
+        await worker.TickAsync(CancellationToken.None);
+        var log = _system.Setups.Single().Arguments.Split("/LOG=\"")[1].TrimEnd('"');
+        _system.Running.Single().Exit(0);
+        await worker.Setup!;
+        File.WriteAllText(log, "setup's log");
+
+        using var http = new HttpClient();
+        var downloads = new UpdateDownloader(http, _folder.Path);
+        downloads.Clean(Version.Parse("0.9.1"));                              // kept while its version runs, to be read
+        File.Exists(log).ShouldBeTrue();
+        downloads.Clean(Version.Parse("0.9.2"));                              // and gone once the next one does
+        File.Exists(log).ShouldBeFalse();
     }
 
     [Fact]

@@ -253,7 +253,7 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
                 Say($"Installing PowerLedger {release.Name}");
                 _log.LogInformation("Installing PowerLedger {Version}", release.Name);
                 await _env.System.CloseAppsAsync(cancel).ConfigureAwait(false);
-                var log = Path.Combine(_env.Folder.Path, $"setup-{release.Name}.log");
+                var log = Path.ChangeExtension(ready.Path, ".log");   // named as the installer, so the clean after the update removes it
                 var setup = _env.System.StartSetup(held, SetupArguments(log));
                 _setup = WatchAsync(setup, held, release, cancel);
                 return true;
