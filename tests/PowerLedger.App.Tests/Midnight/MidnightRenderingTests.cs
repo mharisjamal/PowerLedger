@@ -412,6 +412,39 @@ public class MidnightRenderingTests
             }
         });
 
+    /// <summary>Review 4 (0.8.0): the window is built while the shell is on Classic's Now, which has no view here. The
+    /// page host shows nothing for it, not the ViewModel's type name, and the Dashboard the window shows for it once
+    /// shown is its first page, so it comes in at once, without a cross-fade, at every launch and every switch from Classic.</summary>
+    [Fact]
+    public void A_window_built_on_classics_now_shows_no_page_for_it_and_opens_on_the_dashboard_without_a_fade()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var shell = MidnightFixtures.Shell(saver);
+            shell.Page = Page.Now;
+            var window = MidnightFixtures.Window(shell);
+            var pages = (PageHost)window.FindName("Pages");
+            var presenters = pages.Children.OfType<ContentPresenter>().ToList();
+            UiHarness.Pump(TimeSpan.FromMilliseconds(50));   // the page's binding comes alive on the dispatcher's next turn
+            pages.Content.ShouldBeSameAs(shell.Now);
+            presenters.ShouldAllBe(presenter => presenter.Content == null, "Now has no view here: nothing, not its type's name");
+            window.Show();
+            try
+            {
+                pages.Showing.Content.ShouldBeSameAs(shell.Dashboard);
+                pages.Showing.Opacity.ShouldBe(1);
+                pages.Showing.HasAnimatedProperties.ShouldBeFalse("the first page comes in at once");
+                presenters.Single(presenter => presenter != pages.Showing).Content.ShouldBeNull();
+                UiHarness.Pump(TimeSpan.FromMilliseconds(200));
+                UiHarness.Find<TextBlock>(window, text => text.Text.Contains("ViewModel", StringComparison.Ordinal)).ShouldBeNull();
+                UiHarness.Find<DashboardView>(window).ShouldNotBeNull();
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
     /// <summary>Review 9: building the window changes nothing in the shell, so a switch whose window then fails to show
     /// leaves the page as it was; shown, the window takes Classic's Now as its Dashboard.</summary>
     [Fact]

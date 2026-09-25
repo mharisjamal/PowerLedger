@@ -9,7 +9,9 @@ namespace PowerLedger.App;
 /// Where a Midnight page shows (plan O 0.5): two presenters that take turns, so when the page changes the one leaving
 /// fades out (Fast) while the one arriving fades in and rises 8 px (Base, ease-out), and the old view stays alive until
 /// its fade ends. The templates come from the window's resources, as a ContentControl's would. Under reduced motion the
-/// fades keep 120 ms and nothing moves.
+/// fades keep 120 ms and nothing moves. A page with no template here (Classic's Now, which the window is built on until it
+/// shows its Dashboard for it) shows nothing, at once, rather than its type's name; the page after it is a first page again,
+/// which comes in without a fade (review 4, 0.8.0: every launch and every switch from Classic cross-faded from the name).
 /// </summary>
 internal sealed class PageHost : Grid
 {
@@ -39,10 +41,37 @@ internal sealed class PageHost : Grid
 
     private static void OnContentChanged(DependencyObject element, DependencyPropertyChangedEventArgs e) => ((PageHost)element).Show(e.NewValue);
 
+    /// <summary>Whether <paramref name="content"/> has something to show here: an element, or a template for its type or a
+    /// type it derives from, found as a presenter would find it.</summary>
+    private bool HasView(object content)
+    {
+        if (content is UIElement) return true;
+        for (var type = content.GetType(); type is not null && type != typeof(object); type = type.BaseType)
+        {
+            if (TryFindResource(new DataTemplateKey(type)) is DataTemplate) return true;
+        }
+        return false;
+    }
+
     private void Show(object? content)
     {
+        if (content is not null && !HasView(content)) content = null;
         var leaving = _showing;
         var arriving = leaving == _a ? _b : _a;
+        if (ReferenceEquals(content, leaving.Content)) return;
+        if (content is null)
+        {
+            // Nothing to show: both presenters empty at once, so whatever comes next comes in as a first page.
+            foreach (var presenter in new[] { _a, _b })
+            {
+                presenter.BeginAnimation(OpacityProperty, null);
+                presenter.Content = null;
+                presenter.Visibility = Visibility.Collapsed;
+            }
+            _showing = _a;
+            _a.Visibility = Visibility.Visible;
+            return;
+        }
         if (leaving.Content is null)
         {
             // The first page: nothing to leave, so nothing to fade from.
