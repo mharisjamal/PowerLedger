@@ -127,6 +127,7 @@ internal sealed class FakeService(string name) : IAsyncDisposable
     private PipeMessage Reply(PipeRequest request) => request switch
     {
         GetStatusRequest r => new StatusReply(r.Id, Status),
+        UpdateNowRequest when Refuse is { } refusal => new ErrorReply(request.Id, refusal),
         GetSettingsRequest r => new SettingsReply(r.Id, ServiceSettings.Default),
         SetSettingsRequest or SetTariffRequest or ResetCalibrationRequest or SetConsentRequest or PreviewUploadRequest or SendNowRequest
             or DeleteMyDataRequest or ReportUsageRequest or ReportCrashRequest when Refuse is { } refusal => new ErrorReply(request.Id, refusal),

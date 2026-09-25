@@ -50,6 +50,13 @@ internal sealed class FakeLink : IServiceLink
     /// <summary>Every change the App asked for, in order.</summary>
     public List<object> Writes { get; } = [];
 
+    /// <summary>Each window state the App reported, in order.</summary>
+    public List<bool> Windows { get; } = [];
+
+    public void ReportWindow(bool visible) => Windows.Add(visible);
+
+    public Task<WriteResult> UpdateNowAsync(CancellationToken cancel = default) => Write("updateNow");
+
     /// <summary>What every change comes back as.</summary>
     public WriteResult Answer { get; set; } = WriteResult.Done;
 

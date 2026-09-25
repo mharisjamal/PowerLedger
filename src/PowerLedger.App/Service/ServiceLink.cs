@@ -155,6 +155,15 @@ internal interface IServiceLink : IAsyncDisposable
     /// <summary>N2: asks the household again to let this PC in, once <see cref="HouseholdStatus.CanAskAgain"/> says its
     /// last request ended unanswered or was refused (plan 0.9). Only the user asks again.</summary>
     Task<HouseholdOutcome> AskAgainAsync(CancellationToken cancel = default);
+
+    /// <summary>Plan Q §4: whether the main window is showing now. Kept, and told to a service that takes it on every
+    /// connection and every change, so the service installs an update while nobody is looking at PowerLedger. Never sent
+    /// to an older service, whose status has no <see cref="ServiceStatus.Updates"/>. Returns at once.</summary>
+    void ReportWindow(bool visible);
+
+    /// <summary>Plan Q §3: the blocking window's Update now, to a service that installs updates itself; otherwise, or
+    /// when it can't, what went wrong, and the App falls back to its own setup.</summary>
+    Task<WriteResult> UpdateNowAsync(CancellationToken cancel = default);
 }
 
 /// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
@@ -206,6 +215,8 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     private long _lastId;
     private volatile MessageChannel? _channel;
     private volatile string? _refusal;
+    private volatile bool _windowVisible;
+    private volatile MessageChannel? _takesUiState;   // the connection whose service said it handles updates
     private Task? _run;
 
     public event Action<ReadingFrame>? FrameReceived;
@@ -307,6 +318,20 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public Task<HouseholdOutcome> AskAgainAsync(CancellationToken cancel = default) => HouseholdAsync(new AskAgainRequest(NextId()), cancel);
 
+    public void ReportWindow(bool visible)
+    {
+        _windowVisible = visible;
+        if (!_disposed && _takesUiState is { } channel) _ = SendWindowAsync(channel, _stop.Token);
+    }
+
+    public Task<WriteResult> UpdateNowAsync(CancellationToken cancel = default)
+    {
+        if (_channel is null) return Task.FromResult(WriteResult.NotConnected);
+        if (_refusal is { } refusal) return Task.FromResult(new WriteResult(refusal));
+        if (_takesUiState is null) return Task.FromResult(new WriteResult("This service doesn't install updates itself."));
+        return WriteAsync(new UpdateNowRequest(NextId()), cancel);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposing, 1) == 1) return;                  // once, however often it is asked
@@ -364,6 +389,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
             _refusal = refusal;
             _channel = channel;
             ConnectionChanged?.Invoke(true);
+            if (refusal is null) _ = LearnUpdatesAsync(channel, connection.Token);
             reporting = ReportActivityAsync(channel, connection.Token);
             await Task.WhenAny(reading, reporting).ConfigureAwait(false);
         }
@@ -371,6 +397,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         {
             var connected = _channel is not null;
             _channel = null;
+            _takesUiState = null;
             await connection.CancelAsync().ConfigureAwait(false);
             FailPending();
             await Quietly(reading).ConfigureAwait(false);
@@ -418,6 +445,39 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
                 default:
                     return;   // an error with no id: the service is closing this connection
             }
+        }
+    }
+
+    /// <summary>Asks a new connection's service whether it handles updates (Plan Q §4), which an older one's status
+    /// doesn't say; one that does is told the window state at once, and from then on at each change. Never throws: a
+    /// service that doesn't answer is simply not told.</summary>
+    private async Task LearnUpdatesAsync(MessageChannel channel, CancellationToken cancel)
+    {
+        try
+        {
+            if (await RequestAsync(channel, new GetStatusRequest(NextId()), cancel).ConfigureAwait(false) is not StatusReply { Status.Updates: not null })
+                return;
+            _takesUiState = channel;
+            await SendWindowAsync(channel, cancel).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException or TimeoutException
+                                          or PipeProtocolException)
+        {
+            // The connection ended, or the service is slow: the next connection asks again.
+        }
+    }
+
+    /// <summary>Tells the service whether the window shows now. Never throws.</summary>
+    private async Task SendWindowAsync(MessageChannel channel, CancellationToken cancel)
+    {
+        try
+        {
+            await RequestAsync(channel, new UiStateRequest(NextId(), _windowVisible), cancel).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException or TimeoutException
+                                          or PipeProtocolException)
+        {
+            // Gone or slow: the next connection says it again.
         }
     }
 
