@@ -36,7 +36,8 @@ internal sealed record Done;
 /// The Worker's household routes over HTTPS (households design §5 to §8, plan 0.6): one <see cref="HttpClient"/> for the
 /// service's life, at <see cref="Sharing.SharingEndpoint"/>'s address. Requests about a household are signed by this PC's
 /// device key: <c>X-PL-Device</c>, <c>X-PL-Time</c> and <c>X-PL-Signature</c> over the method, the path with its query, the
-/// time and the body's hash. Meeting slots aren't signed; what is in them vouches for itself.
+/// time and the body's hash. Meeting slots aren't signed; what is in them vouches for itself. Every request says the
+/// service's version, as the data server's do.
 /// </summary>
 internal sealed class RelayClient : IDisposable
 {
@@ -56,6 +57,7 @@ internal sealed class RelayClient : IDisposable
             Timeout = timeout ?? DefaultTimeout,
         };
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PowerLedger", ServiceVersion.Short));
+        _http.DefaultRequestHeaders.Add(Sharing.SharingClient.VersionHeader, ServiceVersion.Short);   // Plan Q §3
     }
 
     public void Dispose() => _http.Dispose();

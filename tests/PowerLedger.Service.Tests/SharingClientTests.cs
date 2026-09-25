@@ -116,6 +116,62 @@ public class SharingClientTests
     }
 
     [Fact]
+    public async Task Every_request_says_the_services_version()
+    {
+        var handler = new FakeHandler(_ => Answer(HttpStatusCode.OK, "{\"ok\":true}"));
+        using var client = new SharingClient(Endpoint, handler);
+
+        await client.SendReportAsync(SharingClient.Gzip("{}"u8.ToArray()), Key);
+        await client.SendHistoryAsync(SharingClient.Gzip("{}"u8.ToArray()), Key);
+        await client.SendConsentAsync(SharingFakes.InstallId, Key, SharingFakes.AllOn);
+        await client.DeleteAsync(SharingFakes.InstallId, Key);
+
+        handler.Seen.Count.ShouldBe(4);
+        foreach (var (request, _) in handler.Seen)
+        {
+            request.Headers.GetValues("X-PowerLedger-Version").ShouldBe(new[] { ServiceVersion.Short });
+        }
+    }
+
+    [Fact]
+    public async Task History_goes_as_gzip_json_with_the_install_key()
+    {
+        var handler = new FakeHandler(_ => Answer(HttpStatusCode.OK, "{\"ok\":true}"));
+        using var client = new SharingClient(Endpoint, handler);
+        var json = "{\"schema\":\"history-v1\"}"u8.ToArray();
+
+        (await client.SendHistoryAsync(SharingClient.Gzip(json), Key)).ShouldBeOfType<SendOutcome.Accepted>();
+
+        var (request, body) = handler.Seen.ShouldHaveSingleItem();
+        (request.Method, request.RequestUri).ShouldBe((HttpMethod.Post, new Uri("http://127.0.0.1:8766/v1/history")));
+        request.Headers.Authorization.ShouldNotBeNull().ToString().ShouldBe($"Bearer {Key}");
+        request.Content.ShouldNotBeNull().Headers.ContentEncoding.ShouldBe(new[] { "gzip" });
+        request.Content.Headers.ContentType.ShouldNotBeNull().MediaType.ShouldBe("application/json");
+        Gunzip(body).ShouldBe(json);
+    }
+
+    [Fact]
+    public async Task An_update_required_answer_carries_the_servers_minimum_version()
+    {
+        using var client = new SharingClient(Endpoint, new FakeHandler(_ =>
+            Answer(HttpStatusCode.UpgradeRequired, "{\"error\":\"update required\",\"minVersion\":\"0.9.0\"}")));
+
+        var sent = await client.SendReportAsync(SharingClient.Gzip("{}"u8.ToArray()), Key);
+
+        sent.ShouldBeOfType<SendOutcome.UpdateRequired>().MinVersion.ShouldBe("0.9.0");
+        sent.Reason.ShouldBe("update required");
+    }
+
+    [Fact]
+    public async Task A_server_without_the_request_answers_not_found()
+    {
+        using var client = new SharingClient(Endpoint, new FakeHandler(_ => Answer(HttpStatusCode.NotFound, "Not found")));
+
+        (await client.SendHistoryAsync(SharingClient.Gzip("{}"u8.ToArray()), Key))
+            .ShouldBeOfType<SendOutcome.NotFound>().Reason.ShouldBe("the server answered 404 Not Found");
+    }
+
+    [Fact]
     public async Task A_consent_change_goes_as_the_id_and_the_four_switches()
     {
         var handler = new FakeHandler(_ => Answer(HttpStatusCode.OK, "{\"ok\":true}"));

@@ -34,6 +34,22 @@ public sealed class CodePairingTests : IDisposable
     private PairingIdentity Joiner => new(_joinerKeys, "Laptop-2", ChassisKind.Laptop, "b1");
 
     [Fact]
+    public async Task Every_request_to_the_relay_says_the_services_version()
+    {
+        var versions = new List<string>();
+        _relay.Intercept = (request, _) =>
+        {
+            lock (versions) versions.AddRange(request.Headers.TryGetValues("X-PowerLedger-Version", out var values) ? values : ["none"]);
+            return null;
+        };
+
+        using var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull();
+
+        versions.ShouldNotBeEmpty();
+        versions.ShouldAllBe(version => version == ServiceVersion.Short);
+    }
+
+    [Fact]
     public async Task A_good_code_joins_without_a_comparison_code()
     {
         using var meeting = (await _pairing.OpenAsync(Adder, CancellationToken.None)).ShouldNotBeNull();

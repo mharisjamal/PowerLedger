@@ -101,8 +101,8 @@ internal static class ServiceHost
         services.AddHostedService(provider => provider.GetRequiredService<SamplingLoop>());
         services.AddHostedService(provider => new SharingWorker(
             provider.GetRequiredService<SqliteDatabase>(), provider.GetRequiredService<StatusBoard>(), provider.GetRequiredService<SharingCommands>(),
-            provider.GetRequiredService<ISharingClient>(), SharingEnvironment.For(paths), provider.GetRequiredService<TimeProvider>(),
-            provider.GetRequiredService<ILogger<SharingWorker>>()));
+            provider.GetRequiredService<ISharingClient>(), provider.GetRequiredService<AppPolicy>(), SharingEnvironment.For(paths),
+            provider.GetRequiredService<TimeProvider>(), provider.GetRequiredService<ILogger<SharingWorker>>()));
         services.AddHostedService(provider => provider.GetRequiredService<HouseholdWorker>());
         services.AddHostedService(provider => new PipeServer(
             provider.GetRequiredService<PipeHandler>(), provider.GetRequiredService<LiveFeed>(),

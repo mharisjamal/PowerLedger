@@ -24,14 +24,25 @@ internal abstract record SendOutcome(string? Reason)
 
     /// <summary>No answer at all: no network, no server, or none in time.</summary>
     public sealed record Unreachable(string Text) : SendOutcome(Text);
+
+    /// <summary>404: the server doesn't have this request, as an older one without <c>/v1/history</c>.</summary>
+    public sealed record NotFound(string Text) : SendOutcome(Text);
+
+    /// <summary>426 (Plan Q §3): this version is older than the server takes; <see cref="MinVersion"/> is the oldest it
+    /// does, as the server said it, or null when it didn't.</summary>
+    public sealed record UpdateRequired(string Text, string? MinVersion) : SendOutcome(Text);
 }
 
-/// <summary>The three requests the service makes of the data server. Stopping the service cancels one with an
+/// <summary>The requests the service makes of the data server. Stopping the service cancels one with an
 /// <see cref="OperationCanceledException"/>; everything else is an outcome.</summary>
 internal interface ISharingClient
 {
     /// <summary><c>POST /v1/report</c> with one day's report, already gzipped; the report names the install.</summary>
     Task<SendOutcome> SendReportAsync(byte[] gzipBody, string key, CancellationToken cancel = default);
+
+    /// <summary><c>POST /v1/history</c> (Plan Q §2) with a chunk of the hourly totals already on the PC, already gzipped; the
+    /// body names the install.</summary>
+    Task<SendOutcome> SendHistoryAsync(byte[] gzipBody, string key, CancellationToken cancel = default);
 
     /// <summary><c>POST /v1/consent</c> with the switches as they are now.</summary>
     Task<SendOutcome> SendConsentAsync(string installId, string key, Consent consent, CancellationToken cancel = default);
@@ -42,13 +53,17 @@ internal interface ISharingClient
 
 /// <summary>
 /// The data server over HTTPS, through one <see cref="HttpClient"/> for the service's life: user agent
-/// <c>PowerLedger/X.Y.Z</c>, a 60-second timeout for the answer's headers and again for an error answer's body, and the
+/// <c>PowerLedger/X.Y.Z</c> and <see cref="VersionHeader"/> on every request, a 60-second timeout for the answer's headers and again for an error answer's body, and the
 /// install key as a bearer token. The service runs as LocalSystem, so requests go direct or through the machine's own
 /// proxy settings, never a user's.
 /// </summary>
 internal sealed class SharingClient : ISharingClient, IDisposable
 {
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>The header every service request carries its version in, <c>X.Y.Z</c> (Plan Q §3), so the server can
+    /// answer 426 to one older than it takes.</summary>
+    public const string VersionHeader = "X-PowerLedger-Version";
 
     /// <summary>The most of an error answer that is read: the server's are one short sentence.</summary>
     private const int MaxErrorBytes = 4096;
@@ -64,6 +79,7 @@ internal sealed class SharingClient : ISharingClient, IDisposable
             Timeout = timeout ?? DefaultTimeout,
         };
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PowerLedger", ServiceVersion.Short));
+        _http.DefaultRequestHeaders.Add(VersionHeader, ServiceVersion.Short);
     }
 
     /// <summary>JSON gzipped for sending, as the server stores it.</summary>
@@ -74,13 +90,11 @@ internal sealed class SharingClient : ISharingClient, IDisposable
         return packed.ToArray();
     }
 
-    public Task<SendOutcome> SendReportAsync(byte[] gzipBody, string key, CancellationToken cancel = default)
-    {
-        var content = new ByteArrayContent(gzipBody);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        content.Headers.ContentEncoding.Add("gzip");
-        return PostAsync("v1/report", content, key, cancel);
-    }
+    public Task<SendOutcome> SendReportAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
+        PostAsync("v1/report", Gzipped(gzipBody), key, cancel);
+
+    public Task<SendOutcome> SendHistoryAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
+        PostAsync("v1/history", Gzipped(gzipBody), key, cancel);
 
     public Task<SendOutcome> SendConsentAsync(string installId, string key, Consent consent, CancellationToken cancel = default)
     {
@@ -103,10 +117,14 @@ internal sealed class SharingClient : ISharingClient, IDisposable
             var status = (int)response.StatusCode;
             if (status is >= 200 and < 300) return new SendOutcome.Accepted();
             if (response.StatusCode == HttpStatusCode.Gone) return new SendOutcome.Gone();
-            var reason = await ReasonAsync(response, _http.Timeout, cancel).ConfigureAwait(false);
-            return response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.RequestEntityTooLarge
-                ? new SendOutcome.Rejected(reason)
-                : new SendOutcome.Refused(reason);
+            var (reason, minVersion) = await ReasonAsync(response, _http.Timeout, cancel).ConfigureAwait(false);
+            return response.StatusCode switch
+            {
+                HttpStatusCode.BadRequest or HttpStatusCode.RequestEntityTooLarge => new SendOutcome.Rejected(reason),
+                HttpStatusCode.NotFound => new SendOutcome.NotFound(reason),
+                HttpStatusCode.UpgradeRequired => new SendOutcome.UpdateRequired(reason, minVersion),
+                _ => new SendOutcome.Refused(reason),
+            };
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
@@ -119,10 +137,11 @@ internal sealed class SharingClient : ISharingClient, IDisposable
     }
 
     /// <summary>The server's own sentence from its <c>{"error": …}</c> answer, or what the status says when there is none or
-    /// it doesn't come within <paramref name="timeout"/>: the client's timeout stops once the headers are in.</summary>
-    private static async Task<string> ReasonAsync(HttpResponseMessage response, TimeSpan timeout, CancellationToken cancel)
+    /// it doesn't come within <paramref name="timeout"/>: the client's timeout stops once the headers are in. A 426's
+    /// answer also says the oldest version the server takes, <c>minVersion</c>.</summary>
+    private static async Task<(string Reason, string? MinVersion)> ReasonAsync(HttpResponseMessage response, TimeSpan timeout, CancellationToken cancel)
     {
-        var fallback = $"the server answered {(int)response.StatusCode} {response.ReasonPhrase}".TrimEnd();
+        var fallback = ($"the server answered {(int)response.StatusCode} {response.ReasonPhrase}".TrimEnd(), (string?)null);
         using var reading = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         reading.CancelAfter(timeout);
         try
@@ -135,7 +154,8 @@ internal sealed class SharingClient : ISharingClient, IDisposable
                 read += count;
             }
             var text = Encoding.UTF8.GetString(buffer, 0, read);
-            return SharingJson.Read(text, SharingJson.Default.ErrorBody)?.Error is { Length: > 0 } error ? Sentence(error) : fallback;
+            var body = SharingJson.Read(text, SharingJson.Default.ErrorBody);
+            return (body?.Error is { Length: > 0 } error ? Sentence(error) : fallback.Item1, body?.MinVersion);
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
@@ -150,6 +170,15 @@ internal sealed class SharingClient : ISharingClient, IDisposable
     private static string Sentence(string text) => text.Trim().TrimEnd('.').Trim();
 
     private static StringContent Json(string json) => new(json, Encoding.UTF8, "application/json");
+
+    /// <summary>A body already gzipped, sent as JSON with that encoding.</summary>
+    private static ByteArrayContent Gzipped(byte[] gzipBody)
+    {
+        var content = new ByteArrayContent(gzipBody);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        content.Headers.ContentEncoding.Add("gzip");
+        return content;
+    }
 }
 
 /// <summary>The body of <c>POST /v1/consent</c>.</summary>
@@ -158,5 +187,5 @@ internal sealed record ConsentPost(string InstallId, ConsentDto Consent);
 /// <summary>The body of <c>POST /v1/delete</c>.</summary>
 internal sealed record DeletePost(string InstallId);
 
-/// <summary>What the server says when it refuses: <c>{"error": "…"}</c>.</summary>
-internal sealed record ErrorBody(string? Error);
+/// <summary>What the server says when it refuses: <c>{"error": "…"}</c>, and with a 426 <c>"minVersion": "X.Y.Z"</c> too.</summary>
+internal sealed record ErrorBody(string? Error, string? MinVersion = null);

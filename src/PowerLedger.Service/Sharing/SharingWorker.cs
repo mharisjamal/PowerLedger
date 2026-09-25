@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
+using PowerLedger.Service.Updates;
 using PowerLedger.Storage;
 
 namespace PowerLedger.Service.Sharing;
@@ -46,6 +47,7 @@ internal sealed class SharingWorker : BackgroundService
     private const long HourMs = 3_600_000;
     private const string NotInTime = "the server didn't answer in time";
     private const string NoTimeLeft = "the service was busy with another request";
+    private const string OutdatedReply = "This version of PowerLedger is out of date and has stopped sending data. Update it to send again.";
     private static readonly TimeSpan Minute = TimeSpan.FromMinutes(1);
 
     /// <summary>How far behind now the minutes are built: readings reach the database at each minute boundary.</summary>
@@ -57,6 +59,7 @@ internal sealed class SharingWorker : BackgroundService
     private readonly StatusBoard _board;
     private readonly SharingCommands _commands;
     private readonly ISharingClient _client;
+    private readonly AppPolicy _policy;
     private readonly SharingEnvironment _environment;
     private readonly TimeProvider _clock;
     private readonly ILogger<SharingWorker> _log;
@@ -71,13 +74,15 @@ internal sealed class SharingWorker : BackgroundService
     /// <summary>True when the last run, or a consent change's post, gave way to the App: it starts again once the inbox is empty.</summary>
     private bool _resume;
 
+    /// <param name="policy">The server's minimum version (Plan Q §3), shared with the update worker: below it nothing is sent.</param>
     public SharingWorker(
-        SqliteDatabase database, StatusBoard board, SharingCommands commands, ISharingClient client, SharingEnvironment environment,
-        TimeProvider clock, ILogger<SharingWorker> log)
+        SqliteDatabase database, StatusBoard board, SharingCommands commands, ISharingClient client, AppPolicy policy,
+        SharingEnvironment environment, TimeProvider clock, ILogger<SharingWorker> log)
     {
         _board = board;
         _commands = commands;
         _client = client;
+        _policy = policy;
         _environment = environment;
         _clock = clock;
         _log = log;
@@ -91,6 +96,10 @@ internal sealed class SharingWorker : BackgroundService
 
     /// <summary>True once the sampling loop has published what a report is built from.</summary>
     private bool LoopHasPublished => _board.Settings is not null && _board.Status is not null;
+
+    /// <summary>True while this version, the one every upload says it is, is older than the server takes (Plan Q §3):
+    /// nothing is sent, and it is neither a problem nor a back-off, since only an update can help.</summary>
+    private bool Outdated => _policy.IsBelowMinimum(_environment.Host().App);
 
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
@@ -187,12 +196,12 @@ internal sealed class SharingWorker : BackgroundService
         DropOldDays(now);
         if (!await PostPendingConsentAsync(now, atOnce: false, stop).ConfigureAwait(false)) return;
 
-        if (!LoopHasPublished) return;
+        if (!LoopHasPublished || Outdated) return;
         if (SendSchedule.Due(now, Zone, _store.SendMinute, _store.LastRun, _store.Backoff, CompleteDays(now, consent).Count > 0))
         {
             await SendAsync(now, answerBy: default, stop).ConfigureAwait(false);
         }
-        if (_store.Consent.AllowsAny && SendSchedule.PartialDue(now, Zone, _store.SendMinute, _store.LastPartialRun, _store.Backoff))
+        if (_store.Consent.AllowsAny && !Outdated && SendSchedule.PartialDue(now, Zone, _store.SendMinute, _store.LastPartialRun, _store.Backoff))
         {
             await SendTodayAsync(now, stop).ConfigureAwait(false);
         }
@@ -419,6 +428,11 @@ internal sealed class SharingWorker : BackgroundService
             command.Answer(false, "The service is still starting. Try again in a moment.");
             return;
         }
+        if (Outdated)
+        {
+            command.Answer(false, OutdatedReply);
+            return;
+        }
         var now = _clock.GetUtcNow();
         if (stored.Consent.Power) Collect(now, stored, giveWay: false);
         if (CompleteDays(now, stored.Consent).Count == 0)
@@ -458,6 +472,7 @@ internal sealed class SharingWorker : BackgroundService
         }
         using var answerBy = AnswerBy(command);
         var outcome = await CallAsync(cancel => _client.DeleteAsync(id, key, cancel), stop, answerBy.Token).ConfigureAwait(false);
+        StopsForUpdate(outcome);
         if (outcome is SendOutcome.Accepted or SendOutcome.Gone)
         {
             _log.LogInformation("The server deleted this install's data; forgetting it");
@@ -587,9 +602,11 @@ internal sealed class SharingWorker : BackgroundService
             return true;
         }
         if (!atOnce && _store.ConsentBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return true;
+        if (Outdated) return true;                                             // it waits for the update
 
         var consent = _store.Consent;
         var outcome = await OwnCallAsync(cancel => _client.SendConsentAsync(id, key, consent, cancel), stop).ConfigureAwait(false);
+        if (StopsForUpdate(outcome)) return true;
         switch (outcome)
         {
             case SendOutcome.Accepted:
@@ -608,6 +625,20 @@ internal sealed class SharingWorker : BackgroundService
                 _store.ConsentBackoff = SendSchedule.After(_store.ConsentBackoff, now);
                 return true;
         }
+    }
+
+    /// <summary>
+    /// Whether the server's answer is a 426 that stops sending until the service is updated (Plan Q §3): its minimum goes to
+    /// the <see cref="AppPolicy"/>, which the update worker shares, and while this version is below it nothing more is sent.
+    /// A 426 without a minimum the policy can read stops nothing: it is then any other refusal.
+    /// </summary>
+    private bool StopsForUpdate(SendOutcome outcome)
+    {
+        if (outcome is not SendOutcome.UpdateRequired required) return false;
+        _policy.Set(required.MinVersion);
+        if (!Outdated) return false;
+        _log.LogWarning("The server takes {Min} and later, so nothing is sent until the service is updated", _policy.MinVersion);
+        return true;
     }
 
     /// <summary>The consent change needs posting no more.</summary>
@@ -697,6 +728,12 @@ internal sealed class SharingWorker : BackgroundService
                     ? await CallAsync(Send, stop, answerBy).ConfigureAwait(false)
                     : await OwnCallAsync(Send, stop).ConfigureAwait(false);
                 asked |= outcome is not OutOfTime { Asked: false };
+                if (StopsForUpdate(outcome))
+                {
+                    result.Outdated = true;
+                    asked = false;                                              // not the night's run: it goes once updated
+                    return result;
+                }
                 switch (outcome)
                 {
                     case SendOutcome.Accepted:
@@ -772,6 +809,7 @@ internal sealed class SharingWorker : BackgroundService
 
         var body = SharingClient.Gzip(ReportJson.Write(report));
         var outcome = await OwnCallAsync(cancel => _client.SendReportAsync(body, key, cancel), stop).ConfigureAwait(false);
+        if (StopsForUpdate(outcome)) return;                                  // it goes once updated
         _store.LastPartialRun = nowMs;
         switch (outcome)
         {
@@ -979,8 +1017,12 @@ internal sealed class SharingWorker : BackgroundService
 
         public bool Gone { get; set; }
 
+        /// <summary>True when the server answered that this version is older than it takes.</summary>
+        public bool Outdated { get; set; }
+
         public (bool Ok, string Message) Reply =>
             Gone ? (false, "The server has deleted this PC's data, so every switch is now off.")
+            : Outdated ? (false, OutdatedReply)
             : Failed is { } failed ? (false, $"Couldn't send: {failed}. Will try again.")
             : Rejected is { } rejected ? (false, $"Rejected by the server: {rejected}.")
             : Sent == 0 ? (true, "Nothing went in time; the rest will go at the next chance.")

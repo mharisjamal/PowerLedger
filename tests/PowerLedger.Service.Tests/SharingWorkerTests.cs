@@ -9,6 +9,7 @@ using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
 using PowerLedger.Service.Sharing;
+using PowerLedger.Service.Updates;
 using PowerLedger.Storage;
 using Shouldly;
 
@@ -179,6 +180,58 @@ public sealed class SharingWorkerTests : IDisposable
         _h.Client.Partials.Count().ShouldBe(2);
         (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
         _h.Outbox.Minutes("2026-09-24").Count.ShouldBe(30);
+    }
+
+    [Fact]
+    public async Task An_update_required_answer_records_the_minimum_and_nothing_is_sent_below_it_with_no_back_off_or_problem()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(true, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        _h.Client.Answer = call => call.Kind == "report" ? new SendOutcome.UpdateRequired("update required", "0.9.0") : new SendOutcome.Accepted();
+
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+        await _h.TickAsync();
+
+        _h.Policy.MinVersion.ShouldBe("0.9.0");
+        _h.Client.Calls.Count(call => call.Kind == "report").ShouldBe(1);         // the day, then nothing more that run
+        (_h.Store.Backoff, _h.Store.Problem, _h.Store.LastRun).ShouldBe((null, null, null));
+        _h.Outbox.MinuteDays().ShouldContain("2026-09-23");
+
+        var calls = _h.Client.Calls.Count;
+        await _h.Consent(false, false, true);                                      // a change isn't posted either
+        for (var now = Local(24, 1, 5); now < Local(24, 4); now = now.AddMinutes(5))
+        {
+            _h.Clock.SetUtcNow(now);
+            await _h.TickAsync();
+        }
+        (await _h.Run(new SendNowCommand(1))).ShouldBe(new SharingReply(1, false,
+            "This version of PowerLedger is out of date and has stopped sending data. Update it to send again."));
+        _h.Client.Calls.Count.ShouldBe(calls);
+        (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
+
+        _h.Policy.Set("0.6.0");                                                    // the server takes this version again
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(24, 4, 5));
+        await _h.TickAsync();
+        _h.Client.Reports.Last().Day.ShouldBe("2026-09-23");
+        _h.Client.Calls.ShouldContain(call => call.Kind == "consent");
+    }
+
+    [Fact]
+    public async Task An_update_required_answer_without_a_minimum_it_can_read_is_tried_again_as_any_refusal()
+    {
+        _h.Clock.SetUtcNow(Local(24, 0, 30));
+        await _h.Consent(false, false, true);
+        _h.Outbox.InsertMinutes([SharingFakes.Minute(600, "2026-09-23")]);
+        _h.Client.Answer = _ => new SendOutcome.UpdateRequired("update required", null);
+
+        _h.Clock.SetUtcNow(Local(24, 1, 1));
+        await _h.TickAsync();
+
+        _h.Policy.MinVersion.ShouldBeNull();
+        _h.Store.Backoff.ShouldNotBeNull();
+        _h.Store.Problem.ShouldBe(new SendProblem("update required", Rejected: false));
     }
 
     [Fact]
@@ -1253,10 +1306,13 @@ public sealed class SharingWorkerTests : IDisposable
             Directory.CreateDirectory(Sent);
             Directory.CreateDirectory(Crashes);
             var environment = new SharingEnvironment(Sent, Crashes, Names, () => SharingFakes.Host, () => SendMinute);
-            Worker = new SharingWorker(Database.Db, Board, Commands, Client, environment, Wall, NullLogger<SharingWorker>.Instance);
+            Worker = new SharingWorker(Database.Db, Board, Commands, Client, Policy, environment, Wall, NullLogger<SharingWorker>.Instance);
         }
 
         public TestDatabase Database { get; } = new();
+
+        /// <summary>The server's minimum version as the service heard it; the harness's service is 0.6.0.</summary>
+        public AppPolicy Policy { get; } = new();
 
         public FakeTimeProvider Clock { get; } = new(Local(24, 0));
 
@@ -1363,6 +1419,12 @@ internal sealed class FakeSharingClient : ISharingClient
     public Task<SendOutcome> SendReportAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
         Record(new SharingCall("report", key, null, null, ReportJson.Read(Gunzip(gzipBody)), gzipBody), cancel);
 
+    public Task<SendOutcome> SendHistoryAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
+        Record(new SharingCall("history", key, null, null, null, gzipBody), cancel);
+
+    /// <summary>The history chunks sent, as their JSON.</summary>
+    public IEnumerable<JsonNode> Histories => Calls.Where(call => call.Kind == "history").Select(call => JsonNode.Parse(Gunzip(call.Body))!);
+
     public Task<SendOutcome> SendConsentAsync(string installId, string key, Consent consent, CancellationToken cancel = default) =>
         Record(new SharingCall("consent", key, installId, consent, null, []), cancel);
 
@@ -1383,7 +1445,7 @@ internal sealed class FakeSharingClient : ISharingClient
     }
 }
 
-/// <param name="Kind"><c>report</c>, <c>consent</c> or <c>delete</c>.</param>
+/// <param name="Kind"><c>report</c>, <c>history</c>, <c>consent</c> or <c>delete</c>.</param>
 internal sealed record SharingCall(string Kind, string Key, string? InstallId, Consent? Consent, ReportV1? Report, byte[] Body);
 
 /// <summary>A fake clock whose time can be set by <see cref="Step"/>, as Windows sets the PC's clock, while its timestamps
