@@ -8,6 +8,12 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.9.0",
+        [
+            "PowerLedger now keeps itself up to date: new versions install on their own, and it reopens afterwards.",
+            "If you share data, today's figures go every hour instead of once a day.",
+            "Approving a PC into your household always shows the right list straight away.",
+        ]),
         ("0.8.1",
         [
             "Every graphics card counts now, older NVIDIA cards such as the Quadro 6000 included, and a PC with several cards adds them all up.",

@@ -9,7 +9,7 @@ namespace PowerLedger.Service.Updates;
 internal static class ReleaseKey
 {
     /// <summary>Base64 SubjectPublicKeyInfo of the release key; empty when none is set. release.ps1 reads this line.</summary>
-    public const string PublicKey = "";
+    public const string PublicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEPMoxkE82JhpnTeFfJVS5YsNgU+DmNjyp4DwvF97ApqngFQugB4WAZtqs1YEKFasKtHi0MBMmpDWKmFXpEV6OAA==";
 
     /// <summary>Whether a key is built in, so the service may install updates itself.</summary>
     public static bool Present => PublicKey.Length > 0;
