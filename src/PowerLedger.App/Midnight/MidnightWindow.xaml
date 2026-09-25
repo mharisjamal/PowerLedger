@@ -24,7 +24,7 @@
             <local:AtLeast x:Key="AtLeast" />
 
             <!-- A short window (under 700 px, where the full sidebar and an update card would not both fit) draws the
-                 sidebar's items and groups closer and the update card down to its title and action, so every page stays
+                 sidebar's items and groups closer and the update card down to its title, action and What's new, so every page stays
                  in view beside the card. -->
             <Style x:Key="NavItem" TargetType="RadioButton" BasedOn="{StaticResource M.NavItem}">
                 <Style.Triggers>
@@ -44,6 +44,17 @@
                 <Style.Triggers>
                     <DataTrigger Binding="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource AtLeast}, ConverterParameter=700}" Value="False">
                         <Setter Property="Margin" Value="24,10,16,4" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <!-- What's new stays in a short window's card, set closer and lower, so the sidebar's pages still fit beside it. -->
+            <Style x:Key="UpdateLink" TargetType="Button" BasedOn="{StaticResource M.Button.Quiet}">
+                <Setter Property="Margin" Value="-12,6,0,0" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource AtLeast}, ConverterParameter=700}" Value="False">
+                        <Setter Property="Margin" Value="-12,2,0,0" />
+                        <Setter Property="MinHeight" Value="24" />
                     </DataTrigger>
                 </Style.Triggers>
             </Style>
@@ -123,10 +134,9 @@
                                 </StackPanel>
                                 <Button Style="{StaticResource M.Button.Primary}" Margin="0,10,0,0" HorizontalAlignment="Left" Content="{Binding ActionLabel}"
                                         Command="{Binding Act}" Visibility="{Binding ActionLabel, Converter={StaticResource VisibleWhenText}}" />
-                                <StackPanel Style="{StaticResource UpdateMore}">
-                                    <Button Style="{StaticResource M.Button.Quiet}" Margin="-12,6,0,0" HorizontalAlignment="Left" Content="What's new"
-                                            Command="{Binding OpenNotes}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
-                                </StackPanel>
+                                <!-- In the App's own window, as Classic's card opens it (review 3); kept in a short window's card too. -->
+                                <Button x:Name="WhatsNew" Style="{StaticResource UpdateLink}" Content="What's new"
+                                        Command="{Binding ShowWhatsNew}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
                             </StackPanel>
                         </Border>
                         <DockPanel Margin="12,0,0,0">
@@ -262,6 +272,33 @@
 
                 <!-- Banners under the page header, flat, in the page's flow: they block nothing. Not while the wizard has the window. -->
                 <StackPanel Grid.Row="2" Margin="32,0,32,0" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
+                    <!-- The service isn't running, as Classic's Now page says it (review 1): a problem's red edge, on every page,
+                         with Start service. -->
+                    <Border x:Name="ServiceDown" Style="{StaticResource M.Card.Flat}" BorderBrush="{DynamicResource M.Bad}" Padding="14,8,8,8" Margin="0,14,0,0"
+                            Visibility="{Binding Now.IsServiceDown, Converter={StaticResource VisibleWhen}, FallbackValue=Collapsed}"
+                            AutomationProperties.Name="Service not running" AutomationProperties.LiveSetting="Polite">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource M.Button.Primary}" Content="Start service" Command="{Binding Now.StartService}"
+                                    Margin="16,0,0,0" VerticalAlignment="Center" />
+                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Glyph}" Foreground="{DynamicResource M.Bad}" Text="&#xE7BA;" Margin="0,0,10,0"
+                                       VerticalAlignment="Center" AutomationProperties.Name="Problem" />
+                            <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" VerticalAlignment="Center"
+                                       Text="Service not running. History stays readable; live readings return when the service starts." />
+                        </DockPanel>
+                    </Border>
+
+                    <!-- What the running service says is wrong, as Classic's status bar says it (review 2): readings held in memory
+                         while the database can't be written, a damaged database set aside. A warning's amber edge. -->
+                    <Border x:Name="ServiceNotice" Style="{StaticResource M.Card.Flat}" BorderBrush="{DynamicResource M.Warn}" Padding="14,10" Margin="0,14,0,0"
+                            Visibility="{Binding Now.Status.Notice, Converter={StaticResource VisibleWhenText}, FallbackValue=Collapsed}"
+                            AutomationProperties.Name="Service notice" AutomationProperties.LiveSetting="Polite">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource M.Text.Glyph}" Foreground="{DynamicResource M.Warn}" Text="&#xE7BA;" Margin="0,0,10,0"
+                                       VerticalAlignment="Center" AutomationProperties.Name="Warning" />
+                            <TextBlock Style="{StaticResource M.Text.Body}" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding Now.Status.Notice}" />
+                        </DockPanel>
+                    </Border>
+
                     <!-- The new look, said once (Midnight look design §1): news, so an accent edge, not a warning's red; it stays
                          until answered. Switch back chooses Classic through Settings; Got it, either button or any look switch
                          retires it for good (UiPreferences.LookIntroduced). -->

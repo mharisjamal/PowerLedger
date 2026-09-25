@@ -29,7 +29,7 @@ public class MidnightDialogRenderingTests
     private static readonly string[] Dialogs =
     [
         "consent", "join-prompt", "join-prompt-code", "approve-prompt", "confirm-join", "add-pc-confirm", "recovery-code", "sent",
-        "feedback",
+        "feedback", "whats-new",
     ];
 
     [Fact]
@@ -136,6 +136,12 @@ public class MidnightDialogRenderingTests
         {
             var sender = new FeedbackSender(new FakeHttp().Client(), Path.Combine(Path.GetTempPath(), "pl-feedback-midnight-render-tests"), new FakeTimeProvider(Now));
             return new SendFeedbackWindow(new FeedbackViewModel(sender, UiThreads.Inline, () => null), null, new FakeImagePicker()) { MaxHeight = 560 };
+        });
+        // Review 3: Midnight's update card opens this window now, so it is drawn under Midnight's palette too.
+        yield return ("whats-new", () =>
+        {
+            var points = WhatsNew.Releases.Single(release => release.Version == "0.8.0").Points;
+            return new WhatsNewWindow(new WhatsNewViewModel("What's new in 0.8.0", points, new CommunityToolkit.Mvvm.Input.RelayCommand(() => { }))) { MaxHeight = 420 };
         });
     }
 

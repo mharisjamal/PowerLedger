@@ -144,6 +144,14 @@ public class MidnightRenderingTests
                 var topBar = UiHarness.Find<Border>(window, border => border.Name == "TopBar")!;
                 topBar.ActualHeight.ShouldBe(56);
                 UiHarness.Find<Border>(window, border => AutomationProperties.GetName(border) == "Update")!.IsVisible.ShouldBeTrue("the update card is in the foot");
+                // Review 3: the short card keeps What's new, and it opens the App's own window, as Classic's does, not the browser.
+                var whatsNew = UiHarness.Find<Button>(window, button => Equals(button.Content, "What's new"))!;
+                whatsNew.IsVisible.ShouldBeTrue("the short card keeps What's new");
+                whatsNew.Command.ShouldBeSameAs(shell.Updates!.ShowWhatsNew);
+                var asked = 0;
+                shell.Updates.NotesRequested += () => asked++;
+                whatsNew.Command.Execute(null);
+                asked.ShouldBe(1);
                 UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Send feedback")!.IsVisible.ShouldBeTrue();
                 var scroller = UiHarness.Find<ScrollViewer>(UiHarness.Find<DashboardView>(window)!)!;
                 scroller.ViewportHeight.ShouldBeLessThan(window.ActualHeight - 56 - 60, "the page, not the shell, is what scrolls");
@@ -411,6 +419,66 @@ public class MidnightRenderingTests
                 window.CloseForSwitch();
             }
         });
+
+    /// <summary>Reviews 1 and 2 (0.8.0): what Classic says of the service, Midnight says too, under the page header on
+    /// every page. A service that's down gets Classic's words with Start service; a running service's notice (readings
+    /// held in memory, a damaged database set aside) an amber banner of its own words.</summary>
+    [Fact]
+    public void A_service_that_is_down_and_a_services_notice_show_as_banners_under_the_page_header()
+    {
+        Directory.CreateDirectory(UiHarness.Folder);
+        UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var link = new FakeLink { Status = Statuses.Running() };
+            var starts = 0;
+            var now = new NowViewModel(link, new FakeHistory(), UiThreads.Inline, new Microsoft.Extensions.Time.Testing.FakeTimeProvider(MidnightFixtures.Now),
+                TimeZoneInfo.Utc, System.Globalization.CultureInfo.GetCultureInfo("en-US"), 0.38, () => starts++);
+            link.Connect(true);
+            var shell = new ShellViewModel(now, MidnightFixtures.BreakdownScreen(), MidnightFixtures.ReportScreen(saver), MidnightFixtures.HouseholdScreen(),
+                MidnightFixtures.SettingsScreen(), MidnightFixtures.WizardScreen(), "0.8.0", null, MidnightFixtures.DashboardScreen(now)) { Page = Page.Dashboard };
+            var window = MidnightFixtures.Window(shell);
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                Border Banner(string name) => UiHarness.Find<Border>(window, border => AutomationProperties.GetName(border) == name)!;
+                Banner("Service not running").IsVisible.ShouldBeFalse();
+                Banner("Service notice").IsVisible.ShouldBeFalse();
+
+                const string held = "Readings are held in memory: the database can't be written (the disk is full).";
+                link.Status = Statuses.Running() with { WriteProblem = held };
+                now.PollAsync().GetAwaiter().GetResult();
+                UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                var notice = Banner("Service notice");
+                notice.IsVisible.ShouldBeTrue("a running service's notice shows");
+                notice.BorderBrush.ShouldBe(window.FindResource("M.Warn"), "a warning's amber edge");
+                UiHarness.Find<TextBlock>(notice, text => text.Text == held).ShouldNotBeNull();
+                UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-banner-notice-Dark.png");
+
+                link.Connect(false);
+                UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                var down = Banner("Service not running");
+                down.IsVisible.ShouldBeTrue("a service that's down says so");
+                UiHarness.Find<TextBlock>(down, text => text.Text == "Service not running. History stays readable; live readings return when the service starts.")
+                    .ShouldNotBeNull("Classic's words");
+                var start = UiHarness.Find<Button>(down, button => Equals(button.Content, "Start service"))!;
+                start.Command.ShouldBeSameAs(now.StartService);
+                start.Command.Execute(null);
+                starts.ShouldBe(1);
+                Banner("Service notice").IsVisible.ShouldBeFalse("a service that's down gives no notice");
+
+                shell.Page = Page.Settings;
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                Banner("Service not running").IsVisible.ShouldBeTrue("on every page");
+                UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, "midnight-banner-service-down-Dark.png");
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+    }
 
     /// <summary>Review 4 (0.8.0): the window is built while the shell is on Classic's Now, which has no view here. The
     /// page host shows nothing for it, not the ViewModel's type name, and the Dashboard the window shows for it once
