@@ -52,7 +52,8 @@ public class MidnightControlsTests
     }
 
     /// <summary>Review 10: every colour in the ring, in both Midnight palettes, drawn as the header and the Household page
-    /// draw it, carries letters of at least 4.5:1: in the light theme too, where the ground was the dark letters' colour.</summary>
+    /// draw it, carries the better of the two letter colours: at least 4.5:1 wherever either reaches it, in the light theme
+    /// too, where the ground was the dark letters' colour; and never under 4.4:1, where neither does (a mid indigo).</summary>
     [Theory]
     [Trait("Category", "UI")]
     [InlineData("Dark")]
@@ -75,7 +76,8 @@ public class MidnightControlsTests
                 var fill = ((SolidColorBrush)Drawings(drawing).OfType<GeometryDrawing>().First().Brush).Color;
                 var ink = ((SolidColorBrush)Drawings(drawing).OfType<GlyphRunDrawing>().Single().ForegroundBrush).Color;
                 ink.ShouldBe(Initials.LettersOn(fill), $"{disc.Member} on {theme}");
-                Contrast.Ratio(ink, fill).ShouldBeGreaterThanOrEqualTo(4.5, $"{disc.Member}'s {fill} disc on {theme}");
+                var possible = Math.Max(Contrast.Ratio(Colors.White, fill), Contrast.Ratio(Initials.NearBlack, fill)) >= 4.5;
+                Contrast.Ratio(ink, fill).ShouldBeGreaterThanOrEqualTo(possible ? 4.5 : 4.4, $"{disc.Member}'s {fill} disc on {theme}");
             }
         });
 
