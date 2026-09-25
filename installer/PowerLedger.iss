@@ -101,14 +101,22 @@ Name: "{autoprograms}\PowerLedger"; Filename: "{app}\PowerLedger.exe"; Comment: 
 ; The first window of a new install is the wizard; the App also turns on starting with Windows for this user.
 Filename: "{app}\PowerLedger.exe"; Description: "Open PowerLedger"; Flags: postinstall nowait skipifsilent runasoriginaluser
 ; An update the App started (spec §13) passes /UPDATE=1: the App opens again, as the user who started setup rather than
-; as the administrator setup runs as.
-Filename: "{app}\PowerLedger.exe"; Flags: nowait runasoriginaluser; Check: IsUpdate
+; as the administrator setup runs as. An update the service started (Plan Q §4) also passes /SERVICEUPDATE=1: setup runs
+; as SYSTEM, so the App would open as SYSTEM, out of the user's sight; the new service opens it in the user's session instead.
+Filename: "{app}\PowerLedger.exe"; Flags: nowait runasoriginaluser; Check: IsUpdate and not IsServiceUpdate
 
 [Code]
 { The App starts setup with /UPDATE=1 when the user chooses "Restart to update" (spec §13). }
 function IsUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
+{ The service starts setup with /SERVICEUPDATE=1 as well when it installs an update itself (Plan Q §4): setup never opens
+  the App then, since the service does, in the console user's session, from its relaunch note. }
+function IsServiceUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:SERVICEUPDATE|0}') = '1';
 end;
 
 function RunHidden(const FileName, Params: string): Integer;
@@ -313,7 +321,8 @@ begin
   Log('Setup ended before it finished; starting the service, and the App for an update, again.');
   if ServiceExists then
     Net('start {#ServiceName}');
-  if IsUpdate and FileExists(ExpandConstant('{app}\PowerLedger.exe')) then
+  { The service's own update: the service just started reads its relaunch note and opens the App itself. }
+  if IsUpdate and not IsServiceUpdate and FileExists(ExpandConstant('{app}\PowerLedger.exe')) then
     try
       ExecAsOriginalUser(ExpandConstant('{app}\PowerLedger.exe'), '', '', SW_SHOWNORMAL, ewNoWait, Code);
     except

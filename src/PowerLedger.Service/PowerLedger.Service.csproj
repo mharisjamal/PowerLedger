@@ -29,4 +29,9 @@
     <InternalsVisibleTo Include="PowerLedger.Service.Tests" />
   </ItemGroup>
 
+  <!-- The App's release feed, checked download and connection cost, for the update worker (Plan Q §4). -->
+  <ItemGroup>
+    <Compile Include="..\Shared\Updates\*.cs" Link="Updates\Shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

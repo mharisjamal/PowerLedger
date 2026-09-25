@@ -14,7 +14,7 @@ public class ReleaseFeedTests
     /// <summary>GitHub's answer for a release, trimmed to what the App reads plus fields it ignores.</summary>
     internal static byte[] Answer(
         string tag = "v0.2.0", string? asset = null, long size = 100_297_944, string? url = null,
-        string digest = $"\"sha256:{Sha}\"", bool draft = false, bool prerelease = false)
+        string digest = $"\"sha256:{Sha}\"", bool draft = false, bool prerelease = false, string? extra = null)
     {
         asset ??= $"PowerLedger-{tag.TrimStart('v')}-setup.exe";
         url ??= $"{Downloads}{tag}/{asset}";
@@ -28,7 +28,7 @@ public class ReleaseFeedTests
               "body": "Notes",
               "assets": [
                 { "name": "notes.txt", "size": 12, "browser_download_url": "{{Downloads}}{{tag}}/notes.txt", "digest": null },
-                { "name": "{{asset}}", "size": {{size}}, "browser_download_url": "{{url}}", "digest": {{digest}} }
+                { "name": "{{asset}}", "size": {{size}}, "browser_download_url": "{{url}}", "digest": {{digest}} }{{(extra is null ? "" : "," + extra)}}
               ]
             }
             """);
@@ -231,6 +231,42 @@ public class ReleaseFeedTests
         http.Requests.Single().RequestUri.ShouldBe(new Uri("http://127.0.0.1:8765/releases/latest"));
         release.ShouldNotBeNull().Installer.ShouldBe(new Uri("http://127.0.0.1:8765/download/v0.2.0/PowerLedger-0.2.0-setup.exe"));
     }
+
+    /// <summary>The signatures asset (Plan Q §4) as GitHub lists it.</summary>
+    private static string SignaturesAsset(
+        string name = "PowerLedger-0.2.0-signatures.json", long size = 420, string? url = null, string digest = $"\"sha256:{Sha}\"")
+        => $$"""{ "name": "{{name}}", "size": {{size}}, "browser_download_url": "{{url ?? $"{Downloads}v0.2.0/{name}"}}", "digest": {{digest}} }""";
+
+    [Fact]
+    public void The_signatures_asset_is_found_with_its_size_and_digest()
+    {
+        var release = GitHubReleaseFeed.Parse(Answer(extra: SignaturesAsset()), Downloads).ShouldNotBeNull();
+        var signatures = release.Signatures.ShouldNotBeNull();
+        signatures.FileName.ShouldBe("PowerLedger-0.2.0-signatures.json");
+        signatures.Address.ShouldBe(new Uri($"{Downloads}v0.2.0/PowerLedger-0.2.0-signatures.json"));
+        signatures.Size.ShouldBe(420);
+        Convert.ToHexStringLower(signatures.Sha256).ShouldBe(Sha);
+    }
+
+    [Fact]
+    public void A_release_without_signatures_is_still_offered_to_the_App()
+        => GitHubReleaseFeed.Parse(Answer(), Downloads).ShouldNotBeNull().Signatures.ShouldBeNull();
+
+    [Theory]
+    [InlineData("https://example.com/PowerLedger-0.2.0-signatures.json", 420, true)]
+    [InlineData(null, 0, true)]
+    [InlineData(null, GitHubReleaseFeed.MaxSignatures + 1, true)]
+    [InlineData(null, 420, false)]
+    public void Signatures_that_break_a_trust_rule_are_left_out(string? url, long size, bool digest)
+    {
+        var asset = SignaturesAsset(size: size, url: url, digest: digest ? $"\"sha256:{Sha}\"" : "null");
+        GitHubReleaseFeed.Parse(Answer(extra: asset), Downloads).ShouldNotBeNull().Signatures.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Another_versions_signatures_are_not_this_releases()
+        => GitHubReleaseFeed.Parse(Answer(extra: SignaturesAsset(name: "PowerLedger-0.1.0-signatures.json")), Downloads)
+            .ShouldNotBeNull().Signatures.ShouldBeNull();
 
     [Fact]
     public void Requests_name_PowerLedger_and_its_version()

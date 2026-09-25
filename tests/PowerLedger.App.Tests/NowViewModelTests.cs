@@ -18,6 +18,22 @@ public class NowViewModelTests
         => new(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, co2KgPerKwh: 0.38, startService: () => _starts++);
 
     [Fact]
+    public async Task Each_status_polled_is_passed_on_for_the_updater()
+    {
+        var updates = new UpdateStatus(true, null, "0.9.0", UpdateRequired: false);
+        _link.Status = Statuses.Running() with { Updates = updates };
+        var model = Model();
+        var heard = new List<ServiceStatus>();
+        model.StatusRead += heard.Add;
+        _link.Connect(true);
+
+        await model.PollAsync();
+
+        heard.ShouldNotBeEmpty();
+        heard[^1].Updates.ShouldBe(updates);
+    }
+
+    [Fact]
     public void A_reading_fills_the_live_panel()
     {
         var model = Model();

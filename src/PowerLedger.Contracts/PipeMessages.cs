@@ -42,6 +42,8 @@ namespace PowerLedger.Contracts;
 [JsonDerivedType(typeof(NewRecoveryCodeRequest), "newRecoveryCode")]
 [JsonDerivedType(typeof(RemoveOldRowsRequest), "removeOldRows")]
 [JsonDerivedType(typeof(AskAgainRequest), "askAgain")]
+[JsonDerivedType(typeof(UiStateRequest), "uiState")]
+[JsonDerivedType(typeof(UpdateNowRequest), "updateNow")]
 [JsonDerivedType(typeof(OkReply), "ok")]
 [JsonDerivedType(typeof(ErrorReply), "error")]
 [JsonDerivedType(typeof(StatusReply), "status")]
@@ -206,3 +208,12 @@ public sealed record RemoveOldRowsRequest(long Id, string? DeviceId = null) : Pi
 /// <summary>N2: ask the household again to let this PC in, after its request ended unanswered or was refused. Only the
 /// user asks again, so the server can't make this PC answer approval after approval (plan 0.9).</summary>
 public sealed record AskAgainRequest(long Id) : PipeRequest(Id);
+
+/// <summary>Plan Q §4: whether the sender's main window is showing, sent when it connects and whenever that changes, so the
+/// service installs an update while nobody is looking at PowerLedger. Sent only to a service whose status carries
+/// <see cref="ServiceStatus.Updates"/>; an older one would take it for a broken line.</summary>
+public sealed record UiStateRequest(long Id, bool WindowVisible) : PipeRequest(Id);
+
+/// <summary>Plan Q §3: the blocking window's Update now. The service installs the newest release at once if it can, and
+/// answers <see cref="OkReply"/>; otherwise an <see cref="ErrorReply"/> says why, and the App falls back to its own setup.</summary>
+public sealed record UpdateNowRequest(long Id) : PipeRequest(Id);

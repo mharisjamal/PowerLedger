@@ -768,6 +768,55 @@ public class RenderingTests
         new FileInfo(Path.Combine(Folder, "update-ready-Dark.png")).Length.ShouldBeGreaterThan(30_000);
     }
 
+    /// <summary>Plan Q §3: below the server's minimum a panel covers everything under the title bar; what it covers is out
+    /// of the keyboard's reach and Update now has the focus. Plan Q §4: the card says "Installing automatically" when the
+    /// service installs.</summary>
+    [Fact]
+    public void The_blocking_update_panel_covers_the_window_in_both_themes()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                foreach (var (name, updates, required) in new[] { ("required", MidnightFixtures.RequiredUpdate(), true), ("automatic", MidnightFixtures.AutomaticUpdate(), false) })
+                {
+                    var shell = new ShellViewModel(NowScreen(), BreakdownScreen(), ReportScreen(saver), HouseholdScreen(), SettingsScreen(), WizardScreen(), "0.8.0", updates);
+                    var window = new MainWindow
+                    {
+                        DataContext = shell, WindowStartupLocation = WindowStartupLocation.Manual,
+                        Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    };
+                    window.Show();
+                    try
+                    {
+                        Pump(TimeSpan.FromMilliseconds(1200));
+                        var cover = (FrameworkElement)window.FindName("UpdateRequiredCover");
+                        cover.IsVisible.ShouldBe(required, name);
+                        ((UIElement)window.FindName("Body")).IsEnabled.ShouldBe(!required, name);
+                        if (required)
+                        {
+                            Find<TextBlock>(cover, text => text.Text == "PowerLedger needs an update").ShouldNotBeNull();
+                            Find<Button>(cover, button => (string)button.Content == "Update now").ShouldNotBeNull().IsKeyboardFocused.ShouldBeTrue();
+                        }
+                        else
+                        {
+                            Find<TextBlock>(window, text => text.Text == "Installing automatically").ShouldNotBeNull();
+                        }
+                        Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"update-{name}-{theme}.png");
+                    }
+                    finally
+                    {
+                        window.Close();
+                    }
+                }
+            }
+        });
+        new FileInfo(Path.Combine(Folder, "update-required-Dark.png")).Length.ShouldBeGreaterThan(30_000);
+    }
+
     /// <summary>Owner's round: the consent dialog is one screen with only Allow all and Decline; plus Settings scrolled
     /// to Privacy with sharing under way, and What's been sent listing two files with the newest selected.</summary>
     [Fact]

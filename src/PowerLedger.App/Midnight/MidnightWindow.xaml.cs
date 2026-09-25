@@ -28,7 +28,7 @@ internal partial class MidnightWindow : Window, IShellWindow
     /// <param name="looks">The switcher the App opened this window through (plan O 0.4). The top bar's Switch look goes
     /// through <see cref="ShellViewModel.SwitchLook"/> instead, so the choice is saved as Settings saves it.</param>
     /// <param name="theme">For the top bar's sun and moon: which theme is on.</param>
-    /// <param name="updates">For the foot's update card.</param>
+    /// <param name="updates">For the foot's update card, and the blocking panel while an update is required (Plan Q §3).</param>
     /// <param name="feedback">Opens the Send feedback window, from the sidebar's Support item and the bug button.</param>
     internal MidnightWindow(ShellViewModel shell, LookSwitcher looks, ThemeManager theme, Updater updates, Action feedback)
     {
@@ -38,6 +38,8 @@ internal partial class MidnightWindow : Window, IShellWindow
         InitializeComponent();
         DataContext = shell;
         UpdateCard.DataContext = updates;
+        UpdateRequiredCover.DataContext = updates;
+        UpdateCover.Attach(UpdateRequiredCover, [Sidebar, PageHeader, Banners, Pages], UpdateNowButton);
         _size = new Extent(Width, Height);
         _minimum = new Extent(MinWidth, MinHeight);
         PcName.Text = Environment.MachineName;

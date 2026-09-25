@@ -44,6 +44,38 @@ public sealed class UpdateDownloaderTests : IDisposable
         _http.Requests.Single().RequestUri.ShouldBe(new Uri($"{GitHubReleaseFeed.Downloads}v0.2.0/PowerLedger-0.2.0-setup.exe"));
     }
 
+    private static ReleaseFile Signatures(byte[] file) => new(
+        new Uri($"{GitHubReleaseFeed.Downloads}v0.2.0/PowerLedger-0.2.0-signatures.json"), "PowerLedger-0.2.0-signatures.json", file.Length,
+        SHA256.HashData(file));
+
+    [Fact]
+    public async Task The_signatures_file_is_fetched_whole_and_checked()
+    {
+        var file = """{ "PowerLedger-0.2.0-setup.exe": "AQID" }"""u8.ToArray();
+        _http.Reply(HttpStatusCode.OK, file);
+        (await Downloader().FetchAsync(Signatures(file), CancellationToken.None)).ShouldBe(file);
+        Files().ShouldBeEmpty();   // held in memory, never written
+    }
+
+    [Fact]
+    public async Task A_signatures_file_that_isnt_githubs_is_refused()
+    {
+        var file = """{ "PowerLedger-0.2.0-setup.exe": "AQID" }"""u8.ToArray();
+        _http.Reply(HttpStatusCode.OK, [.. file.Take(file.Length - 1), (byte)'!']);
+        (await Should.ThrowAsync<UpdateException>(Downloader().FetchAsync(Signatures(file), CancellationToken.None))).Message.ShouldContain("checksum");
+    }
+
+    [Fact]
+    public async Task A_signatures_file_longer_than_listed_is_refused()
+    {
+        var file = """{ "PowerLedger-0.2.0-setup.exe": "AQID" }"""u8.ToArray();
+        _http.Answer = (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new MemoryStream([.. file, .. "more"u8.ToArray()])),   // no length given up front
+        });
+        (await Should.ThrowAsync<UpdateException>(Downloader().FetchAsync(Signatures(file), CancellationToken.None))).Message.ShouldContain("size");
+    }
+
     [Fact]
     public async Task A_checked_copy_already_there_is_used_without_downloading_again()
     {

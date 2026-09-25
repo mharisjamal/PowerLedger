@@ -84,7 +84,7 @@ public partial class App : Application
         _sentFolder = Path.Combine(options.DataFolder, "Sent");
         _dataFolder = options.DataFolder;
         var version = Version();
-        AppLog.Write($"PowerLedger {version} starting.");
+        AppLog.Write(options.AfterUpdate ? $"PowerLedger {version} starting, opened by the service after its update." : $"PowerLedger {version} starting.");
         new CrashCatcher(CrashFolder, version, ScrubNames.Here()).Hook(this);   // data-sharing design §5: as early as the App can catch itself
         _theme = new ThemeManager(this, preferences.Theme, preferences.Look);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
@@ -123,9 +123,13 @@ public partial class App : Application
                     ? "Open PowerLedger and choose Restart to update."
                     : "PowerLedger waits for a connection that isn't metered; open it to take this one now.",
                 ShowWindow),
-            OpenPage);
+            OpenPage,
+            askService: cancel => _link.UpdateNowAsync(cancel));
         _updates.PropertyChanged += OnUpdatesChanged;
         _updates.NotesRequested += OpenWhatsNewWindow;
+        _updates.CloseRequested += ExitUi;   // the blocking window's Close PowerLedger (Plan Q §3)
+        var updates = _updates;
+        _now.StatusRead += status => updates.Apply(status.Updates);
         _settings = new SettingsViewModel(
             _link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates,
             openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
@@ -272,7 +276,9 @@ public partial class App : Application
         };
         window.Window.IsVisibleChanged += (_, _) =>
         {
-            if (IsCurrent(window) && _shell is not null) _shell.IsShown = window.Window.IsVisible;
+            if (!IsCurrent(window)) return;
+            if (_shell is not null) _shell.IsShown = window.Window.IsVisible;
+            _link?.ReportWindow(window.Window.IsVisible);   // Plan Q §4: the service installs while nobody is looking
         };
         return window;
     }
@@ -535,6 +541,7 @@ public partial class App : Application
             {
                 _updates.PropertyChanged -= OnUpdatesChanged;
                 _updates.NotesRequested -= OpenWhatsNewWindow;
+                _updates.CloseRequested -= ExitUi;
                 _updates.Dispose();
             }
             _monthly?.Dispose();

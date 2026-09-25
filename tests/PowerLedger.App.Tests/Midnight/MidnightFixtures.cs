@@ -85,6 +85,23 @@ internal static class MidnightFixtures
     /// <summary>An updater that has not looked yet, so the update card stays hidden.</summary>
     public static Updater IdleUpdates() => Updates(new FakeFeed());
 
+    /// <summary>Plan Q §3: 0.8.0 running while the data server's minimum is 0.9.0, so the blocking panel shows.</summary>
+    public static Updater RequiredUpdate()
+    {
+        var updater = Updates(new FakeFeed());
+        updater.Apply(new PowerLedger.Contracts.UpdateStatus(true, null, "0.9.0", UpdateRequired: true));
+        return updater;
+    }
+
+    /// <summary>Plan Q §4: 0.9.0 found while the service installs updates itself, so the card says "Installing automatically".</summary>
+    public static Updater AutomaticUpdate()
+    {
+        var updater = Updates(new FakeFeed { Latest = UpdaterTests.Release("0.9.0") });
+        updater.Apply(new PowerLedger.Contracts.UpdateStatus(true, null, null, UpdateRequired: false));
+        updater.CheckAsync().GetAwaiter().GetResult();
+        return updater;
+    }
+
     private static Updater Updates(FakeFeed feed)
         => new(feed, new FakeDownloader(), new FakeSetup(), new FakeCost(), new FakeUiSettings(), UiThreads.Inline,
             new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 8, 0), (_, _) => { }, _ => { });

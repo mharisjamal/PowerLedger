@@ -336,6 +336,94 @@ public sealed class ServiceLinkTests : IAsyncLifetime
             .ShouldBe(new SharingOutcome(false, "Sharing detailed data needs Hardware and power turned on."));
     }
 
+    private static readonly UpdateStatus ServiceUpdates = new(ServiceInstalls: true, Stage: null, MinVersion: null, UpdateRequired: false);
+
+    /// <summary>A link to a service of its own, which reports <paramref name="updates"/> in its status.</summary>
+    private async Task<(FakeService Service, PipeServiceLink Link)> Connect(UpdateStatus? updates, IServerCheck? check = null)
+    {
+        var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
+        var service = new FakeService(name) { Status = Statuses.Running() with { Updates = updates } };
+        var link = new PipeServiceLink(name, new FixedIdle(0), _clock, check ?? new TrustAnyServer());
+        service.Start();
+        link.Start();
+        await WaitFor.True(() => link.IsConnected);
+        return (service, link);
+    }
+
+    [Fact]
+    public async Task A_service_that_handles_updates_hears_the_window_state_on_connect_and_on_each_change()
+    {
+        var (service, link) = await Connect(ServiceUpdates);
+        await using (service)
+        await using (link)
+        {
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Any());
+            service.Requests.OfType<UiStateRequest>().Single().WindowVisible.ShouldBeFalse();
+
+            link.ReportWindow(true);
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 2);
+            service.Requests.OfType<UiStateRequest>().Last().WindowVisible.ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task The_window_state_set_before_connecting_is_the_one_sent()
+    {
+        var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
+        await using var service = new FakeService(name) { Status = Statuses.Running() with { Updates = ServiceUpdates } };
+        await using var link = new PipeServiceLink(name, new FixedIdle(0), _clock, new TrustAnyServer());
+        link.ReportWindow(true);
+        service.Start();
+        link.Start();
+        await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Any());
+        service.Requests.OfType<UiStateRequest>().Single().WindowVisible.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task An_older_service_is_never_sent_the_window_state_or_update_now()
+    {
+        var (service, link) = await Connect(updates: null);
+        await using (service)
+        await using (link)
+        {
+            link.ReportWindow(true);
+            (await link.UpdateNowAsync()).Succeeded.ShouldBeFalse();
+            await Task.Delay(100);   // give a wrongly-sent request a chance to arrive
+            service.Requests.OfType<UiStateRequest>().ShouldBeEmpty();
+            service.Requests.OfType<UpdateNowRequest>().ShouldBeEmpty();
+            link.IsConnected.ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task A_server_that_failed_the_check_is_never_sent_the_window_state()
+    {
+        var (service, link) = await Connect(ServiceUpdates, new RefuseAll());
+        await using (service)
+        await using (link)
+        {
+            link.ReportWindow(true);
+            await Task.Delay(100);
+            service.Requests.OfType<UiStateRequest>().ShouldBeEmpty();
+            (await link.UpdateNowAsync()).ShouldBe(new WriteResult(RefuseAll.Reason));
+        }
+    }
+
+    [Fact]
+    public async Task Update_now_reaches_a_service_that_handles_updates()
+    {
+        var (service, link) = await Connect(ServiceUpdates);
+        await using (service)
+        await using (link)
+        {
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Any());   // it knows the service takes it
+            (await link.UpdateNowAsync()).ShouldBe(WriteResult.Done);
+            service.Requests.OfType<UpdateNowRequest>().Count().ShouldBe(1);
+            service.Refuse = "The service has no update ready to install.";
+            (await link.UpdateNowAsync()).ShouldBe(new WriteResult("The service has no update ready to install."));
+        }
+    }
+
     private sealed class RefuseAll : IServerCheck
     {
         public const string Reason = "Not the installed service.";

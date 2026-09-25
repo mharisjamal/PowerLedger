@@ -24,8 +24,6 @@ internal interface IUiSettings
 
     string? StartWithWindows(bool enabled);
 
-    string? CheckForUpdates(bool enabled);
-
     /// <summary>Whether the App reads the monitors' brightness; the next scheduled read follows it.</summary>
     string? ReadMonitorBrightness(bool enabled);
 
@@ -93,8 +91,6 @@ internal sealed class AppPreferences(
             return "Couldn't change starting with Windows: " + error.Message;
         }
     }
-
-    public string? CheckForUpdates(bool enabled) => Save(Current with { CheckForUpdates = enabled });
 
     public string? ReadMonitorBrightness(bool enabled) => Save(Current with { ReadMonitorBrightness = enabled });
 

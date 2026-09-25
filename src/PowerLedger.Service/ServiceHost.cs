@@ -104,6 +104,18 @@ internal static class ServiceHost
             provider.GetRequiredService<ISharingClient>(), provider.GetRequiredService<AppPolicy>(), SharingEnvironment.For(paths),
             provider.GetRequiredService<TimeProvider>(), provider.GetRequiredService<ILogger<SharingWorker>>()));
         services.AddHostedService(provider => provider.GetRequiredService<HouseholdWorker>());
+        if (asService)
+        {
+            // Plan Q §4: only the installed service updates itself; a console run is a development build.
+            services.AddSingleton(provider => new UpdateWorker(
+                UpdateEnvironment.ForService(paths, SharingEndpoint.Resolve(), PowerLedger.Updates.UpdateHttp.Create(ServiceVersion.Short),
+                    provider.GetRequiredService<ILogger<UpdateWorker>>()),
+                provider.GetRequiredService<AppPolicy>(), provider.GetRequiredService<StatusBoard>(), provider.GetRequiredService<NoticeHub>(),
+                provider.GetRequiredService<ServiceSignals>(), provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredService<ILogger<UpdateWorker>>()));
+            services.AddSingleton<IUpdateRequests>(provider => provider.GetRequiredService<UpdateWorker>());
+            services.AddHostedService(provider => provider.GetRequiredService<UpdateWorker>());
+        }
         services.AddHostedService(provider => new PipeServer(
             provider.GetRequiredService<PipeHandler>(), provider.GetRequiredService<LiveFeed>(),
             provider.GetRequiredService<ServiceSignals>(), provider.GetRequiredService<ILogger<PipeServer>>(), pipeName,

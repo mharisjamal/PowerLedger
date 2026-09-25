@@ -15,6 +15,7 @@ public partial class MainWindow : Window, IShellWindow
         InitializeComponent();
         _size = new Extent(Width, Height);
         _minimum = new Extent(MinWidth, MinHeight);
+        UpdateCover.Attach(UpdateRequiredCover, [Body, StatusBar], UpdateNowButton);
     }
 
     /// <summary>The bounds a switch carries over: the restored ones once shown. Setting them places the window by hand,
