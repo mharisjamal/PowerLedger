@@ -2,7 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { utcDateString } from "../src/day";
 import { discardIfDeleted, handleReport } from "../src/report";
-import { gzip, gzipJson, randomInstallId, randomKey, withoutR2 } from "./support";
+import { gzip, gzipJson, randomAddress, randomInstallId, randomKey, withoutR2 } from "./support";
 import validFull from "./fixtures/valid-full.json";
 import validDiagnosticsOnly from "./fixtures/valid-diagnostics-only.json";
 import validLaptopPowerOnly from "./fixtures/valid-laptop-power-only.json";
@@ -136,16 +136,50 @@ describe("POST /v1/report", () => {
     expect(count?.n).toBe(1);
   });
 
-  it("gives 429 on the 21st request of the day from one install", async () => {
+  it("takes 60 requests a day from one install, today so far every hour included, and gives 429 on the 61st", async () => {
     const report = freshReport(validFull);
     const key = randomKey();
 
-    let last: Response | undefined;
-    for (let i = 0; i < 21; i++) {
-      last = await postReport(report, key);
+    // Each from its own address, so only the install's own count is at work.
+    const send = async () => post(await gzipJson(report), key, { "CF-Connecting-IP": randomAddress() });
+    for (let i = 0; i < 60; i++) {
+      expect((await send()).status).toBe(200);
     }
 
-    expect(last!.status).toBe(429);
+    expect((await send()).status).toBe(429);
+  }, 60_000);
+
+  it("keeps complete: false for today so far, and complete for a report without the field", async () => {
+    const partial = { ...freshReport(validFull, utcDateString(0, new Date())), complete: false };
+    const whole = freshReport(validFull);
+
+    expect((await postReport(partial, randomKey())).status).toBe(200);
+    expect((await postReport(whole, randomKey())).status).toBe(200);
+
+    const completeOf = async (report: Report) =>
+      (await env.DB.prepare("SELECT complete FROM reports WHERE install_id = ? AND day = ?")
+        .bind(report.installId, report.day)
+        .first<{ complete: number }>())?.complete;
+    expect(await completeOf(partial)).toBe(0);
+    expect(await completeOf(whole)).toBe(1);
+  });
+
+  it("replaces today so far with the complete day, leaving one row", async () => {
+    const report = freshReport(validFull);
+    const key = randomKey();
+
+    expect((await postReport({ ...report, complete: false }, key)).status).toBe(200);
+    expect((await postReport({ ...report, complete: true }, key)).status).toBe(200);
+
+    const rows = await env.DB.prepare("SELECT complete FROM reports WHERE install_id = ?")
+      .bind(report.installId)
+      .all<{ complete: number }>();
+    expect(rows.results).toEqual([{ complete: 1 }]);
+  });
+
+  it("gives 400 for a complete that isn't true or false", async () => {
+    const response = await postReport({ ...freshReport(validFull), complete: "yes" }, randomKey());
+    expect(response.status).toBe(400);
   });
 
   it("gives 410 for a tombstoned install", async () => {

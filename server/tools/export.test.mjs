@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { test } from "node:test";
-import { csvLine, minuteRows, MINUTES_CSV_HEADER, pseudonym } from "./export.mjs";
+import { csvLine, minuteRows, MINUTES_CSV_HEADER, pseudonym, reportLine } from "./export.mjs";
+
+test("reportLine swaps installId for pc and carries complete, country and receipt time", () => {
+  const report = { schema: 1, installId: "11111111-1111-1111-1111-111111111111", day: "2026-09-24", complete: false };
+
+  const partial = reportLine(report, { country: "PK", receivedAt: 5, complete: false }, "abc123");
+  assert.deepEqual(partial, { pc: "abc123", schema: 1, day: "2026-09-24", complete: false, country: "PK", receivedAt: 5 });
+
+  const { complete, ...older } = report;
+  assert.equal(reportLine(older, { country: "PK", receivedAt: 5, complete: true }, "abc123").complete, true);
+});
 
 function randomSalt() {
   return Buffer.from(crypto.randomBytes(32)).toString("base64url");

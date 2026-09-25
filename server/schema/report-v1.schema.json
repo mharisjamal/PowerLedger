@@ -64,6 +64,10 @@
     },
     "power": {
       "$ref": "#/$defs/power"
+    },
+    "complete": {
+      "type": "boolean",
+      "description": "False for today so far, sent every hour and replaced by the next; true, or left out (as apps before 0.9.0 do), for a complete day."
     }
   },
   "allOf": [

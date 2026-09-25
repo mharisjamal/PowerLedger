@@ -63,6 +63,7 @@ interface ListRow {
   bytes: number;
   sections: string;
   r2Key: string;
+  complete: number;
 }
 
 async function handleList(request: Request, env: Cloudflare.Env): Promise<Response> {
@@ -105,7 +106,7 @@ async function handleList(request: Request, env: Cloudflare.Env): Promise<Respon
   const rows = await env.DB.prepare(
     `SELECT reports.install_id AS installId, reports.day AS day, reports.country AS country,
             reports.received_at AS receivedAt, reports.bytes AS bytes, reports.sections AS sections,
-            reports.r2_key AS r2Key
+            reports.r2_key AS r2Key, reports.complete AS complete
      FROM reports ${join} ${where}
      ORDER BY reports.day, reports.install_id
      LIMIT ?`,
@@ -126,6 +127,7 @@ async function handleList(request: Request, env: Cloudflare.Env): Promise<Respon
       receivedAt: row.receivedAt,
       bytes: row.bytes,
       sections: row.sections,
+      complete: row.complete === 1,
     })),
     next: hasMore && last ? `${last.day}|${last.installId}` : null,
   });

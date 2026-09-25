@@ -9,7 +9,8 @@ import { deleteBodies, putBody } from "./store";
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_UNPACKED_BYTES = 8 * 1024 * 1024;
-const MAX_REQUESTS_PER_DAY = 20;
+// Today so far every hour, the complete day, and room for retries.
+const MAX_REQUESTS_PER_DAY = 60;
 
 interface ReportBody {
   schema: 1;
@@ -20,6 +21,7 @@ interface ReportBody {
   diagnostics?: unknown;
   usage?: unknown;
   power?: { hardware: unknown; minutes: Record<string, unknown> };
+  complete?: boolean;
 }
 
 function errorResponse(status: number, message: string): Response {
@@ -84,7 +86,8 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
   if (count > MAX_REQUESTS_PER_DAY) return errorResponse(429, "Too many requests from this install today.");
 
   // 10. Store the body as sent, and index it. A day sent again replaces the first, since the R2
-  // key and the reports row are both keyed by (install, day).
+  // key and the reports row are both keyed by (install, day): so today so far (complete: false),
+  // sent every hour, is replaced by the next hour's and at last by the complete day.
   const r2Key = `reports/v1/${report.installId}/${report.day}.json.gz`;
   const country = request.cf?.country ? String(request.cf.country) : "XX";
   const receivedAt = Date.now();
@@ -93,13 +96,13 @@ export async function handleReport(request: Request, env: Cloudflare.Env): Promi
   await putBody(env, r2Key, body, { contentType: "application/json", receivedAt });
 
   await env.DB.prepare(
-    `INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO reports (install_id, day, received_at, bytes, sections, country, r2_key, complete)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (install_id, day) DO UPDATE SET
        received_at = excluded.received_at, bytes = excluded.bytes, sections = excluded.sections,
-       country = excluded.country, r2_key = excluded.r2_key`,
+       country = excluded.country, r2_key = excluded.r2_key, complete = excluded.complete`,
   )
-    .bind(report.installId, report.day, receivedAt, body.byteLength, sections, country, r2Key)
+    .bind(report.installId, report.day, receivedAt, body.byteLength, sections, country, r2Key, report.complete === false ? 0 : 1)
     .run();
 
   // checkInstall() guarantees a row already exists (created on first use, or already there).

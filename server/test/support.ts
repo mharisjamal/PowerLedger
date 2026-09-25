@@ -25,6 +25,13 @@ export function randomInstallId(): string {
   return crypto.randomUUID();
 }
 
+/** A fresh IPv4 address for `CF-Connecting-IP`, so a test sending many requests never uses up ADDRESS_LIMIT (60 a
+ * minute) for the tests that share the default address. */
+export function randomAddress(): string {
+  const [a, b, c] = crypto.getRandomValues(new Uint8Array(3));
+  return `10.${a}.${b}.${c}`;
+}
+
 /** A copy of `env` as it would be before R2 is enabled on the account: no REPORTS binding. */
 export function withoutR2(env: Cloudflare.Env): Cloudflare.Env {
   return { ...env, REPORTS: undefined };

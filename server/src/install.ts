@@ -46,7 +46,7 @@ export async function handleConsent(request: Request, env: Cloudflare.Env): Prom
   if (state === "gone") return errorResponse(410, "This install's data has been deleted.");
   if (state === "mismatch") return errorResponse(403, "This install's key does not match.");
 
-  const count = await countRequest(env, installId);
+  const count = await countRequest(env, installId, "control");
   if (count > MAX_REQUESTS_PER_DAY) return errorResponse(429, "Too many requests from this install today.");
 
   await env.DB.prepare(
@@ -83,7 +83,7 @@ export async function handleDelete(request: Request, env: Cloudflare.Env): Promi
   if (state === "gone") return errorResponse(410, "This install's data has already been deleted.");
   if (state === "mismatch") return errorResponse(403, "This install's key does not match.");
 
-  const count = await countRequest(env, installId);
+  const count = await countRequest(env, installId, "control");
   if (count > MAX_REQUESTS_PER_DAY) return errorResponse(429, "Too many requests from this install today.");
 
   await forgetInstall(env, installId);

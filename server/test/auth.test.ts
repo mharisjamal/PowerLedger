@@ -88,4 +88,14 @@ describe("countRequest", () => {
 
     expect(await countRequest(env, b)).toBe(1);
   });
+
+  it("counts reports, history and consent or delete each on their own", async () => {
+    const id = randomInstallId();
+
+    expect(await countRequest(env, id, "history")).toBe(1);
+    expect(await countRequest(env, id)).toBe(1);
+    expect(await countRequest(env, id)).toBe(2);
+    expect(await countRequest(env, id, "control")).toBe(1);
+    expect(await countRequest(env, id, "history")).toBe(2);
+  });
 });

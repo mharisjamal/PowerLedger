@@ -42,6 +42,19 @@ function csvField(value) {
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+/** One line of reports.ndjson: the report with `pc` in place of its installId, and the list item's country, receipt
+ * time and `complete` (false for today so far; a report from before 0.9.0 has no field and is a complete day). */
+export function reportLine(report, item, pc) {
+  const { installId, ...withoutInstallId } = report;
+  return {
+    pc,
+    ...withoutInstallId,
+    complete: item.complete !== false,
+    country: item.country,
+    receivedAt: item.receivedAt,
+  };
+}
+
 /** `report`'s columnar minutes, one row per minute, ready for csvLine(); [] when there's no
  * power section. */
 export function minuteRows(report, pc, country) {
@@ -131,10 +144,7 @@ async function main() {
     const report = await fetchReport(baseUrl, config.token, item.key);
     const pc = pseudonym(config.salt, item.installId);
 
-    const { installId, ...withoutInstallId } = report;
-    reportsStream.write(
-      JSON.stringify({ pc, ...withoutInstallId, country: item.country, receivedAt: item.receivedAt }) + "\n",
-    );
+    reportsStream.write(JSON.stringify(reportLine(report, item, pc)) + "\n");
 
     for (const row of minuteRows(report, pc, item.country)) minutesStream.write(csvLine(row) + "\n");
 

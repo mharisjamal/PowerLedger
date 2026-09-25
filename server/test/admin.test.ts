@@ -160,6 +160,28 @@ describe("GET /admin/object", () => {
   });
 });
 
+describe("GET /admin/list, complete", () => {
+  it("says whether each day is complete or today so far", async () => {
+    const day = utcDateString(0, new Date());
+    const partialId = randomInstallId();
+    const wholeId = randomInstallId();
+    const partial = { ...structuredClone(validFull), installId: partialId, day, complete: false };
+    const sent = await SELF.fetch("https://example.com/v1/report", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${randomKey()}`, "Content-Encoding": "gzip" },
+      body: await gzipJson(partial),
+    });
+    expect(sent.status).toBe(200);
+    expect((await sendReport(wholeId, day)).status).toBe(200);
+
+    const response = await SELF.fetch(`https://example.com/admin/list?from=${day}&to=${day}`, { headers: ADMIN });
+    const page = await response.json<{ items: { installId: string; complete: boolean }[] }>();
+
+    expect(page.items.find((item) => item.installId === partialId)?.complete).toBe(false);
+    expect(page.items.find((item) => item.installId === wholeId)?.complete).toBe(true);
+  });
+});
+
 describe("GET /admin/list, guards", () => {
   it("refuses a cursor that isn't a day and an install", async () => {
     for (const after of ["2026-09-01|not-a-guid", "yesterday|0f8fad5b-d9cb-469f-a165-70867728950e", "2026-09-01|"]) {

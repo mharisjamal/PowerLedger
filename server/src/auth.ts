@@ -54,16 +54,21 @@ export async function checkInstall(env: Cloudflare.Env, id: string, key: string)
   return timingSafeEqualStrings(row.key_hash, hash) ? "ok" : "mismatch";
 }
 
-/** Upserts today's (UTC) request count for `id` and returns the new total. Shared by /v1/report,
- * /v1/consent and /v1/delete. */
-export async function countRequest(env: Cloudflare.Env, id: string): Promise<number> {
+/** Which daily count a request takes from: `count` for /v1/report, `history` for /v1/history, `control` for
+ * /v1/consent and /v1/delete. Each is its own budget, so a day of hourly reports never blocks a delete. */
+export type RequestKind = "count" | "history" | "control";
+
+/** Upserts today's (UTC) count of `kind` for `id` and returns its new total. Shared by /v1/report,
+ * /v1/history, /v1/consent and /v1/delete. */
+export async function countRequest(env: Cloudflare.Env, id: string, kind: RequestKind = "count"): Promise<number> {
   const utcDay = new Date().toISOString().slice(0, 10);
+  // `kind` is one of three fixed column names, never user input.
   const row = await env.DB.prepare(
-    `INSERT INTO requests (install_id, utc_day, count) VALUES (?, ?, 1)
-     ON CONFLICT (install_id, utc_day) DO UPDATE SET count = count + 1
-     RETURNING count`,
+    `INSERT INTO requests (install_id, utc_day, count, history, control) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (install_id, utc_day) DO UPDATE SET ${kind} = ${kind} + 1
+     RETURNING ${kind} AS n`,
   )
-    .bind(id, utcDay)
-    .first<{ count: number }>();
-  return row!.count;
+    .bind(id, utcDay, kind === "count" ? 1 : 0, kind === "history" ? 1 : 0, kind === "control" ? 1 : 0)
+    .first<{ n: number }>();
+  return row!.n;
 }

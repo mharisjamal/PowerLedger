@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { utcDateString } from "../src/day";
 import { handleDelete } from "../src/install";
 import { handleReport } from "../src/report";
-import { gzipJson, randomInstallId, randomKey, withoutR2 } from "./support";
+import { gzipJson, randomAddress, randomInstallId, randomKey, withoutR2 } from "./support";
 import validFull from "./fixtures/valid-full.json";
 
 function consentBody(installId: string, overrides: Partial<Record<string, unknown>> = {}) {
@@ -35,6 +35,18 @@ describe("POST /v1/consent", () => {
       .bind(id)
       .first<{ diagnostics: number; usage: number; power: number; share: number }>();
     expect(row).toEqual({ diagnostics: 1, usage: 0, power: 1, share: 0 });
+  });
+
+  it("takes consent version 2, the one that sends history", async () => {
+    const id = randomInstallId();
+
+    const response = await postJson("/v1/consent", consentBody(id, { version: 2 }), randomKey());
+
+    expect(response.status).toBe(200);
+    const row = await env.DB.prepare("SELECT consent_version FROM installs WHERE id = ?")
+      .bind(id)
+      .first<{ consent_version: number }>();
+    expect(row?.consent_version).toBe(2);
   });
 
   it("gives 400 for share without power", async () => {
@@ -109,6 +121,24 @@ describe("POST /v1/delete", () => {
     });
     expect(secondReport.status).toBe(410);
   });
+
+  it("still takes a consent and a delete after a day of hourly reports", async () => {
+    const id = randomInstallId();
+    const key = randomKey();
+    const report = { ...structuredClone(validFull), installId: id, day: utcDateString(0, new Date()), complete: false };
+    const address = randomAddress();
+    for (let i = 0; i < 30; i++) {
+      const sent = await SELF.fetch("https://example.com/v1/report", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Encoding": "gzip", "CF-Connecting-IP": address },
+        body: await gzipJson(report),
+      });
+      expect(sent.status).toBe(200);
+    }
+
+    expect((await postJson("/v1/consent", consentBody(id), key)).status).toBe(200);
+    expect((await postJson("/v1/delete", { installId: id }, key)).status).toBe(200);
+  }, 60_000);
 
   it("tombstones an install nobody has seen before, and gets 200", async () => {
     const id = randomInstallId();
