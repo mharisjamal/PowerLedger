@@ -75,11 +75,20 @@ public class WhatsNewTests
             "Optional data sharing: help improve the estimates by sharing anonymous readings; ask in Settings → Privacy.",
         ]);
 
+    /// <summary>0.9.1 is the Energy used period button.</summary>
+    [Fact]
+    public void The_0_9_1_points_match_exactly_and_come_first()
+    {
+        WhatsNew.Releases[0].Version.ShouldBe("0.9.1", "newest first");
+        PointsOf("0.9.1").ShouldBe(["The Energy used card starts on Since start, and its button switches it to Today, This week or This month."]);
+        WhatsNew.Since("0.9.0", "0.9.1").ShouldBe(PointsOf("0.9.1"));
+    }
+
     /// <summary>0.9.0 is Plan Q: updates that install themselves, hourly sharing, and the household approval fix.</summary>
     [Fact]
-    public void The_0_9_0_points_match_exactly_and_come_first()
+    public void The_0_9_0_points_match_exactly()
     {
-        WhatsNew.Releases[0].Version.ShouldBe("0.9.0", "newest first");
+        WhatsNew.Releases[1].Version.ShouldBe("0.9.0");
         PointsOf("0.9.0").ShouldBe(
         [
             "PowerLedger now keeps itself up to date: new versions install on their own, and it reopens afterwards.",
@@ -92,7 +101,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_8_1_points_match_exactly()
     {
-        WhatsNew.Releases[1].Version.ShouldBe("0.8.1");
+        WhatsNew.Releases[2].Version.ShouldBe("0.8.1");
         PointsOf("0.8.1").ShouldBe(
         [
             "Every graphics card counts now, older NVIDIA cards such as the Quadro 6000 included, and a PC with several cards adds them all up.",
@@ -106,7 +115,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_8_0_points_match_exactly()
     {
-        WhatsNew.Releases[2].Version.ShouldBe("0.8.0");
+        WhatsNew.Releases[3].Version.ShouldBe("0.8.0");
         PointsOf("0.8.0").ShouldBe(
         [
             "A new look: a dashboard with your power, today's energy and idle waste at a glance. Prefer the classic look? Switch back any time in Settings → Preferences.",
