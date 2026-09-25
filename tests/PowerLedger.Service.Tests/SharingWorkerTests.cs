@@ -298,6 +298,24 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task An_answer_back_under_version_1_with_power_still_on_stops_the_history_and_forgets_its_progress()
+    {
+        _h.Hours(Local(1, 0).AddMonths(-1), 24 * 55);
+        _h.Clock.SetUtcNow(Local(24, 10, 20));
+        await _h.Consent(false, true, true);
+        _h.Store.HistoryUntilMs.ShouldNotBeNull();
+
+        // An older App, which answers under version 1's wording, sends the same choices.
+        (await _h.Run(new SetConsentCommand(2, new Consent(1, false, true, true, false)))).Ok.ShouldBeTrue();
+        (_h.Store.HistoryUntilMs, _h.Store.HistoryThroughMs, _h.Store.HistoryBackoff).ShouldBe((null, null, null));
+
+        _h.Store.HistoryUntilMs = Local(24, 10).ToUnixTimeMilliseconds();          // and even with progress left behind
+        _h.Clock.SetUtcNow(Local(24, 10, 25));
+        await _h.TickAsync();
+        _h.Client.Histories.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task An_old_server_without_history_holds_back_only_the_history_which_a_restart_carries_on()
     {
         _h.Hours(Local(1, 0).AddMonths(-1), 24 * 40);

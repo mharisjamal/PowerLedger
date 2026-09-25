@@ -341,7 +341,7 @@ internal sealed class SharingWorker : BackgroundService
             _store.CollectedTo = null;
         }
         if (consent.Power && !was.Power && consent.Version >= HistoryConsentVersion) StartHistory(nowMs);
-        if (!consent.Power) ForgetHistory();
+        if (!consent.Power || consent.Version < HistoryConsentVersion) ForgetHistory();   // an answer under version 1 never sends it
         if (!consent.Diagnostics)
         {
             _outbox.DeleteEvents(OutboxEvents.Crash);
@@ -857,7 +857,8 @@ internal sealed class SharingWorker : BackgroundService
         _store.HistoryBackoff = null;
     }
 
-    /// <summary>Hardware and power turned off stops the history and forgets how far it went.</summary>
+    /// <summary>Hardware and power turned off, or an answer under a consent version before
+    /// <see cref="HistoryConsentVersion"/>, stops the history and forgets how far it went.</summary>
     private void ForgetHistory()
     {
         _store.HistoryUntilMs = null;
@@ -866,7 +867,8 @@ internal sealed class SharingWorker : BackgroundService
     }
 
     /// <summary>
-    /// Sends the history (Plan Q §2) while Hardware and power is on and the server has heard the consent: the hours from
+    /// Sends the history (Plan Q §2) while Hardware and power is on under consent version 2 or later and the server has
+    /// heard the consent: the hours from
     /// before the answer, oldest first, a chunk of at most <see cref="HistoryBuilder.ChunkDays"/> days at a time and at most
     /// <see cref="MaxHistoryChunksPerRun"/> a run. Its progress is kept after each chunk, so a restart carries on. A chunk
     /// refused for good is passed over. An old server without <c>/v1/history</c> (404), or any failure, holds back only
@@ -878,7 +880,7 @@ internal sealed class SharingWorker : BackgroundService
         for (var chunks = 0; chunks < MaxHistoryChunksPerRun; chunks++)
         {
             var consent = _store.Consent;
-            if (!consent.AllowsAny || !consent.Power || _store.ConsentPending || Outdated) return;
+            if (!consent.AllowsAny || !consent.Power || consent.Version < HistoryConsentVersion || _store.ConsentPending || Outdated) return;
             if (_store.HistoryUntilMs is not { } untilMs || _store.HistoryThroughMs >= untilMs) return;
             if (_store.HistoryBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return;
             if (_commands.AppWaiting) throw new GiveWay();
