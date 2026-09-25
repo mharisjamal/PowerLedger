@@ -63,6 +63,13 @@ internal sealed record UiPreferences
     /// the account's authority, which is the session the service holds (households design §7).</summary>
     public string? SignedInEmail { get; init; }
 
+    /// <summary>What the Midnight Dashboard's Energy used card covers, as its period menu last chose it. Since start until
+    /// the menu is used: a ui.json from before the menu existed has no such field, and nothing older stood for it, so every
+    /// PC starts there after the update. A name this version doesn't know reads as the default rather than failing the
+    /// whole file; the setter keeps the default for a missing field, as <see cref="Look"/>'s does.</summary>
+    [JsonConverter(typeof(EnergyPeriodJsonConverter))]
+    public EnergyPeriod EnergyPeriod { get; set; } = EnergyPeriod.SinceStart;
+
     public static UiPreferences Default { get; } = new();
 
     /// <summary>The same preferences with anything out of range put back to its default.</summary>
@@ -70,6 +77,7 @@ internal sealed record UiPreferences
     {
         Theme = Enum.IsDefined(Theme) ? Theme : ThemeChoice.System,
         Look = Enum.IsDefined(Look) ? Look : Default.Look,
+        EnergyPeriod = Enum.IsDefined(EnergyPeriod) ? EnergyPeriod : Default.EnergyPeriod,
         Co2KgPerKwh = double.IsFinite(Co2KgPerKwh) && Co2KgPerKwh >= 0 && Co2KgPerKwh < MaxCo2KgPerKwh ? Co2KgPerKwh : Co2.DefaultKgPerKwh,
     };
 }
@@ -112,6 +120,19 @@ internal sealed class LookJsonConverter : JsonConverter<Look>
             : UiPreferences.Default.Look;
 
     public override void Write(Utf8JsonWriter writer, Look value, JsonSerializerOptions options) => writer.WriteStringValue(value.ToString());
+}
+
+/// <summary>An energy period by its name, and anything else (a name this version doesn't know, a number, null) as the
+/// default, so the file still loads whole.</summary>
+internal sealed class EnergyPeriodJsonConverter : JsonConverter<EnergyPeriod>
+{
+    public override EnergyPeriod Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.TokenType == JsonTokenType.String && Enum.TryParse<EnergyPeriod>(reader.GetString(), ignoreCase: true, out var period)
+           && Enum.IsDefined(period) && !int.TryParse(reader.GetString(), out _)
+            ? period
+            : UiPreferences.Default.EnergyPeriod;
+
+    public override void Write(Utf8JsonWriter writer, EnergyPeriod value, JsonSerializerOptions options) => writer.WriteStringValue(value.ToString());
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true, UseStringEnumConverter = true)]

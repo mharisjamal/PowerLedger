@@ -138,6 +138,51 @@ public sealed class UiPreferencesTests : IDisposable
     }
 
     [Fact]
+    public void The_energy_card_covers_everything_since_the_start_until_chosen_and_a_chosen_period_survives_a_save_and_a_load()
+    {
+        var store = new UiPreferencesStore(File);
+        store.Load().EnergyPeriod.ShouldBe(EnergyPeriod.SinceStart);
+        UiPreferences.Default.EnergyPeriod.ShouldBe(EnergyPeriod.SinceStart);
+
+        store.Save(UiPreferences.Default with { EnergyPeriod = EnergyPeriod.ThisWeek });
+
+        store.Load().EnergyPeriod.ShouldBe(EnergyPeriod.ThisWeek);
+        System.IO.File.ReadAllText(File).ShouldContain("\"ThisWeek\"");
+    }
+
+    /// <summary>Every PC updating from 0.9.0 or earlier has a ui.json with no energy period: its card starts at the start.</summary>
+    [Fact]
+    public void A_file_from_before_the_energy_period_existed_covers_everything_since_the_start_and_keeps_the_rest()
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, """{ "Theme": "Light", "Look": "Classic", "FirstRunDone": true, "Co2KgPerKwh": 0.23 }""");
+
+        var read = new UiPreferencesStore(File).Load();
+
+        read.EnergyPeriod.ShouldBe(EnergyPeriod.SinceStart);
+        read.Theme.ShouldBe(ThemeChoice.Light);
+        read.Look.ShouldBe(Look.Classic);
+        read.FirstRunDone.ShouldBeTrue();
+        read.Co2KgPerKwh.ShouldBe(0.23);
+    }
+
+    [Theory]
+    [InlineData("\"ThisYear\"")]
+    [InlineData("7")]
+    [InlineData("null")]
+    public void An_energy_period_this_version_does_not_know_reads_as_since_the_start_and_keeps_the_rest_of_the_file(string period)
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, $$"""{ "Theme": "Dark", "EnergyPeriod": {{period}}, "FirstRunDone": true }""");
+
+        var read = new UiPreferencesStore(File).Load();
+
+        read.EnergyPeriod.ShouldBe(EnergyPeriod.SinceStart);
+        read.Theme.ShouldBe(ThemeChoice.Dark);
+        read.FirstRunDone.ShouldBeTrue();
+    }
+
+    [Fact]
     public void That_the_new_look_was_introduced_survives_a_save_and_a_load()
     {
         var store = new UiPreferencesStore(File);

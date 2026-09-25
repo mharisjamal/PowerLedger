@@ -92,6 +92,13 @@ internal sealed class FakeUiSettings : IUiSettings
         return null;
     }
 
+    public string? SetEnergyPeriod(EnergyPeriod period)
+    {
+        Current = Current with { EnergyPeriod = period };
+        Changes.Add($"energy period {period}");
+        return null;
+    }
+
     /// <summary>Tests can set this to control what a first run is stamped with; UtcNow otherwise.</summary>
     public Func<DateTimeOffset> Now { get; set; } = () => DateTimeOffset.UtcNow;
 }

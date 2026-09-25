@@ -59,6 +59,16 @@ internal enum RangePill
     All,
 }
 
+/// <summary>What the Energy used card covers, as its period menu offers it: everything this PC has recorded, the default;
+/// today; the calendar week so far; the calendar month so far. Saved in ui.json by name.</summary>
+internal enum EnergyPeriod
+{
+    SinceStart,
+    Today,
+    ThisWeek,
+    ThisMonth,
+}
+
 /// <summary>The parts table's range chooser: Today, 7 days, 30 days.</summary>
 internal enum PartsRange
 {

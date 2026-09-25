@@ -41,6 +41,16 @@ public sealed class AppPreferencesTests : IDisposable
     }
 
     [Fact]
+    public void The_energy_cards_period_is_saved()
+    {
+        var preferences = Preferences();
+        preferences.SetEnergyPeriod(EnergyPeriod.ThisMonth).ShouldBeNull();
+
+        preferences.Current.EnergyPeriod.ShouldBe(EnergyPeriod.ThisMonth);
+        Store.Load().EnergyPeriod.ShouldBe(EnergyPeriod.ThisMonth);
+    }
+
+    [Fact]
     public void A_co2_factor_reaches_the_screens_and_one_out_of_range_is_refused()
     {
         var preferences = Preferences();

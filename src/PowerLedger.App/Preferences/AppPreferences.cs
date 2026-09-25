@@ -38,6 +38,9 @@ internal interface IUiSettings
     /// <summary>N2's signed-in e-mail, kept in ui.json only (households design §7); null once signed out.</summary>
     string? SetSignedInEmail(string? email);
 
+    /// <summary>What the Dashboard's Energy used card covers, as its period menu chose it.</summary>
+    string? SetEnergyPeriod(EnergyPeriod period);
+
     /// <summary>Stamps <see cref="UiPreferences.FirstRunAt"/> with now when the first run is done but nothing stamped it
     /// yet: an install from before this field existed. Does nothing before the first run finishes, or once stamped.</summary>
     string? EnsureFirstRunAt();
@@ -101,6 +104,8 @@ internal sealed class AppPreferences(
     public string? FinishFirstRun() => Save(Current with { FirstRunDone = true, FirstRunAt = Current.FirstRunAt ?? DateTimeOffset.UtcNow });
 
     public string? SetSignedInEmail(string? email) => Save(Current with { SignedInEmail = email });
+
+    public string? SetEnergyPeriod(EnergyPeriod period) => Save(Current with { EnergyPeriod = period });
 
     public string? EnsureFirstRunAt()
         => Current.FirstRunDone && Current.FirstRunAt is null ? Save(Current with { FirstRunAt = DateTimeOffset.UtcNow }) : null;
