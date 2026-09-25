@@ -12,6 +12,11 @@ the notes in -Notes and all four installers attached, and checks that the SHA-25
 file's, since every installed copy checks its download against that digest (spec §13). -Draft makes a draft, which
 nobody is offered until it is published on GitHub.
 
+Each installer's SHA-256 is also signed with the owner's key, %USERPROFILE%\.powerledger\release-signing.pem (made once by
+scripts\new-release-key.ps1), and the signatures, checked before anything is uploaded, go up as
+PowerLedger-X.Y.Z-signatures.json; the service installs an update itself only when its signature verifies against the
+public key in src\PowerLedger.Service\Updates\ReleaseKey.cs (Plan Q §4). Without the key file nothing is released.
+
 gh must be signed in to an account that may publish to the repository, or GH_TOKEN must hold a token for one.
 
 .EXAMPLE
@@ -27,6 +32,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false   # git's and gh's exit codes are read, not thrown
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'release-signing.ps1')
 
 # Runs a native command, and throws when it fails.
 function Invoke-Native([string]$What, [scriptblock]$Command) {
@@ -57,12 +63,23 @@ if ($head -ne $pushed) { throw "main ($head) isn't what GitHub has ($pushed); pu
 gh release view $tag --repo $Repo --json tagName *> $null
 if ($LASTEXITCODE -eq 0) { throw "$tag is already released; raise <Version> in Directory.Build.props for a new one." }
 
+# The signing key, checked before the long build: missing, or not the one installed services trust, stops the release.
+$publicKey = Get-ReleasePublicKey
+$compiled = Get-CompiledReleaseKey $root
+if ($compiled -and $compiled -ne $publicKey) { throw "The key in $ReleaseKeyPath isn't the one in ReleaseKey.cs, so installed services would refuse this release." }
+if (-not $compiled) { Write-Warning 'ReleaseKey.cs holds no public key yet, so services built from this commit never install an update themselves.' }
+
 if (-not $SkipBuild) { & (Join-Path $root 'installer\build.ps1') -For both,x64,arm64,x86 }
 foreach ($file in $installers) { if (-not (Test-Path $file)) { throw "There is no installer at $file; build it with installer\build.ps1 -For both,x64,arm64,x86." } }
-$shas = @{}
-foreach ($file in $installers) { $shas[(Split-Path $file -Leaf)] = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() }
 
-$create = @('release', 'create', $tag) + $installers + @('--repo', $Repo, '--target', $head, '--title', "PowerLedger $version", '--notes-file', $Notes)
+$signaturesFile = Join-Path $root "installer\output\PowerLedger-$version-signatures.json"
+New-ReleaseSignatures $installers | ConvertTo-Json | Set-Content -LiteralPath $signaturesFile -Encoding utf8NoBOM
+Test-ReleaseSignatures $signaturesFile $installers $publicKey
+$assets = $installers + @($signaturesFile)
+$shas = @{}
+foreach ($file in $assets) { $shas[(Split-Path $file -Leaf)] = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() }
+
+$create = @('release', 'create', $tag) + $assets + @('--repo', $Repo, '--target', $head, '--title', "PowerLedger $version", '--notes-file', $Notes)
 if ($Draft) { $create += '--draft' }
 Invoke-Native 'gh release create' { gh @create } | Out-Host
 
