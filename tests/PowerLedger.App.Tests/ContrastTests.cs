@@ -15,7 +15,8 @@ public class ContrastTests
 {
     private static readonly string[] Texts = ["M.Ink", "M.Ink2", "M.Ink3"];
     private static readonly string[] Grounds = ["M.Ground", "M.Panel", "M.Raised"];
-    private static readonly string[] Marks = ["M.Accent", "M.Good", "M.Bad", "M.Warn", "M.PartCpu", "M.PartGpu", "M.PartDisplay", "M.PartRest", "M.LineStrong", "M.Focus", "M.Tip"];
+    private static readonly string[] Marks = ["M.Accent", "M.Good", "M.Bad", "M.Warn", "M.PartCpu", "M.PartGpu", "M.PartDisplay", "M.PartRest", "M.LineStrong", "M.Focus", "M.Tip", "M.ChartLine", "M.BarTop"];
+    private static readonly string[] Parts = ["M.PartCpu", "M.PartGpu", "M.PartDisplay", "M.PartRest"];
     private static readonly string[] Chips = ["M.ChipMeasured", "M.ChipCalibrated", "M.ChipEstimated"];
 
     /// <summary>Text set in a colour, and where it sits: white on the accent (the active pill, primary buttons, the
@@ -70,20 +71,36 @@ public class ContrastTests
         }
     }
 
-    /// <summary>Review round: the area chart draws the total in the accent over the parts' bands, so the CPU's band must
-    /// not read as the accent, nor as another part; and Classic's keys carry the same values for the shared views.</summary>
+    /// <summary>0.8.1, the reference's one colour family: the parts are indigo, violet, sky and slate, and every two of
+    /// them, stacked in History's chart side by side, read as different colours (CIE76 20 apart); and Classic's keys carry
+    /// the same values for the shared views.</summary>
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
-    public void The_cpu_band_stands_apart_from_the_accent_and_the_other_parts(string theme)
+    public void Every_two_parts_read_as_different_colours(string theme)
     {
         var palette = Midnight(Enum.Parse<Theme>(theme));
-        foreach (var other in new[] { "M.Accent", "M.PartGpu", "M.PartDisplay", "M.PartRest" })
+        foreach (var (one, other) in Parts.SelectMany((one, i) => Parts.Skip(i + 1).Select(other => (one, other))))
         {
-            Contrast.Difference(palette["M.PartCpu"], palette[other]).ShouldBeGreaterThanOrEqualTo(25, $"M.PartCpu and {other}, {theme}");
+            Contrast.Difference(palette[one], palette[other]).ShouldBeGreaterThanOrEqualTo(20, $"{one} and {other}, {theme}");
         }
-        palette["Brush.PartCpu"].ShouldBe(palette["M.PartCpu"], theme);
+        foreach (var part in Parts) palette["Brush." + part[2..]].ShouldBe(palette[part], theme);
         palette["Brush.Amber"].ShouldBe(palette["M.Accent"], theme);
+    }
+
+    /// <summary>The owner's rule for the data colours: none is teal, cyan or green, which the trends' good news keeps. A
+    /// colour's hue, 0 to 360, sits outside 70 to 190.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void No_data_colour_is_teal_cyan_or_green(string theme)
+    {
+        var palette = Midnight(Enum.Parse<Theme>(theme));
+        foreach (var key in Parts.Append("M.ChartLine").Append("M.BarTop").Append("M.BarBottom"))
+        {
+            var hue = Hue(palette[key]);
+            (hue is >= 70 and <= 190).ShouldBeFalse($"{key} at {hue:0} degrees, {theme}");
+        }
     }
 
     /// <summary>0.8.1: the sidebar's current page is its words in ink over the accent's wash, at its strongest behind them.</summary>
@@ -143,6 +160,17 @@ public class ContrastTests
         Contrast.Difference(Color.FromRgb(0xFF, 0, 0), Color.FromRgb(0, 0xFF, 0)).ShouldBe(170.6, 0.1);
         Contrast.Difference(Color.FromRgb(0x80, 0x80, 0x80), Colors.White).ShouldBe(46.4, 0.1);
         Contrast.Difference(Colors.Teal, Colors.Teal).ShouldBe(0);
+    }
+
+    /// <summary>A colour's hue in degrees, as HSV has it.</summary>
+    private static double Hue(Color colour)
+    {
+        var (r, g, b) = (colour.R / 255.0, colour.G / 255.0, colour.B / 255.0);
+        var (max, min) = (Math.Max(r, Math.Max(g, b)), Math.Min(r, Math.Min(g, b)));
+        var span = max - min;
+        if (span == 0) return 0;
+        var hue = max == r ? (g - b) / span % 6 : max == g ? (b - r) / span + 2 : (r - g) / span + 4;
+        return (hue * 60 + 360) % 360;
     }
 
     /// <summary>The colours of a Midnight palette, by key; a translucent one laid over the panel, as the screen shows it.

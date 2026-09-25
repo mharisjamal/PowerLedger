@@ -719,11 +719,11 @@
         <Setter Property="Value" Value="0" />
     </Style>
     <Style x:Key="M.ShareBar" TargetType="local:ShareBar" BasedOn="{StaticResource M.Instrument}">
-        <Setter Property="FillBrush" Value="{DynamicResource M.Accent}" />
+        <Setter Property="FillBrush" Value="{DynamicResource M.ChartLine}" />
         <Setter Property="TrackBrush" Value="{DynamicResource M.Line}" />
     </Style>
     <Style x:Key="M.AreaChart" TargetType="local:AreaChart" BasedOn="{StaticResource M.Instrument}">
-        <Setter Property="SecondBrush" Value="{DynamicResource M.Accent2}" />
+        <Setter Property="StrokeBrush" Value="{DynamicResource M.ChartLine}" />
         <Setter Property="RingBrush" Value="{DynamicResource M.Tip}" />
         <Setter Property="FillTopBrush" Value="{DynamicResource M.ChartFillTop}" />
         <Setter Property="FillBottomBrush" Value="{DynamicResource M.ChartFillBottom}" />
@@ -736,7 +736,10 @@
         <Setter Property="NumberFont" Value="{StaticResource M.Font.Ui}" />
     </Style>
     <Style x:Key="M.StackedChart" TargetType="local:StackedChart" BasedOn="{StaticResource M.Instrument}" />
-    <Style x:Key="M.DailyBars" TargetType="local:DailyBars" BasedOn="{StaticResource M.Instrument}" />
+    <Style x:Key="M.DailyBars" TargetType="local:DailyBars" BasedOn="{StaticResource M.Instrument}">
+        <Setter Property="BarTopBrush" Value="{DynamicResource M.BarTop}" />
+        <Setter Property="BarBottomBrush" Value="{DynamicResource M.BarBottom}" />
+    </Style>
     <Style x:Key="M.BudgetBar" TargetType="local:BudgetBar" BasedOn="{StaticResource M.Instrument}" />
     <Style x:Key="M.Sparkline" TargetType="local:Sparkline" BasedOn="{StaticResource M.Instrument}" />
     <Style x:Key="M.MeterScale" TargetType="local:MeterScale" BasedOn="{StaticResource M.Instrument}" />

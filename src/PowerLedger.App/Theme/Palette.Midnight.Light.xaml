@@ -2,8 +2,8 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Midnight, light: the design's §3 tokens, laid out as the dark palette is. Ink3, LineStrong and Warn sit a little
          past the design's first figures, where the contrast tests (text 4.5:1, borders and marks 3:1 on white) put them;
-         Good and Bad a little darker, since the trends are text. The CPU is teal, not the accent's blue, so its band
-         stays apart from the accent's total line. The tooltip turns the dark page's white bubble round: dark, white words. -->
+         Good and Bad a little darker, since the trends are text. The data is the dark palette's indigo family a step deeper
+         for white. The tooltip turns the dark page's white bubble round: dark, white words. -->
     <SolidColorBrush x:Key="Brush.Ground" Color="#F3F4FA" />
     <SolidColorBrush x:Key="Brush.Panel" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Brush.Raised" Color="#F7F8FD" />
@@ -18,10 +18,10 @@
     <SolidColorBrush x:Key="Brush.Measured" Color="#4B5A12" />
     <SolidColorBrush x:Key="Brush.Calibrated" Color="#7A5A08" />
     <SolidColorBrush x:Key="Brush.Estimated" Color="#0E5A85" />
-    <SolidColorBrush x:Key="Brush.PartCpu" Color="#0D9488" />
-    <SolidColorBrush x:Key="Brush.PartGpu" Color="#7C5CE6" />
-    <SolidColorBrush x:Key="Brush.PartDisplay" Color="#0891B2" />
-    <SolidColorBrush x:Key="Brush.PartRest" Color="#8A90AE" />
+    <SolidColorBrush x:Key="Brush.PartCpu" Color="#4338CA" />
+    <SolidColorBrush x:Key="Brush.PartGpu" Color="#9333EA" />
+    <SolidColorBrush x:Key="Brush.PartDisplay" Color="#0284C7" />
+    <SolidColorBrush x:Key="Brush.PartRest" Color="#64748B" />
 
     <!-- Midnight's own keys. -->
     <SolidColorBrush x:Key="M.Ground" Color="#F3F4FA" />
@@ -40,10 +40,10 @@
     <SolidColorBrush x:Key="M.Good" Color="#147F57" />
     <SolidColorBrush x:Key="M.Bad" Color="#CC3B3B" />
     <SolidColorBrush x:Key="M.Warn" Color="#C28511" />
-    <SolidColorBrush x:Key="M.PartCpu" Color="#0D9488" />
-    <SolidColorBrush x:Key="M.PartGpu" Color="#7C5CE6" />
-    <SolidColorBrush x:Key="M.PartDisplay" Color="#0891B2" />
-    <SolidColorBrush x:Key="M.PartRest" Color="#8A90AE" />
+    <SolidColorBrush x:Key="M.PartCpu" Color="#4338CA" />
+    <SolidColorBrush x:Key="M.PartGpu" Color="#9333EA" />
+    <SolidColorBrush x:Key="M.PartDisplay" Color="#0284C7" />
+    <SolidColorBrush x:Key="M.PartRest" Color="#64748B" />
     <!-- The quality chips: the ground, and the text on it. -->
     <SolidColorBrush x:Key="M.ChipMeasured" Color="#EEF3D6" />
     <SolidColorBrush x:Key="M.ChipMeasuredText" Color="#4B5A12" />
@@ -57,7 +57,10 @@
     <!-- Shadow (menus and tooltips), hatch, the area chart's gradient and the focus ring. -->
     <SolidColorBrush x:Key="M.Shadow" Color="#29151A33" />
     <SolidColorBrush x:Key="M.Hatch" Color="#1A151A33" />
-    <SolidColorBrush x:Key="M.ChartFillTop" Color="#473A5BFF" />
-    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#003A5BFF" />
+    <SolidColorBrush x:Key="M.ChartLine" Color="#6366F1" />
+    <SolidColorBrush x:Key="M.BarTop" Color="#6366F1" />
+    <SolidColorBrush x:Key="M.BarBottom" Color="#4338CA" />
+    <SolidColorBrush x:Key="M.ChartFillTop" Color="#406366F1" />
+    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#006366F1" />
     <SolidColorBrush x:Key="M.Focus" Color="#3A5BFF" />
 </ResourceDictionary>

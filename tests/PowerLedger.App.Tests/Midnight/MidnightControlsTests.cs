@@ -206,6 +206,33 @@ public class MidnightControlsTests
         HatchBar.MarkerAt(200, 200).X.ShouldBe(200 - HatchBar.MarkerWidth, "at the whole, flush with the end");
     }
 
+    /// <summary>The Report's daily bars in Midnight run from the brighter indigo at the top to the deeper at the foot;
+    /// Classic, which gives no ends, keeps its accent.</summary>
+    [Fact]
+    public void Daily_bars_run_from_a_bright_top_to_a_deep_foot_where_the_look_gives_both()
+        => Sta.Run(() =>
+        {
+            var (top, bottom, accent) = (new SolidColorBrush(Color.FromRgb(0x81, 0x8C, 0xF8)), new SolidColorBrush(Color.FromRgb(0x4F, 0x46, 0xE5)), Brushes.Orange);
+            var bar = DailyBars.BarBrush(top, bottom, accent).ShouldBeOfType<LinearGradientBrush>();
+            bar.GradientStops.Select(stop => stop.Color).ShouldBe([top.Color, bottom.Color]);
+            (bar.StartPoint, bar.EndPoint).ShouldBe((new Point(0, 0), new Point(0, 1)), "down each bar");
+            DailyBars.BarBrush(null, bottom, accent).ShouldBeSameAs(accent);
+            DailyBars.BarBrush(null, null, accent).ShouldBeSameAs(accent, "Classic's bars stay the accent");
+            return true;
+        });
+
+    /// <summary>The chart's fill stays rich under the line, three quarters as strong past half way, and is gone at the axis.</summary>
+    [Fact]
+    public void The_charts_fill_holds_under_the_line_and_fades_out_at_the_axis()
+    {
+        var top = Color.FromArgb(0x99, 0x3F, 0x3F, 0xC8);
+        var stops = AreaChart.FillStops(top, Color.FromArgb(0, 0x3F, 0x3F, 0xC8));
+        stops.Select(stop => stop.Offset).ShouldBe([0, 0.55, 1]);
+        stops[0].Color.ShouldBe(top);
+        stops[1].Color.A.ShouldBe((byte)Math.Round(0x99 * 0.75));
+        stops[2].Color.A.ShouldBe((byte)0, "transparent at the axis");
+    }
+
     /// <summary>The sidebar's current row runs from the accent at its left into the violet and out to nothing at its right.</summary>
     [Fact]
     public void The_current_rows_wash_runs_from_the_accent_into_the_violet_and_out()
