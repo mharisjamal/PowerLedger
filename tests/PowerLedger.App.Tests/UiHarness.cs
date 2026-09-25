@@ -56,8 +56,10 @@ internal static class UiHarness
         return result;
     }
 
-    /// <summary>Puts <paramref name="look"/>'s palette for <paramref name="theme"/> first among the application's dictionaries, where the App keeps it.</summary>
-    public static void UseTheme(Theme theme, Look look = Look.Classic) => UsePalette(ThemeManager.Palette(look, theme));
+    /// <summary>Puts Classic's palette for <paramref name="theme"/> first among the application's dictionaries, where the App
+    /// keeps it. Midnight's goes on the window a test draws instead (MidnightHost.Dressed, review 11): tests pump the one
+    /// dispatcher, so a palette put here while one draws would come out in another's renders.</summary>
+    public static void UseTheme(Theme theme) => UsePalette(ThemeManager.Palette(Look.Classic, theme));
 
     /// <summary>Draws <paramref name="visual"/> at <paramref name="width"/> × <paramref name="height"/> to <paramref name="name"/> under <see cref="Folder"/>.</summary>
     public static void Render(Visual visual, int width, int height, string name)

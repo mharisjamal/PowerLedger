@@ -307,11 +307,11 @@ public class MidnightPageRenderingTests
             var model = SettingsScreen(link);
             model.Show();
             var view = new Midnight.SettingsView { DataContext = model };
-            var window = new Window
+            var window = Dressed(new Window
             {
                 Content = view, Width = 1010, Height = 900, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
                 ShowInTaskbar = false, ShowActivated = false,
-            };
+            });
             window.Show();
             try
             {
@@ -342,12 +342,13 @@ public class MidnightPageRenderingTests
             using var styles = Midnight(Theme.Dark);
             foreach (var (name, view) in ShortPages())
             {
-                var window = new Window
+                var window = Dressed(new Window
                 {
-                    Content = view, Width = ShortWidth, Height = ShortHeight, Background = (Brush)Application.Current.FindResource("M.Ground"),
+                    Content = view, Width = ShortWidth, Height = ShortHeight,
                     WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
                     ResizeMode = ResizeMode.NoResize, WindowStyle = WindowStyle.None,
-                };
+                });
+                window.SetResourceReference(Control.BackgroundProperty, "M.Ground");
                 window.Show();
                 try
                 {
@@ -556,26 +557,43 @@ public class MidnightPageRenderingTests
         _ => element.GetType().Name + (element.Name.Length > 0 ? " " + element.Name : ""),
     };
 
+    /// <summary>The Midnight theme the pages this test builds are drawn in, until disposed; the tests of one class run one at a time.</summary>
+    private static Theme? _theme;
+
     /// <summary>
-    /// Midnight's palette over the application's dictionaries until disposed, and nothing else: each page carries
-    /// Midnight's styles itself, as it must when the window's DataTemplate builds it outside the window's tree.
+    /// The pages this test builds wear Midnight's palette for <paramref name="theme"/> until disposed, and nothing else:
+    /// each page carries Midnight's styles itself, as it must when the window's DataTemplate builds it outside the window's
+    /// tree. The palette goes on each page's window, not the application (review 11), so no other test's render takes it up.
     /// </summary>
-    private static IDisposable Midnight(Theme theme) => UsePalette(theme);
+    private static IDisposable Midnight(Theme theme)
+    {
+        _theme = theme;
+        return new Worn();
+    }
+
+    /// <summary>A page's window in the palette <see cref="Midnight"/> chose.</summary>
+    private static Window Dressed(Window window) => MidnightHost.Dressed(window, _theme ?? throw new InvalidOperationException("Midnight(theme) first."));
 
     /// <summary>A page laid out at <paramref name="width"/> and its whole length, on Midnight's ground, as the window's page host would show it.</summary>
     private static PageHost Page(FrameworkElement view, double width)
     {
         view.Width = width;
-        var host = new Border { Background = (Brush)Application.Current.FindResource("M.Ground"), Child = view };
-        var window = new Window
+        var host = new Border { Child = view };
+        host.SetResourceReference(Border.BackgroundProperty, "M.Ground");
+        var window = Dressed(new Window
         {
             Content = host, SizeToContent = SizeToContent.WidthAndHeight, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
             ShowInTaskbar = false, ShowActivated = false, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
-        };
+        });
         window.Show();
         Pump(TimeSpan.FromMilliseconds(600));
         host.UpdateLayout();
-        return new PageHost(host, window);
+        return new PageHost(host, window, _theme!.Value);
+    }
+
+    private sealed class Worn : IDisposable
+    {
+        public void Dispose() => _theme = null;
     }
 
     /// <summary>
@@ -599,11 +617,14 @@ public class MidnightPageRenderingTests
         png.Save(file);
     }
 
-    private sealed record PageHost(Border Host, Window Window) : IDisposable
+    private sealed record PageHost(Border Host, Window Window, Theme Theme) : IDisposable
     {
-        /// <summary>The whole page to <paramref name="name"/> on Midnight's ground, then what it cuts off, of which there is nothing.</summary>
+        /// <summary>The whole page to <paramref name="name"/> on Midnight's ground, then what it cuts off, of which there is
+        /// nothing. Review 11: the ground drawn is this theme's Midnight ground, so a render in another test's palette fails.</summary>
         public void Render(string name)
         {
+            var ground = ((SolidColorBrush)ThemeManager.Palette(Look.Midnight, Theme)["M.Ground"]).Color;
+            PixelOf(Host, (int)Math.Ceiling(Host.ActualWidth), 40, 2, 2).ShouldBe(ground, $"{name}: Midnight's {Theme} ground");
             RenderWhole(Host, Host.Background, name);
             CutOff(Host).ShouldBeEmpty(name);
         }

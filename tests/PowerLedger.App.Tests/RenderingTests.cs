@@ -497,6 +497,9 @@ public class RenderingTests
                     var preferences = Find<TextBlock>(view, text => text.Text == "PREFERENCES").ShouldNotBeNull();
                     scroller.ScrollToVerticalOffset(scroller.VerticalOffset + preferences.TranslatePoint(default, scroller).Y - 16);
                     Pump(TimeSpan.FromMilliseconds(100));
+                    // Review 11: drawn on Classic's ground for this theme, whatever another test pumping the same dispatcher put up meanwhile.
+                    MidnightHost.PixelOf(window, 880, 560, 2, 2)
+                        .ShouldBe(((SolidColorBrush)ThemeManager.Palette(Look.Classic, theme)["Brush.Ground"]).Color, $"Classic's {theme} ground");
                     Save(window, 880, 560, $"settings-look-{theme}.png");
 
                     ui.LookProblem = null;

@@ -45,11 +45,10 @@ public class MidnightDialogRenderingTests
         {
             foreach (var theme in new[] { Theme.Dark, Theme.Light })
             {
-                using var palette = UsePalette(theme);
                 var colours = PaletteColours(theme);
                 foreach (var (name, open) in Windows(sentFolder))
                 {
-                    var window = open();
+                    var window = Dressed(open(), theme);   // on the window, not the application (review 11)
                     window.WindowStartupLocation = WindowStartupLocation.Manual;
                     window.Left = -20000;
                     window.Top = 0;

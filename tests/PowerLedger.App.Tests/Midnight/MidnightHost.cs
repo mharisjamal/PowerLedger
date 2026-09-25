@@ -5,25 +5,35 @@ using System.Windows.Media;
 namespace PowerLedger.App.Tests;
 
 /// <summary>
-/// What the Midnight render tests add to <see cref="UiHarness"/>: a Midnight palette, or a dictionary, put last among
-/// the application's merged dictionaries, where WPF looks first, so the Classic keys a Midnight palette also defines win
-/// while it is in and go with it; and a walk over the colours a window paints with.
+/// What the Midnight render tests add to <see cref="UiHarness"/>: a Midnight palette on the window a test draws, and a
+/// walk over the colours a window paints with. Review 11: the palette goes on the window, never among the application's
+/// dictionaries. The UI tests share one dispatcher, and a test that pumps it runs other tests' work inside its pump, so a
+/// palette put on the application while one test drew came out in another's renders: Classic PNGs in Midnight's colours.
 /// </summary>
 internal static class MidnightHost
 {
-    /// <summary>Midnight's palette for <paramref name="theme"/> over the application's dictionaries until disposed. Call on the UI thread.</summary>
-    public static IDisposable UsePalette(Theme theme) => Use(ThemeManager.Palette(Look.Midnight, theme));
+    /// <summary>Midnight's palette for <paramref name="theme"/> on <paramref name="window"/>, where it wins over the
+    /// application's for everything the window holds, the Classic keys it also defines among them; the window returned.</summary>
+    public static T Dressed<T>(T window, Theme theme)
+        where T : Window
+    {
+        window.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Midnight, theme));
+        return window;
+    }
 
     /// <summary>Every colour Midnight's palette for <paramref name="theme"/> holds, opaque or not.</summary>
     public static IReadOnlySet<Color> PaletteColours(Theme theme)
         => ThemeManager.Palette(Look.Midnight, theme).Values.OfType<SolidColorBrush>().Select(brush => brush.Color).ToHashSet();
 
-    /// <summary>A dictionary among the application's until disposed, after the palette. Call on the UI thread.</summary>
-    public static IDisposable Use(ResourceDictionary dictionary)
+    /// <summary>The colour of the pixel at (<paramref name="x"/>, <paramref name="y"/>) of <paramref name="visual"/> drawn at
+    /// <paramref name="width"/> × <paramref name="height"/>, for a test to check which palette a render took.</summary>
+    public static Color PixelOf(Visual visual, int width, int height, int x, int y)
     {
-        var merged = Application.Current.Resources.MergedDictionaries;
-        merged.Add(dictionary);
-        return new Removal(merged, dictionary);
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var pixel = new byte[4];
+        bitmap.CopyPixels(new Int32Rect(x, y, 1, 1), pixel, 4, 0);
+        return Color.FromArgb(pixel[3], pixel[2], pixel[1], pixel[0]);
     }
 
     /// <summary>Every <typeparamref name="T"/> under <paramref name="root"/>, outermost first.</summary>
@@ -65,9 +75,4 @@ internal static class MidnightHost
     }
 
     private static string Describe(string text) => text.Length > 30 ? "\"" + text[..30] + "…\"" : "\"" + text + "\"";
-
-    private sealed class Removal(ICollection<ResourceDictionary> merged, ResourceDictionary dictionary) : IDisposable
-    {
-        public void Dispose() => merged.Remove(dictionary);
-    }
 }
