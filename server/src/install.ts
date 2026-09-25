@@ -97,26 +97,30 @@ export async function handleDelete(request: Request, env: Cloudflare.Env): Promi
 async function forgetInstall(env: Cloudflare.Env, installId: string): Promise<void> {
   await env.DB.prepare("INSERT OR IGNORE INTO tombstones (id, deleted_at) VALUES (?, ?)").bind(installId, Date.now()).run();
 
-  const known = await env.DB.prepare("SELECT r2_key FROM reports WHERE install_id = ?")
+  const known = await env.DB.prepare(
+    "SELECT r2_key FROM reports WHERE install_id = ?1 UNION ALL SELECT r2_key FROM histories WHERE install_id = ?1",
+  )
     .bind(installId)
     .all<{ r2_key: string }>();
   await deleteBodies(env, known.results.map((row) => row.r2_key));
 
-  // Anything left under the install's prefix that D1 didn't know about. Only possible with R2
-  // bound: without it, every body is in D1 and already covered by the reports rows above.
+  // Anything left under the install's prefixes that D1 didn't know about. Only possible with R2
+  // bound: without it, every body is in D1 and already covered by the rows above.
   const reports = env.REPORTS;
   if (reports) {
-    const prefix = `reports/v1/${installId}/`;
-    let cursor: string | undefined;
-    do {
-      const listed = await reports.list({ prefix, cursor, limit: 1000 });
-      await deleteBodies(env, listed.objects.map((object) => object.key));
-      cursor = listed.truncated ? listed.cursor : undefined;
-    } while (cursor);
+    for (const prefix of [`reports/v1/${installId}/`, `history/v1/${installId}/`]) {
+      let cursor: string | undefined;
+      do {
+        const listed = await reports.list({ prefix, cursor, limit: 1000 });
+        await deleteBodies(env, listed.objects.map((object) => object.key));
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+    }
   }
 
   await env.DB.batch([
     env.DB.prepare("DELETE FROM reports WHERE install_id = ?").bind(installId),
+    env.DB.prepare("DELETE FROM histories WHERE install_id = ?").bind(installId),
     env.DB.prepare("DELETE FROM requests WHERE install_id = ?").bind(installId),
     env.DB.prepare("DELETE FROM installs WHERE id = ?").bind(installId),
   ]);

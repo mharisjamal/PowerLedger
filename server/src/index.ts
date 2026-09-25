@@ -1,5 +1,6 @@
 import { handleAdmin } from "./admin";
 import { handleFeedback } from "./feedback";
+import { handleHistory } from "./history";
 import { handleHouseholdRoutes } from "./households/routes";
 import { handleConsent, handleDelete } from "./install";
 import { handleReport } from "./report";
@@ -11,6 +12,9 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/v1/report") {
       return handleReport(request, env);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/history") {
+      return handleHistory(request, env);
     }
     if (request.method === "POST" && url.pathname === "/v1/consent") {
       return handleConsent(request, env);

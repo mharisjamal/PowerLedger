@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mharisjamal/PowerLedger/blob/main/server/schema/history-v1.schema.json",
+  "title": "PowerLedger history, version 1",
+  "description": "Hourly totals already on a PC when its user agrees (consent version 2, Hardware and power on), sent once in chunks of at most 31 days (744 hours), oldest first, to POST /v1/history.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "installId",
+    "app",
+    "consent",
+    "utcOffsetMinutes",
+    "hours"
+  ],
+  "properties": {
+    "schema": {
+      "const": "history-v1"
+    },
+    "installId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "app": {
+      "$ref": "#/$defs/version"
+    },
+    "consent": {
+      "$ref": "#/$defs/consent"
+    },
+    "utcOffsetMinutes": {
+      "type": "integer",
+      "minimum": -840,
+      "maximum": 840
+    },
+    "hours": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 744,
+      "items": {
+        "$ref": "#/$defs/hour"
+      },
+      "description": "Oldest first. The first hour's t to the last's end spans at most 31 days."
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]{1,4}\\.[0-9]{1,5}\\.[0-9]{1,6}$"
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "diagnostics",
+        "usage",
+        "power",
+        "share"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 1000,
+          "description": "History is sent only on consent version 2 or later."
+        },
+        "diagnostics": {
+          "type": "boolean"
+        },
+        "usage": {
+          "type": "boolean"
+        },
+        "power": {
+          "const": true,
+          "description": "History is power data: only with Hardware and power on."
+        },
+        "share": {
+          "type": "boolean"
+        }
+      }
+    },
+    "hour": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One row of the PC's samples_1h table (src/PowerLedger.Storage/Schema.cs), every numeric column, named in camelCase. Checked by the server's own code (src/hours.ts, built from this definition), not by the validator, to keep a chunk inside the Worker's CPU limit.",
+      "required": [
+        "t",
+        "avgW",
+        "maxW",
+        "energyWh",
+        "cpuWh",
+        "gpuWh",
+        "displayWh",
+        "restWh",
+        "idleOnWh",
+        "idleOffWh",
+        "idleOnS",
+        "idleOffS",
+        "onS",
+        "batteryS",
+        "gapS",
+        "sampleCount",
+        "measuredS",
+        "calibratedS",
+        "estimatedS"
+      ],
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 1577836800000,
+          "multipleOf": 3600000,
+          "description": "start_ms: the hour's start, UTC ms, on the hour. Strictly rising within a chunk, and not in the future."
+        },
+        "avgW": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "avg_w"
+        },
+        "maxW": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "max_w"
+        },
+        "energyWh": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "energy_wh"
+        },
+        "cpuWh": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "cpu_wh"
+        },
+        "gpuWh": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "gpu_wh"
+        },
+        "displayWh": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "display_wh: the PC's own display and its monitors"
+        },
+        "restWh": {
+          "type": "number",
+          "minimum": -5000,
+          "maximum": 5000,
+          "description": "rest_wh: energy less CPU, GPU and display, which can be a little below zero"
+        },
+        "idleOnWh": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "idle_on_wh"
+        },
+        "idleOffWh": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "idle_off_wh"
+        },
+        "idleOnS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 7200,
+          "description": "idle_on_s"
+        },
+        "idleOffS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 7200,
+          "description": "idle_off_s"
+        },
+        "onS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 7200,
+          "description": "on_s"
+        },
+        "batteryS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 7200,
+          "description": "battery_s"
+        },
+        "gapS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 315360000,
+          "description": "gap_s: sleep, hibernation or the service stopped, which one reading after a long gap can carry whole"
+        },
+        "sampleCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000,
+          "description": "sample_count"
+        },
+        "measuredS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 7200,
+          "description": "measured_s"
+        },
+        "calibratedS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 7200,
+          "description": "calibrated_s"
+        },
+        "estimatedS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 7200,
+          "description": "estimated_s"
+        }
+      }
+    }
+  }
+}

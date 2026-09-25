@@ -25,6 +25,45 @@ export function randomInstallId(): string {
   return crypto.randomUUID();
 }
 
+export const HOUR_MS = 3_600_000;
+
+/** One hour row as the service sends it: every samples_1h column, with plausible values. */
+export function hourRow(t: number, i = 0) {
+  return {
+    t,
+    avgW: 120 + i,
+    maxW: 310,
+    energyWh: 120 + i,
+    cpuWh: 40,
+    gpuWh: 30.5,
+    displayWh: 20,
+    restWh: 29.5 + i,
+    idleOnWh: 10,
+    idleOffWh: 0,
+    idleOnS: 600,
+    idleOffS: 0,
+    onS: 3600,
+    batteryS: 0,
+    gapS: 0,
+    sampleCount: 3600,
+    measuredS: 0,
+    calibratedS: 1800,
+    estimatedS: 1800,
+  };
+}
+
+/** A valid history-v1 chunk: `count` consecutive hours from `fromMs`, on consent version 2 with power on. */
+export function historyBody(installId: string, fromMs: number, count: number) {
+  return {
+    schema: "history-v1",
+    installId,
+    app: "0.9.0",
+    consent: { version: 2, diagnostics: true, usage: false, power: true, share: false },
+    utcOffsetMinutes: 300,
+    hours: Array.from({ length: count }, (_, i) => hourRow(fromMs + i * HOUR_MS, i)),
+  };
+}
+
 /** A fresh IPv4 address for `CF-Connecting-IP`, so a test sending many requests never uses up ADDRESS_LIMIT (60 a
  * minute) for the tests that share the default address. */
 export function randomAddress(): string {

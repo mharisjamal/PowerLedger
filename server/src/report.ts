@@ -1,14 +1,10 @@
-import { addressOf } from "./address";
-import { bearer, checkInstall, countRequest } from "./auth";
-import { readBounded } from "./body";
+import { checkInstall, countRequest } from "./auth";
 import { dayInRange } from "./day";
-import { gunzipBounded } from "./gzip";
 import { checkMinutes } from "./minutes";
 import { firstSchemaError } from "./schema";
 import { deleteBodies, putBody } from "./store";
+import { errorResponse, readUpload } from "./upload";
 
-const MAX_BODY_BYTES = 1_048_576;
-const MAX_UNPACKED_BYTES = 8 * 1024 * 1024;
 // Today so far every hour, the complete day, and room for retries.
 const MAX_REQUESTS_PER_DAY = 60;
 
@@ -24,41 +20,11 @@ interface ReportBody {
   complete?: boolean;
 }
 
-function errorResponse(status: number, message: string): Response {
-  return Response.json({ error: message }, { status });
-}
-
 export async function handleReport(request: Request, env: Cloudflare.Env): Promise<Response> {
-  // 1. Auth: a well-formed bearer key is required up front.
-  const key = bearer(request);
-  if (!key) return errorResponse(401, "A valid bearer key is required.");
-
-  // 2. Per-address rate limit (an IPv6 address by its /64), before reading anything.
-  const limited = await env.ADDRESS_LIMIT.limit({ key: addressOf(request) });
-  if (!limited.success) return errorResponse(429, "Too many requests from this address.");
-
-  // 3. Content-Encoding and the as-sent size limit, counted while reading so an oversized body is never held whole.
-  if (request.headers.get("Content-Encoding") !== "gzip") {
-    return errorResponse(413, "The body must be sent gzip-encoded.");
-  }
-  const body = await readBounded(request, MAX_BODY_BYTES);
-  if (body === null) return errorResponse(413, "The body is larger than 1 MB.");
-
-  // 4. Bounded decompression, then JSON.
-  let unpacked: Uint8Array | null;
-  try {
-    unpacked = await gunzipBounded(body, MAX_UNPACKED_BYTES);
-  } catch {
-    return errorResponse(400, "The body is not valid gzip.");
-  }
-  if (unpacked === null) return errorResponse(413, "The unpacked body is larger than 8 MB.");
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(unpacked));
-  } catch {
-    return errorResponse(400, "The body is not valid JSON.");
-  }
+  // 1 to 4. The bearer key, the per-address limit, gzip and its size limits, and JSON (upload.ts).
+  const upload = await readUpload(request, env);
+  if (!upload.ok) return upload.response;
+  const { key, body, value: parsed } = upload;
 
   // 5. The schema.
   const schemaError = firstSchemaError(parsed);
