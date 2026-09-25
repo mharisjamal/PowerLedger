@@ -17,7 +17,7 @@ namespace PowerLedger.Service.Tests;
 /// <summary>The collector and uploader (data-sharing design §4), with a fake server and a fake clock in a UTC+2 zone.</summary>
 public sealed class SharingWorkerTests : IDisposable
 {
-    private const int SendMinute = 60;                       // 01:00 local
+    private const int SendMinute = 45;                       // 00:45 local, and today so far at a quarter to every hour
     private readonly Harness _h = new();
 
     /// <summary>A local time on a day of September 2026, in the harness's UTC+2 zone.</summary>
@@ -91,7 +91,7 @@ public sealed class SharingWorkerTests : IDisposable
         await _h.Consent(false, false, true);
         _h.Clock.SetUtcNow(Local(24, 10, 40));
         await _h.TickAsync();
-        _h.Clock.SetUtcNow(Local(25, 0, 59));
+        _h.Clock.SetUtcNow(Local(25, 0, 44));
         await _h.TickAsync();
         _h.Client.Reports.ShouldBeEmpty();                                   // not before the minute
 
@@ -106,8 +106,79 @@ public sealed class SharingWorkerTests : IDisposable
         ReportSchema.Problems(ReportJson.Write(report)).ShouldBeNull();
         _h.Outbox.Days().ShouldBeEmpty();
         var copy = Path.Combine(_h.Sent, "2026-09-24.json.gz");
-        File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last().Body);
+        File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last(call => call.Report?.Complete == true).Body);
         _h.Store.LastSent.ShouldBe(new LastSent(Local(25, 1, 1).ToUnixTimeMilliseconds(), new FileInfo(copy).Length));
+    }
+
+    [Fact]
+    public async Task Today_so_far_goes_every_hour_at_the_send_minute_and_stays_in_the_outbox_until_the_day_goes_complete()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Clock.SetUtcNow(Local(24, 10, 40));
+        await _h.TickAsync();
+        _h.Client.Calls.Where(call => call.Kind == "report").ShouldBeEmpty();   // the first goes at the next quarter to
+
+        _h.Clock.SetUtcNow(Local(24, 10, 50));
+        await _h.TickAsync();
+        var partial = _h.Client.Partials.ShouldHaveSingleItem();
+        (partial.Day, partial.Complete).ShouldBe(("2026-09-24", false));
+        partial.Power.ShouldNotBeNull().Minutes.T.ShouldBe(Enumerable.Range(600, 30).ToArray());
+        partial.Power.Hardware.ShouldNotBeNull();
+        ReportSchema.Problems(ReportJson.Write(partial)).ShouldBeNull();
+        _h.Outbox.Minutes("2026-09-24").Count.ShouldBe(30);                     // still there for the complete day
+        _h.Store.SentThrough.ShouldBeNull();
+        var copy = Path.Combine(_h.Sent, "2026-09-24.json.gz");
+        File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last().Body);
+        _h.Store.LastSent.ShouldBe(new LastSent(Local(24, 10, 50).ToUnixTimeMilliseconds(), new FileInfo(copy).Length));
+
+        _h.Clock.SetUtcNow(Local(24, 10, 55));
+        await _h.TickAsync();
+        _h.Client.Partials.Count().ShouldBe(1);                                  // once an hour
+
+        _h.Readings(Local(24, 11), TimeSpan.FromMinutes(10));
+        _h.Clock.SetUtcNow(Local(24, 11, 45));
+        await _h.TickAsync();
+        var second = _h.Client.Partials.Last();
+        second.Power.ShouldNotBeNull().Minutes.T.Length.ShouldBe(40);
+        second.Power.Hardware.ShouldBeNull();                                    // the parts went with the first
+        _h.Client.Reports.ShouldBeEmpty();
+
+        _h.Clock.SetUtcNow(Local(25, 0, 50));
+        await _h.TickAsync();
+        var complete = _h.Client.Reports.ShouldHaveSingleItem();
+        (complete.Day, complete.Complete).ShouldBe(("2026-09-24", true));
+        complete.Power.ShouldNotBeNull().Minutes.T.Length.ShouldBe(40);
+        _h.Client.Partials.Count().ShouldBe(2);                                  // nothing yet today to send
+        _h.Outbox.Days().ShouldBeEmpty();
+        _h.Store.SentThrough.ShouldBe("2026-09-24");
+        File.ReadAllBytes(copy).ShouldBe(_h.Client.Calls.Last(call => call.Report?.Complete == true).Body);
+        Directory.GetFiles(_h.Sent, "*.json.gz").ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task Today_so_far_that_fails_backs_off_like_a_day_and_keeps_today_in_the_outbox()
+    {
+        _h.Clock.SetUtcNow(Local(24, 10));
+        await _h.Consent(false, false, true);
+        _h.Readings(Local(24, 10), TimeSpan.FromMinutes(30));
+        _h.Client.Answer = _ => new SendOutcome.Unreachable("the server couldn't be reached");
+
+        _h.Clock.SetUtcNow(Local(24, 10, 50));
+        await _h.TickAsync();
+        _h.Store.Backoff.ShouldBe(new Backoff(1, Local(24, 11, 50).ToUnixTimeMilliseconds()));
+        _h.Store.Problem.ShouldBe(new SendProblem("the server couldn't be reached", Rejected: false));
+        _h.Clock.SetUtcNow(Local(24, 11, 45));
+        await _h.TickAsync();
+        _h.Client.Partials.Count().ShouldBe(1);                                  // the back-off holds it
+
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(24, 11, 50));
+        await _h.TickAsync();
+        _h.Client.Partials.Count().ShouldBe(2);
+        (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
+        _h.Outbox.Minutes("2026-09-24").Count.ShouldBe(30);
     }
 
     [Fact]
@@ -1283,7 +1354,11 @@ internal sealed class FakeSharingClient : ISharingClient
     /// <summary>When set, answers in its own time instead of <see cref="Answer"/>, given the request's token.</summary>
     public Func<SharingCall, CancellationToken, Task<SendOutcome>>? AnswerAsync { get; set; }
 
-    public IEnumerable<ReportV1> Reports => Calls.Where(call => call.Report is not null).Select(call => call.Report!);
+    /// <summary>The complete days sent.</summary>
+    public IEnumerable<ReportV1> Reports => Calls.Where(call => call.Report is { Complete: not false }).Select(call => call.Report!);
+
+    /// <summary>Today so far, as sent each hour.</summary>
+    public IEnumerable<ReportV1> Partials => Calls.Where(call => call.Report is { Complete: false }).Select(call => call.Report!);
 
     public Task<SendOutcome> SendReportAsync(byte[] gzipBody, string key, CancellationToken cancel = default) =>
         Record(new SharingCall("report", key, null, null, ReportJson.Read(Gunzip(gzipBody)), gzipBody), cancel);

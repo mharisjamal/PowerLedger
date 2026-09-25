@@ -79,6 +79,25 @@ public class ReportTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_header_says_whether_the_day_is_complete_or_today_so_far(bool complete)
+    {
+        var json = ReportJson.Write(ReportBuilder.Build(SharingFakes.Inputs() with { Complete = complete }));
+
+        JsonNode.Parse(json)!["complete"]!.GetValue<bool>().ShouldBe(complete);
+        ReportSchema.Problems(json).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_report_without_complete_from_an_older_app_reads_as_it_came()
+    {
+        var file = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Contract", "fixtures", "valid-full.json"));
+
+        ReportJson.Read(Encoding.UTF8.GetBytes(file)).Complete.ShouldBeNull();
+    }
+
+    [Theory]
     [InlineData("0.6.0+1a2b3c4", "0.6.0")]
     [InlineData("0.6.0-rc.1+1a2b3c4", "0.6.0")]
     [InlineData("10.20.300", "10.20.300")]

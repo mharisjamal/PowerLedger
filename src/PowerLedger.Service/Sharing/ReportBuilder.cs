@@ -34,7 +34,7 @@ internal static partial class ReportBuilder
             SchemaVersion, inputs.InstallId, inputs.Host.App, inputs.Host.Windows, inputs.Host.Arch,
             inputs.Settings.Profile.Chassis == ChassisKind.Laptop ? "laptop" : "desktop",
             new ConsentDto(consent.Version, consent.Diagnostics, consent.Usage, consent.Power, consent.Share),
-            inputs.Day, inputs.UtcOffsetMinutes,
+            inputs.Day, inputs.UtcOffsetMinutes, inputs.Complete,
             consent.Diagnostics ? Diagnostics(inputs) : null,
             consent.Usage && inputs.Events.Usage is { } usage ? Usage(usage) : null,
             consent.Power && (inputs.Minutes.Count > 0 || inputs.WithHardware)

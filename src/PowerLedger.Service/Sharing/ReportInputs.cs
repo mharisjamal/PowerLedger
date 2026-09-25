@@ -21,6 +21,7 @@ namespace PowerLedger.Service.Sharing;
 /// <param name="DiscreteGpu">Whether the latest reading found a discrete graphics card.</param>
 /// <param name="WithHardware">Whether the parts go with the minutes.</param>
 /// <param name="Names">The names scrubbed out of every text sent.</param>
+/// <param name="Complete">True for a day that is over, false for today so far (Plan Q §1).</param>
 internal sealed record ReportInputs(
     HostFacts Host,
     string InstallId,
@@ -35,7 +36,8 @@ internal sealed record ReportInputs(
     Tariff? Tariff,
     bool DiscreteGpu,
     bool WithHardware,
-    ScrubNames Names);
+    ScrubNames Names,
+    bool Complete = true);
 
 /// <summary>What the PC running the service says of itself.</summary>
 /// <param name="App">The service's version, <c>X.Y.Z</c>.</param>

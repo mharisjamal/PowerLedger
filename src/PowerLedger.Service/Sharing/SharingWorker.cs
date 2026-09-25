@@ -22,7 +22,7 @@ internal sealed record SharingEnvironment(string Sent, string Crashes, Func<Scru
 /// The collector and uploader (data-sharing design §4). Every five minutes, and at start, it builds the minutes completed
 /// since the last run into the outbox while Hardware and power is on, records the sources' failures and the service's
 /// crashes while Crash and sensor reports is on, drops days too old to send, posts a consent change the server hasn't
-/// heard, and sends each complete day once the schedule says so. Between runs it carries out the App's requests, one at a
+/// heard, sends each complete day once the schedule says so, and today so far once an hour (Plan Q §1). Between runs it carries out the App's requests, one at a
 /// time, so nothing else touches the outbox or the sharing state and neither needs a lock. A request the App waits on
 /// doesn't wait for a run: the run gives way to it where nothing is half-done, cancelling a request to the server under
 /// way, and starts again once the App has its answer. So the App is answered within <see cref="AppWait"/> of asking, and a
@@ -187,10 +187,14 @@ internal sealed class SharingWorker : BackgroundService
         DropOldDays(now);
         if (!await PostPendingConsentAsync(now, atOnce: false, stop).ConfigureAwait(false)) return;
 
-        if (LoopHasPublished
-            && SendSchedule.Due(now, Zone, _store.SendMinute, _store.LastRun, _store.Backoff, CompleteDays(now, consent).Count > 0))
+        if (!LoopHasPublished) return;
+        if (SendSchedule.Due(now, Zone, _store.SendMinute, _store.LastRun, _store.Backoff, CompleteDays(now, consent).Count > 0))
         {
             await SendAsync(now, answerBy: default, stop).ConfigureAwait(false);
+        }
+        if (_store.Consent.AllowsAny && SendSchedule.PartialDue(now, Zone, _store.SendMinute, _store.LastPartialRun, _store.Backoff))
+        {
+            await SendTodayAsync(now, stop).ConfigureAwait(false);
         }
     }
 
@@ -307,6 +311,7 @@ internal sealed class SharingWorker : BackgroundService
         var before = _store.StoredConsent;
         var was = before?.Consent is { Answered: true } answered ? answered : AllOff;
         if (consent.AllowsAny) Identity(changing: true);                    // the first switch turned on makes the ID and key
+        if (consent.AllowsAny && !was.AllowsAny) _store.LastPartialRun = nowMs;  // today so far first goes at the next hour's minute
         if (consent.Power && !was.Power) _store.CollectedTo = nowMs;        // nothing from before the answer is collected
         if (!consent.Power)
         {
@@ -391,7 +396,7 @@ internal sealed class SharingWorker : BackgroundService
         var usage = events.Usage ?? new UsageCounts(day, 0, new Dictionary<string, int>(), new Dictionary<string, int>(), 0, 0, 0, "system", "en");
         var inputs = Inputs(
             day, AllOn, _store.InstallId ?? Guid.Empty.ToString("D"), [.. minutes.Where(minute => minute.Day == day)], events with { Usage = usage },
-            withHardware: true, now);
+            withHardware: true, now) with { Complete = false };
 
         var json = ReportJson.Indented(ReportJson.Write(ReportBuilder.Build(inputs)));
         Directory.CreateDirectory(_environment.Sent);
@@ -737,11 +742,71 @@ internal sealed class SharingWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Sends today so far (Plan Q §1), built as a complete day is, with <c>"complete": false</c>, and the hardware when it
+    /// changed since it last went. Today stays in the outbox, open, for the next hour's and for the complete day. A failure
+    /// backs off and is noted as a day's is; a refusal is noted, and today is kept, since the complete day may still go. A
+    /// day already closed, or one with nothing the switches allow, isn't sent. It gives way to the App as the run does.
+    /// </summary>
+    private async Task SendTodayAsync(DateTimeOffset now, CancellationToken stop)
+    {
+        if (_commands.AppWaiting) throw new GiveWay();
+        var nowMs = now.ToUnixTimeMilliseconds();
+        var day = Today(now);
+        var consent = _store.Consent;
+        if (_store.SentThrough is { } through && string.CompareOrdinal(day, through) <= 0)
+        {
+            _store.LastPartialRun = nowMs;
+            return;
+        }
+        var (id, key) = Identity();
+        var inputs = Inputs(day, consent, id, consent.Power ? _outbox.Minutes(day) : [], OutboxEvents.Read(_outbox, day), withHardware: false, now)
+            with { Complete = false };
+        var hash = consent.Power ? ReportJson.Hash(ReportBuilder.Hardware(inputs)) : null;
+        var report = ReportBuilder.Build(inputs with { WithHardware = hash is not null && hash != _store.HardwareHash });
+        if (report is { Diagnostics: null, Usage: null, Power: null })
+        {
+            _store.LastPartialRun = nowMs;                                    // nothing yet today the switches allow
+            return;
+        }
+
+        var body = SharingClient.Gzip(ReportJson.Write(report));
+        var outcome = await OwnCallAsync(cancel => _client.SendReportAsync(body, key, cancel), stop).ConfigureAwait(false);
+        _store.LastPartialRun = nowMs;
+        switch (outcome)
+        {
+            case SendOutcome.Accepted:
+                Kept(day, body, report.Power?.Hardware is null ? null : hash, now);
+                break;
+            case SendOutcome.Rejected rejected:
+                _log.LogWarning("The server rejected today so far ({Day}): {Reason}", day, rejected.Text);
+                Note(new SendProblem(rejected.Text, Rejected: true));
+                break;
+            case SendOutcome.Gone:
+                _log.LogInformation("The server has deleted this install; forgetting it");
+                Forget(now);
+                break;
+            default:
+                var reason = outcome.Reason ?? "the server didn't take it";
+                _log.LogInformation("Sending today so far failed ({Reason}); trying again later", reason);
+                Note(new SendProblem(reason, Rejected: false));
+                _store.Backoff = SendSchedule.After(_store.Backoff, now);
+                break;
+        }
+    }
+
     /// <summary>The day leaves the outbox, and a copy of what went is kept for the user to see.</summary>
     private void Accepted(string day, byte[] body, string? hardwareHash, DateTimeOffset now)
     {
         _outbox.DeleteDay(day);
         Close(day);
+        Kept(day, body, hardwareHash, now);
+    }
+
+    /// <summary>What an accepted upload leaves: a copy of it, under its day's name, which a later upload of the same day
+    /// replaces, the last upload's time and size, and no problem or back-off.</summary>
+    private void Kept(string day, byte[] body, string? hardwareHash, DateTimeOffset now)
+    {
         WriteSent(day, body);
         _store.LastSent = new LastSent(now.ToUnixTimeMilliseconds(), body.Length);
         Note(null);
