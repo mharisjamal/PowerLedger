@@ -10,6 +10,7 @@ using PowerLedger.Sensors;
 using PowerLedger.Service.Households;
 using PowerLedger.Service.Households.Relay;
 using PowerLedger.Service.Sharing;
+using PowerLedger.Service.Updates;
 using PowerLedger.Storage;
 using Serilog;
 
@@ -79,6 +80,7 @@ internal static class ServiceHost
         services.AddSingleton(provider => LoopEnvironmentFor(provider, asService));
         services.AddSingleton(paths);                           // Program writes the service's crash files under it
         services.AddSingleton<SharingCommands>();
+        services.AddSingleton<AppPolicy>();                     // the server's minimum version, for sharing and updates
         services.AddSingleton<ISharingClient>(_ => new SharingClient(SharingEndpoint.Resolve()));
         services.AddSingleton(_ => new NoticeHub());
         services.AddSingleton(provider =>
