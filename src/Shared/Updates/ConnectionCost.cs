@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace PowerLedger.App;
+namespace PowerLedger.Updates;
 
 /// <summary>Whether the connection this PC uses charges for what it carries.</summary>
 internal interface IConnectionCost

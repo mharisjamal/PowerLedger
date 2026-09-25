@@ -1,7 +1,7 @@
 using System.Net.Http;
 using System.Net.Http.Headers;
 
-namespace PowerLedger.App;
+namespace PowerLedger.Updates;
 
 /// <summary>The one HttpClient updates use for the App's life: the system's proxy, the user agent GitHub's API asks for,
 /// and no overall timeout, since the feed and the download each set their own.</summary>

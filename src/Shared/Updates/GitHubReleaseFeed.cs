@@ -8,7 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
-namespace PowerLedger.App;
+namespace PowerLedger.Updates;
 
 /// <summary>Where the newest release comes from.</summary>
 internal interface IReleaseFeed
@@ -33,6 +33,9 @@ internal sealed partial class GitHubReleaseFeed(HttpClient http, Uri latest, str
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
     internal const int MaxAnswer = 1 << 20;
     internal const long MaxInstaller = 1L << 30;
+
+    /// <summary>The most a signatures file may be: a line or so per installer.</summary>
+    internal const long MaxSignatures = 64 * 1024;
 
     /// <summary>GitHub, or a stand-in at <paramref name="feed"/> (the App's --update-feed) that answers at
     /// feed/releases/latest and serves installers under feed/download/.</summary>
@@ -99,8 +102,27 @@ internal sealed partial class GitHubReleaseFeed(HttpClient http, Uri latest, str
         var page = Uri.TryCreate(release.HtmlUrl, UriKind.Absolute, out var html) && html.AbsoluteUri.StartsWith(Releases + "/", StringComparison.Ordinal)
             ? html
             : PageOf(version);
-        return new Release(version, page, installer, name, asset.Size, Convert.FromHexString(digest.Groups[1].Value));
+        return new Release(version, page, installer, name, asset.Size, Convert.FromHexString(digest.Groups[1].Value), Signatures(release, version, downloads));
     }
+
+    /// <summary>The release's signatures file, PowerLedger-X.Y.Z-signatures.json, when it is under the repository's own
+    /// download address with a plausible size and GitHub's SHA-256; otherwise null, which the App doesn't need and the
+    /// service takes as "don't install this one yourself".</summary>
+    private static ReleaseFile? Signatures(GitHubRelease release, Version version, string downloads)
+    {
+        var name = SignaturesName(version);
+        var asset = release.Assets?.FirstOrDefault(a => a.Name == name);
+        if (asset is null
+            || !Uri.TryCreate(asset.BrowserDownloadUrl, UriKind.Absolute, out var address)
+            || !address.AbsoluteUri.StartsWith(downloads, StringComparison.Ordinal)
+            || asset.Size is <= 0 or > MaxSignatures
+            || Digest().Match(asset.Digest ?? "") is not { Success: true } digest)
+            return null;
+        return new ReleaseFile(address, name, asset.Size, Convert.FromHexString(digest.Groups[1].Value));
+    }
+
+    /// <summary>The signatures file release.ps1 uploads with a version's installers.</summary>
+    internal static string SignaturesName(Version version) => $"PowerLedger-{version.ToString(3)}-signatures.json";
 
     /// <summary>The installers a release may carry, best first: the one built for this PC, then the one with every build.</summary>
     internal static IReadOnlyList<string> InstallerNames(Version version, Architecture architecture)

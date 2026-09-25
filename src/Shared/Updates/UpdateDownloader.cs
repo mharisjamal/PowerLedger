@@ -3,7 +3,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 
-namespace PowerLedger.App;
+namespace PowerLedger.Updates;
 
 /// <summary>Brings a release's installer down and keeps it only when it is the file GitHub lists.</summary>
 internal interface IUpdateDownloader
@@ -81,6 +81,41 @@ internal sealed partial class UpdateDownloader(HttpClient http, string folder, T
         finally
         {
             Delete(partial);   // nothing is there once the download has moved into place
+        }
+    }
+
+    /// <summary>A small release file (the signatures, Plan Q §4) held in memory, returned only when its size and SHA-256
+    /// are the ones GitHub lists. Throws <see cref="UpdateException"/>.</summary>
+    public async Task<byte[]> FetchAsync(ReleaseFile file, CancellationToken cancel)
+    {
+        using var quiet = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        quiet.CancelAfter(stall ?? Stall);
+        try
+        {
+            using var response = await http.GetAsync(file.Address, HttpCompletionOption.ResponseHeadersRead, quiet.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) throw new UpdateException($"GitHub answered {(int)response.StatusCode} for {file.FileName}.");
+            if (response.Content.Headers.ContentLength is { } length && length != file.Size) throw new UpdateException($"{file.FileName} isn't the size GitHub lists.");
+            var bytes = new byte[file.Size];
+            var received = 0;
+            await using (var source = await response.Content.ReadAsStreamAsync(quiet.Token).ConfigureAwait(false))
+            {
+                int read;
+                while (received < bytes.Length && (read = await source.ReadAsync(bytes.AsMemory(received), quiet.Token).ConfigureAwait(false)) > 0)
+                    received += read;
+                if (received == bytes.Length && await source.ReadAsync(new byte[1], quiet.Token).ConfigureAwait(false) > 0)
+                    throw new UpdateException($"{file.FileName} isn't the size GitHub lists.");
+            }
+            if (received != file.Size) throw new UpdateException($"{file.FileName} arrived incomplete.");
+            if (!SHA256.HashData(bytes).AsSpan().SequenceEqual(file.Sha256)) throw new UpdateException($"{file.FileName} didn't match GitHub's checksum.");
+            return bytes;
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            throw new UpdateException($"Downloading {file.FileName} stalled.");
+        }
+        catch (Exception error) when (error is HttpRequestException or HttpIOException or IOException)
+        {
+            throw new UpdateException($"Couldn't download {file.FileName}.", error);
         }
     }
 
