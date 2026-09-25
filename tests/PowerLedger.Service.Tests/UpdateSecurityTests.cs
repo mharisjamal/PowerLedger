@@ -27,7 +27,14 @@ public sealed class UpdateSecurityTests : IDisposable
 
     private string PublicKey => Convert.ToBase64String(_key.ExportSubjectPublicKeyInfo());
 
-    private byte[] Sign(byte[] sha256) => _key.SignHash(sha256, DSASignatureFormat.Rfc3279DerSequence);
+    private const string Version = "0.9.1";
+    private const string FileName = "PowerLedger-0.9.1-setup-x64.exe";
+
+    /// <summary>The release key's signature of what the release script signs: "PowerLedger|version|file name|sha256 hex".</summary>
+    private byte[] Sign(byte[] sha256, string version = Version, string fileName = FileName)
+        => _key.SignData(
+            Encoding.UTF8.GetBytes($"PowerLedger|{version}|{fileName}|{Convert.ToHexStringLower(sha256)}"), HashAlgorithmName.SHA256,
+            DSASignatureFormat.Rfc3279DerSequence);
 
     // ---- The signature
 
@@ -35,7 +42,7 @@ public sealed class UpdateSecurityTests : IDisposable
     public void A_signature_made_with_the_release_key_verifies()
     {
         var digest = SHA256.HashData("setup"u8);
-        ReleaseSignature.Verifies(PublicKey, digest, Sign(digest)).ShouldBeTrue();
+        ReleaseSignature.Verifies(PublicKey, Version, FileName, digest, Sign(digest)).ShouldBeTrue();
     }
 
     [Fact]
@@ -43,8 +50,21 @@ public sealed class UpdateSecurityTests : IDisposable
     {
         var digest = SHA256.HashData("setup"u8);
         using var other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        ReleaseSignature.Verifies(PublicKey, digest, other.SignHash(digest, DSASignatureFormat.Rfc3279DerSequence)).ShouldBeFalse();
-        ReleaseSignature.Verifies(PublicKey, SHA256.HashData("other"u8), Sign(digest)).ShouldBeFalse();
+        var otherKeys = other.SignData(
+            Encoding.UTF8.GetBytes($"PowerLedger|{Version}|{FileName}|{Convert.ToHexStringLower(digest)}"), HashAlgorithmName.SHA256,
+            DSASignatureFormat.Rfc3279DerSequence);
+        ReleaseSignature.Verifies(PublicKey, Version, FileName, digest, otherKeys).ShouldBeFalse();
+        ReleaseSignature.Verifies(PublicKey, Version, FileName, SHA256.HashData("other"u8), Sign(digest)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_signature_for_another_version_or_file_name_does_not_verify()
+    {
+        var digest = SHA256.HashData("setup"u8);
+        ReleaseSignature.Verifies(PublicKey, "0.9.2", FileName, digest, Sign(digest)).ShouldBeFalse();
+        ReleaseSignature.Verifies(PublicKey, Version, "PowerLedger-0.9.1-setup-arm64.exe", digest, Sign(digest)).ShouldBeFalse();
+        ReleaseSignature.Verifies(PublicKey, Version, FileName, digest, _key.SignHash(digest, DSASignatureFormat.Rfc3279DerSequence))
+            .ShouldBeFalse();                                                    // the bare digest, as before, no longer does
     }
 
     [Theory]
@@ -54,22 +74,23 @@ public sealed class UpdateSecurityTests : IDisposable
     public void No_key_or_a_broken_one_verifies_nothing(string key)
     {
         var digest = SHA256.HashData("setup"u8);
-        ReleaseSignature.Verifies(key, digest, Sign(digest)).ShouldBeFalse();
+        ReleaseSignature.Verifies(key, Version, FileName, digest, Sign(digest)).ShouldBeFalse();
     }
 
     [Fact]
     public void Garbage_for_a_signature_verifies_nothing()
-        => ReleaseSignature.Verifies(PublicKey, SHA256.HashData("setup"u8), [1, 2, 3]).ShouldBeFalse();
+        => ReleaseSignature.Verifies(PublicKey, Version, FileName, SHA256.HashData("setup"u8), [1, 2, 3]).ShouldBeFalse();
 
-    /// <summary>What scripts\release-signing.ps1 made with a throwaway key over a file holding "hello\n", so the script's
-    /// format and the service's check can't drift apart.</summary>
+    /// <summary>What scripts\release-signing.ps1 made with a throwaway key for release 0.9.1 over
+    /// PowerLedger-0.9.1-setup-x64.exe holding "hello\n", so the script's format and the service's check can't drift apart.</summary>
     [Fact]
     public void A_signature_from_release_ps1_verifies()
     {
-        const string key = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwd5FuwkURdlyl2KDTOJ4oHCQ/K4SjC+Bq5MFHBW7mW31zIYIEbbnLNXcHtHmSz0fFAAxsSJzj5roPpEw3BOXaw==";
-        const string signature = "MEYCIQC0P9LwWEoamtJCAEX6DVgFkmnJORpwwuKhCMqjpdIeAQIhANNcDPUlsBC8uMHGOwWl43ack22okRE6ma+yDjQICVnS";
-        ReleaseSignature.Verifies(key, SHA256.HashData("hello\n"u8), Convert.FromBase64String(signature)).ShouldBeTrue();
-        ReleaseSignature.Verifies(key, SHA256.HashData("hello"u8), Convert.FromBase64String(signature)).ShouldBeFalse();
+        const string key = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEgHudJmQ8XXPa/59qFS8tqd8NnO3Zn26BEL/n60q3nwd0xp43A1iyuK3sTvbtmVJKmykElFDb4h5ai5iGrQgZ0w==";
+        var signature = Convert.FromBase64String("MEUCIHquDJrRV7g6u6x8uyQPhaAgbVJhucI+VTj6Q9H/He+UAiEAyRK0i8nEKdy+H2xCMaEMFn5nChLrfMJXZt4/33znm5Q=");
+        ReleaseSignature.Verifies(key, "0.9.1", FileName, SHA256.HashData("hello\n"u8), signature).ShouldBeTrue();
+        ReleaseSignature.Verifies(key, "0.9.1", FileName, SHA256.HashData("hello"u8), signature).ShouldBeFalse();
+        ReleaseSignature.Verifies(key, "0.9.2", FileName, SHA256.HashData("hello\n"u8), signature).ShouldBeFalse();
     }
 
     [Fact]
@@ -92,16 +113,30 @@ public sealed class UpdateSecurityTests : IDisposable
 
     private (string Path, byte[] Sha256) Installer(string content = "an installer")
     {
-        var path = Path.Combine(_root, "PowerLedger-0.9.1-setup-x64.exe");
+        var path = Path.Combine(_root, FileName);
         File.WriteAllText(path, content);
         return (path, SHA256.HashData(File.ReadAllBytes(path)));
+    }
+
+    /// <summary>Opens <paramref name="path"/> as release 0.9.1's x64 installer, listed with this size and SHA-256.</summary>
+    private static VerifiedInstaller Open(string path, long size, byte[] sha256, byte[] signature, string publicKey)
+        => VerifiedInstaller.Open(
+            path, new Release(global::System.Version.Parse(Version), new Uri("https://example.com/"), new Uri("https://example.com/i"), FileName, size, sha256),
+            signature, publicKey);
+
+    [Fact]
+    public void An_installer_signed_for_another_version_is_refused()
+    {
+        var (path, sha) = Installer();
+        Should.Throw<UpdateException>(() => Open(path, new FileInfo(path).Length, sha, Sign(sha, version: "0.9.0"), PublicKey))
+            .Message.ShouldContain("signature");
     }
 
     [Fact]
     public void A_verified_installer_is_held_so_nobody_can_change_or_replace_it()
     {
         var (path, sha) = Installer();
-        using (var held = VerifiedInstaller.Open(path, new FileInfo(path).Length, sha, Sign(sha), PublicKey))
+        using (var held = Open(path, new FileInfo(path).Length, sha, Sign(sha), PublicKey))
         {
             held.Path.ShouldBe(path);
             Should.Throw<IOException>(() => File.OpenWrite(path).Dispose());
@@ -117,7 +152,7 @@ public sealed class UpdateSecurityTests : IDisposable
     {
         var (path, sha) = Installer();
         using var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
-        Should.Throw<UpdateException>(() => VerifiedInstaller.Open(path, new FileInfo(path).Length, sha, Sign(sha), PublicKey));
+        Should.Throw<UpdateException>(() => Open(path, new FileInfo(path).Length, sha, Sign(sha), PublicKey));
     }
 
     [Fact]
@@ -125,9 +160,9 @@ public sealed class UpdateSecurityTests : IDisposable
     {
         var (path, sha) = Installer();
         var size = new FileInfo(path).Length;
-        Should.Throw<UpdateException>(() => VerifiedInstaller.Open(path, size + 1, sha, Sign(sha), PublicKey));
+        Should.Throw<UpdateException>(() => Open(path, size + 1, sha, Sign(sha), PublicKey));
         var otherSha = SHA256.HashData("something else"u8);
-        Should.Throw<UpdateException>(() => VerifiedInstaller.Open(path, size, otherSha, Sign(otherSha), PublicKey));
+        Should.Throw<UpdateException>(() => Open(path, size, otherSha, Sign(otherSha), PublicKey));
         File.OpenWrite(path).Dispose();
     }
 
@@ -137,9 +172,9 @@ public sealed class UpdateSecurityTests : IDisposable
         var (path, sha) = Installer();
         var size = new FileInfo(path).Length;
         using var other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        Should.Throw<UpdateException>(() => VerifiedInstaller.Open(path, size, sha, other.SignHash(sha, DSASignatureFormat.Rfc3279DerSequence), PublicKey))
+        Should.Throw<UpdateException>(() => Open(path, size, sha, other.SignHash(sha, DSASignatureFormat.Rfc3279DerSequence), PublicKey))
             .Message.ShouldContain("signature");
-        Should.Throw<UpdateException>(() => VerifiedInstaller.Open(path, size, sha, Sign(sha), ""));   // no key built in: never
+        Should.Throw<UpdateException>(() => Open(path, size, sha, Sign(sha), ""));   // no key built in: never
     }
 
     [Fact]
@@ -148,12 +183,12 @@ public sealed class UpdateSecurityTests : IDisposable
         var (path, sha) = Installer("an installer");
         var size = new FileInfo(path).Length;
         File.WriteAllText(path, "an installEr");                                                    // same size, other bytes
-        Should.Throw<UpdateException>(() => VerifiedInstaller.Open(path, size, sha, Sign(sha), PublicKey));
+        Should.Throw<UpdateException>(() => Open(path, size, sha, Sign(sha), PublicKey));
     }
 
     [Fact]
     public void A_missing_installer_is_an_update_failure()
-        => Should.Throw<UpdateException>(() => VerifiedInstaller.Open(Path.Combine(_root, "gone.exe"), 1, new byte[32], [], PublicKey));
+        => Should.Throw<UpdateException>(() => Open(Path.Combine(_root, "gone.exe"), 1, new byte[32], [], PublicKey));
 
     // ---- The folder
 

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 using PowerLedger.Updates;
@@ -6,15 +7,22 @@ using PowerLedger.Updates;
 namespace PowerLedger.Service.Updates;
 
 /// <summary>
-/// Release signatures (Plan Q §4): release.ps1 signs each installer's SHA-256 with the owner's ECDSA P-256 key, as a DER
-/// signature, and lists them in PowerLedger-X.Y.Z-signatures.json. The key is a parameter, so tests bring their own pair;
-/// the service passes <see cref="ReleaseKey.PublicKey"/>.
+/// Release signatures (Plan Q §4): release.ps1 signs each installer with the owner's ECDSA P-256 key, as a DER signature
+/// over <see cref="Message"/>, and lists them in PowerLedger-X.Y.Z-signatures.json. The message names the version and the
+/// file as well as the SHA-256, so a signature can't be carried over to another release or installer. The key is a
+/// parameter, so tests bring their own pair; the service passes <see cref="ReleaseKey.PublicKey"/>.
 /// </summary>
 internal static class ReleaseSignature
 {
-    /// <summary>Whether <paramref name="signature"/> is the key's signature of <paramref name="sha256"/>. An empty or
-    /// broken key, or a signature that isn't one, verifies nothing.</summary>
-    public static bool Verifies(string publicKey, ReadOnlySpan<byte> sha256, ReadOnlySpan<byte> signature)
+    /// <summary>What is signed: the UTF-8 of "PowerLedger|&lt;version X.Y.Z&gt;|&lt;file name&gt;|&lt;SHA-256, lowercase
+    /// hex&gt;".</summary>
+    public static byte[] Message(string version, string fileName, ReadOnlySpan<byte> sha256)
+        => Encoding.UTF8.GetBytes($"PowerLedger|{version}|{fileName}|{Convert.ToHexStringLower(sha256)}");
+
+    /// <summary>Whether <paramref name="signature"/> is the key's signature of <paramref name="fileName"/>, with
+    /// <paramref name="sha256"/>, as release <paramref name="version"/>'s. An empty or broken key, or a signature that
+    /// isn't one, verifies nothing.</summary>
+    public static bool Verifies(string publicKey, string version, string fileName, ReadOnlySpan<byte> sha256, ReadOnlySpan<byte> signature)
     {
         if (string.IsNullOrEmpty(publicKey)) return false;
         try
@@ -22,7 +30,7 @@ internal static class ReleaseSignature
             using var key = ECDsa.Create();
             key.ImportSubjectPublicKeyInfo(Convert.FromBase64String(publicKey), out _);
             if (key.KeySize != 256) return false;
-            return key.VerifyHash(sha256, signature, DSASignatureFormat.Rfc3279DerSequence);
+            return key.VerifyData(Message(version, fileName, sha256), signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
         }
         catch (Exception error) when (error is FormatException or CryptographicException)
         {
@@ -54,7 +62,8 @@ internal static class ReleaseSignature
 /// <summary>
 /// A downloaded installer, open against every writer and deleter from the moment it is checked until it is disposed, so
 /// what setup runs is what was checked (Plan Q §4): its size, its SHA-256 (GitHub's), and the release key's signature over
-/// that digest. A file someone already has open for writing can't be held, and so isn't run.
+/// that digest with the release's version and the installer's file name. A file someone already has open for writing
+/// can't be held, and so isn't run.
 /// </summary>
 internal sealed class VerifiedInstaller : IDisposable
 {
@@ -72,10 +81,12 @@ internal sealed class VerifiedInstaller : IDisposable
     /// <summary>The open handle, which stays open until this is disposed.</summary>
     public SafeFileHandle Handle => _hold.SafeFileHandle;
 
-    /// <summary>Opens and checks the installer. Throws <see cref="UpdateException"/> when it is gone, can't be held, or
-    /// isn't the release's; the file is let go again in that case.</summary>
-    public static VerifiedInstaller Open(string path, long size, byte[] sha256, byte[] signature, string publicKey)
+    /// <summary>Opens and checks the installer against <paramref name="release"/>'s size, SHA-256, version and file name.
+    /// Throws <see cref="UpdateException"/> when it is gone, can't be held, or isn't the release's; the file is let go
+    /// again in that case.</summary>
+    public static VerifiedInstaller Open(string path, Release release, byte[] signature, string publicKey)
     {
+        var (size, sha256) = (release.Size, release.Sha256);
         var name = System.IO.Path.GetFileName(path);
         FileStream hold;
         try
@@ -91,7 +102,7 @@ internal sealed class VerifiedInstaller : IDisposable
             if (hold.Length != size) throw new UpdateException($"{name} isn't the size GitHub lists, so it isn't run.");
             var digest = SHA256.HashData(hold);
             if (!digest.AsSpan().SequenceEqual(sha256)) throw new UpdateException($"{name} didn't match GitHub's checksum, so it isn't run.");
-            if (!ReleaseSignature.Verifies(publicKey, digest, signature)) throw new UpdateException($"{name} has no valid release signature, so it isn't run.");
+            if (!ReleaseSignature.Verifies(publicKey, release.Name, release.FileName, digest, signature)) throw new UpdateException($"{name} has no valid release signature, so it isn't run.");
             hold.Position = 0;
             return new VerifiedInstaller(path, hold);
         }

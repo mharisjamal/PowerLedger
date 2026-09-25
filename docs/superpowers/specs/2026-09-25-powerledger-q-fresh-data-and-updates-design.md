@@ -66,7 +66,8 @@ Nothing in this plan sends anything a user hasn't agreed to. Existing consents k
 
 - **Signed releases.** The owner holds an ECDSA P-256 key in `%USERPROFILE%\.powerledger\release-signing.pem`, made once by
   `scripts/new-release-key.ps1` (prints only the public key; the private key never leaves that file). `release.ps1` signs
-  each installer's SHA-256 digest and uploads `PowerLedger-X.Y.Z-signatures.json` (`{ "<file name>": "<base64 DER
+  each installer as the UTF-8 message `PowerLedger|<version X.Y.Z>|<file name>|<SHA-256, lowercase hex>`, so a signature
+  can't be carried over to another release or file, and uploads `PowerLedger-X.Y.Z-signatures.json` (`{ "<file name>": "<base64 DER
   signature>" }`) with the installers. The public key is compiled into the service (`ReleaseKey.cs`). A release whose
   installer has no valid signature is never installed by the service (the App's click-to-install flow still works as now).
 - **Shared feed.** `GitHubReleaseFeed`, `Release` and the download/verify code move from the App to a project both use (or

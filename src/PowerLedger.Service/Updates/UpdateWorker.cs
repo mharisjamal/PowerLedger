@@ -177,7 +177,7 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
             var listed = await _env.Installers.FetchAsync(signatures, cancel).ConfigureAwait(false);
             var signature = ReleaseSignature.For(listed, release.FileName)
                 ?? throw new UpdateException($"PowerLedger {release.Name} lists no signature for {release.FileName}, so it isn't installed.");
-            using (VerifiedInstaller.Open(downloaded, release.Size, release.Sha256, signature, _env.PublicKey))
+            using (VerifiedInstaller.Open(downloaded, release, signature, _env.PublicKey))
             {
                 // Checked now so a bad download is found at once; checked again, and held, when setup runs.
             }
@@ -240,7 +240,7 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
         try
         {
             _env.Folder.Prepare();
-            var held = VerifiedInstaller.Open(ready.Path, release.Size, release.Sha256, ready.Signature, _env.PublicKey);
+            var held = VerifiedInstaller.Open(ready.Path, release, ready.Signature, _env.PublicKey);
             try
             {
                 new RelaunchNote(release.Name, windowShowing).Write(_env.Folder.Path);

@@ -12,7 +12,8 @@ the notes in -Notes and all four installers attached, and checks that the SHA-25
 file's, since every installed copy checks its download against that digest (spec §13). -Draft makes a draft, which
 nobody is offered until it is published on GitHub.
 
-Each installer's SHA-256 is also signed with the owner's key, %USERPROFILE%\.powerledger\release-signing.pem (made once by
+Each installer is also signed, with its version, file name and SHA-256, by the owner's key,
+%USERPROFILE%\.powerledger\release-signing.pem (made once by
 scripts\new-release-key.ps1), and the signatures, checked before anything is uploaded, go up as
 PowerLedger-X.Y.Z-signatures.json; the service installs an update itself only when its signature verifies against the
 public key in src\PowerLedger.Service\Updates\ReleaseKey.cs (Plan Q §4). Without the key file nothing is released.
@@ -73,8 +74,8 @@ if (-not $SkipBuild) { & (Join-Path $root 'installer\build.ps1') -For both,x64,a
 foreach ($file in $installers) { if (-not (Test-Path $file)) { throw "There is no installer at $file; build it with installer\build.ps1 -For both,x64,arm64,x86." } }
 
 $signaturesFile = Join-Path $root "installer\output\PowerLedger-$version-signatures.json"
-New-ReleaseSignatures $installers | ConvertTo-Json | Set-Content -LiteralPath $signaturesFile -Encoding utf8NoBOM
-Test-ReleaseSignatures $signaturesFile $installers $publicKey
+New-ReleaseSignatures $installers $version | ConvertTo-Json | Set-Content -LiteralPath $signaturesFile -Encoding utf8NoBOM
+Test-ReleaseSignatures $signaturesFile $installers $version $publicKey
 $assets = $installers + @($signaturesFile)
 $shas = @{}
 foreach ($file in $assets) { $shas[(Split-Path $file -Leaf)] = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() }

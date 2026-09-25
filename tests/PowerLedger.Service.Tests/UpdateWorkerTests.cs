@@ -49,8 +49,14 @@ public sealed class UpdateWorkerTests : IDisposable
 
     private string PublicKey => Convert.ToBase64String(_key.ExportSubjectPublicKeyInfo());
 
-    private byte[] SignaturesFor(byte[] content)
-        => Encoding.UTF8.GetBytes($$"""{ "{{Installer}}": "{{Convert.ToBase64String(_key.SignHash(SHA256.HashData(content), DSASignatureFormat.Rfc3279DerSequence))}}" }""");
+    /// <summary>The signatures file for <see cref="Installer"/> holding <paramref name="content"/>, signed for
+    /// <paramref name="version"/>.</summary>
+    private byte[] SignaturesFor(byte[] content, string version = "0.9.1")
+    {
+        var message = Encoding.UTF8.GetBytes($"PowerLedger|{version}|{Installer}|{Convert.ToHexStringLower(SHA256.HashData(content))}");
+        var signature = _key.SignData(message, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+        return Encoding.UTF8.GetBytes($$"""{ "{{Installer}}": "{{Convert.ToBase64String(signature)}}" }""");
+    }
 
     private static Release Release(string version = "0.9.1", bool signed = true) => new(
         Version.Parse(version), new Uri($"https://github.com/mharisjamal/PowerLedger/releases/tag/v{version}"),
@@ -378,6 +384,7 @@ public sealed class UpdateWorkerTests : IDisposable
         again.Stage.ShouldBe("PowerLedger 0.9.1 didn't install twice, so the App offers it instead");
 
         _feed.Latest = Release("0.9.2");                                        // a newer release starts afresh
+        _installers.Signatures = SignaturesFor(Content, "0.9.2");
         await again.CheckAsync(CancellationToken.None);
         _installers.Downloads.ShouldBe(2);
         File.Exists(Path.Combine(_folder.Path, FailedUpdate.FileName)).ShouldBeFalse();
