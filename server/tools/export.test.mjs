@@ -1,7 +1,35 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { test } from "node:test";
-import { csvLine, minuteRows, MINUTES_CSV_HEADER, pseudonym, reportLine } from "./export.mjs";
+import fs from "node:fs";
+import {
+  csvLine,
+  HOUR_COLUMNS,
+  hourRows,
+  HOURS_CSV_HEADER,
+  minuteRows,
+  MINUTES_CSV_HEADER,
+  pseudonym,
+  reportLine,
+} from "./export.mjs";
+
+test("the hour columns are history-v1.schema.json's, in its order", () => {
+  const schema = JSON.parse(fs.readFileSync(new URL("../schema/history-v1.schema.json", import.meta.url), "utf8"));
+  assert.deepEqual(HOUR_COLUMNS, Object.keys(schema.$defs.hour.properties));
+  assert.deepEqual(HOURS_CSV_HEADER, ["pc", "country", ...HOUR_COLUMNS]);
+});
+
+test("hourRows gives pc, country and every column an hour, only for hours in the range", () => {
+  const hour = (t) => Object.fromEntries(HOUR_COLUMNS.map((column, i) => [column, column === "t" ? t : i]));
+  const history = { schema: "history-v1", installId: "x", hours: [hour(0), hour(3_600_000), hour(7_200_000)] };
+
+  const rows = hourRows(history, "abc123", "PK", 3_600_000, 7_200_000);
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].slice(0, 3), ["abc123", "PK", 3_600_000]);
+  assert.equal(rows[0].length, HOURS_CSV_HEADER.length);
+  assert.equal(csvLine(rows[0]).includes("x"), false);
+});
 
 test("reportLine swaps installId for pc and carries complete, country and receipt time", () => {
   const report = { schema: 1, installId: "11111111-1111-1111-1111-111111111111", day: "2026-09-24", complete: false };

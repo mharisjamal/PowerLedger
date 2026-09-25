@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Downloads and unpacks a range of reports for the owner: pages /admin/list, fetches each
-// /admin/object, and writes NDJSON and a minutes CSV. Node 20+, no dependencies.
+// Downloads and unpacks a range of reports and history for the owner: pages /admin/list, fetches
+// each /admin/object, and writes NDJSON, a minutes CSV and an hours CSV. Node 20+, no dependencies.
 //
 // Usage: node tools/export.mjs --url <worker> --from <day> --to <day> [--shared] --out <folder>
 
@@ -20,6 +20,16 @@ const MINUTE_COLUMNS = [
 ];
 
 export const MINUTES_CSV_HEADER = ["pc", "day", "country", "chassis", "arch", ...MINUTE_COLUMNS];
+
+// The hour columns, in the order history-v1.schema.json lists them: the PC's samples_1h, t its start_ms.
+export const HOUR_COLUMNS = [
+  "t", "avgW", "maxW", "energyWh", "cpuWh", "gpuWh", "displayWh", "restWh", "idleOnWh", "idleOffWh",
+  "idleOnS", "idleOffS", "onS", "batteryS", "gapS", "sampleCount", "measuredS", "calibratedS", "estimatedS",
+];
+
+export const HOURS_CSV_HEADER = ["pc", "country", ...HOUR_COLUMNS];
+
+const DAY_MS = 86_400_000;
 
 /** The first 16 hex characters of HMAC-SHA256(salt, installId): stable across exports (the same
  * install always gets the same pseudonym under one salt), but never reversible to the real id. */
@@ -70,6 +80,17 @@ export function minuteRows(report, pc, country) {
   return rows;
 }
 
+/** A history chunk's hours with fromMs <= t < toMs, one row each, ready for csvLine(): `pc,country,t,<columns>`. The
+ * range keeps an export to the days asked for, though a chunk overlapping them holds hours either side. */
+export function hourRows(history, pc, country, fromMs, toMs) {
+  const rows = [];
+  for (const hour of history.hours ?? []) {
+    if (hour.t < fromMs || hour.t >= toMs) continue;
+    rows.push([pc, country, ...HOUR_COLUMNS.map((column) => hour[column])]);
+  }
+  return rows;
+}
+
 function parseArgs(argv) {
   const args = { shared: false };
   for (let i = 0; i < argv.length; i++) {
@@ -94,10 +115,10 @@ function readAdminConfig() {
   return config;
 }
 
-async function* listItems(baseUrl, token, { from, to, shared }) {
+async function* listItems(baseUrl, token, { from, to, shared }, kind = "report") {
   let after;
   for (;;) {
-    const params = new URLSearchParams({ from, to, limit: "1000" });
+    const params = new URLSearchParams({ kind, from, to, limit: "1000" });
     if (shared) params.set("shared", "1");
     if (after) params.set("after", after);
 
@@ -137,7 +158,9 @@ async function main() {
   const reportsStream = fs.createWriteStream(path.join(args.out, "reports.ndjson"));
   const minutesStream = fs.createWriteStream(path.join(args.out, "minutes.csv"));
   const hardwareStream = fs.createWriteStream(path.join(args.out, "hardware.ndjson"));
+  const hoursStream = fs.createWriteStream(path.join(args.out, "hours.csv"));
   minutesStream.write(csvLine(MINUTES_CSV_HEADER) + "\n");
+  hoursStream.write(csvLine(HOURS_CSV_HEADER) + "\n");
 
   let count = 0;
   for await (const item of listItems(baseUrl, config.token, args)) {
@@ -155,8 +178,24 @@ async function main() {
     count++;
   }
 
-  await Promise.all([closeStream(reportsStream), closeStream(minutesStream), closeStream(hardwareStream)]);
-  console.log(`Wrote ${count} report(s) to ${args.out}.`);
+  // History: every chunk with an hour in the days asked for, clipped to them.
+  const fromMs = Date.parse(`${args.from}T00:00:00Z`);
+  const toMs = Date.parse(`${args.to}T00:00:00Z`) + DAY_MS;
+  let chunks = 0;
+  for await (const item of listItems(baseUrl, config.token, args, "history")) {
+    const history = await fetchReport(baseUrl, config.token, item.key);
+    const pc = pseudonym(config.salt, item.installId);
+    for (const row of hourRows(history, pc, item.country, fromMs, toMs)) hoursStream.write(csvLine(row) + "\n");
+    chunks++;
+  }
+
+  await Promise.all([
+    closeStream(reportsStream),
+    closeStream(minutesStream),
+    closeStream(hardwareStream),
+    closeStream(hoursStream),
+  ]);
+  console.log(`Wrote ${count} report(s) and ${chunks} history chunk(s) to ${args.out}.`);
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
