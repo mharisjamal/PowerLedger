@@ -80,7 +80,7 @@ internal sealed partial class PipeHandler(
                 return new OkReply(request.Id);
             case UpdateNowRequest request:
                 if (updates is null) return new ErrorReply(request.Id, "This service doesn't install updates itself.");
-                return await updates.InstallNowAsync(cancel).ConfigureAwait(false) is { } cannot
+                return await updates.InstallNowAsync(session, cancel).ConfigureAwait(false) is { } cannot
                     ? new ErrorReply(request.Id, cannot)
                     : new OkReply(request.Id);
             case BrowsePcsRequest or AddPcRequest or StartCodePairingRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest

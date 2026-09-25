@@ -28,6 +28,7 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
 
     internal const string NoKey = "This PowerLedger doesn't install updates itself yet.";
     internal const string NothingReady = "The service has no update ready to install.";
+    internal const string NotYours = "Only the PowerLedger open at this PC's screen can update it now.";
     internal const string Soon = "PowerLedger updates in a minute";
 
     private readonly UpdateEnvironment _env;
@@ -72,12 +73,16 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
     /// <summary>Setup was started and hasn't ended.</summary>
     private bool SetupRunning => _setup is { IsCompleted: false };
 
-    /// <summary>Required by the server, or asked for with Update now.</summary>
-    private bool Urgent => _installNow || _policy.IsBelowMinimum(_env.Running.ToString(3));
+    /// <summary>Required by the server.</summary>
+    private bool Required => _policy.IsBelowMinimum(_env.Running.ToString(3));
 
-    public Task<string?> InstallNowAsync(CancellationToken cancel)
+    /// <summary>Required by the server, or asked for with Update now: installed without waiting for the user.</summary>
+    private bool Urgent => _installNow || Required;
+
+    public Task<string?> InstallNowAsync(uint? session, CancellationToken cancel)
     {
         if (!Installs) return Task.FromResult<string?>(NoKey);
+        if (!Required && (session is not { } asking || asking != _env.System.ConsoleSession())) return Task.FromResult<string?>(NotYours);
         if (_ready is null && _found is null && !SetupRunning) return Task.FromResult<string?>(NothingReady);
         _installNow = true;
         Wake();
@@ -166,7 +171,7 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
             }
             if (_ready?.Release.Version == release.Version) return;
             if (_found?.Release.Version != release.Version) _found = new Found(release, now);
-            if (!InstallTiming.MayDownload(_env.Cost.Metered, Urgent, _found!.FirstSeen, now))
+            if (!InstallTiming.MayDownload(_env.Cost.Metered, Required, _found!.FirstSeen, now))
             {
                 Say($"PowerLedger {release.Name} waits for a connection that isn't metered");
                 return;

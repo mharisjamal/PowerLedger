@@ -137,7 +137,7 @@ public sealed class UpdateWorkerTests : IDisposable
 
         _installers.Downloads.ShouldBe(0);
         worker.Stage.ShouldBe("PowerLedger 0.9.1 isn't signed, so the App offers it instead");
-        (await worker.InstallNowAsync(CancellationToken.None)).ShouldBe(UpdateWorker.NothingReady);
+        (await worker.InstallNowAsync(1, CancellationToken.None)).ShouldBe(UpdateWorker.NothingReady);
     }
 
     [Fact]
@@ -192,7 +192,7 @@ public sealed class UpdateWorkerTests : IDisposable
 
         _feed.Asked.ShouldBe(0);
         worker.Installs.ShouldBeFalse();
-        (await worker.InstallNowAsync(CancellationToken.None)).ShouldBe(UpdateWorker.NoKey);
+        (await worker.InstallNowAsync(1, CancellationToken.None)).ShouldBe(UpdateWorker.NoKey);
     }
 
     [Fact]
@@ -295,8 +295,44 @@ public sealed class UpdateWorkerTests : IDisposable
         var worker = Worker();
         await worker.CheckAsync(CancellationToken.None);
 
-        (await worker.InstallNowAsync(CancellationToken.None)).ShouldBeNull();
+        (await worker.InstallNowAsync(1, CancellationToken.None)).ShouldBeNull();
         (await worker.TickAsync(CancellationToken.None)).ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(2u)]
+    [InlineData(null)]
+    public async Task Update_now_from_outside_the_console_session_is_refused_unless_the_update_is_required(uint? session)
+    {
+        _feed.Latest = Release();
+        UserAtWork();
+        var worker = Worker();
+        await worker.CheckAsync(CancellationToken.None);
+
+        (await worker.InstallNowAsync(session, CancellationToken.None)).ShouldBe(UpdateWorker.NotYours);
+        (await worker.TickAsync(CancellationToken.None)).ShouldBeFalse();
+
+        _server.Min = "0.9.1";
+        await worker.RefreshPolicyAsync(CancellationToken.None);
+        (await worker.InstallNowAsync(session, CancellationToken.None)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Update_now_keeps_the_metered_wait_unless_the_update_is_required()
+    {
+        _feed.Latest = Release();
+        _cost.Metered = true;
+        var worker = Worker();
+        await worker.CheckAsync(CancellationToken.None);
+
+        (await worker.InstallNowAsync(1, CancellationToken.None)).ShouldBeNull();
+        await worker.CheckAsync(CancellationToken.None);
+        _installers.Downloads.ShouldBe(0);
+
+        _server.Min = "0.9.1";
+        await worker.RefreshPolicyAsync(CancellationToken.None);
+        await worker.CheckAsync(CancellationToken.None);
+        _installers.Downloads.ShouldBe(1);
     }
 
     [Fact]

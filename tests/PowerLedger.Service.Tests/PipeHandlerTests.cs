@@ -350,8 +350,8 @@ public sealed class PipeHandlerTests : IDisposable
         var updates = new FakeUpdateRequests { Answer = null };
         var handler = new PipeHandler(_commands, _board, _monitors, _signals, new TariffRepository(_database.Db), _clock, _sharing, updates: updates);
 
-        (await handler.HandleAsync(new UpdateNowRequest(62), "client-1", CancellationToken.None)).ShouldBe(new OkReply(62));
-        updates.Asked.ShouldBe(1);
+        (await handler.HandleAsync(new UpdateNowRequest(62), "client-1", CancellationToken.None, session: 3)).ShouldBe(new OkReply(62));
+        (updates.Asked, updates.Session).ShouldBe((1, 3u));                    // the worker hears whose session asked
         updates.Answer = "This PowerLedger can't install updates itself.";
         (await handler.HandleAsync(new UpdateNowRequest(63), "client-1", CancellationToken.None))
             .ShouldBe(new ErrorReply(63, "This PowerLedger can't install updates itself."));
@@ -368,9 +368,12 @@ public sealed class PipeHandlerTests : IDisposable
 
         public int Asked { get; private set; }
 
-        public Task<string?> InstallNowAsync(CancellationToken cancel)
+        public uint? Session { get; private set; }
+
+        public Task<string?> InstallNowAsync(uint? session, CancellationToken cancel)
         {
             Asked++;
+            Session = session;
             return Task.FromResult(Answer);
         }
     }
