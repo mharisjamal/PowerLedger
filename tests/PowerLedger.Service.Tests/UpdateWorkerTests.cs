@@ -24,7 +24,7 @@ public sealed class UpdateWorkerTests : IDisposable
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"powerledger-worker-{Guid.NewGuid():N}");
     private readonly ECDsa _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero));
+    private readonly WatchedClock _clock = new(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero));
     private readonly FakeFeed _feed = new();
     private readonly FakeInstallers _installers;
     private readonly FakePolicy _server = new();
@@ -398,14 +398,16 @@ public sealed class UpdateWorkerTests : IDisposable
 
     // ---- The schedule
 
-    /// <summary>Moves the clock on in small steps until <paramref name="done"/> holds, so a timer the worker hasn't set
-    /// yet isn't jumped over; returns how far it went.</summary>
+    /// <summary>Moves the clock on in small steps until <paramref name="done"/> holds, each step only once the worker is
+    /// waiting on a timer still to come, so a step never lands while the worker, on its own thread, is still between one
+    /// wait and the next; returns how far it went.</summary>
     private async Task<TimeSpan> AdvanceUntil(Func<bool> done, TimeSpan step)
     {
         var moved = TimeSpan.Zero;
         await WaitFor.True(() =>
         {
             if (done()) return true;
+            if (!_clock.Waiting) return false;
             _clock.Advance(step);
             moved += step;
             return false;
@@ -503,6 +505,22 @@ public sealed class UpdateWorkerTests : IDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             // A temp folder left behind.
+        }
+    }
+
+    /// <summary>A fake clock that knows when the last timer made on it is due, so a test can tell the worker is waiting.</summary>
+    private sealed class WatchedClock(DateTimeOffset start) : FakeTimeProvider(start)
+    {
+        private long _dueTicks = long.MinValue;
+
+        /// <summary>The last timer made is still to come.</summary>
+        public bool Waiting => GetUtcNow().UtcTicks < Interlocked.Read(ref _dueTicks);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            if (dueTime != Timeout.InfiniteTimeSpan) Interlocked.Exchange(ref _dueTicks, (GetUtcNow() + dueTime).UtcTicks);
+            return timer;
         }
     }
 
