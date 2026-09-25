@@ -10,8 +10,22 @@ describe("the D1 schema", () => {
     ).all<{ name: string }>();
 
     expect(names.results.map((row) => row.name)).toEqual(
-      expect.arrayContaining(["installs", "reports", "requests", "tombstones", "report_bodies", "feedback_addresses"]),
+      expect.arrayContaining(["installs", "reports", "requests", "tombstones", "report_bodies", "feedback_addresses", "histories"]),
     );
+  });
+
+  it("adds Plan Q's columns (0006) and the histories table (0007)", async () => {
+    const columns = async (table: string) =>
+      (await env.DB.prepare(`SELECT name, dflt_value FROM pragma_table_info('${table}')`).all<{ name: string; dflt_value: string | null }>())
+        .results;
+
+    expect(await columns("reports")).toContainEqual({ name: "complete", dflt_value: "1" });
+    expect((await columns("requests")).map((column) => column.name)).toEqual(
+      expect.arrayContaining(["count", "history", "control"]),
+    );
+    expect((await columns("histories")).map((column) => column.name)).toEqual([
+      "install_id", "from_ms", "to_ms", "received_at", "bytes", "country", "r2_key",
+    ]);
   });
 
   it("lets a row round-trip through each table", async () => {

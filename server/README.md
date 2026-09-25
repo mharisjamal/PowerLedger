@@ -10,16 +10,74 @@ for the design.
 - `POST /v1/report` accepts one PC's day: gzip-encoded, at most 1 MB as sent and 8 MB unpacked (a zip bomb is
   cancelled mid-stream), checked against `schema/report-v1.schema.json` and a hand-written minutes check. A valid
   report is stored as sent, at `reports/v1/<installId>/<day>.json.gz`, and indexed in D1. The first request from an
-  install id records its key (trust on first use); a later request with a different key is refused.
-- `POST /v1/consent` records an install's four switches (diagnostics, usage, power, share). `POST /v1/delete`
-  deletes everything the server holds for an install and leaves a tombstone, so any later request for that id is
-  refused.
+  install id records its key (trust on first use); a later request with a different key is refused. From 0.9.0 the
+  service sends today so far every hour with `"complete": false`, then the complete day just after midnight
+  (`"complete": true`, or no field, as older apps send): each replaces the last, since a day is keyed by
+  (install, day), and the `reports` row keeps `complete` (0 or 1). An install may send 60 reports a UTC day (429
+  after).
+- `POST /v1/history` accepts the hourly totals already on a PC when its user agrees on consent version 2 with
+  Hardware and power on (see History, below).
+- `POST /v1/consent` records an install's four switches (diagnostics, usage, power, share) and the consent version
+  (1 or 2 today; the schema takes 1 to 1000). `POST /v1/delete` deletes everything the server holds for an install,
+  reports and history, and leaves a tombstone, so any later request for that id is refused. The two share their own
+  20 a UTC day, apart from the reports' 60 and history's 60, so a day of hourly reports never blocks a delete.
+- `GET /v1/app-policy` gives the minimum app version (see Minimum version, below).
 - `GET /admin/stats`, `GET /admin/list` and `GET /admin/object`, all behind `ADMIN_TOKEN`, are for the owner only:
-  install and upload counts, a paged list of stored reports, and streaming one report's bytes back out.
+  install and upload counts, a paged list of stored reports (or, with `kind=history`, history chunks), and streaming
+  one report's or chunk's bytes back out.
 - `POST /v1/feedback` takes what a user writes in the App's feedback box and files it as an issue in the owner's
   PRIVATE GitHub repo (see Feedback, below).
-- A daily cron (`retention.ts`) drops reports whose day is more than 3 years old, request counts more than 2 days
-  old, and feedback's per-address counts for the hours that have passed.
+- A daily cron (`retention.ts`) drops reports whose day is more than 3 years old, history chunks whose last hour
+  ended more than 3 years ago, request counts more than 2 days old, and feedback's per-address counts for the hours
+  that have passed.
+
+## History
+
+`POST /v1/history`, gzip-encoded, `Authorization: Bearer <install key>`, the same limits and checks as
+`/v1/report` (1 MB as sent, 8 MB unpacked, the install's key, the address limit, the minimum version), with its own
+60 a UTC day per install. The body, `schema/history-v1.schema.json`:
+
+```
+{ "schema": "history-v1", "installId", "app": "X.Y.Z",
+  "consent": { "version": 2, "diagnostics", "usage", "power": true, "share" },
+  "utcOffsetMinutes",
+  "hours": [ { "t", "avgW", "maxW", "energyWh", "cpuWh", "gpuWh", "displayWh", "restWh", "idleOnWh", "idleOffWh",
+               "idleOnS", "idleOffS", "onS", "batteryS", "gapS", "sampleCount", "measuredS", "calibratedS",
+               "estimatedS" } ] }
+```
+
+The hour columns are every column of the PC's `samples_1h` (`src/PowerLedger.Storage/Schema.cs`) in camelCase, `t`
+being `start_ms`: the hour's start in UTC ms, on the hour. Each hour has exactly those 19 columns, all numbers
+(`sampleCount` whole); `restWh` may be below zero; `hours` holds 1 to 744, strictly rising by `t`, none in the future,
+from the first hour's start to the last one's end at most 31 days. The schema gives each column's range; the Worker
+checks the hours with its own code built from that same definition (`src/hours.ts`), to stay inside the CPU limit.
+Consent below version 2, or power off, is 400.
+
+A chunk is stored as sent at `history/v1/<installId>/<first t>.json.gz` (R2, or D1 until R2 is enabled, like reports)
+and indexed in `histories` (`install_id, from_ms, to_ms, received_at, bytes, country, r2_key`), `from_ms` the first
+hour's start and `to_ms` the last hour's end. The same chunk sent again replaces the first. The answer is 200
+`{"ok":true}`; errors are `{"error"}` as for reports (400, 401, 403, 410, 413, 426, 429).
+
+Privacy: history is only ever power data from a PC whose user turned Hardware and power on under consent version 2.
+It holds no names and no install key, only the install id the reports already carry; `POST /v1/delete` removes it with
+everything else, and retention drops it 3 years after its last hour. The owner's export pseudonymises it like the
+reports (see Exporting).
+
+## Minimum version
+
+`wrangler.toml`'s `MIN_APP_VERSION` (`0.0.0` until 0.9.0 is out, then `0.9.0`) is the oldest app whose uploads are
+taken. The service sends `X-PowerLedger-Version: X.Y.Z` (a `+build` or `-pre` suffix is ignored) on every request.
+`/v1/report` and `/v1/history` check that header, when there is one, before reading the body, and the body's `app`
+after the schema: either below the minimum is 426 `{"error":"update required","minVersion":"X.Y.Z"}`, and nothing
+is stored. A header that isn't a version is 400. With no header, the body's `app` decides. `/v1/consent` and
+`/v1/delete` are never refused for age, so an old app can always take its data back.
+
+`GET /v1/app-policy`, no auth, gives `{"minVersion":"X.Y.Z"}` with `Cache-Control: public, max-age=300`. An empty or
+malformed `MIN_APP_VERSION` counts as `0.0.0`, so a slip in the config never refuses everyone. Raising it is a
+`wrangler.toml` change and a deploy.
+
+Plan Q's migrations, `0006_hourly_reports.sql` (`reports.complete`, and the `history` and `control` request counts)
+and `0007_histories.sql`, go out with `npx wrangler d1 migrations apply powerledger-index --remote` before the deploy.
 
 ## Households
 
@@ -209,16 +267,23 @@ as a Worker secret. Nobody else ever sees the token.
 node tools/export.mjs --url https://<the deployed worker> --from 2026-09-01 --to 2026-09-30 [--shared] --out ./export
 ```
 
-Reads the token and salt from the owner's `admin.json`, pages through `/admin/list`, downloads and gunzips each
-report from `/admin/object`, and writes, under `--out`:
+Reads the token and salt from the owner's `admin.json`, pages through `/admin/list` (reports, then
+`kind=history`), downloads and gunzips each report and history chunk from `/admin/object`, and writes, under `--out`:
 
-- `reports.ndjson` — one report a line, minutes kept columnar (the arrays as they were sent);
-- `minutes.csv` — one row a minute: `pc,day,country,chassis,arch,t,<every minutes column>`;
-- `hardware.ndjson` — `pc`, `day` and `hardware`, for reports that have hardware.
+- `reports.ndjson`: one report a line, minutes kept columnar (the arrays as they were sent), with `complete`
+  (false for a today so far that the complete day hasn't replaced yet);
+- `minutes.csv`: one row a minute: `pc,day,country,chassis,arch,t,<every minutes column>`;
+- `hardware.ndjson`: `pc`, `day` and `hardware`, for reports that have hardware;
+- `hours.csv`: one row an hour of history: `pc,country,t,<every hour column>`, only the hours from `--from` to the
+  end of `--to` (UTC), though a chunk overlapping them holds more.
 
-Every report's `installId` is replaced with `pc`, the first 16 hex characters of HMAC-SHA256(salt, installId), so a
-buyer can follow one PC across a dataset but can never recover its real id. `--shared` keeps only installs whose
-current consent has `share` on.
+Every report's and chunk's `installId` is replaced with `pc`, the first 16 hex characters of HMAC-SHA256(salt,
+installId), so a buyer can follow one PC across a dataset but can never recover its real id. `--shared` keeps only
+installs whose current consent has `share` on.
+
+`GET /admin/list?kind=history&from=&to=&shared=1&after=&limit=` gives `{"items":[{"key","installId","fromMs","toMs",
+"country","receivedAt","bytes"}],"next"}`: the chunks with any hour in those UTC days, by first hour then install,
+`next` the `<fromMs>|<installId>` to send as `after`. A report's list item also carries `complete`.
 
 ## Where the secrets live
 
