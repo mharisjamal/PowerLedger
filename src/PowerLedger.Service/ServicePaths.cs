@@ -18,6 +18,9 @@ internal sealed record ServicePaths(string DataDirectory)
     /// <summary>The service's crash files, until the sharing worker records or deletes them.</summary>
     public string Crashes => Path.Combine(DataDirectory, "Crashes");
 
+    /// <summary>Downloaded installers, setup's logs and the relaunch note, for SYSTEM and Administrators alone (Plan Q §4).</summary>
+    public string Updates => Path.Combine(DataDirectory, "Updates");
+
     /// <summary>C:\ProgramData\PowerLedger, unless configuration names another folder.</summary>
     public static ServicePaths From(IConfiguration configuration)
     {
