@@ -127,12 +127,15 @@ internal static class MidnightFixtures
             new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, 0.38);
     }
 
-    /// <summary>A household of two PCs: this desktop, and a laptop last seen three days ago.</summary>
-    public static HouseholdViewModel HouseholdScreen()
+    /// <summary>A household of two PCs: this desktop, and a laptop last seen three days ago; <paramref name="pendingApprovals"/> PCs waiting to be let in.</summary>
+    public static HouseholdViewModel HouseholdScreen(int pendingApprovals = 0)
     {
         var link = new FakeLink
         {
-            Status = Statuses.Running() with { Household = new HouseholdStatus("hh1", "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null) },
+            Status = Statuses.Running() with
+            {
+                Household = new HouseholdStatus("hh1", "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, PendingApprovals: pendingApprovals),
+            },
         };
         link.Connect(true);
         var history = new FakeHouseholdHistory

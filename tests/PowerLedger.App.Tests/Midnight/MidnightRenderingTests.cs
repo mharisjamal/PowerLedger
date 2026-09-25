@@ -480,6 +480,32 @@ public class MidnightRenderingTests
         });
     }
 
+    /// <summary>Review 5 (0.8.0): the sidebar's Household item counts the PCs waiting for approval, and shows nothing with none.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public void The_household_item_counts_the_pcs_waiting_for_approval(int waiting)
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var now = MidnightFixtures.NowScreen();
+            var shell = new ShellViewModel(now, MidnightFixtures.BreakdownScreen(), MidnightFixtures.ReportScreen(saver), MidnightFixtures.HouseholdScreen(waiting),
+                MidnightFixtures.SettingsScreen(), MidnightFixtures.WizardScreen(), "0.8.0", null, MidnightFixtures.DashboardScreen(now)) { Page = Page.Dashboard };
+            var window = MidnightFixtures.Window(shell);
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                var badge = UiHarness.Find<ContentControl>(window, control => AutomationProperties.GetName(control) == "Waiting for approval")!;
+                badge.IsVisible.ShouldBe(waiting > 0);
+                if (waiting > 0) UiHarness.Find<TextBlock>(badge, text => text.Text == "2").ShouldNotBeNull();
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
     /// <summary>Review 4 (0.8.0): the window is built while the shell is on Classic's Now, which has no view here. The
     /// page host shows nothing for it, not the ViewModel's type name, and the Dashboard the window shows for it once
     /// shown is its first page, so it comes in at once, without a cross-fade, at every launch and every switch from Classic.</summary>
