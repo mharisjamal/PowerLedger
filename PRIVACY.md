@@ -1,6 +1,6 @@
 # PowerLedger privacy policy
 
-Last updated: 24 September 2026, for PowerLedger 0.7.0.
+Last updated: 25 September 2026, for PowerLedger 0.9.0.
 
 PowerLedger works fully without sending anything. It sends data only when you turn on one of the switches described
 here, and only what that switch covers. Until you choose, nothing is sent.
@@ -13,18 +13,19 @@ can be found.
 
 ## Your choices
 
-PowerLedger asks once, in a dialog with four switches, all off until you turn them on. **Allow all**, **Allow none**
-and **Save choices** are there, and you can change any switch at any time in Settings → Privacy. The choice covers
-the whole PC, since the data describes the PC.
+PowerLedger asks once, in a dialog with two buttons: **Allow all** turns on the four switches below, and **Decline**
+leaves them all off. You can change any switch at any time in Settings → Privacy. The choice covers the whole PC, since
+the data describes the PC.
 
 | Switch | What it sends | Why |
 |---|---|---|
 | Crash and sensor reports | Crashes and errors of PowerLedger, with their messages and stack traces. Which of its sensors work or fail, with the graphics card, UPS or power supply each read. PowerLedger's and Windows' versions, the processor architecture, and whether the PC is a laptop or a desktop. | To find and fix what goes wrong on hardware the developer doesn't have. |
 | Usage | How often PowerLedger's window opens, which of its pages are opened, which settings are changed (never what they are changed to), reports exported, updates installed, days since PowerLedger was set up, the theme and the display language. | To decide what to improve next. |
-| Hardware and power | The models of the processor, graphics card, monitors, power supply and UPS. The memory size and the machine details in Settings. The tariff's price and currency. And for each minute, the watts of each part, the processor and graphics loads, the brightness, whether the display was on and the PC idle, locked or on battery, and which figures were measured and which estimated. | To learn what real hardware draws, so PowerLedger's estimates become more accurate for everyone. |
+| Hardware and power | The models of the processor, graphics card, monitors, power supply and UPS. The memory size and the machine details in Settings. The tariff's price and currency. And for each minute, the watts of each part, the processor and graphics loads, the brightness, whether the display was on and the PC idle, locked or on battery, and which figures were measured and which estimated. When you agree, the hourly totals already on your PC are sent once too. | To learn what real hardware draws, so PowerLedger's estimates become more accurate for everyone. |
 | Share my detailed data | Nothing more than Hardware and power. It can only be on while that is. | It lets the data Hardware and power sends be given or sold, as it is, to researchers, hardware makers and energy companies. |
 
-Every upload also carries a random install ID, the switches you chose, the day it covers and that day's offset from UTC.
+Every upload also carries a random install ID, the switches you chose, the day it covers, that day's offset from UTC,
+and whether that day is over or still going.
 
 **Consent is the basis for all of it.** Turning a switch off stops that data from then on, and deletes what was waiting
 to be sent.
@@ -45,7 +46,8 @@ of PowerLedger's own source file.
 
 ## How it is sent and stored
 
-- **How often:** once a day, one upload per complete day, over HTTPS.
+- **How often:** every hour, today so far, and each day once more when it is complete, over HTTPS. Each upload of a
+  day replaces the one before it.
 - **Who can add to it:** each PC has its own random key, so no one else can add to or delete the data under its ID.
 - **Where it is stored:** on Cloudflare, which runs the server (Workers, R2 storage and D1 database) as a processor on
   the developer's behalf. Cloudflare may handle it in any country where it operates. Cloudflare handles your IP address
@@ -59,7 +61,7 @@ everything shared afterwards, but not from copies already given or sold.
 
 | Where | How long |
 |---|---|
-| On your PC | Data waiting to be sent: at most 14 days. Copies of the last 30 uploads, so you can see them. |
+| On your PC | Data waiting to be sent: at most 14 days. A copy of the last upload of each of the last 30 days, so you can see them. |
 | On the server | 3 years from the day the data describes, unless you delete it sooner. |
 
 ## Your rights
@@ -70,7 +72,7 @@ everything shared afterwards, but not from copies already given or sold.
   turns every switch off.
 - **Withdraw consent:** turn the switches off at any time. What was sent before stays until you delete it or it
   expires.
-- **Anything else:** access, correction or a question — write to the address above with your install ID.
+- **Anything else:** access, correction or a question: write to the address above with your install ID.
 - **Complaints:** you can complain to the data protection authority where you live.
 
 ## Households
