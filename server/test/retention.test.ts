@@ -50,6 +50,38 @@ describe("retention", () => {
     ).not.toBeNull();
   });
 
+  it("deletes history 3 years after its last hour, keeping a chunk that ends later", async () => {
+    const now = new Date();
+    const cutoffMs = Date.parse(`${utcDateYearsAgo(3, now)}T00:00:00Z`);
+    const seed = async (installId: string, toMs: number, inD1: boolean) => {
+      const fromMs = toMs - 24 * 3_600_000;
+      const r2Key = `history/v1/${installId}/${fromMs}.json.gz`;
+      await putBody(inD1 ? withoutR2(env) : env, r2Key, new Uint8Array([1, 2, 3]), { contentType: "application/json", receivedAt: 0 });
+      await env.DB.prepare(
+        "INSERT INTO histories (install_id, from_ms, to_ms, received_at, bytes, country, r2_key) VALUES (?, ?, ?, 0, 3, 'XX', ?)",
+      )
+        .bind(installId, fromMs, toMs, r2Key)
+        .run();
+      return r2Key;
+    };
+    const oldInstall = randomInstallId();
+    const oldKey = await seed(oldInstall, cutoffMs - 3_600_000, false);
+    const oldD1Install = randomInstallId();
+    const oldD1Key = await seed(oldD1Install, cutoffMs - 3_600_000, true);
+    const keptInstall = randomInstallId();
+    const keptKey = await seed(keptInstall, cutoffMs + 3_600_000, false);
+
+    await runRetention(env, now);
+
+    expect(await env.REPORTS!.get(oldKey)).toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM report_bodies WHERE r2_key = ?").bind(oldD1Key).first()).toBeNull();
+    for (const id of [oldInstall, oldD1Install]) {
+      expect(await env.DB.prepare("SELECT 1 FROM histories WHERE install_id = ?").bind(id).first()).toBeNull();
+    }
+    expect(await env.REPORTS!.get(keptKey)).not.toBeNull();
+    expect(await env.DB.prepare("SELECT 1 FROM histories WHERE install_id = ?").bind(keptInstall).first()).not.toBeNull();
+  });
+
   it("deletes request counts older than 2 days, keeping today's", async () => {
     const now = new Date();
     const oldInstall = randomInstallId();

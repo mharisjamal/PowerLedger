@@ -66,14 +66,27 @@ interface ListRow {
   complete: number;
 }
 
+/** `/admin/list`: reports by default, or with `kind=history`, history chunks. */
 async function handleList(request: Request, env: Cloudflare.Env): Promise<Response> {
+  const kind = new URL(request.url).searchParams.get("kind") ?? "report";
+  if (kind === "report") return handleReportList(request, env);
+  if (kind === "history") return handleHistoryList(request, env);
+  return errorResponse(400, "kind must be report or history.");
+}
+
+/** The page size asked for, 1 to 1000; 1000 when it's missing or out of range. */
+function pageLimit(url: URL): number {
+  const requested = Number(url.searchParams.get("limit"));
+  return Number.isInteger(requested) && requested > 0 && requested <= 1000 ? requested : 1000;
+}
+
+async function handleReportList(request: Request, env: Cloudflare.Env): Promise<Response> {
   const url = new URL(request.url);
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   const shared = url.searchParams.get("shared") === "1";
   const after = url.searchParams.get("after");
-  const requestedLimit = Number(url.searchParams.get("limit"));
-  const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 && requestedLimit <= 1000 ? requestedLimit : 1000;
+  const limit = pageLimit(url);
 
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -133,10 +146,93 @@ async function handleList(request: Request, env: Cloudflare.Env): Promise<Respon
   });
 }
 
+interface HistoryListRow {
+  installId: string;
+  fromMs: number;
+  toMs: number;
+  country: string;
+  receivedAt: number;
+  bytes: number;
+  r2Key: string;
+}
+
+const DAY_MS = 86_400_000;
+
+/** `/admin/list?kind=history`: the history chunks with any hour in the UTC days `from` to `to` (each optional),
+ * ordered by first hour then install, paged with `after=<fromMs>|<installId>` as a page's `next` gives it. */
+async function handleHistoryList(request: Request, env: Cloudflare.Env): Promise<Response> {
+  const url = new URL(request.url);
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+  const shared = url.searchParams.get("shared") === "1";
+  const after = url.searchParams.get("after");
+  const limit = pageLimit(url);
+
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  for (const [day, name] of [[from, "from"], [to, "to"]] as const) {
+    if (day && !DAY_PATTERN.test(day)) return errorResponse(400, `${name} must be a day, yyyy-MM-dd.`);
+  }
+  if (from) {
+    conditions.push("histories.to_ms > ?");
+    params.push(Date.parse(`${from}T00:00:00Z`));
+  }
+  if (to) {
+    conditions.push("histories.from_ms < ?");
+    params.push(Date.parse(`${to}T00:00:00Z`) + DAY_MS);
+  }
+  if (after) {
+    const separator = after.indexOf("|");
+    const afterFrom = separator === -1 ? "" : after.slice(0, separator);
+    const afterInstallId = separator === -1 ? "" : after.slice(separator + 1);
+    if (!/^[0-9]{1,15}$/.test(afterFrom) || !GUID_PATTERN.test(afterInstallId)) {
+      return errorResponse(400, "after must be <fromMs>|<installId>, as a page's next gives it.");
+    }
+    conditions.push("(histories.from_ms > ? OR (histories.from_ms = ? AND histories.install_id > ?))");
+    params.push(Number(afterFrom), Number(afterFrom), afterInstallId);
+  }
+  if (shared) conditions.push("installs.share = 1");
+  // As for reports: never what a deleted install left behind.
+  conditions.push("histories.install_id NOT IN (SELECT id FROM tombstones)");
+
+  const join = shared ? "JOIN installs ON installs.id = histories.install_id" : "";
+  const where = `WHERE ${conditions.join(" AND ")}`;
+
+  const rows = await env.DB.prepare(
+    `SELECT histories.install_id AS installId, histories.from_ms AS fromMs, histories.to_ms AS toMs,
+            histories.country AS country, histories.received_at AS receivedAt, histories.bytes AS bytes,
+            histories.r2_key AS r2Key
+     FROM histories ${join} ${where}
+     ORDER BY histories.from_ms, histories.install_id
+     LIMIT ?`,
+  )
+    .bind(...params, limit + 1)
+    .all<HistoryListRow>();
+
+  const hasMore = rows.results.length > limit;
+  const page = hasMore ? rows.results.slice(0, limit) : rows.results;
+  const last = page[page.length - 1];
+
+  return Response.json({
+    items: page.map((row) => ({
+      key: row.r2Key,
+      installId: row.installId,
+      fromMs: row.fromMs,
+      toMs: row.toMs,
+      country: row.country,
+      receivedAt: row.receivedAt,
+      bytes: row.bytes,
+    })),
+    next: hasMore && last ? `${last.fromMs}|${last.installId}` : null,
+  });
+}
+
 async function handleObject(request: Request, env: Cloudflare.Env): Promise<Response> {
   const url = new URL(request.url);
   const key = url.searchParams.get("key");
-  if (!key || !key.startsWith("reports/v1/")) return errorResponse(400, "key must be under reports/v1/.");
+  if (!key || !(key.startsWith("reports/v1/") || key.startsWith("history/v1/"))) {
+    return errorResponse(400, "key must be under reports/v1/ or history/v1/.");
+  }
 
   const bytes = await getBody(env, key);
   if (!bytes) return errorResponse(404, "No object with that key.");

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { adminAuthorized, handleAdmin } from "../src/admin";
 import { utcDateString } from "../src/day";
 import { handleReport } from "../src/report";
-import { gzipJson, randomInstallId, randomKey, withoutR2 } from "./support";
+import { gzipJson, historyBody, HOUR_MS, randomInstallId, randomKey, withoutR2 } from "./support";
 import validFull from "./fixtures/valid-full.json";
 
 const ADMIN = { Authorization: "Bearer test-admin-token" };
@@ -179,6 +179,88 @@ describe("GET /admin/list, complete", () => {
 
     expect(page.items.find((item) => item.installId === partialId)?.complete).toBe(false);
     expect(page.items.find((item) => item.installId === wholeId)?.complete).toBe(true);
+  });
+});
+
+describe("GET /admin/list?kind=history", () => {
+  async function sendHistory(installId: string, fromMs: number, count: number, key = randomKey()): Promise<Uint8Array> {
+    const body = await gzipJson(historyBody(installId, fromMs, count));
+    const response = await SELF.fetch("https://example.com/v1/history", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Encoding": "gzip" },
+      body,
+    });
+    expect(response.status).toBe(200);
+    return body;
+  }
+
+  it("pages the chunks that overlap the days asked for, and serves their bytes", async () => {
+    // Three chunks overlapping one UTC day ten days back, and one the day before it.
+    const day = utcDateString(-10, new Date());
+    const dayMs = Date.parse(`${day}T00:00:00Z`);
+    const ids = [randomInstallId(), randomInstallId(), randomInstallId()];
+    const bodies = [
+      await sendHistory(ids[0], dayMs - 2 * HOUR_MS, 4),
+      await sendHistory(ids[1], dayMs + 5 * HOUR_MS, 2),
+      await sendHistory(ids[2], dayMs + 23 * HOUR_MS, 3),
+    ];
+    const before = randomInstallId();
+    await sendHistory(before, dayMs - 10 * HOUR_MS, 2);
+
+    type Item = { key: string; installId: string; fromMs: number; toMs: number; country: string; receivedAt: number; bytes: number };
+    const items: Item[] = [];
+    let next: string | null = null;
+    do {
+      const after: string = next ? `&after=${encodeURIComponent(next)}` : "";
+      const response = await SELF.fetch(`https://example.com/admin/list?kind=history&from=${day}&to=${day}&limit=2${after}`, {
+        headers: ADMIN,
+      });
+      expect(response.status).toBe(200);
+      const page = await response.json<{ items: Item[]; next: string | null }>();
+      items.push(...page.items);
+      next = page.next;
+    } while (next);
+
+    const ours = items.filter((item) => [...ids, before].includes(item.installId));
+    expect(ours.map((item) => item.installId)).toEqual(ids);
+    expect(ours[0]).toEqual({
+      key: `history/v1/${ids[0]}/${dayMs - 2 * HOUR_MS}.json.gz`,
+      installId: ids[0],
+      fromMs: dayMs - 2 * HOUR_MS,
+      toMs: dayMs + 2 * HOUR_MS,
+      country: "XX",
+      receivedAt: expect.any(Number),
+      bytes: bodies[0].byteLength,
+    });
+
+    const object = await SELF.fetch(`https://example.com/admin/object?key=${ours[1].key}`, { headers: ADMIN });
+    expect(object.status).toBe(200);
+    expect(new Uint8Array(await object.arrayBuffer())).toEqual(bodies[1]);
+  });
+
+  it("with shared=1, leaves out an install that hasn't shared", async () => {
+    const day = utcDateString(-11, new Date());
+    const dayMs = Date.parse(`${day}T00:00:00Z`);
+    const sharingId = randomInstallId();
+    const sharingKey = randomKey();
+    const quietId = randomInstallId();
+    await sendHistory(sharingId, dayMs, 2, sharingKey);
+    await setShare(sharingId, sharingKey, true);
+    await sendHistory(quietId, dayMs, 2);
+
+    const response = await SELF.fetch(`https://example.com/admin/list?kind=history&from=${day}&to=${day}&shared=1`, {
+      headers: ADMIN,
+    });
+    const ids = (await response.json<{ items: { installId: string }[] }>()).items.map((item) => item.installId);
+    expect(ids).toContain(sharingId);
+    expect(ids).not.toContain(quietId);
+  });
+
+  it("refuses an unknown kind, and a cursor that isn't an hour and an install", async () => {
+    for (const query of ["kind=minutes", "kind=history&after=2026-09-01|0f8fad5b-d9cb-469f-a165-70867728950e"]) {
+      const response = await SELF.fetch(`https://example.com/admin/list?${query}`, { headers: ADMIN });
+      expect(response.status).toBe(400);
+    }
   });
 });
 
