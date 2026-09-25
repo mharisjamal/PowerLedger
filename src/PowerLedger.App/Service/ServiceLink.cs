@@ -86,7 +86,8 @@ internal interface IServiceLink : IAsyncDisposable
         IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading> power, IReadOnlyList<MonitorDisplayReading> displays,
         CancellationToken cancel = default);
 
-    /// <summary>Records the user's answer to the consent dialog, or a change in Settings → Privacy (data-sharing design §1).</summary>
+    /// <summary>Records the user's answer to the consent dialog, or a change in Settings → Privacy (data-sharing design §1).
+    /// A service from before Plan Q is sent it under consent version 1, the newest it takes.</summary>
     Task<SharingOutcome> SetConsentAsync(Consent consent, CancellationToken cancel = default);
 
     /// <summary>The App's usage counts since the last report; ignored by the service while Usage is off.</summary>
@@ -207,6 +208,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     internal static readonly TimeSpan[] Backoff = [.. new[] { 1, 2, 4, 8, 16, 30 }.Select(s => TimeSpan.FromSeconds(s))];
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
 
+    /// <summary>The newest consent version a service from before Plan Q takes.</summary>
+    internal const int OlderServiceConsentVersion = 1;
+
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentDictionary<long, TaskCompletionSource<PipeMessage>> _pending = new();
     private readonly SemaphoreSlim _sharingGate = new(1, 1);   // never disposed: a request let go at shutdown still releases it
@@ -248,8 +252,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         CancellationToken cancel = default)
         => WriteAsync(new ReportBrightnessRequest(NextId(), monitors, power, displays), cancel);
 
-    public Task<SharingOutcome> SetConsentAsync(Consent consent, CancellationToken cancel = default)
-        => SharingAsync(new SetConsentRequest(NextId(), consent), cancel);
+    public async Task<SharingOutcome> SetConsentAsync(Consent consent, CancellationToken cancel = default)
+        => await SharingAsync(new SetConsentRequest(NextId(), await ForServiceAsync(consent, cancel).ConfigureAwait(false)), cancel)
+            .ConfigureAwait(false);
 
     public Task<WriteResult> ReportUsageAsync(UsageCounts counts, CancellationToken cancel = default)
         => WriteAsync(new ReportUsageRequest(NextId(), counts), cancel);
@@ -342,6 +347,19 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     }
 
     private long NextId() => Interlocked.Increment(ref _lastId);
+
+    /// <summary>The answer as the connected service can take it. A service from before Plan Q, whose status has no
+    /// <see cref="ServiceStatus.Updates"/>, knows consent versions up to <see cref="OlderServiceConsentVersion"/> and
+    /// refuses a newer one, so it is sent the same choices under that version, which is what it does anyway: a day at a
+    /// time, and no history.</summary>
+    private async Task<Consent> ForServiceAsync(Consent consent, CancellationToken cancel)
+    {
+        if (consent.Version <= OlderServiceConsentVersion) return consent;
+        if (_channel is { } channel && _takesUiState == channel) return consent;   // already known to be new
+        return await GetStatusAsync(cancel).ConfigureAwait(false) is { Updates: not null }
+            ? consent
+            : consent with { Version = OlderServiceConsentVersion };
+    }
 
     private async Task RunAsync(CancellationToken stop)
     {

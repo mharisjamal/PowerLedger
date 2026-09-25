@@ -260,6 +260,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         var consent = new Consent(ConsentText.Version, true, true, true, true);
         var counts = new UsageCounts("2026-09-24", 1, new Dictionary<string, int> { ["now"] = 2 }, new Dictionary<string, int>(), 0, 0, 3, "dark", "en-US");
         var crash = new CrashReport(DateTimeOffset.UnixEpoch, "app", "0.6.0", ["System.Exception"], "boom", "at X").Trimmed();
+        _service.Status = Statuses.Running() with { Updates = ServiceUpdates };   // a service as new as the App
 
         (await _link.SetConsentAsync(consent)).ShouldBe(new SharingOutcome(true, "Saved."));
         (await _link.ReportUsageAsync(counts)).ShouldBe(WriteResult.Done);
@@ -272,6 +273,20 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         var gotCrash = _service.Requests.OfType<ReportCrashRequest>().Single().Crash;
         (gotCrash.At, gotCrash.Component, gotCrash.Version, gotCrash.Message, gotCrash.Stack).ShouldBe((crash.At, crash.Component, crash.Version, crash.Message, crash.Stack));
         gotCrash.Types.ShouldBe(crash.Types);
+    }
+
+    /// <summary>A 0.8 service knows consent versions up to 1 and refuses a 2, so the App answers it under version 1, which
+    /// is what that service does anyway: a day at a time, and no history.</summary>
+    [Fact]
+    public async Task An_older_service_is_sent_the_choices_under_consent_version_1()
+    {
+        var (service, link) = await Connect(updates: null);
+        await using (service)
+        await using (link)
+        {
+            (await link.SetConsentAsync(new Consent(ConsentText.Version, true, false, true, true))).ShouldBe(new SharingOutcome(true, "Saved."));
+            service.Requests.OfType<SetConsentRequest>().Single().Consent.ShouldBe(new Consent(1, true, false, true, true));
+        }
     }
 
     [Fact]
