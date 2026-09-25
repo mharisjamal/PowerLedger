@@ -262,19 +262,19 @@ public sealed class UpdateWorkerTests : IDisposable
     }
 
     [Fact]
-    public async Task However_busy_the_user_it_goes_in_six_hours_after_the_download()
+    public async Task However_busy_the_user_it_goes_in_an_hour_after_the_download()
     {
         _feed.Latest = Release();
         var worker = Worker();
         await worker.CheckAsync(CancellationToken.None);
-        for (var minutes = 0; minutes < 359; minutes++)
+        for (var minutes = 0; minutes < 59; minutes++)
         {
             UserAtWork();
             (await worker.TickAsync(CancellationToken.None)).ShouldBeFalse();
             _clock.Advance(TimeSpan.FromMinutes(1));
         }
         UserAtWork();
-        (await worker.TickAsync(CancellationToken.None)).ShouldBeFalse();   // 5 h 59 m: the notice
+        (await worker.TickAsync(CancellationToken.None)).ShouldBeFalse();   // 59 m: the notice
         _heard.TryRead(out _).ShouldBeTrue();
         _clock.Advance(TimeSpan.FromMinutes(1));
         UserAtWork();
@@ -317,6 +317,19 @@ public sealed class UpdateWorkerTests : IDisposable
         await worker.CheckAsync(CancellationToken.None);
 
         (await worker.InstallNowAsync(1, CancellationToken.None)).ShouldBeNull();
+        (await worker.TickAsync(CancellationToken.None)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Update_now_before_any_check_asks_the_feed_and_installs_at_once()
+    {
+        _feed.Latest = Release();
+        UserAtWork();
+        var worker = Worker();
+
+        (await worker.InstallNowAsync(1, CancellationToken.None)).ShouldBeNull();
+        await worker.CheckAsync(CancellationToken.None);
+        _installers.Downloads.ShouldBe(1);
         (await worker.TickAsync(CancellationToken.None)).ShouldBeTrue();
     }
 
@@ -525,7 +538,7 @@ public sealed class UpdateWorkerTests : IDisposable
     }
 
     [Fact]
-    public async Task The_worker_asks_the_server_at_start_and_checks_two_minutes_later_then_hourly()
+    public async Task The_worker_asks_the_server_at_start_and_checks_two_minutes_later_then_every_15_minutes()
     {
         _feed.Latest = Release("0.9.0");
         var worker = Worker();
@@ -536,7 +549,7 @@ public sealed class UpdateWorkerTests : IDisposable
             var first = await AdvanceUntil(() => _feed.Asked == 1, TimeSpan.FromSeconds(10));
             first.ShouldBeInRange(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(10));
             var next = await AdvanceUntil(() => _feed.Asked == 2, TimeSpan.FromMinutes(1));
-            next.ShouldBeInRange(TimeSpan.FromHours(1), TimeSpan.FromHours(1) + TimeSpan.FromMinutes(1));
+            next.ShouldBeInRange(TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(16));
             _server.Asked.ShouldBe(3);
         }
         finally

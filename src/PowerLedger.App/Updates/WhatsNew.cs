@@ -8,6 +8,10 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.9.2",
+        [
+            "Check now installs a new version straight away, and PowerLedger looks for new versions every 15 minutes.",
+        ]),
         ("0.9.1",
         [
             "The Energy used card starts on Since start, and its button switches it to Today, This week or This month.",

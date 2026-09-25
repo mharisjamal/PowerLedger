@@ -73,6 +73,7 @@ internal sealed class Updater : ObservableObject, IDisposable
     private string? _problem;
     private string _status = "Not checked yet.";
     private bool _serviceInstalls;
+    private volatile bool _askedToCheck;
     private Version? _minVersion;
     private volatile bool _installWhenReady;   // Update now: whatever the connection or the service, install once downloaded
     private bool _updateNowPressed;
@@ -106,7 +107,11 @@ internal sealed class Updater : ObservableObject, IDisposable
         });
         OpenNotes = new RelayCommand(() => _open(NotesPage));
         ShowWhatsNew = new RelayCommand(() => NotesRequested?.Invoke());
-        CheckNow = new RelayCommand(() => _threads.Background(() => _ = CheckAsync()));
+        CheckNow = new RelayCommand(() =>
+        {
+            _askedToCheck = true;
+            _threads.Background(() => _ = CheckAsync());
+        });
         UpdateNow = new AsyncRelayCommand(UpdateNowAsync);
         ClosePowerLedger = new RelayCommand(() => CloseRequested?.Invoke());
     }
@@ -279,7 +284,12 @@ internal sealed class Updater : ObservableObject, IDisposable
             }
             if (_serviceInstalls && !_installWhenReady)
             {
-                _threads.Post(() => ServiceWillInstall(release));
+                var asked = _askedToCheck;
+                _threads.Post(() =>
+                {
+                    ServiceWillInstall(release);
+                    if (asked) _ = UpdateNowAsync();   // Check now found it: downloaded and installed at once, not left for later
+                });
                 return;
             }
             if (_cost.Metered && _wanted != release.Name && !_installWhenReady)
@@ -306,6 +316,7 @@ internal sealed class Updater : ObservableObject, IDisposable
         }
         finally
         {
+            _askedToCheck = false;
             Volatile.Write(ref _checking, 0);
         }
     }

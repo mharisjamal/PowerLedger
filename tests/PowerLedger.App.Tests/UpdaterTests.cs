@@ -41,6 +41,31 @@ public class UpdaterTests
     // ---- Plan Q: the service installs updates, and the server's minimum
 
     [Fact]
+    public void Check_now_that_finds_a_release_the_service_installs_asks_it_to_install_at_once()
+    {
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        updater.Apply(ServiceInstalls());
+
+        updater.CheckNow.Execute(null);
+
+        _downloader.Downloads.ShouldBeEmpty();
+        _askedService.ShouldBe(["updateNow"]);
+    }
+
+    [Fact]
+    public async Task A_scheduled_check_leaves_the_install_to_the_service()
+    {
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        updater.Apply(ServiceInstalls());
+
+        await updater.CheckAsync();
+
+        _askedService.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task When_the_service_installs_updates_the_App_offers_nothing_to_restart_into_and_downloads_nothing()
     {
         _feed.Latest = Release("0.3.0");

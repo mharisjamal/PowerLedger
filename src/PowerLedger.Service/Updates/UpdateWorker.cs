@@ -10,7 +10,7 @@ namespace PowerLedger.Service.Updates;
 
 /// <summary>
 /// Silent updates (Plan Q §3, §4). Reads the data server's minimum version at start and with every check; checks for a
-/// release two minutes after start and hourly after, and at once when the update becomes required. A newer release with a
+/// release two minutes after start and every 15 minutes after, and at once when the update becomes required. A newer release with a
 /// signatures file is downloaded into the Updates folder (on a metered connection only after a day, unless required),
 /// checked, and installed when <see cref="InstallTiming"/> says: setup runs detached and silent, after the service has
 /// left itself a <see cref="RelaunchNote"/> and closed the Apps, and the service that starts next opens the App again.
@@ -21,7 +21,7 @@ namespace PowerLedger.Service.Updates;
 internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
 {
     public static readonly TimeSpan FirstCheck = TimeSpan.FromMinutes(2);
-    public static readonly TimeSpan CheckEvery = TimeSpan.FromHours(1);
+    public static readonly TimeSpan CheckEvery = TimeSpan.FromMinutes(15);
 
     /// <summary>How often a checked download is looked at again while it waits for its moment.</summary>
     public static readonly TimeSpan Tick = TimeSpan.FromSeconds(30);
@@ -79,14 +79,29 @@ internal sealed class UpdateWorker : BackgroundService, IUpdateRequests
     /// <summary>Required by the server, or asked for with Update now: installed without waiting for the user.</summary>
     private bool Urgent => _installNow || Required;
 
-    public Task<string?> InstallNowAsync(uint? session, CancellationToken cancel)
+    /// <summary>Update now, and the App's Check now once it sees a newer release: with nothing found yet, the feed is asked
+    /// at once, and a newer signed release is checked for, downloaded and installed straight away rather than an hour on.</summary>
+    public async Task<string?> InstallNowAsync(uint? session, CancellationToken cancel)
     {
-        if (!Installs) return Task.FromResult<string?>(NoKey);
-        if (!Required && (session is not { } asking || asking != _env.System.ConsoleSession())) return Task.FromResult<string?>(NotYours);
-        if (_ready is null && _found is null && !SetupRunning) return Task.FromResult<string?>(NothingReady);
+        if (!Installs) return NoKey;
+        if (!Required && (session is not { } asking || asking != _env.System.ConsoleSession())) return NotYours;
+        if (_ready is null && _found is null && !SetupRunning)
+        {
+            Release? release;
+            try
+            {
+                release = await _env.Feed.LatestAsync(cancel).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
+            {
+                return NothingReady;
+            }
+            if (release is null || release.Version <= _env.Running || release.Signatures is null) return NothingReady;
+            _checkSoon = true;
+        }
         _installNow = true;
         Wake();
-        return Task.FromResult<string?>(null);
+        return null;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stop)

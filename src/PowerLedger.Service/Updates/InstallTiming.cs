@@ -16,7 +16,7 @@ internal enum InstallMoment
 /// <summary>
 /// When the service installs an update (Plan Q §4). At once when the update is required (the server has stopped taking
 /// this version, or the App asked with Update now), when nobody is signed in at the console, or when the App's main window
-/// isn't showing there. Otherwise once the user has been idle for five minutes, and at the latest six hours after the
+/// isn't showing there. Otherwise once the user has been idle for five minutes, and at the latest an hour after the
 /// download, in both cases with a tray notice a minute before. And it downloads on a metered connection only once it has
 /// waited a day for another, or when the update is required.
 /// </summary>
@@ -26,7 +26,7 @@ internal static class InstallTiming
     public static readonly TimeSpan Idle = TimeSpan.FromMinutes(5);
 
     /// <summary>However busy the user is, the update goes in this long after the download.</summary>
-    public static readonly TimeSpan Latest = TimeSpan.FromHours(6);
+    public static readonly TimeSpan Latest = TimeSpan.FromHours(1);
 
     /// <summary>The tray notice comes this long before an install the user might see.</summary>
     public static readonly TimeSpan Warning = TimeSpan.FromMinutes(1);

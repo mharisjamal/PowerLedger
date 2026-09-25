@@ -28,7 +28,7 @@ public class InstallTimingTests
     public void With_the_window_in_use_it_waits()
     {
         Decide(idle: 0).ShouldBe(InstallMoment.Wait);
-        Decide(idle: 299, after: TimeSpan.FromHours(3)).ShouldBe(InstallMoment.Wait);
+        Decide(idle: 299, after: TimeSpan.FromMinutes(30)).ShouldBe(InstallMoment.Wait);
         Decide(idle: null).ShouldBe(InstallMoment.Wait);
     }
 
@@ -41,11 +41,11 @@ public class InstallTimingTests
     }
 
     [Fact]
-    public void Six_hours_after_the_download_it_goes_in_however_busy_the_user_is_with_the_notice_a_minute_before()
+    public void An_hour_after_the_download_it_goes_in_however_busy_the_user_is_with_the_notice_a_minute_before()
     {
-        Decide(after: TimeSpan.FromHours(6) - TimeSpan.FromMinutes(1.5)).ShouldBe(InstallMoment.Wait);
-        Decide(after: TimeSpan.FromHours(6) - TimeSpan.FromMinutes(1)).ShouldBe(InstallMoment.Warn);
-        Decide(after: TimeSpan.FromHours(6), warnedAfter: TimeSpan.FromHours(6) - TimeSpan.FromMinutes(1)).ShouldBe(InstallMoment.Now);
+        Decide(after: TimeSpan.FromHours(1) - TimeSpan.FromMinutes(1.5)).ShouldBe(InstallMoment.Wait);
+        Decide(after: TimeSpan.FromHours(1) - TimeSpan.FromMinutes(1)).ShouldBe(InstallMoment.Warn);
+        Decide(after: TimeSpan.FromHours(1), warnedAfter: TimeSpan.FromHours(1) - TimeSpan.FromMinutes(1)).ShouldBe(InstallMoment.Now);
     }
 
     [Fact]
