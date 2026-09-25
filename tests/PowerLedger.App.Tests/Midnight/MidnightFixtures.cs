@@ -24,9 +24,10 @@ internal static class MidnightFixtures
     /// <summary>
     /// The Dashboard over today's five-minute readings and the hourly ones for the longer ranges, with the totals of the Now
     /// screen's day (0.284 kWh), an average day of 0.3 kWh over the last 31, and a day before whose parts split differently,
-    /// so each trend says something of its own.
+    /// so each trend says something of its own. The energy card is where a new install's is, on Since start, unless
+    /// <paramref name="ui"/> has chosen otherwise; its other periods have figures of their own.
     /// </summary>
-    public static DashboardViewModel DashboardScreen(NowViewModel now)
+    public static DashboardViewModel DashboardScreen(NowViewModel now, FakeUiSettings? ui = null)
     {
         var day = new DateTimeOffset(Now.Date, TimeSpan.Zero);
         var history = new FakeRangeHistory
@@ -37,6 +38,11 @@ internal static class MidnightFixtures
                 {
                     "Today" => Reports.Typical(range, 0.284),
                     "Last 31 days" => Reports.Typical(range, 31 * 0.3),
+                    "Since start" => Reports.Typical(range, 12.4),         // 0.31 kWh a day over the 40 days since the first row
+                    "This week" => Reports.Typical(range, 0.61),
+                    "Last week to date" => Reports.Typical(range, 0.55),
+                    "All of last week" => Reports.Typical(range, 2.2),
+                    "All of last month" => Reports.Typical(range, 9.3),
                     "Before" => Reports.Typical(range, 0.26),
                     _ => Reports.Typical(range),
                 };
@@ -49,7 +55,7 @@ internal static class MidnightFixtures
             },
         };
         var summary = new FakeHistory { Snapshot = Snapshots.Typical(Now, DaySeries(day)), First = Now.AddDays(-40) };
-        return new DashboardViewModel(now, history, summary, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, UiThreads.Inline);
+        return new DashboardViewModel(now, history, summary, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, UiThreads.Inline, ui ?? new FakeUiSettings());
     }
 
     /// <summary>

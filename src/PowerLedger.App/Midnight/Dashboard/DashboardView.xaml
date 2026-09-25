@@ -81,6 +81,23 @@
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="SnapsToDevicePixels" Value="True" />
             </Style>
+            <!-- The tag as a button, for a KPI whose time can be chosen: the tag's frame and type with a chevron after the name,
+                 and the quiet button's wash, press and focus ring. While its menu is open the frame firms and the chevron turns. -->
+            <Style x:Key="PeriodButton" TargetType="Button" BasedOn="{StaticResource M.Button.Quiet}">
+                <Setter Property="BorderBrush" Value="{DynamicResource M.Line}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="8,3,7,3" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="FontSize" Value="11.5" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding ContextMenu.IsOpen, RelativeSource={RelativeSource Self}}" Value="True">
+                        <Setter Property="BorderBrush" Value="{DynamicResource M.LineStrong}" />
+                        <Setter Property="Foreground" Value="{DynamicResource M.Ink}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
 
             <!-- A KPI: its name and the time it covers, the figure with its unit set smaller and dimmer, the line under it and
                  what the trend is against, then the striped bar with the trend or the quality chip at its end. The cell's left
@@ -96,6 +113,36 @@
                                     <TextBlock x:Name="PeriodText" Style="{StaticResource M.Text.Secondary}" FontSize="11.5" Margin="6,0,0,0" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Border>
+                            <!-- Energy used's period: the menu hangs under the button and holds the page's view model, which
+                                 the button's Tag carries to it, as a menu is outside the page's tree. -->
+                            <Button x:Name="PeriodButton" DockPanel.Dock="Right" Style="{StaticResource PeriodButton}" Margin="12,0,0,0" Visibility="Collapsed"
+                                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=local:DashboardView}}" Click="OpenPeriodMenu"
+                                    AutomationProperties.Name="{Binding Period, StringFormat='Period, {0}'}" AutomationProperties.HelpText="Choose the time Energy used covers"
+                                    ToolTip="Choose the period">
+                                <Button.ContextMenu>
+                                    <ContextMenu Style="{StaticResource {x:Type ContextMenu}}" ItemContainerStyle="{StaticResource M.MenuItem.Choice}" Placement="Bottom"
+                                                 DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}" Opened="FocusChosenPeriod">
+                                        <MenuItem Header="Since start" Command="{Binding ChooseEnergyPeriod}" CommandParameter="{x:Static local:EnergyPeriod.SinceStart}"
+                                                  IsChecked="{Binding EnergyPeriod, Mode=OneWay, Converter={StaticResource Is}, ConverterParameter={x:Static local:EnergyPeriod.SinceStart}}" />
+                                        <MenuItem Header="Today" Command="{Binding ChooseEnergyPeriod}" CommandParameter="{x:Static local:EnergyPeriod.Today}"
+                                                  IsChecked="{Binding EnergyPeriod, Mode=OneWay, Converter={StaticResource Is}, ConverterParameter={x:Static local:EnergyPeriod.Today}}" />
+                                        <MenuItem Header="This week" Command="{Binding ChooseEnergyPeriod}" CommandParameter="{x:Static local:EnergyPeriod.ThisWeek}"
+                                                  IsChecked="{Binding EnergyPeriod, Mode=OneWay, Converter={StaticResource Is}, ConverterParameter={x:Static local:EnergyPeriod.ThisWeek}}" />
+                                        <MenuItem Header="This month" Command="{Binding ChooseEnergyPeriod}" CommandParameter="{x:Static local:EnergyPeriod.ThisMonth}"
+                                                  IsChecked="{Binding EnergyPeriod, Mode=OneWay, Converter={StaticResource Is}, ConverterParameter={x:Static local:EnergyPeriod.ThisMonth}}" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource M.Text.Glyph}" FontSize="11" Text="&#xE787;" Foreground="{DynamicResource M.Ink3}" />
+                                    <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" Text="{Binding Period}" />
+                                    <TextBlock x:Name="Chevron" Style="{StaticResource M.Text.Glyph}" FontSize="8" Margin="6,1,0,0" Text="&#xE70D;"
+                                               Foreground="{DynamicResource M.Ink3}" RenderTransformOrigin="0.5,0.5">
+                                        <TextBlock.RenderTransform>
+                                            <RotateTransform x:Name="ChevronTurn" />
+                                        </TextBlock.RenderTransform>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Button>
                             <TextBlock x:Name="Measure" Style="{StaticResource M.Text.Secondary}" FontSize="13" FontWeight="Medium" Text="{Binding Label}"
                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                         </DockPanel>
@@ -108,13 +155,16 @@
                             <TextBlock x:Name="Against" DockPanel.Dock="Right" Style="{StaticResource M.Text.Muted}" Margin="12,0,0,0" Visibility="Collapsed" />
                             <TextBlock Style="{StaticResource M.Text.Muted}" Text="{Binding Small}" TextTrimming="CharacterEllipsis" />
                         </DockPanel>
-                        <DockPanel Margin="0,16,0,0">
+                        <DockPanel x:Name="BarRow" Margin="0,16,0,0">
                             <Grid DockPanel.Dock="Right" Margin="14,0,0,0" MinHeight="22" VerticalAlignment="Center">
                                 <local:TrendMark x:Name="Trend" Kind="{Binding Kind}" Text="{Binding Trend}" LowerIsBetter="{Binding LowerIsBetter}" HorizontalAlignment="Right" />
                                 <ContentControl x:Name="Chip" Style="{StaticResource M.Chip.Measured}" Visibility="Collapsed" />
                             </Grid>
                             <local:HatchBar Style="{StaticResource M.HatchBar}" Value="{Binding Fill}" VerticalAlignment="Center" />
                         </DockPanel>
+                        <!-- Without a bar, the line that stands in its place: since the start, the day's average. -->
+                        <TextBlock x:Name="Note" Style="{StaticResource M.Text.Muted}" Margin="0,16,0,0" MinHeight="22" Text="{Binding Against}"
+                                   TextTrimming="CharacterEllipsis" Visibility="Collapsed" />
                     </StackPanel>
                 </Border>
                 <DataTemplate.Triggers>
@@ -125,12 +175,11 @@
                         <Setter TargetName="PeriodGlyph" Property="Text" Value="&#xE823;" />
                         <Setter TargetName="Period" Property="Visibility" Value="Visible" />
                     </DataTrigger>
-                    <DataTrigger Binding="{Binding Label}" Value="Today">
-                        <Setter TargetName="Measure" Property="Text" Value="Energy used" />
-                        <Setter TargetName="PeriodText" Property="Text" Value="Today" />
-                        <Setter TargetName="Period" Property="Visibility" Value="Visible" />
-                        <!-- What an arrow is against, for the two KPIs that have one; words alone ("first month") say it themselves. -->
-                        <Setter TargetName="Against" Property="Text" Value="vs your average day" />
+                    <!-- Energy used names its own period, on the button that chooses it, and what its arrow is against. -->
+                    <DataTrigger Binding="{Binding Label}" Value="Energy used">
+                        <Setter TargetName="PeriodButton" Property="Visibility" Value="Visible" />
+                        <!-- What an arrow is against, for the KPIs that have one; words alone ("first month") say it themselves. -->
+                        <Setter TargetName="Against" Property="Text" Value="{Binding Against}" />
                         <Setter TargetName="Against" Property="Visibility" Value="Visible" />
                     </DataTrigger>
                     <DataTrigger Binding="{Binding Label}" Value="Idle waste this month">
@@ -142,6 +191,29 @@
                     </DataTrigger>
                     <DataTrigger Binding="{Binding Kind}" Value="Text">
                         <Setter TargetName="Against" Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                    <!-- Since the start: no bar and no trend, and the line in their place. -->
+                    <DataTrigger Binding="{Binding HasBar}" Value="False">
+                        <Setter TargetName="BarRow" Property="Visibility" Value="Collapsed" />
+                        <Setter TargetName="Against" Property="Visibility" Value="Collapsed" />
+                        <Setter TargetName="Note" Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                    <!-- Its menu open, the period button's chevron turns to point up; under reduced motion it turns at once. -->
+                    <DataTrigger Binding="{Binding ContextMenu.IsOpen, ElementName=PeriodButton}" Value="True">
+                        <DataTrigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <local:MotionAnimation Storyboard.TargetName="ChevronTurn" Storyboard.TargetProperty="Angle" To="180" Speed="Fast" EasingFunction="{StaticResource M.Ease.Out}" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </DataTrigger.EnterActions>
+                        <DataTrigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <local:MotionAnimation Storyboard.TargetName="ChevronTurn" Storyboard.TargetProperty="Angle" To="0" Speed="Fast" EasingFunction="{StaticResource M.Ease.Out}" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </DataTrigger.ExitActions>
                     </DataTrigger>
                     <!-- Without a figure, "No reading" is a state rather than a number: muted, in the figure's face and size. -->
                     <DataTrigger Binding="{Binding Big}" Value="{x:Static local:Format.NoReading}">
@@ -163,7 +235,7 @@
                                  Binding="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=local:DashboardView}, Converter={StaticResource AtLeast}, ConverterParameter=866}">
                         <Setter TargetName="Cell" Property="BorderThickness" Value="0,1,0,0" />
                     </DataTrigger>
-                    <DataTrigger Binding="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource TemplatedParent}}" Value="0">
+                    <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Value="First">
                         <Setter TargetName="Cell" Property="BorderThickness" Value="0" />
                     </DataTrigger>
                 </DataTemplate.Triggers>
@@ -177,26 +249,26 @@
                  sidebar and the 1 px frame each side. -->
             <Border Style="{StaticResource M.Card}" Padding="0">
                 <StackPanel>
-                    <ItemsControl ItemsSource="{Binding Kpis}" ItemTemplate="{StaticResource Kpi}" AlternationCount="3" Focusable="False">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <UniformGrid>
-                                    <UniformGrid.Style>
-                                        <Style TargetType="UniformGrid">
-                                            <Setter Property="Rows" Value="1" />
-                                            <Style.Triggers>
-                                                <DataTrigger Value="False"
-                                                             Binding="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=local:DashboardView}, Converter={StaticResource AtLeast}, ConverterParameter=866}">
-                                                    <Setter Property="Rows" Value="0" />
-                                                    <Setter Property="Columns" Value="1" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </UniformGrid.Style>
-                                </UniformGrid>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                    </ItemsControl>
+                    <!-- A presenter a card, each over its own place in the list: a new pass hands a presenter a new card
+                         and it keeps its template, so the period button, its menu and the keyboard's focus outlive the
+                         redraw that each live reading brings; a list's items would all be made again. -->
+                    <UniformGrid>
+                        <UniformGrid.Style>
+                            <Style TargetType="UniformGrid">
+                                <Setter Property="Rows" Value="1" />
+                                <Style.Triggers>
+                                    <DataTrigger Value="False"
+                                                 Binding="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=local:DashboardView}, Converter={StaticResource AtLeast}, ConverterParameter=866}">
+                                        <Setter Property="Rows" Value="0" />
+                                        <Setter Property="Columns" Value="1" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </UniformGrid.Style>
+                        <ContentPresenter Content="{Binding Kpis[0]}" ContentTemplate="{StaticResource Kpi}" Tag="First" />
+                        <ContentPresenter Content="{Binding Kpis[1]}" ContentTemplate="{StaticResource Kpi}" />
+                        <ContentPresenter Content="{Binding Kpis[2]}" ContentTemplate="{StaticResource Kpi}" />
+                    </UniformGrid>
 
                     <!-- Power over time: the range's name, the range choices, the chart and its key: the one line, and sleep. -->
                     <Border Style="{StaticResource M.Divider}" Padding="20,18,20,16" AutomationProperties.Name="Power over time">

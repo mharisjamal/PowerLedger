@@ -40,7 +40,7 @@ public class MidnightRenderingTests
                     UiHarness.Find<Button>(window, button => AutomationProperties.GetName(button) == "Send feedback").ShouldNotBeNull();
                     window.Pill.Opacity.ShouldBe(1);
                     var view = UiHarness.Find<DashboardView>(window)!;
-                    UiTree.Descendants<HatchBar>(UiHarness.Find<ItemsControl>(view)!).Count().ShouldBe(3, "three KPI cards, a bar each");
+                    UiTree.Descendants<HatchBar>(UiHarness.Find<System.Windows.Controls.Primitives.UniformGrid>(view)!).Count().ShouldBe(3, "three KPI cards, a bar each");
                     Pills(view, "Power over time").ShouldBe(["1H", "1D", "1W", "1M", "1Y", "All"]);
                     Checked(view, "Power over time").ShouldBe("1D");
                     Pills(view, "Where the power went").ShouldBe(["Today", "7 days", "30 days"]);
@@ -48,7 +48,13 @@ public class MidnightRenderingTests
                     UiTree.Descendants<ShareBar>(CardNamed(view, "Where the power went")).Count().ShouldBe(4, "a row a part");
                     UiTree.Descendants<TrendMark>(view).Where(mark => mark.Kind is TrendKind.Up or TrendKind.Down)
                         .ShouldAllBe(mark => mark.LowerIsBetter, "every trend on the page is of energy, where less is better");
-                    UiTree.Descendants<TrendMark>(CardNamed(view, "Today")).Single().Sense.ShouldBe(TrendSense.Bad, "today runs above the average day");
+                    // A new install's energy card covers everything since the start: no bar or trend, the day's average in their place.
+                    var energy = CardNamed(view, "Energy used");
+                    UiTree.Descendants<HatchBar>(energy).Single().IsVisible.ShouldBeFalse();
+                    UiTree.Descendants<TrendMark>(energy).Single().IsVisible.ShouldBeFalse();
+                    UiHarness.Find<TextBlock>(energy, text => text.Name == "Note")!.Text.ShouldBe("since 30 July, 0.31 kWh a day on average");
+                    UiHarness.Find<TextBlock>(energy, text => text.Name == "Note")!.IsVisible.ShouldBeTrue();
+                    UiHarness.Find<Button>(energy, button => AutomationProperties.GetName(button) == "Period, Since start")!.IsVisible.ShouldBeTrue();
                     // 0.8.1, after the reference: two framed sections, the KPIs and the chart in one and the table in the other, flat.
                     UiTree.Descendants<Border>(view).Count(border => border.Style == window.Resources["M.Card"]).ShouldBe(2, "the overview and the table");
                     UiTree.Descendants<Border>(view).ShouldAllBe(border => border.Effect == null, "no shadow under a section");
@@ -75,6 +81,104 @@ public class MidnightRenderingTests
             new FileInfo(Path.Combine(UiHarness.Folder, $"midnight-dashboard-{theme}.png")).Length.ShouldBeGreaterThan(30_000);
         }
     }
+
+    /// <summary>The energy card's period button opens its menu under it, on the period chosen and with the keyboard's focus
+    /// there; a choice switches the card where it stands, bar and trend back for a week, is saved, and gives the focus
+    /// back to the button. Drawn in both themes, the menu on its own as a render of the window leaves popups out.</summary>
+    [Fact]
+    public void The_energy_cards_period_menu_switches_the_card_in_place_in_both_themes()
+    {
+        Directory.CreateDirectory(UiHarness.Folder);
+        foreach (var theme in new[] { Theme.Dark, Theme.Light })
+        {
+            UiHarness.OnUi(() =>
+            {
+                using var saver = new FakeSaver();
+                var ui = new FakeUiSettings();
+                var now = MidnightFixtures.NowScreen();
+                var dashboard = MidnightFixtures.DashboardScreen(now, ui);
+                var shell = new ShellViewModel(now, MidnightFixtures.BreakdownScreen(), MidnightFixtures.ReportScreen(saver), MidnightFixtures.HouseholdScreen(),
+                    MidnightFixtures.SettingsScreen(), MidnightFixtures.WizardScreen(), "0.8.0", null, dashboard) { Page = Page.Dashboard };
+                var window = MidnightFixtures.Window(shell, theme);
+                window.Show();
+                try
+                {
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(1200));
+                    var view = UiHarness.Find<DashboardView>(window)!;
+                    var card = CardNamed(view, "Energy used");
+                    var button = UiHarness.Find<Button>(card, b => AutomationProperties.GetName(b) == "Period, Since start")!;
+                    button.Focusable.ShouldBeTrue();
+                    button.Focus().ShouldBeTrue();
+                    UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-energy-since-start-{theme}.png");
+
+                    ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(button)).Invoke();
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(400));
+                    var menu = button.ContextMenu!;
+                    menu.IsOpen.ShouldBeTrue();
+                    menu.PlacementTarget.ShouldBeSameAs(button);
+                    var items = menu.Items.Cast<MenuItem>().ToList();
+                    items.Select(item => (string)item.Header).ShouldBe(["Since start", "Today", "This week", "This month"]);
+                    items.Where(item => item.IsChecked).Select(item => (string)item.Header).ShouldBe(["Since start"]);
+                    items[0].IsKeyboardFocusWithin.ShouldBeTrue("the arrows start from the period chosen");
+                    menu.Opacity.ShouldBe(1);
+                    UiHarness.Render(menu, (int)menu.ActualWidth, (int)menu.ActualHeight, $"midnight-energy-menu-{theme}.png");
+
+                    ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.MenuItemAutomationPeer(items[2])).Invoke();
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(400));
+                    menu.IsOpen.ShouldBeFalse();
+                    ui.Current.EnergyPeriod.ShouldBe(EnergyPeriod.ThisWeek);
+                    card = CardNamed(view, "Energy used");
+                    UiHarness.Find<Button>(card, b => b.Name == "PeriodButton").ShouldBeSameAs(button, "the card changes where it stands, its button kept");
+                    button.IsKeyboardFocused.ShouldBeTrue("the focus comes back to the button");
+                    AutomationProperties.GetName(button).ShouldBe("Period, This week");
+                    dashboard.Range = RangePill.Week;   // a new pass redraws every card, as each live reading does
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                    UiHarness.Find<Button>(CardNamed(view, "Energy used"), b => b.Name == "PeriodButton").ShouldBeSameAs(button, "a redraw keeps the button");
+                    button.IsKeyboardFocused.ShouldBeTrue("and its focus");
+                    dashboard.Range = RangePill.Day;
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                    UiTree.Descendants<HatchBar>(card).Single().IsVisible.ShouldBeTrue("a week has a bar");
+                    UiTree.Descendants<TrendMark>(card).Single().IsVisible.ShouldBeTrue();
+                    UiHarness.Find<TextBlock>(card, text => text.Text == "vs last week")!.IsVisible.ShouldBeTrue();
+                    UiHarness.Find<TextBlock>(card, text => text.Name == "Note")!.IsVisible.ShouldBeFalse();
+                    UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-energy-week-{theme}.png");
+                }
+                finally
+                {
+                    window.CloseForSwitch();
+                }
+            });
+        }
+    }
+
+    /// <summary>Under reduced motion the period menu opens without its drop and the chevron turns at once; the fade stays.</summary>
+    [Fact]
+    public void Under_reduced_motion_the_period_menu_opens_without_travel()
+        => UiHarness.OnUi(() =>
+        {
+            using var reduced = Motion.Force(reduced: true);
+            using var saver = new FakeSaver();
+            var window = MidnightFixtures.Window(MidnightFixtures.Shell(saver));
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromMilliseconds(600));
+                var view = UiHarness.Find<DashboardView>(window)!;
+                var button = UiHarness.Find<Button>(CardNamed(view, "Energy used"), b => b.Name == "PeriodButton")!;
+                ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(button)).Invoke();
+                UiHarness.Pump(TimeSpan.FromMilliseconds(40));
+                var menu = button.ContextMenu!;
+                menu.IsOpen.ShouldBeTrue();
+                var drop = (System.Windows.Media.TranslateTransform)UiHarness.Find<Border>(menu, border => border.Name == "Root")!.RenderTransform;
+                drop.Y.ShouldBe(0, "no travel under reduced motion");
+                ((System.Windows.Media.RotateTransform)UiHarness.Find<TextBlock>(button, text => text.Name == "Chevron")!.RenderTransform).Angle.ShouldBe(180);
+                menu.IsOpen = false;
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
 
     /// <summary>Plan Q §3: below the server's minimum a panel covers the window under the top bar, which keeps its window
     /// buttons; what it covers is out of the keyboard's reach and Update now has the focus. Plan Q §4: the card says
