@@ -148,6 +148,9 @@
                                           Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" />
                                 </Viewbox>
                             </Button>
+                            <!-- The version running, beside the service's state, so it is always plain which one this is (owner, 2026-09-26). -->
+                            <TextBlock x:Name="VersionLine" DockPanel.Dock="Right" Margin="8,0,8,0" Style="{StaticResource M.Text.Muted}" VerticalAlignment="Center"
+                                       Text="{Binding Updates.ShortName}" ToolTip="{Binding Updates.RunningName}" AutomationProperties.Name="{Binding Updates.RunningName}" />
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <Ellipse Width="8" Height="8" VerticalAlignment="Center">
                                     <Ellipse.Style>

@@ -188,8 +188,7 @@ public class MidnightRenderingTests
         });
 
     /// <summary>Plan Q §3: below the server's minimum a panel covers the window under the top bar, which keeps its window
-    /// buttons; what it covers is out of the keyboard's reach and Update now has the focus. Plan Q §4: the card says
-    /// "Installing automatically" when the service installs.</summary>
+    /// buttons; what it covers is out of the keyboard's reach and Update now has the focus.</summary>
     [Fact]
     public void The_blocking_update_panel_covers_the_window_in_both_themes()
     {
@@ -228,7 +227,6 @@ public class MidnightRenderingTests
                 {
                     UiHarness.Pump(TimeSpan.FromMilliseconds(600));
                     ((FrameworkElement)calm.FindName("UpdateRequiredCover")).IsVisible.ShouldBeFalse();
-                    UiHarness.Find<TextBlock>(calm, text => text.Text == "Installing automatically").ShouldNotBeNull();
                     UiHarness.Render(calm, (int)calm.ActualWidth, (int)calm.ActualHeight, $"midnight-update-automatic-{theme}.png");
                 }
                 finally

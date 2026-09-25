@@ -41,70 +41,27 @@ public class UpdaterTests
     // ---- Plan Q: the service installs updates, and the server's minimum
 
     [Fact]
-    public void Check_now_that_finds_a_release_the_service_installs_asks_it_to_install_at_once()
+    public void The_sidebar_names_the_version_running()
     {
-        _feed.Latest = Release("0.3.0");
-        var updater = Updater();
-        updater.Apply(ServiceInstalls());
-
-        updater.CheckNow.Execute(null);
-
-        _downloader.Downloads.ShouldBeEmpty();
-        _askedService.ShouldBe(["updateNow"]);
+        var updater = Updater("0.9.3");
+        updater.RunningName.ShouldBe("Version 0.9.3");
+        updater.ShortName.ShouldBe("v0.9.3");
     }
 
     [Fact]
-    public async Task A_scheduled_check_leaves_the_install_to_the_service()
+    public async Task When_the_service_installs_updates_Check_now_still_downloads_and_offers_Restart_to_update()
     {
         _feed.Latest = Release("0.3.0");
         var updater = Updater();
-        updater.Apply(ServiceInstalls());
+        updater.Apply(ServiceInstalls("PowerLedger is up to date"));
 
         await updater.CheckAsync();
 
-        _askedService.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task When_the_service_installs_updates_the_App_offers_nothing_to_restart_into_and_downloads_nothing()
-    {
-        _feed.Latest = Release("0.3.0");
-        var updater = Updater();
-        updater.Apply(ServiceInstalls());
-
-        await updater.CheckAsync();
-
-        _downloader.Downloads.ShouldBeEmpty();
-        updater.Stage.ShouldBe(UpdateStage.Available);
-        updater.ShowCard.ShouldBeTrue();
-        updater.Title.ShouldBe("PowerLedger 0.3.0 is available");
-        updater.Detail.ShouldBe("Installing automatically");
-        updater.ActionLabel.ShouldBeNull();
-        updater.ReadyVersion.ShouldBeNull();
-        _announced.ShouldBeEmpty();   // the service gives its own notice before it installs
-    }
-
-    [Fact]
-    public async Task A_download_ready_before_the_service_said_it_installs_turns_into_installing_automatically()
-    {
-        _feed.Latest = Release("0.3.0");
-        var updater = Updater();
-        await updater.CheckAsync();
+        _downloader.Downloads.ShouldNotBeEmpty();
+        updater.Stage.ShouldBe(UpdateStage.Ready);
         updater.ActionLabel.ShouldBe("Restart to update");
-
-        updater.Apply(ServiceInstalls());
-
-        updater.Detail.ShouldBe("Installing automatically");
-        updater.ActionLabel.ShouldBeNull();
-        updater.ReadyVersion.ShouldBeNull();
-    }
-
-    [Fact]
-    public void The_services_stage_is_settings_line()
-    {
-        var updater = Updater();
-        updater.Apply(ServiceInstalls(stage: "Downloading PowerLedger 0.3.0"));
-        updater.Status.ShouldBe("Downloading PowerLedger 0.3.0");
+        updater.ReadyVersion.ShouldBe("0.3.0");
+        updater.Status.ShouldBe("PowerLedger 0.3.0 is ready to install");
     }
 
     [Theory]

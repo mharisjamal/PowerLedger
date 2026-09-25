@@ -769,8 +769,7 @@ public class RenderingTests
     }
 
     /// <summary>Plan Q §3: below the server's minimum a panel covers everything under the title bar; what it covers is out
-    /// of the keyboard's reach and Update now has the focus. Plan Q §4: the card says "Installing automatically" when the
-    /// service installs.</summary>
+    /// of the keyboard's reach and Update now has the focus.</summary>
     [Fact]
     public void The_blocking_update_panel_covers_the_window_in_both_themes()
     {
@@ -803,7 +802,6 @@ public class RenderingTests
                         }
                         else
                         {
-                            Find<TextBlock>(window, text => text.Text == "Installing automatically").ShouldNotBeNull();
                         }
                         Save(window, (int)window.ActualWidth, (int)window.ActualHeight, $"update-{name}-{theme}.png");
                     }

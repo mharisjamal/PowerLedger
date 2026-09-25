@@ -37,9 +37,9 @@ internal enum UpdateStage
 /// instead, and taking it there is the user's own choice; otherwise the next check off that connection downloads it. Once
 /// it is checked, the card offers it, the tray announces it once per version and its menu offers it too. Installing starts
 /// setup, which closes the App and opens the new version. Old downloads are cleared when the App starts and at each check.
-/// The card and Settings' Updates row bind here, and everything they read changes on the UI thread. Plan Q: once the
-/// service says it installs updates itself, the App downloads nothing and its card says "Installing automatically"; and
-/// while the App's version is below the data server's minimum, the blocking window binds here too, with Update now (the
+/// The card and Settings' Updates row bind here, and everything they read changes on the UI thread. Plan Q: the service
+/// may also install a signed release itself in the background; the App still downloads and offers Restart to update, as
+/// Check now's answer the user can see (owner's choice, 2026-09-26). While the App's version is below the data server's minimum, the blocking window binds here too, with Update now (the
 /// service first, else the App's own setup) and Close PowerLedger.
 /// </summary>
 internal sealed class Updater : ObservableObject, IDisposable
@@ -73,7 +73,6 @@ internal sealed class Updater : ObservableObject, IDisposable
     private string? _problem;
     private string _status = "Not checked yet.";
     private bool _serviceInstalls;
-    private volatile bool _askedToCheck;
     private Version? _minVersion;
     private volatile bool _installWhenReady;   // Update now: whatever the connection or the service, install once downloaded
     private bool _updateNowPressed;
@@ -107,11 +106,7 @@ internal sealed class Updater : ObservableObject, IDisposable
         });
         OpenNotes = new RelayCommand(() => _open(NotesPage));
         ShowWhatsNew = new RelayCommand(() => NotesRequested?.Invoke());
-        CheckNow = new RelayCommand(() =>
-        {
-            _askedToCheck = true;
-            _threads.Background(() => _ = CheckAsync());
-        });
+        CheckNow = new RelayCommand(() => _threads.Background(() => _ = CheckAsync()));
         UpdateNow = new AsyncRelayCommand(UpdateNowAsync);
         ClosePowerLedger = new RelayCommand(() => CloseRequested?.Invoke());
     }
@@ -125,6 +120,12 @@ internal sealed class Updater : ObservableObject, IDisposable
 
     /// <summary>The version running now.</summary>
     public Version Running { get; }
+
+    /// <summary>"Version 0.9.3": the sidebar version's tooltip and name for screen readers.</summary>
+    public string RunningName => $"Version {Running.ToString(3)}";
+
+    /// <summary>"v0.9.3": the same, short enough for the sidebar's foot beside the service's state.</summary>
+    public string ShortName => $"v{Running.ToString(3)}";
 
     /// <summary>The running version as updates compare it, from the App's version text: the numbers before any pre-release
     /// suffix, or 0.0.0 when there are none, which every release is newer than.</summary>
@@ -149,7 +150,6 @@ internal sealed class Updater : ObservableObject, IDisposable
     /// <summary>A line under the title, or null.</summary>
     public string? Detail => _stage switch
     {
-        UpdateStage.Available or UpdateStage.Ready when _serviceInstalls => "Installing automatically",
         UpdateStage.Available => _release is { } release ? $"{Megabytes(release)} · waiting for a connection that isn't metered" : null,
         UpdateStage.Installing => "Windows asks for permission",
         UpdateStage.Failed => _problem,
@@ -159,7 +159,6 @@ internal sealed class Updater : ObservableObject, IDisposable
     /// <summary>The card's button, or null for none.</summary>
     public string? ActionLabel => _stage switch
     {
-        UpdateStage.Available or UpdateStage.Ready when _serviceInstalls => null,
         UpdateStage.Available => "Download",
         UpdateStage.Ready => "Restart to update",
         UpdateStage.Failed => "Try again",
@@ -173,7 +172,7 @@ internal sealed class Updater : ObservableObject, IDisposable
 
     /// <summary>The version the tray menu offers to restart into: a checked download that isn't being installed, or null.</summary>
     public string? ReadyVersion
-        => !_serviceInstalls && (_stage is UpdateStage.Ready or UpdateStage.Failed) && _installer is not null ? _release?.Name : null;
+        => (_stage is UpdateStage.Ready or UpdateStage.Failed) && _installer is not null ? _release?.Name : null;
 
     /// <summary>Settings' line, and the blocking window's: where things stand.</summary>
     public string Status
@@ -282,16 +281,6 @@ internal sealed class Updater : ObservableObject, IDisposable
                 _threads.Post(() => Status = $"PowerLedger is up to date · checked {Clock()}");
                 return;
             }
-            if (_serviceInstalls && !_installWhenReady)
-            {
-                var asked = _askedToCheck;
-                _threads.Post(() =>
-                {
-                    ServiceWillInstall(release);
-                    if (asked) _ = UpdateNowAsync();   // Check now found it: downloaded and installed at once, not left for later
-                });
-                return;
-            }
             if (_cost.Metered && _wanted != release.Name && !_installWhenReady)
             {
                 _threads.Post(() => Waiting(release));
@@ -316,7 +305,6 @@ internal sealed class Updater : ObservableObject, IDisposable
         }
         finally
         {
-            _askedToCheck = false;
             Volatile.Write(ref _checking, 0);
         }
     }
@@ -339,7 +327,6 @@ internal sealed class Updater : ObservableObject, IDisposable
         }
         _minVersion = min;
         if (required != UpdateRequired) OnPropertyChanged(nameof(UpdateRequired));
-        if (installs && service?.Stage is { Length: > 0 } stage && !_installWhenReady) Status = stage;
     }
 
     /// <summary>The blocking window's Update now (Plan Q §3): the service installs it when it can; otherwise the App's own
@@ -376,15 +363,6 @@ internal sealed class Updater : ObservableObject, IDisposable
         }
         Status = "Downloading the update…";
         await CheckAsync().ConfigureAwait(true);
-    }
-
-    /// <summary>A newer release the service installs itself (Plan Q §4): the card says so, with nothing to press.</summary>
-    private void ServiceWillInstall(Release release)
-    {
-        if (_stage is UpdateStage.Installing or UpdateStage.Ready) return;
-        _release = release;
-        Status = $"PowerLedger {release.Name} installs automatically";
-        Show(UpdateStage.Available);
     }
 
     /// <summary>A checked download is ready: the card, the tray's announcement once per version, and the menu item.</summary>
