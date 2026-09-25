@@ -232,7 +232,7 @@
                                         <Setter Property="VerticalAlignment" Value="Center" />
                                     </Style>
                                 </WrapPanel.Resources>
-                                <Border Width="16" Height="2" CornerRadius="1" Background="{DynamicResource M.Accent}" VerticalAlignment="Center" /><TextBlock Text="Total power" />
+                                <Border Width="16" Height="2" CornerRadius="1" Background="{DynamicResource M.ChartLine}" VerticalAlignment="Center" /><TextBlock Text="Total power" />
                                 <local:HatchBar Style="{StaticResource M.SleepKey}" Width="18" VerticalAlignment="Center" /><TextBlock Text="Asleep" />
                             </WrapPanel>
                         </StackPanel>

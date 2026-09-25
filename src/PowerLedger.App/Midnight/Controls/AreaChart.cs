@@ -8,10 +8,10 @@ using System.Windows.Media;
 namespace PowerLedger.App;
 
 /// <summary>
-/// "Power over time" (plan O M1-2, after the reference in 0.8.1): the total as one smooth 2 px line running from the
-/// accent into the violet over a gradient that fades to nothing, sleep faintly hatched, a dashed line at now, and the axes
+/// "Power over time" (plan O M1-2, after the reference in 0.8.1): the total as one smooth 2 px indigo line over a rich
+/// indigo gradient that fades to nothing at the axis, sleep faintly hatched, a dashed line at now, and the axes
 /// the model gives in small grey words. The parts are the History page's and the table's to show, not this chart's. The pointer or the arrow keys pick a bucket: a
-/// ringed dot marks it on the line, a dotted guide runs from it to the axis, and a tooltip says when and how much, so
+/// white-ringed dot marks it on the line, a faint white dotted guide runs across at its value, and a tooltip says when and how much, so
 /// the figure is reachable without a mouse. The tooltip is a ToolTip of the window's, so it takes the window's bubble.
 /// </summary>
 internal sealed class AreaChart : Instrument
@@ -20,7 +20,7 @@ internal sealed class AreaChart : Instrument
         nameof(Model), typeof(ChartModel), typeof(AreaChart), new FrameworkPropertyMetadata(ChartModel.Empty, FrameworkPropertyMetadataOptions.AffectsRender, OnModelChanged));
     public static readonly DependencyProperty FromProperty = Register<DateTimeOffset?>(nameof(From), null, typeof(AreaChart));
     public static readonly DependencyProperty ZoneProperty = Register(nameof(Zone), TimeZoneInfo.Local, typeof(AreaChart));
-    public static readonly DependencyProperty SecondBrushProperty = Register<Brush?>(nameof(SecondBrush), null, typeof(AreaChart));
+    public static readonly DependencyProperty StrokeBrushProperty = Register<Brush?>(nameof(StrokeBrush), null, typeof(AreaChart));
     public static readonly DependencyProperty RingBrushProperty = Register<Brush?>(nameof(RingBrush), null, typeof(AreaChart));
     public static readonly DependencyProperty FillTopBrushProperty = Register<Brush>(nameof(FillTopBrush), Brushes.Transparent, typeof(AreaChart));
     public static readonly DependencyProperty FillBottomBrushProperty = Register<Brush>(nameof(FillBottomBrush), Brushes.Transparent, typeof(AreaChart));
@@ -34,6 +34,9 @@ internal sealed class AreaChart : Instrument
     private const double AxisRoom = 28;
     private const double PlotHeight = 260;
     private const double LabelSize = 11;
+    private const double GuideOpacity = 0.55;
+    private const double HeldStrength = 0.75;
+    private const double HeldTo = 0.55;
 
     private int _hover = -1;
     private ToolTip? _tip;
@@ -50,8 +53,8 @@ internal sealed class AreaChart : Instrument
 
     public TimeZoneInfo Zone { get => (TimeZoneInfo)GetValue(ZoneProperty); set => SetValue(ZoneProperty, value); }
 
-    /// <summary>The colour the line runs into at the right; the accent all along when unset.</summary>
-    public Brush? SecondBrush { get => (Brush?)GetValue(SecondBrushProperty); set => SetValue(SecondBrushProperty, value); }
+    /// <summary>The line's colour, and the hovered dot's: the charts' indigo (M.ChartLine); the accent when unset.</summary>
+    public Brush? StrokeBrush { get => (Brush?)GetValue(StrokeBrushProperty); set => SetValue(StrokeBrushProperty, value); }
 
     /// <summary>The ring round the hovered dot: the tooltip's colour, white on the dark page; the ink when unset.</summary>
     public Brush? RingBrush { get => (Brush?)GetValue(RingBrushProperty); set => SetValue(RingBrushProperty, value); }
@@ -131,10 +134,10 @@ internal sealed class AreaChart : Instrument
         }
 
         var line = AreaGeometry.Line(buckets.Select(b => b.Total).ToArray(), capacity, max, Left, right, Top, bottom);
-        var fill = new LinearGradientBrush(ColourOf(FillTopBrush), ColourOf(FillBottomBrush), new Point(0, 0), new Point(0, 1));
+        var fill = new LinearGradientBrush(FillStops(ColourOf(FillTopBrush), ColourOf(FillBottomBrush)), new Point(0, 0), new Point(0, 1));
         fill.Freeze();
         dc.DrawGeometry(fill, null, Curve(line, bottom));
-        var stroke = new Pen(LineBrushFor(line), 2) { LineJoin = PenLineJoin.Round, StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        var stroke = new Pen(StrokeBrush ?? AccentBrush, 2) { LineJoin = PenLineJoin.Round, StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
         dc.DrawGeometry(null, stroke, Curve(line, null));
 
         if (model.NowAt is { } nowAt)
@@ -148,10 +151,11 @@ internal sealed class AreaChart : Instrument
         if (_hover >= 0 && _hover < line.Count)
         {
             var at = line[_hover];
-            var dotted = Line(LabelBrush, 1, new DashStyle([1, 3], 0));
             dc.DrawLine(Line(LineBrush), new Point(at.X, Top), new Point(at.X, bottom));
-            dc.DrawLine(dotted, new Point(Left, at.Y), new Point(right, at.Y));
-            dc.DrawEllipse(AccentBrush, new Pen(RingBrush ?? InkBrush, 2), at, 5, 5);
+            dc.PushOpacity(GuideOpacity);
+            dc.DrawLine(Line(InkBrush, 1, new DashStyle([1, 3], 0)), new Point(Left, at.Y), new Point(right, at.Y));
+            dc.Pop();
+            dc.DrawEllipse(StrokeBrush ?? AccentBrush, new Pen(RingBrush ?? InkBrush, 2), at, 5, 5);
         }
     }
 
@@ -247,17 +251,14 @@ internal sealed class AreaChart : Instrument
 
     private static Color ColourOf(Brush brush) => (brush as SolidColorBrush)?.Color ?? Colors.Transparent;
 
-    /// <summary>The line's brush: the accent into <see cref="SecondBrush"/> across the line's own width, or the accent.</summary>
-    private Brush LineBrushFor(IReadOnlyList<Point> line)
-    {
-        if (SecondBrush is null || line.Count < 2) return AccentBrush;
-        var brush = new LinearGradientBrush(ColourOf(AccentBrush), ColourOf(SecondBrush), new Point(line[0].X, 0), new Point(Math.Max(line[^1].X, line[0].X + 1), 0))
-        {
-            MappingMode = BrushMappingMode.Absolute,
-        };
-        brush.Freeze();
-        return brush;
-    }
+    /// <summary>The fill's stops, down the area: the top colour under the line, still three quarters as strong past half way,
+    /// so the fill reads rich under the line as the reference's does, then out to the bottom colour at the axis.</summary>
+    internal static GradientStopCollection FillStops(Color top, Color bottom) =>
+    [
+        new GradientStop(top, 0),
+        new GradientStop(Color.FromArgb((byte)Math.Round(top.A * HeldStrength), top.R, top.G, top.B), HeldTo),
+        new GradientStop(bottom, 1),
+    ];
 
     /// <summary>The tooltip's words: the time, quieter, over the figure named ("Power: 92 W"), in the window's tooltip colours.</summary>
     private StackPanel TipLines(int index)
