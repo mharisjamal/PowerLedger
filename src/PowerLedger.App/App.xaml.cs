@@ -137,7 +137,7 @@ public partial class App : Application
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
-        _dashboard = new DashboardViewModel(_now, history, history, TimeProvider.System, zone, culture, threads);
+        _dashboard = new DashboardViewModel(_now, history, history, TimeProvider.System, zone, culture, threads, _preferences);
         _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard);
         _shell.FeedbackRequested += OpenFeedbackWindow;
         // Review 6: a saved look that won't open at start opens Classic instead, which is then saved, through Settings as

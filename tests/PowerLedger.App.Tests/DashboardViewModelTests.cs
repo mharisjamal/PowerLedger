@@ -14,6 +14,10 @@ public sealed class DashboardViewModelTests : IDisposable
     private readonly FakeLink _link = new();
     private readonly FakeHistory _summary = new();
     private readonly FakeRangeHistory _history = new();
+
+    /// <summary>Saved with the energy card on Today, the period most of these tests are about; the tests of the period
+    /// menu set it as they need.</summary>
+    private readonly FakeUiSettings _ui = new() { Current = UiPreferences.Default with { EnergyPeriod = EnergyPeriod.Today } };
     private readonly NowViewModel _now;
     private DashboardViewModel? _dashboard;
 
@@ -41,7 +45,7 @@ public sealed class DashboardViewModelTests : IDisposable
     {
         _link.Connect(true);
         _link.Push(Frames.At(Now));
-        return _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, UiThreads.Inline);
+        return _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, UiThreads.Inline, _ui);
     }
 
     [Fact]
@@ -58,11 +62,14 @@ public sealed class DashboardViewModelTests : IDisposable
         power.Kind.ShouldBe(TrendKind.Quality);
         power.Fill.ShouldBe(34.2 / 75, 1e-9);                  // over the meter's 75 W scale, sized for today's 68 W peak
 
-        today.Label.ShouldBe("Today");
+        today.Label.ShouldBe("Energy used");
+        today.Period.ShouldBe("Today");
         today.Big.ShouldBe("0.284 kWh");
         today.Small.ShouldBe("$0.05");
+        today.Against.ShouldBe("vs your average day");
         today.Trend.ShouldBe("56%");                          // 284 Wh against 300 Wh × 0.606 of the day = 182 Wh expected
         today.Kind.ShouldBe(TrendKind.Up);
+        today.HasBar.ShouldBeTrue();
         today.Fill.ShouldBe(284 / 300.0, 1e-9);
 
         idle.Label.ShouldBe("Idle waste this month");
@@ -431,11 +438,198 @@ public sealed class DashboardViewModelTests : IDisposable
         dashboard.Kpis[1].Big.ShouldBe(Format.NoReading);
     }
 
+    /// <summary>With nothing chosen, the energy card covers everything this PC has recorded: from the first row, 50 days and
+    /// 6½ hours before now, with its cost, and the day's average over that time in place of a bar and a trend.</summary>
+    [Fact]
+    public void Energy_used_covers_everything_since_the_start_until_another_period_is_chosen()
+    {
+        _ui.Current = UiPreferences.Default;
+        _summary.First = new DateTimeOffset(2026, 7, 20, 8, 0, 0, TimeSpan.Zero);
+        var answer = _history.Answer;
+        _history.Answer = range => range.Title == "Since start" ? Reports.Typical(range, 15) : answer(range);
+        var dashboard = Dashboard();
+        dashboard.EnergyPeriod.ShouldBe(EnergyPeriod.SinceStart);
+        dashboard.Show();
+
+        var since = _history.Reads.Last(range => range.Title == "Since start");
+        since.From.ShouldBe(new DateTimeOffset(2026, 7, 20, 0, 0, 0, TimeSpan.Zero));
+        since.To.ShouldBe(Now);
+        var energy = dashboard.Kpis[1];
+        energy.Label.ShouldBe("Energy used");
+        energy.Period.ShouldBe("Since start");
+        energy.Big.ShouldBe("15.0 kWh");
+        energy.Small.ShouldBe("$2.55");
+        energy.Against.ShouldBe("since 20 July, 0.30 kWh a day on average");   // 15 kWh over 50.27 days
+        energy.HasBar.ShouldBeFalse();
+        energy.Trend.ShouldBeNull();
+        energy.Kind.ShouldBe(TrendKind.Text);
+        energy.LowerIsBetter.ShouldBeTrue();
+    }
+
+    /// <summary>The average is over whole days at the least: an hour's history is not 24 hours' worth a day.</summary>
+    [Fact]
+    public void A_history_that_began_today_averages_over_a_whole_day()
+    {
+        _ui.Current = UiPreferences.Default;
+        _summary.First = Now.AddHours(-1);
+        var answer = _history.Answer;
+        _history.Answer = range => range.Title == "Since start" ? Reports.Typical(range, 0.04) : answer(range);
+        var dashboard = Dashboard();
+        dashboard.Show();
+
+        dashboard.Kpis[1].Against.ShouldBe("since 8 September, 0.04 kWh a day on average");
+    }
+
+    [Fact]
+    public void Since_the_start_without_history_says_what_it_can()
+    {
+        _ui.Current = UiPreferences.Default;
+        _history.Answer = range => range.Title == "Since start" ? null : Reports.Typical(range);
+        var dashboard = Dashboard();
+        dashboard.Show();
+
+        dashboard.Kpis[1].Big.ShouldBe(Format.NoReading);
+        dashboard.Kpis[1].Small.ShouldBe("History can't be read right now");
+        dashboard.Kpis[1].Against.ShouldBeNull();
+        dashboard.Kpis[1].HasBar.ShouldBeFalse();
+    }
+
+    /// <summary>This week, Monday to now as the app's weeks run, against last week from its Monday to the same day and
+    /// time; the bar is this week so far over the whole of last week.</summary>
+    [Fact]
+    public void This_week_compares_with_last_week_at_the_same_point()
+    {
+        _ui.Current = UiPreferences.Default with { EnergyPeriod = EnergyPeriod.ThisWeek };
+        var answer = _history.Answer;
+        _history.Answer = range => range.Title switch
+        {
+            "This week" => Reports.Typical(range, 1.2),
+            "Last week to date" => Reports.Typical(range, 1.0),
+            "All of last week" => Reports.Typical(range, 3.0),
+            _ => answer(range),
+        };
+        var dashboard = Dashboard();
+        dashboard.Show();
+
+        var week = _history.Reads.Last(range => range.Title == "This week");
+        week.From.ShouldBe(new DateTimeOffset(2026, 9, 7, 0, 0, 0, TimeSpan.Zero));   // the Monday
+        week.To.ShouldBe(Now);
+        var before = _history.Reads.Last(range => range.Title == "Last week to date");
+        before.From.ShouldBe(new DateTimeOffset(2026, 8, 31, 0, 0, 0, TimeSpan.Zero));
+        before.To.ShouldBe(Now.AddDays(-7));
+        var whole = _history.Reads.Last(range => range.Title == "All of last week");
+        whole.From.ShouldBe(new DateTimeOffset(2026, 8, 31, 0, 0, 0, TimeSpan.Zero));
+        whole.To.ShouldBe(new DateTimeOffset(2026, 9, 7, 0, 0, 0, TimeSpan.Zero));
+        var energy = dashboard.Kpis[1];
+        energy.Period.ShouldBe("This week");
+        energy.Big.ShouldBe("1.20 kWh");
+        energy.Small.ShouldBe("$0.20");
+        energy.Against.ShouldBe("vs last week");
+        energy.Trend.ShouldBe("20%");
+        energy.Kind.ShouldBe(TrendKind.Up);
+        energy.HasBar.ShouldBeTrue();
+        energy.Fill.ShouldBe(1.2 / 3.0, 1e-9);
+        energy.LowerIsBetter.ShouldBeTrue();
+    }
+
+    /// <summary>This month so far, from the same read as the idle waste's, against last month to the same day and time;
+    /// the bar is this month so far over the whole of last month.</summary>
+    [Fact]
+    public void This_month_compares_with_last_month_at_the_same_point()
+    {
+        _ui.Current = UiPreferences.Default with { EnergyPeriod = EnergyPeriod.ThisMonth };
+        var answer = _history.Answer;
+        _history.Answer = range => range.Title switch
+        {
+            "Last month to date" => Reports.Typical(range, 3.0),
+            "All of last month" => Reports.Typical(range, 8.0),
+            _ => answer(range),
+        };
+        var dashboard = Dashboard();
+        dashboard.Show();
+
+        var whole = _history.Reads.Last(range => range.Title == "All of last month");
+        whole.From.ShouldBe(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero));
+        whole.To.ShouldBe(new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero));
+        var energy = dashboard.Kpis[1];
+        energy.Period.ShouldBe("This month");
+        energy.Big.ShouldBe("2.74 kWh");
+        energy.Small.ShouldBe("$0.47");
+        energy.Against.ShouldBe("vs last month");
+        energy.Trend.ShouldBe("9%");                          // 2.74 against 3.0 to the same point
+        energy.Kind.ShouldBe(TrendKind.Down);
+        energy.Fill.ShouldBe(2.74 / 8.0, 1e-9);
+    }
+
+    [Fact]
+    public void With_nothing_last_week_there_is_no_trend_but_still_the_week()
+    {
+        _ui.Current = UiPreferences.Default with { EnergyPeriod = EnergyPeriod.ThisWeek };
+        var answer = _history.Answer;
+        _history.Answer = range => range.Title is "Last week to date" or "All of last week" ? Reports.Empty(range) : answer(range);
+        var dashboard = Dashboard();
+        dashboard.Show();
+
+        dashboard.Kpis[1].Big.ShouldBe("2.74 kWh");
+        dashboard.Kpis[1].Trend.ShouldBeNull();
+        dashboard.Kpis[1].Kind.ShouldBe(TrendKind.Text);
+        dashboard.Kpis[1].Fill.ShouldBe(0);
+    }
+
+    /// <summary>The menu's choice switches the card where it stands, is saved for the next start, and reads only what the
+    /// card needs: the chart is left as it was.</summary>
+    [Fact]
+    public void A_chosen_period_switches_the_card_in_place_and_is_remembered()
+    {
+        _ui.Current = UiPreferences.Default with { EnergyPeriod = EnergyPeriod.ThisMonth };
+        var dashboard = Dashboard();
+        dashboard.EnergyPeriod.ShouldBe(EnergyPeriod.ThisMonth, "the saved choice");
+        dashboard.Show();
+        dashboard.Kpis[1].Period.ShouldBe("This month");
+        var chart = dashboard.Chart;
+        _history.Reads.Clear();
+
+        dashboard.ChooseEnergyPeriod.Execute(EnergyPeriod.ThisWeek);
+
+        dashboard.EnergyPeriod.ShouldBe(EnergyPeriod.ThisWeek);
+        dashboard.Kpis[1].Period.ShouldBe("This week");
+        dashboard.Kpis[1].Against.ShouldBe("vs last week");
+        _ui.Current.EnergyPeriod.ShouldBe(EnergyPeriod.ThisWeek);
+        _ui.Changes.ShouldBe(["energy period ThisWeek"]);
+        _history.Reads.Count(range => range.Title == "Today").ShouldBe(1, "the parts' today, and not the chart's, which stays");
+        dashboard.Chart.ShouldBeSameAs(chart);
+
+        dashboard.EnergyPeriod = EnergyPeriod.SinceStart;
+        dashboard.Kpis[1].Period.ShouldBe("Since start");
+        dashboard.EnergyPeriod = EnergyPeriod.Today;
+        dashboard.Kpis[1].Period.ShouldBe("Today");
+        dashboard.Kpis[1].Against.ShouldBe("vs your average day");
+        _ui.Current.EnergyPeriod.ShouldBe(EnergyPeriod.Today);
+        _ui.Changes.Count.ShouldBe(3);
+    }
+
+    /// <summary>Every period is read again with the rest each minute, so the card keeps up as the others do.</summary>
+    [Theory]
+    [InlineData("SinceStart", "Since start")]
+    [InlineData("ThisWeek", "This week")]
+    [InlineData("ThisMonth", "All of last month")]
+    public void The_chosen_period_is_read_again_every_minute(string period, string title)
+    {
+        _ui.Current = UiPreferences.Default with { EnergyPeriod = Enum.Parse<EnergyPeriod>(period) };
+        var dashboard = Dashboard();
+        dashboard.Show();
+        _history.Reads.Clear();
+
+        _clock.Advance(DashboardViewModel.RefreshEvery);
+
+        _history.Reads.Count(range => range.Title == title).ShouldBe(1);
+    }
+
     /// <summary>The Dashboard with its background reads held in <paramref name="queue"/> until a test runs them.</summary>
     private DashboardViewModel Queued(Queue<Action> queue)
     {
         _link.Connect(true);
         _link.Push(Frames.At(Now));
-        return _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, new UiThreads(action => action(), queue.Enqueue));
+        return _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, new UiThreads(action => action(), queue.Enqueue), _ui);
     }
 }

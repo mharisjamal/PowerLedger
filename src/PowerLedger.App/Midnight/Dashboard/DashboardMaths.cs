@@ -25,7 +25,8 @@ internal static class DashboardMaths
     public static double Fill(double value, double max)
         => max > 0 && double.IsFinite(value) && double.IsFinite(max) ? Math.Clamp(value / max, 0, 1) : 0;
 
-    /// <summary>This month against last, as a fraction of last month's; null with no last month to compare.</summary>
+    /// <summary>This month against last, or this week against last, as a fraction of the one before's; null with nothing
+    /// before to compare.</summary>
     public static double? MonthTrend(double thisWh, double? lastWh) => lastWh is > 0 ? (thisWh - lastWh.Value) / lastWh.Value : null;
 
     /// <summary>Which way a change points: up for more, down for less, flat for too little to mention.</summary>

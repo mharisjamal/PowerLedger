@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using PowerLedger.Contracts;
 using PowerLedger.Storage;
 
@@ -39,6 +40,8 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private string? _chartMessage;
     private DateTimeOffset? _chartFrom;
     private IReadOnlyList<DashboardPart> _parts = [];
+    private readonly IUiSettings? _ui;
+    private EnergyPeriod _energyPeriod;
 
     /// <summary>One pass over the history, read together so every card agrees on the moment.</summary>
     /// <param name="Pill">The chart's range when it was read, so a later pass keeps its chart only for the same range.</param>
@@ -46,12 +49,23 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <param name="LastMonth">Last month up to the same day and time as now.</param>
     /// <param name="Before">The parts' range a period back, for their trends.</param>
     /// <param name="FirstRow">When the history begins, or null with none: this month is the first only when it begins in it.</param>
+    /// <param name="Energy">The energy card's period as it was read.</param>
     private sealed record Reading(
         RangePill Pill, DateTimeOffset LocalNow, HistorySnapshot? Snapshot, RangeReport? Recent, RangeReport? LastMonth,
-        DateRange ChartRange, RangeReport? Chart, DateRange PartsWindow, RangeReport? Parts, RangeReport? Before, DateTimeOffset? FirstRow = null);
+        DateRange ChartRange, RangeReport? Chart, DateRange PartsWindow, RangeReport? Parts, RangeReport? Before, DateTimeOffset? FirstRow = null,
+        EnergyReading? Energy = null);
 
+    /// <summary>What the energy card's period needs beyond the snapshot, the average day and last month to date, which
+    /// every pass reads anyway: today and this month need nothing more.</summary>
+    /// <param name="SoFar">The period so far: this week, or everything since the start.</param>
+    /// <param name="SamePoint">The period before up to the same point: last week to the same day and time.</param>
+    /// <param name="Whole">The whole of the period before, which the bar measures the period so far against.</param>
+    private sealed record EnergyReading(EnergyPeriod Period, RangeReport? SoFar = null, RangeReport? SamePoint = null, RangeReport? Whole = null);
+
+    /// <param name="ui">Where the energy card's period is kept between runs; none keeps it for this run only.</param>
     public DashboardViewModel(
-        NowViewModel now, IRangeHistory history, IHistory summary, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, UiThreads threads)
+        NowViewModel now, IRangeHistory history, IHistory summary, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, UiThreads threads,
+        IUiSettings? ui = null)
     {
         _now = now;
         _history = history;
@@ -60,6 +74,9 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         _zone = zone;
         _culture = culture;
         _threads = threads;
+        _ui = ui;
+        _energyPeriod = ui?.Current.EnergyPeriod ?? UiPreferences.Default.EnergyPeriod;
+        ChooseEnergyPeriod = new RelayCommand<EnergyPeriod>(period => EnergyPeriod = period);
         _now.PropertyChanged += OnNowChanged;
         Rebuild();
     }
@@ -74,7 +91,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <summary>The service's status, for the header's pill.</summary>
     public StatusLine Status => _now.Status;
 
-    /// <summary>Power now, Today and Idle waste this month, in that order.</summary>
+    /// <summary>Power now, Energy used over <see cref="EnergyPeriod"/> and Idle waste this month, in that order.</summary>
     public IReadOnlyList<KpiCard> Kpis { get => _kpis; private set => SetProperty(ref _kpis, value); }
 
     /// <summary>The chart's range; a change reads it again at once.</summary>
@@ -115,6 +132,22 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>What the Energy used card covers, as its period menu chose it, Since start until then. A change is saved and
+    /// reads the card again at once, leaving the chart as it was.</summary>
+    public EnergyPeriod EnergyPeriod
+    {
+        get => _energyPeriod;
+        set
+        {
+            if (!SetProperty(ref _energyPeriod, value)) return;
+            _ui?.SetEnergyPeriod(value);
+            Refresh(chart: false);
+        }
+    }
+
+    /// <summary>The period menu's items: the period to choose.</summary>
+    public IRelayCommand<EnergyPeriod> ChooseEnergyPeriod { get; }
+
     /// <summary>"Where the power went": one row a part, CPU first.</summary>
     public IReadOnlyList<DashboardPart> Parts { get => _parts; private set => SetProperty(ref _parts, value); }
 
@@ -154,6 +187,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         var read = ++_reads;
         var pill = Range;
         var parts = PartsRange;
+        var energy = EnergyPeriod;
         var kept = chart || _read is not { Chart: not null } last || last.Pill != pill ? null : _read;
         _threads.Background(() =>
         {
@@ -162,11 +196,11 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             try
             {
                 if (kept is not null && !SameCut(kept.ChartRange, RangeFor(pill, now))) kept = null;   // a new day
-                reading = Read(now, pill, parts, kept);
+                reading = Read(now, pill, parts, energy, kept);
             }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
-                reading = NothingRead(now, pill, parts);
+                reading = NothingRead(now, pill, parts) with { Energy = new EnergyReading(energy) };
             }
             _threads.Post(() =>
             {
@@ -178,10 +212,11 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         });
     }
 
-    private Reading Read(DateTimeOffset now, RangePill pill, PartsRange parts, Reading? kept)
+    private Reading Read(DateTimeOffset now, RangePill pill, PartsRange parts, EnergyPeriod energy, Reading? kept)
     {
         var chartRange = kept?.ChartRange ?? RangeFor(pill, now);
         var partsRange = RangeFor(parts, now);
+        var first = _summary.FirstRow();
         return new Reading(
             pill,
             TimeZoneInfo.ConvertTime(now, _zone),
@@ -193,7 +228,34 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             partsRange,
             _history.Read(partsRange, _zone),
             _history.Read(Before(partsRange, DaysOf(parts), _zone), _zone),
-            _summary.FirstRow());
+            first,
+            ReadEnergy(energy, now, first));
+    }
+
+    /// <summary>The energy card's own reads: since the start, from the first row's day to now; this week so far, the
+    /// same stretch of last week and the whole of it; the whole of last month. Today and this month so far come from the
+    /// snapshot, and last month to date from the pass's own read.</summary>
+    private EnergyReading ReadEnergy(EnergyPeriod period, DateTimeOffset now, DateTimeOffset? first)
+    {
+        var day = TimeSpan.FromDays(1);   // the card needs the totals only; a bucket a day is the least to cut
+        switch (period)
+        {
+            case EnergyPeriod.SinceStart:
+                return new(period, _history.Read(Ranges.All(first, now, _zone, _culture) with { Title = "Since start" }, _zone));
+            case EnergyPeriod.ThisWeek:
+                var week = Ranges.ThisWeek(now, _zone) with { Bucket = day };
+                var monday = Ranges.LocalDay(week.From, _zone);
+                var lastWeek = Ranges.Days(monday.AddDays(-7), monday.AddDays(-1), now, _zone, _culture) with { Title = "All of last week", Bucket = day };
+                return new(
+                    period,
+                    _history.Read(week, _zone),
+                    _history.Read(Before(week, 7, _zone) with { Title = "Last week to date" }, _zone),
+                    _history.Read(lastWeek, _zone));
+            case EnergyPeriod.ThisMonth:
+                return new(period, Whole: _history.Read(Ranges.LastMonth(now, _zone, _culture) with { Title = "All of last month", Bucket = day }, _zone));
+            default:
+                return new(period);
+        }
     }
 
     /// <summary>A reading of nothing, for a pass that threw: the chart's range as well as it can be named, and no data.</summary>
@@ -288,7 +350,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     {
         var live = _now.Live;
         if (live.Quality is { } quality) _lastQuality = quality;
-        Kpis = [PowerNow(live), TodayCard(), IdleWaste()];
+        Kpis = [PowerNow(live), EnergyUsed(), IdleWaste()];
         Parts = PartRows(live, _read);
     }
 
@@ -318,22 +380,92 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             DashboardMaths.Fill(watts ?? 0, live.Meter.Max));
     }
 
-    /// <summary>Today: kWh so far and its cost, against the average of the last 30 complete days up to the same time of
-    /// day; the bar is today over that whole average day.</summary>
-    private KpiCard TodayCard()
+    /// <summary>Energy used over the period the card's menu chose, with its cost, from the period the last pass read,
+    /// which a new choice's read replaces at once; before the first pass, the period chosen and nothing more.</summary>
+    private KpiCard EnergyUsed()
     {
-        if (_read is not { Snapshot: { } snapshot } read) return new KpiCard("Today", Format.NoReading, _read is null ? "" : Unread, null, TrendKind.Text, 0);
+        var period = _read?.Energy?.Period ?? EnergyPeriod;
+        var card = _read is not { } read ? null : period switch
+        {
+            EnergyPeriod.Today => TodayEnergy(read),
+            EnergyPeriod.ThisWeek => WeekEnergy(read),
+            EnergyPeriod.ThisMonth => MonthEnergy(read),
+            _ => EnergySinceStart(read),
+        };
+        card ??= new KpiCard(EnergyLabel, Format.NoReading, _read is null ? "" : Unread, null, TrendKind.Text, 0)
+        {
+            HasBar = period != EnergyPeriod.SinceStart,
+        };
+        return card with { Period = PeriodName(period), LowerIsBetter = true };
+    }
+
+    private const string EnergyLabel = "Energy used";
+
+    /// <summary>The period's name on the card's button, as the menu lists it.</summary>
+    internal static string PeriodName(EnergyPeriod period) => period switch
+    {
+        EnergyPeriod.Today => "Today",
+        EnergyPeriod.ThisWeek => "This week",
+        EnergyPeriod.ThisMonth => "This month",
+        _ => "Since start",
+    };
+
+    /// <summary>Today: kWh so far and its cost, against the average of the last 30 complete days up to the same time of
+    /// day; the bar is today over that whole average day. Null without a snapshot.</summary>
+    private KpiCard? TodayEnergy(Reading read)
+    {
+        if (read.Snapshot is not { } snapshot) return null;
         var today = snapshot.Today;
         var todayDay = DateOnly.FromDateTime(read.LocalNow.DateTime);
         var average = DashboardMaths.AverageDayWh(read.Recent?.Days.Where(day => day.Day < todayDay).ToList() ?? []);
         var change = DashboardMaths.TodayTrend(today.EnergyKwh * 1000, average, read.LocalNow.TimeOfDay.TotalDays);
-        return new KpiCard(
-            "Today",
-            Format.Kwh(today.EnergyKwh, _culture) + " kWh",
-            today.Currency is { } currency ? Money.Format(today.Cost, currency, _culture) : "no tariff set",
-            Trend(change), change is { } c ? DashboardMaths.Kind(c) : TrendKind.Text,
-            DashboardMaths.Fill(today.EnergyKwh * 1000, average ?? 0)) { LowerIsBetter = true };
+        return Energy(today, change, DashboardMaths.Fill(today.EnergyKwh * 1000, average ?? 0), "vs your average day");
     }
+
+    /// <summary>This week, Monday to now as <see cref="Ranges.ThisWeek"/> cuts it, against last week from its Monday to the
+    /// same day and time; the bar is this week so far over the whole of last week. Null without this week.</summary>
+    private KpiCard? WeekEnergy(Reading read)
+    {
+        if (read.Energy?.SoFar is not { } week) return null;
+        var kwh = week.Totals.EnergyKwh;
+        var change = DashboardMaths.MonthTrend(kwh * 1000, read.Energy.SamePoint?.Totals.EnergyKwh * 1000);
+        return Energy(week.Totals, change, DashboardMaths.Fill(kwh, read.Energy.Whole?.Totals.EnergyKwh ?? 0), "vs last week");
+    }
+
+    /// <summary>This month so far, from the snapshot the idle waste reads, against last month to the same day and time;
+    /// the bar is this month so far over the whole of last month. Null without a snapshot.</summary>
+    private KpiCard? MonthEnergy(Reading read)
+    {
+        if (read.Snapshot is not { } snapshot) return null;
+        var kwh = snapshot.Month.EnergyKwh;
+        var change = DashboardMaths.MonthTrend(kwh * 1000, read.LastMonth?.Totals.EnergyKwh * 1000);
+        return Energy(snapshot.Month, change, DashboardMaths.Fill(kwh, read.Energy?.Whole?.Totals.EnergyKwh ?? 0), "vs last month");
+    }
+
+    /// <summary>Everything this PC has recorded, from the first row's day, with its cost; no bar or trend, but the day's
+    /// average over the time since the first row, a day at the least so an hour's history is not a day's worth. Null
+    /// without the range.</summary>
+    private KpiCard? EnergySinceStart(Reading read)
+    {
+        if (read.Energy?.SoFar is not { } all) return null;
+        string? line = null;
+        if (read.FirstRow is { } first)
+        {
+            var days = Math.Max(1, (read.LocalNow - first).TotalDays);
+            var perDay = Math.Max(0, all.Totals.EnergyKwh) / days;
+            line = $"since {Ranges.LocalDay(first, _zone).ToString("d MMMM", _culture)}, {perDay.ToString("0.00", _culture)} kWh a day on average";
+        }
+        return Energy(all.Totals, null, 0, line) with { HasBar = false };
+    }
+
+    /// <summary>The energy card over <paramref name="totals"/>: its kWh, its cost or that there is no tariff, the change
+    /// and the bar.</summary>
+    private KpiCard Energy(RangeTotals totals, double? change, double fill, string? against) => new(
+        EnergyLabel,
+        Format.Kwh(totals.EnergyKwh, _culture) + " kWh",
+        totals.Currency is { } currency ? Money.Format(totals.Cost, currency, _culture) : "no tariff set",
+        Trend(change), change is { } c ? DashboardMaths.Kind(c) : TrendKind.Text,
+        fill) { Against = against };
 
     /// <summary>Idle waste this month: the month's idle energy, on and off, priced at the month's average price as the
     /// Report and the Now page price it, against last month's; the bar is idle waste over the month's total.</summary>

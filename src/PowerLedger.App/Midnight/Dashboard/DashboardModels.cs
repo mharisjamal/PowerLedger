@@ -32,6 +32,17 @@ internal sealed record KpiCard(string Label, string Big, string Small, string? T
 {
     /// <summary>Whether a fall is the good news: true for energy, which costs.</summary>
     public bool LowerIsBetter { get; init; }
+
+    /// <summary>The period the card covers, on its period button: "Since start", "Today"; null for a card whose period is
+    /// its own and fixed, which the view names.</summary>
+    public string? Period { get; init; }
+
+    /// <summary>What the trend is against, beside the cost: "vs last week"; or, for a card with no bar, the line in its
+    /// place: "since 20 July, 0.30 kWh a day on average". Null for a card whose view says it, or for nothing to say.</summary>
+    public string? Against { get; init; }
+
+    /// <summary>Whether the card has its striped bar and trend; since the start there is nothing to measure it against.</summary>
+    public bool HasBar { get; init; } = true;
 }
 
 /// <summary>One row of "Where the power went".</summary>
