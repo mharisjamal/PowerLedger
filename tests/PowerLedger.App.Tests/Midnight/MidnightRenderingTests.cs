@@ -142,6 +142,13 @@ public class MidnightRenderingTests
                     UiHarness.Find<TextBlock>(card, text => text.Text == "vs last week")!.IsVisible.ShouldBeTrue();
                     UiHarness.Find<TextBlock>(card, text => text.Name == "Note")!.IsVisible.ShouldBeFalse();
                     UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-energy-week-{theme}.png");
+                    foreach (var (period, file) in new[] { (EnergyPeriod.Today, "today"), (EnergyPeriod.ThisMonth, "month") })
+                    {
+                        dashboard.EnergyPeriod = period;
+                        UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                        UiTree.Descendants<HatchBar>(CardNamed(view, "Energy used")).Single().IsVisible.ShouldBeTrue(file);
+                        UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-energy-{file}-{theme}.png");
+                    }
                 }
                 finally
                 {
