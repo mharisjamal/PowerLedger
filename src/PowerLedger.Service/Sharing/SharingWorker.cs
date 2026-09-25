@@ -23,7 +23,8 @@ internal sealed record SharingEnvironment(string Sent, string Crashes, Func<Scru
 /// The collector and uploader (data-sharing design §4). Every five minutes, and at start, it builds the minutes completed
 /// since the last run into the outbox while Hardware and power is on, records the sources' failures and the service's
 /// crashes while Crash and sensor reports is on, drops days too old to send, posts a consent change the server hasn't
-/// heard, sends each complete day once the schedule says so, and today so far once an hour (Plan Q §1). Between runs it carries out the App's requests, one at a
+/// heard, sends each complete day once the schedule says so, today so far once an hour (Plan Q §1), and the hourly totals
+/// from before Hardware and power was turned on under consent version 2, once (Plan Q §2). Between runs it carries out the App's requests, one at a
 /// time, so nothing else touches the outbox or the sharing state and neither needs a lock. A request the App waits on
 /// doesn't wait for a run: the run gives way to it where nothing is half-done, cancelling a request to the server under
 /// way, and starts again once the App has its answer. So the App is answered within <see cref="AppWait"/> of asking, and a
@@ -39,6 +40,12 @@ internal sealed class SharingWorker : BackgroundService
     public static readonly TimeSpan AppWait = TimeSpan.FromSeconds(8);
 
     public const int MaxDaysPerRun = 7;
+
+    /// <summary>The most history chunks one run sends, about a year, so years of it go over a few runs.</summary>
+    public const int MaxHistoryChunksPerRun = 12;
+
+    /// <summary>The consent version whose Hardware and power, turned on, sends the history (Plan Q §2).</summary>
+    public const int HistoryConsentVersion = 2;
     public const int KeepDays = 14;
     public const int KeepSent = 30;
     public const int MaxCrashesPerDay = 20;
@@ -67,12 +74,16 @@ internal sealed class SharingWorker : BackgroundService
     private readonly OutboxRepository _outbox;
     private readonly RawSampleRepository _raw;
     private readonly TariffRepository _tariffs;
+    private readonly AggregateRepository _hours;
 
     /// <summary>Each source's failure count at the last look, so only new failures are added to the day.</summary>
     private readonly Dictionary<string, int> _failures = new(StringComparer.Ordinal);
 
     /// <summary>True when the last run, or a consent change's post, gave way to the App: it starts again once the inbox is empty.</summary>
     private bool _resume;
+
+    /// <summary>True once the log has said the server has no <c>/v1/history</c>, so it says so once, not every try.</summary>
+    private bool _historyMissingLogged;
 
     /// <param name="policy">The server's minimum version (Plan Q §3), shared with the update worker: below it nothing is sent.</param>
     public SharingWorker(
@@ -90,6 +101,7 @@ internal sealed class SharingWorker : BackgroundService
         _outbox = new OutboxRepository(database);
         _raw = new RawSampleRepository(database);
         _tariffs = new TariffRepository(database);
+        _hours = new AggregateRepository(database);
     }
 
     private TimeZoneInfo Zone => _clock.LocalTimeZone;
@@ -205,6 +217,7 @@ internal sealed class SharingWorker : BackgroundService
         {
             await SendTodayAsync(now, stop).ConfigureAwait(false);
         }
+        await SendHistoryAsync(now, stop).ConfigureAwait(false);
     }
 
     /// <summary>Carries out one of the App's requests and answers it, unless the pipe has given up on it: the App was then told
@@ -327,6 +340,8 @@ internal sealed class SharingWorker : BackgroundService
             _outbox.DeleteMinutes();
             _store.CollectedTo = null;
         }
+        if (consent.Power && !was.Power && consent.Version >= HistoryConsentVersion) StartHistory(nowMs);
+        if (!consent.Power) ForgetHistory();
         if (!consent.Diagnostics)
         {
             _outbox.DeleteEvents(OutboxEvents.Crash);
@@ -830,6 +845,83 @@ internal sealed class SharingWorker : BackgroundService
                 Note(new SendProblem(reason, Rejected: false));
                 _store.Backoff = SendSchedule.After(_store.Backoff, now);
                 break;
+        }
+    }
+
+    /// <summary>The history (Plan Q §2) is every hour row from before the hour Hardware and power was turned on in: the
+    /// minutes cover what comes after. It goes from the oldest.</summary>
+    private void StartHistory(long nowMs)
+    {
+        _store.HistoryUntilMs = nowMs / HourMs * HourMs;
+        _store.HistoryThroughMs = null;
+        _store.HistoryBackoff = null;
+    }
+
+    /// <summary>Hardware and power turned off stops the history and forgets how far it went.</summary>
+    private void ForgetHistory()
+    {
+        _store.HistoryUntilMs = null;
+        _store.HistoryThroughMs = null;
+        _store.HistoryBackoff = null;
+    }
+
+    /// <summary>
+    /// Sends the history (Plan Q §2) while Hardware and power is on and the server has heard the consent: the hours from
+    /// before the answer, oldest first, a chunk of at most <see cref="HistoryBuilder.ChunkDays"/> days at a time and at most
+    /// <see cref="MaxHistoryChunksPerRun"/> a run. Its progress is kept after each chunk, so a restart carries on. A chunk
+    /// refused for good is passed over. An old server without <c>/v1/history</c> (404), or any failure, holds back only
+    /// the history, on a back-off of its own, and is neither a problem nor a reason to hold the reports back. It gives way to
+    /// the App before each chunk.
+    /// </summary>
+    private async Task SendHistoryAsync(DateTimeOffset now, CancellationToken stop)
+    {
+        for (var chunks = 0; chunks < MaxHistoryChunksPerRun; chunks++)
+        {
+            var consent = _store.Consent;
+            if (!consent.AllowsAny || !consent.Power || _store.ConsentPending || Outdated) return;
+            if (_store.HistoryUntilMs is not { } untilMs || _store.HistoryThroughMs >= untilMs) return;
+            if (_store.HistoryBackoff is { } backoff && now.ToUnixTimeMilliseconds() < backoff.NextMs) return;
+            if (_commands.AppWaiting) throw new GiveWay();
+
+            var until = DateTimeOffset.FromUnixTimeMilliseconds(untilMs);
+            var from = DateTimeOffset.FromUnixTimeMilliseconds(_store.HistoryThroughMs ?? 0);
+            if (_hours.FirstHourStart(from, until) is not { } first)
+            {
+                _store.HistoryThroughMs = untilMs;                            // all of it has gone
+                _log.LogInformation("The history has all been sent");
+                return;
+            }
+            var to = HistoryBuilder.ChunkEnd(first, until);
+            var (id, key) = Identity();
+            var history = HistoryBuilder.Build(
+                id, _environment.Host().App, consent, (int)Zone.GetUtcOffset(now).TotalMinutes, _hours.ReadHours(first, to));
+            var body = SharingClient.Gzip(ReportJson.Write(history));
+            var outcome = await OwnCallAsync(cancel => _client.SendHistoryAsync(body, key, cancel), stop).ConfigureAwait(false);
+            if (StopsForUpdate(outcome)) return;
+            switch (outcome)
+            {
+                case SendOutcome.Accepted:
+                    _store.HistoryThroughMs = to.ToUnixTimeMilliseconds();
+                    _store.HistoryBackoff = null;
+                    break;
+                case SendOutcome.Rejected rejected:
+                    _log.LogWarning("The server rejected the history from {From} to {To}: {Reason}; it goes on after it", first, to, rejected.Text);
+                    _store.HistoryThroughMs = to.ToUnixTimeMilliseconds();
+                    break;
+                case SendOutcome.Gone:
+                    _log.LogInformation("The server has deleted this install; forgetting it");
+                    Forget(now);
+                    return;
+                case SendOutcome.NotFound:
+                    if (!_historyMissingLogged) _log.LogInformation("The server doesn't take the history yet; it will be tried again later");
+                    _historyMissingLogged = true;
+                    _store.HistoryBackoff = SendSchedule.After(_store.HistoryBackoff, now);
+                    return;
+                default:
+                    _log.LogInformation("Sending the history failed ({Reason}); trying again later", outcome.Reason);
+                    _store.HistoryBackoff = SendSchedule.After(_store.HistoryBackoff, now);
+                    return;
+            }
         }
     }
 

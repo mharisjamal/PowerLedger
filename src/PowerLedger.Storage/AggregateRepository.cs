@@ -30,6 +30,17 @@ public sealed class AggregateRepository(SqliteDatabase db)
     /// <summary>Start of the newest hour row, or null when there are none.</summary>
     public DateTimeOffset? LastHourStart() => LastStart(HourTable);
 
+    /// <summary>Start of the oldest hour row with from ≤ start &lt; to, or null when there is none.</summary>
+    public DateTimeOffset? FirstHourStart(DateTimeOffset from, DateTimeOffset to)
+    {
+        using var c = db.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = $"SELECT MIN(start_ms) FROM {HourTable} WHERE start_ms >= $from AND start_ms < $to";
+        Rows.Add(cmd, "$from", Rows.Ms(from));
+        Rows.Add(cmd, "$to", Rows.Ms(to));
+        return cmd.ExecuteScalar() is long ms ? Rows.Time(ms) : null;
+    }
+
     /// <summary>Start of the oldest minute row, or null when there are none: where history begins.</summary>
     public DateTimeOffset? FirstMinuteStart()
     {

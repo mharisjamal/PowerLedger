@@ -60,6 +60,21 @@ public class AggregateRepositoryTests
     }
 
     [Fact]
+    public void The_first_hour_in_a_range_is_the_oldest_row_from_its_start_up_to_its_end()
+    {
+        using var t = new TestDatabase();
+        var repo = new AggregateRepository(t.Db);
+        repo.FirstHourStart(Fixtures.T0, Fixtures.T0.AddDays(1)).ShouldBeNull();
+        repo.UpsertHour(Minute(120));
+        repo.UpsertHour(Minute(60));
+        repo.UpsertMinute(Minute(0));                                             // a minute is no hour
+
+        repo.FirstHourStart(Fixtures.T0, Fixtures.T0.AddDays(1)).ShouldBe(Fixtures.T0.AddHours(1));
+        repo.FirstHourStart(Fixtures.T0.AddMinutes(61), Fixtures.T0.AddDays(1)).ShouldBe(Fixtures.T0.AddHours(2));
+        repo.FirstHourStart(Fixtures.T0, Fixtures.T0.AddHours(1)).ShouldBeNull();   // the end is left out
+    }
+
+    [Fact]
     public void Purge_removes_old_minutes_only()
     {
         using var t = new TestDatabase();

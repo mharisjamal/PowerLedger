@@ -235,6 +235,99 @@ public sealed class SharingWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task Turning_power_on_under_version_2_sends_the_hours_from_before_once_oldest_first_in_chunks_of_31_days()
+    {
+        _h.Hours(Local(1, 0).AddMonths(-1), 24 * 55);                              // 1 August 00:00 to 24 September 23:00
+        _h.Clock.SetUtcNow(Local(24, 10, 20));
+        await _h.Consent(false, true, true);
+        var until = Local(24, 10);                                                 // the hours before the one the answer came in
+        _h.Store.HistoryUntilMs.ShouldBe(until.ToUnixTimeMilliseconds());
+
+        _h.Clock.SetUtcNow(Local(24, 10, 25));
+        await _h.TickAsync();
+
+        var chunks = _h.Client.Histories.ToList();
+        chunks.Count.ShouldBe(2);
+        var first = chunks[0];
+        first["schema"]!.GetValue<string>().ShouldBe("history-v1");
+        first["installId"]!.GetValue<string>().ShouldBe(_h.Store.InstallId);
+        first["app"]!.GetValue<string>().ShouldBe("0.6.0");
+        first["utcOffsetMinutes"]!.GetValue<int>().ShouldBe(120);
+        JsonNode.DeepEquals(first["consent"], JsonNode.Parse("""{"version":2,"diagnostics":false,"usage":true,"power":true,"share":false}""")).ShouldBeTrue();
+        JsonNode.DeepEquals(first["hours"]![0], JsonNode.Parse($$"""
+            {"t":{{Local(1, 0).AddMonths(-1).ToUnixTimeMilliseconds()}},"avgW":101.235,"maxW":150,"energyWh":101.235,"cpuWh":30.5,
+             "gpuWh":40.25,"displayWh":10,"restWh":20.485,"idleOnWh":5,"idleOffWh":1,"idleOnS":600,"idleOffS":60,"onS":3540,
+             "batteryS":120,"gapS":60,"sampleCount":3540,"measuredS":1800,"calibratedS":900,"estimatedS":840}
+            """)).ShouldBeTrue(first["hours"]![0]!.ToJsonString());
+        var starts = chunks.SelectMany(chunk => chunk["hours"]!.AsArray().Select(hour => hour!["t"]!.GetValue<long>())).ToList();
+        chunks[0]["hours"]!.AsArray().Count.ShouldBe(31 * 24);
+        starts.ShouldBe(Enumerable.Range(0, 24 * 54 + 10).Select(i => Local(1, 0).AddMonths(-1).AddHours(i).ToUnixTimeMilliseconds()));
+        _h.Client.Calls.Where(call => call.Kind == "history").ShouldAllBe(call => call.Key == _h.Store.Key);
+        _h.Store.HistoryThroughMs.ShouldBe(until.ToUnixTimeMilliseconds());
+
+        _h.Clock.SetUtcNow(Local(24, 12));
+        await _h.TickAsync();
+        _h.Client.Histories.Count().ShouldBe(2);                                   // once
+    }
+
+    [Fact]
+    public async Task History_goes_only_for_power_turned_on_under_version_2_and_turning_it_off_forgets_the_progress()
+    {
+        _h.Hours(Local(20, 0), 24);
+        // A version 1 answer with power on, from before 0.9.0: it stands, and sends no history.
+        _h.Store.SaveConsent(new StoredConsent(new Consent(1, false, false, true, false), Local(21, 9).ToUnixTimeMilliseconds()));
+        _h.Store.Identity();
+        _h.Clock.SetUtcNow(Local(24, 10, 5));
+        await _h.TickAsync();
+        await _h.Consent(false, true, true);                                        // power stays on: still no history
+        _h.Clock.SetUtcNow(Local(24, 10, 10));
+        await _h.TickAsync();
+        _h.Client.Histories.ShouldBeEmpty();
+        _h.Store.HistoryUntilMs.ShouldBeNull();
+
+        _h.Store.HistoryThroughMs = 1;
+        await _h.Consent(false, true, false);                                       // off: nothing kept
+        (_h.Store.HistoryUntilMs, _h.Store.HistoryThroughMs).ShouldBe((null, null));
+
+        await _h.Consent(false, true, true);                                        // on again, answering the new wording
+        _h.Clock.SetUtcNow(Local(24, 10, 15));
+        await _h.TickAsync();
+        _h.Client.Histories.ShouldHaveSingleItem()["hours"]!.AsArray().Count.ShouldBe(24);
+    }
+
+    [Fact]
+    public async Task An_old_server_without_history_holds_back_only_the_history_which_a_restart_carries_on()
+    {
+        _h.Hours(Local(1, 0).AddMonths(-1), 24 * 40);
+        _h.Clock.SetUtcNow(Local(24, 10, 20));
+        await _h.Consent(false, false, true);
+        var answers = new Queue<SendOutcome>([new SendOutcome.Accepted(), new SendOutcome.NotFound("the server answered 404 Not Found")]);
+        _h.Client.Answer = call => call.Kind == "history" ? answers.Dequeue() : new SendOutcome.Accepted();
+        _h.Readings(Local(24, 10, 20), TimeSpan.FromMinutes(30));
+
+        _h.Clock.SetUtcNow(Local(24, 10, 25));
+        await _h.TickAsync();
+        var firstEnd = Local(1, 0).AddMonths(-1).AddDays(31).ToUnixTimeMilliseconds();
+        _h.Store.HistoryThroughMs.ShouldBe(firstEnd);
+        _h.Store.HistoryBackoff.ShouldNotBeNull().NextMs.ShouldBe(Local(24, 11, 25).ToUnixTimeMilliseconds());
+        (_h.Store.Backoff, _h.Store.Problem).ShouldBe((null, null));
+
+        _h.Clock.SetUtcNow(Local(24, 10, 50));
+        await _h.TickAsync();
+        _h.Client.Histories.Count().ShouldBe(2);                                   // waiting out its back-off
+        _h.Client.Partials.ShouldHaveSingleItem();                                 // while today so far goes on
+
+        _h.Restart();
+        _h.Client.Answer = _ => new SendOutcome.Accepted();
+        _h.Clock.SetUtcNow(Local(24, 11, 30));
+        await _h.TickAsync();
+        var last = _h.Client.Histories.Last();
+        last["hours"]![0]!["t"]!.GetValue<long>().ShouldBe(firstEnd);              // on from where it stopped
+        _h.Store.HistoryThroughMs.ShouldBe(Local(24, 10).ToUnixTimeMilliseconds());
+        _h.Store.HistoryBackoff.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Send_now_the_next_day_sends_the_minutes_read_since_the_answer_with_no_tick_between()
     {
         _h.Clock.SetUtcNow(Local(24, 10));
@@ -1251,6 +1344,10 @@ public sealed class SharingWorkerTests : IDisposable
 
     private static UsageCounts Usage(string day) => new(day, 2, new Dictionary<string, int> { ["now"] = 1 }, new Dictionary<string, int>(), 0, 0, 3, "dark", "en-US");
 
+    /// <summary>An hour row with a figure in every column, some needing rounding.</summary>
+    private static Aggregate Hour(DateTimeOffset start) =>
+        new(start, 101.23456, 150, 101.23456, 30.5, 40.25, 10, 20.48456, 5, 1, 600, 60, 3540, 120, 60, 3540, 1800, 900, 840);
+
     private static CrashReport Crash(DateTimeOffset at) =>
         new(at, "app", "0.6.0", ["System.InvalidOperationException"], "Collection was modified.", "   at X()");
 
@@ -1305,8 +1402,7 @@ public sealed class SharingWorkerTests : IDisposable
             Board.PublishDiscreteGpu(true);
             Directory.CreateDirectory(Sent);
             Directory.CreateDirectory(Crashes);
-            var environment = new SharingEnvironment(Sent, Crashes, Names, () => SharingFakes.Host, () => SendMinute);
-            Worker = new SharingWorker(Database.Db, Board, Commands, Client, Policy, environment, Wall, NullLogger<SharingWorker>.Instance);
+            Worker = NewWorker();
         }
 
         public TestDatabase Database { get; } = new();
@@ -1324,7 +1420,17 @@ public sealed class SharingWorkerTests : IDisposable
 
         public FakeSharingClient Client { get; } = new();
 
-        public SharingWorker Worker { get; }
+        public SharingWorker Worker { get; private set; }
+
+        /// <summary>A new worker on the same database, server and clock, as after the service restarts.</summary>
+        public void Restart() => Worker = NewWorker();
+
+        /// <summary>Hour rows, one an hour from <paramref name="from"/>, as the rollups keep them forever.</summary>
+        public void Hours(DateTimeOffset from, int count)
+        {
+            var hours = new AggregateRepository(Database.Db);
+            for (var i = 0; i < count; i++) hours.UpsertHour(Hour(from.AddHours(i)));
+        }
 
         /// <summary>How many runs have started while a request the App waits on was queued: a run asks for the names to scrub
         /// first thing. (A request's handling asks after taking it, and a run's upload before it goes.)</summary>
@@ -1380,6 +1486,10 @@ public sealed class SharingWorkerTests : IDisposable
         /// <summary>A crash file as the service writes one when it crashes.</summary>
         public void CrashFile(DateTimeOffset at, string message = "Boom.") =>
             ServiceCrashes.TryWrite(Crashes, new InvalidOperationException(message), at, "0.6.0").ShouldNotBeNull();
+
+        private SharingWorker NewWorker() => new(
+            Database.Db, Board, Commands, Client, Policy, new SharingEnvironment(Sent, Crashes, Names, () => SharingFakes.Host, () => SendMinute),
+            Wall, NullLogger<SharingWorker>.Instance);
 
         private ScrubNames Names()
         {
