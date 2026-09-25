@@ -65,14 +65,12 @@ public sealed class UiPreferencesTests : IDisposable
     }
 
     [Fact]
-    public void Updates_are_on_by_default_even_in_a_file_from_before_they_existed()
+    public void A_file_from_when_updates_could_be_turned_off_still_loads()
     {
-        new UiPreferencesStore(File).Load().CheckForUpdates.ShouldBeTrue();
-
         Directory.CreateDirectory(_folder);
-        System.IO.File.WriteAllText(File, """{ "Theme": "Dark", "FirstRunDone": true }""");
+        System.IO.File.WriteAllText(File, """{ "Theme": "Dark", "FirstRunDone": true, "CheckForUpdates": false }""");
         var old = new UiPreferencesStore(File).Load();
-        old.CheckForUpdates.ShouldBeTrue();
+        old.FirstRunDone.ShouldBeTrue();
         old.AnnouncedVersion.ShouldBeNull();
         old.LastVersion.ShouldBeNull();
     }
@@ -154,7 +152,7 @@ public sealed class UiPreferencesTests : IDisposable
     public void The_update_bookkeeping_survives_a_save_and_a_load()
     {
         var store = new UiPreferencesStore(File);
-        var saved = UiPreferences.Default with { CheckForUpdates = false, AnnouncedVersion = "0.3.0", LastVersion = "0.2.0" };
+        var saved = UiPreferences.Default with { AnnouncedVersion = "0.3.0", LastVersion = "0.2.0" };
         store.Save(saved);
         store.Load().ShouldBe(saved);
     }

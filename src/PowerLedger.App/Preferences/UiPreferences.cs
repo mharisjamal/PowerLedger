@@ -46,11 +46,6 @@ internal sealed record UiPreferences
     /// for an install that already had <see cref="FirstRunDone"/> before this field existed.</summary>
     public DateTimeOffset? FirstRunAt { get; init; }
 
-    /// <summary>Look for new versions every few hours and download them quietly (spec §13). On until the user unticks it;
-    /// a ui.json from before it existed keeps it on. It has a setter rather than init for that: the JSON source generator
-    /// gives an init-only property missing from the file its type's default, false, where a setter is left alone.</summary>
-    public bool CheckForUpdates { get; set; } = true;
-
     /// <summary>Read each external monitor over its cable, read-only: whether it is on each minute, and its brightness every
     /// five minutes (Plans J and K). It stops only the requests sent to monitors; the refresh rate and HDR state Windows
     /// drives each at are read whatever it says, as that asks no monitor anything. On until the user unticks it; a ui.json

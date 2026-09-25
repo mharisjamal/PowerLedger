@@ -121,8 +121,15 @@ doesn't carry one. Then a card at the bottom of the window's rail, one notificat
 the tray menu offer **Restart to update**:
 Windows asks for permission, setup closes the App, updates the service and opens the new version. The check sends nothing
 about you or your PC; GitHub sees the request, with your IP address and `PowerLedger/<version>` as its user agent.
-Settings turns the checks off (**Download new versions quietly, then ask**) and has **Check now**. Drafts and
-pre-releases are never offered. Version 0.1.0 has no updater: install a newer version over it by hand once.
+Checks are always on; Settings has **Check now**. Drafts and pre-releases are never offered. Version 0.1.0 has no
+updater: install a newer version over it by hand once.
+
+From 0.9.0 the service can install updates itself, once the owner's release key is built in: it downloads the installer
+for the PC into `%ProgramData%\PowerLedger\Updates`, a folder only SYSTEM and administrators can use, and installs it only
+when its size, its SHA-256 and the owner's signature all check out and it is newer than the version running. It installs
+while the window isn't showing, or once you have been idle for five minutes, and at the latest six hours after the
+download, with a tray notice a minute before; then it opens the App again. The card says **Installing automatically**.
+A version the data server no longer takes is installed at once, and the App shows **PowerLedger needs an update** until it is.
 
 ## Build and test
 

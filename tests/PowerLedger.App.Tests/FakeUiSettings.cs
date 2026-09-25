@@ -49,13 +49,6 @@ internal sealed class FakeUiSettings : IUiSettings
         return null;
     }
 
-    public string? CheckForUpdates(bool enabled)
-    {
-        Current = Current with { CheckForUpdates = enabled };
-        Changes.Add($"updates {enabled}");
-        return null;
-    }
-
     public string? ReadMonitorBrightness(bool enabled)
     {
         Current = Current with { ReadMonitorBrightness = enabled };

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using Microsoft.Extensions.Time.Testing;
+using PowerLedger.Contracts;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -22,8 +23,168 @@ public class UpdaterTests
         Version.Parse(version), new Uri($"https://github.com/mharisjamal/PowerLedger/releases/tag/v{version}"),
         new Uri($"{GitHubReleaseFeed.Downloads}v{version}/PowerLedger-{version}-setup.exe"), $"PowerLedger-{version}-setup.exe", 1000, new byte[32]);
 
+    private readonly List<string> _askedService = [];
+
+    /// <summary>What the service answers Update now with.</summary>
+    private WriteResult _serviceAnswer = WriteResult.Done;
+
     private Updater Updater(string running = "0.2.0") => new(
-        _feed, _downloader, _setup, _cost, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, Version.Parse(running), (release, ready) => _announced.Add((release, ready)), _opened.Add);
+        _feed, _downloader, _setup, _cost, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, Version.Parse(running), (release, ready) => _announced.Add((release, ready)), _opened.Add,
+        askService: _ =>
+        {
+            _askedService.Add("updateNow");
+            return Task.FromResult(_serviceAnswer);
+        });
+
+    private static UpdateStatus ServiceInstalls(string? stage = null, string? min = null) => new(true, stage, min, UpdateRequired: false);
+
+    // ---- Plan Q: the service installs updates, and the server's minimum
+
+    [Fact]
+    public async Task When_the_service_installs_updates_the_App_offers_nothing_to_restart_into_and_downloads_nothing()
+    {
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        updater.Apply(ServiceInstalls());
+
+        await updater.CheckAsync();
+
+        _downloader.Downloads.ShouldBeEmpty();
+        updater.Stage.ShouldBe(UpdateStage.Available);
+        updater.ShowCard.ShouldBeTrue();
+        updater.Title.ShouldBe("PowerLedger 0.3.0 is available");
+        updater.Detail.ShouldBe("Installing automatically");
+        updater.ActionLabel.ShouldBeNull();
+        updater.ReadyVersion.ShouldBeNull();
+        _announced.ShouldBeEmpty();   // the service gives its own notice before it installs
+    }
+
+    [Fact]
+    public async Task A_download_ready_before_the_service_said_it_installs_turns_into_installing_automatically()
+    {
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        await updater.CheckAsync();
+        updater.ActionLabel.ShouldBe("Restart to update");
+
+        updater.Apply(ServiceInstalls());
+
+        updater.Detail.ShouldBe("Installing automatically");
+        updater.ActionLabel.ShouldBeNull();
+        updater.ReadyVersion.ShouldBeNull();
+    }
+
+    [Fact]
+    public void The_services_stage_is_settings_line()
+    {
+        var updater = Updater();
+        updater.Apply(ServiceInstalls(stage: "Downloading PowerLedger 0.3.0"));
+        updater.Status.ShouldBe("Downloading PowerLedger 0.3.0");
+    }
+
+    [Theory]
+    [InlineData("0.3.0", true)]
+    [InlineData("0.2.0", false)]
+    [InlineData("0.1.9", false)]
+    [InlineData(null, false)]
+    [InlineData("nonsense", false)]
+    public void An_update_is_required_only_below_the_servers_minimum(string? min, bool required)
+    {
+        var updater = Updater("0.2.0");
+        updater.Apply(new UpdateStatus(false, null, min, UpdateRequired: false));
+        updater.UpdateRequired.ShouldBe(required);
+    }
+
+    [Fact]
+    public void An_older_service_says_nothing_so_nothing_is_required()
+    {
+        var updater = Updater("0.2.0");
+        updater.Apply(new UpdateStatus(true, null, "0.3.0", UpdateRequired: true));
+        updater.Apply(null);
+        updater.UpdateRequired.ShouldBeFalse();
+        updater.ServiceInstalls.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void The_blocking_window_hears_when_an_update_becomes_required()
+    {
+        var updater = Updater("0.2.0");
+        var changed = new List<string?>();
+        updater.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        updater.Apply(new UpdateStatus(false, null, "0.3.0", UpdateRequired: false));
+        changed.ShouldContain(nameof(updater.UpdateRequired));
+        updater.RequiredTitle.ShouldBe("PowerLedger needs an update");
+        updater.RequiredText.ShouldBe("This version is out of date and has stopped sending data. Update to keep using PowerLedger.");
+    }
+
+    [Fact]
+    public async Task Update_now_asks_the_service_when_it_installs_updates()
+    {
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        updater.Apply(new UpdateStatus(true, null, "0.3.0", UpdateRequired: true));
+
+        updater.RequiredStatus.ShouldBeNull();   // nothing to say until Update now is pressed
+        await updater.UpdateNowAsync();
+
+        updater.RequiredStatus.ShouldBe(updater.Status);
+        _askedService.ShouldBe(["updateNow"]);
+        _downloader.Downloads.ShouldBeEmpty();
+        _setup.Started.ShouldBeEmpty();
+        updater.Status.ShouldBe("Installing the update. PowerLedger closes and opens again when it's done.");
+    }
+
+    [Fact]
+    public async Task Update_now_falls_back_to_the_Apps_own_setup_when_the_service_cant_even_on_a_metered_connection()
+    {
+        _feed.Latest = Release("0.3.0");
+        _cost.Metered = true;
+        _serviceAnswer = new WriteResult("The service has no update ready to install.");
+        var updater = Updater();
+        updater.Apply(new UpdateStatus(true, null, "0.3.0", UpdateRequired: true));
+
+        await updater.UpdateNowAsync();
+
+        _askedService.ShouldBe(["updateNow"]);
+        _downloader.Downloads.Single().Name.ShouldBe("0.3.0");
+        _setup.Started.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task Update_now_without_the_service_runs_the_Apps_own_setup()
+    {
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        updater.Apply(new UpdateStatus(false, null, "0.3.0", UpdateRequired: false));
+
+        await updater.UpdateNowAsync();
+
+        _askedService.ShouldBeEmpty();
+        _setup.Started.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task Update_now_with_a_download_already_ready_installs_it()
+    {
+        _feed.Latest = Release("0.3.0");
+        var updater = Updater();
+        await updater.CheckAsync();
+
+        await updater.UpdateNowAsync();
+
+        _downloader.Downloads.Count.ShouldBe(1);
+        _setup.Started.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void Close_PowerLedger_asks_the_App_to_exit()
+    {
+        var updater = Updater();
+        var asked = 0;
+        updater.CloseRequested += () => asked++;
+        updater.ClosePowerLedger.Execute(null);
+        asked.ShouldBe(1);
+    }
 
     [Fact]
     public async Task A_newer_release_is_downloaded_quietly_then_offered()
@@ -190,7 +351,7 @@ public class UpdaterTests
     }
 
     [Fact]
-    public void It_checks_a_minute_after_starting_and_every_hour_while_allowed()
+    public void It_checks_a_minute_after_starting_and_every_hour_always()
     {
         var updater = Updater();
         updater.Start();
@@ -200,14 +361,11 @@ public class UpdaterTests
         _feed.Asked.ShouldBe(1);
         _clock.Advance(TimeSpan.FromHours(1));
         _feed.Asked.ShouldBe(2);
-
-        updater.CheckAutomatically = false;
-        _ui.Current.CheckForUpdates.ShouldBeFalse();
         _clock.Advance(TimeSpan.FromHours(12));
-        _feed.Asked.ShouldBe(2);
+        _feed.Asked.ShouldBe(14);                  // updates are always on (Plan Q §4): no tick box turns them off
 
-        updater.CheckNow.Execute(null);            // asked for, so it checks anyway
-        _feed.Asked.ShouldBe(3);
+        updater.CheckNow.Execute(null);
+        _feed.Asked.ShouldBe(15);
     }
 
     [Fact]

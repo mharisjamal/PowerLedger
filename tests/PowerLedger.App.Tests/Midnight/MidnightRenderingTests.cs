@@ -76,6 +76,58 @@ public class MidnightRenderingTests
         }
     }
 
+    /// <summary>Plan Q §3: below the server's minimum a panel covers the window under the top bar, which keeps its window
+    /// buttons; what it covers is out of the keyboard's reach and Update now has the focus. Plan Q §4: the card says
+    /// "Installing automatically" when the service installs.</summary>
+    [Fact]
+    public void The_blocking_update_panel_covers_the_window_in_both_themes()
+    {
+        Directory.CreateDirectory(UiHarness.Folder);
+        foreach (var theme in new[] { Theme.Dark, Theme.Light })
+        {
+            UiHarness.OnUi(() =>
+            {
+                using var saver = new FakeSaver();
+                var updates = MidnightFixtures.RequiredUpdate();
+                var shell = MidnightFixtures.Shell(saver, updates);
+                var window = MidnightFixtures.Window(shell, theme, updates);
+                window.Show();
+                try
+                {
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(1200));
+                    var cover = (FrameworkElement)window.FindName("UpdateRequiredCover");
+                    cover.IsVisible.ShouldBeTrue();
+                    UiHarness.Find<TextBlock>(cover, text => text.Text == "PowerLedger needs an update").ShouldNotBeNull();
+                    UiHarness.Find<Button>(cover, button => (string)button.Content == "Close PowerLedger").ShouldNotBeNull();
+                    var updateNow = UiHarness.Find<Button>(cover, button => (string)button.Content == "Update now").ShouldNotBeNull();
+                    ((UIElement)window.FindName("Pages")).IsEnabled.ShouldBeFalse();
+                    ((UIElement)window.FindName("Sidebar")).IsEnabled.ShouldBeFalse();
+                    updateNow.IsKeyboardFocused.ShouldBeTrue();
+                    UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-update-required-{theme}.png");
+                }
+                finally
+                {
+                    window.CloseForSwitch();
+                }
+
+                var automatic = MidnightFixtures.AutomaticUpdate();
+                var calm = MidnightFixtures.Window(MidnightFixtures.Shell(saver, automatic), theme, automatic);
+                calm.Show();
+                try
+                {
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(600));
+                    ((FrameworkElement)calm.FindName("UpdateRequiredCover")).IsVisible.ShouldBeFalse();
+                    UiHarness.Find<TextBlock>(calm, text => text.Text == "Installing automatically").ShouldNotBeNull();
+                    UiHarness.Render(calm, (int)calm.ActualWidth, (int)calm.ActualHeight, $"midnight-update-automatic-{theme}.png");
+                }
+                finally
+                {
+                    calm.CloseForSwitch();
+                }
+            });
+        }
+    }
+
     [Fact]
     public void The_pill_slides_to_each_item_the_sidebar_chooses_and_the_page_follows()
     {

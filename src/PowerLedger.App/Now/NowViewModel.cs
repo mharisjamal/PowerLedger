@@ -115,6 +115,10 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
 
     public bool IsCollecting { get => _isCollecting; private set => SetProperty(ref _isCollecting, value); }
 
+    /// <summary>Each status the service answered a poll with, on the UI thread: the updater reads how updates stand from it
+    /// (Plan Q §3, §4), whether or not a window shows.</summary>
+    public event Action<ServiceStatus>? StatusRead;
+
     /// <summary>"Start service" on the banner (spec §9: a Start button, through UAC).</summary>
     public ICommand StartService { get; }
 
@@ -265,6 +269,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     {
         if (settings is not null) _settings = settings;
         if (status is null) return;
+        StatusRead?.Invoke(status);
         var counted = status.Monitors?.Where(monitor => monitor is { Counted: true }).ToList() ?? [];
         _monitors = counted.Count;
         _monitorStates = PowerStates(counted);

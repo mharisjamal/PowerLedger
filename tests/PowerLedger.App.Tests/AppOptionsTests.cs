@@ -22,6 +22,15 @@ public class AppOptionsTests
         options.PipeName.ShouldBe("PowerLedger.dev");
         options.DatabasePath.ShouldBe(@"C:\Temp\pl-run\power.db");
         options.StartInTray.ShouldBeTrue();
+        options.AfterUpdate.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void The_service_opens_the_App_after_an_update_it_installed_in_the_tray()
+    {
+        var options = AppOptions.Parse(["--after-update", "--tray"]);
+        options.AfterUpdate.ShouldBeTrue();
+        options.StartInTray.ShouldBeTrue();
     }
 
     [Fact]

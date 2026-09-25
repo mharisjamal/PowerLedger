@@ -352,7 +352,7 @@
                         </ToggleButton>
                     </StackPanel>
                     <TextBlock Style="{StaticResource Said}" Text="{Binding AppMessage}" Visibility="{Binding AppMessage, Converter={StaticResource VisibleWhenText}}" />
-                    <!-- A grid, not the row, so Check now drops under the switch in a narrow page instead of running past the card. -->
+                    <!-- A grid, not the row, so Check now lines up with the other rows' controls. -->
                     <Grid Margin="0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="208" />
@@ -360,16 +360,12 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Style="{StaticResource Label}" Text="Updates" />
                         <WrapPanel Grid.Column="1">
-                            <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding Updates.CheckAutomatically}" Margin="0,0,12,0">
-                                <TextBlock Style="{StaticResource SwitchText}" Text="Download new versions quietly, then ask" />
-                            </ToggleButton>
+                            <!-- Plan Q §4: updates are always on, so there is no switch; the note below says where they stand. -->
                             <Button Style="{StaticResource M.Button.Outline}" Content="Check now" Command="{Binding Updates.CheckNow}" />
                         </WrapPanel>
                     </Grid>
                     <TextBlock Style="{StaticResource Note}" Margin="208,0,0,0" Text="{Binding Updates.Status}"
                                Visibility="{Binding Updates.Status, Converter={StaticResource VisibleWhenText}, FallbackValue=Collapsed}" />
-                    <TextBlock Style="{StaticResource Said}" Text="{Binding Updates.Message}"
-                               Visibility="{Binding Updates.Message, Converter={StaticResource VisibleWhenText}, FallbackValue=Collapsed}" />
                 </StackPanel>
             </Border>
 

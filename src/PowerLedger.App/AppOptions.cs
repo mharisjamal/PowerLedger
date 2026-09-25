@@ -7,7 +7,8 @@ namespace PowerLedger.App;
 /// <param name="DataFolder">Where the service keeps power.db; --data names a development run's folder.</param>
 /// <param name="StartInTray">--tray: start with only the tray icon, as the Run entry does.</param>
 /// <param name="UpdateFeed">--update-feed: a stand-in for GitHub's releases on this machine, to test updates against; null means GitHub.</param>
-internal sealed record AppOptions(string PipeName, string DataFolder, bool StartInTray, Uri? UpdateFeed = null)
+/// <param name="AfterUpdate">--after-update: the service opened the App after installing an update itself (Plan Q §4).</param>
+internal sealed record AppOptions(string PipeName, string DataFolder, bool StartInTray, Uri? UpdateFeed = null, bool AfterUpdate = false)
 {
     public static string DefaultDataFolder { get; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PowerLedger");
@@ -19,6 +20,7 @@ internal sealed record AppOptions(string PipeName, string DataFolder, bool Start
         var pipe = PipeProtocol.PipeName;
         var data = DefaultDataFolder;
         var tray = false;
+        var afterUpdate = false;
         Uri? feed = null;
         for (var i = 0; i < args.Count; i++)
         {
@@ -33,12 +35,15 @@ internal sealed record AppOptions(string PipeName, string DataFolder, bool Start
                 case "--tray":
                     tray = true;
                     break;
+                case "--after-update":
+                    afterUpdate = true;
+                    break;
                 case "--update-feed" when i + 1 < args.Count:
                     feed = TestFeed(args[++i]);
                     break;
             }
         }
-        return new AppOptions(pipe, data, tray, feed);
+        return new AppOptions(pipe, data, tray, feed, afterUpdate);
     }
 
     /// <summary>A feed to test updates against, served on this machine over HTTP or HTTPS; anything else is ignored, since
