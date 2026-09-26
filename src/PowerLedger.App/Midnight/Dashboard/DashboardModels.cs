@@ -57,6 +57,9 @@ internal sealed record DashboardPart(
 {
     /// <summary>Whether a fall is the good news: true for a part's energy, which costs.</summary>
     public bool LowerIsBetter { get; init; }
+
+    /// <summary>What the part is, in a few words under its name: "NVIDIA GeForce RTX 3060"; null when Windows doesn't say.</summary>
+    public string? Model { get; init; }
 }
 
 /// <summary>The chart's range pills: 1H · 1D · 1W · 1M · 1Y · All.</summary>

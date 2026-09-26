@@ -49,6 +49,45 @@ public sealed class DashboardViewModelTests : IDisposable
     }
 
     [Fact]
+    public void Each_part_names_its_model_under_it_once_read_and_none_without()
+    {
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+        var dashboard = _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, UiThreads.Inline, _ui, new FakeHardware());
+        dashboard.Show();
+
+        dashboard.Parts.Single(p => p.Part == Part.Cpu).Model.ShouldBe("Intel Core i7-8650U");
+        dashboard.Parts.Single(p => p.Part == Part.Gpu).Model.ShouldBe("NVIDIA GeForce RTX 3060");
+        dashboard.Parts.Single(p => p.Part == Part.Display).Model.ShouldBe("DELL U2720Q");
+        dashboard.Parts.Single(p => p.Part == Part.Rest).Model.ShouldBe("16 GB DDR4 RAM, Samsung SSD 980 1TB");
+        Dashboard().Parts.ShouldAllBe(p => p.Model == null);
+    }
+
+    [Theory]
+    [InlineData("Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz", "Intel Core i7-8650U")]
+    [InlineData("AMD Ryzen 7 5800H with Radeon Graphics         ", "AMD Ryzen 7 5800H with Radeon Graphics")]
+    [InlineData("AMD Ryzen 9 5900X 12-Core Processor", "AMD Ryzen 9 5900X")]
+    [InlineData("  ", null)]
+    public void A_processor_name_loses_the_trademarks_and_the_clock(string raw, string? shown)
+        => HardwareNames.Cpu(raw).ShouldBe(shown);
+
+    [Theory]
+    [InlineData("NVIDIA GeForce RTX 3060", "NVIDIA GeForce RTX 3060")]
+    [InlineData("Microsoft Basic Display Adapter", null)]
+    [InlineData("Microsoft Remote Display Adapter", null)]
+    public void Windows_own_display_adapters_are_not_named_as_graphics_cards(string raw, string? shown)
+        => HardwareNames.Gpu(raw).ShouldBe(shown);
+
+    [Fact]
+    public void A_monitors_name_is_read_from_its_padded_code_units_and_memory_is_counted_in_gigabytes()
+    {
+        HardwareNames.Monitor([.. "DELL U2720Q".Select(c => (ushort)c), 0, 0, 0]).ShouldBe("DELL U2720Q");
+        HardwareNames.Monitor([0, 0]).ShouldBeNull();
+        HardwareNames.Memory(2 * 8589934592d, 26).ShouldBe("16 GB DDR4 RAM");
+        HardwareNames.Memory(34359738368d, 0).ShouldBe("32 GB RAM");
+    }
+
+    [Fact]
     public void The_cards_come_from_the_live_reading_and_the_history()
     {
         var dashboard = Dashboard();

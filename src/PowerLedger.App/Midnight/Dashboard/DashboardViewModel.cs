@@ -65,7 +65,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <param name="ui">Where the energy card's period is kept between runs; none keeps it for this run only.</param>
     public DashboardViewModel(
         NowViewModel now, IRangeHistory history, IHistory summary, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, UiThreads threads,
-        IUiSettings? ui = null)
+        IUiSettings? ui = null, IHardwareNames? hardware = null)
     {
         _now = now;
         _history = history;
@@ -79,7 +79,22 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         ChooseEnergyPeriod = new RelayCommand<EnergyPeriod>(period => EnergyPeriod = period);
         _now.PropertyChanged += OnNowChanged;
         Rebuild();
+        if (hardware is not null)
+        {
+            _threads.Background(() =>
+            {
+                var models = hardware.Read();
+                _threads.Post(() =>
+                {
+                    _models = models;
+                    Rebuild();
+                });
+            });
+        }
     }
+
+    /// <summary>Each part's model, once read off the UI thread; empty until then.</summary>
+    private IReadOnlyDictionary<Part, string> _models = new Dictionary<Part, string>();
 
     /// <summary>The live reading, as the Now page has it.</summary>
     public LivePanel Live => _now.Live;
@@ -522,7 +537,11 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
                 row?.Fraction ?? 0,
                 frame is null ? null : QualityOf(frame, entry.Part),
                 Trend(change),
-                change is { } c ? DashboardMaths.Kind(c) : TrendKind.Text) { LowerIsBetter = true };
+                change is { } c ? DashboardMaths.Kind(c) : TrendKind.Text)
+            {
+                LowerIsBetter = true,
+                Model = _models.GetValueOrDefault(entry.Part),
+            };
         })];
     }
 
