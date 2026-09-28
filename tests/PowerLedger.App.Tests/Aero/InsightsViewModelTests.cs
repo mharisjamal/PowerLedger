@@ -70,14 +70,18 @@ public class InsightsViewModelTests
     }
 
     [Fact]
-    public void A_forecast_without_a_tariff_asks_for_one()
+    public void A_forecast_without_a_tariff_gives_the_energy_and_asks_for_one()
     {
-        _insights.Answer = Report(new BillForecast(0, 0, 0, null, 30, true));
+        _insights.Answer = Report(new BillForecast(0, 0, 0, null, 30, true, 412.4, 398.2, 431.9));
         var model = Model();
 
         model.Show();
 
-        (model.Forecast.Ready, model.Forecast.Cost, model.Forecast.Note).ShouldBe((false, "No tariff set", "Set a tariff in Settings to see the likely bill"));
+        var card = model.Forecast;
+        (card.Ready, card.Cost, card.Range).ShouldBe((true, "412 kWh", "Likely 398 to 432 kWh"));
+        card.Note.ShouldBe("By the end of September, from 30 days of history. Set a tariff in Settings to see the likely bill");
+        (card.Low, card.Projected, card.High).ShouldBe((398.2, 412.4, 431.9));
+        card.Maximum.ShouldBeGreaterThan(431.9);
     }
 
     [Fact]

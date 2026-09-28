@@ -17,7 +17,7 @@ public class BillForecastTests
         var forecast = BillForecasts.From(days, Today, todayLeft: 1, monthKwh: 28, price: 0.20m, currency: "GBP");
 
         // 14 days used 28 kWh; today and the 15 after it at 2 kWh each: 60 kWh at 0.20.
-        forecast.ShouldBe(new BillForecast(12.00m, 12.00m, 12.00m, "GBP", 30, true));
+        forecast.ShouldBe(new BillForecast(12.00m, 12.00m, 12.00m, "GBP", 30, true, 60, 60, 60));
     }
 
     [Fact]
@@ -93,11 +93,11 @@ public class BillForecastTests
     }
 
     [Fact]
-    public void With_no_tariff_the_figures_are_zero_and_the_forecast_still_ready()
+    public void With_no_tariff_the_costs_are_zero_and_the_energy_is_still_forecast()
     {
         var forecast = BillForecasts.From(Days(Today.AddDays(-30), 30, _ => 2), Today, 1, 28, 0m, null);
 
-        forecast.ShouldBe(new BillForecast(0, 0, 0, null, 30, true));
+        forecast.ShouldBe(new BillForecast(0, 0, 0, null, 30, true, 60, 60, 60));
     }
 
     [Fact]

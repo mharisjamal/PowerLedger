@@ -24,8 +24,12 @@ internal sealed record InsightsReport(BillForecast Forecast, IReadOnlyList<Usage
 /// <see cref="Ready"/> until <see cref="DaysOfData"/> reaches a week, when the page says "Needs a week of data" and the
 /// figures are 0.
 /// </summary>
-/// <param name="Currency">The tariff's currency code; null when no tariff is set, and the figures are then 0.</param>
-internal sealed record BillForecast(decimal ProjectedCost, decimal Low, decimal High, string? Currency, int DaysOfData, bool Ready)
+/// <param name="Currency">The tariff's currency code; null when no tariff is set, and the costs are then 0.</param>
+/// <param name="ProjectedKwh">The likely energy at the month's end, in kWh, with or without a tariff, so a PC with none still
+/// sees a forecast; <paramref name="LowKwh"/> and <paramref name="HighKwh"/> are its range.</param>
+internal sealed record BillForecast(
+    decimal ProjectedCost, decimal Low, decimal High, string? Currency, int DaysOfData, bool Ready,
+    double ProjectedKwh = 0, double LowKwh = 0, double HighKwh = 0)
 {
     /// <summary>Days of history the forecast needs before it says anything.</summary>
     public const int DaysNeeded = 7;

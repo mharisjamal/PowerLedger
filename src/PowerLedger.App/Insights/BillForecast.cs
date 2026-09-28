@@ -46,7 +46,7 @@ internal static class BillForecasts
         var (under, over) = Band(Misses(recent), weights.Select(w => w.Weight).ToList(), weights.Select(w => (int)w.Day.DayOfWeek).ToList(), shared);
         var low = Math.Min(projected, Math.Max(monthKwh, projected + under));
         var high = Math.Max(projected, projected + over);
-        return new BillForecast(Cost(projected, price), Cost(low, price), Cost(high, price), currency, recent.Count, true);
+        return new BillForecast(Cost(projected, price), Cost(low, price), Cost(high, price), currency, recent.Count, true, Kwh(projected), Kwh(low), Kwh(high));
     }
 
     /// <summary>A day's energy from the days known before it: the median of its weekday; else the mean of its month's
@@ -119,4 +119,7 @@ internal static class BillForecasts
     }
 
     private static decimal Cost(double kwh, decimal price) => decimal.Round((decimal)Math.Max(0, kwh) * price, 2);
+
+    /// <summary>To the watt-hour: a sum of hour rows carries float noise the page would never show.</summary>
+    private static double Kwh(double kwh) => Math.Round(Math.Max(0, kwh), 3);
 }

@@ -47,7 +47,7 @@ public class AeroDashboardFiguresTests
     {
         DashboardFigures.Forecast(new BillForecast(6.8m, 6.1m, 7.4m, "USD", 20, true), English).ShouldBe("Likely $6.10 to $7.40 by the month's end");
         DashboardFigures.Forecast(BillForecast.NotReady(3, "USD"), English).ShouldBe("Needs a week of data");
-        DashboardFigures.Forecast(new BillForecast(6.8m, 6.1m, 7.4m, null, 20, true), English).ShouldBe("No tariff set, so no forecast");
+        DashboardFigures.Forecast(new BillForecast(0, 0, 0, null, 20, true, 41.2, 38.5, 44.9), English).ShouldBe("Likely 38.5 to 44.9 kWh by the month's end");
         DashboardFigures.Forecast(null, English).ShouldBeNull();
     }
 }

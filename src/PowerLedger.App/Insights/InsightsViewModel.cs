@@ -94,9 +94,17 @@ internal sealed class InsightsViewModel(IInsights insights, UiThreads threads, T
     {
         if (!forecast.Ready)
             return new(false, NeedsAWeek, "", $"{forecast.DaysOfData.ToString(_culture)} of {BillForecast.DaysNeeded.ToString(_culture)} days so far", 0, 0, 0, 1);
-        if (forecast.Currency is not { } currency) return new(false, "No tariff set", "", "Set a tariff in Settings to see the likely bill", 0, 0, 0, 1);
-
         var month = TimeZoneInfo.ConvertTime(now, zone).ToString("MMMM", _culture);
+        if (forecast.Currency is not { } currency)
+        {
+            // No tariff: the energy the month is heading for, which needs none.
+            return new ForecastCard(
+                true, Format.Kwh(forecast.ProjectedKwh, _culture) + " kWh",
+                $"Likely {Format.Kwh(forecast.LowKwh, _culture)} to {Format.Kwh(forecast.HighKwh, _culture)} kWh",
+                $"By the end of {month}, from {forecast.DaysOfData.ToString(_culture)} days of history. Set a tariff in Settings to see the likely bill",
+                forecast.LowKwh, forecast.ProjectedKwh, forecast.HighKwh, Math.Max(0.01, forecast.HighKwh * 1.2));
+        }
+
         return new ForecastCard(
             true, Money.Format(forecast.ProjectedCost, currency, _culture),
             $"Likely {Money.Format(forecast.Low, currency, _culture)} to {Money.Format(forecast.High, currency, _culture)}",

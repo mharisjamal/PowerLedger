@@ -104,7 +104,7 @@ public class InsightsTests
         var report = Make().Read(Now, Utc);
 
         // 2.4 kWh a day at 0.25: 14 days and 12 hours so far (34.8 kWh), then half of today and 15 more days (37.2): 72 kWh.
-        report.Forecast.ShouldBe(new BillForecast(18.00m, 18.00m, 18.00m, "GBP", 56, true));
+        report.Forecast.ShouldBe(new BillForecast(18.00m, 18.00m, 18.00m, "GBP", 56, true, 72, 72, 72));
         report.Anomalies.ShouldBeEmpty();
         var habits = report.Habits.ShouldNotBeNull();
         (habits.WorstWindowStart, habits.Currency).ShouldBe((22, "GBP"));
@@ -156,7 +156,7 @@ public class InsightsTests
 
         var report = Make().Read(Now, Utc);
 
-        report.Forecast.ShouldBe(new BillForecast(0, 0, 0, null, 56, true));
+        report.Forecast.ShouldBe(new BillForecast(0, 0, 0, null, 56, true, 72, 72, 72), "the energy is forecast all the same");
     }
 
     /// <summary>London, the day after the clocks went back (25 October 2026, a 25-hour day): the days still count whole,

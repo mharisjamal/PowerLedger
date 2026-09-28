@@ -46,7 +46,7 @@ internal static class DashboardFigures
     {
         null => null,
         { Ready: false } => "Needs a week of data",
-        { Currency: null } => "No tariff set, so no forecast",
+        { Currency: null } f => $"Likely {Format.Kwh(f.LowKwh, culture)} to {Format.Kwh(f.HighKwh, culture)} kWh by the month's end",
         { } f => $"Likely {Money.Format(f.Low, f.Currency, culture)} to {Money.Format(f.High, f.Currency, culture)} by the month's end",
     };
 }
