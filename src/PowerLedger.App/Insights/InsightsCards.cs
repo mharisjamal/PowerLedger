@@ -10,6 +10,7 @@ internal sealed record ForecastCard(bool Ready, string Cost, string Range, strin
 
 /// <summary>An unusual hour as the page lists it, with what its small chart draws.</summary>
 /// <param name="When">"Tue 15 Sep, 14:00 to 15:00".</param>
+/// <param name="Normal">"Normally 0.120 kWh"; empty when the hour is normally off, which <paramref name="Times"/> says.</param>
 /// <param name="Maximum">The largest hour or normal among the rows, so every row's chart has the same scale.</param>
 internal sealed record AnomalyRow(string When, string Used, string Normal, string Times, double Kwh, double NormalKwh, double Maximum);
 

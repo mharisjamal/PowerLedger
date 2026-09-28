@@ -110,7 +110,8 @@ internal sealed class InsightsViewModel(IInsights insights, UiThreads threads, T
         var end = TimeZoneInfo.ConvertTime(anomaly.Hour + TimeSpan.FromHours(1), zone);
         var when = $"{hour.ToString("ddd d MMM", _culture)}, {hour.ToString("HH:mm", _culture)} to {end.ToString("HH:mm", _culture)}";
         var times = double.IsFinite(anomaly.Times) ? $"{anomaly.Times.ToString("0.0", _culture)} times normal" : "Normally off";
-        return new AnomalyRow(when, Format.Kwh(anomaly.Kwh, _culture) + " kWh", "Normally " + Format.Kwh(anomaly.NormalKwh, _culture) + " kWh", times,
+        var normal = anomaly.NormalKwh > 0 ? "Normally " + Format.Kwh(anomaly.NormalKwh, _culture) + " kWh" : "";
+        return new AnomalyRow(when, Format.Kwh(anomaly.Kwh, _culture) + " kWh", normal, times,
             anomaly.Kwh, anomaly.NormalKwh, maximum);
     }
 

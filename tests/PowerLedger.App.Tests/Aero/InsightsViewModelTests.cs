@@ -97,7 +97,7 @@ public class InsightsViewModelTests
         (first.When, first.Used, first.Normal, first.Times).ShouldBe(($"{new DateTime(2026, 9, 15).ToString("ddd d MMM", British)}, 14:00 to 15:00", "0.420 kWh", "Normally 0.120 kWh", "3.5 times normal"));
         (first.Kwh, first.NormalKwh).ShouldBe((0.42, 0.12));
         first.Maximum.ShouldBe(0.42);
-        model.Unusual[1].Times.ShouldBe("Normally off");
+        (model.Unusual[1].Times, model.Unusual[1].Normal).ShouldBe(("Normally off", ""));
         model.Unusual[1].Maximum.ShouldBe(0.42, "every row's chart is drawn to the same scale");
     }
 

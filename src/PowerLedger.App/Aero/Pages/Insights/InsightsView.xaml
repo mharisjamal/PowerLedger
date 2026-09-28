@@ -1,0 +1,162 @@
+<UserControl x:Class="PowerLedger.App.Aero.InsightsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="clr-namespace:PowerLedger.App"
+             xmlns:aero="clr-namespace:PowerLedger.App.Aero"
+             AutomationProperties.Name="Insights">
+    <!-- Aero's Insights page (Aero look design §4) over InsightsViewModel: the Bill forecast and Carbon side by side, then
+         Unusual use and Habits the page's width, each a glass panel as the Dashboard's are, their charts drawn in wells or
+         straight on the panel, never glass on glass. Every card has its empty state (design §6). Only the style contract's
+         keys (Plan S 0.8) and the palette's A.* tokens are used. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- The window's styles, shared with it: a view built by a DataTemplate resolves its StaticResources before it joins the window. -->
+                <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Aero/Styles.Aero.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <app:VisibleWhen x:Key="VisibleWhen" />
+            <app:VisibleWhen x:Key="HiddenWhen" Invert="True" />
+            <app:VisibleWhenText x:Key="VisibleWhenText" />
+
+            <!-- A panel's heading: its icon in a small well, then its title, as the Dashboard's panels have them. -->
+            <Style x:Key="TitleWell" TargetType="Border">
+                <Setter Property="Width" Value="30" />
+                <Setter Property="Height" Value="30" />
+                <Setter Property="CornerRadius" Value="{DynamicResource A.R.Icon}" />
+                <Setter Property="Background" Value="{DynamicResource A.B.Well2}" />
+                <Setter Property="Margin" Value="0,0,10,0" />
+            </Style>
+            <Style x:Key="Chart" TargetType="app:Instrument">
+                <Setter Property="LineBrush" Value="{DynamicResource A.B.Track}" />
+                <Setter Property="LabelBrush" Value="{DynamicResource A.B.Text3}" />
+                <Setter Property="InkBrush" Value="{DynamicResource A.B.Text}" />
+                <Setter Property="StrongLineBrush" Value="{DynamicResource A.B.Text}" />
+                <Setter Property="AccentBrush" Value="{DynamicResource A.B.Accent}" />
+                <Setter Property="NumberFont" Value="{DynamicResource A.F.Ui}" />
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <Grid Margin="0,0,0,24">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.2*" />
+                <ColumnDefinition Width="18" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Bill forecast -->
+            <aero:GlassPanel x:Name="ForecastPanel" Padding="20,18" AutomationProperties.Name="Bill forecast">
+                <StackPanel DataContext="{Binding Forecast}">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                        <Border Style="{StaticResource TitleWell}">
+                            <aero:Icon Data="{StaticResource A.I.Report}" Size="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="Bill forecast" Style="{StaticResource A.PanelTitle}" />
+                    </StackPanel>
+                    <TextBlock x:Name="ForecastCost" Text="{Binding Cost}" Style="{StaticResource A.Text.BigMonth}" FontWeight="Medium"
+                               Visibility="{Binding Ready, Converter={StaticResource VisibleWhen}}" />
+                    <TextBlock x:Name="ForecastWaiting" Text="{Binding Cost}" Style="{StaticResource A.Text.Mid}" TextWrapping="Wrap"
+                               Visibility="{Binding Ready, Converter={StaticResource HiddenWhen}}" />
+                    <TextBlock Text="{Binding Range}" Style="{StaticResource A.Text.Body}" Margin="0,4,0,0"
+                               Visibility="{Binding Range, Converter={StaticResource VisibleWhenText}}" />
+                    <aero:ForecastBand x:Name="Band" Style="{StaticResource Chart}" Margin="0,14,0,10"
+                                       Low="{Binding Low}" High="{Binding High}" Value="{Binding Projected}" Maximum="{Binding Maximum}"
+                                       AutomationProperties.Name="{Binding Range}"
+                                       Visibility="{Binding Ready, Converter={StaticResource VisibleWhen}}" />
+                    <TextBlock Text="{Binding Note}" Style="{StaticResource A.Text.Small}" Foreground="{DynamicResource A.B.Text3}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                </StackPanel>
+            </aero:GlassPanel>
+
+            <!-- Carbon -->
+            <aero:GlassPanel x:Name="CarbonPanel" Grid.Column="2" Padding="20,18" AutomationProperties.Name="Carbon">
+                <StackPanel DataContext="{Binding Carbon}">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                        <Border Style="{StaticResource TitleWell}">
+                            <aero:Icon Data="{StaticResource A.I.Bolt}" Size="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="Carbon" Style="{StaticResource A.PanelTitle}" />
+                    </StackPanel>
+                    <TextBlock x:Name="CarbonMonth" Text="{Binding Month}" Style="{StaticResource A.Text.BigMonth}" FontWeight="Medium" />
+                    <TextBlock Text="of CO₂ this month" Style="{StaticResource A.Label}" Margin="0,2,0,0" />
+                    <TextBlock Style="{StaticResource A.Text.Body}" Margin="0,12,0,0">
+                        <Run Text="{Binding SinceStart, Mode=OneWay}" FontWeight="Medium" /><Run Text=" since the history began" Foreground="{DynamicResource A.B.Text2}" />
+                    </TextBlock>
+                    <TextBlock Text="{Binding Factor}" Style="{StaticResource A.Text.Small}" Foreground="{DynamicResource A.B.Text2}" Margin="0,12,0,0" />
+                    <TextBlock Text="{Binding Source}" Style="{StaticResource A.Text.Small}" Foreground="{DynamicResource A.B.Text3}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                </StackPanel>
+            </aero:GlassPanel>
+
+            <!-- Unusual use -->
+            <aero:GlassPanel x:Name="UnusualPanel" Grid.Row="2" Grid.ColumnSpan="3" Padding="20,18" AutomationProperties.Name="Unusual use">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource TitleWell}">
+                            <aero:Icon Data="{StaticResource A.I.Bell}" Size="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Grid.Column="1" Text="Unusual use" Style="{StaticResource A.PanelTitle}" />
+                        <TextBlock x:Name="UnusualNote" Grid.Column="2" Text="{Binding UnusualNote}" Style="{StaticResource A.Label}" TextAlignment="Right"
+                                   VerticalAlignment="Center" TextWrapping="Wrap" Margin="16,0,0,0" />
+                    </Grid>
+                    <ItemsControl x:Name="UnusualRows" ItemsSource="{Binding Unusual}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource A.Table.Row}" AutomationProperties.Name="{Binding When}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" MinWidth="90" />
+                                            <ColumnDefinition Width="*" MaxWidth="260" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding When}" Style="{StaticResource A.Text.Body}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Used}" Style="{StaticResource A.Text.Number}" FontWeight="Medium" VerticalAlignment="Center"
+                                                   HorizontalAlignment="Right" Margin="8,0,16,0" />
+                                        <aero:NormalChart Grid.Column="2" Style="{StaticResource Chart}" Kwh="{Binding Kwh}" NormalKwh="{Binding NormalKwh}"
+                                                          Maximum="{Binding Maximum}" VerticalAlignment="Center"
+                                                          AutomationProperties.Name="{Binding Times}" />
+                                        <StackPanel Grid.Column="3" Margin="16,0,0,0" VerticalAlignment="Center" MinWidth="130">
+                                            <TextBlock Text="{Binding Times}" Style="{StaticResource A.Text.Small}" />
+                                            <TextBlock Text="{Binding Normal}" Style="{StaticResource A.Text.Small}" Foreground="{DynamicResource A.B.Text3}"
+                                                       Visibility="{Binding Normal, Converter={StaticResource VisibleWhenText}}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </aero:GlassPanel>
+
+            <!-- Habits -->
+            <aero:GlassPanel x:Name="HabitsPanel" Grid.Row="4" Grid.ColumnSpan="3" Padding="20,18" AutomationProperties.Name="Habits">
+                <StackPanel DataContext="{Binding Habits}">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <Border Style="{StaticResource TitleWell}">
+                            <aero:Icon Data="{StaticResource A.I.Moon}" Size="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="Habits" Style="{StaticResource A.PanelTitle}" />
+                    </StackPanel>
+                    <TextBlock x:Name="HabitsWorst" Text="{Binding Worst}" Style="{StaticResource A.Text.Body}" TextWrapping="Wrap" />
+                    <Border Style="{StaticResource A.Well}" Margin="0,12,0,0" Visibility="{Binding Ready, Converter={StaticResource VisibleWhen}}">
+                        <aero:Heatmap x:Name="Heat" Style="{StaticResource Chart}" Values="{Binding Heatmap}" WorstStart="{Binding WorstStart}" WorstHours="{Binding WorstHours}" />
+                    </Border>
+                    <TextBlock Text="{Binding Saving}" Style="{StaticResource A.Label}" TextWrapping="Wrap" Margin="0,12,0,0"
+                               Visibility="{Binding Saving, Converter={StaticResource VisibleWhenText}}" />
+                </StackPanel>
+            </aero:GlassPanel>
+        </Grid>
+    </ScrollViewer>
+</UserControl>
