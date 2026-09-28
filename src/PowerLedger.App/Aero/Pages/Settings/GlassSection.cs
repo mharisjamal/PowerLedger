@@ -80,6 +80,9 @@ internal sealed class GlassSection : ObservableObject
     /// <summary>The Colour style's tint, #RRGGBB.</summary>
     public string TintColor => Glass.TintColor;
 
+    /// <summary>The preset swatch to tick: the tint while the Colour style is chosen, none otherwise.</summary>
+    public string ChosenTint => IsColour ? Glass.TintColor : "";
+
     /// <summary>The Colour style's tint as the wheel and the preview draw it; a colour chosen is kept as #RRGGBB, any alpha
     /// dropped, since the strength slider says how much of it shows.</summary>
     public Color Tint
@@ -152,7 +155,7 @@ internal sealed class GlassSection : ObservableObject
     /// own name alone hears it.</summary>
     private static readonly string[] Shown =
     [
-        nameof(Style), nameof(IsColour), nameof(TintColor), nameof(Tint), nameof(TintStrength), nameof(Frost), nameof(EdgeLight),
+        nameof(Style), nameof(IsColour), nameof(TintColor), nameof(ChosenTint), nameof(Tint), nameof(TintStrength), nameof(Frost), nameof(EdgeLight),
         nameof(Accent), nameof(Backdrop), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ReduceMotion),
         nameof(FollowsWindows), nameof(ReduceMotionNote), nameof(Parallax), nameof(ParallaxAvailable),
     ];
