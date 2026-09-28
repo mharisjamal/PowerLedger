@@ -107,8 +107,12 @@
                                         </Button>
                                         <TextBlock Text="Power now" Style="{StaticResource A.Text.Body}" FontSize="15" Margin="10,0,0,0" VerticalAlignment="Center" />
                                     </DockPanel>
-                                    <TextBlock x:Name="NowFigure" Style="{StaticResource A.Text.Big}" VerticalAlignment="Bottom" TextTrimming="None"
-                                               AutomationProperties.LiveSetting="Off"><Run x:Name="NowValue" Text="0" /><Run Text=" " FontSize="{DynamicResource A.T.Mid}" /><Run x:Name="NowUnit" Text="W" FontSize="{DynamicResource A.T.Mid}" Foreground="{DynamicResource A.B.Text2}" /></TextBlock>
+                                    <!-- The watts roll digit by digit (G6's RollingNumber); the cost of an hour, or no reading, is plain text. -->
+                                    <StackPanel x:Name="NowFigure" Orientation="Horizontal" VerticalAlignment="Bottom" Focusable="False">
+                                        <aero:RollingNumber x:Name="NowRoll" DigitSize="{DynamicResource A.T.Big}" DigitWeight="Medium" VerticalAlignment="Bottom" />
+                                        <TextBlock x:Name="NowValue" Style="{StaticResource A.Text.Big}" TextTrimming="None" VerticalAlignment="Bottom" Visibility="Collapsed" />
+                                        <TextBlock x:Name="NowUnit" Style="{StaticResource A.Text.Secondary}" FontSize="{DynamicResource A.T.Mid}" Margin="7,0,0,5" VerticalAlignment="Bottom" Text="W" />
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                             <Border Grid.Row="2" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.Well}">

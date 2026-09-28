@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using Shouldly;
 
@@ -85,7 +86,9 @@ public class AeroWindowTests
             shell.Page.ShouldBe(Page.Now, "a closed window no longer follows the shell");
         });
 
-    /// <summary>Review 11: the window draws on the Aero palette put on it, in each theme, whatever the application's is.</summary>
+    /// <summary>Review 11: the window draws on the Aero palette put on it, in each theme, whatever the application's is:
+    /// its ground is the palette's plain ground where the backdrop is plain, and the palette's wash over the desktop where
+    /// Windows can show the desktop through it (Plan S G4).</summary>
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
@@ -101,8 +104,12 @@ public class AeroWindowTests
             {
                 window.Show();
                 window.UpdateLayout();
-                MidnightHost.PixelOf(window, 960, 640, 2, 2)
-                    .ShouldBe(((SolidColorBrush)ThemeManager.Palette(Look.Aero, theme)["Brush.Ground"]).Color, $"Aero's {theme} ground");
+                var palette = ThemeManager.Palette(Look.Aero, theme);
+                var room = (Border)window.FindName("Room");
+                if (window.BackdropKind == Aero.BackdropKind.SeeThrough)
+                    ((SolidColorBrush)room.Background).Color.ShouldBe((Color)palette["A.C.SeeThroughWash"], $"Aero's {theme} wash over the desktop");
+                else
+                    MidnightHost.PixelOf(window, 960, 640, 2, 2).ShouldBe((Color)palette["A.C.Plain"], $"Aero's {theme} plain ground");
             }
             finally
             {

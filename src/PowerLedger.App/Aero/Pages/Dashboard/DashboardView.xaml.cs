@@ -155,6 +155,11 @@ public partial class DashboardView : UserControl
         var culture = CultureInfo.CurrentCulture;
         var detail = model.Detail;
         var (value, unit) = DashboardFigures.PowerNow(model.Live.Watts, _costMode, detail?.PricePerKwh, detail?.Currency, culture);
+        var rolls = !_costMode || detail?.PricePerKwh is null;
+        rolls &= double.IsFinite(model.Live.Watts);
+        if (rolls) NowRoll.Value = (int)Math.Round(Math.Max(0, model.Live.Watts));
+        NowRoll.Visibility = rolls ? Visibility.Visible : Visibility.Collapsed;
+        NowValue.Visibility = rolls ? Visibility.Collapsed : Visibility.Visible;
         NowValue.Text = value;
         NowUnit.Text = unit;
         AutomationProperties.SetName(NowFigure, unit.Length == 0 ? value : $"{value} {unit}");
@@ -392,6 +397,7 @@ public partial class DashboardView : UserControl
         AeroMotion.Move(CamScale, ScaleTransform.ScaleYProperty, s, AeroMotion.Camera, AeroMotion.Glide);
         AeroMotion.Move(CamShift, TranslateTransform.XProperty, tx, AeroMotion.Camera, AeroMotion.Glide);
         AeroMotion.Move(CamShift, TranslateTransform.YProperty, ty, AeroMotion.Camera, AeroMotion.Glide);
+        (Window.GetWindow(this) as AeroWindow)?.AlignFrostFor(AeroMotion.MoveMs(AeroMotion.Camera));
         var dim = TryFindResource("A.Glass.DimmedOpacity") is double d ? d : .22;
         foreach (var other in Panes)
         {
@@ -410,6 +416,7 @@ public partial class DashboardView : UserControl
         AeroMotion.Move(CamScale, ScaleTransform.ScaleYProperty, 1, AeroMotion.Camera, AeroMotion.Glide);
         AeroMotion.Move(CamShift, TranslateTransform.XProperty, 0, AeroMotion.Camera, AeroMotion.Glide);
         AeroMotion.Move(CamShift, TranslateTransform.YProperty, 0, AeroMotion.Camera, AeroMotion.Glide);
+        (Window.GetWindow(this) as AeroWindow)?.AlignFrostFor(AeroMotion.MoveMs(AeroMotion.Camera));
         foreach (var pane in Panes)
         {
             AeroMotion.Fade(pane, OpacityProperty, 1, AeroMotion.FocusFade, AeroMotion.Glide);

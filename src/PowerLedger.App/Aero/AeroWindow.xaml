@@ -302,18 +302,12 @@
                     </Grid>
                     <Button x:Name="ServiceButton" Grid.Column="4" Style="{StaticResource A.RoundGlassBtn}" Margin="0,0,10,0" VerticalAlignment="Center"
                             Click="ServiceClick" AutomationProperties.Name="Service" ToolTip="{Binding Now.Status.State}">
-                        <Ellipse x:Name="ServiceDot" Width="9" Height="9" IsHitTestVisible="False">
-                            <Ellipse.Style>
-                                <Style TargetType="Ellipse">
-                                    <Setter Property="Fill" Value="{DynamicResource M.Bad}" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding Now.Status.Running}" Value="True">
-                                            <Setter Property="Fill" Value="{DynamicResource A.B.Accent}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Ellipse.Style>
-                        </Ellipse>
+                        <Grid>
+                            <!-- Measuring: the accent dot breathing; stopped: a still red one. -->
+                            <aero:PulseDot x:Name="ServicePulse" Size="9" Visibility="{Binding Now.Status.Running, Converter={StaticResource VisibleWhen}}" />
+                            <Ellipse x:Name="ServiceDot" Width="9" Height="9" IsHitTestVisible="False" Fill="{DynamicResource M.Bad}"
+                                     Visibility="{Binding Now.Status.Running, Converter={StaticResource HiddenWhen}}" />
+                        </Grid>
                     </Button>
                     <Button x:Name="HouseholdButton" Grid.Column="5" Style="{StaticResource A.GlassBtn}" Height="46" Padding="6,0,14,0" VerticalAlignment="Center"
                             Click="HouseholdClick" AutomationProperties.Name="Household">

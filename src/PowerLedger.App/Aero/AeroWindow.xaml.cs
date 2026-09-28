@@ -34,6 +34,7 @@ internal partial class AeroWindow : Window, IShellWindow
     private bool _introAnnounced;
     private bool _shown;
     private readonly GlassMaterial _glass;
+    private readonly Backdrop _backdrop;
 
     /// <param name="looks">The switcher the App opened this window through (plan O 0.4), as Midnight's takes it; a look
     /// chosen in the window goes through <see cref="SettingsViewModel.Look"/> instead, so the choice is saved.</param>
@@ -54,6 +55,9 @@ internal partial class AeroWindow : Window, IShellWindow
         // The glass itself (Aero look design §3): the A.* tokens on this window, repainted live as Settings' Glass or the
         // theme changes, never among the application's resources.
         _glass = GlassMaterial.For(this, shell.Settings, theme);
+        // What shows behind the glass (design §3): the desktop, the wallpaper frosted once, or the plain ground; the stage
+        // tilts a little with the pointer over the wallpaper.
+        _backdrop = new Backdrop(this, Room, _glass, () => theme.Current, tilt: Stage);
         UpdateRequiredCover.DataContext = updates;
         UpdateCover.Attach(UpdateRequiredCover, [Side, TopBar, Banners, Pages], UpdateNowButton);
         _size = new Extent(Width, Height);
@@ -80,6 +84,7 @@ internal partial class AeroWindow : Window, IShellWindow
             if (shell.Dashboard is { } dashboard) dashboard.Detailed = false;
             _problemTimer.Stop();
             _toastTimer?.Stop();
+            _backdrop.Dispose();
             _glass.Dispose();
         };
         _problemTimer.Tick += (_, _) => HideProblem();
@@ -266,8 +271,20 @@ internal partial class AeroWindow : Window, IShellWindow
         for (var i = 0; i < panes.Length; i++) Rise(panes[i], i);
         FrameworkElement[] contents = [SideContent, TopBar];
         for (var i = 0; i < contents.Length; i++) Glide(contents[i], i);
+        // The frost follows the panes while they rise, then stops.
+        AlignFrostFor(AeroMotion.MoveMs(AeroMotion.ContentDelay + AeroMotion.ContentIn + 8 * AeroMotion.Stagger));
         Dispatcher.BeginInvoke(() => IntroPending = false, DispatcherPriority.ContextIdle);
     }
+
+    /// <summary>Lines the wallpaper's frost up with the panes every frame for <paramref name="ms"/>, while they move (the
+    /// intro, the camera), then stops: nothing runs at rest (Plan S G5).</summary>
+    internal void AlignFrostFor(double ms)
+    {
+        if (ms > 0) _backdrop.AlignFor(TimeSpan.FromMilliseconds(ms));
+    }
+
+    /// <summary>What the backdrop chose, for a test.</summary>
+    internal BackdropKind BackdropKind => _backdrop.Kind;
 
     /// <summary>A pane rising into place: from 22 px down and 95 %, fading in, on the spring, <paramref name="index"/>
     /// staggers late.</summary>
