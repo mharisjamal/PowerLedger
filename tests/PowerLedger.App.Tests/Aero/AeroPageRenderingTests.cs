@@ -155,6 +155,19 @@ public class AeroPageRenderingTests
                     page.Render($"parts-{size}");
                 }
 
+                // Nothing read yet: the words, not an empty table.
+                var empty = new PartsView { DataContext = new PartsScreen() };
+                using (var page = Page(empty, Narrow, theme))
+                {
+                    Find<TextBlock>(empty, t => t.Text.StartsWith("No readings yet.", StringComparison.Ordinal)).ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
+                    page.Render("parts-empty");
+                }
+                var some = new PartsView { DataContext = screen };
+                using (Page(some, Narrow, theme))
+                {
+                    Find<TextBlock>(some, t => t.Text.StartsWith("No readings yet.", StringComparison.Ordinal))!.IsVisible.ShouldBeFalse(theme.ToString());
+                }
+
                 // Over the real Dashboard, before D fills the week: no line, and the page still whole.
                 var real = new PartsView { DataContext = dashboard };
                 using (var page = Page(real, Narrow, theme))
@@ -165,7 +178,25 @@ public class AeroPageRenderingTests
             }
         });
         Sizes(20_000, "parts-960", "parts-1440", "parts-dashboard");
+        Sizes(8_000, "parts-empty");
     }
+
+    [Fact]
+    public void Under_reduced_motion_the_range_pill_jumps_to_the_choice_without_travel()
+        => OnUi(() =>
+        {
+            using var reduced = AeroMotion.Force(true);
+            var model = HistoryScreen(new FakeSaver());
+            model.Show();
+            var view = new HistoryView { DataContext = model };
+            using var page = Page(view, Narrow, Theme.Dark);
+            var track = MidnightHost.AllOf<SegTrack>(view).First();
+            var pills = MidnightHost.AllOf<RadioButton>(track).ToList();
+            pills[3].IsChecked = true;
+            Pump(TimeSpan.FromMilliseconds(50));   // the layout pass the pill waits for, far short of the spring's 500 ms
+            Behind(track, pills[3], "reduced");
+            model.Range.Choice.ShouldBe(RangeChoice.ThirtyDays);
+        });
 
     [Fact]
     public void Reports_shows_the_range_the_exports_and_the_sheet_of_figures_and_its_png_draws_the_sheet()

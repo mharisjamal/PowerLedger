@@ -143,8 +143,21 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <!-- Before the first read, or with the service away since the start: say so, not an empty table. -->
+                    <TextBlock Style="{StaticResource A.Page.Cell.Muted}" Margin="14,9" Text="No readings yet. The parts appear once the service has measured this PC.">
+                        <TextBlock.Visibility>
+                            <Binding Path="Parts.Count" FallbackValue="{x:Static Visibility.Visible}">
+                                <Binding.Converter>
+                                    <app:VisibleWhenStep />
+                                </Binding.Converter>
+                                <Binding.ConverterParameter>
+                                    <sys:Int32 xmlns:sys="clr-namespace:System;assembly=System.Runtime">0</sys:Int32>
+                                </Binding.ConverterParameter>
+                            </Binding>
+                        </TextBlock.Visibility>
+                    </TextBlock>
                     <TextBlock Style="{StaticResource A.Page.Note}" Margin="14,12,0,0"
-                               Text="Now is each part's live share of the power; energy, share and the change against the same time before are over the range chosen above." />
+                               Text="Now is each part's watts at this moment; energy, share and the change against the same length of time before are over the range chosen above." />
                 </StackPanel>
             </aero:GlassPanel>
         </StackPanel>
