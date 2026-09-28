@@ -100,13 +100,14 @@ internal sealed class PieChart3D : FrameworkElement
     /// <summary>The slices drawn, for a test.</summary>
     internal IReadOnlyList<PieSlice> Slices => _slices;
 
-    /// <summary>A part's colour as the palette gives it: the accent for the CPU, then green, violet and blue, as the demo.</summary>
-    public static string ColourKey(Part part) => part switch
+    /// <summary>A part's brush as the palette gives it (M.PartCpu, M.PartGpu, M.PartDisplay, M.PartRest), the same keys
+    /// the Parts and History pages colour their parts with, so all three agree.</summary>
+    public static string BrushKey(Part part) => part switch
     {
-        Part.Cpu => "A.C.Accent",
-        Part.Gpu => "A.C.Green",
-        Part.Display => "A.C.Violet",
-        _ => "A.C.Blue",
+        Part.Cpu => "M.PartCpu",
+        Part.Gpu => "M.PartGpu",
+        Part.Display => "M.PartDisplay",
+        _ => "M.PartRest",
     };
 
     /// <summary>Starts the slices rising in turn, or sets them risen under reduced motion.</summary>
@@ -169,7 +170,7 @@ internal sealed class PieChart3D : FrameworkElement
         foreach (var slice in PieSlices.PaintOrder(_slices))
         {
             var part = slice.Index < parts.Count ? parts[slice.Index].Part : Part.Rest;
-            var colour = ChartInk.Colour(this, ColourKey(part), Colors.Gray);
+            var colour = ChartInk.Colour(this, BrushKey(part), Colors.Gray);
             var progress = PieSlices.Progress(Rise, _slices.ToList().IndexOf(slice), _slices.Count);
             var lift = LiftOf(part);
             var h = progress <= 0 ? 0 : Math.Max(0, slice.Height * PieSlices.Back(progress) + lift * 8);

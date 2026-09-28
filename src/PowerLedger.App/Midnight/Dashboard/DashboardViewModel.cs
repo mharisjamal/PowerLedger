@@ -423,6 +423,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     {
         var span = Detail?.Span ?? HistorySpan;
         var text = HistoryTable.Text(HistoryTable.Csv(span, HistoryShown));
+        Saved = null;   // the same outcome again is news again
         if (_saver.Ask(HistoryTable.FileName(span), "CSV file|*.csv") is not { } path) return;
         _threads.Background(() =>
         {

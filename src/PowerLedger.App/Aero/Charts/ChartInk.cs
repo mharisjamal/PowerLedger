@@ -14,9 +14,13 @@ internal static class ChartInk
 {
     private static readonly FontFamily Fallback = new("Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI");
 
-    /// <summary>The palette's colour <paramref name="key"/> as <paramref name="element"/> finds it, or <paramref name="fallback"/>.</summary>
-    public static Color Colour(FrameworkElement element, string key, Color fallback)
-        => element.TryFindResource(key) is Color colour ? colour : fallback;
+    /// <summary>The palette's colour (or a solid brush's) <paramref name="key"/> as <paramref name="element"/> finds it, or <paramref name="fallback"/>.</summary>
+    public static Color Colour(FrameworkElement element, string key, Color fallback) => element.TryFindResource(key) switch
+    {
+        Color colour => colour,
+        SolidColorBrush brush => brush.Color,
+        _ => fallback,
+    };
 
     public static SolidColorBrush Brush(Color colour) => Frozen(new SolidColorBrush(colour));
 
