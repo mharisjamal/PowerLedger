@@ -11,7 +11,9 @@ namespace PowerLedger.App.Aero;
 
 /// <summary>
 /// The Glass settings' colour picker (Aero look design §1): a disc of hue round the edge and saturation out from the
-/// white centre, at full brightness, with a ringed knob at the colour chosen. Drag or click to choose; with the keyboard,
+/// white centre, with a ringed knob at the colour chosen. A pick changes the hue and how strong it is, not how dark: the
+/// colour's brightness is kept (a black or near-black colour picks at the demo violet's brightness instead, or it could
+/// pick nothing but black), as agent S's TintWheel did, which this replaces. Drag or click to choose; with the keyboard,
 /// Left and Right turn the hue (5 degrees, 1 with Shift), Up and Down change the saturation (5 %, 1 % with Shift). The
 /// disc is drawn once for each size and kept; nothing runs at rest. A screen reader hears it as a slider named "Colour"
 /// whose value is the colour, its hue and its saturation, and can set a #RRGGBB.
@@ -24,6 +26,10 @@ public sealed class ColourWheel : FrameworkElement
     public static readonly DependencyProperty SaturationProperty = DependencyProperty.Register(nameof(Saturation), typeof(double), typeof(ColourWheel),
         new FrameworkPropertyMetadata(0.53, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnHsChanged, CoerceFraction));
 
+    /// <summary>The colour chosen; set, it moves the knob.</summary>
+    public static readonly DependencyProperty ColourProperty = DependencyProperty.Register(nameof(Colour), typeof(Color), typeof(ColourWheel),
+        new FrameworkPropertyMetadata(Color.FromRgb(0x74, 0x66, 0xD8), FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnColourChanged));
+
     /// <summary>The colour as #RRGGBB, upper-case, as <c>GlassSettings.TintColor</c> keeps it; set, it moves the knob.</summary>
     public static readonly DependencyProperty HexProperty = DependencyProperty.Register(nameof(Hex), typeof(string), typeof(ColourWheel),
         new FrameworkPropertyMetadata("#7466D8", FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnHexChanged));
@@ -34,10 +40,17 @@ public sealed class ColourWheel : FrameworkElement
     public const double HueStep = 5;
     public const double SaturationStep = 0.05;
 
+    /// <summary>The demo violet's brightness, which a pick takes when the colour it starts from is too dark to show a hue.</summary>
+    public const double DemoBrightness = 0xD8 / 255.0;
+
+    /// <summary>Below this brightness a colour is too dark for a pick to keep it.</summary>
+    public const double DarkestKept = 0.15;
+
     [ThreadStatic]
     private static Dictionary<int, BitmapSource>? _discs;
 
     private bool _syncing;
+    private double _brightness = DemoBrightness;
 
     static ColourWheel()
     {
@@ -49,7 +62,7 @@ public sealed class ColourWheel : FrameworkElement
     {
         Cursor = Cursors.Cross;
         SetResourceReference(FocusVisualStyleProperty, "A.Focus.Pill");
-        SyncHex();
+        Apply(Colour);
     }
 
     public double Hue { get => (double)GetValue(HueProperty); set => SetValue(HueProperty, value); }
@@ -58,8 +71,10 @@ public sealed class ColourWheel : FrameworkElement
 
     public string Hex { get => (string)GetValue(HexProperty); set => SetValue(HexProperty, value); }
 
-    /// <summary>The colour chosen, at full brightness.</summary>
-    public Color Colour => FromHsv(Hue, Saturation, 1);
+    public Color Colour { get => (Color)GetValue(ColourProperty); set => SetValue(ColourProperty, value); }
+
+    /// <summary>The colour's brightness, 0 to 1, which a pick keeps.</summary>
+    public double Brightness => _brightness;
 
     public event RoutedEventHandler ColourChanged
     {
@@ -108,12 +123,12 @@ public sealed class ColourWheel : FrameworkElement
         static byte Byte(double v) => (byte)Math.Round(Math.Clamp(v, 0, 1) * 255);
     }
 
-    internal static (double Hue, double Saturation) ToHs(Color colour)
+    internal static (double Hue, double Saturation, double Value) ToHsv(Color colour)
     {
         double r = colour.R / 255.0, g = colour.G / 255.0, b = colour.B / 255.0;
         double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), span = max - min;
         var hue = span == 0 ? 0 : max == r ? 60 * ((g - b) / span % 6) : max == g ? 60 * ((b - r) / span + 2) : 60 * ((r - g) / span + 4);
-        return ((hue + 360) % 360, max == 0 ? 0 : span / max);
+        return ((hue + 360) % 360, max == 0 ? 0 : span / max, max);
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -189,11 +204,21 @@ public sealed class ColourWheel : FrameworkElement
 
     private static object CoerceFraction(DependencyObject d, object value) => value is double f && double.IsFinite(f) ? Math.Clamp(f, 0, 1) : 0.0;
 
+    /// <summary>A pick or a key moved the hue or saturation: the colour follows at the kept brightness.</summary>
     private static void OnHsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         var wheel = (ColourWheel)d;
         if (wheel._syncing) return;
-        wheel.SyncHex();
+        if (wheel._brightness < DarkestKept) wheel._brightness = DemoBrightness;
+        wheel.Show(FromHsv(wheel.Hue, wheel.Saturation, wheel._brightness));
+        wheel.RaiseEvent(new RoutedEventArgs(ColourChangedEvent, wheel));
+    }
+
+    private static void OnColourChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var wheel = (ColourWheel)d;
+        if (wheel._syncing) return;
+        wheel.Apply((Color)e.NewValue);
         wheel.RaiseEvent(new RoutedEventArgs(ColourChangedEvent, wheel));
     }
 
@@ -201,35 +226,45 @@ public sealed class ColourWheel : FrameworkElement
     {
         var wheel = (ColourWheel)d;
         if (wheel._syncing || e.NewValue is not string hex) return;
+        Color colour;
         try
         {
-            var colour = (Color)ColorConverter.ConvertFromString(hex);
-            var (hue, saturation) = ToHs(colour);
-            wheel._syncing = true;
-            wheel.Hue = hue;
-            wheel.Saturation = saturation;
+            colour = (Color)ColorConverter.ConvertFromString(hex);
         }
         catch (FormatException)
         {
             return;
         }
-        finally
-        {
-            wheel._syncing = false;
-        }
-        wheel.SyncHex();
+        wheel.Apply(colour);
         wheel.RaiseEvent(new RoutedEventArgs(ColourChangedEvent, wheel));
     }
 
-    private void SyncHex()
+    /// <summary>Takes <paramref name="colour"/> as the wheel's: its hue, saturation and brightness, and the hex.</summary>
+    private void Apply(Color colour)
     {
-        var c = Colour;
-        var hex = string.Create(CultureInfo.InvariantCulture, $"#{c.R:X2}{c.G:X2}{c.B:X2}");
-        if (Hex == hex) return;
+        var (hue, saturation, value) = ToHsv(colour);
+        _brightness = value;
         _syncing = true;
         try
         {
-            SetCurrentValue(HexProperty, hex);
+            SetCurrentValue(HueProperty, hue);
+            SetCurrentValue(SaturationProperty, saturation);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+        Show(Color.FromRgb(colour.R, colour.G, colour.B));
+    }
+
+    /// <summary>Puts <paramref name="colour"/> in Colour and Hex without starting the round again.</summary>
+    private void Show(Color colour)
+    {
+        _syncing = true;
+        try
+        {
+            SetCurrentValue(ColourProperty, colour);
+            SetCurrentValue(HexProperty, string.Create(CultureInfo.InvariantCulture, $"#{colour.R:X2}{colour.G:X2}{colour.B:X2}"));
         }
         finally
         {

@@ -125,9 +125,8 @@ public class AeroControlsTests
     public void A_full_brightness_colour_goes_round_the_wheel_and_back(string hex)
     {
         var colour = (Color)ColorConverter.ConvertFromString(hex);
-        var (hue, saturation) = ColourWheel.ToHs(colour);
-        var max = Math.Max(colour.R, Math.Max(colour.G, colour.B)) / 255.0;
-        var back = ColourWheel.FromHsv(hue, saturation, max);
+        var (hue, saturation, value) = ColourWheel.ToHsv(colour);
+        var back = ColourWheel.FromHsv(hue, saturation, value);
         Math.Abs(back.R - colour.R).ShouldBeLessThanOrEqualTo(1);
         Math.Abs(back.G - colour.G).ShouldBeLessThanOrEqualTo(1);
         Math.Abs(back.B - colour.B).ShouldBeLessThanOrEqualTo(1);
@@ -137,10 +136,12 @@ public class AeroControlsTests
     public void The_keyboard_turns_the_hue_and_the_saturation_and_the_hex_follows()
         => UiHarness.OnUi(() =>
         {
-            var (_, wheel) = AeroStylesTests.Dressed(new ColourWheel { Hue = 358, Saturation = 1 }, null, Theme.Dark);
+            var (_, wheel) = AeroStylesTests.Dressed(new ColourWheel { Hex = "#FF0000" }, null, Theme.Dark);
+            wheel.Hue = 358;
             var changed = 0;
             wheel.ColourChanged += (_, _) => changed++;
             wheel.Hex.ShouldBe("#FF0008");
+            wheel.Colour.ShouldBe(Color.FromRgb(0xFF, 0x00, 0x08));
             Press(wheel, Key.Right);
             wheel.Hue.ShouldBe(3, 0.001, "round past red");
             Press(wheel, Key.Left);
@@ -151,10 +152,15 @@ public class AeroControlsTests
             wheel.Saturation.ShouldBe(0.95, 0.001);
             changed.ShouldBe(3, "each change that moved the colour");
             wheel.Hex = "#2F7552";
-            wheel.Hue.ShouldBe(ColourWheel.ToHs(Color.FromRgb(0x2F, 0x75, 0x52)).Hue, 0.001);
-            wheel.Colour.ShouldBe(ColourWheel.FromHsv(wheel.Hue, wheel.Saturation, 1));
+            wheel.Hue.ShouldBe(ColourWheel.ToHsv(Color.FromRgb(0x2F, 0x75, 0x52)).Hue, 0.001);
+            wheel.Colour.ShouldBe(Color.FromRgb(0x2F, 0x75, 0x52), "a set colour is kept exactly");
             wheel.Hex = "not a colour";
-            wheel.Hue.ShouldBe(ColourWheel.ToHs(Color.FromRgb(0x2F, 0x75, 0x52)).Hue, 0.001, "a bad colour is ignored");
+            wheel.Colour.ShouldBe(Color.FromRgb(0x2F, 0x75, 0x52), "a bad colour is ignored");
+            Press(wheel, Key.Right);
+            ColourWheel.ToHsv(wheel.Colour).Value.ShouldBe(0x75 / 255.0, 0.01, "a pick keeps the brightness");
+            wheel.Colour = Color.FromRgb(0x08, 0x08, 0x08);
+            Press(wheel, Key.Up);
+            ColourWheel.ToHsv(wheel.Colour).Value.ShouldBe(ColourWheel.DemoBrightness, 0.01, "from near black a pick takes the demo's brightness");
             wheel.Focusable.ShouldBeTrue();
         });
 
@@ -168,8 +174,9 @@ public class AeroControlsTests
             peer.GetAutomationControlType().ShouldBe(AutomationControlType.Slider);
             var value = (IValueProvider)peer.GetPattern(PatternInterface.Value);
             value.Value.ShouldBe("#FF0000, hue 0 degrees, saturation 100 percent");
-            value.SetValue("#00FF00");
+            value.SetValue("#00ff00");
             wheel.Hue.ShouldBe(120, 0.001);
+            wheel.Hex.ShouldBe("#00FF00");
             Should.Throw<ArgumentException>(() => value.SetValue("green"));
         });
 
