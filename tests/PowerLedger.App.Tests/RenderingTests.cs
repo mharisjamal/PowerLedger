@@ -1466,6 +1466,59 @@ public class RenderingTests
         });
     }
 
+    /// <summary>Households design §3: on a Public network the page says to keep it open on both PCs, beside Add a PC, and
+    /// offers Windows' network settings, before a household exists and in one, in both themes.</summary>
+    [Fact]
+    public void On_a_public_network_the_household_page_says_so_and_offers_network_settings()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                UseTheme(theme);
+                foreach (var (householdId, name) in new[] { ((string?)null, "none"), ("hh1", "member") })
+                {
+                    var link = new FakeLink
+                    {
+                        Status = Statuses.Running() with
+                        {
+                            Household = new HouseholdStatus(householdId, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, Network: NetworkCategory.Public),
+                        },
+                    };
+                    link.Connect(true);
+                    var history = new FakeHouseholdHistory
+                    {
+                        Answer = _ => FakeHouseholdHistory.Empty with
+                        {
+                            Members = householdId is null ? [] : [new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-40), null, Now)],
+                        },
+                    };
+                    var model = new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
+                    model.Show();
+
+                    var window = new Window
+                    {
+                        Content = new HouseholdView { DataContext = model }, Width = 480, SizeToContent = SizeToContent.Height,
+                        WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
+                    };
+                    window.Show();
+                    try
+                    {
+                        Pump(TimeSpan.FromMilliseconds(300));
+                        Find<TextBlock>(window, t => t.Text == HouseholdViewModel.PublicNetworkNote && t.IsVisible).ShouldNotBeNull($"{name} on {theme}");
+                        Find<Button>(window, b => Equals(b.Content, "Network settings") && b.IsVisible).ShouldNotBeNull($"{name} on {theme}");
+                        Save(window, 480, (int)window.ActualHeight, $"household-public-{name}-{theme}.png");
+                    }
+                    finally
+                    {
+                        window.Close();
+                    }
+                }
+            }
+        });
+    }
+
     /// <summary>Security round, review: with no Google secret built in, only Microsoft is offered — no Google button,
     /// and no "isn't set up yet" placeholder either.</summary>
     [Fact]

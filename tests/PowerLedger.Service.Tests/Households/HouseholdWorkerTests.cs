@@ -628,6 +628,167 @@ public sealed class HouseholdWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task On_a_public_network_the_household_page_opens_a_window_in_which_this_pc_listens_and_is_announced()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Category.IsPrivate = false;                                    // home Wi-Fi left Public, as Windows sets it
+        desktop.Worker.Port.ShouldBe(0);
+
+        (await desktop.Send<HouseholdReply>(new PairingWindowRequest(1))).Ok.ShouldBeTrue();
+
+        desktop.Worker.Port.ShouldBeGreaterThan(0);
+        _network.Announced.ShouldHaveSingleItem().Port.ShouldBe(desktop.Worker.Port);
+        desktop.Board.Household!.Network.ShouldBe(NetworkCategory.Public);
+    }
+
+    [Fact]
+    public async Task The_window_closes_15_minutes_after_the_page_last_showed()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Category.IsPrivate = false;
+        await desktop.Send<HouseholdReply>(new PairingWindowRequest(1));
+        _clock.Advance(TimeSpan.FromMinutes(14));
+        await desktop.Send<HouseholdReply>(new PairingWindowRequest(2));        // the page still showing: 15 minutes from now
+        _clock.Advance(TimeSpan.FromMinutes(14));
+        desktop.Worker.Port.ShouldBeGreaterThan(0);
+        _network.Announced.ShouldHaveSingleItem();
+
+        _clock.Advance(TimeSpan.FromMinutes(1));
+
+        await WaitFor.True(() => desktop.Worker.Port == 0);
+        _network.Announced.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Only_the_app_at_the_screen_opens_the_window()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Category.IsPrivate = false;
+
+        (await desktop.Worker.HandleAsync(new PairingWindowRequest(1), WorkerPc.Screen + 1, CancellationToken.None))
+            .ShouldBe(new HouseholdReply(1, false, HouseholdWorker.NotAtTheScreen));
+        await desktop.Worker.HandleAsync(new BrowsePcsRequest(2), WorkerPc.Screen + 1, CancellationToken.None);   // looking is allowed
+
+        desktop.Worker.Port.ShouldBe(0);
+        _network.Announced.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Looking_for_pcs_from_the_screen_as_add_a_pc_does_opens_the_window_too()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Category.IsPrivate = false;
+
+        await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(1));
+
+        desktop.Worker.Port.ShouldBeGreaterThan(0);
+        _network.Announced.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task With_the_tick_off_the_window_opens_nothing()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Category.IsPrivate = false;
+        await desktop.Send<HouseholdReply>(new SetDiscoverableRequest(1, false));
+
+        (await desktop.Send<HouseholdReply>(new PairingWindowRequest(2))).Ok.ShouldBeTrue();
+
+        desktop.Worker.Port.ShouldBe(0);
+        _network.Announced.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task The_window_follows_the_network_as_it_changes()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Category.IsPrivate = false;
+        await desktop.Send<HouseholdReply>(new PairingWindowRequest(1));
+
+        desktop.Category.IsPrivate = true;                                     // switched to Private in Settings
+        _clock.Advance(TimeSpan.FromMinutes(16));
+        desktop.Worker.Port.ShouldBeGreaterThan(0);                            // Private needs no window
+        _network.Announced.ShouldHaveSingleItem();
+
+        desktop.Category.IsPrivate = false;                                    // Public again, the window long closed
+        desktop.Worker.Port.ShouldBe(0);
+        _network.Announced.ShouldBeEmpty();
+
+        desktop.Category.Kind = NetworkCategory.None;                          // a domain network alone: never, window or not
+        await desktop.Send<HouseholdReply>(new PairingWindowRequest(2));
+        desktop.Worker.Port.ShouldBe(0);
+        _network.Announced.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task On_a_public_network_a_pc_whose_page_is_closed_isnt_found()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        desktop.Category.IsPrivate = false;
+        laptop.Category.IsPrivate = false;
+
+        (await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(1))).Pcs.ShouldBeEmpty();
+
+        await laptop.Send<HouseholdReply>(new PairingWindowRequest(2));        // its Household page opened
+        (await desktop.Send<FoundPcsReply>(new BrowsePcsRequest(3))).Pcs.ShouldHaveSingleItem().Name.ShouldBe("Laptop-2");
+    }
+
+    [Fact]
+    public async Task Two_pcs_on_a_public_network_pair_while_both_have_the_household_page_open()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        desktop.Category.IsPrivate = false;
+        laptop.Category.IsPrivate = false;
+        await desktop.Send<HouseholdReply>(new PairingWindowRequest(1));
+        await laptop.Send<HouseholdReply>(new PairingWindowRequest(2));
+
+        await WorkerPc.Pair(desktop, laptop);
+
+        laptop.Worker.Store.HouseholdId.ShouldNotBeNull().ShouldBe(desktop.Worker.Store.HouseholdId);
+        laptop.Worker.Store.CurrentKey.ShouldBe(desktop.Worker.Store.CurrentKey);
+    }
+
+    /// <summary>Households design §3: on a Public network members sync on it while the window is open, over the listener that
+    /// syncs only with members who prove their keys; once it closes they sync through the server alone.</summary>
+    [Fact]
+    public async Task On_a_public_network_members_sync_on_it_in_the_window_and_not_after()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        var laptop = await Start("Laptop-2", ChassisKind.Laptop);
+        desktop.Category.IsPrivate = false;
+        laptop.Category.IsPrivate = false;
+        await desktop.Send<HouseholdReply>(new PairingWindowRequest(1));
+        await laptop.Send<HouseholdReply>(new PairingWindowRequest(2));
+        await WorkerPc.Pair(desktop, laptop);
+        _relay.Down = true;                                                    // the network is the only way
+
+        desktop.Household.Upsert([Row(desktop.Worker.DeviceId, 1, 42, changed: Now.ToUnixTimeMilliseconds() + 1)]);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+        laptop.Household.Row(desktop.Worker.DeviceId, Hour(1)).ShouldNotBeNull().EnergyWh.ShouldBe(42);
+
+        _clock.Advance(HouseholdWorker.PairingWindowFor);                      // both pages long closed
+        await WaitFor.True(() => laptop.Worker.Port == 0 && desktop.Worker.Port == 0);
+        desktop.Household.Upsert([Row(desktop.Worker.DeviceId, 2, 43, changed: _clock.GetUtcNow().ToUnixTimeMilliseconds() + 1)]);
+        await desktop.Worker.RunOnceAsync(CancellationToken.None);
+
+        laptop.Household.Row(desktop.Worker.DeviceId, Hour(2)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task The_status_says_which_kind_of_network_this_pc_is_on_even_when_windows_says_nothing()
+    {
+        var desktop = await Start("Desktop-7", ChassisKind.Desktop);
+        desktop.Board.Household!.Network.ShouldBe(NetworkCategory.Private);
+
+        desktop.Category.Quietly(isPrivate: false);
+        _clock.Advance(HouseholdWorker.NetworkEvery);
+
+        await WaitFor.True(() => desktop.Board.Household!.Network == NetworkCategory.Public);
+    }
+
+    [Fact]
     public async Task Once_the_joining_pc_has_said_it_is_joining_leaving_its_household_waits_for_the_pairing_to_finish()
     {
         var desktop = await Start("Desktop-7", ChassisKind.Desktop);

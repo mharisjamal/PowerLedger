@@ -39,6 +39,6 @@ public sealed class WindowsDiscoveryTests
     {
         using var category = new WindowsNetworkCategory(NullLogger.Instance);
 
-        Should.NotThrow(() => category.IsPrivate);
+        Should.NotThrow(() => category.Kind);
     }
 }

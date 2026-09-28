@@ -110,7 +110,7 @@ public partial class App : Application
         var signIn = new SignIn(() => new HttpLoopbackServer(), OpenPage, new HttpClient(), TimeProvider.System);
         var account = new SignInViewModel(
             _link, _preferences, signIn, threads, SignInClients.Microsoft, SignInClients.Google, SignInClients.GoogleSecret);
-        _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account);
+        _household = new HouseholdViewModel(_link, householdHistory, threads, TimeProvider.System, zone, culture, account, OpenPage);
         _household.AddPcRequested += OpenAddPcWindow;
         var http = UpdateHttp.Create(version);
         _feedbackSender = new FeedbackSender(http, FeedbackQueue.DefaultFolder, TimeProvider.System);
@@ -233,7 +233,8 @@ public partial class App : Application
             _usage?.CountReportExported();
     }
 
-    /// <summary>A release's page in the browser; with no browser set up, nothing happens.</summary>
+    /// <summary>A release's page in the browser, or a page of Windows' Settings (households design §3); with nothing set up to
+    /// open it, nothing happens.</summary>
     private static void OpenPage(Uri page)
     {
         try

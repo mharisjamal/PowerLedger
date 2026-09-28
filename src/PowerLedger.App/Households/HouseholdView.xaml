@@ -35,6 +35,14 @@
                     <TextBlock Style="{StaticResource Text.Muted}" Margin="0,6,0,0" Foreground="{DynamicResource Brush.Amber}" Text="{Binding AskAgainMessage}"
                                Visibility="{Binding AskAgainMessage, Converter={StaticResource VisibleWhenText}}" />
                 </StackPanel>
+                <!-- Households design §3: on a Public network this PC is found only while this page or Add a PC shows, on both
+                     PCs. Network settings opens Windows' own page; PowerLedger never changes the network's category itself. -->
+                <StackPanel Margin="0,0,0,16" Visibility="{Binding IsPublicNetwork, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" MaxWidth="480" HorizontalAlignment="Left"
+                               Text="{x:Static local:HouseholdViewModel.PublicNetworkNote}" />
+                    <Button Style="{StaticResource Link}" Margin="0,4,0,0" Content="Network settings" Command="{Binding OpenNetworkSettings}"
+                            HorizontalAlignment="Left" />
+                </StackPanel>
                 <Button Style="{StaticResource Quiet}" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
             </StackPanel>
 
@@ -132,6 +140,14 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Households design §3: on a Public network this PC is found only while this page or Add a PC shows, on both
+                     PCs. Network settings opens Windows' own page; PowerLedger never changes the network's category itself. -->
+                <StackPanel Margin="0,20,0,0" Visibility="{Binding IsPublicNetwork, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Style="{StaticResource Text.Muted}" TextWrapping="Wrap" MaxWidth="480" HorizontalAlignment="Left"
+                               Text="{x:Static local:HouseholdViewModel.PublicNetworkNote}" />
+                    <Button Style="{StaticResource Link}" Margin="0,4,0,0" Content="Network settings" Command="{Binding OpenNetworkSettings}"
+                            HorizontalAlignment="Left" />
+                </StackPanel>
                 <Button Style="{StaticResource Link}" Margin="0,20,0,0" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
 
                 <TextBlock Style="{StaticResource Text.Eyebrow}" Margin="0,28,0,10" Text="MANAGE THIS HOUSEHOLD" />

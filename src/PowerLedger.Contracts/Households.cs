@@ -23,6 +23,8 @@ public sealed record MemberStatus(
 /// <param name="RecoveryMissing">N2: signed in and linked, but no recovery code works any more; the App offers a new one.</param>
 /// <param name="CanAskAgain">N2: this PC's request to join ended unanswered or was refused; the App offers
 /// <see cref="AskAgainRequest"/>. The service never asks again by itself (plan 0.9).</param>
+/// <param name="Network">The kind of network this PC is on (households design §3): on a Public one the App says so and offers
+/// Windows' network settings. Null from an older service, which takes no <see cref="PairingWindowRequest"/>.</param>
 public sealed record HouseholdStatus(
     string? HouseholdId,
     string DeviceId,
@@ -34,7 +36,22 @@ public sealed record HouseholdStatus(
     bool SignedIn = false,
     int PendingApprovals = 0,
     bool RecoveryMissing = false,
-    bool CanAskAgain = false);
+    bool CanAskAgain = false,
+    NetworkCategory? Network = null);
+
+/// <summary>The kind of network this PC is on, as Windows' Network List Manager says (households design §3).</summary>
+public enum NetworkCategory
+{
+    /// <summary>On no Private or Public network: none connected, or a domain network alone. Nothing is announced.</summary>
+    None = 0,
+
+    /// <summary>Some connected network is Private and none is Public: this PC is announced while its user lets it be found.</summary>
+    Private = 1,
+
+    /// <summary>Some connected network is Public, as Windows sets home Wi-Fi by default: this PC is announced only in the
+    /// pairing window, while its Household page or Add a PC is open and for 15 minutes after.</summary>
+    Public = 2,
+}
 
 /// <summary>A PowerLedger PC found on this network.</summary>
 /// <param name="InstanceId">The random name it announces itself under, which <see cref="AddPcRequest"/> names.</param>

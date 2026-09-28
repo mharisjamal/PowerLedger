@@ -34,6 +34,7 @@ public class HouseholdContractTests
             new RemoveOldRowsRequest(17, "0123456789abcdef0123456789abcdef"),
             new RemoveOldRowsRequest(18),
             new AskAgainRequest(19),
+            new PairingWindowRequest(20),
         ];
         foreach (var message in messages)
         {
@@ -69,6 +70,18 @@ public class HouseholdContractTests
 
         PipeProtocol.Deserialize(line.AsSpan(0, line.Length - 1)).ShouldBeOfType<StatusReply>().Status.Household!.CanAskAgain.ShouldBeTrue();
         new HouseholdStatus(null, "d1", "Desktop-7", ChassisKind.Desktop, true, [], null).CanAskAgain.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_status_says_which_kind_of_network_this_pc_is_on_and_an_older_services_says_nothing()
+    {
+        var household = new HouseholdStatus(null, "d1", "Desktop-7", ChassisKind.Desktop, true, [], null, Network: NetworkCategory.Public);
+        var line = PipeProtocol.Serialize(new StatusReply(1, new ServiceStatus("0.9.5", DateTimeOffset.UnixEpoch, 0, [], 0, 0,
+            new CalibrationStatus(0, 0, 0, 0), "", 0, null, null, null, Household: household)));
+
+        PipeProtocol.Deserialize(line.AsSpan(0, line.Length - 1)).ShouldBeOfType<StatusReply>().Status.Household!.Network
+            .ShouldBe(NetworkCategory.Public);
+        new HouseholdStatus(null, "d1", "Desktop-7", ChassisKind.Desktop, true, [], null).Network.ShouldBeNull();
     }
 
     [Fact]

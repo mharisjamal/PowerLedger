@@ -102,6 +102,18 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         (await _link.AskAgainAsync()).ShouldBe(new HouseholdOutcome(false, "Sign in first to ask to join your household."));
     }
 
+    /// <summary>Households design §3: the Household page's pairing window signal answers as an ordinary HouseholdReply
+    /// over the real pipe, and a refusal, such as from another user's session, in the service's words.</summary>
+    [Fact]
+    public async Task The_pairing_window_answers_as_a_household_reply()
+    {
+        (await _link.OpenPairingWindowAsync()).Ok.ShouldBeTrue();
+        _service.Requests.OfType<PairingWindowRequest>().ShouldHaveSingleItem();
+
+        _service.Refuse = "Only the PC's own screen can change its household.";
+        (await _link.OpenPairingWindowAsync()).ShouldBe(new HouseholdOutcome(false, "Only the PC's own screen can change its household."));
+    }
+
     /// <summary>Service round, review: any request can now come back with an oversized-reply ErrorReply — shown as a
     /// message, never a crash.</summary>
     [Fact]

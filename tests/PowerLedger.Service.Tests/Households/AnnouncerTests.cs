@@ -1,11 +1,12 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using PowerLedger.Contracts;
 using PowerLedger.Service.Households;
 using Shouldly;
 
 namespace PowerLedger.Service.Tests;
 
-/// <summary>When this PC is announced on the network (households design §3): only while the user lets it be found and the
-/// network is Private.</summary>
+/// <summary>When this PC is announced on the network (households design §3): only while the user lets it be found, and the
+/// network is Private, or Public while the pairing window is open.</summary>
 public sealed class AnnouncerTests
 {
     private static readonly Dictionary<string, string> Txt = new() { ["v"] = "1", ["name"] = "Desktop-7", ["tag"] = "" };
@@ -42,6 +43,54 @@ public sealed class AnnouncerTests
         _category.IsPrivate = false;
         _network.Announced.ShouldBeEmpty();
         announcer.Announced.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void On_a_public_network_it_is_announced_only_while_the_pairing_window_is_open()
+    {
+        var window = false;
+        var announcer = new Announcer(_network.Join(), _category, NullLogger.Instance, () => window);
+        _category.Kind = NetworkCategory.Public;
+
+        announcer.Update(new Announcement("a1", 50123, Txt)).ShouldBeFalse();
+        _network.Announced.ShouldBeEmpty();
+
+        window = true;
+        announcer.Update(new Announcement("a1", 50123, Txt)).ShouldBeTrue();
+        _network.Announced.ShouldHaveSingleItem().Instance.ShouldBe("a1");
+
+        window = false;                                                  // 15 minutes on: the next update withdraws it
+        announcer.Update(new Announcement("a1", 50123, Txt)).ShouldBeFalse();
+        _network.Announced.ShouldBeEmpty();
+        announcer.Announced.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_network_change_checks_the_window_again()
+    {
+        var window = true;
+        var announcer = new Announcer(_network.Join(), _category, NullLogger.Instance, () => window);
+        announcer.Update(new Announcement("a1", 50123, Txt)).ShouldBeTrue();
+
+        _category.Kind = NetworkCategory.Public;                         // turned Public with the window open: still found
+        _network.Announced.ShouldHaveSingleItem();
+
+        window = false;
+        _category.Kind = NetworkCategory.Public;                         // a change after the window closed withdraws it
+        _network.Announced.ShouldBeEmpty();
+
+        _category.Kind = NetworkCategory.Private;                        // Private needs no window
+        _network.Announced.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void On_neither_a_private_nor_a_public_network_the_window_announces_nothing()
+    {
+        var announcer = new Announcer(_network.Join(), _category, NullLogger.Instance, () => true);
+        _category.Kind = NetworkCategory.None;                           // a domain network alone, or none at all
+
+        announcer.Update(new Announcement("a1", 50123, Txt)).ShouldBeFalse();
+        _network.Announced.ShouldBeEmpty();
     }
 
     [Fact]

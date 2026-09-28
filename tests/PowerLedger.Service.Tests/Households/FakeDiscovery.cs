@@ -1,4 +1,5 @@
 using System.Net;
+using PowerLedger.Contracts;
 using PowerLedger.Service.Households;
 
 namespace PowerLedger.Service.Tests;
@@ -57,21 +58,30 @@ internal sealed class FakeDiscovery(FakeNetwork network) : IDiscovery
 /// <summary>A network whose category the test sets, raising <see cref="Changed"/> as it does.</summary>
 internal sealed class FakeNetworkCategory(bool isPrivate = true) : INetworkCategory
 {
-    private bool _isPrivate = isPrivate;
+    private int _kind = (int)Of(isPrivate);
 
-    public bool IsPrivate
+    public NetworkCategory Kind
     {
-        get => Volatile.Read(ref _isPrivate);
+        get => (NetworkCategory)Volatile.Read(ref _kind);
         set
         {
-            Volatile.Write(ref _isPrivate, value);
+            Volatile.Write(ref _kind, (int)value);
             Changed?.Invoke();
         }
+    }
+
+    /// <summary>True for a Private network, false for a Public one, as most tests have it.</summary>
+    public bool IsPrivate
+    {
+        get => Kind == NetworkCategory.Private;
+        set => Kind = Of(value);
     }
 
     public event Action? Changed;
 
     /// <summary>Changes the category without raising <see cref="Changed"/>, as Windows says nothing when only the category of a
     /// network changes.</summary>
-    public void Quietly(bool isPrivate) => Volatile.Write(ref _isPrivate, isPrivate);
+    public void Quietly(bool isPrivate) => Volatile.Write(ref _kind, (int)Of(isPrivate));
+
+    private static NetworkCategory Of(bool isPrivate) => isPrivate ? NetworkCategory.Private : NetworkCategory.Public;
 }
