@@ -67,6 +67,14 @@
                         <TextBlock Style="{StaticResource A.PanelTitle}" Text="Household" />
                     </DockPanel>
 
+                    <!-- Households design §3: on a Public network this PC is found only while this page or Add a PC shows, on both
+                         PCs. Network settings opens Windows' own page; PowerLedger never changes the network's category itself. -->
+                    <StackPanel Style="{StaticResource Measure}" Margin="0,0,0,14" Visibility="{Binding IsPublicNetwork, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource A.Page.Note}" Margin="0" Text="{x:Static app:HouseholdViewModel.PublicNetworkNote}" />
+                        <Button Style="{StaticResource A.GhostBtn}" Margin="0,10,0,0" HorizontalAlignment="Left" Content="Network settings"
+                                Command="{Binding OpenNetworkSettings}" />
+                    </StackPanel>
+
                     <!-- Before a household exists (households design §2). -->
                     <StackPanel Style="{StaticResource Measure}" Visibility="{Binding HasHousehold, Converter={StaticResource HiddenWhen}}">
                         <TextBlock Style="{StaticResource A.Page.Prose}" Text="{Binding Message}" />

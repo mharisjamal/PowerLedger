@@ -8,6 +8,14 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.10.0",
+        [
+            "Aero, a new Liquid Glass look, is now the default, with a short tour the first time it opens. Switch look brings back Midnight or Classic.",
+            "Settings has a Glass section: Clear, Tinted, Dark or your own colour, plus Reduce transparency and Increase contrast.",
+            "Insights: your likely bill this month, hours of unusual use, when your PC idles most, and its carbon.",
+            "A small glass overlay can show your watts over other windows.",
+            "PCs on the same Wi-Fi find each other even when Windows calls the network Public: keep the Household page open on both.",
+        ]),
         ("0.9.4",
         [
             "Where the power went names each part: your processor, graphics card, monitors, and memory and drives.",
