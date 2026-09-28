@@ -89,7 +89,7 @@ public class AeroStylesTests
         {
             var (host, text) = Dressed(new TextBlock { Text = "12 345" }, key, Theme.Dark);
             text.FontSize.ShouldBe(size, key);
-            text.FontFamily.Source.ShouldContain("Segoe UI", Case.Insensitive, key);
+            text.FontFamily.Source.ShouldStartWith("pack://application:,,,/PowerLedger;component/Fonts/Geist/#Geist", customMessage: key);
             GC.KeepAlive(host);
         });
 

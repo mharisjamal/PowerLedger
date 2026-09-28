@@ -258,7 +258,8 @@
     <sys:Double x:Key="A.Radius.Panel">26</sys:Double>
 
     <!-- Type -->
-    <FontFamily x:Key="A.F.Ui">Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI</FontFamily>
+    <!-- Geist, the demo's face, bundled (Fonts/Geist, SIL OFL); Segoe UI Variable where a glyph is missing. -->
+    <FontFamily x:Key="A.F.Ui">pack://application:,,,/PowerLedger;component/Fonts/Geist/#Geist, Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI</FontFamily>
     <sys:Double x:Key="A.T.Big">40</sys:Double>
     <sys:Double x:Key="A.T.BigMonth">34</sys:Double>
     <sys:Double x:Key="A.T.Mid">22</sys:Double>
