@@ -153,6 +153,10 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     /// <summary>The one-time banner about the new look is retired (Midnight look design §1): by its buttons or any switch.</summary>
     public bool LookIntroduced => _ui.Current.LookIntroduced;
 
+    /// <summary>The look the one-time move to Aero left (Aero look design §1), where Aero's banner's Switch back goes; null
+    /// when it left none.</summary>
+    public Look? LookBeforeAero => _ui.Current.LookBeforeAero;
+
     /// <summary>The banner's Got it, or its Switch back before the switch: never again, in either look.</summary>
     public void IntroduceLook()
     {
