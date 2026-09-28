@@ -211,6 +211,32 @@ public class MidnightPageRenderingTests
         Sizes(10_000, "household-none", "household-left");   // two short cards, and a table of two rows
     }
 
+    /// <summary>Households design §3: on a Public network the page says to keep it open on both PCs, beside Add a PC, and
+    /// offers Windows' network settings, before a household exists and in one, in both themes.</summary>
+    [Fact]
+    public void Household_on_a_public_network_says_so_beside_add_a_pc_and_offers_network_settings()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                using var styles = Midnight(theme);
+                foreach (var (model, name) in new[] { (PublicScreen(householdId: null), "none"), (PublicScreen("hh1"), "member") })
+                {
+                    model.Show();
+                    var view = new Midnight.HouseholdView { DataContext = model };
+                    using var page = Page(view, 1010);
+                    var notes = AllOf<TextBlock>(view).Where(t => t.Text == HouseholdViewModel.PublicNetworkNote && t.IsVisible).ToList();
+                    notes.Count.ShouldBe(1, $"{name} on {theme}");
+                    AllOf<Button>(view).Count(b => Equals(b.Content, "Network settings") && b.IsVisible).ShouldBe(1, $"{name} on {theme}");
+                    page.Render($"midnight-household-public-{name}-{theme}.png");
+                }
+            }
+        });
+        Sizes(10_000, "household-public-none", "household-public-member");
+    }
+
     [Fact]
     public void Settings_shows_each_section_as_a_card_with_the_look_and_theme_pills_and_the_privacy_switches_in_both_themes()
     {
@@ -444,6 +470,27 @@ public class MidnightPageRenderingTests
         var link = new FakeLink();
         link.Connect(true);
         return new HouseholdViewModel(link, new FakeHouseholdHistory(), UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
+    }
+
+    /// <summary>This PC on Wi-Fi Windows calls Public, with no household yet or as a member of one.</summary>
+    private static HouseholdViewModel PublicScreen(string? householdId)
+    {
+        var link = new FakeLink
+        {
+            Status = Statuses.Running() with
+            {
+                Household = new HouseholdStatus(householdId, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, Network: NetworkCategory.Public),
+            },
+        };
+        link.Connect(true);
+        var history = new FakeHouseholdHistory
+        {
+            Answer = _ => householdId is null ? FakeHouseholdHistory.Empty : FakeHouseholdHistory.Empty with
+            {
+                Members = [new HouseholdMemberRow("aaaa", "Desktop-1", ChassisKind.Desktop, Now.AddDays(-40), null, Now)],
+            },
+        };
+        return new HouseholdViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, FakeAccount.Model(link));
     }
 
     /// <summary>A household whose laptop left three days ago and whose rows are still on file (task 0.8's removeOldRows).</summary>

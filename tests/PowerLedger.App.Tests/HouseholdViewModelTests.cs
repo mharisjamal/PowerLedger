@@ -638,4 +638,83 @@ public class HouseholdViewModelTests
         model.IsConfirming.ShouldBeFalse();
         model.ActionMessage.ShouldBe("The service didn't answer, so the change may not have been made.");
     }
+
+    private static ServiceStatus OnNetwork(NetworkCategory? network) => Statuses.Running() with
+    {
+        Household = new HouseholdStatus(null, "aaaa", "Desktop-1", ChassisKind.Desktop, true, [], null, Network: network),
+    };
+
+    /// <summary>Households design §3: Windows sets home Wi-Fi to Public by default, and there this PC is found only while
+    /// the page is open, so the page says to keep it open on both PCs, and opens Windows' network settings, never changing
+    /// the network's category itself.</summary>
+    [Fact]
+    public void On_a_public_network_the_page_says_so_and_opens_windows_network_settings()
+    {
+        _link.Status = OnNetwork(NetworkCategory.Public);
+        _link.Connect(true);
+        var opened = new List<Uri>();
+        var model = new HouseholdViewModel(
+            _link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, FakeAccount.Model(_link), opened.Add);
+
+        model.Show();
+
+        model.IsPublicNetwork.ShouldBeTrue();
+        HouseholdViewModel.PublicNetworkNote.ShouldBe(
+            "This Wi-Fi is set to Public in Windows. Keep this page open on both PCs while you add one.");
+        model.OpenNetworkSettings.Execute(null);
+        opened.ShouldHaveSingleItem().OriginalString.ShouldBe("ms-settings:network-status");
+    }
+
+    [Theory]
+    [InlineData(NetworkCategory.Private)]
+    [InlineData(NetworkCategory.None)]
+    [InlineData(null)]
+    public void On_any_other_network_or_with_an_older_service_the_page_says_nothing_about_it(NetworkCategory? network)
+    {
+        _link.Status = OnNetwork(network);
+        _link.Connect(true);
+        var model = Model();
+
+        model.Show();
+
+        model.IsPublicNetwork.ShouldBeFalse();
+    }
+
+    /// <summary>Households design §3: the pairing window stays open while the page shows and for 15 minutes after, so the
+    /// App tells the service as the page shows, every minute while it shows, and once more as it hides.</summary>
+    [Fact]
+    public void While_the_page_shows_it_keeps_the_pairing_window_open_and_says_so_once_more_as_it_hides()
+    {
+        _link.Status = OnNetwork(NetworkCategory.Public);
+        _link.Connect(true);
+        var model = Model();
+
+        model.Show();
+        _link.PairingWindowCalls.ShouldBe(1);
+
+        _clock.Advance(HouseholdViewModel.RefreshEvery);
+        _link.PairingWindowCalls.ShouldBe(2);
+
+        model.Hide();
+        _link.PairingWindowCalls.ShouldBe(3);
+
+        model.Hide();                                                       // every other page hides it again: nothing more
+        _clock.Advance(HouseholdViewModel.RefreshEvery);
+        _link.PairingWindowCalls.ShouldBe(3);
+        _link.HouseholdRequests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void An_older_service_that_says_nothing_of_the_network_is_never_sent_the_pairing_window()
+    {
+        _link.Status = OnNetwork(null);
+        _link.Connect(true);
+        var model = Model();
+
+        model.Show();
+        _clock.Advance(HouseholdViewModel.RefreshEvery);
+        model.Hide();
+
+        _link.PairingWindowCalls.ShouldBe(0);
+    }
 }

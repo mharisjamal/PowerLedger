@@ -42,6 +42,7 @@ namespace PowerLedger.Contracts;
 [JsonDerivedType(typeof(NewRecoveryCodeRequest), "newRecoveryCode")]
 [JsonDerivedType(typeof(RemoveOldRowsRequest), "removeOldRows")]
 [JsonDerivedType(typeof(AskAgainRequest), "askAgain")]
+[JsonDerivedType(typeof(PairingWindowRequest), "pairingWindow")]
 [JsonDerivedType(typeof(UiStateRequest), "uiState")]
 [JsonDerivedType(typeof(UpdateNowRequest), "updateNow")]
 [JsonDerivedType(typeof(OkReply), "ok")]
@@ -178,8 +179,17 @@ public sealed record LeaveHouseholdRequest(long Id) : PipeRequest(Id);
 /// <summary>This PC's name in the household, 1 to 40 characters.</summary>
 public sealed record RenamePcRequest(long Id, string Name) : PipeRequest(Id);
 
-/// <summary>Whether other PCs on a Private network can find this one.</summary>
+/// <summary>Whether other PCs on the network can find this one: on a Public network only in the pairing window (households
+/// design §3).</summary>
 public sealed record SetDiscoverableRequest(long Id, bool On) : PipeRequest(Id);
+
+/// <summary>
+/// The Household page, in any look, is showing on this PC (households design §3): on a Public network this PC may be found,
+/// and listens for the others, until 15 minutes after the last of these, answered with a <see cref="HouseholdReply"/>. The
+/// App sends it when the page shows, every minute while it shows, and as it hides; only an App at this PC's screen is heeded.
+/// Sent only to a service whose <see cref="HouseholdStatus.Network"/> is set: an older one would take it for a broken line.
+/// </summary>
+public sealed record PairingWindowRequest(long Id) : PipeRequest(Id);
 
 /// <summary>N2: sign in with an ID token the App got from the provider in the browser, and a recovery code when the user
 /// is restoring a household (households design §7).</summary>

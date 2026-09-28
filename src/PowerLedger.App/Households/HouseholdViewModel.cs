@@ -51,6 +51,14 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
 
     public const string Explanation = "Pair this PC with the others in your home to see what all of them use together.";
 
+    /// <summary>Households design §3: on a Public network, as Windows sets home Wi-Fi by default, this PC is found only in the
+    /// pairing window, which this page and Add a PC hold open, so both PCs need it showing while one is added.</summary>
+    public const string PublicNetworkNote = "This Wi-Fi is set to Public in Windows. Keep this page open on both PCs while you add one.";
+
+    /// <summary>Windows' own page for the network, where its user may make it Private; PowerLedger never changes the
+    /// network's category itself (households design §3).</summary>
+    public static readonly Uri NetworkSettings = new("ms-settings:network-status");
+
     private const string CantRead = "History can't be read right now. It comes back when the service is running.";
 
     private readonly IServiceLink _link;
@@ -59,7 +67,11 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     private readonly TimeProvider _clock;
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
+    private readonly Action<Uri> _openSettings;
     private ITimer? _timer;
+    private bool _showing;
+    private bool _serviceKnowsWindow;
+    private bool _isPublicNetwork;
     private int _reads;
     private bool _hasHousehold;
     private HouseholdPeriod _today;
@@ -84,7 +96,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
 
     public HouseholdViewModel(
         IServiceLink link, IHouseholdHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
-        SignInViewModel account)
+        SignInViewModel account, Action<Uri>? openSettings = null)
     {
         _link = link;
         _history = history;
@@ -93,6 +105,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         _zone = zone;
         _culture = culture;
         Account = account;
+        _openSettings = openSettings ?? (_ => { });
         _today = Empty("Today");
         _week = Empty("This week");
         _month = Empty("This month");
@@ -112,6 +125,7 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         CancelPending = new RelayCommand(EndConfirm);
         MakeRecoveryCode = new RelayCommand(() => _ = MakeRecoveryCodeAsync());
         AskAgain = new RelayCommand(() => _ = AskAgainAsync());
+        OpenNetworkSettings = new RelayCommand(() => _openSettings(NetworkSettings));
     }
 
     /// <summary>N2's sign-in section (Plan N tasks A6, A7): works whether or not this PC is in a household.</summary>
@@ -182,6 +196,13 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     /// none or with no household. Midnight's sidebar badges its Household item with it.</summary>
     public int PendingApprovals { get => _pendingApprovals; private set => SetProperty(ref _pendingApprovals, value); }
 
+    /// <summary>Households design §3: this PC is on a Public network, so the page shows <see cref="PublicNetworkNote"/> and
+    /// <see cref="OpenNetworkSettings"/>. False on any other, and with an older service that doesn't say.</summary>
+    public bool IsPublicNetwork { get => _isPublicNetwork; private set => SetProperty(ref _isPublicNetwork, value); }
+
+    /// <summary>Opens <see cref="NetworkSettings"/> in Windows' Settings.</summary>
+    public IRelayCommand OpenNetworkSettings { get; }
+
     /// <summary>Opens Add a PC (Plan N task A2 wires the window up to this).</summary>
     public ICommand AddPc { get; }
 
@@ -234,17 +255,25 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
 
     public IRelayCommand CancelPending { get; }
 
-    /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
+    /// <summary>The page is shown: read now, and every minute until it is hidden, holding the pairing window open with
+    /// each read (households design §3). Call on the UI thread.</summary>
     public void Show()
     {
+        _showing = true;
         Refresh();
         _timer ??= _clock.CreateTimer(_ => _threads.Post(Refresh), null, RefreshEvery, RefreshEvery);
     }
 
+    /// <summary>The page is hidden: reading stops, and a service that takes the pairing window is told once more, so the
+    /// window stays open for its 15 minutes from now, the time to walk to the other PC (households design §3). Every other
+    /// page hides this one too; only the hide of a page that was showing says anything. Call on the UI thread.</summary>
     public void Hide()
     {
+        var wasShowing = _showing;
+        _showing = false;
         _timer?.Dispose();
         _timer = null;
+        if (wasShowing && _serviceKnowsWindow) _threads.Background(() => _ = _link.OpenPairingWindowAsync());
     }
 
     /// <summary>Reads the service's status and, only while in a household, the stored rows, off the UI thread. A read a
@@ -252,15 +281,20 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
     internal void Refresh()
     {
         var read = ++_reads;
-        _threads.Background(() => _ = ReadAsync(read));
+        var showing = _showing;
+        _threads.Background(() => _ = ReadAsync(read, showing));
     }
 
     public void Dispose() => Hide();
 
-    private async Task ReadAsync(int read)
+    /// <param name="showing">The page is showing, so a service that says which network this PC is on, and so takes the
+    /// request, is told the pairing window stays open (households design §3). Its answer changes nothing here: another
+    /// user's session is refused, and a Private network needs no window.</param>
+    private async Task ReadAsync(int read, bool showing)
     {
         var status = await _link.GetStatusAsync().ConfigureAwait(false);
         var household = status?.Household;
+        if (showing && household?.Network is not null) await _link.OpenPairingWindowAsync().ConfigureAwait(false);
         var now = _clock.GetUtcNow();
         // Review finding A11: read even with no current household, so old rows left behind by one this PC has since
         // left (households design §1: a left member's rows stay until the user removes them) can still be pointed out.
@@ -278,6 +312,8 @@ internal sealed class HouseholdViewModel : ObservableObject, IDisposable
         RecoveryMissing = household?.RecoveryMissing ?? false;   // task 0.8: can matter with or without a household
         CanAskAgain = household?.CanAskAgain ?? false;   // plan 0.9: this PC is waiting to be let in, not a member yet
         PendingApprovals = Math.Max(0, household?.PendingApprovals ?? 0);
+        _serviceKnowsWindow = household?.Network is not null;
+        IsPublicNetwork = household?.Network == NetworkCategory.Public;   // households design §3: with or without a household
         HasHousehold = household?.HouseholdId is not null;
         Problem = HasHousehold ? household!.Problem : null;
         if (!HasHousehold)

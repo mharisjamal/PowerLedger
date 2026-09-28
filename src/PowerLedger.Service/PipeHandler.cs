@@ -85,7 +85,7 @@ internal sealed partial class PipeHandler(
                     : new OkReply(request.Id);
             case BrowsePcsRequest or AddPcRequest or StartCodePairingRequest or JoinByCodeRequest or AnswerPromptRequest or RemovePcRequest
                 or LeaveHouseholdRequest or RenamePcRequest or SetDiscoverableRequest or SignInRequest or SignOutRequest or DeleteAccountRequest
-                or CancelPairingRequest or NewRecoveryCodeRequest or RemoveOldRowsRequest:
+                or CancelPairingRequest or NewRecoveryCodeRequest or RemoveOldRowsRequest or AskAgainRequest or PairingWindowRequest:
                 return await HouseholdAsync((PipeRequest)message, session, cancel).ConfigureAwait(false);
             case PipeRequest request:
                 return new ErrorReply(request.Id, "The service does not handle that request.");

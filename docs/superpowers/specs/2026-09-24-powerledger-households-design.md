@@ -71,9 +71,25 @@ A phone or web view is not wanted now. Built as two parts in one release, 0.7.0:
     ID under the household key, cut to 8 bytes. A member can work the tag out, and so the list can say "already in your
     household". A stranger can't tell which PCs share a household, since the tag differs for each PC.
   - The **port** is the service's listener, chosen by Windows and given in the SRV record.
-- **Listening.** The service listens on TCP on the LAN. The installer adds a Windows Firewall rule for the service's
-  program: inbound TCP, **Private** networks only. On a Public network nothing is announced, and **Somewhere else** is
-  the way.
+- **Listening.** The service listens on TCP on the LAN. The installer adds two Windows Firewall rules for the service's
+  program, both inbound TCP from the local subnet only: "PowerLedger households" for **Private** networks, and
+  "PowerLedger households (public)" for **Public** ones. Every install adds both, an update included, and uninstalling
+  removes both.
+- **Which network.** Windows sets home Wi-Fi to **Public** by default, so a Public network can't mean "nothing here".
+  - On a **Private** network the PC is announced, and listens, whenever the tick is on.
+  - On a **Public** network it is announced, and listens, only while the **pairing window** is open: while the Household
+    page, in any look, or Add a PC is showing in the App on that PC, and for 15 minutes after it last showed. The App
+    says so to the service over the pipe (`pairingWindow`) as the page shows, every minute while it shows, and as it
+    hides; looking for PCs from Add a PC does the same. Only the App at the PC's own screen opens it. When the window
+    closes, the listener stops and the announcement is withdrawn.
+  - A network that is Public wins over one that is Private, and a domain network alone is neither: nothing is announced.
+  - The status tells the App which kind of network the PC is on. On a Public one the Household page says "This Wi-Fi is
+    set to Public in Windows. Keep this page open on both PCs while you add one." and offers **Network settings**, which
+    opens Windows' own page (`ms-settings:network-status`). PowerLedger never changes a network's category itself.
+  - Members already paired sync on the network in the window too, over the same listener, which syncs only with members
+    that prove who they are. Outside it they sync through the server as usual.
+  - The comparison code, the commitment and the limits below are the same on either kind of network. **Somewhere else**
+    works on any network.
 - **Finding.** The App asks the service to browse (`DnsServiceBrowse`, then `DnsServiceResolve`) and lists what answers
   within a few seconds, refreshing while the list is open.
 - **The exchange**, over one TCP connection:

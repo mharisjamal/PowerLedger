@@ -185,7 +185,8 @@ internal sealed class HouseholdStore(SettingsRepository settings, Func<string>? 
         foreach (var key in OfTheHousehold) settings.Remove(key);
     }
 
-    /// <summary>Whether other PCs on a Private network can find this one; on until the user turns it off.</summary>
+    /// <summary>Whether other PCs on the network can find this one, on a Public network only in the pairing window (households
+    /// design §3); on until the user turns it off.</summary>
     public bool Discoverable
     {
         get => settings.Get(DiscoverableKey) != "0";

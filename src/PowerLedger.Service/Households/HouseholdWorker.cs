@@ -30,7 +30,8 @@ internal interface IHouseholdRequests
 
 /// <summary>
 /// The household in the service (households design §9): it holds this PC's keys and the household's, announces this PC on
-/// Private networks and listens for the others, builds this PC's hour rows every hour, syncs with the members it finds on
+/// Private networks, and on Public ones in the pairing window (§3), and listens for the others there, builds this PC's hour
+/// rows every hour, syncs with the members it finds on
 /// the network and through the server every 15 minutes, and carries out the App's requests. Pairings run on their own and
 /// tell the App how they go in pushed notices; everything that changes the household goes through one gate, which the
 /// worker's own work gives way to at once, so every request is answered within <see cref="AppWait"/>.
@@ -56,6 +57,14 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>How often the network's category is looked at again (plan 0.9): Windows says nothing when only a network's
     /// category changes, so the listener and the announcement stop within this long of the network turning Public.</summary>
     internal static readonly TimeSpan NetworkEvery = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// How long the pairing window stays open after the App last said its Household page or Add a PC is showing (households
+    /// design §3). Windows sets home Wi-Fi to Public by default, and on a Public network this PC is announced, and listens,
+    /// only in this window: long enough to walk to the other PC and add it, short enough that a PC carried to a café soon
+    /// stops answering. Only the App at this PC's screen opens it; a pairing still needs its user's Join and both codes.
+    /// </summary>
+    internal static readonly TimeSpan PairingWindowFor = TimeSpan.FromMinutes(15);
 
     /// <summary>The most members found on the network synced with in a turn: twice the most a household has.</summary>
     internal const int MaxFound = 2 * Wire.MaxMembers;
@@ -102,9 +111,19 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     private readonly SemaphoreSlim _kick = new(0);
     private readonly Lock _listening = new();
     private readonly Lock _statusLock = new();
+    private readonly Lock _windowLock = new();
     private LanListener? _listener;
     private ITimer? _networkCheck;
     private long _rowsBuiltForHour = -1;
+
+    /// <summary>When the pairing window closes, as UTC ticks; 0 before it ever opened (households design §3).</summary>
+    private long _windowUntil;
+
+    /// <summary>Looks again as the pairing window closes, so a Public network's listener and announcement stop on time.</summary>
+    private ITimer? _windowTimer;
+
+    /// <summary>The network's category as last read, a <see cref="NetworkCategory"/>; -1 before the first read.</summary>
+    private int _networkSeen = -1;
 
     /// <summary>How many publishes of the status have begun, and the number of the one that landed last.</summary>
     private long _statusBegun;
@@ -130,9 +149,13 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         _prompts = new HouseholdPrompts(notices, clock);
         _pairingGate = new PairingGate(clock);
         _strangers = new StrangerGate(clock);
-        _announcer = new Announcer(environment.Discovery, environment.Network, log);
+        _announcer = new Announcer(environment.Discovery, environment.Network, log, () => PairingWindowOpen);
         _keys = _store.DeviceKeys();
     }
+
+    /// <summary>Whether the pairing window is open now: the App at this PC's screen said its Household page or Add a PC was
+    /// showing less than <see cref="PairingWindowFor"/> ago (households design §3).</summary>
+    private bool PairingWindowOpen => _clock.GetUtcNow().UtcTicks < Volatile.Read(ref _windowUntil);
 
     /// <summary>This PC's device ID.</summary>
     public string DeviceId => _keys.DeviceId;
@@ -170,6 +193,9 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         {
             _environment.Network.Changed -= Announce;
             if (_networkCheck is not null) await _networkCheck.DisposeAsync().ConfigureAwait(false);
+            ITimer? windowTimer;
+            lock (_windowLock) (windowTimer, _windowTimer) = (_windowTimer, null);
+            if (windowTimer is not null) await windowTimer.DisposeAsync().ConfigureAwait(false);
             _announcer.Dispose();
             LanListener? listener;
             lock (_listening) (listener, _listener) = (_listener, null);
@@ -268,14 +294,18 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
 
     /// <summary>Carries out a request from the App. Anything that changes the household, pairing and signing in included,
     /// is taken only from a client in the console session, the one at the screen (plan 0.8): another user's session on the
-    /// same PC, or a service, may only look for PCs.</summary>
+    /// same PC, or a service, may only look for PCs. Looking from the screen, as Add a PC does every few seconds, opens the
+    /// pairing window as the Household page's own <see cref="PairingWindowRequest"/> does (households design §3).</summary>
     public async Task<PipeMessage> HandleAsync(PipeRequest request, uint? session, CancellationToken cancel)
     {
-        if (request is not BrowsePcsRequest && !_notices.AtTheScreen(session)) return Reply(request.Id, false, NotAtTheScreen);
+        var atTheScreen = _notices.AtTheScreen(session);
+        if (request is not BrowsePcsRequest && !atTheScreen) return Reply(request.Id, false, NotAtTheScreen);
         try
         {
+            if (atTheScreen && request is BrowsePcsRequest or PairingWindowRequest) OpenPairingWindow();
             return request switch
             {
+                PairingWindowRequest window => Reply(window.Id, true, "The pairing window is open."),
                 BrowsePcsRequest browse => await BrowseAsync(browse, cancel).ConfigureAwait(false),
                 AddPcRequest add => await AddPcAsync(add, cancel).ConfigureAwait(false),
                 StartCodePairingRequest start => await StartCodePairingAsync(start, cancel).ConfigureAwait(false),
@@ -903,12 +933,16 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         key is not null && service.Txt.GetValueOrDefault("tag") is { Length: > 0 } tag && tag == HouseholdCrypto.HouseholdTag(key, service.Instance);
 
     /// <summary>Announces this PC as it is now: its name, and the tag of its household when it is in one. Only while it may be
-    /// found, as its user lets it be and on a Private network, does it listen at all (plan 0.8); otherwise its port is shut
-    /// and nothing is announced.</summary>
+    /// found, as its user lets it be, on a Private network, or on a Public one in the pairing window (households design §3),
+    /// does it listen at all (plan 0.8); otherwise its port is shut and nothing is announced. A change in the network's
+    /// category goes to the status at once, so the App can say the network is Public.</summary>
     private void Announce()
     {
         if (_stopping.IsCancellationRequested) return;
-        if (Listen() is not { Port: > 0 } listener)
+        var before = Volatile.Read(ref _networkSeen);
+        var listening = Listen();
+        if (before >= 0 && Volatile.Read(ref _networkSeen) != before) Publish();
+        if (listening is not { Port: > 0 } listener)
         {
             _announcer.Update(null);
             return;
@@ -927,7 +961,7 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
     /// <summary>Starts the listener when this PC may be found and stops it when it may not; the listener as it is now.</summary>
     private LanListener? Listen()
     {
-        var wanted = _store.Discoverable && OnPrivateNetwork();
+        var wanted = _store.Discoverable && Announcer.MayAnnounceOn(ReadNetwork(), PairingWindowOpen);
         LanListener? stopping = null;
         LanListener? listening;
         lock (_listening)
@@ -957,16 +991,38 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
         return listening;
     }
 
-    private bool OnPrivateNetwork()
+    /// <summary>The network's category now, remembered for the status; None when Windows won't say.</summary>
+    private NetworkCategory ReadNetwork()
     {
+        NetworkCategory network;
         try
         {
-            return _environment.Network.IsPrivate;
+            network = _environment.Network.Kind;
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidCastException or UnauthorizedAccessException)
         {
-            return false;
+            network = NetworkCategory.None;
         }
+        Volatile.Write(ref _networkSeen, (int)network);
+        return network;
+    }
+
+    /// <summary>
+    /// Opens the pairing window, or keeps it open, for <see cref="PairingWindowFor"/> from now (households design §3): the App
+    /// at this PC's screen has its Household page or Add a PC showing. On a Public network this PC then listens and is
+    /// announced; a timer looks again as the window closes, and stops both unless the page showed again meanwhile. On a
+    /// Private network the window changes nothing.
+    /// </summary>
+    private void OpenPairingWindow()
+    {
+        Volatile.Write(ref _windowUntil, (_clock.GetUtcNow() + PairingWindowFor).UtcTicks);
+        lock (_windowLock)
+        {
+            if (_stopping.IsCancellationRequested) return;
+            if (_windowTimer is null) _windowTimer = _clock.CreateTimer(_ => Announce(), null, PairingWindowFor, Timeout.InfiniteTimeSpan);
+            else _windowTimer.Change(PairingWindowFor, Timeout.InfiniteTimeSpan);
+        }
+        Announce();
     }
 
     /// <summary>How the household stands, for the status. It never throws: the status keeps what was last published. Publishes
@@ -990,7 +1046,8 @@ internal sealed partial class HouseholdWorker : BackgroundService, IHouseholdReq
                 householdId, me, _store.Name, Kind(), _store.Discoverable, members, householdId is null ? null : _store.Problem,
                 SignedIn: _store.Session is not null, PendingApprovals: householdId is null ? 0 : Volatile.Read(ref _waitingApprovals),
                 RecoveryMissing: householdId is not null && _store.Session is not null && _recoveryMissing,
-                CanAskAgain: householdId is null && _store.Session is not null && _store.CanAskAgain);
+                CanAskAgain: householdId is null && _store.Session is not null && _store.CanAskAgain,
+                Network: Volatile.Read(ref _networkSeen) is >= 0 and var seen ? (NetworkCategory)seen : ReadNetwork());
             lock (_statusLock)
             {
                 if (_statusLanded > begun) return;                              // one that began later has landed: this one read older

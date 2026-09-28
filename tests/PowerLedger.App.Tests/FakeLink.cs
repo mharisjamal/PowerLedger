@@ -185,6 +185,17 @@ internal sealed class FakeLink : IServiceLink
 
     public Task<HouseholdOutcome> AskAgainAsync(CancellationToken cancel = default) => Household("askAgain");
 
+    /// <summary>How many times the App said its Household page is showing (households design §3), kept apart from
+    /// <see cref="HouseholdRequests"/> as it is sent every minute.</summary>
+    public int PairingWindowCalls { get; private set; }
+
+    public Task<HouseholdOutcome> OpenPairingWindowAsync(CancellationToken cancel = default)
+    {
+        if (!IsConnected) return Task.FromResult(HouseholdOutcome.NotConnected);
+        PairingWindowCalls++;
+        return Task.FromResult(new HouseholdOutcome(true, "The pairing window is open."));
+    }
+
     /// <summary>When set, a household request throws this instead of answering — for testing a caller's guard against
     /// something even <see cref="SignIn"/> itself didn't turn into a failed result (review finding A7).</summary>
     public Exception? HouseholdThrows { get; set; }

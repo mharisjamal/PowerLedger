@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
+using PowerLedger.Contracts;
 
 namespace PowerLedger.Service.Households;
 
@@ -28,9 +29,10 @@ internal interface IDiscovery : IDisposable
 /// <summary>Which kind of network this PC is on.</summary>
 internal interface INetworkCategory
 {
-    /// <summary>True when this PC is on a Private network and on no Public one: only then is it announced, and only there
-    /// does the installer's firewall rule let the other PCs in.</summary>
-    bool IsPrivate { get; }
+    /// <summary>Public when this PC is on any Public network, else Private when it is on a Private one, else None (households
+    /// design §3). On Private it is announced while its user lets it be found; on Public only while the pairing window is
+    /// open, and the installer's second firewall rule lets the other PCs in from the local subnet; on None never.</summary>
+    NetworkCategory Kind { get; }
 
     /// <summary>Raised, on any thread, when the networks may have changed.</summary>
     event Action? Changed;
@@ -45,25 +47,35 @@ internal sealed record Announcement(string Instance, int Port, IReadOnlyDictiona
 }
 
 /// <summary>
-/// Announces this PC only while the user lets it be found and the network is Private (households design §3), checking again
-/// whenever the networks change. A registration Windows refuses is tried again at the next update.
+/// Announces this PC only while the user lets it be found and the network is Private, or Public while the pairing window is
+/// open (households design §3), checking again whenever the networks change. The window is the worker's to open and close; it
+/// calls <see cref="Update"/> as it does, and a network change looks at the window as it stands. A registration Windows
+/// refuses is tried again at the next update.
 /// </summary>
 internal sealed class Announcer : IDisposable
 {
     private readonly IDiscovery _discovery;
     private readonly INetworkCategory _network;
     private readonly ILogger _log;
+    private readonly Func<bool> _windowOpen;
     private readonly Lock _gate = new();
     private Announcement? _wanted;
     private Announcement? _current;
 
-    public Announcer(IDiscovery discovery, INetworkCategory network, ILogger log)
+    /// <param name="windowOpen">Whether the pairing window is open now; null for a window that never opens.</param>
+    public Announcer(IDiscovery discovery, INetworkCategory network, ILogger log, Func<bool>? windowOpen = null)
     {
         _discovery = discovery;
         _network = network;
         _log = log;
+        _windowOpen = windowOpen ?? (() => false);
         _network.Changed += NetworkChanged;
     }
+
+    /// <summary>Whether this PC may be announced on <paramref name="network"/>: always on Private, on Public only while the
+    /// pairing window is open, never on None (households design §3).</summary>
+    public static bool MayAnnounceOn(NetworkCategory network, bool windowOpen) =>
+        network == NetworkCategory.Private || network == NetworkCategory.Public && windowOpen;
 
     public bool Announced
     {
@@ -73,7 +85,8 @@ internal sealed class Announcer : IDisposable
         }
     }
 
-    /// <summary>Announces <paramref name="wanted"/>, or withdraws the announcement when it is null or the network isn't Private.</summary>
+    /// <summary>Announces <paramref name="wanted"/>, or withdraws the announcement when it is null or the network, and the
+    /// window on a Public one, don't allow it.</summary>
     /// <returns>True when this PC is announced now.</returns>
     public bool Update(Announcement? wanted)
     {
@@ -101,17 +114,17 @@ internal sealed class Announcer : IDisposable
 
     private bool Apply()
     {
-        bool isPrivate;
+        bool allowed;
         try
         {
-            isPrivate = _wanted is not null && _network.IsPrivate;
+            allowed = _wanted is not null && MayAnnounceOn(_network.Kind, _windowOpen());
         }
         catch (Exception error) when (error is COMException or InvalidCastException or UnauthorizedAccessException)
         {
             _log.LogWarning(error, "The network's category could not be read, so this PC isn't announced");
-            isPrivate = false;
+            allowed = false;
         }
-        if (!isPrivate || _wanted is null)
+        if (!allowed || _wanted is null)
         {
             if (_current is null) return false;
             try
@@ -142,10 +155,11 @@ internal sealed class Announcer : IDisposable
 }
 
 /// <summary>
-/// The network's category from Windows' Network List Manager: Private when some connected network is Private and none is
-/// Public. A domain network alone counts as neither, as the firewall rule is for Private networks only. Address changes
-/// raise <see cref="Changed"/>; changing a network's category in Settings changes no address, so the worker also asks
-/// again every minute (plan 0.9).
+/// The network's category from Windows' Network List Manager: Public when some connected network is Public, which wins so
+/// that one Public network is never treated as Private; else Private when some connected network is Private. A domain
+/// network alone counts as neither, as the firewall rules are for Private and Public networks only. Address changes raise
+/// <see cref="Changed"/>; changing a network's category in Settings changes no address, so the worker also asks again every
+/// minute (plan 0.9).
 /// </summary>
 internal sealed class WindowsNetworkCategory : INetworkCategory, IDisposable
 {
@@ -164,12 +178,13 @@ internal sealed class WindowsNetworkCategory : INetworkCategory, IDisposable
 
     public event Action? Changed;
 
-    public bool IsPrivate
+    public NetworkCategory Kind
     {
         get
         {
             var categories = Categories();
-            return categories.Contains(Private) && !categories.Contains(Public);
+            if (categories.Contains(Public)) return NetworkCategory.Public;
+            return categories.Contains(Private) ? NetworkCategory.Private : NetworkCategory.None;
         }
     }
 

@@ -78,6 +78,13 @@
                         <TextBlock Style="{StaticResource M.Said}" Margin="0,6,0,0" Text="{Binding AskAgainMessage}"
                                    Visibility="{Binding AskAgainMessage, Converter={StaticResource VisibleWhenText}}" />
                     </StackPanel>
+                    <!-- Households design §3: on a Public network this PC is found only while this page or Add a PC shows, on both
+                         PCs. Network settings opens Windows' own page; PowerLedger never changes the network's category itself. -->
+                    <StackPanel Margin="0,16,0,0" Visibility="{Binding IsPublicNetwork, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource M.Note}" Text="{x:Static app:HouseholdViewModel.PublicNetworkNote}" />
+                        <Button Style="{StaticResource M.Button.Quiet}" Margin="-12,4,0,0" HorizontalAlignment="Left" Content="Network settings"
+                                Command="{Binding OpenNetworkSettings}" />
+                    </StackPanel>
                     <Button Style="{StaticResource M.Button.Primary}" Margin="0,20,0,0" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
                 </StackPanel>
             </Border>
@@ -178,6 +185,13 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <!-- Households design §3: on a Public network this PC is found only while this page or Add a PC shows, on both
+                             PCs. Network settings opens Windows' own page; PowerLedger never changes the network's category itself. -->
+                        <StackPanel Margin="0,12,0,0" Visibility="{Binding IsPublicNetwork, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock Style="{StaticResource M.Note}" Text="{x:Static app:HouseholdViewModel.PublicNetworkNote}" />
+                            <Button Style="{StaticResource M.Button.Quiet}" Margin="-12,4,0,0" HorizontalAlignment="Left" Content="Network settings"
+                                    Command="{Binding OpenNetworkSettings}" />
+                        </StackPanel>
                         <Button Style="{StaticResource M.Button.Outline}" Margin="0,12,0,4" Content="Add a PC" Command="{Binding AddPc}" HorizontalAlignment="Left" />
                     </StackPanel>
                 </Border>

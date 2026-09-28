@@ -135,7 +135,8 @@ internal interface IServiceLink : IAsyncDisposable
     /// <summary>This PC's name in the household, 1 to 40 characters.</summary>
     Task<HouseholdOutcome> RenamePcAsync(string name, CancellationToken cancel = default);
 
-    /// <summary>Whether other PCs on a Private network can find this one.</summary>
+    /// <summary>Whether other PCs on the network can find this one: on a Public network only in the pairing window
+    /// (households design §3).</summary>
     Task<HouseholdOutcome> SetDiscoverableAsync(bool on, CancellationToken cancel = default);
 
     /// <summary>N2: sign in with an ID token the App got from the provider in the browser, and the nonce salt
@@ -156,6 +157,11 @@ internal interface IServiceLink : IAsyncDisposable
     /// <summary>N2: asks the household again to let this PC in, once <see cref="HouseholdStatus.CanAskAgain"/> says its
     /// last request ended unanswered or was refused (plan 0.9). Only the user asks again.</summary>
     Task<HouseholdOutcome> AskAgainAsync(CancellationToken cancel = default);
+
+    /// <summary>Households design §3: the Household page is showing, so on a Public network the service opens the pairing
+    /// window, finding and being found until 15 minutes after the last of these. Sent only to a service whose
+    /// <see cref="HouseholdStatus.Network"/> is set; an older one doesn't know the request.</summary>
+    Task<HouseholdOutcome> OpenPairingWindowAsync(CancellationToken cancel = default);
 
     /// <summary>Plan Q §4: whether the main window is showing now. Kept, and told to a service that takes it on every
     /// connection and every change, so the service installs an update while nobody is looking at PowerLedger. Never sent
@@ -322,6 +328,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public Task<HouseholdOutcome> NewRecoveryCodeAsync(CancellationToken cancel = default) => HouseholdAsync(new NewRecoveryCodeRequest(NextId()), cancel);
 
     public Task<HouseholdOutcome> AskAgainAsync(CancellationToken cancel = default) => HouseholdAsync(new AskAgainRequest(NextId()), cancel);
+
+    public Task<HouseholdOutcome> OpenPairingWindowAsync(CancellationToken cancel = default)
+        => HouseholdAsync(new PairingWindowRequest(NextId()), cancel);
 
     public void ReportWindow(bool visible)
     {

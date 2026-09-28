@@ -165,19 +165,27 @@ begin
 end;
 
 { Households (design §3): the other PCs in a household reach the service's listener, inbound TCP to the service's program,
-  on Private networks only and from the local subnet only (plan 0.8). Deleting it first replaces the rule an earlier install
-  added, so an update never doubles it. A failure is only logged: the PCs can still pair and sync through the server. }
+  from the local subnet only (plan 0.8). One rule for Private networks, and a second for Public ones, as Windows sets home
+  Wi-Fi by default: there the service listens only in the pairing window, while the Household page or Add a PC shows and
+  for 15 minutes after, so the second rule lets in nothing the rest of the time. Deleting each first replaces the rule an
+  earlier install added, so an update never doubles it, and an update from before the second rule adds it. Setup never
+  changes a network's category. A failure is only logged: the PCs can still pair and sync through the server. }
 procedure AddFirewallRule;
 begin
   Netsh('advfirewall firewall delete rule name="PowerLedger households"');
   if Netsh('advfirewall firewall add rule name="PowerLedger households" dir=in action=allow program="' + ServiceExecutable +
       '" protocol=TCP profile=private remoteip=localsubnet') <> 0 then
     Log('The households firewall rule could not be added.');
+  Netsh('advfirewall firewall delete rule name="PowerLedger households (public)"');
+  if Netsh('advfirewall firewall add rule name="PowerLedger households (public)" dir=in action=allow program="' + ServiceExecutable +
+      '" protocol=TCP profile=public remoteip=localsubnet') <> 0 then
+    Log('The households firewall rule for Public networks could not be added.');
 end;
 
 procedure RemoveFirewallRule;
 begin
   Netsh('advfirewall firewall delete rule name="PowerLedger households"');
+  Netsh('advfirewall firewall delete rule name="PowerLedger households (public)"');
 end;
 
 { The quoted image path keeps Windows from starting C:\Program.exe in the service's place. }
