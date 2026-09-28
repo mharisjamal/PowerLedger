@@ -63,7 +63,8 @@ the same day:
   - Reduce transparency, Increase contrast, Reduce motion. Reduce motion follows Windows until the user changes it.
   - Light, Dark or Follow Windows (the existing Theme choice).
   - Tilt and parallax, on or off.
-  - The Carbon insight's grid factor: by region, or the user's own.
+  - No carbon setting of its own: the Carbon insight uses the Preferences section's CO₂ per kWh, which Now and the
+    Report use too, and whose "Use <country>'s figure" button fills in Windows' region's grid figure.
   - An **Overlay** section: on or off, its corner, opacity and sparkline.
 - **The overlay (Aero only):** §5.
 - **The wizard, the consent dialog, the household prompts, Add a PC, the recovery code, sign-in and the feedback
@@ -156,12 +157,11 @@ src/PowerLedger.App/
   | `IncreaseContrast` | bool | false |
   | `ReduceMotion` | bool, or null to follow Windows | null |
   | `Parallax` | bool | true |
-  | `CarbonGramsPerKwh` | 0 up to 2000, or null for by region | null |
 
   Loading is tolerant: a missing or null object or field takes its default; a name this version doesn't know, a number
   or null for an enum takes that field's default; a colour that isn't #RRGGBB takes the default and a good one is kept
-  upper-case; a slider out of range is clamped; a carbon factor no grid has reads as by region. None of these fails the
-  rest of the file.
+  upper-case; a slider out of range is clamped; a carbon factor an earlier build wrote there is ignored. None of these fails
+  the rest of the file.
 - **`GlassMaterial`** turns the settings into the glass: Clear is a low tint; Tinted the demo's; Dark black at 55 %;
   Colour the user's hue at the chosen strength. Reduce transparency is an opaque frosted fill. Increase contrast is
   solid rims, full-strength text and a darker wash. It listens to `SettingsViewModel.Glass`, which Settings raises
@@ -205,10 +205,12 @@ says so.
   - the worst 2-hour window across the week;
   - the saving a month if the PC slept after 10 idle minutes: the idle-on kWh past the first 10 minutes, at the tariff.
     The wording reuses `IdleAdvice`'s.
-- **Carbon** (`CarbonEstimate(MonthKg, SinceStartKg, GramsPerKwh, Source)`): kWh × the grid factor. The factor is the
-  user's (`GlassSettings.CarbonGramsPerKwh`) when set; otherwise a built-in table by Windows' region (about 40
-  countries, each with its source and year cited in `GridFactors.cs`); otherwise the world average. `Source` says which,
-  in words the page shows.
+- **Carbon** (`CarbonEstimate(MonthKg, SinceStartKg, GramsPerKwh, Source)`): kWh × the grid factor. The factor is
+  Settings' one CO₂ per kWh (`UiPreferences.Co2KgPerKwh`, 0.40 kg by default), which Now and the Report use too, so
+  every screen agrees. A built-in table by Windows' region (about 40 countries, each with its source and year cited in
+  `GridFactors.cs`), with the world average after it, only suggests a figure: Settings' "Use <country>'s figure"
+  button. `Source` says in the page's words where the figure in use came from: the default, the region's or the
+  world's table entry, or the user's own.
 
 ## 5. The overlay
 

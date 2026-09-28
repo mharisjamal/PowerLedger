@@ -122,13 +122,12 @@ that both Aero palettes define the same keys. G owns every value from here on; t
 
 `Preferences/GlassSettings.cs`, both records properties of `UiPreferences` (`Glass`, `Overlay`), every property with a
 setter and a default, loaded tolerantly (missing or null → default; unknown enum names, numbers or null → that field's
-default through `NamedEnumJsonConverter<T>`; a bad colour → `#7466D8`, a good one upper-cased; sliders clamped; a
-carbon factor outside 0 to 2000 g → null), `Sanitised()` on every load:
+default through `NamedEnumJsonConverter<T>`; a bad colour → `#7466D8`, a good one upper-cased; sliders clamped), `Sanitised()` on every load:
 
 ```csharp
 record GlassSettings { GlassStyle Style = Tinted; string TintColor = "#7466D8"; double TintStrength = 0.5, Frost = 0.6,
     EdgeLight = 0.6; GlassAccent Accent = Lime; GlassBackdrop Backdrop = Desktop; bool ReduceTransparency, IncreaseContrast;
-    bool? ReduceMotion /* null follows Windows */; bool Parallax = true; double? CarbonGramsPerKwh /* null: by region */ }
+    bool? ReduceMotion /* null follows Windows */; bool Parallax = true }   // no carbon factor: Insights read UiPreferences.Co2KgPerKwh
 enum GlassStyle { Clear, Tinted, Dark, Colour }     enum GlassAccent { Lime, Ice, Indigo, Amber, Rose }
 enum GlassBackdrop { Desktop, Wallpaper, Plain }    enum OverlayPosition { TopLeft, TopRight, BottomLeft, BottomRight, Free }
 record OverlaySettings { bool Enabled; OverlayPosition Position = TopRight; double? Left, Top; double Opacity = 1 /* 0.55 to 1 */;
@@ -310,7 +309,7 @@ You build Aero's Settings page, with the new Glass and Overlay sections, and the
 - [ ] **S2. The Glass section:** Style (Clear, Tinted, Dark, Colour; Colour opens a picker with 8 presets and G's
   `ColourWheel`), a live preview tile, the Tint strength, Frost and Edge light sliders, the accent, the backdrop,
   Reduce transparency, Increase contrast, Reduce motion (showing Windows' setting until changed), tilt and parallax,
-  and the Carbon grid factor (by region, or a figure in g/kWh). Each change sets `SettingsViewModel.Glass` to a new
+  and the Preferences section's "Use <country>'s figure" for CO₂ per kWh. Each change sets `SettingsViewModel.Glass` to a new
   record (`with`), which saves it and raises it; add to `SettingsViewModel` only helpers the section needs
   (additive).
 - [ ] **S3. The overlay** (`Aero/Overlay/`): a topmost tool window (not in the taskbar or Alt Tab), the glass pill with
@@ -343,9 +342,9 @@ Merge `plan-s/g` when the lead says G1 landed (the page only; the maths needs no
   least 4 samples. At most 3 a day for the bell; expose them on `InsightsViewModel` as `Alerts` (today's, newest first).
 - [ ] **I3. Habits** (`Insights/IdleHabits.cs`): the 7 × 24 idle heatmap over 4 weeks (indexed by `DayOfWeek`), the
   worst 2-hour window, and the saving a month from sleeping after 10 idle minutes, worded as `IdleAdvice`.
-- [ ] **I4. Carbon** (`Insights/Carbon.cs`, `GridFactors.cs`): kWh × factor; the factor from
-  `GlassSettings.CarbonGramsPerKwh` when set, else a built-in table by Windows' region (about 40 countries, each with
-  its source and year in a comment), else the world average; `Source` says which. Note for the lead: the App already
+- [ ] **I4. Carbon** (`Insights/Carbon.cs`, `GridFactors.cs`): kWh × factor; the factor is Settings' CO₂ per kWh
+  (`UiPreferences.Co2KgPerKwh`; Wave 2 decided on no second setting), which a built-in table by Windows' region (about
+  40 countries, each with its source and year in a comment), else the world average, only suggests; `Source` says which. Note for the lead: the App already
   has `UiPreferences.Co2KgPerKwh` (Settings' CO₂ field, the world average by default, used by Now and the Report); say
   in your report whether Carbon should read it instead of a second setting.
 - [ ] **I5. `Insights/Insights.cs`,** the `IInsights`: one pass over the hour rows (8 weeks, one read), all four

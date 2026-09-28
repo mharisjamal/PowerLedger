@@ -1,6 +1,6 @@
 # PowerLedger privacy policy
 
-Last updated: 25 September 2026, for PowerLedger 0.9.0.
+Last updated: 29 September 2026, for PowerLedger 0.10.0.
 
 PowerLedger works fully without sending anything. It sends data only when you turn on one of the switches described
 here, and only what that switch covers. Until you choose, nothing is sent.
