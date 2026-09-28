@@ -22,7 +22,12 @@ public sealed class GlassSwitch : ToggleButton
     {
         base.OnApplyTemplate();
         _on = GetTemplateChild("PART_On") as FrameworkElement;
-        _knob = (GetTemplateChild("PART_Knob") as FrameworkElement)?.RenderTransform as TranslateTransform;
+        if (GetTemplateChild("PART_Knob") is FrameworkElement knob)
+        {
+            // A template's transform is frozen with it; the knob needs one of its own to move.
+            _knob = new TranslateTransform();
+            knob.RenderTransform = _knob;
+        }
         Sync(false);
     }
 
