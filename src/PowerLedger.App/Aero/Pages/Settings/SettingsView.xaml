@@ -606,6 +606,7 @@
                         <TextBlock Style="{StaticResource Label}" Text="CO₂ per kWh, kg" />
                         <TextBox Style="{StaticResource Field}" Text="{Binding Co2, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Kilograms of CO2 per kWh" />
                         <Button Style="{StaticResource A.OutlineBtn}" Content="Save" Command="{Binding SaveCo2}" Margin="12,0,0,0" />
+                        <Button Style="{StaticResource A.OutlineBtn}" Content="{Binding RegionCo2Offer}" Command="{Binding UseRegionCo2}" Margin="8,0,0,0" />
                     </StackPanel>
                     <TextBlock Style="{StaticResource RowNote}" Text="Use your electricity supplier's figure for its grid; 0.40 is the world average." />
                     <TextBlock Style="{StaticResource Said}" Text="{Binding Co2Message}" Visibility="{Binding Co2Message, Converter={StaticResource VisibleWhenText}}" />
