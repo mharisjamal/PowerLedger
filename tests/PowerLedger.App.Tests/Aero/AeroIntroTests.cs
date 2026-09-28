@@ -160,6 +160,29 @@ public sealed class AeroIntroTests : IDisposable
         intro.State.ShouldBe(IntroState.Closed, "a closed intro hears its player no more");
     }
 
+    /// <summary>The build carries the real video and poster beside the exe, where <see cref="IntroMedia.Installed"/>
+    /// looks and the installer's recursive copy of the publish picks them up: an MP4 under 4 MB, a 1280 x 720 poster.</summary>
+    [Fact]
+    public void The_build_carries_the_video_and_its_poster_where_the_app_looks()
+    {
+        var video = new FileInfo(IntroMedia.Installed.Video);
+        video.Exists.ShouldBeTrue(video.FullName);
+        video.Length.ShouldBeInRange(500_000, 4L * 1024 * 1024);
+        using (var stream = video.OpenRead())
+        {
+            var head = new byte[12];
+            stream.ReadExactly(head);
+            System.Text.Encoding.ASCII.GetString(head, 4, 4).ShouldBe("ftyp", "an MP4");
+        }
+        var poster = Sta.Run(() =>
+        {
+            var frame = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri(IntroMedia.Installed.Poster),
+                System.Windows.Media.Imaging.BitmapCreateOptions.None, System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+            return (frame.PixelWidth, frame.PixelHeight);
+        });
+        poster.ShouldBe((1280, 720));
+    }
+
     public static TheoryData<string> Failures => ["missing", "open throws", "play throws", "media failed"];
 
     /// <summary>A missing file, a player that can't be made or can't play (Windows N without Media Foundation), or the

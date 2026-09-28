@@ -33,6 +33,9 @@
     <None Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
     <!-- The window's icon: its taskbar button and Alt+Tab. -->
     <Resource Include="..\..\assets\brand\PowerLedger.ico" Link="Brand\PowerLedger.ico" />
+    <!-- Plan S intro: the Aero intro video and its poster, loose files beside the exe (MediaElement plays from a path),
+         so the publish, and the installer's recursive copy of it, carry them under Assets\Intro. -->
+    <Content Include="Assets\Intro\aero-intro.mp4;Assets\Intro\aero-intro.jpg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
