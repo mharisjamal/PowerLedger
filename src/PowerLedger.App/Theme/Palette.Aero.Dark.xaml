@@ -1,80 +1,84 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
-    <!-- Aero, dark (Aero look design §3), Task 0's contract: every key Classic's and Midnight's palettes define,
-         so the shared dialogs, the wizard, the update card and any view that reads a Midnight key take this palette's
-         colours without a change; the values are Midnight's dark ones until agent G gives them Aero's. Then Aero's own
-         tokens, under A., as the prototype (tools/AeroPreview/Tokens.xaml, from the approved HTML) names them; the
-         prototype is dark only, so the light palette carries the same values until G sets its own. -->
-    <SolidColorBrush x:Key="Brush.Ground" Color="#0A0C16" />
-    <SolidColorBrush x:Key="Brush.Panel" Color="#0F1220" />
-    <SolidColorBrush x:Key="Brush.Raised" Color="#161A2B" />
-    <SolidColorBrush x:Key="Brush.Line" Color="#1F2438" />
-    <SolidColorBrush x:Key="Brush.LineStrong" Color="#58618C" />
-    <SolidColorBrush x:Key="Brush.Ink" Color="#F2F3F8" />
-    <SolidColorBrush x:Key="Brush.Ink2" Color="#A3A9C2" />
-    <SolidColorBrush x:Key="Brush.Ink3" Color="#7D84A6" />
-    <SolidColorBrush x:Key="Brush.Amber" Color="#3D5CFF" />
-    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#383D5CFF" />
-    <SolidColorBrush x:Key="Brush.OnAmber" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.Measured" Color="#D9E27F" />
+    <!-- Aero, dark (Aero look design §3). First every key Classic's and Midnight's palettes define, in glass colours, so
+         the shared dialogs, the wizard, the update card and any view that reads a Midnight key take Aero's look: the
+         ground is the demo's deep backdrop tone, panels the dark glass as it reads over it, the accent the lime with its
+         ink. Then Aero's own tokens, under A., from the approved HTML through the prototype's Tokens.xaml. ContrastTests
+         holds all of it to WCAG AA: text on the glass over the darkest and the brightest backdrop the look allows
+         (A.C.BackdropDarkest and A.C.BackdropBrightest, which WallpaperFrost and the see-through wash keep it within) at
+         4.5:1, the accent, the rim and the focus ring at 3:1. -->
+    <SolidColorBrush x:Key="Brush.Ground" Color="#0E0F12" />
+    <SolidColorBrush x:Key="Brush.Panel" Color="#1A1C21" />
+    <SolidColorBrush x:Key="Brush.Raised" Color="#24262C" />
+    <SolidColorBrush x:Key="Brush.Line" Color="#34363D" />
+    <SolidColorBrush x:Key="Brush.LineStrong" Color="#6E7079" />
+    <SolidColorBrush x:Key="Brush.Ink" Color="#F3F4F6" />
+    <SolidColorBrush x:Key="Brush.Ink2" Color="#B8BABF" />
+    <SolidColorBrush x:Key="Brush.Ink3" Color="#9A9CA2" />
+    <SolidColorBrush x:Key="Brush.Amber" Color="#D3F03F" />
+    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#33D3F03F" />
+    <SolidColorBrush x:Key="Brush.OnAmber" Color="#1B2004" />
+    <SolidColorBrush x:Key="Brush.Measured" Color="#D3F03F" />
     <SolidColorBrush x:Key="Brush.Calibrated" Color="#F1D57A" />
-    <SolidColorBrush x:Key="Brush.Estimated" Color="#7CC4F5" />
-    <SolidColorBrush x:Key="Brush.PartCpu" Color="#6366F1" />
-    <SolidColorBrush x:Key="Brush.PartGpu" Color="#C084FC" />
-    <SolidColorBrush x:Key="Brush.PartDisplay" Color="#38BDF8" />
-    <SolidColorBrush x:Key="Brush.PartRest" Color="#94A3B8" />
+    <SolidColorBrush x:Key="Brush.Estimated" Color="#7FD4FF" />
+    <SolidColorBrush x:Key="Brush.PartCpu" Color="#D3F03F" />
+    <SolidColorBrush x:Key="Brush.PartGpu" Color="#2F7552" />
+    <SolidColorBrush x:Key="Brush.PartDisplay" Color="#7466D8" />
+    <SolidColorBrush x:Key="Brush.PartRest" Color="#4E93B5" />
 
-    <!-- Midnight's own keys. -->
-    <SolidColorBrush x:Key="M.Ground" Color="#0A0C16" />
-    <SolidColorBrush x:Key="M.Panel" Color="#0F1220" />
-    <SolidColorBrush x:Key="M.Raised" Color="#161A2B" />
-    <SolidColorBrush x:Key="M.Line" Color="#1F2438" />
-    <SolidColorBrush x:Key="M.LineStrong" Color="#58618C" />
-    <SolidColorBrush x:Key="M.Ink" Color="#F2F3F8" />
-    <SolidColorBrush x:Key="M.Ink2" Color="#A3A9C2" />
-    <SolidColorBrush x:Key="M.Ink3" Color="#7D84A6" />
-    <SolidColorBrush x:Key="M.Accent" Color="#3D5CFF" />
-    <SolidColorBrush x:Key="M.AccentSoft" Color="#383D5CFF" />
-    <SolidColorBrush x:Key="M.OnAccent" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="M.AccentText" Color="#7B93FF" />
-    <!-- The violet the accent runs into: the chart's line and the sidebar's current page, never alone and never text. -->
-    <SolidColorBrush x:Key="M.Accent2" Color="#8B5CF6" />
+    <!-- Midnight's own keys, in Aero's colours. -->
+    <SolidColorBrush x:Key="M.Ground" Color="#0E0F12" />
+    <SolidColorBrush x:Key="M.Panel" Color="#1A1C21" />
+    <SolidColorBrush x:Key="M.Raised" Color="#24262C" />
+    <SolidColorBrush x:Key="M.Line" Color="#34363D" />
+    <SolidColorBrush x:Key="M.LineStrong" Color="#6E7079" />
+    <SolidColorBrush x:Key="M.Ink" Color="#F3F4F6" />
+    <SolidColorBrush x:Key="M.Ink2" Color="#B8BABF" />
+    <SolidColorBrush x:Key="M.Ink3" Color="#9A9CA2" />
+    <SolidColorBrush x:Key="M.Accent" Color="#D3F03F" />
+    <SolidColorBrush x:Key="M.AccentSoft" Color="#33D3F03F" />
+    <SolidColorBrush x:Key="M.OnAccent" Color="#1B2004" />
+    <SolidColorBrush x:Key="M.AccentText" Color="#D3F03F" />
+    <!-- The violet the demo pairs with the lime (the second PC): never alone and never text. -->
+    <SolidColorBrush x:Key="M.Accent2" Color="#7466D8" />
     <SolidColorBrush x:Key="M.Good" Color="#34D399" />
     <SolidColorBrush x:Key="M.Bad" Color="#F87171" />
     <SolidColorBrush x:Key="M.Warn" Color="#F5B942" />
-    <SolidColorBrush x:Key="M.PartCpu" Color="#6366F1" />
-    <SolidColorBrush x:Key="M.PartGpu" Color="#C084FC" />
-    <SolidColorBrush x:Key="M.PartDisplay" Color="#38BDF8" />
-    <SolidColorBrush x:Key="M.PartRest" Color="#94A3B8" />
+    <!-- The demo's pie, exactly: the accent, the green, the violet and the blue. GlassMaterial moves PartCpu with the accent. -->
+    <SolidColorBrush x:Key="M.PartCpu" Color="#D3F03F" />
+    <SolidColorBrush x:Key="M.PartGpu" Color="#2F7552" />
+    <SolidColorBrush x:Key="M.PartDisplay" Color="#7466D8" />
+    <SolidColorBrush x:Key="M.PartRest" Color="#4E93B5" />
     <!-- The quality chips: the ground, and the text on it. -->
-    <SolidColorBrush x:Key="M.ChipMeasured" Color="#2F3A1E" />
-    <SolidColorBrush x:Key="M.ChipMeasuredText" Color="#D9E27F" />
+    <SolidColorBrush x:Key="M.ChipMeasured" Color="#2A3310" />
+    <SolidColorBrush x:Key="M.ChipMeasuredText" Color="#D3F03F" />
     <SolidColorBrush x:Key="M.ChipCalibrated" Color="#3A3418" />
     <SolidColorBrush x:Key="M.ChipCalibratedText" Color="#F1D57A" />
-    <SolidColorBrush x:Key="M.ChipEstimated" Color="#1A2F44" />
-    <SolidColorBrush x:Key="M.ChipEstimatedText" Color="#7CC4F5" />
-    <!-- Tooltips: a white bubble with dark words over the dark page, as the reference draws its chart's. -->
-    <SolidColorBrush x:Key="M.Tip" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="M.TipText" Color="#0F1220" />
-    <SolidColorBrush x:Key="M.TipMuted" Color="#5C6386" />
-    <!-- Shadow (menus and tooltips), hatch, the area chart's gradient and the focus ring. -->
+    <SolidColorBrush x:Key="M.ChipEstimated" Color="#13303F" />
+    <SolidColorBrush x:Key="M.ChipEstimatedText" Color="#7FD4FF" />
+    <!-- Tooltips: the demo's chart tip, the pill white with the ink's words. -->
+    <SolidColorBrush x:Key="M.Tip" Color="#F4F4F0" />
+    <SolidColorBrush x:Key="M.TipText" Color="#16181C" />
+    <SolidColorBrush x:Key="M.TipMuted" Color="#5A5D66" />
     <SolidColorBrush x:Key="M.Shadow" Color="#73000000" />
     <SolidColorBrush x:Key="M.Hatch" Color="#1AFFFFFF" />
-    <!-- The charts' indigo, as the reference's: the Dashboard's line, and the daily bars from their brighter top to their deeper foot. -->
-    <SolidColorBrush x:Key="M.ChartLine" Color="#6366F1" />
-    <SolidColorBrush x:Key="M.BarTop" Color="#818CF8" />
-    <SolidColorBrush x:Key="M.BarBottom" Color="#4F46E5" />
-    <SolidColorBrush x:Key="M.ChartFillTop" Color="#993F3FC8" />
-    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#003F3FC8" />
-    <SolidColorBrush x:Key="M.Focus" Color="#8FA5FF" />
+    <!-- The charts in the lime, as the demo's line and bars. -->
+    <SolidColorBrush x:Key="M.ChartLine" Color="#D3F03F" />
+    <SolidColorBrush x:Key="M.BarTop" Color="#D3F03F" />
+    <SolidColorBrush x:Key="M.BarBottom" Color="#9DB52A" />
+    <SolidColorBrush x:Key="M.ChartFillTop" Color="#66D3F03F" />
+    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#00D3F03F" />
+    <SolidColorBrush x:Key="M.Focus" Color="#D3F03F" />
 
     <!-- Aero's own tokens. -->
 
-    <!-- Ink -->
+    <!-- Ink: the demo's #F3F4F6 at 100 %, then 78 and 60 % where the demo has 70 and 44 %, which read under WCAG AA's
+         4.5:1 over the brighter backdrops (44 % does even over black). Where each may sit (ContrastTests): the ink
+         anywhere; Text2 on the glass, the quiet wells, menus and dialogs; Text3 on the glass and the chart well only. -->
     <Color x:Key="A.C.Text">#F3F4F6</Color>
-    <Color x:Key="A.C.Text2">#B3F3F4F6</Color>
-    <Color x:Key="A.C.Text3">#70F3F4F6</Color>
+    <Color x:Key="A.C.Text2">#C7F3F4F6</Color>
+    <Color x:Key="A.C.Text3">#99F3F4F6</Color>
     <Color x:Key="A.C.Ink">#16181C</Color>
     <Color x:Key="A.C.Accent">#D3F03F</Color>
     <Color x:Key="A.C.AccentInk">#1B2004</Color>
@@ -84,7 +88,27 @@
     <Color x:Key="A.C.Blue">#4E93B5</Color>
     <Color x:Key="A.C.MarkerFill">#1B1D20</Color>
 
-    <!-- Glass: tint 13%, edge light 75% -->
+    <!-- The accents the Glass settings offer (the demo's tuner), each with an ink that reads on it at 4.5:1. -->
+    <Color x:Key="A.C.Accent.Lime">#D3F03F</Color>
+    <Color x:Key="A.C.AccentInk.Lime">#1B2004</Color>
+    <Color x:Key="A.C.Accent.Ice">#7FD4FF</Color>
+    <Color x:Key="A.C.AccentInk.Ice">#04202E</Color>
+    <Color x:Key="A.C.Accent.Indigo">#9AA2FF</Color>
+    <Color x:Key="A.C.AccentInk.Indigo">#0F1440</Color>
+    <Color x:Key="A.C.Accent.Amber">#FFC857</Color>
+    <Color x:Key="A.C.AccentInk.Amber">#2E1F00</Color>
+    <Color x:Key="A.C.Accent.Rose">#FF8FB1</Color>
+    <Color x:Key="A.C.AccentInk.Rose">#3A0A1A</Color>
+
+    <!-- The backdrop the glass is designed over: the darkest and the brightest a pane may sit on. WallpaperFrost holds the
+         frosted wallpaper under the brightest; see-through, the system backdrop's dark acrylic and the wash hold the
+         desktop there. The ground a plain backdrop paints. -->
+    <Color x:Key="A.C.BackdropDarkest">#000000</Color>
+    <Color x:Key="A.C.BackdropBrightest">#222222</Color>
+    <Color x:Key="A.C.SeeThroughWash">#40000000</Color>
+    <Color x:Key="A.C.Plain">#101114</Color>
+
+    <!-- Glass: tint 13 %, edge light 75 % (the demo's defaults) -->
     <Color x:Key="A.C.GlassTintTop">#21FFFFFF</Color>
     <Color x:Key="A.C.GlassTintBottom">#11CDD0DA</Color>
     <Color x:Key="A.C.RimA">#77FFFFFF</Color>
@@ -194,6 +218,8 @@
     <SolidColorBrush x:Key="A.B.RimInner" Color="{StaticResource A.C.RimInner}" />
     <SolidColorBrush x:Key="A.B.RimDark" Color="{StaticResource A.C.RimDark}" />
     <SolidColorBrush x:Key="A.B.White" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="A.B.Plain" Color="{StaticResource A.C.Plain}" />
+    <SolidColorBrush x:Key="A.B.SeeThroughWash" Color="{StaticResource A.C.SeeThroughWash}" />
 
     <LinearGradientBrush x:Key="A.B.GlassTint" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Offset="0" Color="{StaticResource A.C.GlassTintTop}" />

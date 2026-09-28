@@ -163,6 +163,133 @@ public class ContrastTests
     public void Both_aero_palettes_define_the_same_keys_with_the_same_types()
         => Keys(Look.Aero, Theme.Dark).OrderBy(k => k.Key).ShouldBe(Keys(Look.Aero, Theme.Light).OrderBy(k => k.Key));
 
+    /// <summary>Plan S G2: Aero's text reads at 4.5:1 on the glass wherever a pane can sit, over the darkest and the
+    /// brightest backdrop the look allows (WallpaperFrost and the see-through wash keep the scene between them), at the
+    /// tint's top and its foot, and in the wells, menus and dialogs laid on it.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Aeros_text_reads_on_the_glass_over_every_backdrop_at_four_and_a_half_to_one(string theme)
+    {
+        var aero = Aero(Enum.Parse<Theme>(theme));
+        foreach (var (where, ground, tiers) in AeroGrounds(aero))
+        {
+            foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
+            {
+                Contrast.Ratio(Contrast.Over(aero[text], ground), ground).ShouldBeGreaterThanOrEqualTo(4.5, $"{text} on {where}, {theme}");
+            }
+        }
+    }
+
+    /// <summary>The marks a user must see stand off the glass at 3:1: the accent (bars, the chart's line, the chosen
+    /// page's disc) and the focus ring, which is the accent; each accent the Glass settings offer; and the rim at its
+    /// brightest, which draws the pane's edge.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Aeros_accents_rim_and_focus_ring_stand_off_the_glass_at_three_to_one(string theme)
+    {
+        var aero = Aero(Enum.Parse<Theme>(theme));
+        foreach (var (where, glass) in AeroGlass(aero))
+        {
+            Contrast.Ratio(aero["A.C.Accent"], glass).ShouldBeGreaterThanOrEqualTo(3, $"the accent on {where}, {theme}");
+            foreach (var accent in AeroAccents) Contrast.Ratio(aero["A.C.Accent." + accent], glass).ShouldBeGreaterThanOrEqualTo(3, $"{accent} on {where}, {theme}");
+            Contrast.Ratio(Contrast.Over(aero["A.C.RimA"], glass), glass).ShouldBeGreaterThanOrEqualTo(3, $"the rim on {where}, {theme}");
+        }
+    }
+
+    /// <summary>Words set on a filled mark: each accent's ink on it (a button, the chosen page's icon), the ink on the
+    /// pill (the chosen segment, the tooltip) and the glyph on the white round button.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Aeros_inks_read_on_what_they_are_set_on(string theme)
+    {
+        var aero = Aero(Enum.Parse<Theme>(theme));
+        Contrast.Ratio(aero["A.C.AccentInk"], aero["A.C.Accent"]).ShouldBeGreaterThanOrEqualTo(4.5, theme);
+        foreach (var accent in AeroAccents)
+            Contrast.Ratio(aero["A.C.AccentInk." + accent], aero["A.C.Accent." + accent]).ShouldBeGreaterThanOrEqualTo(4.5, $"{accent}, {theme}");
+        aero["A.C.Accent"].ShouldBe(aero["A.C.Accent.Lime"], "lime is the default accent");
+        Contrast.Ratio(aero["A.C.Ink"], aero["A.C.Pill"]).ShouldBeGreaterThanOrEqualTo(4.5, theme);
+        Contrast.Ratio(aero["A.C.WhiteRoundInk"], Contrast.Over(aero["A.C.WhiteRound"], aero["A.C.BackdropDarkest"])).ShouldBeGreaterThanOrEqualTo(3, theme);
+    }
+
+    /// <summary>Aero's Classic and Midnight keys, which the shared dialogs and the wizard draw with, hold to Midnight's
+    /// rules: text on every ground at 4.5:1, marks on the panel at 3:1, coloured text where it sits and a chip's text on
+    /// its chip at 4.5:1; and Classic's part keys carry the Midnight ones.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Aeros_shared_keys_keep_midnights_rules(string theme)
+    {
+        var palette = Solid(Look.Aero, Enum.Parse<Theme>(theme));
+        foreach (var text in Texts)
+        {
+            foreach (var ground in Grounds) Contrast.Ratio(palette[text], palette[ground]).ShouldBeGreaterThanOrEqualTo(4.5, $"{text} on {ground}, {theme}");
+        }
+        foreach (var mark in Marks) Contrast.Ratio(palette[mark], palette["M.Panel"]).ShouldBeGreaterThanOrEqualTo(3, $"{mark} on M.Panel, {theme}");
+        foreach (var (text, ground) in ColouredText) Contrast.Ratio(palette[text], palette[ground]).ShouldBeGreaterThanOrEqualTo(4.5, $"{text} on {ground}, {theme}");
+        foreach (var chip in Chips) Contrast.Ratio(palette[chip + "Text"], palette[chip]).ShouldBeGreaterThanOrEqualTo(4.5, $"{chip}, {theme}");
+        foreach (var part in Parts) palette["Brush." + part[2..]].ShouldBe(palette[part], theme);
+        palette["Brush.Amber"].ShouldBe(palette["M.Accent"], theme);
+        palette["M.Accent"].ShouldBe(palette["M.Focus"], theme);
+    }
+
+    private static readonly string[] AeroAccents = ["Lime", "Ice", "Indigo", "Amber", "Rose"];
+
+    /// <summary>The glass as it reads over the darkest and the brightest backdrop, at the tint's top and its foot.</summary>
+    private static IEnumerable<(string Where, Color Glass)> AeroGlass(Dictionary<string, Color> aero)
+    {
+        foreach (var backdrop in new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" })
+        {
+            foreach (var tint in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom" })
+                yield return ($"{tint} over {backdrop}", Contrast.Over(aero[tint], aero[backdrop]));
+        }
+    }
+
+    /// <summary>Everywhere text sits in Aero, and how many of its three inks may sit there (the palettes' Ink comment):
+    /// all three on the glass and the chart well (axes); the ink and Text2 on the quiet wells, a hovered row, a menu and
+    /// a dialog; only the ink on the brighter wells (Well2 and Well3: the key cap, the change against yesterday).</summary>
+    private static IEnumerable<(string Where, Color Ground, int Tiers)> AeroGrounds(Dictionary<string, Color> aero)
+    {
+        foreach (var (where, glass) in AeroGlass(aero))
+        {
+            yield return (where, glass, 3);
+            yield return ($"A.C.ChartWell in {where}", Contrast.Over(aero["A.C.ChartWell"], glass), 3);
+            foreach (var well in new[] { "A.C.Well", "A.C.WellHover", "A.C.MenuHover" })
+                yield return ($"{well} in {where}", Contrast.Over(aero[well], glass), 2);
+            foreach (var well in new[] { "A.C.Well2", "A.C.Well3" })
+                yield return ($"{well} in {where}", Contrast.Over(aero[well], glass), 1);
+        }
+        foreach (var backdrop in new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" })
+        {
+            foreach (var fill in new[] { "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom" })
+                yield return ($"{fill} over {backdrop}", Contrast.Over(aero[fill], aero[backdrop]), 2);
+        }
+    }
+
+    /// <summary>Aero's colours by key, translucent ones as they are, for a test to lay each over what it sits on.</summary>
+    private static Dictionary<string, Color> Aero(Theme theme) => UiHarness.OnUi(() =>
+    {
+        var dictionary = new ResourceDictionary { Source = LookRules.PaletteFor(Look.Aero, theme) };
+        var colours = new Dictionary<string, Color>();
+        foreach (var key in dictionary.Keys.Cast<string>())
+        {
+            if (dictionary[key] is Color colour) colours[key] = colour;
+            else if (dictionary[key] is SolidColorBrush brush) colours[key] = brush.Color;
+        }
+        return colours;
+    });
+
+    /// <summary>A palette's solid brushes by key, a translucent one laid over the panel, as <see cref="Midnight"/>.</summary>
+    private static Dictionary<string, Color> Solid(Look look, Theme theme) => UiHarness.OnUi(() =>
+    {
+        var dictionary = new ResourceDictionary { Source = LookRules.PaletteFor(look, theme) };
+        var panel = ((SolidColorBrush)dictionary["M.Panel"]).Color;
+        return dictionary.Keys.Cast<string>().Where(key => !key.StartsWith("A.", StringComparison.Ordinal))
+            .ToDictionary(key => key, key => Contrast.Over(((SolidColorBrush)dictionary[key]).Color, panel));
+    });
+
     [Fact]
     public void The_maths_is_wcags()
     {

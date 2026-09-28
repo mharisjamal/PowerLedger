@@ -717,7 +717,8 @@
                         <Border CornerRadius="{TemplateBinding CornerRadius}" Margin="1" BorderBrush="{DynamicResource A.B.RimInner}" BorderThickness="1.5" IsHitTestVisible="False" />
                         <Border CornerRadius="{TemplateBinding CornerRadius}" Margin="1" Background="{DynamicResource A.B.TopSheen}" IsHitTestVisible="False" />
                         <Border x:Name="PART_Sheen" CornerRadius="{TemplateBinding CornerRadius}" Opacity="0" IsHitTestVisible="False" />
-                        <ContentPresenter Margin="{TemplateBinding Padding}" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                     </Grid>
                 </ControlTemplate>
             </Setter.Value>
@@ -745,6 +746,7 @@
         <Setter Property="HorizontalAlignment" Value="Center" />
         <Setter Property="VerticalAlignment" Value="Bottom" />
         <Setter Property="Margin" Value="0,0,0,26" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="AutomationProperties.LiveSetting" Value="Polite" />
     </Style>
     <!-- The banner under the top bar ("PowerLedger has a new look"): a glass strip at the well's radius. -->
