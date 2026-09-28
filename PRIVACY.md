@@ -139,6 +139,13 @@ The bug button at the foot of the window sends a report only when you press **Se
 - **Offline:** a report that couldn't be sent waits in `%LOCALAPPDATA%\PowerLedger\Feedback` on your PC, for up to 30
   days, and goes when the PC is online. Delete the file to stop it.
 
+## Insights
+
+The Insights page (the bill forecast, unusual use, habits and the carbon estimate) is worked out on your PC, from the
+history already stored on it. Nothing new is collected for it and nothing about it leaves the PC: no switch above
+covers it because it sends nothing. The carbon estimate uses the CO₂ per kWh figure in Settings; to name where that
+figure comes from, it reads the country or region set in Windows, on the PC, and sends it nowhere.
+
 ## Changes
 
 When what a switch sends changes, the consent version goes up. PowerLedger then sends nothing until you have chosen
