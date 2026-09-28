@@ -195,6 +195,19 @@ public sealed class AppPreferencesTests : IDisposable
         _looks.ShouldBeEmpty("introducing it switches nothing");
     }
 
+    [Fact]
+    public void The_aero_intro_once_seen_is_saved_as_such_and_retires_nothing_else()
+    {
+        var preferences = Preferences();
+        preferences.Current.AeroIntroSeen.ShouldBeFalse();
+
+        preferences.SeeAeroIntro().ShouldBeNull();
+
+        preferences.Current.AeroIntroSeen.ShouldBeTrue();
+        Store.Load().AeroIntroSeen.ShouldBeTrue();
+        preferences.Current.LookIntroduced.ShouldBeFalse("the banner still shows after the video");
+    }
+
     /// <summary>Aero look design §3: the Glass section's choices are saved as a whole, put in range first; the look
     /// itself learns of them through Settings, which raises its Glass property.</summary>
     [Fact]

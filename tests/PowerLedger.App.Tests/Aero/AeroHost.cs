@@ -1,4 +1,5 @@
 using System.Windows;
+using PowerLedger.App.Aero;
 
 namespace PowerLedger.App.Tests;
 
@@ -23,15 +24,16 @@ internal static class AeroHost
 
     /// <summary>An Aero window over <paramref name="shell"/> in <paramref name="theme"/>'s Aero palette, off screen and
     /// unactivated, as <see cref="MidnightFixtures.Window"/> makes Midnight's: the palette on the window, and the Classic
-    /// palette the theme manager puts on the application taken off again. Call on the UI thread.</summary>
-    public static AeroWindow Window(ShellViewModel shell, Theme theme = Theme.Dark, Updater? updates = null, Action? feedback = null)
+    /// palette the theme manager puts on the application taken off again. With no <paramref name="intro"/> the window has
+    /// no intro video, and its banner shows as before. Call on the UI thread.</summary>
+    public static AeroWindow Window(ShellViewModel shell, Theme theme = Theme.Dark, Updater? updates = null, Action? feedback = null, AeroIntro? intro = null)
     {
         var app = Application.Current.Resources.MergedDictionaries;
         var before = app.Count;
         var manager = new ThemeManager(Application.Current, theme == Theme.Dark ? ThemeChoice.Dark : ThemeChoice.Light);
         if (app.Count == before + 1) app.RemoveAt(0);
         var looks = new LookSwitcher(_ => throw new InvalidOperationException("No switch in a render."), manager, _ => { }, _ => { });
-        var window = new AeroWindow(shell, looks, manager, updates ?? MidnightFixtures.IdleUpdates(), feedback ?? (() => { }))
+        var window = new AeroWindow(shell, looks, manager, updates ?? MidnightFixtures.IdleUpdates(), feedback ?? (() => { }), intro)
         {
             WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0, ShowInTaskbar = false, ShowActivated = false,
         };

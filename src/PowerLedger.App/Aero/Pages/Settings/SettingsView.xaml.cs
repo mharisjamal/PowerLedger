@@ -13,6 +13,10 @@ namespace PowerLedger.App.Aero;
 internal partial class SettingsView : UserControl
 {
     public SettingsView() => InitializeComponent();
+
+    /// <summary>Watch the Aero intro (Plan S intro): the window's intro dialog, out of the button.</summary>
+    private void WatchIntroClick(object sender, System.Windows.RoutedEventArgs e)
+        => (System.Windows.Window.GetWindow(this) as AeroWindow)?.WatchIntroVideo(WatchIntroButton);
 }
 
 /// <summary>True when the two values are the same text, ignoring case: a preset's swatch is ticked while it is the

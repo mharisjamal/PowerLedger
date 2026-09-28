@@ -20,6 +20,9 @@ internal interface IUiSettings
     /// <summary>Retires the one-time banner about the new look for good (<see cref="UiPreferences.LookIntroduced"/>).</summary>
     string? IntroduceLook();
 
+    /// <summary>Remembers that the Aero intro video autoplayed once (<see cref="UiPreferences.AeroIntroSeen"/>).</summary>
+    string? SeeAeroIntro();
+
     string? UseCo2(double kgPerKwh);
 
     string? StartWithWindows(bool enabled);
@@ -80,6 +83,8 @@ internal sealed class AppPreferences(
     }
 
     public string? IntroduceLook() => Current.LookIntroduced ? null : Save(Current with { LookIntroduced = true });
+
+    public string? SeeAeroIntro() => Current.AeroIntroSeen ? null : Save(Current with { AeroIntroSeen = true });
 
     public string? UseCo2(double kgPerKwh)
     {

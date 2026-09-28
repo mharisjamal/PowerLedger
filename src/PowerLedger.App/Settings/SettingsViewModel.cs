@@ -189,6 +189,17 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(LookIntroduced));
     }
 
+    /// <summary>The Aero intro video has autoplayed once (Plan S intro); it never autoplays again.</summary>
+    public bool AeroIntroSeen => _ui.Current.AeroIntroSeen;
+
+    /// <summary>The intro's automatic start: counted once, and saved.</summary>
+    public void SeeAeroIntro()
+    {
+        if (AeroIntroSeen) return;
+        AppMessage = _ui.SeeAeroIntro();
+        OnPropertyChanged(nameof(AeroIntroSeen));
+    }
+
     /// <summary>Applies when ticked.</summary>
     public bool StartWithWindows
     {

@@ -2,3 +2,5 @@
 *.sln text eol=crlf
 assets/monitors/*.csv -text
 *.ttf binary
+*.mp4 binary
+*.jpg binary
