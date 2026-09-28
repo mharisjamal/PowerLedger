@@ -1,0 +1,245 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+    <!-- Aero, light (Aero look design §3), Task 0's contract: every key Classic's and Midnight's palettes define,
+         so the shared dialogs, the wizard, the update card and any view that reads a Midnight key take this palette's
+         colours without a change; the values are Midnight's light ones until agent G gives them Aero's. Then Aero's own
+         tokens, under A., as the prototype (tools/AeroPreview/Tokens.xaml, from the approved HTML) names them; the
+         prototype is dark only, so the light palette carries the same values until G sets its own. -->
+    <SolidColorBrush x:Key="Brush.Ground" Color="#F3F4FA" />
+    <SolidColorBrush x:Key="Brush.Panel" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="Brush.Raised" Color="#F7F8FD" />
+    <SolidColorBrush x:Key="Brush.Line" Color="#E2E5F1" />
+    <SolidColorBrush x:Key="Brush.LineStrong" Color="#868CAB" />
+    <SolidColorBrush x:Key="Brush.Ink" Color="#151A33" />
+    <SolidColorBrush x:Key="Brush.Ink2" Color="#5C6386" />
+    <SolidColorBrush x:Key="Brush.Ink3" Color="#676D8C" />
+    <SolidColorBrush x:Key="Brush.Amber" Color="#3A5BFF" />
+    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#243A5BFF" />
+    <SolidColorBrush x:Key="Brush.OnAmber" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="Brush.Measured" Color="#4B5A12" />
+    <SolidColorBrush x:Key="Brush.Calibrated" Color="#7A5A08" />
+    <SolidColorBrush x:Key="Brush.Estimated" Color="#0E5A85" />
+    <SolidColorBrush x:Key="Brush.PartCpu" Color="#4338CA" />
+    <SolidColorBrush x:Key="Brush.PartGpu" Color="#9333EA" />
+    <SolidColorBrush x:Key="Brush.PartDisplay" Color="#0284C7" />
+    <SolidColorBrush x:Key="Brush.PartRest" Color="#64748B" />
+
+    <!-- Midnight's own keys. -->
+    <SolidColorBrush x:Key="M.Ground" Color="#F3F4FA" />
+    <SolidColorBrush x:Key="M.Panel" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="M.Raised" Color="#F7F8FD" />
+    <SolidColorBrush x:Key="M.Line" Color="#E2E5F1" />
+    <SolidColorBrush x:Key="M.LineStrong" Color="#868CAB" />
+    <SolidColorBrush x:Key="M.Ink" Color="#151A33" />
+    <SolidColorBrush x:Key="M.Ink2" Color="#5C6386" />
+    <SolidColorBrush x:Key="M.Ink3" Color="#676D8C" />
+    <SolidColorBrush x:Key="M.Accent" Color="#3A5BFF" />
+    <SolidColorBrush x:Key="M.AccentSoft" Color="#243A5BFF" />
+    <SolidColorBrush x:Key="M.OnAccent" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="M.AccentText" Color="#3A5BFF" />
+    <SolidColorBrush x:Key="M.Accent2" Color="#7C3AED" />
+    <SolidColorBrush x:Key="M.Good" Color="#147F57" />
+    <SolidColorBrush x:Key="M.Bad" Color="#CC3B3B" />
+    <SolidColorBrush x:Key="M.Warn" Color="#C28511" />
+    <SolidColorBrush x:Key="M.PartCpu" Color="#4338CA" />
+    <SolidColorBrush x:Key="M.PartGpu" Color="#9333EA" />
+    <SolidColorBrush x:Key="M.PartDisplay" Color="#0284C7" />
+    <SolidColorBrush x:Key="M.PartRest" Color="#64748B" />
+    <!-- The quality chips: the ground, and the text on it. -->
+    <SolidColorBrush x:Key="M.ChipMeasured" Color="#EEF3D6" />
+    <SolidColorBrush x:Key="M.ChipMeasuredText" Color="#4B5A12" />
+    <SolidColorBrush x:Key="M.ChipCalibrated" Color="#FBF1CF" />
+    <SolidColorBrush x:Key="M.ChipCalibratedText" Color="#7A5A08" />
+    <SolidColorBrush x:Key="M.ChipEstimated" Color="#DDEFFA" />
+    <SolidColorBrush x:Key="M.ChipEstimatedText" Color="#0E5A85" />
+    <SolidColorBrush x:Key="M.Tip" Color="#151A33" />
+    <SolidColorBrush x:Key="M.TipText" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="M.TipMuted" Color="#A9AFCC" />
+    <!-- Shadow (menus and tooltips), hatch, the area chart's gradient and the focus ring. -->
+    <SolidColorBrush x:Key="M.Shadow" Color="#29151A33" />
+    <SolidColorBrush x:Key="M.Hatch" Color="#1A151A33" />
+    <SolidColorBrush x:Key="M.ChartLine" Color="#6366F1" />
+    <SolidColorBrush x:Key="M.BarTop" Color="#6366F1" />
+    <SolidColorBrush x:Key="M.BarBottom" Color="#4338CA" />
+    <SolidColorBrush x:Key="M.ChartFillTop" Color="#406366F1" />
+    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#006366F1" />
+    <SolidColorBrush x:Key="M.Focus" Color="#3A5BFF" />
+
+    <!-- Aero's own tokens. -->
+
+    <!-- Ink -->
+    <Color x:Key="A.C.Text">#F3F4F6</Color>
+    <Color x:Key="A.C.Text2">#B3F3F4F6</Color>
+    <Color x:Key="A.C.Text3">#70F3F4F6</Color>
+    <Color x:Key="A.C.Ink">#16181C</Color>
+    <Color x:Key="A.C.Accent">#D3F03F</Color>
+    <Color x:Key="A.C.AccentInk">#1B2004</Color>
+    <Color x:Key="A.C.Pill">#F4F4F0</Color>
+    <Color x:Key="A.C.Violet">#7466D8</Color>
+    <Color x:Key="A.C.Green">#2F7552</Color>
+    <Color x:Key="A.C.Blue">#4E93B5</Color>
+    <Color x:Key="A.C.MarkerFill">#1B1D20</Color>
+
+    <!-- Glass: tint 13%, edge light 75% -->
+    <Color x:Key="A.C.GlassTintTop">#21FFFFFF</Color>
+    <Color x:Key="A.C.GlassTintBottom">#11CDD0DA</Color>
+    <Color x:Key="A.C.RimA">#77FFFFFF</Color>
+    <Color x:Key="A.C.RimB">#39FFFFFF</Color>
+    <Color x:Key="A.C.RimC">#2AFFFFFF</Color>
+    <Color x:Key="A.C.RimD">#58FFFFFF</Color>
+    <Color x:Key="A.C.RimInner">#41FFFFFF</Color>
+    <Color x:Key="A.C.RimDark">#0E000000</Color>
+    <Color x:Key="A.C.TopSheen">#1FFFFFFF</Color>
+    <Color x:Key="A.C.PointerSheen">#1AFFFFFF</Color>
+    <Color x:Key="A.C.Shadow">#000000</Color>
+    <sys:Double x:Key="A.Glass.ShadowFarBlur">60</sys:Double>
+    <sys:Double x:Key="A.Glass.ShadowFarDepth">30</sys:Double>
+    <sys:Double x:Key="A.Glass.ShadowFarOpacity">0.34</sys:Double>
+    <sys:Double x:Key="A.Glass.ShadowNearBlur">16</sys:Double>
+    <sys:Double x:Key="A.Glass.ShadowNearDepth">6</sys:Double>
+    <sys:Double x:Key="A.Glass.ShadowNearOpacity">0.18</sys:Double>
+    <sys:Double x:Key="A.Glass.Frost">26</sys:Double>
+    <sys:Double x:Key="A.Glass.Saturate">1.55</sys:Double>
+    <sys:Double x:Key="A.Glass.SheenRadius">420</sys:Double>
+    <sys:Double x:Key="A.Glass.DimmedOpacity">0.22</sys:Double>
+
+    <!-- Wells and lines -->
+    <Color x:Key="A.C.Well">#1AFFFFFF</Color>
+    <Color x:Key="A.C.Well2">#26FFFFFF</Color>
+    <Color x:Key="A.C.Well3">#38FFFFFF</Color>
+    <Color x:Key="A.C.WellHover">#24FFFFFF</Color>
+    <Color x:Key="A.C.WellEdge">#0DFFFFFF</Color>
+    <Color x:Key="A.C.WellTop">#24FFFFFF</Color>
+    <Color x:Key="A.C.Line">#47FFFFFF</Color>
+    <Color x:Key="A.C.ChartWell">#29000000</Color>
+    <Color x:Key="A.C.ChartWellTop">#14FFFFFF</Color>
+    <Color x:Key="A.C.Grid">#0FFFFFFF</Color>
+    <Color x:Key="A.C.Track">#1AFFFFFF</Color>
+    <Color x:Key="A.C.TrackSoft">#14FFFFFF</Color>
+    <Color x:Key="A.C.Muted">#66FFFFFF</Color>
+    <Color x:Key="A.C.Ghost">#33FFFFFF</Color>
+    <Color x:Key="A.C.PrevLine">#42FFFFFF</Color>
+    <Color x:Key="A.C.Guide">#47FFFFFF</Color>
+    <Color x:Key="A.C.GuideStrong">#59FFFFFF</Color>
+
+    <!-- Controls -->
+    <Color x:Key="A.C.BtnFill">#1FFFFFFF</Color>
+    <Color x:Key="A.C.BtnFillHover">#2EFFFFFF</Color>
+    <Color x:Key="A.C.BtnEdge">#38FFFFFF</Color>
+    <Color x:Key="A.C.BtnTop">#40FFFFFF</Color>
+    <Color x:Key="A.C.OutlineHover">#14FFFFFF</Color>
+    <Color x:Key="A.C.AccentTop">#80FFFFFF</Color>
+    <Color x:Key="A.C.AccentHover">#12FFFFFF</Color>
+    <Color x:Key="A.C.WhiteRound">#C7FFFFFF</Color>
+    <Color x:Key="A.C.WhiteRoundHover">#E6FFFFFF</Color>
+    <Color x:Key="A.C.WhiteRoundInk">#4A4D55</Color>
+    <Color x:Key="A.C.NavFillA">#0EFFFFFF</Color>
+    <Color x:Key="A.C.NavFillB">#1AFFFFFF</Color>
+    <Color x:Key="A.C.NavHover">#1CFFFFFF</Color>
+    <Color x:Key="A.C.NavIcon">#29FFFFFF</Color>
+    <Color x:Key="A.C.NavIndicator">#1AFFFFFF</Color>
+    <Color x:Key="A.C.NavIndicatorTop">#38FFFFFF</Color>
+    <Color x:Key="A.C.SwitchOff">#2EFFFFFF</Color>
+    <Color x:Key="A.C.MenuFill">#B017181C</Color>
+    <Color x:Key="A.C.MenuEdge">#29FFFFFF</Color>
+    <Color x:Key="A.C.MenuHover">#1AFFFFFF</Color>
+    <Color x:Key="A.C.ModalTop">#A0282A30</Color>
+    <Color x:Key="A.C.ModalBottom">#961C1E22</Color>
+    <Color x:Key="A.C.Scrim">#66000000</Color>
+    <Color x:Key="A.C.TimePill">#40000000</Color>
+
+    <SolidColorBrush x:Key="A.B.Text" Color="{StaticResource A.C.Text}" />
+    <SolidColorBrush x:Key="A.B.Text2" Color="{StaticResource A.C.Text2}" />
+    <SolidColorBrush x:Key="A.B.Text3" Color="{StaticResource A.C.Text3}" />
+    <SolidColorBrush x:Key="A.B.Ink" Color="{StaticResource A.C.Ink}" />
+    <SolidColorBrush x:Key="A.B.Accent" Color="{StaticResource A.C.Accent}" />
+    <SolidColorBrush x:Key="A.B.AccentInk" Color="{StaticResource A.C.AccentInk}" />
+    <SolidColorBrush x:Key="A.B.Pill" Color="{StaticResource A.C.Pill}" />
+    <SolidColorBrush x:Key="A.B.Violet" Color="{StaticResource A.C.Violet}" />
+    <SolidColorBrush x:Key="A.B.Well" Color="{StaticResource A.C.Well}" />
+    <SolidColorBrush x:Key="A.B.Well2" Color="{StaticResource A.C.Well2}" />
+    <SolidColorBrush x:Key="A.B.Well3" Color="{StaticResource A.C.Well3}" />
+    <SolidColorBrush x:Key="A.B.WellHover" Color="{StaticResource A.C.WellHover}" />
+    <SolidColorBrush x:Key="A.B.WellEdge" Color="{StaticResource A.C.WellEdge}" />
+    <SolidColorBrush x:Key="A.B.WellTop" Color="{StaticResource A.C.WellTop}" />
+    <SolidColorBrush x:Key="A.B.Line" Color="{StaticResource A.C.Line}" />
+    <SolidColorBrush x:Key="A.B.ChartWell" Color="{StaticResource A.C.ChartWell}" />
+    <SolidColorBrush x:Key="A.B.ChartWellTop" Color="{StaticResource A.C.ChartWellTop}" />
+    <SolidColorBrush x:Key="A.B.Track" Color="{StaticResource A.C.Track}" />
+    <SolidColorBrush x:Key="A.B.TrackSoft" Color="{StaticResource A.C.TrackSoft}" />
+    <SolidColorBrush x:Key="A.B.Muted" Color="{StaticResource A.C.Muted}" />
+    <SolidColorBrush x:Key="A.B.BtnFill" Color="{StaticResource A.C.BtnFill}" />
+    <SolidColorBrush x:Key="A.B.BtnFillHover" Color="{StaticResource A.C.BtnFillHover}" />
+    <SolidColorBrush x:Key="A.B.BtnEdge" Color="{StaticResource A.C.BtnEdge}" />
+    <SolidColorBrush x:Key="A.B.BtnTop" Color="{StaticResource A.C.BtnTop}" />
+    <SolidColorBrush x:Key="A.B.OutlineHover" Color="{StaticResource A.C.OutlineHover}" />
+    <SolidColorBrush x:Key="A.B.AccentTop" Color="{StaticResource A.C.AccentTop}" />
+    <SolidColorBrush x:Key="A.B.AccentHover" Color="{StaticResource A.C.AccentHover}" />
+    <SolidColorBrush x:Key="A.B.WhiteRound" Color="{StaticResource A.C.WhiteRound}" />
+    <SolidColorBrush x:Key="A.B.WhiteRoundHover" Color="{StaticResource A.C.WhiteRoundHover}" />
+    <SolidColorBrush x:Key="A.B.WhiteRoundInk" Color="{StaticResource A.C.WhiteRoundInk}" />
+    <SolidColorBrush x:Key="A.B.NavHover" Color="{StaticResource A.C.NavHover}" />
+    <SolidColorBrush x:Key="A.B.NavIcon" Color="{StaticResource A.C.NavIcon}" />
+    <SolidColorBrush x:Key="A.B.NavIndicator" Color="{StaticResource A.C.NavIndicator}" />
+    <SolidColorBrush x:Key="A.B.NavIndicatorTop" Color="{StaticResource A.C.NavIndicatorTop}" />
+    <SolidColorBrush x:Key="A.B.SwitchOff" Color="{StaticResource A.C.SwitchOff}" />
+    <SolidColorBrush x:Key="A.B.MenuFill" Color="{StaticResource A.C.MenuFill}" />
+    <SolidColorBrush x:Key="A.B.MenuEdge" Color="{StaticResource A.C.MenuEdge}" />
+    <SolidColorBrush x:Key="A.B.MenuHover" Color="{StaticResource A.C.MenuHover}" />
+    <SolidColorBrush x:Key="A.B.Scrim" Color="{StaticResource A.C.Scrim}" />
+    <SolidColorBrush x:Key="A.B.RimInner" Color="{StaticResource A.C.RimInner}" />
+    <SolidColorBrush x:Key="A.B.RimDark" Color="{StaticResource A.C.RimDark}" />
+    <SolidColorBrush x:Key="A.B.White" Color="#FFFFFF" />
+
+    <LinearGradientBrush x:Key="A.B.GlassTint" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Offset="0" Color="{StaticResource A.C.GlassTintTop}" />
+        <GradientStop Offset="1" Color="{StaticResource A.C.GlassTintBottom}" />
+    </LinearGradientBrush>
+    <!-- The rim: a crisp light edge, brightest top left and bottom right, as the HTML's 140 degree gradient. -->
+    <LinearGradientBrush x:Key="A.B.Rim" StartPoint="0.18,0" EndPoint="0.82,1">
+        <GradientStop Offset="0" Color="{StaticResource A.C.RimA}" />
+        <GradientStop Offset="0.3" Color="{StaticResource A.C.RimB}" />
+        <GradientStop Offset="0.65" Color="{StaticResource A.C.RimC}" />
+        <GradientStop Offset="1" Color="{StaticResource A.C.RimD}" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="A.B.TopSheen" StartPoint="0,0" EndPoint="0,22" MappingMode="Absolute">
+        <GradientStop Offset="0" Color="{StaticResource A.C.TopSheen}" />
+        <GradientStop Offset="1" Color="#00FFFFFF" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="A.B.NavFill" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Offset="0" Color="{StaticResource A.C.NavFillA}" />
+        <GradientStop Offset="1" Color="{StaticResource A.C.NavFillB}" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="A.B.ModalFill" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Offset="0" Color="{StaticResource A.C.ModalTop}" />
+        <GradientStop Offset="1" Color="{StaticResource A.C.ModalBottom}" />
+    </LinearGradientBrush>
+
+    <!-- Radii -->
+    <CornerRadius x:Key="A.R.Panel">26</CornerRadius>
+    <CornerRadius x:Key="A.R.Well">20</CornerRadius>
+    <CornerRadius x:Key="A.R.Pill">999</CornerRadius>
+    <CornerRadius x:Key="A.R.Search">16</CornerRadius>
+    <CornerRadius x:Key="A.R.Button">10</CornerRadius>
+    <CornerRadius x:Key="A.R.Menu">18</CornerRadius>
+    <CornerRadius x:Key="A.R.MenuItem">12</CornerRadius>
+    <CornerRadius x:Key="A.R.Modal">28</CornerRadius>
+    <CornerRadius x:Key="A.R.Icon">9</CornerRadius>
+    <sys:Double x:Key="A.Radius.Panel">26</sys:Double>
+
+    <!-- Type -->
+    <FontFamily x:Key="A.F.Ui">Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI</FontFamily>
+    <sys:Double x:Key="A.T.Big">40</sys:Double>
+    <sys:Double x:Key="A.T.BigMonth">34</sys:Double>
+    <sys:Double x:Key="A.T.Mid">22</sys:Double>
+    <sys:Double x:Key="A.T.Title">16</sys:Double>
+    <sys:Double x:Key="A.T.Brand">18</sys:Double>
+    <sys:Double x:Key="A.T.Body">14</sys:Double>
+    <sys:Double x:Key="A.T.Control">13.5</sys:Double>
+    <sys:Double x:Key="A.T.Label">13</sys:Double>
+    <sys:Double x:Key="A.T.Small">12.5</sys:Double>
+    <sys:Double x:Key="A.T.Tiny">12</sys:Double>
+    <sys:Double x:Key="A.T.Axis">11</sys:Double>
+    <sys:Double x:Key="A.T.Modal">20</sys:Double>
+</ResourceDictionary>

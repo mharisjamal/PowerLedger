@@ -3,8 +3,9 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace PowerLedger.App;
 
-/// <summary>The screens of spec §9's rail, and Midnight's Dashboard (Midnight look design §2), which stands in for Now
-/// there as Now stands in for it in Classic.</summary>
+/// <summary>The screens of spec §9's rail, Midnight's Dashboard (Midnight look design §2), which stands in for Now there
+/// as Now stands in for it in Classic, and Aero's Parts and Insights (Aero look design §1), which only Aero has: the
+/// other looks show their landing page for them.</summary>
 internal enum Page
 {
     Now,
@@ -13,6 +14,8 @@ internal enum Page
     Household,
     Settings,
     Dashboard,
+    Parts,
+    Insights,
 }
 
 /// <summary>The window: which page shows, the screens, the first-run wizard while it runs, and the version in the title bar.</summary>
@@ -24,7 +27,8 @@ internal sealed class ShellViewModel : ObservableObject
 
     public ShellViewModel(
         NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, HouseholdViewModel household, SettingsViewModel settings,
-        WizardViewModel wizard, string version, Updater? updates = null, DashboardViewModel? dashboard = null)
+        WizardViewModel wizard, string version, Updater? updates = null, DashboardViewModel? dashboard = null,
+        InsightsViewModel? insights = null)
     {
         Now = now;
         Breakdown = breakdown;
@@ -35,6 +39,7 @@ internal sealed class ShellViewModel : ObservableObject
         Version = version;
         Updates = updates;
         Dashboard = dashboard;
+        Insights = insights;
         Wizard.Finished += EndSetup;
         Settings.SetupRequested += BeginSetup;
         Settings.PropertyChanged += (_, e) =>
@@ -49,6 +54,9 @@ internal sealed class ShellViewModel : ObservableObject
 
     /// <summary>Midnight's landing page (Midnight look design §4); a Classic-only App has none, and shows Now for it.</summary>
     public DashboardViewModel? Dashboard { get; }
+
+    /// <summary>Aero's Insights page (Aero look design §4); without it the page shows the Dashboard, or Now.</summary>
+    public InsightsViewModel? Insights { get; }
 
     /// <summary>The title bars' Switch look button: the other look, chosen as in Settings, so the choice is kept.</summary>
     public IRelayCommand SwitchLook { get; }
@@ -116,6 +124,8 @@ internal sealed class ShellViewModel : ObservableObject
     {
         Page.Now => Now,
         Page.Dashboard => Dashboard ?? (object)Now,
+        Page.Parts => Dashboard ?? (object)Now,   // Aero's Parts page draws DashboardViewModel.Parts
+        Page.Insights => Insights ?? Dashboard ?? (object)Now,
         Page.Breakdown => Breakdown,
         Page.Report => Report,
         Page.Household => Household,
@@ -129,10 +139,10 @@ internal sealed class ShellViewModel : ObservableObject
         IsSetup = true;
     }
 
-    /// <summary>The wizard is done: back to the landing page, Now or Midnight's Dashboard by the look in use.</summary>
+    /// <summary>The wizard is done: back to the landing page, Now in Classic, the Dashboard in Midnight and Aero.</summary>
     public void EndSetup()
     {
-        _page = Settings.Look == Look.Midnight && Dashboard is not null ? Page.Dashboard : Page.Now;
+        _page = Settings.Look != Look.Classic && Dashboard is not null ? Page.Dashboard : Page.Now;
         OnPropertyChanged(nameof(Page));
         IsSetup = false;
     }
@@ -141,8 +151,10 @@ internal sealed class ShellViewModel : ObservableObject
     private void ShowPage()
     {
         var shown = IsSetup || !IsShown ? (Page?)null : Page;
-        if (shown == Page.Dashboard) Dashboard?.Show();
+        if (shown is Page.Dashboard or Page.Parts || (shown == Page.Insights && Insights is null)) Dashboard?.Show();   // as Current has it
         else Dashboard?.Hide();
+        if (shown == Page.Insights) Insights?.Show();
+        else Insights?.Hide();
         if (shown == Page.Breakdown) Breakdown.Show();
         else Breakdown.Hide();
         if (shown == Page.Report) Report.Show();

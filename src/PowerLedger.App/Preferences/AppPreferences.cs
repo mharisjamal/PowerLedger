@@ -41,6 +41,13 @@ internal interface IUiSettings
     /// <summary>What the Dashboard's Energy used card covers, as its period menu chose it.</summary>
     string? SetEnergyPeriod(EnergyPeriod period);
 
+    /// <summary>Saves Aero's glass as Settings' Glass section chose it, put in range first (Aero look design §3). The look
+    /// repaints from <see cref="SettingsViewModel.Glass"/>, which raises its change, not from here.</summary>
+    string? SetGlass(GlassSettings glass);
+
+    /// <summary>Saves the watts overlay's choices, put in range first (Aero look design §5).</summary>
+    string? SetOverlay(OverlaySettings overlay);
+
     /// <summary>Stamps <see cref="UiPreferences.FirstRunAt"/> with now when the first run is done but nothing stamped it
     /// yet: an install from before this field existed. Does nothing before the first run finishes, or once stamped.</summary>
     string? EnsureFirstRunAt();
@@ -106,6 +113,10 @@ internal sealed class AppPreferences(
     public string? SetSignedInEmail(string? email) => Save(Current with { SignedInEmail = email });
 
     public string? SetEnergyPeriod(EnergyPeriod period) => Save(Current with { EnergyPeriod = period });
+
+    public string? SetGlass(GlassSettings glass) => Save(Current with { Glass = glass.Sanitised() });
+
+    public string? SetOverlay(OverlaySettings overlay) => Save(Current with { Overlay = overlay.Sanitised() });
 
     public string? EnsureFirstRunAt()
         => Current.FirstRunDone && Current.FirstRunAt is null ? Save(Current with { FirstRunAt = DateTimeOffset.UtcNow }) : null;

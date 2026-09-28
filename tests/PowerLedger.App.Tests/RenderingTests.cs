@@ -156,6 +156,11 @@ public class RenderingTests
             shellWindow.Bounds = new Rect(-20000, 10, 1000, 700);
             shellWindow.Page = Page.Dashboard;
             shell.Page.ShouldBe(Page.Now);
+            foreach (var aeroOnly in new[] { Page.Parts, Page.Insights })
+            {
+                shellWindow.Page = aeroOnly;
+                shell.Page.ShouldBe(Page.Now, $"Classic has no {aeroOnly} page");
+            }
             shellWindow.Page = Page.Report;
             shell.Page.ShouldBe(Page.Report);
             shellWindow.Page.ShouldBe(Page.Report);
@@ -480,7 +485,8 @@ public class RenderingTests
                     var label = Find<TextBlock>(view, text => text.Text == "Look").ShouldNotBeNull(theme.ToString());
                     var classic = Choice("Classic");
                     var midnight = Choice("Midnight");
-                    (classic.IsChecked, midnight.IsChecked).ShouldBe((true, false), theme.ToString());
+                    var aero = Choice("Aero");
+                    (classic.IsChecked, midnight.IsChecked, aero.IsChecked).ShouldBe((true, false, false), theme.ToString());
                     var themeRow = Choice("Like Windows");
                     Top(label).ShouldBeGreaterThan(Top(themeRow), theme.ToString());
                     Top(label).ShouldBeLessThan(Top(Find<TextBlock>(view, text => text.Text == "Start with Windows").ShouldNotBeNull()), theme.ToString());
@@ -507,7 +513,13 @@ public class RenderingTests
 
                     settings.Look.ShouldBe(Look.Midnight, theme.ToString());
                     ui.Changes.ShouldBe(["look Midnight"], theme.ToString());
-                    (classic.IsChecked, midnight.IsChecked).ShouldBe((false, true), theme.ToString());
+                    (classic.IsChecked, midnight.IsChecked, aero.IsChecked).ShouldBe((false, true, false), theme.ToString());
+
+                    aero.IsChecked = true;
+
+                    settings.Look.ShouldBe(Look.Aero, theme.ToString());
+                    ui.Changes.ShouldBe(["look Midnight", "look Aero"], theme.ToString());
+                    (classic.IsChecked, midnight.IsChecked, aero.IsChecked).ShouldBe((false, false, true), theme.ToString());
                 }
                 finally
                 {

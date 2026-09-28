@@ -487,6 +487,11 @@ public class MidnightRenderingTests
             window.Bounds = new Rect(-20000, 10, 1000, 700);
             window.Page = Page.Now;
             shell.Page.ShouldBe(Page.Dashboard, "Classic's Now arrives as the Dashboard");
+            foreach (var aeroOnly in new[] { Page.Parts, Page.Insights })
+            {
+                window.Page = aeroOnly;
+                shell.Page.ShouldBe(Page.Dashboard, $"Midnight has no {aeroOnly} page");
+            }
             window.Page = Page.Report;
             window.Page.ShouldBe(Page.Report);
             try

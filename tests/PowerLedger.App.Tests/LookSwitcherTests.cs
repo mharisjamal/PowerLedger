@@ -46,8 +46,8 @@ public class LookSwitcherTests
     }
 
     /// <summary>A shell window over a real <see cref="ShellViewModel"/>, which maps the page it is given as the look's
-    /// window does: Midnight has no Now and Classic no Dashboard, and Midnight's window moves the shell off Now as it
-    /// opens, as MidnightWindow does.</summary>
+    /// window does: Midnight and Aero have no Now, Classic no Dashboard, and neither Classic nor Midnight has Aero's Parts
+    /// or Insights; Midnight's and Aero's windows move the shell off Now as they open, as their windows do.</summary>
     private sealed class ShellWindowFake : IShellWindow
     {
         private readonly ShellViewModel _shell;
@@ -59,7 +59,7 @@ public class LookSwitcherTests
             Look = look;
             _shell = shell;
             _showFails = showFails;
-            if (look == Look.Midnight && shell.Page == Page.Now) shell.Page = Page.Dashboard;
+            if (look != Look.Classic && shell.Page == Page.Now) shell.Page = Page.Dashboard;
         }
 
         public Look Look { get; }
@@ -73,9 +73,9 @@ public class LookSwitcherTests
             get => _shell.Page;
             set => _shell.Page = (Look, value) switch
             {
-                (Look.Midnight, Page.Now) => Page.Dashboard,
-                (Look.Classic, Page.Dashboard) => Page.Now,
-                _ => value,
+                (Look.Classic, _) => MainWindow.OwnPage(value),
+                (Look.Midnight, _) => MidnightWindow.OwnPage(value),
+                _ => AeroWindow.OwnPage(value),
             };
         }
 
@@ -123,7 +123,7 @@ public class LookSwitcherTests
             _opened.Add(window);
             return window;
         }),
-        theme, window => _events.Add($"retarget {((FakeWindow)window).Look}"), _log.Add, fellBack);
+        theme, window => _events.Add($"retarget {(window as FakeWindow)?.Look ?? (window as ShellWindowFake)?.Look}"), _log.Add, fellBack);
 
     /// <summary>The App's one shell, with Midnight's Dashboard, over <see cref="_history"/> and <see cref="_clock"/>.</summary>
     private ShellViewModel Shell()
@@ -150,6 +150,8 @@ public class LookSwitcherTests
     [Theory]
     [InlineData("Classic", "Now", "Midnight")]
     [InlineData("Midnight", "Dashboard", "Classic")]
+    [InlineData("Classic", "Now", "Aero")]
+    [InlineData("Aero", "Dashboard", "Classic")]
     public void A_window_that_will_not_show_leaves_the_shell_on_the_page_it_was_on(string fromLook, string onPage, string toLook)
         => WithTheme((theme, _) =>
         {
@@ -226,6 +228,60 @@ public class LookSwitcherTests
             _events.Count.ShouldBe(3);
         });
 
+    /// <summary>Aero look design §2: Aero switches with either of the others as they switch with each other, in both
+    /// directions: the new window at the old one's bounds, state and page, shown, the tray retargeted, the old closed,
+    /// and the new look's palette on.</summary>
+    [Theory]
+    [InlineData("Classic", "Aero")]
+    [InlineData("Aero", "Classic")]
+    [InlineData("Midnight", "Aero")]
+    [InlineData("Aero", "Midnight")]
+    public void Aero_switches_with_either_other_look_carrying_bounds_state_and_page(string fromLook, string toLook)
+        => WithTheme((theme, merged) =>
+        {
+            var (from, to) = (Enum.Parse<Look>(fromLook), Enum.Parse<Look>(toLook));
+            theme.Apply(from);
+            var looks = Switcher(theme);
+            var first = (FakeWindow)looks.Current;
+            first.Look.ShouldBe(from);
+            first.Bounds = new Rect(10, 20, 1000, 700);
+            first.State = WindowState.Maximized;
+            first.Page = Page.Household;
+
+            looks.Switch(to).ShouldBeNull();
+
+            var second = (FakeWindow)looks.Current;
+            second.Look.ShouldBe(to);
+            (second.Bounds, second.State, second.Page).ShouldBe((new Rect(10, 20, 1000, 700), WindowState.Maximized, Page.Household));
+            _events.ShouldBe([$"show {to}", $"retarget {to}", $"close {from}"]);
+            (looks.Look, theme.Look).ShouldBe((to, to));
+            merged[0].Source.ShouldBe(LookRules.PaletteFor(to, Theme.Dark));
+            _log.ShouldBeEmpty();
+        });
+
+    /// <summary>Aero look design §1: a page only Aero has is shown as the other look's landing page when switching away
+    /// from it, and the landing pages map both ways.</summary>
+    [Theory]
+    [InlineData("Aero", "Insights", "Midnight", "Dashboard")]
+    [InlineData("Aero", "Parts", "Midnight", "Dashboard")]
+    [InlineData("Aero", "Insights", "Classic", "Now")]
+    [InlineData("Aero", "Dashboard", "Classic", "Now")]
+    [InlineData("Classic", "Now", "Aero", "Dashboard")]
+    [InlineData("Midnight", "Report", "Aero", "Report")]
+    public void A_switch_shows_the_new_looks_own_page_for_one_it_has_no_view_for(string fromLook, string onPage, string toLook, string lands)
+        => WithTheme((theme, _) =>
+        {
+            var shell = Shell();
+            theme.Apply(Enum.Parse<Look>(fromLook));
+            var looks = Switcher(theme, look => new ShellWindowFake(look, shell, showFails: false));
+            looks.Current.Page = Enum.Parse<Page>(onPage);
+            shell.Page.ShouldBe(Enum.Parse<Page>(onPage));
+
+            looks.Switch(Enum.Parse<Look>(toLook)).ShouldBeNull();
+
+            shell.Page.ShouldBe(Enum.Parse<Page>(lands));
+        });
+
     [Fact]
     public void A_look_whose_window_will_not_open_leaves_the_old_window_and_its_palette_and_says_why()
         => WithTheme((theme, merged) =>
@@ -293,17 +349,20 @@ public class LookSwitcherTests
     /// opens instead, with its palette, the reason goes to the log, and the App is told, so it saves Classic and the
     /// next start doesn't fail the same way.</summary>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void At_start_a_look_that_will_not_open_falls_back_to_classic_and_says_so(bool opensButWillNotShow)
+    [InlineData(false, "Midnight")]
+    [InlineData(true, "Midnight")]
+    [InlineData(false, "Aero")]
+    [InlineData(true, "Aero")]
+    public void At_start_a_look_that_will_not_open_falls_back_to_classic_and_says_so(bool opensButWillNotShow, string lookName)
         => WithTheme((theme, merged) =>
         {
-            theme.Apply(Look.Midnight);
+            var saved = Enum.Parse<Look>(lookName);
+            theme.Apply(saved);
             var fellBack = new List<Look>();
             var looks = Switcher(theme, look =>
             {
-                if (look == Look.Midnight && !opensButWillNotShow) throw new InvalidOperationException("no XAML");
-                var window = new FakeWindow(look, _events, showFails: look == Look.Midnight);
+                if (look == saved && !opensButWillNotShow) throw new InvalidOperationException("no XAML");
+                var window = new FakeWindow(look, _events, showFails: look == saved);
                 _opened.Add(window);
                 return window;
             }, fellBack.Add);
@@ -314,21 +373,26 @@ public class LookSwitcherTests
             looks.Current.ShouldBeSameAs(shown);
             (looks.Look, theme.Look).ShouldBe((Look.Classic, Look.Classic));
             merged[0].Source.ShouldBe(LookRules.PaletteFor(Look.Classic, Theme.Dark));
-            _events.ShouldBe(opensButWillNotShow ? ["close Midnight", "show Classic"] : ["show Classic"]);
+            _events.ShouldBe(opensButWillNotShow ? [$"close {saved}", "show Classic"] : ["show Classic"]);
             _log.Single().ShouldContain(opensButWillNotShow ? "the window would not show" : "no XAML");
-            _log.Single().ShouldStartWith("The Midnight look didn't open at start");
+            _log.Single().ShouldStartWith($"The {saved} look didn't open at start");
             fellBack.ShouldBe([Look.Classic]);
         });
 
     /// <summary>Review 6: the Midnight window that failed may already have moved the shell to the Dashboard; Classic has
     /// no Dashboard, so it opens on Now, as a switch to it would.</summary>
-    [Fact]
-    public void At_start_the_classic_fallback_opens_on_its_own_page()
+    [Theory]
+    [InlineData("Midnight", "Now")]
+    [InlineData("Aero", "Now")]
+    [InlineData("Aero", "Insights")]
+    public void At_start_the_classic_fallback_opens_on_its_own_page(string lookName, string onPage)
         => WithTheme((theme, _) =>
         {
-            theme.Apply(Look.Midnight);
+            var saved = Enum.Parse<Look>(lookName);
+            theme.Apply(saved);
             var shell = Shell();
-            var looks = Switcher(theme, look => new ShellWindowFake(look, shell, showFails: look == Look.Midnight), _ => { });
+            shell.Page = Enum.Parse<Page>(onPage);
+            var looks = Switcher(theme, look => new ShellWindowFake(look, shell, showFails: look == saved), _ => { });
 
             looks.Show();
 

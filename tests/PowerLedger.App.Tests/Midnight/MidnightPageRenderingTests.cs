@@ -232,7 +232,7 @@ public class MidnightPageRenderingTests
                     eyebrow.IsVisible.ShouldBeTrue($"{title} on {theme}");
                     Ancestor<Border>(eyebrow, b => b.Style == view.FindResource("M.Card")).ShouldNotBeNull($"{title} in a card on {theme}");
                 }
-                AllOf<RadioButton>(view).Where(p => p.Content is "Classic" or "Midnight" or "Like Windows" or "Dark" or "Light").Count().ShouldBe(5, theme.ToString());
+                AllOf<RadioButton>(view).Where(p => p.Content is "Classic" or "Midnight" or "Aero" or "Like Windows" or "Dark" or "Light").Count().ShouldBe(6, theme.ToString());
                 AllOf<RadioButton>(view).Where(p => p.Content is "Like Windows").Single().IsChecked.ShouldBe(true, theme.ToString());
                 var switches = AllOf<ToggleButton>(view).Where(t => t is not CheckBox and not RadioButton).ToList();
                 switches.Select(t => t.Content).ShouldContain("Crash and sensor reports", theme.ToString());
@@ -261,8 +261,9 @@ public class MidnightPageRenderingTests
                 // Rows of pills and rows of switches keep one rhythm.
                 (Top("Start with Windows") - Top("Look")).ShouldBe(Top("Look") - Top("Theme"), 1, theme.ToString());
                 (Top("Monitors") - Top("Start with Windows")).ShouldBe(Top("Look") - Top("Theme"), 1, theme.ToString());
-                var looks = AllOf<RadioButton>(view).Where(p => p.Content is "Classic" or "Midnight").ToList();
-                looks.Single(p => p.IsChecked == true).Content.ShouldBe("Midnight", theme.ToString());   // the default look
+                var looks = AllOf<RadioButton>(view).Where(p => p.Content is "Classic" or "Midnight" or "Aero").ToList();
+                looks.Count.ShouldBe(3, theme.ToString());
+                looks.Single(p => p.IsChecked == true).Content.ShouldBe("Aero", theme.ToString());   // the default look
                 looks.Single(p => Equals(p.Content, "Classic")).IsChecked = true;
                 model.Look.ShouldBe(Look.Classic, theme.ToString());
                 looks.Single(p => p.IsChecked == true).Content.ShouldBe("Classic", theme.ToString());

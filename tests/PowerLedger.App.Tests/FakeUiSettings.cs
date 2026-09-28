@@ -99,6 +99,20 @@ internal sealed class FakeUiSettings : IUiSettings
         return null;
     }
 
+    public string? SetGlass(GlassSettings glass)
+    {
+        Current = Current with { Glass = glass.Sanitised() };
+        Changes.Add($"glass {glass.Style}");
+        return null;
+    }
+
+    public string? SetOverlay(OverlaySettings overlay)
+    {
+        Current = Current with { Overlay = overlay.Sanitised() };
+        Changes.Add($"overlay {(overlay.Enabled ? "on" : "off")} {overlay.Position}");
+        return null;
+    }
+
     /// <summary>Tests can set this to control what a first run is stamped with; UtcNow otherwise.</summary>
     public Func<DateTimeOffset> Now { get; set; } = () => DateTimeOffset.UtcNow;
 }

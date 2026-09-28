@@ -21,17 +21,34 @@ internal sealed record UiPreferences
 
     public ThemeChoice Theme { get; init; } = ThemeChoice.System;
 
-    /// <summary>Which front end the window opens in (Midnight look design §1): Midnight, the default (the owner's decision,
-    /// 2026-09-25), for a new install and for a ui.json from before the look existed; Classic once chosen. A name this
-    /// version doesn't know reads as the default rather than failing the whole file. It has a setter rather than init for
-    /// the missing case: the JSON source generator gives an init-only property missing from the file its type's default,
-    /// which is Classic, where a setter is left alone.</summary>
+    /// <summary>Which front end the window opens in (Midnight look design §1, Aero look design §1): Aero, the default (the
+    /// owner's decision, 2026-09-28), for a new install and for a ui.json from before the look existed; Classic or
+    /// Midnight once chosen. A name this version doesn't know reads as the default rather than failing the whole file. It
+    /// has a setter rather than init for the missing case: the JSON source generator gives an init-only property missing
+    /// from the file its type's default, which is Classic, where a setter is left alone.</summary>
     [JsonConverter(typeof(LookJsonConverter))]
-    public Look Look { get; set; } = Look.Midnight;
+    public Look Look { get; set; } = Look.Aero;
 
     /// <summary>The one-time banner that says this is the new look, with Switch back and Got it, has been retired: by one
-    /// of its buttons or by any look switch (Midnight look design §1). It never shows again, in either look.</summary>
+    /// of its buttons or by any look switch (Midnight look design §1). It never shows again, in any look, until the move
+    /// to Aero (<see cref="AeroIntroduced"/>) brings it back once.</summary>
     public bool LookIntroduced { get; init; }
+
+    /// <summary>
+    /// The one-time move to Aero has been made (Aero look design §1): every PC updating from 0.9.x lands on Aero once,
+    /// whatever look it had, with the new look's banner showing again; after that the user's choice sticks. The move is
+    /// made by <see cref="Introduced"/> as the store loads, and saved with whatever the App saves next.
+    /// <para>It is init-only with an initialiser of true on purpose, the reverse of the setters above: the JSON source
+    /// generator gives an init-only property missing from the file its type's default, false, so a ui.json from before
+    /// Aero is moved, while a new install's preferences, made in memory, have nothing to move.</para>
+    /// </summary>
+    public bool AeroIntroduced { get; init; } = true;
+
+    /// <summary>The look the one-time move to Aero moved this PC from, Classic or Midnight, for the banner's Switch back
+    /// to return to (Aero look design §1); null for a PC that had none to leave (a new install, or no look saved, or one
+    /// already on Aero). The move sets it; nothing else changes it.</summary>
+    [JsonConverter(typeof(LookJsonConverter))]
+    public Look? LookBeforeAero { get; init; }
 
     /// <summary>Kilograms of CO₂ per kWh used for every CO₂ figure; spec §9's default is the world average, which a
     /// ui.json without the field keeps. It has a setter rather than init for that: the JSON source generator gives an
@@ -70,6 +87,15 @@ internal sealed record UiPreferences
     [JsonConverter(typeof(EnergyPeriodJsonConverter))]
     public EnergyPeriod EnergyPeriod { get; set; } = EnergyPeriod.SinceStart;
 
+    /// <summary>Aero's glass, as Settings' Glass section chose it (Aero look design §3). A ui.json from before it existed,
+    /// or with null for it, takes the defaults; the setter keeps the default for a missing field, as
+    /// <see cref="Look"/>'s does.</summary>
+    public GlassSettings Glass { get; set; } = GlassSettings.Default;
+
+    /// <summary>The watts overlay, as Settings' Overlay section and its own menu chose it (Aero look design §5); missing or
+    /// null reads as the defaults, as <see cref="Glass"/> does.</summary>
+    public OverlaySettings Overlay { get; set; } = OverlaySettings.Default;
+
     public static UiPreferences Default { get; } = new();
 
     /// <summary>The same preferences with anything out of range put back to its default.</summary>
@@ -77,9 +103,18 @@ internal sealed record UiPreferences
     {
         Theme = Enum.IsDefined(Theme) ? Theme : ThemeChoice.System,
         Look = Enum.IsDefined(Look) ? Look : Default.Look,
+        LookBeforeAero = LookBeforeAero is { } before && Enum.IsDefined(before) && before != Look.Aero ? before : null,
         EnergyPeriod = Enum.IsDefined(EnergyPeriod) ? EnergyPeriod : Default.EnergyPeriod,
         Co2KgPerKwh = double.IsFinite(Co2KgPerKwh) && Co2KgPerKwh >= 0 && Co2KgPerKwh < MaxCo2KgPerKwh ? Co2KgPerKwh : Co2.DefaultKgPerKwh,
+        Glass = (Glass ?? GlassSettings.Default).Sanitised(),
+        Overlay = (Overlay ?? OverlaySettings.Default).Sanitised(),
     };
+
+    /// <summary>The same preferences after the one-time move to Aero (<see cref="AeroIntroduced"/>): on Aero, with the new
+    /// look's banner to show; once made, the preferences as they are.</summary>
+    public UiPreferences Introduced() => AeroIntroduced
+        ? this
+        : this with { Look = Look.Aero, LookIntroduced = false, AeroIntroduced = true, LookBeforeAero = Look == Look.Aero ? null : Look };
 }
 
 /// <summary>Reads and writes ui.json. Reading never fails: a missing or damaged file gives the defaults.</summary>
@@ -93,7 +128,7 @@ internal sealed class UiPreferencesStore(string path)
         try
         {
             if (!File.Exists(path)) return UiPreferences.Default;
-            return (JsonSerializer.Deserialize(File.ReadAllText(path), UiJson.Default.UiPreferences) ?? UiPreferences.Default).Sanitised();
+            return (JsonSerializer.Deserialize(File.ReadAllText(path), UiJson.Default.UiPreferences) ?? UiPreferences.Default).Sanitised().Introduced();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {

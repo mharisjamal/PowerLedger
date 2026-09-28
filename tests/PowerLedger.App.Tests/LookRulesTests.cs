@@ -9,6 +9,8 @@ public class LookRulesTests
     [InlineData("Classic", "Light", "Palette.Light.xaml")]
     [InlineData("Midnight", "Dark", "Palette.Midnight.Dark.xaml")]
     [InlineData("Midnight", "Light", "Palette.Midnight.Light.xaml")]
+    [InlineData("Aero", "Dark", "Palette.Aero.Dark.xaml")]
+    [InlineData("Aero", "Light", "Palette.Aero.Light.xaml")]
     public void Each_look_draws_each_theme_from_its_own_palette(string look, string theme, string file)
         => LookRules.PaletteFor(Enum.Parse<Look>(look), Enum.Parse<Theme>(theme))
             .ToString().ShouldBe($"pack://application:,,,/PowerLedger;component/Theme/{file}");

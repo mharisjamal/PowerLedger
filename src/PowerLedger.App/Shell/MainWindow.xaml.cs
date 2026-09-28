@@ -39,15 +39,18 @@ public partial class MainWindow : Window, IShellWindow
         set => WindowState = value;
     }
 
-    /// <summary>Classic has no Dashboard: Midnight's landing page maps to Now.</summary>
+    /// <summary>Classic has no Dashboard, nor Aero's Parts and Insights: each maps to Now, the landing page.</summary>
     Page IShellWindow.Page
     {
         get => Shell?.Page ?? Page.Now;
         set
         {
-            if (Shell is { } shell) shell.Page = value == Page.Dashboard ? Page.Now : value;
+            if (Shell is { } shell) shell.Page = OwnPage(value);
         }
     }
+
+    /// <summary>The page Classic shows for <paramref name="page"/>: Now for one it has no view for.</summary>
+    internal static Page OwnPage(Page page) => page is Page.Dashboard or Page.Parts or Page.Insights ? Page.Now : page;
 
     Window IShellWindow.Window => this;
 

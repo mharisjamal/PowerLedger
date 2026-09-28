@@ -143,6 +143,26 @@ public class ContrastTests
     public void Both_midnight_palettes_define_the_same_keys()
         => Keys(Look.Midnight, Theme.Dark).Keys.OrderBy(k => k).ShouldBe(Keys(Look.Midnight, Theme.Light).Keys.OrderBy(k => k));
 
+    /// <summary>Aero look design §3: Aero's palettes define every key Classic's and Midnight's do, so the shared dialogs,
+    /// the wizard and any Midnight-keyed view take Aero's colours, each as the same type of value as there; every other
+    /// key is Aero's own, under A.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void Aero_defines_every_key_classic_and_midnight_define_and_the_rest_under_a(string theme)
+    {
+        var midnight = Keys(Look.Midnight, Enum.Parse<Theme>(theme));
+        var aero = Keys(Look.Aero, Enum.Parse<Theme>(theme));
+        midnight.Keys.ShouldBeSubsetOf(aero.Keys);
+        foreach (var (key, type) in midnight) aero[key].ShouldBe(type, key);
+        aero.Keys.Except(midnight.Keys).ShouldAllBe(key => key.StartsWith("A.", StringComparison.Ordinal));
+        aero.Keys.Count(key => key.StartsWith("A.", StringComparison.Ordinal)).ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public void Both_aero_palettes_define_the_same_keys_with_the_same_types()
+        => Keys(Look.Aero, Theme.Dark).OrderBy(k => k.Key).ShouldBe(Keys(Look.Aero, Theme.Light).OrderBy(k => k.Key));
+
     [Fact]
     public void The_maths_is_wcags()
     {

@@ -329,13 +329,14 @@
                             </StackPanel>
                         </Border>
                     </StackPanel>
-                    <!-- The Midnight look design §1: the look, in both looks, under the theme. -->
+                    <!-- The Midnight look design §1: the look, in every look, under the theme; Aero joins the choices (Aero look design §1). -->
                     <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Look" />
                         <Border Style="{StaticResource Choices}">
                             <StackPanel Orientation="Horizontal">
                                 <RadioButton Style="{StaticResource Choice}" Content="Classic" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Classic}}" />
                                 <RadioButton Style="{StaticResource Choice}" Content="Midnight" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Midnight}}" />
+                                <RadioButton Style="{StaticResource Choice}" Content="Aero" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Aero}}" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

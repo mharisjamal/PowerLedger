@@ -1,0 +1,7 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Aero's keyed and implicit styles (Aero look design §3), merged by AeroWindow and by every Aero view through
+         SharedDictionary, never at Application level, so its implicit styles never reach Classic, Midnight or the dialogs.
+         Task 0 leaves it empty; agent G fills it with every key in Plan S's style contract (G1), and the other agents use
+         only those keys. Colours come from the palette's A.* tokens through DynamicResource, never from values here. -->
+</ResourceDictionary>

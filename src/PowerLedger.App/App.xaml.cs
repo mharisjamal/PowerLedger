@@ -203,6 +203,8 @@ public partial class App : Application
             Page.Breakdown => "breakdown",
             Page.Report => "report",
             Page.Household => "household",
+            Page.Parts => "parts",
+            Page.Insights => "insights",
             _ => "settings",
         });
     }
@@ -259,15 +261,18 @@ public partial class App : Application
         if (_preferences is { Current.FirstRunDone: true }) _consentGate?.CheckOnce();
     }
 
-    /// <summary>A shell window in <paramref name="look"/> over the one shell (Midnight look design §2). Closing it hides
+    /// <summary>A shell window in <paramref name="look"/> over the one shell (Midnight look design §2, Aero look design §2). Closing it hides
     /// it to the tray while it is the current one; the service keeps logging either way. On exit, and once a switch has
     /// moved on to another window, a close is a close. The shell's pages read only while the current window shows; a
     /// switch's two windows showing and closing leave that alone, since neither is the current one as it happens.</summary>
     private IShellWindow OpenWindow(Look look)
     {
-        IShellWindow window = look == Look.Midnight
-            ? new MidnightWindow(_shell!, _looks!, _theme!, _updates!, OpenFeedbackWindow)
-            : new MainWindow { DataContext = _shell };
+        IShellWindow window = look switch
+        {
+            Look.Midnight => new MidnightWindow(_shell!, _looks!, _theme!, _updates!, OpenFeedbackWindow),
+            Look.Aero => new AeroWindow(_shell!, _looks!, _theme!, _updates!, OpenFeedbackWindow),
+            _ => new MainWindow { DataContext = _shell },
+        };
         window.Window.Closing += (_, args) =>
         {
             if (_exiting || !IsCurrent(window)) return;

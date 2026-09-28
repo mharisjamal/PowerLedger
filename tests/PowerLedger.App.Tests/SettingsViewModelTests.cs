@@ -173,7 +173,7 @@ public class SettingsViewModelTests
         var model = Model();
         var changed = new List<string?>();
         model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
-        model.Look.ShouldBe(Look.Midnight, "the default");
+        model.Look.ShouldBe(Look.Aero, "the default");
 
         model.Look = Look.Classic;
 
@@ -218,6 +218,58 @@ public class SettingsViewModelTests
         var switched = Model();
         switched.Look = Look.Classic;
         switched.LookIntroduced.ShouldBeTrue("switching looks knows there are two");
+    }
+
+    /// <summary>Aero look design §1: Aero is one of the choices, and choosing it from another look switches to it.</summary>
+    [Fact]
+    public void Aero_can_be_chosen_from_another_look()
+    {
+        _ui.Current = UiPreferences.Default with { Look = Look.Classic };
+        var model = Model();
+
+        model.Look = Look.Aero;
+
+        _ui.Changes.ShouldBe(["look Aero"]);
+        model.Look.ShouldBe(Look.Aero);
+    }
+
+    /// <summary>Aero look design §3: the Glass section's choices are saved as a whole and raise Glass, which the look
+    /// repaints from; the same choice again saves nothing.</summary>
+    [Fact]
+    public void Glass_settings_are_saved_when_chosen_and_raise_their_change()
+    {
+        var model = Model();
+        var changed = new List<string?>();
+        model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        model.Glass.ShouldBe(GlassSettings.Default);
+
+        model.Glass = model.Glass with { Style = GlassStyle.Dark, Frost = 2 };
+
+        _ui.Changes.ShouldBe(["glass Dark"]);
+        model.Glass.ShouldBe(GlassSettings.Default with { Style = GlassStyle.Dark, Frost = 1 });
+        changed.ShouldBe([nameof(SettingsViewModel.Glass)]);
+
+        model.Glass = GlassSettings.Default with { Style = GlassStyle.Dark, Frost = 1 };
+        _ui.Changes.Count.ShouldBe(1);
+    }
+
+    /// <summary>Aero look design §5: the overlay's choices are saved as a whole and raise Overlay, which shows or hides it.</summary>
+    [Fact]
+    public void Overlay_settings_are_saved_when_chosen_and_raise_their_change()
+    {
+        var model = Model();
+        var changed = new List<string?>();
+        model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        model.Overlay.ShouldBe(OverlaySettings.Default);
+
+        model.Overlay = model.Overlay with { Enabled = true, Position = OverlayPosition.BottomLeft };
+
+        _ui.Changes.ShouldBe(["overlay on BottomLeft"]);
+        model.Overlay.ShouldBe(OverlaySettings.Default with { Enabled = true, Position = OverlayPosition.BottomLeft });
+        changed.ShouldBe([nameof(SettingsViewModel.Overlay)]);
+
+        model.Overlay = model.Overlay with { };
+        _ui.Changes.Count.ShouldBe(1);
     }
 
     [Fact]

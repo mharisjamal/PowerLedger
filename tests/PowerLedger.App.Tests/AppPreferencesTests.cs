@@ -159,7 +159,7 @@ public sealed class AppPreferencesTests : IDisposable
     public void A_look_switches_the_window_first_and_is_then_saved_and_the_new_look_needs_no_introducing_after()
     {
         var preferences = Preferences();
-        preferences.Current.Look.ShouldBe(Look.Midnight, "the default");
+        preferences.Current.Look.ShouldBe(Look.Aero, "the default");
 
         preferences.SetLook(Look.Classic).ShouldBeNull();
 
@@ -178,8 +178,8 @@ public sealed class AppPreferencesTests : IDisposable
 
         preferences.SetLook(Look.Classic).ShouldBe("Couldn't open the Classic look: no window.");
 
-        preferences.Current.Look.ShouldBe(Look.Midnight);
-        Store.Load().Look.ShouldBe(Look.Midnight);
+        preferences.Current.Look.ShouldBe(Look.Aero);
+        Store.Load().Look.ShouldBe(Look.Aero);
     }
 
     [Fact]
@@ -193,6 +193,34 @@ public sealed class AppPreferencesTests : IDisposable
         preferences.Current.LookIntroduced.ShouldBeTrue();
         Store.Load().LookIntroduced.ShouldBeTrue();
         _looks.ShouldBeEmpty("introducing it switches nothing");
+    }
+
+    /// <summary>Aero look design §3: the Glass section's choices are saved as a whole, put in range first; the look
+    /// itself learns of them through Settings, which raises its Glass property.</summary>
+    [Fact]
+    public void Glass_settings_are_saved_in_range()
+    {
+        var preferences = Preferences();
+        var chosen = GlassSettings.Default with { Style = GlassStyle.Colour, TintColor = "#12ab9f", TintStrength = 3, ReduceMotion = true };
+
+        preferences.SetGlass(chosen).ShouldBeNull();
+
+        var kept = GlassSettings.Default with { Style = GlassStyle.Colour, TintColor = "#12AB9F", TintStrength = 1, ReduceMotion = true };
+        preferences.Current.Glass.ShouldBe(kept);
+        Store.Load().Glass.ShouldBe(kept);
+        _looks.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Overlay_settings_are_saved_in_range()
+    {
+        var preferences = Preferences();
+
+        preferences.SetOverlay(new OverlaySettings { Enabled = true, Position = OverlayPosition.Free, Left = 10, Top = 20, Opacity = 0.1 }).ShouldBeNull();
+
+        var kept = new OverlaySettings { Enabled = true, Position = OverlayPosition.Free, Left = 10, Top = 20, Opacity = 0.55 };
+        preferences.Current.Overlay.ShouldBe(kept);
+        Store.Load().Overlay.ShouldBe(kept);
     }
 
     [Fact]

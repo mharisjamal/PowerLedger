@@ -88,12 +88,16 @@ internal partial class MidnightWindow : Window, IShellWindow
 
     public WindowState State { get => WindowState; set => WindowState = value; }
 
-    /// <summary>The shell's page; Classic's Now arrives as the Dashboard, the page that stands in its place here.</summary>
+    /// <summary>The shell's page; Classic's Now arrives as the Dashboard, the page that stands in its place here, and so do
+    /// Aero's Parts and Insights, which Midnight has no page for.</summary>
     public Page Page
     {
         get => _shell.Page;
-        set => _shell.Page = value == Page.Now ? Page.Dashboard : value;
+        set => _shell.Page = OwnPage(value);
     }
+
+    /// <summary>The page Midnight shows for <paramref name="page"/>: the Dashboard for one it has no view for.</summary>
+    internal static Page OwnPage(Page page) => page is Page.Now or Page.Parts or Page.Insights ? Page.Dashboard : page;
 
     public Window Window => this;
 
@@ -148,10 +152,10 @@ internal partial class MidnightWindow : Window, IShellWindow
         AutomationProperties.SetName(MaximizeButton, name);
     }
 
-    /// <summary>Shown, the window shows its own page for Classic's Now; while shown, it keeps doing so.</summary>
+    /// <summary>Shown, the window shows its own page for Classic's Now and Aero's pages; while shown, it keeps doing so.</summary>
     private void ShowOwnPage()
     {
-        if (IsVisible && _shell.Page == Page.Now) _shell.Page = Page.Dashboard;   // Midnight's sidebar never selects Now
+        if (IsVisible && OwnPage(_shell.Page) != _shell.Page) _shell.Page = Page.Dashboard;   // Midnight's sidebar never selects Now
     }
 
     private void OnShellChanged(object? sender, PropertyChangedEventArgs e)

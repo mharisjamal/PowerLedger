@@ -124,6 +124,32 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Aero's glass (Aero look design §3), chosen as a whole by the Glass section: saved in range, then raised, so
+    /// the look repaints from what was kept. The same settings again save nothing.</summary>
+    public GlassSettings Glass
+    {
+        get => _ui.Current.Glass;
+        set
+        {
+            if (value == _ui.Current.Glass) return;
+            AppMessage = _ui.SetGlass(value);
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>The watts overlay's choices (Aero look design §5), from the Overlay section, the tray and the overlay's own
+    /// menu: saved in range, then raised, so the overlay shows, hides or moves from what was kept.</summary>
+    public OverlaySettings Overlay
+    {
+        get => _ui.Current.Overlay;
+        set
+        {
+            if (value == _ui.Current.Overlay) return;
+            AppMessage = _ui.SetOverlay(value);
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>The one-time banner about the new look is retired (Midnight look design §1): by its buttons or any switch.</summary>
     public bool LookIntroduced => _ui.Current.LookIntroduced;
 

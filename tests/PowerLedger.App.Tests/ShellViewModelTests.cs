@@ -24,8 +24,8 @@ public class ShellViewModelTests
         new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
         "0.1.0");
 
-    /// <summary>A shell with Midnight's Dashboard as well, over the same history.</summary>
-    private ShellViewModel ShellWithDashboard()
+    /// <summary>A shell with Midnight's Dashboard as well, over the same history, and Aero's Insights when given.</summary>
+    private ShellViewModel ShellWithDashboard(InsightsViewModel? insights = null)
     {
         var now = new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { });
         return new ShellViewModel(
@@ -36,7 +36,66 @@ public class ShellViewModelTests
             new SettingsViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
             new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
             "0.1.0",
-            dashboard: new DashboardViewModel(now, _history, new FakeHistory(), _clock, TimeZoneInfo.Utc, English, UiThreads.Inline));
+            dashboard: new DashboardViewModel(now, _history, new FakeHistory(), _clock, TimeZoneInfo.Utc, English, UiThreads.Inline),
+            insights: insights);
+    }
+
+    /// <summary>Aero look design §1: the Parts page draws the Dashboard's parts, so the Dashboard reads while it shows.</summary>
+    [Fact]
+    public void The_parts_page_shows_the_dashboard_which_reads_while_it_shows()
+    {
+        var shell = ShellWithDashboard();
+
+        shell.Page = Page.Parts;
+
+        shell.Current.ShouldBe(shell.Dashboard);
+        var read = _history.Reads.Count;
+        read.ShouldBeGreaterThan(0);
+        _clock.Advance(DashboardViewModel.RefreshEvery);
+        _history.Reads.Count.ShouldBeGreaterThan(read);
+
+        shell.Page = Page.Now;
+        read = _history.Reads.Count;
+        _clock.Advance(DashboardViewModel.RefreshEvery * 3);
+        _history.Reads.Count.ShouldBe(read);
+    }
+
+    /// <summary>Aero look design §4: the Insights page reads as it shows and every quarter of an hour while it does, at
+    /// the clock's time, and stops once another page shows.</summary>
+    [Fact]
+    public void The_insights_page_reads_only_while_it_shows()
+    {
+        var insights = new FakeInsights();
+        var model = new InsightsViewModel(insights, UiThreads.Inline, _clock, TimeZoneInfo.Utc);
+        var shell = ShellWithDashboard(model);
+
+        shell.Page = Page.Insights;
+
+        shell.Current.ShouldBe(shell.Insights);
+        shell.Insights.ShouldBeSameAs(model);
+        insights.Reads.ShouldBe([(Now, TimeZoneInfo.Utc)]);
+        model.Report.ShouldBe(FakeInsights.Empty);
+        _clock.Advance(InsightsViewModel.RefreshEvery);
+        insights.Reads.Count.ShouldBe(2);
+
+        shell.Page = Page.Dashboard;
+        _clock.Advance(InsightsViewModel.RefreshEvery * 3);
+        insights.Reads.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void Without_insights_their_page_shows_the_dashboard_or_now()
+    {
+        var withDashboard = ShellWithDashboard();
+        withDashboard.Page = Page.Insights;
+        withDashboard.Current.ShouldBe(withDashboard.Dashboard);
+        _history.Reads.ShouldNotBeEmpty("the dashboard shown reads as it would on its own page");
+
+        var bare = Shell();
+        bare.Page = Page.Insights;
+        bare.Current.ShouldBe(bare.Now);
+        bare.Page = Page.Parts;
+        bare.Current.ShouldBe(bare.Now);
     }
 
     [Fact]
@@ -90,7 +149,7 @@ public class ShellViewModelTests
         var shell = Shell();
         var raised = new List<string?>();
         shell.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
-        shell.SwitchLookTip.ShouldBe("Switch to the Classic look", "Midnight is the default");
+        shell.SwitchLookTip.ShouldBe("Switch to the Classic look", "Aero is the default, and Midnight's and Aero's buttons both offer Classic");
 
         shell.SwitchLook.Execute(null);
 
@@ -101,6 +160,18 @@ public class ShellViewModelTests
 
         shell.SwitchLook.Execute(null);
         _ui.Current.Look.ShouldBe(Look.Midnight);
+    }
+
+    [Fact]
+    public void Setup_ends_on_the_dashboard_under_aero()
+    {
+        _ui.Current = UiPreferences.Default with { Look = Look.Aero };
+        var aero = ShellWithDashboard();
+        aero.Page = Page.Insights;
+        aero.BeginSetup();
+        aero.Wizard.Finish.Execute(null);
+        aero.Page.ShouldBe(Page.Dashboard);
+        aero.Current.ShouldBe(aero.Dashboard);
     }
 
     [Fact]
