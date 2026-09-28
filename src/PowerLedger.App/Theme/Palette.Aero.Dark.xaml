@@ -245,4 +245,12 @@
     <sys:Double x:Key="A.T.Tiny">12</sys:Double>
     <sys:Double x:Key="A.T.Axis">11</sys:Double>
     <sys:Double x:Key="A.T.Modal">20</sys:Double>
+    <sys:Double x:Key="A.T.BigLine">42</sys:Double>
+
+    <!-- G1's additions for the style contract: the soft focus ring's radius, the toast's capsule, a disabled control's
+         opacity, and the brush a glass pane's shadow is cast from. -->
+    <CornerRadius x:Key="A.R.Focus">14</CornerRadius>
+    <CornerRadius x:Key="A.R.Toast">22</CornerRadius>
+    <sys:Double x:Key="A.Opacity.Disabled">0.5</sys:Double>
+    <SolidColorBrush x:Key="A.B.Shadow" Color="{StaticResource A.C.Shadow}" />
 </ResourceDictionary>
