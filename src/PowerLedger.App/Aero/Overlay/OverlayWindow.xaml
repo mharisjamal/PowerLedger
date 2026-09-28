@@ -1,0 +1,80 @@
+<Window x:Class="PowerLedger.App.Aero.OverlayWindow" x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+        xmlns:app="clr-namespace:PowerLedger.App"
+        xmlns:aero="clr-namespace:PowerLedger.App.Aero"
+        Title="PowerLedger watts overlay" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" SizeToContent="WidthAndHeight"
+        FontFamily="{DynamicResource A.F.Ui}" Foreground="{DynamicResource A.B.Text}" TextOptions.TextFormattingMode="Ideal"
+        Typography.NumeralAlignment="Tabular" UseLayoutRounding="True">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Aero's styles on the window, as on Aero's main window (Aero look design §3), never at Application level. -->
+                <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Aero/Styles.Aero.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- The room around the pill its shadow is drawn in; OverlayWindow.Margin in code. -->
+            <Thickness x:Key="Overlay.Room">18</Thickness>
+            <!-- The pill: the prototype's, a capsule 44 high. -->
+            <sys:Double x:Key="Overlay.Height">44</sys:Double>
+            <CornerRadius x:Key="Overlay.Radius">22</CornerRadius>
+            <!-- A pill's shadow, closer and softer than a pane's, to fit the small window. -->
+            <sys:Double x:Key="Overlay.ShadowFarBlur">16</sys:Double>
+            <sys:Double x:Key="Overlay.ShadowFarDepth">5</sys:Double>
+            <sys:Double x:Key="Overlay.ShadowFarOpacity">0.34</sys:Double>
+            <sys:Double x:Key="Overlay.ShadowNearBlur">5</sys:Double>
+            <sys:Double x:Key="Overlay.ShadowNearDepth">1.5</sys:Double>
+            <sys:Double x:Key="Overlay.ShadowNearOpacity">0.22</sys:Double>
+            <!-- The menu's section heads: quiet, and not a choice. -->
+            <Style x:Key="Overlay.MenuHead" TargetType="MenuItem">
+                <Setter Property="IsEnabled" Value="False" />
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="OverridesDefaultStyle" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="MenuItem">
+                            <TextBlock Text="{TemplateBinding Header}" FontSize="{DynamicResource A.T.Tiny}" Foreground="{DynamicResource A.B.Text3}" Margin="12,8,12,2" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid x:Name="Room" Margin="{StaticResource Overlay.Room}">
+        <Grid x:Name="Pill" RenderTransformOrigin="0.5,0.5" Height="{StaticResource Overlay.Height}">
+            <Grid.RenderTransform>
+                <ScaleTransform x:Name="PillScale" />
+            </Grid.RenderTransform>
+            <!-- The shadow, clipped to outside the pill in code, so the glass shows what is behind it rather than the
+                 shadow's own body. -->
+            <Grid x:Name="Shadow" Margin="-18" IsHitTestVisible="False">
+                <Border Margin="{StaticResource Overlay.Room}" CornerRadius="{StaticResource Overlay.Radius}" Background="{DynamicResource A.B.Shadow}" IsHitTestVisible="False">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="{StaticResource Overlay.ShadowFarBlur}" ShadowDepth="{StaticResource Overlay.ShadowFarDepth}"
+                                          Opacity="{StaticResource Overlay.ShadowFarOpacity}" Color="{DynamicResource A.C.Shadow}" Direction="270" RenderingBias="Performance" />
+                    </Border.Effect>
+                </Border>
+                <Border Margin="{StaticResource Overlay.Room}" CornerRadius="{StaticResource Overlay.Radius}" Background="{DynamicResource A.B.Shadow}" IsHitTestVisible="False">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="{StaticResource Overlay.ShadowNearBlur}" ShadowDepth="{StaticResource Overlay.ShadowNearDepth}"
+                                          Opacity="{StaticResource Overlay.ShadowNearOpacity}" Color="{DynamicResource A.C.Shadow}" Direction="270" RenderingBias="Performance" />
+                    </Border.Effect>
+                </Border>
+            </Grid>
+            <aero:GlassPanel x:Name="Glass" CornerRadius="{StaticResource Overlay.Radius}" Padding="16,0,18,0" SheenEnabled="True" HasShadow="False"
+                             AutomationProperties.Name="No reading">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- The live dot, still: a breathing ring would redraw the window all the time. -->
+                    <Ellipse Width="7" Height="7" Fill="{DynamicResource A.B.Accent}" VerticalAlignment="Center" Margin="0,0,11,0" />
+                    <aero:OverlayDigits x:Name="Number" DigitSize="21" VerticalAlignment="Center" />
+                    <TextBlock x:Name="Unit" Text="W" FontSize="{DynamicResource A.T.Body}" Foreground="{DynamicResource A.B.Text2}" Margin="5,0,0,0" VerticalAlignment="Center" />
+                    <TextBlock x:Name="NoReading" Text="No reading" FontSize="{DynamicResource A.T.Body}" Foreground="{DynamicResource A.B.Text2}" VerticalAlignment="Center"
+                               Visibility="Collapsed" />
+                    <aero:Sparkline x:Name="Spark" Width="46" Height="18" Margin="13,0,0,0" VerticalAlignment="Center" Stroke="{DynamicResource A.B.Accent}" />
+                </StackPanel>
+            </aero:GlassPanel>
+        </Grid>
+    </Grid>
+</Window>

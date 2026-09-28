@@ -37,6 +37,7 @@ public partial class App : Application
     private ShellViewModel? _shell;
     private DashboardViewModel? _dashboard;
     private TrayIcon? _tray;
+    private Aero.OverlayHost? _overlay;
     private LookSwitcher? _looks;
     private AddPcWindow? _addPcWindow;
     private ApprovePromptWindow? _approvePromptWindow;
@@ -151,6 +152,11 @@ public partial class App : Application
         _settings.Service.Saved += CountMachineChanged;
         _report.PropertyChanged += OnReportChanged;
         _tray = new TrayIcon(ShowWindow, ExitUi, autostart);
+        // Aero look design §5: the watts overlay, Aero's only, open while the look is Aero and it is on; the tray offers it in Aero.
+        var now = _now;
+        _overlay = new Aero.OverlayHost(
+            settings, () => new Aero.OverlayWindow(now, settings),
+            (offered, on) => _tray?.OfferOverlay(offered, on, () => settings.ToggleOverlay.Execute(null)));
         _link.HouseholdNoticeReceived += OnHouseholdNotice;
         _monthly = new MonthlyReports(
             history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,
@@ -556,6 +562,7 @@ public partial class App : Application
             _feedbackWindow?.Close();
             _whatsNewWindow?.Close();
             if (_looks is { IsOpen: true }) _looks.Current.CloseForSwitch();   // for good, shown or hidden
+            _overlay?.Dispose();
             _tray?.Dispose();
             if (_now is not null)
             {
