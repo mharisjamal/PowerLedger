@@ -13,7 +13,7 @@ namespace PowerLedger.App;
 /// </list>
 /// Nothing is said until there is a week of whole days (<see cref="BillForecast.DaysNeeded"/>).
 /// </summary>
-internal static class Habits
+internal static class HabitsFinder
 {
     public const int Weeks = 4;
 

@@ -36,7 +36,7 @@ internal sealed class Insights(IRangeHistory history, Func<double> co2KgPerKwh, 
 
         var forecast = BillForecasts.From(HourUse.WholeDays(hours, today), today, todayLeft, monthKwh, price, currency);
         var anomalies = UsageAnomalies.Find(hours, now, zone);
-        var habits = Habits.From(hours, today, price, currency);
+        var habits = HabitsFinder.From(hours, today, price, currency);
         var carbon = Carbon.Estimate(monthKwh, report.Totals.EnergyKwh + Before(Ranges.Midnight(from, zone), now, zone), kgPerKwh, region);
         return new InsightsReport(forecast, anomalies, habits, carbon);
     }

@@ -19,7 +19,7 @@ public class IdleHabitsTests
     [Fact]
     public void Idle_evenings_fill_their_cells_and_are_the_worst_window()
     {
-        var habits = Habits.From(Days(28, Evenings), Today, 0.20m, "GBP").ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(28, Evenings), Today, 0.20m, "GBP").ShouldNotBeNull();
 
         for (var day = 0; day < 7; day++)
         {
@@ -31,7 +31,7 @@ public class IdleHabitsTests
     [Fact]
     public void The_saving_keeps_the_first_ten_minutes_of_a_spell_awake()
     {
-        var habits = Habits.From(Days(28, Evenings), Today, 0.20m, "GBP").ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(28, Evenings), Today, 0.20m, "GBP").ShouldNotBeNull();
 
         // Each evening: 22:00's 100 Wh less its first 10 minutes (83.3 Wh), and all of 23:00's, which carries on the spell.
         var perDay = 0.1 * 50 / 60 + 0.1;
@@ -43,7 +43,7 @@ public class IdleHabitsTests
     [Fact]
     public void A_short_idle_spell_saves_nothing()
     {
-        var habits = Habits.From(Days(28, local => local.Hour == 12 ? (0.01, 540) : (0, 0)), Today, 1m, "USD").ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(28, local => local.Hour == 12 ? (0.01, 540) : (0, 0)), Today, 1m, "USD").ShouldNotBeNull();
 
         habits.SavingPerMonthKwh.ShouldBe(0);
         habits.SavingPerMonthCost.ShouldBe(0m);
@@ -52,7 +52,7 @@ public class IdleHabitsTests
     [Fact]
     public void The_worst_window_may_run_past_midnight()
     {
-        var habits = Habits.From(Days(28, local => local.Hour is 23 or 0 ? (0.1, 3600) : (0, 0)), Today, 1m, "USD").ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(28, local => local.Hour is 23 or 0 ? (0.1, 3600) : (0, 0)), Today, 1m, "USD").ShouldNotBeNull();
 
         habits.WorstWindowStart.ShouldBe(23);
     }
@@ -60,7 +60,7 @@ public class IdleHabitsTests
     [Fact]
     public void Weekend_habits_land_on_their_own_days()
     {
-        var habits = Habits.From(Days(28, local => local.DayOfWeek == DayOfWeek.Saturday && local.Hour == 10 ? (0.3, 3600) : (0, 0)), Today, 1m, "USD")
+        var habits = HabitsFinder.From(Days(28, local => local.DayOfWeek == DayOfWeek.Saturday && local.Hour == 10 ? (0.3, 3600) : (0, 0)), Today, 1m, "USD")
             .ShouldNotBeNull();
 
         habits.Heatmap[(int)DayOfWeek.Saturday, 10].ShouldBe(300, 1e-9);
@@ -72,7 +72,7 @@ public class IdleHabitsTests
     public void Only_the_last_four_weeks_count()
     {
         var cut = Today.AddDays(-28);
-        var habits = Habits.From(Days(56, local => DateOnly.FromDateTime(local) < cut ? (0.5, 3600) : (0, 0)), Today, 1m, "USD").ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(56, local => DateOnly.FromDateTime(local) < cut ? (0.5, 3600) : (0, 0)), Today, 1m, "USD").ShouldNotBeNull();
 
         habits.SavingPerMonthKwh.ShouldBe(0);
         habits.Heatmap.Cast<double>().Sum().ShouldBe(0);
@@ -81,14 +81,14 @@ public class IdleHabitsTests
     [Fact]
     public void Fewer_than_seven_whole_days_says_nothing_yet()
     {
-        Habits.From(Days(6, Evenings), Today, 1m, "USD").ShouldBeNull();
-        Habits.From(Days(7, Evenings), Today, 1m, "USD").ShouldNotBeNull();
+        HabitsFinder.From(Days(6, Evenings), Today, 1m, "USD").ShouldBeNull();
+        HabitsFinder.From(Days(7, Evenings), Today, 1m, "USD").ShouldNotBeNull();
     }
 
     [Fact]
     public void A_short_history_is_averaged_over_the_days_it_has()
     {
-        var habits = Habits.From(Days(10, Evenings), Today, 1m, "USD").ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(10, Evenings), Today, 1m, "USD").ShouldNotBeNull();
 
         habits.Heatmap[(int)DayOfWeek.Monday, 22].ShouldBe(100, 1e-9);
         habits.SavingPerMonthKwh.ShouldBe((0.1 * 50 / 60 + 0.1) * 365.25 / 12, 1e-9);
@@ -99,7 +99,7 @@ public class IdleHabitsTests
     [Fact]
     public void A_clock_change_day_keeps_all_its_hours()
     {
-        var habits = Habits.From(Days(28, local => local.Hour == 1 ? (0.1, 3600) : (0, 0), London, new DateOnly(2026, 10, 27)), new DateOnly(2026, 10, 27), 1m, "USD")
+        var habits = HabitsFinder.From(Days(28, local => local.Hour == 1 ? (0.1, 3600) : (0, 0), London, new DateOnly(2026, 10, 27)), new DateOnly(2026, 10, 27), 1m, "USD")
             .ShouldNotBeNull();
 
         // Four Sundays at 01:00: three of 100 Wh, and the one with two such hours, 200: 125 on average.
@@ -110,7 +110,7 @@ public class IdleHabitsTests
     [Fact]
     public void Without_a_tariff_the_cost_is_zero()
     {
-        var habits = Habits.From(Days(28, Evenings), Today, 0m, null).ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(28, Evenings), Today, 0m, null).ShouldNotBeNull();
 
         (habits.SavingPerMonthCost, habits.Currency).ShouldBe((0m, (string?)null));
         habits.SavingPerMonthKwh.ShouldBeGreaterThan(0);
