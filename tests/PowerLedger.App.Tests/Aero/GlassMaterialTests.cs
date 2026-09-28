@@ -15,7 +15,7 @@ namespace PowerLedger.App.Tests;
 /// for every style and switch go to %TEMP%\powerledger-renders\aero-glass-*.
 /// </summary>
 [Trait("Category", "UI")]
-[Collection("Aero motion")]   // AeroMotion's override is one for the process (agent D's AeroMotionScope)
+[Collection(AeroMotionScope.Name)]   // AeroMotion's override is one for the process (agent D's AeroMotionScope)
 public class GlassMaterialTests
 {
     public static TheoryData<string> Themes => new() { "Dark", "Light" };

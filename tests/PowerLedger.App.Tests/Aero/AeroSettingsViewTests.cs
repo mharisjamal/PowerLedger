@@ -14,6 +14,7 @@ namespace PowerLedger.App.Tests;
 /// <c>%TEMP%\powerledger-renders\aero-settings-*</c>. The palette and styles go on the window drawn (review 11).
 /// </summary>
 [Trait("Category", "UI")]
+[Collection(AeroMotionScope.Name)]   // its GlassMaterial sets AeroMotion's override from the settings, one for the process
 public class AeroSettingsViewTests
 {
     private static (Window Window, Aero.SettingsView View) Page(SettingsViewModel settings, Theme theme, double width)
@@ -101,7 +102,7 @@ public class AeroSettingsViewTests
                 MidnightHost.AllOf<GlassPanel>(view).Count().ShouldBeGreaterThanOrEqualTo(10, "each section a glass pane, and the preview's");
                 var styles = MidnightHost.AllOf<RadioButton>(view).Where(r => r.Content is "Clear" or "Tinted" or "Dark" or "Colour" && r.Style == view.FindResource("A.OptItem")).ToList();
                 styles.Single(r => r.IsChecked == true).Content.ShouldBe(styleName);
-                var wheel = MidnightHost.AllOf<TintWheel>(view).Single();
+                var wheel = MidnightHost.AllOf<ColourWheel>(view).Single();
                 wheel.IsVisible.ShouldBe(style == GlassStyle.Colour, "the presets and the wheel show for Colour only");
                 if (style == GlassStyle.Colour)
                 {
@@ -180,7 +181,7 @@ public class AeroSettingsViewTests
                     .Select(c => c.GetType().Name)
                     .ToList();
                 unnamed.ShouldBeEmpty();
-                string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetName(MidnightHost.AllOf<TintWheel>(view).Single())).ShouldBeFalse();
+                string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetName(MidnightHost.AllOf<ColourWheel>(view).Single())).ShouldBeFalse();
             }
             finally
             {

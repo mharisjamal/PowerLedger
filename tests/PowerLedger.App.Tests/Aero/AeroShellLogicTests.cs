@@ -32,10 +32,10 @@ public class AeroShellLogicTests
         UsageAnomaly At(int day, int hour, double times) => new(new DateTimeOffset(2026, 9, day, hour, 0, 0, TimeSpan.Zero), 0.3, 0.1, times);
         var anomalies = new[] { At(8, 2, 3), At(8, 9, 4), At(7, 22, 5), At(8, 11, 3.5), At(8, 13, 3.1), At(8, 6, 6) };
 
-        var alerts = Bell.Alerts(anomalies, Now, TimeZoneInfo.Utc);
+        var alerts = UsageAnomalies.Today(anomalies, Now, TimeZoneInfo.Utc);
 
         alerts.Select(a => a.Hour.Hour).ShouldBe([13, 11, 9], "today's only, the newest three");
-        Bell.Alerts([], Now, TimeZoneInfo.Utc).ShouldBeEmpty();
+        UsageAnomalies.Today([], Now, TimeZoneInfo.Utc).ShouldBeEmpty();
     }
 
     [Fact]

@@ -17,7 +17,7 @@ namespace PowerLedger.App.Tests;
 /// (%TEMP%\powerledger-renders\aero-controls-*).
 /// </summary>
 [Trait("Category", "UI")]
-[Collection("Aero motion")]   // AeroMotion's override is one for the process (agent D's AeroMotionScope)
+[Collection(AeroMotionScope.Name)]   // AeroMotion's override is one for the process (agent D's AeroMotionScope)
 public class AeroControlsTests
 {
     [Fact]

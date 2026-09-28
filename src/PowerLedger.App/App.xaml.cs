@@ -101,9 +101,10 @@ public partial class App : Application
         byte[] Pdf(ReportData data) => ReportDocument.Generate(data, version, DateTimeOffset.Now, culture);
 
         _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
-        _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture);
+        var saver = new FileSaver();   // one Save as dialog for the Report's exports and History's Save CSV
+        _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture, saver);
         _report = new ReportViewModel(
-            _link, history, householdHistory, sleep, new FileSaver(), Pdf, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
+            _link, history, householdHistory, sleep, saver, Pdf,threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
         var autostart = new StartWithWindows(Environment.ProcessPath!);
         _preferences = new AppPreferences(store, preferences, choice => _theme.Choose(choice), UseCo2, autostart, look => _looks?.Switch(look));
         _preferences.ApplyFirstRunDefaults();
@@ -139,7 +140,11 @@ public partial class App : Application
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
         _dashboard = new DashboardViewModel(_now, history, history, TimeProvider.System, zone, culture, threads, _preferences, new HardwareNames());
-        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard);
+        // Aero look design §4: Insights over the PC's own history, with Settings' CO₂ per kWh as it stands at each read.
+        var prefs = _preferences;
+        var insights = new InsightsViewModel(
+            new Insights(history, () => prefs.Current.Co2KgPerKwh, GridFactors.WindowsRegion()), threads, TimeProvider.System, zone, culture);
+        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard, insights);
         _shell.FeedbackRequested += OpenFeedbackWindow;
         // Review 6: a saved look that won't open at start opens Classic instead, which is then saved, through Settings as
         // any choice of look is, so the next start doesn't fail the same way; the switcher logs why.

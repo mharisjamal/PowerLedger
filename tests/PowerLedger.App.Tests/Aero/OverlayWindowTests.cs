@@ -16,6 +16,7 @@ namespace PowerLedger.App.Tests;
 /// the real displays is <see cref="OverlayPlacementTests"/>' and the on-screen check's.
 /// </summary>
 [Trait("Category", "UI")]
+[Collection(AeroMotionScope.Name)]   // the overlay's GlassMaterial sets AeroMotion's override, one for the process
 public class OverlayWindowTests
 {
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
@@ -52,13 +53,14 @@ public class OverlayWindowTests
             var window = Overlay(now, Settings(new FakeUiSettings()), theme, OverlaySettings.Default with { Enabled = true, Sparkline = sparkline });
             try
             {
-                var number = UiHarness.Find<OverlayDigits>(window)!;
+                var number = UiHarness.Find<RollingNumber>(window)!;
+                UiHarness.Find<PulseDot>(window)!.Breathes.ShouldBeFalse("the live dot is still: a breathing ring would redraw the overlay all the time");
                 var spark = UiHarness.Find<Aero.Sparkline>(window)!;
                 var none = UiHarness.Find<TextBlock>(window, t => t.Text == "No reading")!;
                 if (reading == "reading")
                 {
-                    number.Value.ShouldBe((int)Math.Round(now.Live.Watts));
-                    window.Reading.ShouldBe($"{number.Value} watts now");
+                    number.Text.ShouldBe(Math.Round(now.Live.Watts).ToString("0", CultureInfo.InvariantCulture));
+                    window.Reading.ShouldBe($"{number.Text} watts now");
                     none.Visibility.ShouldBe(Visibility.Collapsed);
                     spark.Samples!.Count.ShouldBeGreaterThan(30, "a minute of readings, of which the sparkline draws the last 30 s");
                 }
@@ -103,7 +105,7 @@ public class OverlayWindowTests
 
                 link.Push(Frames.At(MidnightFixtures.Now, totalW: 212.4));
 
-                UiHarness.Find<OverlayDigits>(window)!.Value.ShouldBe(212);
+                UiHarness.Find<RollingNumber>(window)!.Text.ShouldBe("212");
                 window.Reading.ShouldBe("212 watts now");
             }
             finally

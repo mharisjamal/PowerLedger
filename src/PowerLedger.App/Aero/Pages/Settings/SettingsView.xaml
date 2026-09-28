@@ -222,8 +222,8 @@
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                    <aero:TintWheel Width="160" Height="160" Margin="0,4,0,0" Colour="{Binding Tint, Delay=150}"
-                                                    AutomationProperties.Name="Tint colour wheel" />
+                                    <aero:ColourWheel Width="160" Height="160" Margin="0,4,0,0" Colour="{Binding Tint, Delay=150}"
+                                                     AutomationProperties.Name="Tint colour wheel" />
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel Style="{StaticResource Row}">

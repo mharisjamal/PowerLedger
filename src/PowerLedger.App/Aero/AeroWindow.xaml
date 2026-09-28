@@ -287,7 +287,7 @@
                     </aero:GlassPanel>
                     <!-- The watts overlay (design §5): on or off, through Settings, where the overlay listens. -->
                     <ToggleButton x:Name="OverlayButton" Grid.Column="2" Style="{StaticResource A.GlassToggle}" Height="46" Margin="0,0,10,0" VerticalAlignment="Center"
-                                  Click="OverlayClick" AutomationProperties.Name="Watts overlay" ToolTip="Show the watts over other windows">
+                                  Command="{Binding Settings.ToggleOverlay}" IsChecked="{Binding Settings.OverlaySection.Enabled, Mode=OneWay}" AutomationProperties.Name="Watts overlay" ToolTip="Show the watts over other windows">
                         <StackPanel Orientation="Horizontal">
                             <aero:Icon Data="{StaticResource A.I.Overlay}" Size="16" />
                             <TextBlock Text="Overlay" Margin="8,0,0,0" VerticalAlignment="Center" Style="{StaticResource WideText}" FontSize="{DynamicResource A.T.Control}" />

@@ -30,15 +30,6 @@ internal static class AeroLooks
 /// </summary>
 internal static class Bell
 {
-    public const int MostAlerts = 3;
-
-    /// <summary>Today's unusual hours on the local clock, newest first, <see cref="MostAlerts"/> at the most.</summary>
-    public static IReadOnlyList<UsageAnomaly> Alerts(IReadOnlyList<UsageAnomaly> anomalies, DateTimeOffset now, TimeZoneInfo zone)
-    {
-        var today = Ranges.LocalDay(now, zone);
-        return [.. anomalies.Where(a => Ranges.LocalDay(a.Hour, zone) == today).OrderByDescending(a => a.Hour).Take(MostAlerts)];
-    }
-
     /// <summary>"2:00 PM, 3.5 times the usual".</summary>
     public static string Line(UsageAnomaly alert, TimeZoneInfo zone, CultureInfo culture)
         => $"{TimeZoneInfo.ConvertTime(alert.Hour, zone).ToString(culture.DateTimeFormat.ShortTimePattern, culture)}, "

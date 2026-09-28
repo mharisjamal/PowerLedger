@@ -67,8 +67,8 @@
                              AutomationProperties.Name="No reading">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <!-- The live dot, still: a breathing ring would redraw the window all the time. -->
-                    <Ellipse Width="7" Height="7" Fill="{DynamicResource A.B.Accent}" VerticalAlignment="Center" Margin="0,0,11,0" />
-                    <aero:OverlayDigits x:Name="Number" DigitSize="21" VerticalAlignment="Center" />
+                    <aero:PulseDot Size="7" Breathes="False" VerticalAlignment="Center" Margin="0,0,11,0" />
+                    <aero:RollingNumber x:Name="Number" DigitSize="21" DigitWeight="SemiBold" VerticalAlignment="Center" />
                     <TextBlock x:Name="Unit" Text="W" FontSize="{DynamicResource A.T.Body}" Foreground="{DynamicResource A.B.Text2}" Margin="5,0,0,0" VerticalAlignment="Center" />
                     <TextBlock x:Name="NoReading" Text="No reading" FontSize="{DynamicResource A.T.Body}" Foreground="{DynamicResource A.B.Text2}" VerticalAlignment="Center"
                                Visibility="Collapsed" />

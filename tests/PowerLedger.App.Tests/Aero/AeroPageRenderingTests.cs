@@ -17,6 +17,7 @@ namespace PowerLedger.App.Tests;
 /// automation names a screen reader reads, and nothing cut off.
 /// </summary>
 [Trait("Category", "UI")]
+[Collection(AeroMotionScope.Name)]   // its reduced-motion render sets AeroMotion's override, one for the process
 public class AeroPageRenderingTests
 {
     [Fact]

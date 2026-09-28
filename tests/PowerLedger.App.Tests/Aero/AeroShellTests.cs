@@ -187,7 +187,7 @@ public class AeroShellTests
     public void The_bell_holds_the_approvals_and_todays_unusual_hours_with_its_dot_on()
     {
         using var saver = new FakeSaver();
-        var hour = new DateTimeOffset(DateTime.Now.Date.AddHours(DateTime.Now.Hour));
+        var hour = new DateTimeOffset(2026, 9, 8, 13, 0, 0, TimeSpan.Zero);   // an hour of today on the Insights' clock (MidnightFixtures.Now, UTC)
         var insights = new FakeInsights { Answer = FakeInsights.Empty with { Anomalies = [new UsageAnomaly(hour, 0.42, 0.12, 3.5)] } };
         var shell = AeroFixtures.Shell(saver, insights: insights, pendingApprovals: 2);
         OnWindow(shell, window =>
@@ -352,12 +352,15 @@ public class AeroShellTests
         OnWindow(shell, window =>
         {
             var button = UiHarness.Find<ToggleButton>(window, b => b.Name == "OverlayButton")!;
+            button.Command.ShouldBeSameAs(shell.Settings.ToggleOverlay, "the one toggle the tray uses too");
             button.IsChecked.ShouldBe(false);
             Press(button);
             shell.Settings.Overlay.Enabled.ShouldBeTrue();
             button.IsChecked.ShouldBe(true);
             Press(button);
             shell.Settings.Overlay.Enabled.ShouldBeFalse();
+            shell.Settings.OverlaySection.Enabled = true;   // Settings' Overlay section
+            button.IsChecked.ShouldBe(true);
         });
     }
 }

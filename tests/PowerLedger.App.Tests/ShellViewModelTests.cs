@@ -223,6 +223,25 @@ public class ShellViewModelTests
         _householdHistory.Reads.Count.ShouldBe(1);         // stopped once hidden, so no further read arrives late
     }
 
+    /// <summary>Aero look design §1: "Your PCs" and the Dashboard's split by PC read the household, so it reads while the
+    /// Dashboard shows as well as its own page.</summary>
+    [Fact]
+    public void The_household_reads_while_the_dashboard_shows_too()
+    {
+        var shell = ShellWithDashboard();
+
+        shell.Page = Page.Dashboard;
+
+        _householdHistory.Reads.Count.ShouldBe(1);
+        _clock.Advance(HouseholdViewModel.RefreshEvery);
+        _householdHistory.Reads.Count.ShouldBeGreaterThan(1);
+
+        shell.Page = Page.Breakdown;
+        var read = _householdHistory.Reads.Count;
+        _clock.Advance(HouseholdViewModel.RefreshEvery * 3);
+        _householdHistory.Reads.Count.ShouldBe(read);
+    }
+
     [Fact]
     public void Settings_reads_the_service_while_it_shows()
     {

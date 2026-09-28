@@ -159,7 +159,7 @@ internal sealed class ShellViewModel : ObservableObject
         else Breakdown.Hide();
         if (shown == Page.Report) Report.Show();
         else Report.Hide();
-        if (shown == Page.Household) Household.Show();
+        if (shown is Page.Household or Page.Dashboard) Household.Show();   // Aero's "Your PCs" and the split by PC stay fresh
         else Household.Hide();
         if (shown == Page.Settings) Settings.Show();
         else Settings.Hide();

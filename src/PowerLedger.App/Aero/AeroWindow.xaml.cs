@@ -64,7 +64,6 @@ internal partial class AeroWindow : Window, IShellWindow
         _minimum = new Extent(MinWidth, MinHeight);
         ShowIntro();
         ShowPcs();
-        ShowOverlay();
         ShowBell();
         // Nothing in the shell changes until the window shows: a switch whose new window fails to show puts the page back
         // as it was, which a window that had already mapped it here would have changed under it (as MidnightWindow).
@@ -335,7 +334,7 @@ internal partial class AeroWindow : Window, IShellWindow
 
     private void OnInsightsChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(InsightsViewModel.Report)) ShowBell();
+        if (e.PropertyName == nameof(InsightsViewModel.Alerts)) ShowBell();
     }
 
     /// <summary>"Your PCs" and the household button's line, redrawn only when what they say has changed.</summary>
@@ -348,23 +347,13 @@ internal partial class AeroWindow : Window, IShellWindow
 
     /// <summary>Today's alerts, three at the most, and the bell's dot while anything waits.</summary>
     internal IReadOnlyList<UsageAnomaly> Alerts
-        => Bell.Alerts(_shell.Insights?.Report?.Anomalies ?? [], DateTimeOffset.Now, TimeZoneInfo.Local);
+        => _shell.Insights?.Alerts ?? [];
 
     private void ShowBell()
     {
         var news = Bell.HasNews(_shell.Household.PendingApprovals, Alerts.Count);
         BellDot.Visibility = news ? Visibility.Visible : Visibility.Collapsed;
         AutomationProperties.SetHelpText(BellButton, news ? "Something is waiting" : "Nothing is waiting");
-    }
-
-    private void ShowOverlay() => OverlayButton.IsChecked = _shell.Settings.Overlay.Enabled;
-
-    /// <summary>The overlay on or off, saved through Settings, where the overlay listens (Plan S 0.4).</summary>
-    private void OverlayClick(object sender, RoutedEventArgs e)
-    {
-        var overlay = _shell.Settings.Overlay;
-        _shell.Settings.Overlay = overlay with { Enabled = !overlay.Enabled };
-        ShowOverlay();
     }
 
     private void PcClick(object sender, RoutedEventArgs e) => _shell.Page = Page.Household;
@@ -422,11 +411,10 @@ internal partial class AeroWindow : Window, IShellWindow
     }
 
     /// <summary>A look chosen here that didn't open: Settings has put why on its message line, out of sight, so it shows
-    /// here; the banner and the overlay button follow Settings.</summary>
+    /// here; the banner follows Settings.</summary>
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(SettingsViewModel.LookIntroduced)) ShowIntro();
-        if (e.PropertyName == nameof(SettingsViewModel.Overlay)) ShowOverlay();
         if (e.PropertyName != nameof(SettingsViewModel.Look) || !_switching) return;
         _switching = false;
         if (_shell.Settings.AppMessage is { } problem) ShowProblem(problem);

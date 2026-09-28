@@ -175,6 +175,7 @@ public class InsightsRenderingTests
         foreach (var text in AllOf<TextBlock>(view).Where(t => t.IsVisible && t.TextWrapping == TextWrapping.NoWrap && t.TextTrimming == TextTrimming.None))
         {
             var natural = new TextBlock { Text = text.Text, FontFamily = text.FontFamily, FontSize = text.FontSize, FontWeight = text.FontWeight };
+            System.Windows.Documents.Typography.SetNumeralAlignment(natural, System.Windows.Documents.Typography.GetNumeralAlignment(text));   // Geist's tabular figures are narrower than its proportional ones
             natural.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             text.ActualWidth.ShouldBeGreaterThanOrEqualTo(natural.DesiredSize.Width - 0.5, $"\"{text.Text}\" is cut off at {where}");
         }
