@@ -344,10 +344,10 @@ public class MidnightControlsTests
                     chart.Tip.ShouldBeNull();
 
                     chart.Hover(144);
-                    UiHarness.Pump(TimeSpan.FromMilliseconds(250));
                     chart.Hovered.ShouldBe(144);
                     chart.Tip.ShouldNotBeNull();
-                    chart.Tip.IsOpen.ShouldBeTrue();
+                    chart.Tip.IsOpen.ShouldBeTrue("opened by the hover itself, before a pump gives anything else the chance to shut it");
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(250));
                     chart.TipText.ShouldMatch(@"^12:00 Power: \d+ W$");
                     chart.Describe().ShouldMatch(@"At 12:00, \d+ W\.$");
                     var bubble = UiHarness.Find<Border>(chart.Tip, border => border.Name == "Bubble")!;

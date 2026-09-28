@@ -111,30 +111,28 @@ public class MidnightRenderingTests
                     button.Focus().ShouldBeTrue();
                     UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-energy-since-start-{theme}.png");
 
-                    ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(button)).Invoke();
-                    UiHarness.Pump(TimeSpan.FromMilliseconds(400));
                     var menu = button.ContextMenu!;
-                    menu.IsOpen.ShouldBeTrue();
-                    menu.PlacementTarget.ShouldBeSameAs(button);
                     var items = menu.Items.Cast<MenuItem>().ToList();
+                    ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.ButtonAutomationPeer(button)).Invoke();
+                    // Until it lands rather than for a fixed while: the longer the pump, the likelier another process takes
+                    // the foreground meanwhile, which shuts a menu as it should (UiHarness.HasFocus).
+                    UiHarness.PumpUntil(() => menu.IsOpen && items[0].IsKeyboardFocusWithin, TimeSpan.FromSeconds(10), "the menu, open on the period chosen");
+                    menu.PlacementTarget.ShouldBeSameAs(button);
                     items.Select(item => (string)item.Header).ShouldBe(["Since start", "Today", "This week", "This month"]);
                     items.Where(item => item.IsChecked).Select(item => (string)item.Header).ShouldBe(["Since start"]);
-                    items[0].IsKeyboardFocusWithin.ShouldBeTrue("the arrows start from the period chosen");
                     menu.Opacity.ShouldBe(1);
                     UiHarness.Render(menu, (int)menu.ActualWidth, (int)menu.ActualHeight, $"midnight-energy-menu-{theme}.png");
 
                     ((System.Windows.Automation.Provider.IInvokeProvider)new System.Windows.Automation.Peers.MenuItemAutomationPeer(items[2])).Invoke();
-                    UiHarness.Pump(TimeSpan.FromMilliseconds(400));
-                    menu.IsOpen.ShouldBeFalse();
-                    ui.Current.EnergyPeriod.ShouldBe(EnergyPeriod.ThisWeek);
+                    UiHarness.PumpUntil(() => !menu.IsOpen && ui.Current.EnergyPeriod == EnergyPeriod.ThisWeek, TimeSpan.FromSeconds(10), "the menu to shut on This week");
                     card = CardNamed(view, "Energy used");
                     UiHarness.Find<Button>(card, b => b.Name == "PeriodButton").ShouldBeSameAs(button, "the card changes where it stands, its button kept");
-                    button.IsKeyboardFocused.ShouldBeTrue("the focus comes back to the button");
+                    UiHarness.HasFocus(button).ShouldBeTrue("the focus comes back to the button");
                     AutomationProperties.GetName(button).ShouldBe("Period, This week");
                     dashboard.Range = RangePill.Week;   // a new pass redraws every card, as each live reading does
                     UiHarness.Pump(TimeSpan.FromMilliseconds(100));
                     UiHarness.Find<Button>(CardNamed(view, "Energy used"), b => b.Name == "PeriodButton").ShouldBeSameAs(button, "a redraw keeps the button");
-                    button.IsKeyboardFocused.ShouldBeTrue("and its focus");
+                    UiHarness.HasFocus(button).ShouldBeTrue("and its focus");
                     dashboard.Range = RangePill.Day;
                     UiHarness.Pump(TimeSpan.FromMilliseconds(100));
                     UiTree.Descendants<HatchBar>(card).Single().IsVisible.ShouldBeTrue("a week has a bar");
@@ -212,7 +210,7 @@ public class MidnightRenderingTests
                     var updateNow = UiHarness.Find<Button>(cover, button => (string)button.Content == "Update now").ShouldNotBeNull();
                     ((UIElement)window.FindName("Pages")).IsEnabled.ShouldBeFalse();
                     ((UIElement)window.FindName("Sidebar")).IsEnabled.ShouldBeFalse();
-                    updateNow.IsKeyboardFocused.ShouldBeTrue();
+                    UiHarness.HasFocus(updateNow).ShouldBeTrue();
                     UiHarness.Render(window, (int)window.ActualWidth, (int)window.ActualHeight, $"midnight-update-required-{theme}.png");
                 }
                 finally
@@ -356,9 +354,9 @@ public class MidnightRenderingTests
                 chart.Model.Buckets.Count.ShouldBeGreaterThan(100, "today's readings are on the chart");
                 chart.Culture.Name.ShouldBe("en-US", "the page's culture, the ViewModel's");
                 chart.Hover(chart.Model.Capacity / 2);   // the middle of the day's width: noon
-                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
                 chart.Tip.ShouldNotBeNull();
-                chart.Tip.IsOpen.ShouldBeTrue();
+                chart.Tip.IsOpen.ShouldBeTrue("opened by the hover itself, before a pump gives anything else the chance to shut it");
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
                 chart.TipText.ShouldMatch(@"^12:00 Power: \d+ W$", "the time as the axis writes it, over the figure named");
                 UiHarness.Find<Border>(chart.Tip, border => border.Name == "Bubble").ShouldNotBeNull("the tooltip is a solid bubble");
                 WithTip(window, chart, "midnight-dashboard-hover-Dark.png");

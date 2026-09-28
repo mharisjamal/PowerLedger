@@ -810,7 +810,7 @@ public class RenderingTests
                         if (required)
                         {
                             Find<TextBlock>(cover, text => text.Text == "PowerLedger needs an update").ShouldNotBeNull();
-                            Find<Button>(cover, button => (string)button.Content == "Update now").ShouldNotBeNull().IsKeyboardFocused.ShouldBeTrue();
+                            UiHarness.HasFocus(Find<Button>(cover, button => (string)button.Content == "Update now").ShouldNotBeNull()).ShouldBeTrue();
                         }
                         else
                         {

@@ -99,7 +99,7 @@ public class AeroShellTests
             shell.Page = Page.Dashboard;
             UiHarness.Pump(TimeSpan.FromMilliseconds(300));
             window.PageHost.Showing.ShouldBeOfType<AeroDashboard>();
-            window.PageHost.Children.Count.ShouldBe(1, "the pages left have gone once faded");
+            UiHarness.PumpUntil(() => window.PageHost.Children.Count == 1, TimeSpan.FromSeconds(10), "the pages left to go once faded");
         });
     }
 
@@ -279,6 +279,8 @@ public class AeroShellTests
             UiHarness.Pump(TimeSpan.FromMilliseconds(300));
             shell.Page.ShouldBe(Page.Dashboard, "the search is of the Dashboard's history");
             shell.Dashboard!.HistoryShown.Select(r => r.Period).ShouldBe(["Yesterday"]);
+            UiHarness.HasFocus(search).ShouldBeTrue("the search keeps the focus as the page changes");
+            search.Focus();   // back from wherever another process's foreground took it; Esc clears only a focused search
             Key(window, System.Windows.Input.Key.Escape);
             search.Text.ShouldBeEmpty();
             shell.Dashboard.HistoryShown.Count.ShouldBe(7);
@@ -318,14 +320,13 @@ public class AeroShellTests
         {
             var view = (AeroDashboard)window.PageHost.Showing!;
             Press(UiHarness.Find<Button>(view, b => b.Name == "FocusDaily")!);
-            UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+            // The fades land with the frames, which come late under load: seen still at full opacity 311 ms into a 200 ms fade.
+            UiHarness.PumpUntil(() => view.Panes.Where(p => p.Name != "PDaily").All(p => p.Opacity < 0.5), TimeSpan.FromSeconds(10), "the others to dim");
             view.Focused!.Name.ShouldBe("PDaily");
-            view.Panes.Where(p => p.Name != "PDaily").ShouldAllBe(p => p.Opacity < 0.5, "the others dim");
             Key(window, System.Windows.Input.Key.Escape);
             view.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window)!, 0, System.Windows.Input.Key.Escape) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
-            UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+            UiHarness.PumpUntil(() => view.Panes.All(p => p.Opacity > 0.95), TimeSpan.FromSeconds(10), "every pane back in full");
             view.Focused.ShouldBeNull();
-            view.Panes.ShouldAllBe(p => p.Opacity > 0.95, "all back in full");
         });
     }
 

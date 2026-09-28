@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -19,29 +20,53 @@ internal static class UiHarness
     private static ResourceDictionary? _palette;
     private static bool _working;
     private static Exception? _stray;
+    private static readonly SemaphoreSlim Turn = new(1, 1);
 
-    /// <summary>Runs <paramref name="work"/> on the application's thread, and throws here what it threw there.</summary>
+    /// <summary>
+    /// Runs <paramref name="work"/> on the application's thread, and throws here what it threw there. One test's work at
+    /// a time: a test waits its turn here, not in the dispatcher's queue, where another test's pump would run it in the
+    /// middle of that test (its windows took the keyboard focus, shut tooltips and menus and swapped the palette under
+    /// the other's renders). Work already on the application's thread runs at once. A test waits on tasks, for its turn
+    /// and for its work, as the thread pool adds a thread for a pool thread blocked on a task: blocked on
+    /// Dispatcher.Invoke, the tests waiting for the one UI thread held the pool's threads, and the rest of the process
+    /// (a pipe's accept, a sign-in's continuation, WaitFor's own timer) queued behind them for seconds.
+    /// </summary>
     public static void OnUi(Action work)
     {
-        ExceptionDispatchInfo? failure = null;
-        Ui.Value.Invoke(() =>
+        if (Ui.Value.CheckAccess())
         {
-            _working = true;
-            try
-            {
-                if (_stray is { } stray) ExceptionDispatchInfo.Capture(stray).Throw();
-                work();
-            }
-            catch (Exception error)
-            {
-                failure = ExceptionDispatchInfo.Capture(error);
-            }
-            finally
-            {
-                _working = false;
-                _stray = null;
-            }
-        });
+            Run(work);
+            return;
+        }
+        Turn.WaitAsync().Wait();
+        try
+        {
+            Ui.Value.InvokeAsync(() => Run(work), DispatcherPriority.Send).Task.Wait();
+        }
+        finally
+        {
+            Turn.Release();
+        }
+    }
+
+    private static void Run(Action work)
+    {
+        ExceptionDispatchInfo? failure = null;
+        _working = true;
+        try
+        {
+            if (_stray is { } stray) ExceptionDispatchInfo.Capture(stray).Throw();
+            work();
+        }
+        catch (Exception error)
+        {
+            failure = ExceptionDispatchInfo.Capture(error);
+        }
+        finally
+        {
+            _working = false;
+            _stray = null;
+        }
         failure?.Throw();
     }
 
@@ -98,6 +123,31 @@ internal static class UiHarness
         timer.Start();
         Dispatcher.PushFrame(frame);
     }
+
+    /// <summary>Lets the dispatcher run, timers and frames included, until <paramref name="condition"/> holds, and fails
+    /// naming <paramref name="what"/> should it not within <paramref name="within"/>. For what lands with the frames, such
+    /// as a fade's end or a popup's opening: under load a frame can come later than a fixed pump lasts.</summary>
+    public static void PumpUntil(Func<bool> condition, TimeSpan within, string what)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (watch.Elapsed > within) throw new TimeoutException($"Waited {within.TotalSeconds:0.#} s for {what}.");
+            Pump(TimeSpan.FromMilliseconds(15));
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetFocus();
+
+    /// <summary>Whether <paramref name="element"/> has the keyboard focus, or had it when another process took the
+    /// foreground: Windows then leaves this thread no Win32 focus, WPF drops the keyboard focus, and the element stays its
+    /// window's focused element, to have the focus back when the window is next active. A second test run, or the person
+    /// at the PC, can take the foreground at any moment, so IsKeyboardFocused alone says as much about the desktop as
+    /// about the product.</summary>
+    public static bool HasFocus(UIElement element)
+        => element.IsKeyboardFocused
+           || GetFocus() == IntPtr.Zero && FocusManager.GetFocusedElement(FocusManager.GetFocusScope(element)) == element;
 
     private static void UsePalette(ResourceDictionary palette)
     {
