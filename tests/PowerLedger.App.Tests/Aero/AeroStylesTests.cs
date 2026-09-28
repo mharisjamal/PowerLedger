@@ -148,6 +148,10 @@ public class AeroStylesTests
             Dressed(new GlassPanel(), "A.Toast", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(22));
             Dressed(new GlassPanel(), "A.Banner", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(20));
             Dressed(new Border(), "A.Well", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(20));
+            var pane = Dressed(new GlassPanel(), null, Theme.Dark).Element;
+            pane.HorizontalContentAlignment.ShouldBe(HorizontalAlignment.Stretch, "a pane's content fills it");
+            pane.VerticalContentAlignment.ShouldBe(VerticalAlignment.Stretch);
+            Dressed(new GlassPanel(), "A.Toast", Theme.Dark).Element.VerticalContentAlignment.ShouldBe(VerticalAlignment.Center, "a toast's words sit in its middle");
         });
 
     /// <summary>Tokens, never raw values (Plan S ground rules): no colour is written into the styles, every token they
