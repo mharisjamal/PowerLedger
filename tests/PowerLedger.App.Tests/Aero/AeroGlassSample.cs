@@ -62,6 +62,7 @@ internal static class AeroGlassSample
         main.Children.Add(table);
         root.Children.Add(main);
         var layer = new Grid();
+        layer.Children.Add(new Border { Name = "Scene", Background = Scene(theme), IsHitTestVisible = false });
         layer.Children.Add(root);
         var modal = new GlassPanel { Style = Keyed(window, "A.Modal"), Width = 330, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 44, 44) };
         var body = new StackPanel();
@@ -79,6 +80,9 @@ internal static class AeroGlassSample
         window.Content = layer;
         return window;
     }
+
+    /// <summary>The sample's scene layer, behind everything: where a backdrop puts the wash, the wallpaper or the ground.</summary>
+    public static Border SceneOf(Window window) => (Border)((Grid)window.Content).Children[0];
 
     private static GlassPanel Sidebar(Window window)
     {

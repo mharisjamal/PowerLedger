@@ -113,6 +113,38 @@ public class AeroMotionTests
                 .ShouldBeOfType<System.Windows.Automation.Peers.ToggleButtonAutomationPeer>();
         });
 
+    /// <summary>Agent S's report: a checked switch whose value arrives after its template (a binding, the usual order)
+    /// appears already on, drawn with the knob in place and no animation; only a toggle once it is drawn springs.</summary>
+    [Fact]
+    public void A_switch_appears_in_place_and_springs_only_when_toggled()
+        => UiHarness.OnUi(() =>
+        {
+            using var _ = AeroMotion.Force(false);
+            var glassSwitch = new GlassSwitch();
+            var window = AeroHost.Dressed(new Window { Width = 120, Height = 80, Left = -20000, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None, Content = glassSwitch }, Theme.Dark);
+            try
+            {
+                glassSwitch.ApplyTemplate();
+                glassSwitch.IsChecked = true;
+                glassSwitch.KnobOffset.ShouldBe(GlassSwitch.Travel, "in place at once");
+                window.Show();
+                UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                glassSwitch.KnobOffset.ShouldBe(GlassSwitch.Travel);
+                UiHarness.Render(window, 120, 80, "aero-switch-checked-first-show.png");
+                glassSwitch.Shown.ShouldBeTrue();
+
+                glassSwitch.IsChecked = false;
+                var knob = (TranslateTransform)((FrameworkElement)glassSwitch.Template.FindName("PART_Knob", glassSwitch)).RenderTransform;
+                knob.HasAnimatedProperties.ShouldBeTrue("a toggle once drawn springs the knob across");
+                UiHarness.Pump(TimeSpan.FromMilliseconds(AeroMotion.Switch + 150));
+                glassSwitch.KnobOffset.ShouldBe(0, 0.001);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
     [Fact]
     public void Press_compresses_a_button_and_springs_it_back()
         => UiHarness.OnUi(() =>

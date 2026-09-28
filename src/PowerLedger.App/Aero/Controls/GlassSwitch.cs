@@ -17,6 +17,15 @@ public sealed class GlassSwitch : ToggleButton
 
     private FrameworkElement? _on;
     private TranslateTransform? _knob;
+    private bool _shown;
+
+    public GlassSwitch()
+    {
+        // A value that arrives before the switch is first drawn (a binding, the usual order) puts the knob in place; only a
+        // toggle after that moves it.
+        Loaded += (_, _) => Dispatcher.InvokeAsync(() => _shown = IsLoaded, System.Windows.Threading.DispatcherPriority.Input);
+        Unloaded += (_, _) => _shown = false;
+    }
 
     public override void OnApplyTemplate()
     {
@@ -34,16 +43,19 @@ public sealed class GlassSwitch : ToggleButton
     /// <summary>Where the knob sits, for a test: 0 off, <see cref="Travel"/> on.</summary>
     internal double KnobOffset => _knob?.X ?? 0;
 
+    /// <summary>Whether a change now springs the knob across: once the switch has been drawn.</summary>
+    internal bool Shown => _shown;
+
     protected override void OnChecked(RoutedEventArgs e)
     {
         base.OnChecked(e);
-        Sync(true);
+        Sync(_shown);
     }
 
     protected override void OnUnchecked(RoutedEventArgs e)
     {
         base.OnUnchecked(e);
-        Sync(true);
+        Sync(_shown);
     }
 
     protected override AutomationPeer OnCreateAutomationPeer() => new ToggleButtonAutomationPeer(this);
