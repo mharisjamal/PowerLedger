@@ -213,8 +213,8 @@
                         </Border>
                         <DockPanel Margin="8,0,4,0">
                             <TextBlock x:Name="VersionLine" DockPanel.Dock="Right" Style="{StaticResource WideText}" Foreground="{DynamicResource A.B.Text3}" FontSize="{DynamicResource A.T.Small}"
-                                       VerticalAlignment="Center" Text="{Binding Updates.ShortName}" ToolTip="{Binding Updates.RunningName}"
-                                       AutomationProperties.Name="{Binding Updates.RunningName}" />
+                                       VerticalAlignment="Center" Text="{Binding ShortName}" ToolTip="{Binding RunningName}"
+                                       AutomationProperties.Name="{Binding RunningName}" />
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" ToolTip="{Binding Now.Status.State}">
                                 <Ellipse x:Name="StateDot" Width="8" Height="8" VerticalAlignment="Center">
                                     <Ellipse.Style>

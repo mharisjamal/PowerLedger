@@ -26,8 +26,8 @@ public class AeroShellTests
     private static void OnWindow(ShellViewModel shell, Action<AeroWindow> test, double width = 1440, double height = 900, Theme theme = Theme.Dark)
         => UiHarness.OnUi(() =>
         {
-            using var reduced = AeroMotion.Force(true);
             var window = AeroHost.Window(shell, theme);
+            using var reduced = AeroMotion.Force(true);   // after the window: its glass sets the override from Settings
             window.Width = width;
             window.Height = height;
             window.Show();
@@ -218,6 +218,10 @@ public class AeroShellTests
             {
                 window.OpenModal(UiHarness.Find<Button>(window, b => b.Name == "ServiceButton"), new TextBlock { Text = "A dialog" });
                 window.Modal.ShouldNotBeNull();
+                UiHarness.Pump(TimeSpan.FromMilliseconds(200));
+                var frost = UiHarness.Find<System.Windows.Shapes.Rectangle>(window.Modal!, r => r.Fill is System.Windows.Media.VisualBrush { Visual: Grid { Name: "Stage" } });
+                frost.ShouldNotBeNull("the dialog is frosted with what is under it");
+                ((System.Windows.Media.VisualBrush)frost.Fill).Viewbox.Width.ShouldBeGreaterThan(window.Modal!.ActualWidth);
                 UiHarness.Find<Border>(window, b => b.Name == "Scrim")!.IsVisible.ShouldBeTrue();
                 Key(window, System.Windows.Input.Key.Escape);
                 window.Modal.ShouldBeNull("Esc closes it");

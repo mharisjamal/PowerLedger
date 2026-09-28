@@ -60,7 +60,7 @@ internal static class Bell
 }
 
 /// <summary>One of the sidebar's "Your PCs": its initials, its name, and its figure (this PC's watts now, another's energy
-/// this month), and its share of the household's month, for This month's split.</summary>
+/// this month), and its share of the household's month and that energy ("34.2 kWh"), for This month's split.</summary>
 internal sealed record PcRow(string Initials, string Name, string Figure, bool IsThisPc, double Share, string Energy);
 
 /// <summary>
@@ -76,11 +76,11 @@ internal static class YourPcs
         var current = members.Where(m => !m.IsLeft).ToList();
         if (current.FirstOrDefault(m => m.IsThisPc) is not { } me)
             return [new PcRow(Initials.Letters(Environment.MachineName), "This PC", live, true, 1, Format.Missing), .. Others(current)];
-        return [new PcRow(Initials.Letters(me.Name), "This PC", live, true, me.Share, me.Energy), .. Others(current)];
+        return [new PcRow(Initials.Letters(me.Name), "This PC", live, true, me.Share, me.Energy + " kWh"), .. Others(current)];
     }
 
     private static IEnumerable<PcRow> Others(IEnumerable<HouseholdMemberDisplay> members)
-        => members.Where(m => !m.IsThisPc).Select(m => new PcRow(Initials.Letters(m.Name), m.Name, m.Energy, false, m.Share, m.Energy));
+        => members.Where(m => !m.IsThisPc).Select(m => new PcRow(Initials.Letters(m.Name), m.Name, m.Energy + " kWh", false, m.Share, m.Energy + " kWh"));
 
     /// <summary>The household button's second line.</summary>
     public static string Summary(int pcs) => pcs > 1 ? $"{pcs.ToString(CultureInfo.CurrentCulture)} PCs in this household" : "This PC only";

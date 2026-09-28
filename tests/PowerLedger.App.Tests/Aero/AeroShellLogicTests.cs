@@ -65,9 +65,9 @@ public class AeroShellLogicTests
     {
         HouseholdMemberDisplay[] members =
         [
-            new("bbbb", "Laptop-2", "Laptop", false, "12.6 kWh", 0.27, "last seen 3 days ago", false),
-            new("aaaa", "Desktop-1", "Desktop", true, "34.2 kWh", 0.73, "synced", false),
-            new("cccc", "Old PC", "Desktop", false, "0 kWh", 0, "left", true),
+            new("bbbb", "Laptop-2", "Laptop", false, "12.6", 0.27, "last seen 3 days ago", false),
+            new("aaaa", "Desktop-1", "Desktop", true, "34.2", 0.73, "synced", false),
+            new("cccc", "Old PC", "Desktop", false, "0", 0, "left", true),
         ];
 
         var rows = YourPcs.Rows(members, 34.4, English);

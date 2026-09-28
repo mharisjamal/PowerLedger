@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using PowerLedger.App.Aero;
 
@@ -198,8 +199,9 @@ internal partial class AeroWindow
 
     /// <summary>
     /// Opens a dialog out of <paramref name="trigger"/> (design §1: "modals that open from their trigger"): it grows on
-    /// the spring from the trigger's middle to the window's, over a scrim that fades in; under reduced motion it only
-    /// fades. The keyboard stays in it until it closes.
+    /// the spring from the trigger's middle to the window's, over a scrim that fades in and takes the pointer; under
+    /// reduced motion it only fades. The keyboard cycles in it until it closes. What it covers keeps its colours, so the
+    /// frost shows the page as it is rather than greyed out.
     /// </summary>
     internal void OpenModal(FrameworkElement? trigger, FrameworkElement body)
     {
@@ -224,9 +226,9 @@ internal partial class AeroWindow
             AeroMotion.Move(scale, ScaleTransform.ScaleYProperty, 1, AeroMotion.Modal, AeroMotion.Spring, from: .4);
         }
         AeroMotion.Fade(modal, OpacityProperty, 1, AeroMotion.Modal, AeroMotion.Glide, from: 0);
+        Frost(modal);
         _modal = modal;
         _modalFrom = trigger;
-        foreach (UIElement covered in new UIElement[] { Stage, Caption }) covered.IsEnabled = false;
         modal.Dispatcher.BeginInvoke(() => modal.MoveFocus(new TraversalRequest(FocusNavigationDirection.First)), DispatcherPriority.Input);
     }
 
@@ -236,7 +238,6 @@ internal partial class AeroWindow
         ModalHost.Children.Remove(_modal);
         _modal = null;
         Scrim.Visibility = Visibility.Collapsed;
-        foreach (UIElement covered in new UIElement[] { Stage, Caption }) covered.IsEnabled = true;
         if (restoreFocus) _modalFrom?.Focus();
         _modalFrom = null;
     }
@@ -270,6 +271,7 @@ internal partial class AeroWindow
         AeroMotion.Move(shift, TranslateTransform.YProperty, 0, AeroMotion.Toast, AeroMotion.Spring, from: 16);
         AeroMotion.Move(scale, ScaleTransform.ScaleXProperty, 1, AeroMotion.Toast, AeroMotion.Spring, from: .9);
         AeroMotion.Move(scale, ScaleTransform.ScaleYProperty, 1, AeroMotion.Toast, AeroMotion.Spring, from: .9);
+        Frost(toast);
         UIElementAutomationPeer.CreatePeerForElement(toast)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
         _toast = toast;
         _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AeroMotion.ToastHold) };
@@ -283,5 +285,48 @@ internal partial class AeroWindow
             });
         };
         _toastTimer.Start();
+    }
+
+    // ---------------------------------------------------------------- frost for what floats
+
+    /// <summary>
+    /// Real frost on a dialog or a toast (the prototype's AttachFrost): the stage under it, blurred, in its frost layer,
+    /// so the panes behind read as glass seen through glass rather than as text through a tint. BlurEffect is kept to
+    /// these small surfaces (CLAUDE.md), and the view of the stage is lined up when the pane is laid out or the window
+    /// resized, never per frame; the spring it opens on moves it a little off its rest place for a moment, which the
+    /// blur hides.
+    /// </summary>
+    private void Frost(GlassPanel pane)
+    {
+        pane.ApplyTemplate();
+        if (pane.Template?.FindName("PART_Frost", pane) is not Border host) return;
+        const double bleed = 40;
+        // The window's ground, then its room (the backdrop), then the stage: the stage alone is see-through between its panes.
+        var room = new VisualBrush(Room) { ViewboxUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
+        var brush = new VisualBrush(Stage) { ViewboxUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
+        var layers = new Grid { Margin = new Thickness(-bleed), IsHitTestVisible = false };
+        layers.SetBinding(Panel.BackgroundProperty, new System.Windows.Data.Binding(nameof(Background)) { Source = this });
+        layers.Children.Add(new System.Windows.Shapes.Rectangle { Fill = room });
+        layers.Children.Add(new System.Windows.Shapes.Rectangle { Fill = brush });
+        layers.Effect = new BlurEffect { Radius = 24, KernelType = KernelType.Gaussian, RenderingBias = RenderingBias.Performance };
+        host.Child = layers;
+        void Align()
+        {
+            if (!pane.IsLoaded || pane.ActualWidth <= 0) return;
+            var r = pane.CornerRadius.TopLeft;
+            host.Clip = new RectangleGeometry(new Rect(host.RenderSize), r, r);
+            // Where the pane sits over the stage at rest: its layout place, without the spring's transform.
+            var at = pane.TranslatePoint(new Point(0, 0), Layer);
+            if (pane.RenderTransform is TransformGroup { Value: var m } && !m.IsIdentity) at = new Point(at.X - m.OffsetX, at.Y - m.OffsetY);
+            var stageAt = Stage.TranslatePoint(new Point(0, 0), Layer);
+            brush.Viewbox = new Rect(at.X - stageAt.X - bleed, at.Y - stageAt.Y - bleed, pane.ActualWidth + 2 * bleed, pane.ActualHeight + 2 * bleed);
+            var roomAt = Room.TranslatePoint(new Point(0, 0), Layer);
+            room.Viewbox = new Rect(at.X - roomAt.X - bleed, at.Y - roomAt.Y - bleed, pane.ActualWidth + 2 * bleed, pane.ActualHeight + 2 * bleed);
+        }
+        SizeChangedEventHandler resized = (_, _) => Align();
+        pane.SizeChanged += resized;
+        pane.Loaded += (_, _) => Align();
+        SizeChanged += resized;
+        pane.Unloaded += (_, _) => SizeChanged -= resized;   // a toast or dialog gone lets go of the window
     }
 }

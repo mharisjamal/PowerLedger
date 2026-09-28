@@ -360,7 +360,11 @@ public partial class DashboardView : UserControl
         AeroMotion.Move(Daily, DailyChart.RevealProperty, 1, AeroMotion.DailyWipe, AeroMotion.Glide, from: 0);
         Pie.PlayRise();
         AeroMotion.Move(MonthFill, WidthProperty, MonthBar.ActualWidth * _monthFill, AeroMotion.BarGrow, AeroMotion.Glide, from: 0,
-            done: () => MonthFill.BeginAnimation(WidthProperty, null));
+            done: () =>
+            {
+                MonthFill.BeginAnimation(WidthProperty, null);   // back to a plain width, which a resize then keeps in step
+                MonthFill.Width = MonthBar.ActualWidth * _monthFill;
+            });
     }
 
     // ---------------------------------------------------------------- the camera

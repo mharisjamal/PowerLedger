@@ -11,6 +11,7 @@ namespace PowerLedger.App.Tests;
 /// closes it.
 /// </summary>
 [Trait("Category", "UI")]
+[Collection(AeroMotionScope.Name)]   // its window's glass sets the reduce-motion override, one for the whole process
 public class AeroWindowTests
 {
     [Fact]

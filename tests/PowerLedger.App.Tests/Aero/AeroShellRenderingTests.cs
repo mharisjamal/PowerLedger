@@ -20,8 +20,8 @@ public class AeroShellRenderingTests
         Directory.CreateDirectory(UiHarness.Folder);
         UiHarness.OnUi(() =>
         {
-            using var motion = AeroMotion.Force(reduced ? true : false);
             var window = AeroHost.Window(shell(), theme);
+            using var motion = AeroMotion.Force(reduced);   // after the window: its glass sets the override from Settings
             window.Width = width;
             window.Height = height;
             window.Show();
@@ -61,7 +61,8 @@ public class AeroShellRenderingTests
         }
     }
 
-    /// <summary>The Dashboard's figures are whole: no text in it trimmed at 1440 px, and its panes are glass.</summary>
+    /// <summary>The Dashboard's figures are whole: no text in it trimmed at 1440 px but a part's model, which is cut with
+    /// an ellipsis and says itself whole in its tooltip; and its panes are glass.</summary>
     [Fact]
     public void The_dashboards_text_is_never_cut_short_and_its_panes_are_glass()
     {
@@ -71,10 +72,10 @@ public class AeroShellRenderingTests
             var view = (Aero.DashboardView)window.PageHost.Showing!;
             view.Panes.Length.ShouldBe(5);
             view.Panes.ShouldAllBe(p => p.Template != null && p.ActualWidth > 0);
-            foreach (var text in MidnightHost.AllOf<TextBlock>(view).Where(t => t.IsVisible && t.ActualWidth > 0 && !string.IsNullOrEmpty(t.Text)))
+            foreach (var text in MidnightHost.AllOf<TextBlock>(view).Where(t => t.IsVisible && t.ActualWidth > 0 && !string.IsNullOrEmpty(t.Text) && !Equals(t.ToolTip, t.Text)))
             {
                 text.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                text.DesiredSize.Width.ShouldBeLessThanOrEqualTo(text.ActualWidth + 1, $"\"{text.Text}\" is cut short");
+                (text.DesiredSize.Width - text.Margin.Left - text.Margin.Right).ShouldBeLessThanOrEqualTo(text.ActualWidth + 1, $"\"{text.Text}\" is cut short");
             }
         });
     }
@@ -95,6 +96,8 @@ public class AeroShellRenderingTests
             UiHarness.Find<LiveChart>(view)!.Reveal.ShouldBe(1, 0.01);
             UiHarness.Find<DailyChart>(view)!.Reveal.ShouldBe(1, 0.01);
             UiHarness.Find<PieChart3D>(view)!.Rise.ShouldBe(1, 0.01);
+            var bar = (FrameworkElement)view.FindName("MonthBar");
+            ((FrameworkElement)view.FindName("MonthFill")).ActualWidth.ShouldBe(bar.ActualWidth * 8 / 30, 1, "the month's bar grown to the 8th of 30");
         }, reduced: false);
     }
 

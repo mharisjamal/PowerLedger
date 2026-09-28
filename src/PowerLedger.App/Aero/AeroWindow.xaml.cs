@@ -33,6 +33,7 @@ internal partial class AeroWindow : Window, IShellWindow
     private bool _switching;
     private bool _introAnnounced;
     private bool _shown;
+    private readonly GlassMaterial _glass;
 
     /// <param name="looks">The switcher the App opened this window through (plan O 0.4), as Midnight's takes it; a look
     /// chosen in the window goes through <see cref="SettingsViewModel.Look"/> instead, so the choice is saved.</param>
@@ -49,6 +50,10 @@ internal partial class AeroWindow : Window, IShellWindow
         InitializeComponent();
         DataContext = shell;
         UpdateCard.DataContext = updates;
+        VersionLine.DataContext = updates;
+        // The glass itself (Aero look design §3): the A.* tokens on this window, repainted live as Settings' Glass or the
+        // theme changes, never among the application's resources.
+        _glass = GlassMaterial.For(this, shell.Settings, theme);
         UpdateRequiredCover.DataContext = updates;
         UpdateCover.Attach(UpdateRequiredCover, [Side, TopBar, Banners, Pages], UpdateNowButton);
         _size = new Extent(Width, Height);
@@ -75,6 +80,7 @@ internal partial class AeroWindow : Window, IShellWindow
             if (shell.Dashboard is { } dashboard) dashboard.Detailed = false;
             _problemTimer.Stop();
             _toastTimer?.Stop();
+            _glass.Dispose();
         };
         _problemTimer.Tick += (_, _) => HideProblem();
         IsVisibleChanged += (_, _) => OnShown();
