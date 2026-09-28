@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using PowerLedger.App.Aero;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
 
@@ -29,6 +30,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     private readonly TimeProvider _clock;
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
+    private readonly Func<string?> _region;
     private ITimer? _timer;
     private int _sampleSeconds = 1;
     private ChassisKind? _chassis;
@@ -48,7 +50,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public SettingsViewModel(
         IServiceLink link, IMachineHistory history, IUiSettings ui, UiThreads threads, TimeProvider clock, TimeZoneInfo zone,
         CultureInfo culture, string regionCurrency, Updater? updates = null, Action? openSent = null, Action<Uri>? openBrowser = null,
-        Action<string>? copyToClipboard = null)
+        Action<string>? copyToClipboard = null, Func<bool>? windowsReducesMotion = null, Func<string?>? windowsRegion = null)
     {
         _link = link;
         _history = history;
@@ -65,12 +67,17 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         Tariff.Saved += ReadTariffs;
         Service.Saved += OnSaved;
         SaveCo2 = new RelayCommand(ApplyCo2);
+        _region = windowsRegion ?? GridFactors.WindowsRegion;
+        UseRegionCo2 = new RelayCommand(ApplyRegionCo2);
         ResetCalibration = new RelayCommand(() => ConfirmingReset = true);
         CancelReset = new RelayCommand(() => ConfirmingReset = false);
         ConfirmReset = new RelayCommand(() => _ = ConfirmResetAsync());
         RunSetup = new RelayCommand(() => SetupRequested?.Invoke());
         _link.ConnectionChanged += OnConnectionChanged;
         Updates = updates;
+        GlassSection = new GlassSection(this, windowsReducesMotion ?? (() => !System.Windows.SystemParameters.ClientAreaAnimation));
+        OverlaySection = new OverlaySection(this);
+        ToggleOverlay = new RelayCommand(() => Overlay = Overlay with { Enabled = !Overlay.Enabled });
     }
 
     /// <summary>"Run setup again": the shell shows the wizard.</summary>
@@ -97,6 +104,13 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public string? Co2Message { get => _co2Message; private set => SetProperty(ref _co2Message, value); }
 
     public ICommand SaveCo2 { get; }
+
+    /// <summary>Aero's Settings (Aero look design §4): the built-in grid figure for Windows' region, saved as the one CO₂
+    /// setting, in kg to two decimals as it is typed.</summary>
+    public ICommand UseRegionCo2 { get; }
+
+    /// <summary>The words on <see cref="UseRegionCo2"/>'s button: "Use France's figure", or the world average's.</summary>
+    public string RegionCo2Offer => GridFactors.For(_region()) is { } grid ? $"Use {grid.Country}'s figure" : "Use the world average";
 
     /// <summary>Applies when chosen.</summary>
     public ThemeChoice Theme
@@ -149,6 +163,16 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             OnPropertyChanged();
         }
     }
+
+    /// <summary>Aero's Settings, Glass section (Aero look design §3): each of <see cref="Glass"/>'s fields for its own
+    /// control, each change saved through <see cref="Glass"/>.</summary>
+    public GlassSection GlassSection { get; }
+
+    /// <summary>Aero's Settings, Overlay section (Aero look design §5), each change saved through <see cref="Overlay"/>.</summary>
+    public OverlaySection OverlaySection { get; }
+
+    /// <summary>The watts overlay on, or off again, keeping its place (Aero look design §5): Aero's top-bar button.</summary>
+    public ICommand ToggleOverlay { get; }
 
     /// <summary>The one-time banner about the new look is retired (Midnight look design §1): by its buttons or any switch.</summary>
     public bool LookIntroduced => _ui.Current.LookIntroduced;
@@ -303,6 +327,16 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     {
         var tariffs = _history.Tariffs();
         _threads.Post(() => ShowTariffs(tariffs));
+    }
+
+    private void ApplyRegionCo2()
+    {
+        var grid = GridFactors.Suggested(_region());
+        var kg = Math.Round(grid.Grams / 1000, 2);
+        Co2 = kg.ToString("0.00", _culture);
+        var who = grid == GridFactors.World ? "the world's" : $"{grid.Country}'s";
+        Co2Message = _ui.UseCo2(kg)
+            ?? $"Saved {who} figure, {grid.Grams.ToString("0", _culture)} g per kWh ({grid.Source}, {grid.Year.ToString(CultureInfo.InvariantCulture)}).";
     }
 
     private void ApplyCo2()

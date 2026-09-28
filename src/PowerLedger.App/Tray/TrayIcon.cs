@@ -31,12 +31,14 @@ internal sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _update;
+    private readonly ToolStripMenuItem _overlay;
     private Icon? _current;
     private int? _shown;
     private bool _drawn;
     private bool _disposed;
     private Action? _clicked;
     private Action? _install;
+    private Action? _toggleOverlay;
 
     public TrayIcon(Action open, Action exit, StartWithWindows autostart)
     {
@@ -44,8 +46,11 @@ internal sealed class TrayIcon : IDisposable
         startWithWindows.CheckedChanged += (_, _) => autostart.Set(startWithWindows.Checked);
         _update = new ToolStripMenuItem("Restart to update") { Visible = false };
         _update.Click += (_, _) => _install?.Invoke();
+        _overlay = new ToolStripMenuItem("Watts overlay") { Available = false };
+        _overlay.Click += (_, _) => _toggleOverlay?.Invoke();
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open", null, (_, _) => open());
+        menu.Items.Add(_overlay);
         menu.Items.Add(_update);
         menu.Items.Add(startWithWindows);
         menu.Items.Add(new ToolStripSeparator());
@@ -89,6 +94,24 @@ internal sealed class TrayIcon : IDisposable
         _update.Text = $"Restart to update to {version}";
         _update.Visible = version is not null;
     }
+
+    /// <summary>"Watts overlay" in the menu, ticked while it is on, while <paramref name="offered"/>: only in the Aero look,
+    /// the overlay's only one (Aero look design §5). A click runs <paramref name="toggle"/>.</summary>
+    public void OfferOverlay(bool offered, bool on, Action toggle)
+    {
+        if (_disposed) return;
+        _toggleOverlay = toggle;
+        _overlay.Checked = on;
+        _overlay.Available = offered;   // Available, not Visible, which reads false while the menu is closed
+    }
+
+    /// <summary>The overlay's item is in the menu.</summary>
+    internal bool OverlayOffered => _overlay.Available;
+
+    internal bool OverlayOn => _overlay.Checked;
+
+    /// <summary>As a click on the overlay's item, for a test.</summary>
+    internal void ClickOverlay() => _overlay.PerformClick();
 
     private void Balloon(string title, string text, Action clicked)
     {
