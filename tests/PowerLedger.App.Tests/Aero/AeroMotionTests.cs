@@ -12,6 +12,7 @@ namespace PowerLedger.App.Tests;
 /// the press behaviour, the switch's knob and the capsule radius.
 /// </summary>
 [Trait("Category", "UI")]
+[Collection("Aero motion")]   // AeroMotion's override is one for the process (agent D's AeroMotionScope)
 public class AeroMotionTests
 {
     [Fact]

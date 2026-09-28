@@ -36,6 +36,15 @@ internal static class BackdropRules
     }
 }
 
+/// <summary>Where the wallpaper is when Windows names none (a slideshow), pure.</summary>
+internal static class WallpaperRules
+{
+    /// <summary>Explorer's BackgroundType for a solid colour.</summary>
+    public const int SolidColour = 1;
+
+    public static string? Fallback(int? backgroundType, string? transcoded) => backgroundType == SolidColour ? null : transcoded;
+}
+
 /// <summary>The few Win32 and DWM calls Aero's backdrop needs; thin, each failure harmless.</summary>
 internal static class AeroNative
 {
@@ -78,13 +87,38 @@ internal static class AeroNative
         _ = DwmExtendFrameIntoClientArea(hwnd, ref margins);
     }
 
-    /// <summary>The wallpaper's file, or null for none (a solid colour or a slideshow Windows hasn't named).</summary>
+    /// <summary>The wallpaper's file, or null for none. Windows names it through SPI_GETDESKWALLPAPER; a slideshow names
+    /// none, and then the picture on screen is the copy Windows keeps (Themes\TranscodedWallpaper), unless the background
+    /// is a solid colour, whose leftover copy would be stale.</summary>
     public static string? WallpaperPath()
     {
         var buffer = new char[520];
-        if (!SystemParametersInfo(SPI_GETDESKWALLPAPER, buffer.Length, buffer, 0)) return null;
-        var path = new string(buffer, 0, Array.IndexOf(buffer, '\0') is var end and >= 0 ? end : buffer.Length);
-        return path.Length > 0 && System.IO.File.Exists(path) ? path : null;
+        if (SystemParametersInfo(SPI_GETDESKWALLPAPER, buffer.Length, buffer, 0))
+        {
+            var end = Array.IndexOf(buffer, '\0');
+            var path = new string(buffer, 0, end >= 0 ? end : buffer.Length);
+            if (path.Length > 0 && System.IO.File.Exists(path)) return path;
+        }
+        return WallpaperRules.Fallback(BackgroundType(), TranscodedWallpaper());
+    }
+
+    private static int? BackgroundType()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers");
+            return key?.GetValue("BackgroundType") as int?;
+        }
+        catch (System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TranscodedWallpaper()
+    {
+        var path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
+        return System.IO.File.Exists(path) ? path : null;
     }
 
     [StructLayout(LayoutKind.Sequential)]

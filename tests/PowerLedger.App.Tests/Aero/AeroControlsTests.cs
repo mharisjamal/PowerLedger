@@ -17,6 +17,7 @@ namespace PowerLedger.App.Tests;
 /// (%TEMP%\powerledger-renders\aero-controls-*).
 /// </summary>
 [Trait("Category", "UI")]
+[Collection("Aero motion")]   // AeroMotion's override is one for the process (agent D's AeroMotionScope)
 public class AeroControlsTests
 {
     [Fact]
@@ -64,14 +65,28 @@ public class AeroControlsTests
         });
 
     [Theory]
-    [InlineData(true, false, true, true, false, true)]
-    [InlineData(true, true, true, true, false, false)]
-    [InlineData(false, false, true, true, false, false)]
-    [InlineData(true, false, false, true, false, false)]
-    [InlineData(true, false, true, false, false, false)]
-    [InlineData(true, false, true, true, true, false)]
-    public void The_pulse_breathes_only_where_someone_can_see_it(bool breathes, bool reduced, bool visible, bool active, bool minimised, bool expected)
-        => PulseDot.ShouldBreathe(breathes, reduced, visible, active, minimised).ShouldBe(expected);
+    [InlineData(true, false, true, true, false, true, true)]
+    [InlineData(true, true, true, true, false, true, false)]
+    [InlineData(false, false, true, true, false, true, false)]
+    [InlineData(true, false, false, true, false, true, false)]
+    [InlineData(true, false, true, false, false, true, false)]
+    [InlineData(true, false, true, true, true, true, false)]
+    [InlineData(true, false, true, true, false, false, false)]
+    public void The_pulse_breathes_only_while_someone_is_using_the_window(bool breathes, bool reduced, bool visible, bool active, bool minimised, bool awake, bool expected)
+        => PulseDot.ShouldBreathe(breathes, reduced, visible, active, minimised, awake).ShouldBe(expected);
+
+    [Fact]
+    public void Using_the_window_wakes_the_pulse_and_it_sleeps_again()
+        => UiHarness.OnUi(() =>
+        {
+            var dot = new PulseDot();
+            dot.Awake.ShouldBeFalse();
+            dot.Wake();
+            dot.Awake.ShouldBeTrue();
+            dot.Sleep();
+            dot.Awake.ShouldBeFalse();
+            PulseDot.AwakeFor.ShouldBe(TimeSpan.FromSeconds(15));
+        });
 
     /// <summary>A window in the background (the tests' windows never take the foreground) keeps its pulse still: an idle
     /// App asks for no frames.</summary>

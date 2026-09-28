@@ -13,6 +13,7 @@ namespace PowerLedger.App.Tests;
 /// lined up with the panes without a frame clock at rest, and the throttled parallax that stops once settled.
 /// </summary>
 [Trait("Category", "UI")]
+[Collection("Aero motion")]   // AeroMotion's override is one for the process (agent D's AeroMotionScope)
 public class BackdropTests
 {
     [Theory]
