@@ -109,11 +109,18 @@ internal static class AeroPages
         return null;
     }
 
+    /// <summary>How wide the line's text is written, measured as a TextBlock with its font and its figures (Geist's tabular
+    /// figures, which the styles ask for, are narrower than its proportional ones, which FormattedText would measure).</summary>
     private static double Written(TextBlock line)
     {
-        var face = new Typeface(line.FontFamily, line.FontStyle, line.FontWeight, line.FontStretch);
-        var text = new FormattedText(line.Text, CultureInfo.CurrentUICulture, line.FlowDirection, face, line.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(line).PixelsPerDip);
-        return text.WidthIncludingTrailingWhitespace + line.Padding.Left + line.Padding.Right;
+        var natural = new TextBlock
+        {
+            Text = line.Text, FontFamily = line.FontFamily, FontStyle = line.FontStyle, FontWeight = line.FontWeight, FontStretch = line.FontStretch,
+            FontSize = line.FontSize, FlowDirection = line.FlowDirection, Padding = line.Padding,
+        };
+        System.Windows.Documents.Typography.SetNumeralAlignment(natural, System.Windows.Documents.Typography.GetNumeralAlignment(line));
+        natural.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return natural.DesiredSize.Width;
     }
 
     private static string Describe(FrameworkElement element) => element switch
