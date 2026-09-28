@@ -27,11 +27,20 @@ internal sealed partial class OverlayWindow : Window, IOverlay
     private bool _blurred;
     private bool _closing;
 
-    public OverlayWindow(NowViewModel now, SettingsViewModel settings)
+    /// <param name="theme">Paints the pill in Aero's glass as Settings has it (accent, contrast, transparency), live, as the
+    /// main window is; none leaves the palette's own, for a test.</param>
+    public OverlayWindow(NowViewModel now, SettingsViewModel settings, ThemeManager? theme = null)
     {
         _now = now;
         _settings = settings;
         InitializeComponent();
+        if (theme is not null)
+        {
+            // Once it has a window, so the material's colours go on after whatever else the window merges and win.
+            GlassMaterial? material = null;
+            SourceInitialized += (_, _) => material ??= GlassMaterial.For(this, settings, theme);
+            Closed += (_, _) => material?.Dispose();
+        }
         Spark.Seconds = 30;
         ShowLive(animate: false);
         now.PropertyChanged += OnNowChanged;

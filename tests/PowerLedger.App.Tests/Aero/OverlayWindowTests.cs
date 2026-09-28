@@ -153,6 +153,35 @@ public class OverlayWindowTests
             }
         });
 
+    /// <summary>Aero look design §3: the pill takes the glass as Settings has it, live, as the main window does.</summary>
+    [Fact]
+    public void It_takes_the_accent_chosen_in_settings_at_once()
+        => UiHarness.OnUi(() =>
+        {
+            var app = Application.Current.Resources.MergedDictionaries;
+            var before = app.Count;
+            using var theme = new ThemeManager(Application.Current, ThemeChoice.Dark);
+            if (app.Count == before + 1) app.RemoveAt(0);   // the palette goes on the window drawn (review 11)
+            var settings = Settings(new FakeUiSettings());
+            var window = AeroHost.Dressed(new OverlayWindow(MidnightFixtures.NowScreen(), settings, theme) { Placing = false, Left = -20000, Top = 0 }, Theme.Dark);
+            try
+            {
+                window.Apply(OverlaySettings.Default with { Enabled = true });
+                window.ShowOverlay();
+                Color Dot() => ((SolidColorBrush)MidnightHost.AllOf<System.Windows.Shapes.Ellipse>(window).First().Fill).Color;
+                Dot().ShouldBe((Color)window.FindResource("A.C.Accent.Lime"));
+
+                settings.GlassSection.Accent = GlassAccent.Rose;
+                UiHarness.Pump(TimeSpan.FromMilliseconds(100));   // the material repaints at background priority
+
+                Dot().ShouldBe((Color)window.FindResource("A.C.Accent.Rose"));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
     /// <summary>The overlay is a tool window: never in the taskbar or Alt Tab.</summary>
     [Fact]
     public void It_stays_out_of_the_taskbar_and_alt_tab()

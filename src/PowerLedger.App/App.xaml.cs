@@ -155,7 +155,7 @@ public partial class App : Application
         // Aero look design §5: the watts overlay, Aero's only, open while the look is Aero and it is on; the tray offers it in Aero.
         var now = _now;
         _overlay = new Aero.OverlayHost(
-            settings, () => new Aero.OverlayWindow(now, settings),
+            settings, () => new Aero.OverlayWindow(now, settings, _theme),
             (offered, on) => _tray?.OfferOverlay(offered, on, () => settings.ToggleOverlay.Execute(null)));
         _link.HouseholdNoticeReceived += OnHouseholdNotice;
         _monthly = new MonthlyReports(

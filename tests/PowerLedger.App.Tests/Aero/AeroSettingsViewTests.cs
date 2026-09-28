@@ -26,6 +26,18 @@ public class AeroSettingsViewTests
             WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = 0,
         }, theme);
         window.SetResourceReference(Control.BackgroundProperty, "Brush.Ground");
+        // The glass as the settings have it, as the Aero window paints it (GlassMaterial), after the palette so it wins; the
+        // theme manager's own palette comes off the application again (review 11).
+        var app = Application.Current.Resources.MergedDictionaries;
+        var before = app.Count;
+        var themes = new ThemeManager(Application.Current, theme == Theme.Dark ? ThemeChoice.Dark : ThemeChoice.Light);
+        if (app.Count == before + 1) app.RemoveAt(0);
+        var material = GlassMaterial.For(window, settings, themes);
+        window.Closed += (_, _) =>
+        {
+            material.Dispose();
+            themes.Dispose();
+        };
         window.Show();
         UiHarness.Pump(TimeSpan.FromMilliseconds(600));   // a switch whose value arrives after its template springs there first
         window.UpdateLayout();
