@@ -32,6 +32,19 @@ public class BackdropTests
 
     [Fact]
     public void The_wallpaper_fills_the_scene_as_uniform_to_fill_draws_it()
+        => Fill();
+
+    [Theory]
+    [InlineData(0, "t", "t")]
+    [InlineData(2, "t", "t")]
+    [InlineData(3, "t", "t")]
+    [InlineData(null, "t", "t")]
+    [InlineData(1, "t", null)]
+    [InlineData(2, null, null)]
+    public void A_slideshow_shows_the_copy_windows_keeps_and_a_solid_colour_none(int? type, string? transcoded, string? expected)
+        => WallpaperRules.Fallback(type, transcoded).ShouldBe(expected);
+
+    private static void Fill()
     {
         var rect = WallpaperFrost.ImageRect(new Size(1000, 500), new Size(1920, 1200));
         rect.Width.ShouldBe(1000, 0.01);
