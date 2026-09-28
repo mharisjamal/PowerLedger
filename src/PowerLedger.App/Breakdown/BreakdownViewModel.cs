@@ -1,5 +1,8 @@
 using System.Globalization;
+using System.IO;
+using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using PowerLedger.Contracts;
 using PowerLedger.Storage;
 
@@ -35,8 +38,16 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     private bool _hasNegativeRest;
     private string? _message;
     private string _footnote;
+    private readonly IFileSaver? _saver;
+    private string _search = "";
+    private IReadOnlyList<PartRow> _foundParts = [];
+    private string? _searchMessage;
+    private string? _saved;
 
-    public BreakdownViewModel(IServiceLink link, IRangeHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture)
+    /// <param name="saver">Where Save CSV asks to save; without one (Classic and Midnight, which don't offer it) the command
+    /// does nothing.</param>
+    public BreakdownViewModel(IServiceLink link, IRangeHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
+        IFileSaver? saver = null)
     {
         _link = link;
         _history = history;
@@ -44,9 +55,11 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
         _clock = clock;
         _zone = zone;
         _culture = culture;
+        _saver = saver;
         _footnote = FootnoteFor(null);
         Range = new RangePicker(RangeChoice.Today, Ranges.LocalDay(clock.GetUtcNow(), zone));
         Range.Changed += Refresh;
+        ExportCsv = new RelayCommand(SaveCsv, () => _saver is not null);
     }
 
     public RangePicker Range { get; }
@@ -68,7 +81,37 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     /// <summary>"Watts", or "Wh per hour".</summary>
     public string UnitLabel { get => _unitLabel; private set => SetProperty(ref _unitLabel, value); }
 
-    public IReadOnlyList<PartRow> Parts { get => _parts; private set => SetProperty(ref _parts, value); }
+    public IReadOnlyList<PartRow> Parts
+    {
+        get => _parts;
+        private set
+        {
+            if (SetProperty(ref _parts, value)) Find();
+        }
+    }
+
+    /// <summary>Aero's History search (Aero look design §1; Plan S, P1): the table's rows whose name holds what is typed,
+    /// whatever the case; every row while nothing is. <see cref="Parts"/> stays whole for the other looks.</summary>
+    public string Search
+    {
+        get => _search;
+        set
+        {
+            if (SetProperty(ref _search, value ?? "")) Find();
+        }
+    }
+
+    /// <summary>The rows <see cref="Search"/> finds.</summary>
+    public IReadOnlyList<PartRow> FoundParts { get => _foundParts; private set => SetProperty(ref _foundParts, value); }
+
+    /// <summary>What the search found nothing for, in words; null while it finds something or nothing is typed.</summary>
+    public string? SearchMessage { get => _searchMessage; private set => SetProperty(ref _searchMessage, value); }
+
+    /// <summary>Save CSV: the hour rows of the range shown, as the Report's "CSV · 1 h" writes them.</summary>
+    public IRelayCommand ExportCsv { get; }
+
+    /// <summary>What the last Save CSV did: the file it saved, or why it could not.</summary>
+    public string? Saved { get => _saved; private set => SetProperty(ref _saved, value); }
 
     /// <summary>Measured mode put the rest band below zero somewhere in the range, which the footnote explains (spec §9).</summary>
     public bool HasNegativeRest { get => _hasNegativeRest; private set => SetProperty(ref _hasNegativeRest, value); }
@@ -164,4 +207,48 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     }
 
     private IReadOnlyList<PartRow> Rows(RangeTotals t) => Bands.Rows(t, _culture, withTotal: true);
+
+    private void Find()
+    {
+        var typed = _search.Trim();
+        FoundParts = typed.Length == 0 ? _parts : [.. _parts.Where(p => p.Name.Contains(typed, StringComparison.CurrentCultureIgnoreCase))];
+        SearchMessage = typed.Length > 0 && FoundParts.Count == 0 ? $"No part here matches \"{typed}\"." : null;
+    }
+
+    /// <summary>Asks where to save on the UI thread, then writes off it beside the target and moves the file into place, so a
+    /// failed write leaves any earlier file whole, as the Report's exports do.</summary>
+    private void SaveCsv()
+    {
+        if (_saver is null || _range is not { } range) return;
+        if (_saver.Ask(ReportViewModel.FileName(range, _zone) + "-1h.csv", "CSV file|*.csv") is not { } path) return;
+        _threads.Background(() =>
+        {
+            var partial = path + ".partial";
+            string outcome;
+            try
+            {
+                var lines = _history.Csv(range, ExportGrain.Hour) ?? throw new IOException("history can't be read right now.");
+                using (var file = File.Create(partial))
+                using (var writer = new StreamWriter(file, new UTF8Encoding(false)))
+                {
+                    foreach (var line in lines) writer.WriteLine(line);
+                }
+                File.Move(partial, path, overwrite: true);
+                outcome = "Saved " + Path.GetFileName(path);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                try
+                {
+                    File.Delete(partial);
+                }
+                catch (Exception left) when (left is IOException or UnauthorizedAccessException)
+                {
+                    // Left behind; the next save to the same place replaces it.
+                }
+                outcome = "Couldn't save: " + error.Message;
+            }
+            _threads.Post(() => Saved = outcome);
+        });
+    }
 }
