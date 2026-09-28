@@ -223,7 +223,7 @@ public sealed class UiPreferencesTests : IDisposable
         var glass = GlassSettings.Default;
         (glass.Style, glass.TintColor, glass.TintStrength, glass.Frost, glass.EdgeLight).ShouldBe((GlassStyle.Tinted, "#7466D8", 0.5, 0.6, 0.6));
         (glass.Accent, glass.Backdrop, glass.ReduceTransparency, glass.IncreaseContrast).ShouldBe((GlassAccent.Lime, GlassBackdrop.Desktop, false, false));
-        (glass.ReduceMotion, glass.Parallax, glass.CarbonGramsPerKwh).ShouldBe(((bool?)null, true, (double?)null));
+        (glass.ReduceMotion, glass.Parallax).ShouldBe(((bool?)null, true));
         var overlay = OverlaySettings.Default;
         (overlay.Enabled, overlay.Position, overlay.Left, overlay.Top, overlay.Opacity, overlay.Sparkline)
             .ShouldBe((false, OverlayPosition.TopRight, (double?)null, (double?)null, 1.0, true));
@@ -239,7 +239,6 @@ public sealed class UiPreferencesTests : IDisposable
             {
                 Style = GlassStyle.Colour, TintColor = "#12AB9F", TintStrength = 0.8, Frost = 0.2, EdgeLight = 1, Accent = GlassAccent.Rose,
                 Backdrop = GlassBackdrop.Wallpaper, ReduceTransparency = true, IncreaseContrast = true, ReduceMotion = false, Parallax = false,
-                CarbonGramsPerKwh = 233,
             },
             Overlay = new OverlaySettings { Enabled = true, Position = OverlayPosition.Free, Left = -1200.5, Top = 40, Opacity = 0.7, Sparkline = false },
         };
@@ -345,20 +344,22 @@ public sealed class UiPreferencesTests : IDisposable
         read.Overlay.Opacity.ShouldBe(opacity);
     }
 
-    /// <summary>A grid factor that is no real grid's (negative, or 2 kg or more per kWh, as <see cref="UiPreferences.MaxCo2KgPerKwh"/>)
-    /// reads as "by region".</summary>
+    /// <summary>The Carbon insight reads Settings' one CO₂ factor (<see cref="UiPreferences.Co2KgPerKwh"/>); a glass
+    /// carbon factor, which a build before that decision could have written, is ignored and the rest of the file kept.</summary>
     [Theory]
-    [InlineData("-1", null)]
-    [InlineData("2000", null)]
-    [InlineData("0", 0.0)]
-    [InlineData("1999.5", 1999.5)]
-    [InlineData("null", null)]
-    public void A_carbon_factor_out_of_range_reads_as_by_region(string written, double? read)
+    [InlineData("233")]
+    [InlineData("null")]
+    [InlineData("\"by region\"")]
+    public void A_glass_carbon_factor_from_an_earlier_build_is_ignored(string written)
     {
         Directory.CreateDirectory(_folder);
-        System.IO.File.WriteAllText(File, $$"""{ "AeroIntroduced": true, "Glass": { "CarbonGramsPerKwh": {{written}} } }""");
+        System.IO.File.WriteAllText(File, $$"""{ "AeroIntroduced": true, "Co2KgPerKwh": 0.23, "Glass": { "Style": "Dark", "CarbonGramsPerKwh": {{written}} } }""");
 
-        new UiPreferencesStore(File).Load().Glass.CarbonGramsPerKwh.ShouldBe(read);
+        var read = new UiPreferencesStore(File).Load();
+
+        read.Glass.ShouldBe(GlassSettings.Default with { Style = GlassStyle.Dark });
+        read.Co2KgPerKwh.ShouldBe(0.23);
+        typeof(GlassSettings).GetProperty("CarbonGramsPerKwh").ShouldBeNull();
     }
 
     [Fact]

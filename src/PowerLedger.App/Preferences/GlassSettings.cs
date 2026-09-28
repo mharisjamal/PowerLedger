@@ -55,9 +55,6 @@ internal sealed partial record GlassSettings
     /// <summary>The demo's violet, the tint a Colour style starts from.</summary>
     public const string DefaultTint = "#7466D8";
 
-    /// <summary>A grid at or above this many grams of CO₂ per kWh is not a real grid (<see cref="UiPreferences.MaxCo2KgPerKwh"/>).</summary>
-    public const double MaxCarbonGramsPerKwh = UiPreferences.MaxCo2KgPerKwh * 1000;
-
     [JsonConverter(typeof(GlassStyleJsonConverter))]
     public GlassStyle Style { get; set; } = GlassStyle.Tinted;
 
@@ -92,15 +89,15 @@ internal sealed partial record GlassSettings
     /// <summary>Tilt and parallax on the panels as the pointer moves; off under reduced motion whatever this says.</summary>
     public bool Parallax { get; set; } = true;
 
-    /// <summary>The Carbon insight's grid factor in grams of CO₂ per kWh as the user set it; null takes the built-in
-    /// table's figure for Windows' region (Aero look design §4).</summary>
-    public double? CarbonGramsPerKwh { get; set; }
+    // No carbon factor here: the Carbon insight reads Settings' one CO₂ per kWh (UiPreferences.Co2KgPerKwh), which Now and
+    // the Report use too; GridFactors only suggests a figure for Windows' region. A CarbonGramsPerKwh an earlier build
+    // wrote is ignored as the file loads.
 
     public static GlassSettings Default { get; } = new();
 
     /// <summary>The same settings with a name this version doesn't know put back to its default, the tint colour
-    /// normalised to upper-case #RRGGBB or put back, the sliders clamped to 0 to 1 (a number that isn't one put back),
-    /// and a carbon factor no grid has read as by region.</summary>
+    /// normalised to upper-case #RRGGBB or put back, and the sliders clamped to 0 to 1 (a number that isn't one put
+    /// back).</summary>
     public GlassSettings Sanitised() => this with
     {
         Style = Enum.IsDefined(Style) ? Style : Default.Style,
@@ -110,7 +107,6 @@ internal sealed partial record GlassSettings
         EdgeLight = Fraction(EdgeLight, Default.EdgeLight),
         Accent = Enum.IsDefined(Accent) ? Accent : Default.Accent,
         Backdrop = Enum.IsDefined(Backdrop) ? Backdrop : Default.Backdrop,
-        CarbonGramsPerKwh = CarbonGramsPerKwh is >= 0 and < MaxCarbonGramsPerKwh ? CarbonGramsPerKwh : null,
     };
 
     /// <summary><paramref name="value"/> clamped to 0 to 1; <paramref name="fallback"/> for a value that is no number.</summary>
