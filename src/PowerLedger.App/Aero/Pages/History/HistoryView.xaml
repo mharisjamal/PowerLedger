@@ -22,7 +22,7 @@
 
             <!-- The range and its chart, as the demo's History panel: the pills slide a white pill between them, Save CSV the
                  range's hour rows. -->
-            <aero:GlassPanel Padding="{StaticResource A.Page.Panel}">
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Padding="{StaticResource A.Page.Panel}">
                 <StackPanel>
                     <DockPanel Style="{StaticResource A.Page.Head}">
                         <Button DockPanel.Dock="Right" Style="{StaticResource A.RoundGlassBtn}" Width="38" Height="38" Margin="10,0,0,0"
@@ -101,7 +101,7 @@
             </aero:GlassPanel>
 
             <!-- Each part's energy and share over the range, with a search over the rows. -->
-            <aero:GlassPanel Margin="{StaticResource A.Page.Gap}" Padding="20,18,20,12">
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Margin="{StaticResource A.Page.Gap}" Padding="20,18,20,12">
                 <StackPanel>
                     <DockPanel Style="{StaticResource A.Page.Head}">
                         <!-- A well, not glass: glass on glass is left to the demo's own controls. -->

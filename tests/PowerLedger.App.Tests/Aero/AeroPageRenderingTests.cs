@@ -223,6 +223,81 @@ public class AeroPageRenderingTests
         Sizes(30_000, "reports-960", "reports-1440", "reports-failed");
     }
 
+    [Fact]
+    public void Household_shows_its_figures_a_row_per_pc_the_pcs_waiting_manage_and_sign_in()
+    {
+        OnUi(() =>
+        {
+            foreach (var theme in Themes)
+            {
+                foreach (var (width, size) in new[] { (Narrow, "960"), (Wide, "1440") })
+                {
+                    var at = $"{size} on {theme}";
+                    var model = MidnightFixtures.HouseholdScreen(pendingApprovals: 2);
+                    model.Show();
+                    var view = new Aero.HouseholdView { DataContext = model };
+                    using var page = Page(view, width, theme);
+                    foreach (var title in new[] { "Household", "Today", "This week", "This month", "Your PCs", "Manage this household", "Sign in" })
+                    {
+                        Find<TextBlock>(view, t => t.Text == title && t.IsVisible).ShouldNotBeNull($"{title} {at}");
+                    }
+                    Find<TextBlock>(view, t => t.Text == "46.8").ShouldNotBeNull(at).IsVisible.ShouldBeTrue(at);
+                    Find<TextBlock>(view, t => t.Text == HouseholdViewModel.Explanation).ShouldBeNull(at);
+                    var waiting = Find<TextBlock>(view, t => AutomationProperties.GetName(t) == "Waiting for approval").ShouldNotBeNull(at);
+                    waiting.IsVisible.ShouldBeTrue(at);
+                    waiting.Inlines.OfType<System.Windows.Documents.Run>().Any(r => r.Text == "2").ShouldBeTrue(at);
+
+                    var rows = Find<ItemsControl>(view, items => items.ItemsSource == model.Members).ShouldNotBeNull(at);
+                    model.Members.Count.ShouldBe(2, at);
+                    foreach (var member in model.Members)
+                    {
+                        var row = rows.ItemContainerGenerator.ContainerFromItem(member).ShouldBeAssignableTo<DependencyObject>(at)!;
+                        Find<TextBlock>(row, t => t.Text == member.Name).ShouldNotBeNull($"{member.Name} {at}");
+                        Find<TextBlock>(row, t => t.Text == member.Energy).ShouldNotBeNull($"{member.Name} {at}");
+                        Find<TextBlock>(row, t => t.Text == "this PC")!.IsVisible.ShouldBe(member.IsThisPc, $"{member.Name} {at}");
+                        Find<Button>(row, b => Equals(b.Content, "Remove"))!.IsVisible.ShouldBe(!member.IsThisPc, $"{member.Name} {at}");
+                        Find<ShareBar>(row, b => AutomationProperties.GetName(b) == $"{member.Name} share")!.Value.ShouldBe(member.Share, $"{member.Name} {at}");
+                        Find<Initials>(row)!.Member.ShouldBe(member.Name, $"{member.Name} {at}");
+                    }
+                    MidnightHost.AllOf<Button>(view).Count(b => Equals(b.Content, "Add a PC") && b.IsVisible).ShouldBe(1, at);
+                    Find<TextBox>(view, b => AutomationProperties.GetName(b) == "This PC's name").ShouldNotBeNull(at).IsVisible.ShouldBeTrue(at);
+                    page.Render($"household-{size}");
+                }
+
+                // Before a household: the explanation and Add a PC; nobody waits, so no approvals panel.
+                var link = new FakeLink();
+                link.Connect(true);
+                var none = new HouseholdViewModel(link, new FakeHouseholdHistory(), UiThreads.Inline, new FakeTimeProvider(MidnightFixtures.Now), TimeZoneInfo.Utc,
+                    MidnightFixtures.English, FakeAccount.Model(link));
+                none.Show();
+                var explainer = new Aero.HouseholdView { DataContext = none };
+                using (var page = Page(explainer, Narrow, theme))
+                {
+                    Find<TextBlock>(explainer, t => t.Text == HouseholdViewModel.Explanation).ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
+                    Find<TextBlock>(explainer, t => t.Text == "Your PCs")!.IsVisible.ShouldBeFalse(theme.ToString());
+                    Find<TextBlock>(explainer, t => AutomationProperties.GetName(t) == "Waiting for approval")!.IsVisible.ShouldBeFalse(theme.ToString());
+                    var add = MidnightHost.AllOf<Button>(explainer).Single(b => Equals(b.Content, "Add a PC") && b.IsVisible);
+                    add.Style.ShouldBe(explainer.FindResource("A.AccentBtn"), theme.ToString());
+                    Find<TextBlock>(explainer, t => t.Text == "Sign in")!.IsVisible.ShouldBeTrue(theme.ToString());
+                    page.Render("household-none");
+                }
+
+                // Removing a PC asks first, in the Manage panel.
+                var asking = MidnightFixtures.HouseholdScreen();
+                asking.Show();
+                asking.AskRemove.Execute(asking.Members.Single(m => !m.IsThisPc));
+                var confirm = new Aero.HouseholdView { DataContext = asking };
+                using (var page = Page(confirm, Narrow, theme))
+                {
+                    Find<TextBlock>(confirm, t => t.Text == asking.ConfirmText && t.IsVisible).ShouldNotBeNull(theme.ToString());
+                    Find<Button>(confirm, b => Equals(b.Content, "Confirm") && b.IsVisible).ShouldNotBeNull(theme.ToString());
+                    page.Render("household-confirm");
+                }
+            }
+        });
+        Sizes(20_000, "household-960", "household-1440", "household-none", "household-confirm");
+    }
+
     /// <summary>What a screen reader hears from a figure.</summary>
     private sealed class KeyValueAutomation(KeyValue figure)
     {

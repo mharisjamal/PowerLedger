@@ -56,7 +56,7 @@
         <StackPanel Margin="{StaticResource A.Page.Margin}">
 
             <!-- The head of the page: the household, or the explanation before there is one, and Add a PC. -->
-            <aero:GlassPanel Padding="{StaticResource A.Page.Panel}">
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Padding="{StaticResource A.Page.Panel}">
                 <StackPanel>
                     <DockPanel Style="{StaticResource A.Page.Head}">
                         <Button DockPanel.Dock="Right" Style="{StaticResource A.AccentBtn}" Content="Add a PC" Margin="12,0,0,0" Command="{Binding AddPc}"
@@ -117,7 +117,7 @@
             <!-- PCs waiting for a member to let them in: each is answered in its own prompt; here, how many. -->
             <aero:GlassPanel Margin="{StaticResource A.Page.Gap}" Padding="{StaticResource A.Page.Panel}">
                 <aero:GlassPanel.Style>
-                    <Style TargetType="aero:GlassPanel" BasedOn="{StaticResource {x:Type aero:GlassPanel}}">
+                    <Style TargetType="aero:GlassPanel" BasedOn="{StaticResource A.Page.Glass}">
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding PendingApprovals}" Value="0">
                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -136,7 +136,7 @@
             </aero:GlassPanel>
 
             <!-- The members: a row per PC with its disc, when it synced, its share of the month and its energy. -->
-            <aero:GlassPanel Margin="{StaticResource A.Page.Gap}" Padding="20,18,20,12" Visibility="{Binding HasHousehold, Converter={StaticResource VisibleWhen}}">
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Margin="{StaticResource A.Page.Gap}" Padding="20,18,20,12" Visibility="{Binding HasHousehold, Converter={StaticResource VisibleWhen}}">
                 <StackPanel Grid.IsSharedSizeScope="True">
                     <DockPanel Style="{StaticResource A.Page.Head}">
                         <TextBlock DockPanel.Dock="Right" Style="{StaticResource A.Label}" VerticalAlignment="Center" Text="This month, share and kWh" />
@@ -159,7 +159,7 @@
                                             <StackPanel VerticalAlignment="Center">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Style="{StaticResource A.Page.Cell}" FontWeight="Medium" Text="{Binding Name}" />
-                                                    <TextBlock Style="{StaticResource A.Page.Cell}" Foreground="{DynamicResource A.B.Text3}" Margin="8,0,0,0" Text="this PC"
+                                                    <TextBlock Style="{StaticResource A.Page.Cell}" Foreground="{DynamicResource A.B.Text2}" Margin="8,0,0,0" Text="this PC"
                                                                Visibility="{Binding IsThisPc, Converter={StaticResource VisibleWhen}}" />
                                                 </StackPanel>
                                                 <TextBlock Style="{StaticResource A.Text.Small}" Foreground="{DynamicResource A.B.Text2}" Margin="0,2,0,0" Text="{Binding Kind}" />
@@ -188,14 +188,14 @@
             </aero:GlassPanel>
 
             <!-- Manage: this PC's name, and leaving; the confirm step for anything that removes. -->
-            <aero:GlassPanel Margin="{StaticResource A.Page.Gap}" Padding="{StaticResource A.Page.Panel}" Visibility="{Binding HasHousehold, Converter={StaticResource VisibleWhen}}">
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Margin="{StaticResource A.Page.Gap}" Padding="{StaticResource A.Page.Panel}" Visibility="{Binding HasHousehold, Converter={StaticResource VisibleWhen}}">
                 <StackPanel Style="{StaticResource Measure}">
                     <TextBlock Style="{StaticResource A.Page.Title}" Text="Manage this household" />
                     <StackPanel Visibility="{Binding IsConfirming, Converter={StaticResource HiddenWhen}}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Left" Style="{StaticResource A.Label}" Text="This PC's name" Margin="0,0,12,0" VerticalAlignment="Center" />
                             <Button DockPanel.Dock="Right" Style="{StaticResource A.OutlineBtn}" Content="Save" Margin="8,0,0,0" Command="{Binding SaveName}" />
-                            <TextBox Style="{StaticResource A.Field}" Text="{Binding NameInput, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="This PC's name" />
+                            <TextBox Style="{StaticResource A.Field}" MinWidth="220" Text="{Binding NameInput, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="This PC's name" />
                         </DockPanel>
                         <TextBlock Style="{StaticResource Said}" Text="{Binding NameMessage}" Visibility="{Binding NameMessage, Converter={StaticResource VisibleWhenText}}" />
                         <Button Style="{StaticResource A.GhostBtn}" Margin="0,14,0,0" HorizontalAlignment="Left" Content="Leave this household" Command="{Binding AskLeave}" />
@@ -212,7 +212,7 @@
             </aero:GlassPanel>
 
             <!-- N2's sign-in (Plan N tasks A6, A7): whether or not this PC is in a household. -->
-            <aero:GlassPanel Margin="{StaticResource A.Page.Gap}" Padding="{StaticResource A.Page.Panel}" DataContext="{Binding Account}">
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Margin="{StaticResource A.Page.Gap}" Padding="{StaticResource A.Page.Panel}" DataContext="{Binding Account}">
                 <StackPanel Style="{StaticResource Measure}">
                     <TextBlock Style="{StaticResource A.Page.Title}" Text="Sign in" />
                     <StackPanel Visibility="{Binding SignedIn, Converter={StaticResource HiddenWhen}}">
@@ -266,7 +266,7 @@
             </aero:GlassPanel>
 
             <!-- Review finding A6, task 0.8: the account's recovery code no longer works. -->
-            <aero:GlassPanel Margin="{StaticResource A.Page.Gap}" Padding="{StaticResource A.Page.Panel}"
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Margin="{StaticResource A.Page.Gap}" Padding="{StaticResource A.Page.Panel}"
                              Visibility="{Binding RecoveryMissing, Converter={StaticResource VisibleWhen}}">
                 <StackPanel Style="{StaticResource Measure}">
                     <TextBlock Style="{StaticResource A.Page.Prose}" Text="Your account's recovery code no longer works." />

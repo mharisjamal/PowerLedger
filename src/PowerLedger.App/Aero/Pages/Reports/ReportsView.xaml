@@ -10,7 +10,7 @@
                 <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Aero/Styles.Aero.Pages.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <!-- The sheet's panels sit two to a row, 16 apart. -->
-            <Style x:Key="Left" TargetType="aero:GlassPanel" BasedOn="{StaticResource {x:Type aero:GlassPanel}}">
+            <Style x:Key="Left" TargetType="aero:GlassPanel" BasedOn="{StaticResource A.Page.Glass}">
                 <Setter Property="Grid.Column" Value="0" />
                 <Setter Property="Margin" Value="0,16,8,0" />
                 <Setter Property="Padding" Value="{StaticResource A.Page.Panel}" />
@@ -29,7 +29,7 @@
         <StackPanel Margin="{StaticResource A.Page.Margin}">
 
             <!-- The range and the exports: Save as PDF the accent, the rest quiet outlines. -->
-            <aero:GlassPanel Padding="20,18,20,10">
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Padding="20,18,20,10">
                 <StackPanel>
                     <DockPanel Style="{StaticResource A.Page.Head}">
                         <Button DockPanel.Dock="Right" Style="{StaticResource A.AccentBtn}" Content="Save as PDF" Margin="12,0,0,0" Command="{Binding ExportPdf}"

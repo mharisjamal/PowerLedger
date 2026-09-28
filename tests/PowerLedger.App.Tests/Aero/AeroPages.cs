@@ -88,7 +88,7 @@ internal static class AeroPages
                 && right > panel.TranslatePoint(new Point(panel.ActualWidth - panel.Padding.Right, 0), scroller).X + 0.5
                 && element.TemplatedParent is null)
             {
-                problems.Add($"{Describe(element)} runs past its panel");
+                problems.Add($"{Describe(element)} runs past its panel at {right:0.0} of {panel.TranslatePoint(new Point(panel.ActualWidth - panel.Padding.Right, 0), scroller).X:0.0} (panel {panel.ActualWidth:0.0}, padding {panel.Padding})");
             }
             if (element is TextBlock { TextWrapping: TextWrapping.NoWrap, TextTrimming: TextTrimming.None } line && line.Text.Length > 0)
             {

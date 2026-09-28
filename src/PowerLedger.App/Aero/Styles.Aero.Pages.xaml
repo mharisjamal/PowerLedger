@@ -21,6 +21,13 @@
     <sys:Double x:Key="A.Page.Measure">560</sys:Double>
     <sys:Double x:Key="A.Page.Share">120</sys:Double>
 
+    <!-- A page's panels fill their width: a Control centres or left-aligns its content unless told, and a panel of rows and
+         wells should reach its right edge whatever its widest child. -->
+    <Style x:Key="A.Page.Glass" TargetType="aero:GlassPanel" BasedOn="{StaticResource {x:Type aero:GlassPanel}}">
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Padding" Value="{StaticResource A.Page.Panel}" />
+    </Style>
+
     <!-- A panel's head: the icon well, the title, and the panel's own controls docked at the right. -->
     <Style x:Key="A.Page.Head" TargetType="DockPanel">
         <Setter Property="Margin" Value="0,0,0,12" />
@@ -184,7 +191,7 @@
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                             <TextBlock x:Name="Value" Text="{TemplateBinding Value}" HorizontalAlignment="Right" TextAlignment="Right" Typography.NumeralAlignment="Tabular" />
                             <TextBlock x:Name="Note" Text="{TemplateBinding Note}" HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap" MaxWidth="220"
-                                       FontSize="{DynamicResource A.T.Small}" Foreground="{DynamicResource A.B.Text3}" Margin="0,2,0,0" />
+                                       FontSize="{DynamicResource A.T.Small}" Foreground="{DynamicResource A.B.Text2}" Margin="0,2,0,0" />
                         </StackPanel>
                     </Grid>
                     <ControlTemplate.Triggers>

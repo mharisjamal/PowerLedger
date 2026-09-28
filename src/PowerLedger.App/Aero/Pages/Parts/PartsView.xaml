@@ -21,7 +21,7 @@
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
         <StackPanel Margin="{StaticResource A.Page.Margin}">
-            <aero:GlassPanel Padding="20,18,20,12">
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Padding="20,18,20,12">
                 <StackPanel>
                     <DockPanel Style="{StaticResource A.Page.Head}">
                         <aero:SegTrack DockPanel.Dock="Right" Style="{StaticResource A.Page.SegTrack}">
@@ -94,7 +94,7 @@
                                             <ContentControl x:Name="Measured" Style="{StaticResource A.Chip.Measured}" Visibility="Collapsed" />
                                             <ContentControl x:Name="Calibrated" Style="{StaticResource A.Chip.Calibrated}" Visibility="Collapsed" />
                                             <ContentControl x:Name="Estimated" Style="{StaticResource A.Chip.Estimated}" Visibility="Collapsed" />
-                                            <TextBlock x:Name="NoReading" Style="{StaticResource A.Text.Small}" Foreground="{DynamicResource A.B.Text3}" Text="No reading" Visibility="Collapsed" />
+                                            <TextBlock x:Name="NoReading" Style="{StaticResource A.Text.Small}" Foreground="{DynamicResource A.B.Text2}" Text="No reading" Visibility="Collapsed" />
                                         </Grid>
                                         <aero:PartTrend x:Name="Line" Grid.Column="6" Style="{StaticResource A.Page.PartTrend}" Margin="4,0,0,0" HorizontalAlignment="Left"
                                                         Values="{Binding Last7DaysWh}" StrokeBrush="{DynamicResource M.PartRest}"
