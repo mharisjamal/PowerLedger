@@ -111,7 +111,7 @@ internal static class AeroPages
 
     /// <summary>How wide the line's text is written, measured as a TextBlock with its font and its figures (Geist's tabular
     /// figures, which the styles ask for, are narrower than its proportional ones, which FormattedText would measure).</summary>
-    private static double Written(TextBlock line)
+    public static double Written(TextBlock line)
     {
         var natural = new TextBlock
         {

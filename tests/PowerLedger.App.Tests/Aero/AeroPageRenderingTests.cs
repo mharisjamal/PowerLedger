@@ -128,9 +128,11 @@ public class AeroPageRenderingTests
                 dashboard.Parts.Count.ShouldBe(4, theme.ToString());
                 double[][] weeks = [[210, 260, 180, 300, 280, 120, 240], [60, 90, 40, 120, 80, 20, 70], [48, 50, 47, 52, 49, 20, 48], [150, 170, 140, 190, 160, 90, 150]];
                 string?[] models = ["AMD Ryzen 7 7840U with Radeon 780M Graphics", "AMD Radeon 780M", "Built-in display, 14 inches", null];
+                (string? Trend, TrendKind Kind)[] changes = [("0%", TrendKind.Flat), ("100%", TrendKind.Up), ("88%", TrendKind.Down), (null, TrendKind.Text)];
                 var screen = new PartsScreen
                 {
-                    Parts = [.. dashboard.Parts.Select((p, i) => p with { Last7DaysWh = weeks[i], Model = models[i] })],
+                    // And a change against before in each of its words, the widest of them among them.
+                    Parts = [.. dashboard.Parts.Select((p, i) => p with { Last7DaysWh = weeks[i], Model = models[i], Trend = changes[i].Trend, Kind = changes[i].Kind })],
                 };
                 foreach (var (width, size) in new[] { (Narrow, "960"), (Wide, "1440") })
                 {
@@ -145,6 +147,9 @@ public class AeroPageRenderingTests
                         Find<TextBlock>(row, t => t.Text == part.NowW).ShouldNotBeNull($"{part.Name} {at}");
                         Find<TextBlock>(row, t => t.Text == part.Energy).ShouldNotBeNull($"{part.Name} {at}");
                         if (part.Model is { } model) Find<TextBlock>(row, t => t.Text == model).ShouldNotBeNull($"{part.Name} {at}").IsVisible.ShouldBeTrue($"{part.Name} {at}");
+                        // Its change against before reads whole ("About the same" was trimmed to "About the sa..." in the 80 px column).
+                        var change = Find<TextBlock>(row, t => t.Name == "Trend").ShouldNotBeNull($"{part.Name} {at}");
+                        if (change.IsVisible) Written(change).ShouldBeLessThanOrEqualTo(change.ActualWidth + 0.5, $"\"{change.Text}\" for {part.Name} {at}");
                         var line = Find<PartTrend>(row).ShouldNotBeNull($"{part.Name} {at}");
                         line.Values.ShouldBe(part.Last7DaysWh, $"{part.Name} {at}");
                         AutomationProperties.GetName(line).ShouldBe($"{part.Name}, last 7 days", $"{part.Name} {at}");

@@ -9,10 +9,11 @@
                 <!-- Aero's styles and the page styles, the one instance the window merges (SharedDictionary). -->
                 <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Aero/Styles.Aero.Pages.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            <!-- The table's columns, one set for the heads and every row: the part and its model take what is left. -->
+            <!-- The table's columns, one set for the heads and every row: the part and its model take what is left. Energy's is
+                 wide enough for its change against before in full, "About the same" the widest. -->
             <GridLength x:Key="Swatch">22</GridLength>
             <GridLength x:Key="Now">64</GridLength>
-            <GridLength x:Key="Energy">80</GridLength>
+            <GridLength x:Key="Energy">96</GridLength>
             <GridLength x:Key="Share">72</GridLength>
             <GridLength x:Key="Quality">104</GridLength>
             <GridLength x:Key="Trend">100</GridLength>
