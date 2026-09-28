@@ -1,0 +1,206 @@
+<UserControl x:Class="PowerLedger.App.Aero.HistoryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="clr-namespace:PowerLedger.App"
+             xmlns:aero="clr-namespace:PowerLedger.App.Aero">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Aero's styles and the page styles, the one instance the window merges (SharedDictionary): a view the
+                     window's DataTemplate builds resolves its StaticResources before it joins the window. -->
+                <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Aero/Styles.Aero.Pages.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- The by-part table's columns, one set for the heads and every row. -->
+            <GridLength x:Key="Swatch">26</GridLength>
+            <GridLength x:Key="Energy">96</GridLength>
+            <GridLength x:Key="Percent">60</GridLength>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel Margin="{StaticResource A.Page.Margin}">
+
+            <!-- The range and its chart, as the demo's History panel: the pills slide a white pill between them, Save CSV the
+                 range's hour rows. -->
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Padding="{StaticResource A.Page.Panel}">
+                <StackPanel>
+                    <DockPanel Style="{StaticResource A.Page.Head}">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource A.RoundGlassBtn}" Width="38" Height="38" Margin="10,0,0,0"
+                                Command="{Binding ExportCsv}" AutomationProperties.Name="Save as CSV" ToolTip="Save this range's hour rows as a CSV file">
+                            <aero:Icon Data="{StaticResource A.I.Download}" Size="15" />
+                        </Button>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,4,0">
+                            <RadioButton Style="{StaticResource A.TextToggle}" Content="Watts" Margin="0,0,12,0" ToolTip="Average watts while the machine was on"
+                                         IsChecked="{Binding Unit, Converter={StaticResource Is}, ConverterParameter={x:Static app:ChartUnit.Watts}}" />
+                            <RadioButton Style="{StaticResource A.TextToggle}" Content="Wh" ToolTip="Energy in each bucket"
+                                         IsChecked="{Binding Unit, Converter={StaticResource Is}, ConverterParameter={x:Static app:ChartUnit.WattHours}}" />
+                        </StackPanel>
+                        <Border Style="{StaticResource A.Page.IconWell}">
+                            <aero:Icon Data="{StaticResource A.I.History}" Size="15" />
+                        </Border>
+                        <TextBlock Style="{StaticResource A.PanelTitle}" Text="History" />
+                    </DockPanel>
+
+                    <!-- The rolling ranges on one track and the calendar months on another, so a narrow page wraps between them. -->
+                    <WrapPanel DataContext="{Binding Range}">
+                        <aero:SegTrack Style="{StaticResource A.Page.SegTrack}" Margin="0,0,8,8">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Style="{StaticResource A.SegItem}" GroupName="HistoryRange" Content="Last hour"
+                                             IsChecked="{Binding Choice, Converter={StaticResource Is}, ConverterParameter={x:Static app:RangeChoice.LastHour}}" />
+                                <RadioButton Style="{StaticResource A.SegItem}" GroupName="HistoryRange" Content="Today"
+                                             IsChecked="{Binding Choice, Converter={StaticResource Is}, ConverterParameter={x:Static app:RangeChoice.Today}}" />
+                                <RadioButton Style="{StaticResource A.SegItem}" GroupName="HistoryRange" Content="7 days"
+                                             IsChecked="{Binding Choice, Converter={StaticResource Is}, ConverterParameter={x:Static app:RangeChoice.SevenDays}}" />
+                                <RadioButton Style="{StaticResource A.SegItem}" GroupName="HistoryRange" Content="30 days"
+                                             IsChecked="{Binding Choice, Converter={StaticResource Is}, ConverterParameter={x:Static app:RangeChoice.ThirtyDays}}" />
+                                <RadioButton Style="{StaticResource A.SegItem}" GroupName="HistoryRange" Content="Last year"
+                                             IsChecked="{Binding Choice, Converter={StaticResource Is}, ConverterParameter={x:Static app:RangeChoice.LastYear}}" />
+                            </StackPanel>
+                        </aero:SegTrack>
+                        <aero:SegTrack Style="{StaticResource A.Page.SegTrack}" Margin="0,0,8,8">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Style="{StaticResource A.SegItem}" GroupName="HistoryRange" Content="This month"
+                                             IsChecked="{Binding Choice, Converter={StaticResource Is}, ConverterParameter={x:Static app:RangeChoice.ThisMonth}}" />
+                                <RadioButton Style="{StaticResource A.SegItem}" GroupName="HistoryRange" Content="Last month"
+                                             IsChecked="{Binding Choice, Converter={StaticResource Is}, ConverterParameter={x:Static app:RangeChoice.LastMonth}}" />
+                            </StackPanel>
+                        </aero:SegTrack>
+                    </WrapPanel>
+
+                    <DockPanel Margin="0,4,0,0">
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource A.Page.Note}" Margin="12,0,0,0" Text="{Binding Saved}"
+                                   Visibility="{Binding Saved, Converter={StaticResource VisibleWhenText}}" />
+                        <TextBlock Style="{StaticResource A.Label}" Text="{Binding Heading}" TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource A.Page.Note}" Text="{Binding Message}" Visibility="{Binding HasMessage, Converter={StaticResource VisibleWhen}}" />
+
+                    <!-- The chart in the demo's chart well: darker than the glass, so the parts read against it. -->
+                    <Border Margin="0,12,0,0" Padding="12,12,12,8" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.ChartWell}"
+                            BorderBrush="{DynamicResource A.B.ChartWellTop}" BorderThickness="0,1,0,0">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,6">
+                                <TextBlock DockPanel.Dock="Right" Style="{StaticResource A.Label}" Text="{Binding UnitLabel}" VerticalAlignment="Center" />
+                                <WrapPanel VerticalAlignment="Center">
+                                    <WrapPanel.Resources>
+                                        <Style TargetType="Ellipse" BasedOn="{StaticResource A.Page.Dot}" />
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource A.Label}">
+                                            <Setter Property="Margin" Value="7,0,18,0" />
+                                        </Style>
+                                    </WrapPanel.Resources>
+                                    <Ellipse Fill="{DynamicResource M.PartCpu}" /><TextBlock Text="CPU" />
+                                    <Ellipse Fill="{DynamicResource M.PartGpu}" /><TextBlock Text="GPU" />
+                                    <Ellipse Fill="{DynamicResource M.PartDisplay}" /><TextBlock Text="Display" />
+                                    <Ellipse Fill="{DynamicResource M.PartRest}" /><TextBlock Text="Rest" />
+                                </WrapPanel>
+                            </DockPanel>
+                            <app:StackedChart Style="{StaticResource A.Page.StackedChart}" Height="300" Model="{Binding Chart}"
+                                              AutomationProperties.Name="{Binding Heading}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </aero:GlassPanel>
+
+            <!-- Each part's energy and share over the range, with a search over the rows. -->
+            <aero:GlassPanel Style="{StaticResource A.Page.Glass}" Margin="{StaticResource A.Page.Gap}" Padding="20,18,20,12">
+                <StackPanel>
+                    <DockPanel Style="{StaticResource A.Page.Head}">
+                        <!-- A well, not glass: glass on glass is left to the demo's own controls. -->
+                        <Border DockPanel.Dock="Right" Width="220" Height="38" Padding="14,0,10,0" Style="{StaticResource A.Well}"
+                                CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <aero:Icon Data="{StaticResource A.I.Search}" Size="15" Opacity="0.7" />
+                                <TextBlock Grid.Column="1" Margin="10,0,0,0" Text="Search parts" Foreground="{DynamicResource A.B.Text2}"
+                                           FontSize="{DynamicResource A.T.Control}" VerticalAlignment="Center" IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Text, ElementName=Search}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBox x:Name="Search" Grid.Column="1" Margin="8,0,0,0" Style="{StaticResource A.SearchBox}" FontSize="{DynamicResource A.T.Control}"
+                                         Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Search parts" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource A.Page.IconWell}">
+                            <aero:Icon Data="{StaticResource A.I.Chip}" Size="15" />
+                        </Border>
+                        <TextBlock Style="{StaticResource A.PanelTitle}" Text="By part" />
+                    </DockPanel>
+
+                    <Border Style="{StaticResource A.Table.Header}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="{StaticResource Swatch}" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="{StaticResource Energy}" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="{StaticResource Percent}" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="1" Style="{StaticResource A.Page.Head.Cell}" Margin="10,0,14,0" Text="Part" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource A.Page.Head.Cell}" Text="kWh" HorizontalAlignment="Right" />
+                            <TextBlock Grid.Column="3" Style="{StaticResource A.Page.Head.Cell}" Text="Share" Width="{StaticResource A.Page.Share}" Margin="14,0,0,0" />
+                        </Grid>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding FoundParts}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type app:PartRow}">
+                                <Border Style="{StaticResource A.Table.Row}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{StaticResource Swatch}" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="{StaticResource Energy}" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="{StaticResource Percent}" />
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse x:Name="Swatch" Style="{StaticResource A.Page.Dot}" Fill="{DynamicResource M.PartRest}" HorizontalAlignment="Right" />
+                                        <TextBlock x:Name="Label" Grid.Column="1" Style="{StaticResource A.Page.Cell}" Margin="10,0,14,0" Text="{Binding Name}" />
+                                        <TextBlock x:Name="Energy" Grid.Column="2" Style="{StaticResource A.Page.Cell.Number}" Text="{Binding Energy}" />
+                                        <app:ShareBar x:Name="Share" Grid.Column="3" Style="{StaticResource A.Page.ShareBar}" Width="{StaticResource A.Page.Share}" Margin="14,0,0,0"
+                                                      VerticalAlignment="Center" Value="{Binding Fraction}" AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}" />
+                                        <TextBlock Grid.Column="4" Style="{StaticResource A.Page.Cell.Number}" Foreground="{DynamicResource A.B.Text2}" Text="{Binding Share}" />
+                                    </Grid>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding Part}" Value="Cpu">
+                                        <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartCpu}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartCpu}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Part}" Value="Gpu">
+                                        <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartGpu}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartGpu}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Part}" Value="Display">
+                                        <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartDisplay}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartDisplay}" />
+                                    </DataTrigger>
+                                    <!-- The total: no dot and no bar, in the medium weight. -->
+                                    <DataTrigger Binding="{Binding Part}" Value="{x:Null}">
+                                        <Setter TargetName="Swatch" Property="Visibility" Value="Hidden" />
+                                        <Setter TargetName="Share" Property="Visibility" Value="Hidden" />
+                                        <Setter TargetName="Label" Property="FontWeight" Value="Medium" />
+                                        <Setter TargetName="Energy" Property="FontWeight" Value="Medium" />
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Style="{StaticResource A.Page.Cell.Muted}" Margin="14,9" Text="{Binding SearchMessage}"
+                               Visibility="{Binding SearchMessage, Converter={StaticResource VisibleWhenText}}" />
+                    <TextBlock Style="{StaticResource A.Page.Note}" Margin="0,12,0,0" Visibility="{Binding HasNegativeRest, Converter={StaticResource VisibleWhen}}"
+                               Text="The rest of the system fell below zero for part of this range: in measured mode the parts sometimes report more than the battery drains. The chart and the table count it as zero." />
+                    <TextBlock Style="{StaticResource A.Page.Note}" Margin="0,12,0,0" Text="{Binding Footnote}" />
+                </StackPanel>
+            </aero:GlassPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

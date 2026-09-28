@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using Microsoft.Extensions.Time.Testing;
 using PowerLedger.Contracts;
 using Shouldly;
@@ -170,5 +171,89 @@ public class BreakdownViewModelTests
         model.Hide();
         _clock.Advance(BreakdownViewModel.RefreshEvery * 3);
         _history.Reads.Count.ShouldBe(2);
+    }
+
+    // Aero's History page (Plan S, P1): a search over the table's rows and Save CSV of the range shown.
+
+    [Fact]
+    public void Search_finds_rows_by_name_whatever_the_case_and_leaves_the_table_whole()
+    {
+        var model = Model();
+        model.Show();
+        model.FoundParts.Select(p => p.Name).ShouldBe(model.Parts.Select(p => p.Name));   // nothing typed: every row
+        model.SearchMessage.ShouldBeNull();
+
+        model.Search = "  gP ";
+
+        model.FoundParts.Select(p => p.Name).ShouldBe(new[] { "GPU" });
+        model.Parts.Count.ShouldBe(5);                                // Classic's and Midnight's table is untouched
+        model.SearchMessage.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_search_that_finds_nothing_says_so_and_a_new_read_keeps_it()
+    {
+        var model = Model();
+        model.Show();
+        model.Search = "fan";
+
+        model.FoundParts.ShouldBeEmpty();
+        model.SearchMessage.ShouldBe("No part here matches \"fan\".");
+
+        _clock.Advance(BreakdownViewModel.RefreshEvery);
+        model.FoundParts.ShouldBeEmpty();
+        model.Search = "";
+        model.FoundParts.Count.ShouldBe(5);
+        model.SearchMessage.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Save_CSV_writes_the_hour_rows_of_the_range_shown()
+    {
+        using var saver = new FakeSaver();
+        var model = new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, saver);
+        model.Show();
+        model.Range.Choice = RangeChoice.SevenDays;
+
+        model.ExportCsv.Execute(null);
+
+        _history.Exports.Single().Grain.ShouldBe(ExportGrain.Hour);
+        _history.Exports.Single().Range.Title.ShouldBe("Last 7 days");
+        saver.Suggested.ShouldBe("PowerLedger-2026-09-02-to-2026-09-08-1h.csv");
+        File.ReadAllLines(saver.Chosen).ShouldBe(new[] { "header", "row" });
+        model.Saved.ShouldBe("Saved PowerLedger-2026-09-02-to-2026-09-08-1h.csv");
+    }
+
+    [Fact]
+    public void Save_CSV_says_why_it_couldnt_and_does_nothing_when_cancelled_or_before_a_read()
+    {
+        using var saver = new FakeSaver();
+        var model = new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, saver);
+        model.ExportCsv.Execute(null);                                // nothing read yet
+        saver.Suggested.ShouldBeNull();
+
+        model.Show();
+        saver.Cancel = true;
+        model.ExportCsv.Execute(null);
+        model.Saved.ShouldBeNull();
+
+        saver.Cancel = false;
+        _history.Lines = null;
+        model.ExportCsv.Execute(null);
+        model.Saved.ShouldBe("Couldn't save: history can't be read right now.");
+        File.Exists(saver.Chosen).ShouldBeFalse();
+        File.Exists(saver.Chosen + ".partial").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Without_a_saver_Save_CSV_does_nothing()
+    {
+        var model = Model();
+        model.Show();
+
+        model.ExportCsv.CanExecute(null).ShouldBeFalse();
+        model.ExportCsv.Execute(null);
+
+        _history.Exports.ShouldBeEmpty();
     }
 }
