@@ -41,9 +41,13 @@ internal partial class AeroWindow : Window, IShellWindow
     /// <param name="theme">Which theme is on, for the views that ask.</param>
     /// <param name="updates">For the update card, and the blocking panel while an update is required (Plan Q §3).</param>
     /// <param name="feedback">Opens the Send feedback window.</param>
-    internal AeroWindow(ShellViewModel shell, LookSwitcher looks, ThemeManager theme, Updater updates, Action feedback)
+    /// <param name="intro">The Aero intro video (Plan S intro), played before the banner on the first open after the move
+    /// and from Settings; none leaves the banner as it was.</param>
+    internal AeroWindow(ShellViewModel shell, LookSwitcher looks, ThemeManager theme, Updater updates, Action feedback, AeroIntro? intro = null)
     {
         _shell = shell;
+        _intro = intro;
+        _introDue = intro is { Due: true };
         Switcher = looks;
         Themes = theme;
         Updates = updates;
@@ -83,9 +87,11 @@ internal partial class AeroWindow : Window, IShellWindow
             if (shell.Dashboard is { } dashboard) dashboard.Detailed = false;
             _problemTimer.Stop();
             _toastTimer?.Stop();
+            StopIntroVideo();
             _backdrop.Dispose();
             _glass.Dispose();
         };
+        if (intro is not null) intro.Finished += OnIntroVideoFinished;
         _problemTimer.Tick += (_, _) => HideProblem();
         IsVisibleChanged += (_, _) => OnShown();
         Loaded += (_, _) =>
@@ -93,6 +99,8 @@ internal partial class AeroWindow : Window, IShellWindow
             Fit();
             MovePill(animate: false);
             PlayIntro();
+            // Once laid out, ahead of anything idle: the dialog opens over the stage as its panes rise.
+            Dispatcher.BeginInvoke(AutoPlayIntroVideo, DispatcherPriority.Loaded);
         };
         SizeChanged += (_, _) => Fit();
         StateChanged += (_, _) => ShowState();
@@ -211,6 +219,7 @@ internal partial class AeroWindow : Window, IShellWindow
     private void OnShellChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ShellViewModel.Page)) ShowOwnPage();
+        if (e.PropertyName == nameof(ShellViewModel.IsSetup)) AutoPlayIntroVideo();   // the wizard done, the intro's turn
         if (e.PropertyName is nameof(ShellViewModel.Page) or nameof(ShellViewModel.IsSetup))
             Dispatcher.BeginInvoke(() => MovePill(animate: true), DispatcherPriority.Loaded);
     }
@@ -393,10 +402,11 @@ internal partial class AeroWindow : Window, IShellWindow
 
     // ---------------------------------------------------------------- the new look, and switching looks
 
-    /// <summary>The banner shows until the look has been introduced; its line names the look Switch back returns to.</summary>
+    /// <summary>The banner shows until the look has been introduced, after the intro video when that is due (Plan S
+    /// intro); its line names the look Switch back returns to.</summary>
     private void ShowIntro()
     {
-        LookIntro.Visibility = _shell.Settings.LookIntroduced ? Visibility.Collapsed : Visibility.Visible;
+        LookIntro.Visibility = _shell.Settings.LookIntroduced || _introDue || IntroPlaying ? Visibility.Collapsed : Visibility.Visible;
         var back = AeroLooks.SwitchBackTo(_shell.Settings.LookBeforeAero);
         LookIntroLine.Text = $"Liquid glass, with Insights and a watts overlay. Prefer {back}? Switch back any time here, or in Settings.";
         SwitchBackButton.ToolTip = $"Back to the {back} look";

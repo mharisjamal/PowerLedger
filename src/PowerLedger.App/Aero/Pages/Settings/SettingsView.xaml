@@ -616,6 +616,9 @@
                         <RadioButton Style="{StaticResource A.OptItem}" Content="Classic" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Classic}}" />
                         <RadioButton Style="{StaticResource A.OptItem}" Content="Midnight" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Midnight}}" />
                         <RadioButton Style="{StaticResource A.OptItem}" Content="Aero" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Aero}}" />
+                        <!-- Plan S intro: the intro video again, any time, out of this button; it counts against nothing. -->
+                        <Button x:Name="WatchIntroButton" Style="{StaticResource A.OutlineBtn}" Content="Watch the Aero intro" Height="30" Margin="12,0,0,0"
+                                Click="WatchIntroClick" AutomationProperties.Name="Watch the Aero intro" />
                     </StackPanel>
                     <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Start with Windows" />

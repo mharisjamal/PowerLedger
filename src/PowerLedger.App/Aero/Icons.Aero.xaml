@@ -15,6 +15,9 @@
     </GeometryGroup>
     <PathGeometry x:Key="A.I.History" po:Freeze="True" Figures="M3,12 a9,9 0 1 0 3,-6.7 M3,4 v5 h5 M12,7 v5 l3,2" />
     <PathGeometry x:Key="A.I.Replay" po:Freeze="True" Figures="M3,12 a9,9 0 1 0 3,-6.7 M3,4 v5 h5" />
+    <!-- The intro's speaker (Plan S intro): sounding, and crossed out while muted. -->
+    <PathGeometry x:Key="A.I.Speaker" po:Freeze="True" Figures="M4,9 h4 l5,-4 v14 l-5,-4 h-4 Z M16.5,8.5 a5,5 0 0 1 0,7 M19,6 a8.5,8.5 0 0 1 0,12" />
+    <PathGeometry x:Key="A.I.Muted" po:Freeze="True" Figures="M4,9 h4 l5,-4 v14 l-5,-4 h-4 Z M16,9 l6,6 M22,9 l-6,6" />
     <GeometryGroup x:Key="A.I.Chip" po:Freeze="True">
         <RectangleGeometry Rect="6,6,12,12" RadiusX="2" RadiusY="2" />
         <PathGeometry Figures="M9,2 v4 M15,2 v4 M9,18 v4 M15,18 v4 M2,9 h4 M2,15 h4 M18,9 h4 M18,15 h4" />

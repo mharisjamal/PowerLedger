@@ -281,7 +281,8 @@ public partial class App : Application
         IShellWindow window = look switch
         {
             Look.Midnight => new MidnightWindow(_shell!, _looks!, _theme!, _updates!, OpenFeedbackWindow),
-            Look.Aero => new AeroWindow(_shell!, _looks!, _theme!, _updates!, OpenFeedbackWindow),
+            Look.Aero => new AeroWindow(_shell!, _looks!, _theme!, _updates!, OpenFeedbackWindow,
+                new Aero.AeroIntro(Aero.IntroMedia.Installed, Aero.MediaIntroPlayer.Open, _shell!.Settings)),
             _ => new MainWindow { DataContext = _shell },
         };
         window.Window.Closing += (_, args) =>

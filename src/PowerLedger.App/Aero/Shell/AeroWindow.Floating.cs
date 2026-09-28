@@ -22,6 +22,7 @@ internal partial class AeroWindow
 {
     private GlassPanel? _modal;
     private FrameworkElement? _modalFrom;
+    private Action? _modalClosed;
     private GlassPanel? _toast;
     private DispatcherTimer? _toastTimer;
 
@@ -201,16 +202,17 @@ internal partial class AeroWindow
     /// Opens a dialog out of <paramref name="trigger"/> (design §1: "modals that open from their trigger"): it grows on
     /// the spring from the trigger's middle to the window's, over a scrim that fades in and takes the pointer; under
     /// reduced motion it only fades. The keyboard cycles in it until it closes. What it covers keeps its colours, so the
-    /// frost shows the page as it is rather than greyed out.
+    /// frost shows the page as it is rather than greyed out. <paramref name="closed"/> hears it close, however it closes
+    /// (a button, Esc, the scrim, or another dialog in its place); <paramref name="style"/> names its A.Modal style.
     /// </summary>
-    internal void OpenModal(FrameworkElement? trigger, FrameworkElement body)
+    internal GlassPanel OpenModal(FrameworkElement? trigger, FrameworkElement body, Action? closed = null, string style = "A.Modal")
     {
         CloseModal(restoreFocus: false);
         OpenMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false);
         Scrim.Visibility = Visibility.Visible;
         AeroMotion.Fade(Scrim, OpacityProperty, 1, AeroMotion.Scrim, AeroMotion.Glide, from: 0);
         var modal = new GlassPanel { Content = body };
-        modal.SetResourceReference(StyleProperty, "A.Modal");
+        modal.SetResourceReference(StyleProperty, style);
         KeyboardNavigation.SetTabNavigation(modal, KeyboardNavigationMode.Cycle);
         ModalHost.Children.Add(modal);
         var scale = new ScaleTransform();
@@ -229,7 +231,12 @@ internal partial class AeroWindow
         Frost(modal);
         _modal = modal;
         _modalFrom = trigger;
-        modal.Dispatcher.BeginInvoke(() => modal.MoveFocus(new TraversalRequest(FocusNavigationDirection.First)), DispatcherPriority.Input);
+        _modalClosed = closed;
+        modal.Dispatcher.BeginInvoke(() =>
+        {
+            if (_modal == modal && !modal.IsKeyboardFocusWithin) modal.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+        }, DispatcherPriority.Input);
+        return modal;
     }
 
     internal void CloseModal(bool restoreFocus = true)
@@ -240,6 +247,9 @@ internal partial class AeroWindow
         Scrim.Visibility = Visibility.Collapsed;
         if (restoreFocus) _modalFrom?.Focus();
         _modalFrom = null;
+        var closed = _modalClosed;
+        _modalClosed = null;
+        closed?.Invoke();
     }
 
     private void ScrimDown(object sender, MouseButtonEventArgs e) => CloseModal();

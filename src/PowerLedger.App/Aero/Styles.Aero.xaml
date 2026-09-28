@@ -738,6 +738,22 @@
         <Setter Property="KeyboardNavigation.TabNavigation" Value="Cycle" />
         <Setter Property="AutomationProperties.Name" Value="Dialog" />
     </Style>
+    <!-- The Aero intro video's dialog (Plan S intro): the same modal glass, wide enough for a 16:9 picture; the window
+         narrows it to fit a small window. -->
+    <Style x:Key="A.Modal.Intro" TargetType="aero:GlassPanel" BasedOn="{StaticResource A.Modal}">
+        <Setter Property="Width" Value="720" />
+        <Setter Property="Padding" Value="20,20,20,20" />
+        <Setter Property="AutomationProperties.Name" Value="The Aero intro" />
+    </Style>
+    <!-- Play and Replay over the intro's picture: a larger round glass button, low in the frame so the poster's own title
+         stays clear. -->
+    <Style x:Key="A.Intro.PlayBtn" TargetType="ButtonBase" BasedOn="{StaticResource A.RoundGlassBtn}">
+        <Setter Property="Width" Value="56" />
+        <Setter Property="Height" Value="56" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Bottom" />
+        <Setter Property="Margin" Value="0,0,0,24" />
+    </Style>
     <!-- A toast: a small glass capsule at the foot of the window, read out politely. -->
     <Style x:Key="A.Toast" TargetType="aero:GlassPanel" BasedOn="{StaticResource {x:Type aero:GlassPanel}}">
         <Setter Property="CornerRadius" Value="{DynamicResource A.R.Toast}" />
