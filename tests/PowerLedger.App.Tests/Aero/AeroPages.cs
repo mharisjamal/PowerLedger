@@ -38,7 +38,7 @@ internal static class AeroPages
         Glow(0.28, 0.35, 0.45, dark ? Color.FromArgb(0x8C, 0x40, 0x6E, 0xFF) : Color.FromArgb(0x70, 0x9D, 0xB8, 0xFF));
         Glow(0.72, 0.62, 0.4, dark ? Color.FromArgb(0x6B, 0x96, 0x50, 0xFF) : Color.FromArgb(0x60, 0xC9, 0xB5, 0xFF));
         Glow(0.62, 0.12, 0.3, dark ? Color.FromArgb(0x47, 0x00, 0xC8, 0xFF) : Color.FromArgb(0x50, 0x9E, 0xE8, 0xFF));
-        return new DrawingBrush(group) { Stretch = Stretch.Fill };
+        return new DrawingBrush(group) { Stretch = Stretch.Fill, ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(0, 0, 1, 1) };
     }
 
     /// <summary>A page laid out at <paramref name="width"/> and its whole length over the backdrop, as the page host shows it.</summary>
@@ -125,14 +125,29 @@ internal static class AeroPages
 
     internal sealed record PageHost(Border Host, Window Window, Theme Theme) : IDisposable
     {
-        /// <summary>The whole page to <c>aero-<paramref name="name"/>-{theme}.png</c>, then what it cuts off, of which there is nothing.</summary>
+        /// <summary>The whole page to <c>aero-<paramref name="name"/>-{theme}.png</c>, at its full length however tall the
+        /// screen lets the window be, then what it cuts off, of which there is nothing.</summary>
         public void Render(string name)
         {
             Host.UpdateLayout();
+            var content = (FrameworkElement)Find<ScrollViewer>(Host)!.Content;
             var width = (int)Math.Ceiling(Host.ActualWidth);
-            var height = (int)Math.Ceiling(Host.ActualHeight);
+            var tall = content.ActualHeight + content.Margin.Top + content.Margin.Bottom;
+            var height = (int)Math.Ceiling(Host.Padding.Top + tall);
+            var page = new DrawingVisual();
+            using (var context = page.RenderOpen())
+            {
+                context.DrawRectangle(Host.Background, null, new Rect(0, 0, width, height));
+                var brush = new VisualBrush(content)
+                {
+                    Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top,
+                    ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(-content.Margin.Left, -content.Margin.Top, width, tall),
+                    ViewportUnits = BrushMappingMode.Absolute, Viewport = new Rect(0, Host.Padding.Top, width, tall),
+                };
+                context.DrawRectangle(brush, null, new Rect(0, Host.Padding.Top, width, tall));
+            }
             var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(Host);
+            bitmap.Render(page);
             var png = new PngBitmapEncoder();
             png.Frames.Add(BitmapFrame.Create(bitmap));
             Directory.CreateDirectory(Folder);

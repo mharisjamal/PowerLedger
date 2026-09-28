@@ -145,9 +145,9 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="{StaticResource Percent}" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="1" Style="{StaticResource A.Page.Head.Cell}" Margin="0,0,14,8" Text="Part" />
+                            <TextBlock Grid.Column="1" Style="{StaticResource A.Page.Head.Cell}" Margin="10,0,14,0" Text="Part" />
                             <TextBlock Grid.Column="2" Style="{StaticResource A.Page.Head.Cell}" Text="kWh" HorizontalAlignment="Right" />
-                            <TextBlock Grid.Column="3" Style="{StaticResource A.Page.Head.Cell}" Text="Share" Width="{StaticResource A.Page.Share}" />
+                            <TextBlock Grid.Column="3" Style="{StaticResource A.Page.Head.Cell}" Text="Share" Width="{StaticResource A.Page.Share}" Margin="14,0,0,0" />
                         </Grid>
                     </Border>
                     <ItemsControl ItemsSource="{Binding FoundParts}" Focusable="False">
@@ -163,9 +163,9 @@
                                             <ColumnDefinition Width="{StaticResource Percent}" />
                                         </Grid.ColumnDefinitions>
                                         <Ellipse x:Name="Swatch" Style="{StaticResource A.Page.Dot}" Fill="{StaticResource A.Part.Rest}" HorizontalAlignment="Right" />
-                                        <TextBlock x:Name="Label" Grid.Column="1" Style="{StaticResource A.Page.Cell}" Margin="10,9,14,9" Text="{Binding Name}" />
+                                        <TextBlock x:Name="Label" Grid.Column="1" Style="{StaticResource A.Page.Cell}" Margin="10,0,14,0" Text="{Binding Name}" />
                                         <TextBlock x:Name="Energy" Grid.Column="2" Style="{StaticResource A.Page.Cell.Number}" Text="{Binding Energy}" />
-                                        <app:ShareBar x:Name="Share" Grid.Column="3" Style="{StaticResource A.Page.ShareBar}" Width="{StaticResource A.Page.Share}" Margin="14,0"
+                                        <app:ShareBar x:Name="Share" Grid.Column="3" Style="{StaticResource A.Page.ShareBar}" Width="{StaticResource A.Page.Share}" Margin="14,0,0,0"
                                                       VerticalAlignment="Center" Value="{Binding Fraction}" AutomationProperties.Name="{Binding Name, StringFormat={}{0} share}" />
                                         <TextBlock Grid.Column="4" Style="{StaticResource A.Page.Cell.Number}" Foreground="{DynamicResource A.B.Text2}" Text="{Binding Share}" />
                                     </Grid>
@@ -194,7 +194,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Style="{StaticResource A.Page.Cell.Muted}" Text="{Binding SearchMessage}"
+                    <TextBlock Style="{StaticResource A.Page.Cell.Muted}" Margin="14,9" Text="{Binding SearchMessage}"
                                Visibility="{Binding SearchMessage, Converter={StaticResource VisibleWhenText}}" />
                     <TextBlock Style="{StaticResource A.Page.Note}" Margin="0,12,0,0" Visibility="{Binding HasNegativeRest, Converter={StaticResource VisibleWhen}}"
                                Text="The rest of the system fell below zero for part of this range: in measured mode the parts sometimes report more than the battery drains. The chart and the table count it as zero." />

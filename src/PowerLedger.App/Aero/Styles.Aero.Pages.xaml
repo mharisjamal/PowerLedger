@@ -70,16 +70,15 @@
         </Setter>
     </Style>
 
-    <!-- A table's column heads and cells, as the demo's History table: small muted heads, rows that light on hover. -->
+    <!-- A table's column heads and cells, inside A.Table.Header and A.Table.Row, which give the 14 px sides and the
+         demo's small muted heads and rows that light on hover; a cell keeps 14 from the next. -->
     <Style x:Key="A.Page.Head.Cell" TargetType="TextBlock">
         <Setter Property="FontSize" Value="{DynamicResource A.T.Small}" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text3}" />
-        <Setter Property="Margin" Value="14,0,14,8" />
         <Setter Property="VerticalAlignment" Value="Bottom" />
     </Style>
     <Style x:Key="A.Page.Cell" TargetType="TextBlock">
         <Setter Property="FontSize" Value="{DynamicResource A.T.Control}" />
-        <Setter Property="Margin" Value="14,9" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
     </Style>
