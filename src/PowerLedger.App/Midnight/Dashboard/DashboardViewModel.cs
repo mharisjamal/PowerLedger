@@ -399,7 +399,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             var date = more.Month.AddDays(d - 1);
             var found = more.Daily?.Days.FirstOrDefault(row => row.Day == date);
             return new DailyDay(date, Math.Max(0, found?.EnergyKwh ?? 0),
-                found?.Currency is { } currency ? Money.Format(found.Cost, currency, _culture) : "no tariff set");
+                found?.Currency is { } currency ? Money.Format(found.Cost, currency, _culture) : null);
         }).ToList();
         var before = more.Month.AddMonths(-1);
         var previous = Enumerable.Range(1, DateTime.DaysInMonth(before.Year, before.Month))

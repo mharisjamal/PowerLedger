@@ -23,8 +23,13 @@ internal sealed record HistoryRow(string Period, string Energy, string Cost, str
     public string SourceName => Source.ToString();
 }
 
-/// <summary>One day of "Energy each day": its energy and its cost as the tip says it ("$0.27"), or "no tariff set".</summary>
-internal sealed record DailyDay(DateOnly Day, double Kwh, string Cost);
+/// <summary>One day of "Energy each day": its energy and its cost as the tip says it ("$0.27"), null without a tariff
+/// that day or without history, when the tip gives the energy instead.</summary>
+internal sealed record DailyDay(DateOnly Day, double Kwh, string? Cost)
+{
+    /// <summary>What the chart's tip says of the day: "$0.27 on the 17th", or "0.84 kWh on the 17th" without a cost.</summary>
+    public string Tip(CultureInfo culture) => $"{Cost ?? Format.Kwh(Kwh, culture) + " kWh"} on the {Aero.DailyScale.Ordinal(Day.Day)}";
+}
 
 /// <summary>
 /// What Aero's Dashboard shows beyond Midnight's (Aero look design §1, Plan S D3), from one pass of reads while <see
