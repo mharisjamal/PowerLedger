@@ -87,10 +87,10 @@
                                             <Setter Property="Margin" Value="7,0,18,0" />
                                         </Style>
                                     </WrapPanel.Resources>
-                                    <Ellipse Fill="{StaticResource A.Part.Cpu}" /><TextBlock Text="CPU" />
-                                    <Ellipse Fill="{StaticResource A.Part.Gpu}" /><TextBlock Text="GPU" />
-                                    <Ellipse Fill="{StaticResource A.Part.Display}" /><TextBlock Text="Display" />
-                                    <Ellipse Fill="{StaticResource A.Part.Rest}" /><TextBlock Text="Rest" />
+                                    <Ellipse Fill="{DynamicResource M.PartCpu}" /><TextBlock Text="CPU" />
+                                    <Ellipse Fill="{DynamicResource M.PartGpu}" /><TextBlock Text="GPU" />
+                                    <Ellipse Fill="{DynamicResource M.PartDisplay}" /><TextBlock Text="Display" />
+                                    <Ellipse Fill="{DynamicResource M.PartRest}" /><TextBlock Text="Rest" />
                                 </WrapPanel>
                             </DockPanel>
                             <app:StackedChart Style="{StaticResource A.Page.StackedChart}" Height="300" Model="{Binding Chart}"
@@ -162,7 +162,7 @@
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="{StaticResource Percent}" />
                                         </Grid.ColumnDefinitions>
-                                        <Ellipse x:Name="Swatch" Style="{StaticResource A.Page.Dot}" Fill="{StaticResource A.Part.Rest}" HorizontalAlignment="Right" />
+                                        <Ellipse x:Name="Swatch" Style="{StaticResource A.Page.Dot}" Fill="{DynamicResource M.PartRest}" HorizontalAlignment="Right" />
                                         <TextBlock x:Name="Label" Grid.Column="1" Style="{StaticResource A.Page.Cell}" Margin="10,0,14,0" Text="{Binding Name}" />
                                         <TextBlock x:Name="Energy" Grid.Column="2" Style="{StaticResource A.Page.Cell.Number}" Text="{Binding Energy}" />
                                         <app:ShareBar x:Name="Share" Grid.Column="3" Style="{StaticResource A.Page.ShareBar}" Width="{StaticResource A.Page.Share}" Margin="14,0,0,0"
@@ -172,16 +172,16 @@
                                 </Border>
                                 <DataTemplate.Triggers>
                                     <DataTrigger Binding="{Binding Part}" Value="Cpu">
-                                        <Setter TargetName="Swatch" Property="Fill" Value="{StaticResource A.Part.Cpu}" />
-                                        <Setter TargetName="Share" Property="FillBrush" Value="{StaticResource A.Part.Cpu}" />
+                                        <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartCpu}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartCpu}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding Part}" Value="Gpu">
-                                        <Setter TargetName="Swatch" Property="Fill" Value="{StaticResource A.Part.Gpu}" />
-                                        <Setter TargetName="Share" Property="FillBrush" Value="{StaticResource A.Part.Gpu}" />
+                                        <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartGpu}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartGpu}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding Part}" Value="Display">
-                                        <Setter TargetName="Swatch" Property="Fill" Value="{StaticResource A.Part.Display}" />
-                                        <Setter TargetName="Share" Property="FillBrush" Value="{StaticResource A.Part.Display}" />
+                                        <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartDisplay}" />
+                                        <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartDisplay}" />
                                     </DataTrigger>
                                     <!-- The total: no dot and no bar, in the medium weight. -->
                                     <DataTrigger Binding="{Binding Part}" Value="{x:Null}">

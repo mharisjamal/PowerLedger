@@ -114,6 +114,67 @@ public class AeroPageRenderingTests
         Sizes(10_000, "history-failed");
     }
 
+    [Fact]
+    public void Parts_shows_each_parts_model_watts_energy_share_quality_and_a_seven_day_line()
+    {
+        OnUi(() =>
+        {
+            foreach (var theme in Themes)
+            {
+                // The Dashboard's own parts, as D fills them: a model under each and a week of days.
+                var dashboard = MidnightFixtures.DashboardScreen(MidnightFixtures.NowScreen());
+                dashboard.Show();
+                dashboard.Parts.Count.ShouldBe(4, theme.ToString());
+                double[][] weeks = [[210, 260, 180, 300, 280, 120, 240], [60, 90, 40, 120, 80, 20, 70], [48, 50, 47, 52, 49, 20, 48], [150, 170, 140, 190, 160, 90, 150]];
+                string?[] models = ["AMD Ryzen 7 7840U with Radeon 780M Graphics", "AMD Radeon 780M", "Built-in display, 14 inches", null];
+                var screen = new PartsScreen
+                {
+                    Parts = [.. dashboard.Parts.Select((p, i) => p with { Last7DaysWh = weeks[i], Model = models[i] })],
+                };
+                foreach (var (width, size) in new[] { (Narrow, "960"), (Wide, "1440") })
+                {
+                    var at = $"{size} on {theme}";
+                    var view = new PartsView { DataContext = screen };
+                    using var page = Page(view, width, theme);
+                    var rows = Find<ItemsControl>(view, items => items.ItemsSource == screen.Parts).ShouldNotBeNull(at);
+                    foreach (var part in screen.Parts)
+                    {
+                        var row = rows.ItemContainerGenerator.ContainerFromItem(part).ShouldBeAssignableTo<DependencyObject>(at)!;
+                        Find<TextBlock>(row, t => t.Text == part.Name).ShouldNotBeNull($"{part.Name} {at}");
+                        Find<TextBlock>(row, t => t.Text == part.NowW).ShouldNotBeNull($"{part.Name} {at}");
+                        Find<TextBlock>(row, t => t.Text == part.Energy).ShouldNotBeNull($"{part.Name} {at}");
+                        if (part.Model is { } model) Find<TextBlock>(row, t => t.Text == model).ShouldNotBeNull($"{part.Name} {at}").IsVisible.ShouldBeTrue($"{part.Name} {at}");
+                        var line = Find<PartTrend>(row).ShouldNotBeNull($"{part.Name} {at}");
+                        line.Values.ShouldBe(part.Last7DaysWh, $"{part.Name} {at}");
+                        AutomationProperties.GetName(line).ShouldBe($"{part.Name}, last 7 days", $"{part.Name} {at}");
+                        var chips = MidnightHost.AllOf<ContentControl>(row).Where(c => c.IsVisible).ToList();
+                        if (part.Quality is { } quality) chips.Single().Content.ShouldBe(quality.ToString(), $"{part.Name} {at}");
+                        else Find<TextBlock>(row, t => t.Text == "No reading").ShouldNotBeNull($"{part.Name} {at}").IsVisible.ShouldBeTrue($"{part.Name} {at}");
+                    }
+                    MidnightHost.AllOf<RadioButton>(view).Single(p => p.IsChecked == true).Content.ShouldBe("7 days", at);
+                    page.Render($"parts-{size}");
+                }
+
+                // Over the real Dashboard, before D fills the week: no line, and the page still whole.
+                var real = new PartsView { DataContext = dashboard };
+                using (var page = Page(real, Narrow, theme))
+                {
+                    MidnightHost.AllOf<PartTrend>(real).Count().ShouldBe(4, theme.ToString());
+                    page.Render("parts-dashboard");
+                }
+            }
+        });
+        Sizes(20_000, "parts-960", "parts-1440", "parts-dashboard");
+    }
+
+    /// <summary>What the Parts page binds on the Dashboard, with parts a test chooses.</summary>
+    private sealed class PartsScreen
+    {
+        public IReadOnlyList<DashboardPart> Parts { get; init; } = [];
+
+        public PartsRange PartsRange { get; set; } = PartsRange.SevenDays;
+    }
+
     /// <summary>The pill is where <paramref name="chosen"/> is, and as wide.</summary>
     private static void Behind(SegTrack track, RadioButton chosen, string at)
     {
