@@ -154,4 +154,53 @@
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text3}" />
         <Setter Property="Margin" Value="0,0,0,8" />
     </Style>
+
+    <!-- A panel's title with room under it, for the Report's and Household's smaller panels. -->
+    <Style x:Key="A.Page.Title" TargetType="TextBlock" BasedOn="{StaticResource A.PanelTitle}">
+        <Setter Property="Margin" Value="0,0,0,12" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- A well of figures, as the demo's kv-wrap: a faint top light, the rows inside. -->
+    <Style x:Key="A.Page.Figures" TargetType="Border" BasedOn="{StaticResource A.Well}">
+        <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellTop}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+        <Setter Property="Padding" Value="0,2" />
+    </Style>
+
+    <Style TargetType="aero:KeyValue">
+        <Setter Property="Foreground" Value="{DynamicResource A.B.Text}" />
+        <Setter Property="FontSize" Value="{DynamicResource A.T.Body}" />
+        <Setter Property="Padding" Value="14,11" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="aero:KeyValue">
+                    <Grid Margin="{TemplateBinding Padding}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{TemplateBinding Key}" Foreground="{DynamicResource A.B.Text2}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock x:Name="Value" Text="{TemplateBinding Value}" HorizontalAlignment="Right" TextAlignment="Right" Typography.NumeralAlignment="Tabular" />
+                            <TextBlock x:Name="Note" Text="{TemplateBinding Note}" HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap" MaxWidth="220"
+                                       FontSize="{DynamicResource A.T.Small}" Foreground="{DynamicResource A.B.Text3}" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Note" Value="">
+                            <Setter TargetName="Note" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="Note" Value="{x:Null}">
+                            <Setter TargetName="Note" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="IsHero" Value="True">
+                            <Setter TargetName="Value" Property="FontSize" Value="{DynamicResource A.T.Mid}" />
+                            <Setter TargetName="Value" Property="FontWeight" Value="Medium" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>

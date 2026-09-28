@@ -167,6 +167,68 @@ public class AeroPageRenderingTests
         Sizes(20_000, "parts-960", "parts-1440", "parts-dashboard");
     }
 
+    [Fact]
+    public void Reports_shows_the_range_the_exports_and_the_sheet_of_figures_and_its_png_draws_the_sheet()
+    {
+        OnUi(() =>
+        {
+            foreach (var theme in Themes)
+            {
+                foreach (var (width, size) in new[] { (Narrow, "960"), (Wide, "1440") })
+                {
+                    var at = $"{size} on {theme}";
+                    using var saver = new FakeSaver();
+                    var model = MidnightFixtures.ReportScreen(saver);
+                    model.Show();
+                    var view = new ReportsView { DataContext = model };
+                    using var page = Page(view, width, theme);
+                    MidnightHost.AllOf<Button>(view).Where(b => b.TemplatedParent is null).Select(b => b.Content)
+                        .ShouldBe(["Save as PDF", "PNG", "CSV · 1 h", "CSV · 1 min", "CSV · raw"], ignoreOrder: true, at);
+                    var ranges = MidnightHost.AllOf<RadioButton>(view).ToList();
+                    ranges.Select(p => p.Content).ShouldBe(["Today", "7 days", "30 days", "This month", "Last month"], at);
+                    ranges.Single(p => p.IsChecked == true).Content.ShouldBe("This month", at);
+                    Find<CheckBox>(view, c => Equals(c.Content, "Include my household")).ShouldNotBeNull(at).Visibility.ShouldBe(Visibility.Collapsed, at);
+                    foreach (var title in new[] { "Bill", "Time", "By part", "Everyday equivalents", "Idle waste", "Data quality", "Energy each day" })
+                    {
+                        Find<TextBlock>(view, t => t.Text == title).ShouldNotBeNull($"{title} {at}").IsVisible.ShouldBeTrue($"{title} {at}");
+                    }
+                    Find<TextBlock>(view, t => t.Text == model.Data.Title).ShouldNotBeNull(at);
+                    var energy = MidnightHost.AllOf<KeyValue>(view).Single(k => k.Key == "Energy used");
+                    energy.Value.ShouldBe(model.Data.Energy, at);
+                    new KeyValueAutomation(energy).Name.ShouldBe($"Energy used: {model.Data.Energy}, kWh", at);
+                    MidnightHost.AllOf<KeyValue>(view).Count(k => k.IsVisible).ShouldBeGreaterThan(10, at);
+                    page.Render($"reports-{size}");
+
+                    // PNG draws the sheet, the element named Sheet, into the file the saver names.
+                    view.FindName("Sheet").ShouldBeOfType<Grid>(at);
+                    Find<Button>(view, b => Equals(b.Content, "PNG"))!.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    new FileInfo(saver.Chosen).Length.ShouldBeGreaterThan(30_000, at);
+                    File.Copy(saver.Chosen, Path.Combine(Folder, $"aero-reports-picture-{size}-{theme}.png"), overwrite: true);
+                }
+
+                // The service away: the message, and the figures as words, not zeros.
+                var failed = new ReportViewModel(new FakeLink(), new FakeRangeHistory { Answer = _ => null }, new FakeHouseholdHistory(), new FakeSleep(), new FakeSaver(),
+                    _ => [], UiThreads.Inline, new FakeTimeProvider(MidnightFixtures.Now), TimeZoneInfo.Utc, MidnightFixtures.English, 0.38);
+                failed.Show();
+                var none = new ReportsView { DataContext = failed };
+                using (var page = Page(none, Narrow, theme))
+                {
+                    Find<TextBlock>(none, t => t.Text == "History can't be read right now. It comes back when the service is running.").ShouldNotBeNull(theme.ToString())
+                        .IsVisible.ShouldBeTrue(theme.ToString());
+                    MidnightHost.AllOf<KeyValue>(none).Single(k => k.Key == "Energy used").Value.ShouldBe(Format.Missing, theme.ToString());
+                    page.Render("reports-failed");
+                }
+            }
+        });
+        Sizes(30_000, "reports-960", "reports-1440", "reports-failed");
+    }
+
+    /// <summary>What a screen reader hears from a figure.</summary>
+    private sealed class KeyValueAutomation(KeyValue figure)
+    {
+        public string Name { get; } = System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(figure).GetName();
+    }
+
     /// <summary>What the Parts page binds on the Dashboard, with parts a test chooses.</summary>
     private sealed class PartsScreen
     {
