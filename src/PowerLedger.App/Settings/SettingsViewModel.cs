@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using PowerLedger.App.Aero;
 using PowerLedger.Contracts;
 using PowerLedger.Core;
 
@@ -48,7 +49,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public SettingsViewModel(
         IServiceLink link, IMachineHistory history, IUiSettings ui, UiThreads threads, TimeProvider clock, TimeZoneInfo zone,
         CultureInfo culture, string regionCurrency, Updater? updates = null, Action? openSent = null, Action<Uri>? openBrowser = null,
-        Action<string>? copyToClipboard = null)
+        Action<string>? copyToClipboard = null, Func<bool>? windowsReducesMotion = null)
     {
         _link = link;
         _history = history;
@@ -71,6 +72,9 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         RunSetup = new RelayCommand(() => SetupRequested?.Invoke());
         _link.ConnectionChanged += OnConnectionChanged;
         Updates = updates;
+        GlassSection = new GlassSection(this, windowsReducesMotion ?? (() => !System.Windows.SystemParameters.ClientAreaAnimation));
+        OverlaySection = new OverlaySection(this);
+        ToggleOverlay = new RelayCommand(() => Overlay = Overlay with { Enabled = !Overlay.Enabled });
     }
 
     /// <summary>"Run setup again": the shell shows the wizard.</summary>
@@ -149,6 +153,16 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             OnPropertyChanged();
         }
     }
+
+    /// <summary>Aero's Settings, Glass section (Aero look design §3): each of <see cref="Glass"/>'s fields for its own
+    /// control, each change saved through <see cref="Glass"/>.</summary>
+    public GlassSection GlassSection { get; }
+
+    /// <summary>Aero's Settings, Overlay section (Aero look design §5), each change saved through <see cref="Overlay"/>.</summary>
+    public OverlaySection OverlaySection { get; }
+
+    /// <summary>The watts overlay on, or off again, keeping its place (Aero look design §5): Aero's top-bar button.</summary>
+    public ICommand ToggleOverlay { get; }
 
     /// <summary>The one-time banner about the new look is retired (Midnight look design §1): by its buttons or any switch.</summary>
     public bool LookIntroduced => _ui.Current.LookIntroduced;
