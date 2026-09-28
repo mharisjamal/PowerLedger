@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using PowerLedger.App.Aero;
 using Shouldly;
 
@@ -17,6 +18,7 @@ public class AeroSettingsViewTests
 {
     private static (Window Window, Aero.SettingsView View) Page(SettingsViewModel settings, Theme theme, double width)
     {
+        settings.Show();
         var view = new Aero.SettingsView { DataContext = settings };
         var window = AeroHost.Dressed(new Window
         {
@@ -25,8 +27,32 @@ public class AeroSettingsViewTests
         }, theme);
         window.SetResourceReference(Control.BackgroundProperty, "Brush.Ground");
         window.Show();
+        UiHarness.Pump(TimeSpan.FromMilliseconds(600));   // a switch whose value arrives after its template springs there first
         window.UpdateLayout();
         return (window, view);
+    }
+
+    /// <summary>The whole page, however tall: a window is held to the screen's height, so the page's panel is drawn onto
+    /// the window's ground at its own height rather than the window captured.</summary>
+    private static DrawingVisual WholePage(Window window, Aero.SettingsView view, int width)
+    {
+        var panel = (FrameworkElement)((ScrollViewer)view.Content).Content;
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen())
+        {
+            drawing.DrawRectangle(window.Background, null, new Rect(0, 0, width, WholeHeight(view)));
+            var left = (width - panel.ActualWidth) / 2;
+            var offset = VisualTreeHelper.GetOffset(panel);   // a visual brush draws the panel where it sits in its parent
+            drawing.DrawRectangle(new VisualBrush(panel) { Stretch = Stretch.Fill, ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(offset.X, offset.Y, panel.ActualWidth, panel.ActualHeight) }, null,
+                new Rect(left, panel.Margin.Top, panel.ActualWidth, panel.ActualHeight));
+        }
+        return visual;
+    }
+
+    private static int WholeHeight(Aero.SettingsView view)
+    {
+        var panel = (FrameworkElement)((ScrollViewer)view.Content).Content;
+        return (int)Math.Ceiling(panel.ActualHeight + panel.Margin.Top + panel.Margin.Bottom);
     }
 
     private static SettingsViewModel Screen(GlassSettings glass, OverlaySettings? overlay = null)
@@ -71,8 +97,7 @@ public class AeroSettingsViewTests
                 }
 
                 Directory.CreateDirectory(UiHarness.Folder);
-                var height = (int)Math.Ceiling(((FrameworkElement)((ScrollViewer)view.Content).Content).ActualHeight);
-                UiHarness.Render(window, width, Math.Min(height, 3400), $"aero-settings-{themeName.ToLowerInvariant()}-{styleName.ToLowerInvariant()}-{width}.png");
+                UiHarness.Render(WholePage(window, view, width), width, WholeHeight(view), $"aero-settings-{themeName.ToLowerInvariant()}-{styleName.ToLowerInvariant()}-{width}.png");
             }
             finally
             {
@@ -98,6 +123,29 @@ public class AeroSettingsViewTests
                 settings.Glass.Style.ShouldBe(GlassStyle.Dark);
                 settings.Overlay.Enabled.ShouldBeTrue();
                 ui.Changes.ShouldBe(["glass Dark", "overlay on TopRight"]);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
+    /// <summary>The switches show what is saved: tilt and parallax on by default, the others as chosen.</summary>
+    [Fact]
+    public void The_switches_show_the_saved_glass()
+        => UiHarness.OnUi(() =>
+        {
+            var settings = Screen(GlassSettings.Default with { ReduceMotion = false, IncreaseContrast = true });
+            var (window, view) = Page(settings, Theme.Dark, 1440);
+            try
+            {
+                GlassSwitch Named(string name) => MidnightHost.AllOf<GlassSwitch>(view).Single(s => System.Windows.Automation.AutomationProperties.GetName(s) == name);
+
+                Named("Tilt and parallax").IsChecked.ShouldBe(true);
+                Named("Tilt and parallax").KnobOffset.ShouldBe(GlassSwitch.Travel);
+                Named("Increase contrast").KnobOffset.ShouldBe(GlassSwitch.Travel);
+                Named("Reduce transparency").KnobOffset.ShouldBe(0);
+                Named("Reduce motion").IsChecked.ShouldBe(false);
             }
             finally
             {

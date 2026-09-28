@@ -21,7 +21,7 @@
             <Thickness x:Key="Pane.Padding">24,20,24,22</Thickness>
             <sys:Double x:Key="Label.Width">200</sys:Double>
             <sys:Double x:Key="Slider.Width">240</sys:Double>
-            <sys:Double x:Key="Number.Width">72</sys:Double>
+            <sys:Double x:Key="Number.Width">84</sys:Double>
 
             <!-- Each section a glass pane, as the demo's panels. -->
             <Style x:Key="Pane" TargetType="aero:GlassPanel" BasedOn="{StaticResource {x:Type aero:GlassPanel}}">
@@ -246,23 +246,23 @@
                                 <StackPanel Orientation="Horizontal">
                                     <RadioButton Style="{StaticResource Swatch}" ToolTip="Lime" AutomationProperties.Name="Lime accent"
                                                  IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Lime}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{Binding Source={x:Static aero:GlassSection.Accents}, Path=[0].Colour}" /></RadioButton.Background>
+                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Lime}" /></RadioButton.Background>
                                     </RadioButton>
                                     <RadioButton Style="{StaticResource Swatch}" ToolTip="Ice" AutomationProperties.Name="Ice accent"
                                                  IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Ice}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{Binding Source={x:Static aero:GlassSection.Accents}, Path=[1].Colour}" /></RadioButton.Background>
+                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Ice}" /></RadioButton.Background>
                                     </RadioButton>
                                     <RadioButton Style="{StaticResource Swatch}" ToolTip="Indigo" AutomationProperties.Name="Indigo accent"
                                                  IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Indigo}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{Binding Source={x:Static aero:GlassSection.Accents}, Path=[2].Colour}" /></RadioButton.Background>
+                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Indigo}" /></RadioButton.Background>
                                     </RadioButton>
                                     <RadioButton Style="{StaticResource Swatch}" ToolTip="Amber" AutomationProperties.Name="Amber accent"
                                                  IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Amber}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{Binding Source={x:Static aero:GlassSection.Accents}, Path=[3].Colour}" /></RadioButton.Background>
+                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Amber}" /></RadioButton.Background>
                                     </RadioButton>
                                     <RadioButton Style="{StaticResource Swatch}" ToolTip="Rose" AutomationProperties.Name="Rose accent"
                                                  IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Rose}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{Binding Source={x:Static aero:GlassSection.Accents}, Path=[4].Colour}" /></RadioButton.Background>
+                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Rose}" /></RadioButton.Background>
                                     </RadioButton>
                                 </StackPanel>
                             </StackPanel>
