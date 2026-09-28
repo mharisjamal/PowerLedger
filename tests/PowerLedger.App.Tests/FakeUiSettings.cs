@@ -34,6 +34,13 @@ internal sealed class FakeUiSettings : IUiSettings
         return null;
     }
 
+    public string? SeeAeroIntro()
+    {
+        Current = Current with { AeroIntroSeen = true };
+        Changes.Add("aero intro seen");
+        return null;
+    }
+
     public string? UseCo2(double kgPerKwh)
     {
         if (!(kgPerKwh >= 0 && kgPerKwh < UiPreferences.MaxCo2KgPerKwh)) return "refused";

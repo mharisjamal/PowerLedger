@@ -50,6 +50,12 @@ internal sealed record UiPreferences
     [JsonConverter(typeof(LookJsonConverter))]
     public Look? LookBeforeAero { get; init; }
 
+    /// <summary>The Aero intro video has autoplayed once (Plan S intro), on the first Aero open after the move, before the
+    /// banner; it never autoplays again, and Settings' Watch the Aero intro plays it without counting. False for a ui.json
+    /// from before it existed, and for anything in it but true, which reads as unseen rather than failing the file.</summary>
+    [JsonConverter(typeof(TrueOnlyJsonConverter))]
+    public bool AeroIntroSeen { get; init; }
+
     /// <summary>Kilograms of CO₂ per kWh used for every CO₂ figure; spec §9's default is the world average, which a
     /// ui.json without the field keeps. It has a setter rather than init for that: the JSON source generator gives an
     /// init-only property missing from the file its type's default, 0, where a setter is left alone, and
@@ -155,6 +161,22 @@ internal sealed class LookJsonConverter : JsonConverter<Look>
             : UiPreferences.Default.Look;
 
     public override void Write(Utf8JsonWriter writer, Look value, JsonSerializerOptions options) => writer.WriteStringValue(value.ToString());
+}
+
+/// <summary>True for JSON's true, and false for anything else (false, null, a string, a number, an object), so a flag a
+/// newer or damaged file wrote oddly still leaves the file loading whole.</summary>
+internal sealed class TrueOnlyJsonConverter : JsonConverter<bool>
+{
+    public override bool HandleNull => true;
+
+    public override bool Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = reader.TokenType == JsonTokenType.True;
+        reader.Skip();   // an object or an array is passed over whole
+        return value;
+    }
+
+    public override void Write(Utf8JsonWriter writer, bool value, JsonSerializerOptions options) => writer.WriteBooleanValue(value);
 }
 
 /// <summary>An energy period by its name, and anything else (a name this version doesn't know, a number, null) as the

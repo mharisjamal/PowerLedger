@@ -434,6 +434,29 @@ public sealed class UiPreferencesTests : IDisposable
         store.Load().LookIntroduced.ShouldBeTrue();
     }
 
+    /// <summary>Plan S intro: the Aero intro video autoplays once. A ui.json from before the field, or with anything but
+    /// true for it (null, a string, a number), reads as not seen and keeps the rest of the file; seen survives a save and
+    /// a load.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData(""", "AeroIntroSeen": null""")]
+    [InlineData(""", "AeroIntroSeen": "yes" """)]
+    [InlineData(""", "AeroIntroSeen": 1""")]
+    public void The_aero_intro_is_unseen_until_saved_seen_and_a_file_without_it_still_loads(string field)
+    {
+        UiPreferences.Default.AeroIntroSeen.ShouldBeFalse();
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, $$"""{ "Theme": "Dark", "FirstRunDone": true{{field}} }""");
+
+        var read = new UiPreferencesStore(File).Load();
+
+        read.AeroIntroSeen.ShouldBeFalse();
+        read.Theme.ShouldBe(ThemeChoice.Dark);
+        read.FirstRunDone.ShouldBeTrue();
+        new UiPreferencesStore(File).Save(read with { AeroIntroSeen = true });
+        new UiPreferencesStore(File).Load().AeroIntroSeen.ShouldBeTrue();
+    }
+
     [Fact]
     public void The_update_bookkeeping_survives_a_save_and_a_load()
     {
