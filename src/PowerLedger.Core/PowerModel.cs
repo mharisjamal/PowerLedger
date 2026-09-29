@@ -7,7 +7,8 @@ namespace PowerLedger.Core;
 /// The total comes from the first of these that applies: a laptop's battery discharge rate while it runs on its battery;
 /// the output of a UPS the user says powers this PC, alone or with its monitors; what a power supply says it draws from the
 /// wall, which is a total already, or else its DC output over the efficiency of whatever feeds this machine, a desktop's
-/// supply read at the load it is carrying or a laptop's adapter; and otherwise the model, which sums the parts with a
+/// supply read at the load it is carrying or a laptop's adapter; the processor's own meter of the whole platform
+/// (Snapdragon X's system rail), over the same efficiency on AC and as it is on battery; and otherwise the model, which sums the parts with a
 /// learned (laptop) or default "rest of system" baseline and divides by that same efficiency. Each of the measured totals
 /// counts only above zero, since a machine that runs draws something. A UPS or power supply total keeps the model's
 /// parts, and the rest is what the total leaves of them. The external monitors draw what the <see cref="IMonitorDraw"/>
@@ -151,8 +152,32 @@ public sealed class PowerModel
             var total = drawn + monitors.OwnPlug;
             return Build(s, total, Quality.Measured, WithRest(parts with { PsuLoss = drawn - output }, total), userIdle, TotalSource.PowerSupply);
         }
-        return Build(s, beforePsu + psuLoss + monitors.OwnPlug, quality, parts, userIdle, TotalSource.Model);
+        if (Finite(s.PlatformW) is { } platform && platform > 0)
+        {
+            // The processor's own meter of the whole platform (Snapdragon X's system rail) measures the machine's DC draw,
+            // the display and anything running off the PC included, behind the charger, so battery charging is not in it.
+            // On AC the wall figure is that over the adapter's efficiency, as a power supply's DC output is; on battery,
+            // with no rate to read (a battery reporting relative units), it is the draw itself.
+            var drawn = platform / efficiency;
+            var railTotal = AtLeastTheDischarge(s, isLaptop, drawn + monitors.OwnPlug, monitors.OwnPlug);
+            return Build(s, railTotal, Quality.Measured, WithRest(parts with { PsuLoss = drawn - platform }, railTotal), userIdle, TotalSource.PlatformMeter);
+        }
+        var modelled = beforePsu + psuLoss + monitors.OwnPlug;
+        var floored = AtLeastTheDischarge(s, isLaptop, modelled, monitors.OwnPlug);
+        return Build(s, floored, quality, floored > modelled ? WithRest(parts, floored) : parts, userIdle, TotalSource.Model);
     }
+
+    /// <summary>
+    /// A laptop on AC whose battery is discharging draws more than its adapter delivers, so it draws at least the discharge:
+    /// the total is raised to it where it came out lower. It stays a floor and not a measurement, since what the adapter
+    /// delivers beside it is unknown, so the quality and source are left as they were.
+    /// The battery rule, the same everywhere: energy the battery gives the machine is counted when it is given, on battery
+    /// as the total and on AC as this floor; energy that goes into the battery while it charges is never counted, since the
+    /// PC has not used it yet and counting it as well would count the same energy twice. So a charge rate is never added to
+    /// any total, and a figure that might hold one has it taken off (see the Sensors' SampleDraft).
+    /// </summary>
+    private static double AtLeastTheDischarge(Sample s, bool isLaptop, double total, double ownPlug)
+        => isLaptop && s.DischargeOnAcW is { } discharge ? Math.Max(total, discharge + ownPlug) : total;
 
     /// <summary>A reading is never non-finite: a bad profile or option value yields a zeroed, suspect reading rather than poisoning storage.</summary>
     private static Reading Build(Sample s, double total, Quality quality, Components parts, bool userIdle, TotalSource source)

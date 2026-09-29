@@ -24,14 +24,13 @@ public readonly record struct NvmlDevice(string Name, uint DeviceId, ulong Memor
 public sealed class Nvml : IDisposable
 {
     private const int Success = 0;
-    private const int Uninitialized = 1;
-    private const int DriverNotLoaded = 9;
-    private const int GpuIsLost = 15;
     private const int NameLength = 96;          // NVML_DEVICE_NAME_V2_BUFFER_SIZE; older drivers use 64
     private const uint NvidiaVendor = 0x10DE;
 
     private readonly List<IntPtr> _handles = [];
+    private readonly List<NvmlPower> _power = [];
     private readonly List<NvmlDevice> _devices = [];
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private bool _initialised;
 
     /// <summary>The library is looked for where the driver put it, not only in System32 (see <see cref="NvmlLibrary"/>).</summary>
@@ -68,6 +67,7 @@ public sealed class Nvml : IDisposable
                 // A GPU NVML will not open, as one the driver denies access to, is left to Windows' load counters.
                 if (nvmlDeviceGetHandleByIndex_v2(index, out var device) != Success) continue;
                 _handles.Add(device);
+                _power.Add(new NvmlPower(new NativeDevice(device), () => _clock.Elapsed));
                 _devices.Add(new NvmlDevice(Name(device), DeviceId(device), Memory(device)));
             }
             if (_handles.Count == 0)
@@ -96,31 +96,28 @@ public sealed class Nvml : IDisposable
     /// <summary>The GPUs that are open, in NVML's order; <see cref="Read"/> takes an index into it.</summary>
     public IReadOnlyList<NvmlDevice> Devices => _devices;
 
-    /// <summary>One GPU's power and load. "Not supported" leaves either null: many GeForce and Fermi cards measure no
-    /// power, and Fermi GeForce cards give no utilisation either.</summary>
+    /// <summary>One GPU's power and load: the energy its counter gained since the last read where it keeps one (Volta and
+    /// newer), else its power figure (see <see cref="NvmlPower"/>). "Not supported" leaves either null: many GeForce and
+    /// Fermi cards measure no power, and Fermi GeForce cards give no utilisation either. Throws when the GPU or its driver
+    /// has gone, so the sampler backs off.</summary>
     public GpuReading Read(int index)
     {
-        if (!Available || index < 0 || index >= _handles.Count) return new GpuReading(false, null, null);
-
-        var device = _handles[index];
-        var powerResult = nvmlDeviceGetPowerUsage(device, out var milliwatts);
-        var loadResult = nvmlDeviceGetUtilizationRates(device, out var utilisation);
-        ThrowIfBroken(powerResult);
-        ThrowIfBroken(loadResult);
-
-        // "Not supported" means a card with no power sensor, and other errors a card that declined this once: both are null.
-        double? watts = powerResult == Success ? milliwatts / 1000.0 : null;
-        double? load = loadResult == Success ? utilisation.Gpu / 100.0 : null;
-        return new GpuReading(true, watts, load);
+        if (!Available || index < 0 || index >= _power.Count) return new GpuReading(false, null, null);
+        return _power[index].Read();
     }
 
-    /// <summary>A lost GPU, an unloaded driver or a torn-down library is a broken source, not a missing reading:
-    /// throwing lets the sampler back off and show it in status instead of charging a phantom load forever.</summary>
-    private static void ThrowIfBroken(int result)
+    /// <summary>The driver's own calls for one open GPU.</summary>
+    private sealed class NativeDevice(IntPtr handle) : INvmlDevice
     {
-        if (result is Uninitialized or DriverNotLoaded or GpuIsLost)
+        public int TotalEnergy(out ulong millijoules) => nvmlDeviceGetTotalEnergyConsumption(handle, out millijoules);
+
+        public int PowerUsage(out uint milliwatts) => nvmlDeviceGetPowerUsage(handle, out milliwatts);
+
+        public int Utilisation(out uint gpuPercent)
         {
-            throw new InvalidOperationException($"NVML error {result}: the GPU or its driver is no longer available");
+            var result = nvmlDeviceGetUtilizationRates(handle, out var utilisation);
+            gpuPercent = utilisation.Gpu;
+            return result;
         }
     }
 
@@ -228,5 +225,6 @@ public sealed class Nvml : IDisposable
     [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetPciInfo(IntPtr device, out PciInfo pci);
     [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetMemoryInfo(IntPtr device, out MemoryInfo memory);
     [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetPowerUsage(IntPtr device, out uint milliwatts);
+    [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetTotalEnergyConsumption(IntPtr device, out ulong millijoules);
     [DllImport("nvml.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] private static extern int nvmlDeviceGetUtilizationRates(IntPtr device, out Utilisation utilisation);
 }

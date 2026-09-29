@@ -6,7 +6,9 @@ namespace PowerLedger.Core;
 /// <param name="DeltaSeconds">Seconds since the previous tick, from a monotonic clock.</param>
 /// <param name="IGpuW">Informational only. On Intel it is already inside CpuPackageW; never add it to the CPU figure.</param>
 /// <param name="CpuLoad">0..1.</param>
-/// <param name="BatteryRateW">Discharge watts (positive) while on battery; null when unknown.</param>
+/// <param name="BatteryRateW">Discharge watts (positive) whenever the machine's own battery is discharging: on battery, and
+/// on AC under a load the adapter can't carry, when it is a floor for the total. Null while charging or idle, when unknown,
+/// and on a battery that reports relative units rather than milliwatts. Charging is never in any field of a sample.</param>
 /// <param name="Brightness">0..1 for the internal panel; null when unavailable.</param>
 /// <param name="Suspect">Set by the validator when a value was replaced or looks implausible.</param>
 /// <param name="DGpuScope">What <paramref name="DGpuW"/> covers when a vendor library measured it.</param>
@@ -24,6 +26,8 @@ namespace PowerLedger.Core;
 /// <param name="Gpus">Each discrete graphics card on its own, when the sensors read them card by card; the model then adds
 /// them up and <paramref name="DGpuW"/>, <paramref name="DGpuLoad"/>, <paramref name="DGpuPresent"/> and
 /// <paramref name="DGpuScope"/> are their <see cref="GpuCard.Totals"/>. Null for a sample that has only those four.</param>
+/// <param name="PlatformW">The whole platform's DC watts from an energy-meter rail that meters it (Snapdragon X's
+/// <c>system</c>), display included and battery charging excluded; null where there is no such rail.</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -48,9 +52,14 @@ public sealed record Sample(
     double? PsuOutputW = null,
     string? PsuName = null,
     double? PsuWallW = null,
-    IReadOnlyList<GpuCard>? Gpus = null)
+    IReadOnlyList<GpuCard>? Gpus = null,
+    double? PlatformW = null)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>
     public bool HasDischargeRate => OnBattery && BatteryRateW is { } rate && double.IsFinite(rate) && rate > 0;
+
+    /// <summary>The battery's discharge while on AC, when the adapter can't carry the load alone; null otherwise. The
+    /// machine draws at least this, so it is a floor for the total, never the total: the adapter delivers the rest.</summary>
+    public double? DischargeOnAcW => !OnBattery && BatteryRateW is { } rate && double.IsFinite(rate) && rate > 0 ? rate : null;
 }

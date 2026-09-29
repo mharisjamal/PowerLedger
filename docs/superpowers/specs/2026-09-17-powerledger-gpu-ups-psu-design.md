@@ -72,6 +72,24 @@ and the App says "chip measured, rest of card estimated".
 - **Quality.** A UPS total (ActivePower or load of rated watts) and a power supply total count as Measured; the load of rated
   VA counts as Estimated.
 
+## 7. Measure more, estimate less (2026-09-30)
+
+The research "measure more" (2026-09-30) ranked driver-free sources; part A adds three.
+
+- **Snapdragon X energy rails.** The Energy Meter's `soc`, `cpu_cluster_N`, `gpu`, `npu`, `memory` and `system` are
+  classified through one nesting table (`QualcommRails`): `soc` is the CPU package (never added to its clusters, graphics
+  or NPU), `gpu` the integrated graphics, and `system` the whole platform, display included. A laptop's total from `system`
+  is Measured (source `PlatformMeter`, "platform meter" on the Now screen), over the adapter's efficiency on AC. The names
+  come from npu-watt; the nesting, and whether `system` sits behind the charger, are **unverified on real hardware** and are
+  corrected in that table alone once a device dump says otherwise.
+- **NVIDIA total energy.** Volta and newer cards are read from `nvmlDeviceGetTotalEnergyConsumption` deltas, exact over each
+  tick; the power figure stays for the first read, a counter reset or wrap, a gap over 10 s, a declined read and older cards.
+  Quality is unchanged: an NVML figure was already a measured part.
+- **Battery.** A battery with `BATTERY_CAPACITY_RELATIVE` gives no watts. On AC a discharge is a floor under the total
+  (quality unchanged, since it bounds the total rather than measuring it). Charging is never counted as consumption.
+- **Sharing.** The shared report's `totalSource` column is 0 to 4 on the server (server/src/minutes.ts), so a minute whose
+  source is `PlatformMeter` (5) is left out of the report until the server accepts it.
+
 ## Honest limits
 
 - None of AMD, Intel Arc, UPS or power supply reading has met real hardware; tests use fakes, plus Hardware tests that run

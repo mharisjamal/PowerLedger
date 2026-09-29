@@ -94,4 +94,24 @@ public class SampleDraftTests
         sample.DGpuPresent.ShouldBeFalse();
         sample.DGpuW.ShouldBeNull();
     }
+
+    [Fact]
+    public void A_platform_rail_behind_the_charger_is_the_machines_draw_as_it_is()
+    {
+        var draft = new SampleDraft { PlatformW = 14, BatteryChargeW = 30, PlatformHoldsCharging = false };
+        draft.ToSample(DateTimeOffset.UnixEpoch, 1).PlatformW.ShouldBe(14);
+    }
+
+    [Fact]
+    public void A_platform_rail_that_holds_the_charge_has_it_taken_off_since_charging_is_never_the_pcs_consumption()
+    {
+        var draft = new SampleDraft { PlatformW = 44, BatteryChargeW = 30, PlatformHoldsCharging = true };
+        draft.ToSample(DateTimeOffset.UnixEpoch, 1).PlatformW.ShouldNotBeNull().ShouldBe(14, 1e-9);
+
+        var notCharging = new SampleDraft { PlatformW = 14, PlatformHoldsCharging = true };
+        notCharging.ToSample(DateTimeOffset.UnixEpoch, 1).PlatformW.ShouldBe(14);
+
+        var onBattery = new SampleDraft { PlatformW = 14, BatteryChargeW = 30, PlatformHoldsCharging = true, OnBattery = true };
+        onBattery.ToSample(DateTimeOffset.UnixEpoch, 1).PlatformW.ShouldBe(14);
+    }
 }

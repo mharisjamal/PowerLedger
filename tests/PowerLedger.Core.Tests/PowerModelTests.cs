@@ -656,6 +656,103 @@ public class PowerModelTests
         more.TotalW.ShouldBe(200 / (0.85 * 0.97), 1e-9);     // a fifth of the rating, where a Bronze unit makes 97% of its best
     }
 
+    [Fact]
+    public void On_ac_a_whole_platform_rail_is_the_measured_total_over_the_adapters_efficiency()
+    {
+        var r = Laptop().Evaluate(TestData.Laptop() with { PlatformW = 27 });
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.PlatformMeter, Quality.Measured));
+        r.TotalW.ShouldBe(27 / 0.90, 1e-9);
+        r.Components.PsuLoss.ShouldBe(27 / 0.90 - 27, 1e-9);
+        r.Components.Cpu.ShouldBe(14.6);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void On_battery_the_discharge_rate_still_comes_first_and_the_platform_rail_stands_in_where_there_is_none()
+    {
+        var battery = Laptop().Evaluate(TestData.Laptop(battery: 30, onBattery: true) with { PlatformW = 27 });
+        (battery.TotalSource, battery.Quality).ShouldBe((TotalSource.Battery, Quality.Measured));
+        battery.TotalW.ShouldBe(30, 1e-9);
+
+        // A battery reporting relative units gives no rate, and the rail is then the measured total, with no adapter.
+        var rail = Laptop().Evaluate(TestData.Laptop(battery: null, onBattery: true) with { PlatformW = 27 });
+        (rail.TotalSource, rail.Quality).ShouldBe((TotalSource.PlatformMeter, Quality.Measured));
+        rail.TotalW.ShouldBe(27, 1e-9);
+        rail.Components.PsuLoss.ShouldBe(0);
+        rail.Components.Sum.ShouldBe(rail.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_platform_rail_holds_the_monitors_running_off_the_pc_and_only_one_with_its_own_plug_is_added()
+    {
+        var r = Laptop(monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 6))).Evaluate(TestData.Laptop() with { PlatformW = 27 });
+        r.TotalW.ShouldBe(27 / 0.90 + 25, 1e-9);
+        r.Components.Monitors.ShouldBe(31);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_platform_rail_reading_no_watts_leaves_the_total_to_the_model()
+    {
+        var model = Laptop().Evaluate(TestData.Laptop());
+        var zero = Laptop().Evaluate(TestData.Laptop() with { PlatformW = 0 });
+        (zero.TotalSource, zero.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        zero.TotalW.ShouldBe(model.TotalW, 1e-9);
+        Laptop().Evaluate(TestData.Laptop() with { PlatformW = double.NaN }).TotalSource.ShouldBe(TotalSource.Model);
+    }
+
+    [Fact]
+    public void A_ups_said_to_power_this_pc_is_read_at_the_wall_and_comes_before_the_platform_rail()
+    {
+        var profile = MachineProfile.DefaultLaptop with { UpsLoad = UpsLoad.ThisPc };
+        var r = Laptop(profile: profile).Evaluate(WithUps(TestData.Laptop(), 40) with { PlatformW = 27 });
+        r.TotalSource.ShouldBe(TotalSource.Ups);
+        r.TotalW.ShouldBe(40, 1e-9);
+    }
+
+    [Fact]
+    public void On_ac_a_discharging_battery_is_a_floor_for_the_modelled_total()
+    {
+        // Under a load the adapter can't carry, the battery makes up the difference, so the machine draws at least that.
+        var model = Laptop().Evaluate(TestData.Laptop());
+        var heavy = Laptop().Evaluate(TestData.Laptop(battery: 80, onBattery: false));
+        heavy.TotalW.ShouldBe(80, 1e-9);
+        // A floor is not a measurement of the whole: the adapter's share is still unknown, so the quality stays the model's.
+        (heavy.TotalSource, heavy.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        heavy.Components.Sum.ShouldBe(heavy.TotalW, 1e-9);
+
+        var light = Laptop().Evaluate(TestData.Laptop(battery: 5, onBattery: false));
+        light.TotalW.ShouldBe(model.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void The_floor_also_holds_under_a_platform_rail_and_counts_an_own_plug_monitor_on_top()
+    {
+        var rail = Laptop().Evaluate(TestData.Laptop(battery: 60, onBattery: false) with { PlatformW = 27 });
+        rail.TotalW.ShouldBe(60, 1e-9);
+        rail.TotalSource.ShouldBe(TotalSource.PlatformMeter);
+
+        var plugged = Laptop(monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 0))).Evaluate(TestData.Laptop(battery: 80, onBattery: false));
+        plugged.TotalW.ShouldBe(80 + 25, 1e-9);
+        plugged.Components.Sum.ShouldBe(plugged.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_desktop_takes_no_floor_from_a_battery_since_any_it_has_is_a_ups()
+    {
+        var model = Desktop().Evaluate(DesktopTick());
+        Desktop().Evaluate(DesktopTick() with { BatteryRateW = 900 }).TotalW.ShouldBe(model.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void Only_a_discharge_on_ac_is_a_floor()
+    {
+        TestData.Laptop(battery: 12, onBattery: false).DischargeOnAcW.ShouldBe(12);
+        TestData.Laptop(battery: 12, onBattery: true).DischargeOnAcW.ShouldBeNull();
+        TestData.Laptop(battery: null, onBattery: false).DischargeOnAcW.ShouldBeNull();
+        TestData.Laptop(battery: 0, onBattery: false).DischargeOnAcW.ShouldBeNull();
+    }
+
     /// <summary>A desktop tick: the CPU drawing 50 W and the GPU 120 W, with no built-in panel. The default desktop adds 5 W
     /// of memory, 2 W of storage and 15 W of board and fans, so 192 W go through its Bronze supply.</summary>
     private static Sample DesktopTick() => TestData.Laptop(cpu: 50, gpu: 120, brightness: null);
