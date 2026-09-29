@@ -11,8 +11,12 @@ internal static class AeroFixtures
         => new() { Current = UiPreferences.Default with { Look = Look.Aero, LookIntroduced = introduced, LookBeforeAero = before } };
 
     public static ShellViewModel Shell(FakeSaver saver, FakeUiSettings? ui = null, FakeInsights? insights = null, int pendingApprovals = 0, Updater? updates = null)
+        => Shell(saver, out _, ui, insights, pendingApprovals, updates);
+
+    /// <summary>The shell, and the <paramref name="link"/> its Now screen reads, for a test that pushes another reading.</summary>
+    public static ShellViewModel Shell(FakeSaver saver, out FakeLink link, FakeUiSettings? ui = null, FakeInsights? insights = null, int pendingApprovals = 0, Updater? updates = null)
     {
-        var now = MidnightFixtures.NowScreen();
+        var now = MidnightFixtures.NowScreen(out link);
         var dashboard = Dashboard(now, saver);
         var insight = new InsightsViewModel(insights ?? new FakeInsights(), UiThreads.Inline, new FakeTimeProvider(MidnightFixtures.Now), TimeZoneInfo.Utc);
         var shell = new ShellViewModel(now, MidnightFixtures.BreakdownScreen(), MidnightFixtures.ReportScreen(saver), MidnightFixtures.HouseholdScreen(pendingApprovals),

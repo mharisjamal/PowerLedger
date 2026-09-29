@@ -64,7 +64,7 @@ internal static class PieSlices
 internal sealed class PieChart3D : FrameworkElement
 {
     public static readonly DependencyProperty PartsProperty = DependencyProperty.Register(nameof(Parts), typeof(IReadOnlyList<DashboardPart>),
-        typeof(PieChart3D), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((PieChart3D)d).OnParts()));
+        typeof(PieChart3D), new FrameworkPropertyMetadata(null, (d, _) => ((PieChart3D)d).OnParts()));
 
     public static readonly DependencyProperty RiseProperty = DependencyProperty.Register(nameof(Rise), typeof(double),
         typeof(PieChart3D), new FrameworkPropertyMetadata(1.0, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -77,6 +77,7 @@ internal sealed class PieChart3D : FrameworkElement
 
     private const double Cx = 120, Cy = 104, R = 92, K = .5, Vw = 240, Vh = 190;
     private IReadOnlyList<PieSlice> _slices = [];
+    private IReadOnlyList<Part> _kinds = [];
     private readonly Dictionary<int, (MediaGeometry Top, MediaGeometry? Wall, MediaGeometry S0, MediaGeometry S1)> _shapes = [];
     private Part? _leaving;
 
@@ -113,10 +114,21 @@ internal sealed class PieChart3D : FrameworkElement
     /// <summary>Starts the slices rising in turn, or sets them risen under reduced motion.</summary>
     public void PlayRise() => AeroMotion.Move(this, RiseProperty, 1, PieSlices.RiseMs(_slices.Count), null, from: 0);
 
+    /// <summary>New parts, with every reading: the pie is drawn again only if a slice has moved by a visible amount (a
+    /// thousandth of a turn is well under a pixel at its rim) or a part has changed, so a steady load costs no redraw.</summary>
     private void OnParts()
     {
         var parts = Parts ?? [];
-        _slices = PieSlices.From([.. parts.Select(p => p.Share)]);
+        var slices = PieSlices.From([.. parts.Select(p => p.Share)]);
+        var kinds = parts.Select(p => p.Part).ToList();
+        var moved = slices.Count != _slices.Count || !kinds.SequenceEqual(_kinds)
+            || slices.Zip(_slices).Any(s => s.First.Index != s.Second.Index || Math.Abs(s.First.A1 - s.Second.A1) > Math.PI * 2 / 1000);
+        _kinds = kinds;
+        if (moved)
+        {
+            _slices = slices;
+            InvalidateVisual();
+        }
         AutomationProperties.SetHelpText(this, string.Join(", ", parts.Where(p => p.Share > 0)
             .Select(p => $"{p.Name} {Format.Percent(p.Share, CultureInfo.CurrentCulture)}")));
     }

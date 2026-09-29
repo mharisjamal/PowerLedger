@@ -9,8 +9,9 @@ namespace PowerLedger.App.Aero;
 /// A Liquid Glass pane (Aero look design §3), drawn by its style in Styles.Aero.xaml: the frost (the blurred scene
 /// behind, when the window paints its own backdrop: <see cref="Frost"/>), a light tint, a crisp light rim with a faint dark
 /// line inside it, a soft sheen along the top, a sheen that follows the pointer, and a shadow drawn only outside the pane.
-/// The shadow is cached as a bitmap and clipped to the outside once per size, so live content inside never re-blurs it;
-/// the pointer sheen moves only while the pointer is over the pane. Nothing here runs at rest.
+/// The shadow is blurred and clipped to the outside into one cached bitmap, again only when the pane's size or the glass
+/// changes, so live content inside never re-blurs it; the pointer sheen moves only while the pointer is over the pane.
+/// Nothing here runs at rest.
 /// </summary>
 public class GlassPanel : ContentControl
 {
@@ -29,6 +30,7 @@ public class GlassPanel : ContentControl
     private static readonly List<GlassPanel> Panes = [];
 
     private FrameworkElement? _shadow;
+    private FrameworkElement? _shadowClip;
     private Border? _sheen;
     private RadialGradientBrush? _sheenBrush;
 
@@ -60,6 +62,7 @@ public class GlassPanel : ContentControl
     {
         base.OnApplyTemplate();
         _shadow = GetTemplateChild("PART_Shadow") as FrameworkElement;
+        _shadowClip = GetTemplateChild("PART_ShadowClip") as FrameworkElement ?? _shadow;
         _sheen = GetTemplateChild("PART_Sheen") as Border;
         _sheenBrush = null;
         UpdateClip();
@@ -123,6 +126,7 @@ public class GlassPanel : ContentControl
         var inner = new RectangleGeometry(new Rect(m, m, ActualWidth, ActualHeight), r, r);
         var clip = new CombinedGeometry(GeometryCombineMode.Exclude, outer, inner);
         clip.Freeze();
-        _shadow.Clip = clip;
+        // Inside the shadow's cache (PART_ShadowClip), so the clip is drawn into the bitmap once, not on every frame.
+        _shadowClip!.Clip = clip;
     }
 }

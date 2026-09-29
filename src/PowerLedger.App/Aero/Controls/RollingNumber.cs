@@ -9,13 +9,14 @@ namespace PowerLedger.App.Aero;
 /// <summary>
 /// A whole number whose digits roll to their new values on the spring, like an odometer (the demo's watts): each digit is
 /// a strip of 0 to 9 behind a one-line window, softened at its top and foot so a digit rolls out of the glass rather
-/// than a hard slot. Under reduced motion the digits change in place. It moves only when the value changes (the 1 s live
-/// tick), never at rest. A screen reader hears the number, not the strips.
+/// than a hard slot. Under reduced motion the digits change in place. A live reading (<see cref="Value"/>, once a second)
+/// changes the digits in place too: a roll on every reading kept the compositor drawing most of each second (Plan U), so
+/// only <see cref="Set"/> with animate rolls, for a change someone made. A screen reader hears the number, not the strips.
 /// </summary>
 public sealed class RollingNumber : StackPanel
 {
     public static readonly DependencyProperty ValueProperty = DependencyProperty.Register(nameof(Value), typeof(int),
-        typeof(RollingNumber), new PropertyMetadata(0, (d, e) => ((RollingNumber)d).Set((int)e.NewValue, ((RollingNumber)d).IsLoaded)));
+        typeof(RollingNumber), new PropertyMetadata(0, (d, e) => ((RollingNumber)d).Set((int)e.NewValue, animate: false)));
 
     public static readonly DependencyProperty DigitSizeProperty = DependencyProperty.Register(nameof(DigitSize), typeof(double),
         typeof(RollingNumber), new PropertyMetadata(22.0, (d, _) => ((RollingNumber)d).Rebuild()));
@@ -37,7 +38,7 @@ public sealed class RollingNumber : StackPanel
         Loaded += (_, _) => Rebuild();
     }
 
-    /// <summary>The number shown; set, it rolls there (once loaded; before, it is simply shown).</summary>
+    /// <summary>The number shown; set, its digits change in place (a live reading's).</summary>
     public int Value { get => (int)GetValue(ValueProperty); set => SetValue(ValueProperty, value); }
 
     public double DigitSize { get => (double)GetValue(DigitSizeProperty); set => SetValue(DigitSizeProperty, value); }

@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
@@ -37,6 +38,8 @@ public sealed class PulseDot : Grid
     private DispatcherTimer? _sleep;
     private bool _awake;
     private DateTime _woke;
+    private Point? _pointer;
+    private AnimationClock? _grow, _fade;
 
     public PulseDot()
     {
@@ -112,7 +115,7 @@ public sealed class PulseDot : Grid
             _window.Activated += OnWindowChanged;
             _window.Deactivated += OnWindowChanged;
             _window.StateChanged += OnWindowChanged;
-            _window.PreviewMouseMove += OnUsed;
+            _window.PreviewMouseMove += OnPointer;
             _window.PreviewMouseDown += OnUsed;
             _window.PreviewKeyDown += OnUsed;
             if (_window.IsActive) Wake();
@@ -128,7 +131,7 @@ public sealed class PulseDot : Grid
             _window.Activated -= OnWindowChanged;
             _window.Deactivated -= OnWindowChanged;
             _window.StateChanged -= OnWindowChanged;
-            _window.PreviewMouseMove -= OnUsed;
+            _window.PreviewMouseMove -= OnPointer;
             _window.PreviewMouseDown -= OnUsed;
             _window.PreviewKeyDown -= OnUsed;
             _window = null;
@@ -146,16 +149,35 @@ public sealed class PulseDot : Grid
 
     private void OnUsed(object sender, EventArgs e) => Wake();
 
+    /// <summary>The pointer moved, if it did: WPF also raises a mouse move under a still pointer whenever the layout
+    /// under it changes, which a live reading does every second, and those kept the ring breathing for good (Plan U).</summary>
+    private void OnPointer(object sender, MouseEventArgs e)
+    {
+        if (_window is not null) PointerAt(e.GetPosition(_window));
+    }
+
+    /// <summary>The pointer is at <paramref name="at"/> in the window: a wake if it has moved since the last.</summary>
+    internal void PointerAt(Point at)
+    {
+        if (_pointer == at) return;
+        _pointer = at;
+        Wake();
+    }
+
     private void Build()
     {
         Width = Height = Size;
         _ring.Width = _ring.Height = _dot.Width = _dot.Height = Size;
-        var breathe = IsLoaded && _window != null
-            && ShouldBreathe(Breathes, AeroMotion.Reduced, IsVisible, _window.IsActive, _window.WindowState == WindowState.Minimized, _awake);
+        Breathe(IsLoaded && _window != null
+            && ShouldBreathe(Breathes, AeroMotion.Reduced, IsVisible, _window.IsActive, _window.WindowState == WindowState.Minimized, _awake));
+    }
+
+    /// <summary>Starts the ring breathing, or stops it and its clocks; internal for a test, whose windows are never
+    /// active.</summary>
+    internal void Breathe(bool breathe)
+    {
         if (breathe == Breathing) return;
-        _scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        _scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-        _ring.BeginAnimation(OpacityProperty, null);
+        StopClocks();
         if (!breathe)
         {
             _ring.Opacity = 0;
@@ -175,8 +197,23 @@ public sealed class PulseDot : Grid
         fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, cycle));
         Timeline.SetDesiredFrameRate(scale, FrameRate);
         Timeline.SetDesiredFrameRate(fade, FrameRate);
-        _scale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
-        _scale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
-        _ring.BeginAnimation(OpacityProperty, fade);
+        _grow = scale.CreateClock();
+        _fade = fade.CreateClock();
+        _scale.ApplyAnimationClock(ScaleTransform.ScaleXProperty, _grow);
+        _scale.ApplyAnimationClock(ScaleTransform.ScaleYProperty, _grow);
+        _ring.ApplyAnimationClock(OpacityProperty, _fade);
+    }
+
+    /// <summary>Stops the ring's clocks, not only takes them off the ring: a clock that repeats for ever and is merely
+    /// detached (BeginAnimation with null) stays active in WPF's timing tree until a garbage collection, and kept the
+    /// frame clock ticking at the ring's rate long after the dot went still (Plan U, measured on the real App).</summary>
+    private void StopClocks()
+    {
+        _grow?.Controller?.Remove();
+        _fade?.Controller?.Remove();
+        _grow = _fade = null;
+        _scale.ApplyAnimationClock(ScaleTransform.ScaleXProperty, null);
+        _scale.ApplyAnimationClock(ScaleTransform.ScaleYProperty, null);
+        _ring.ApplyAnimationClock(OpacityProperty, null);
     }
 }

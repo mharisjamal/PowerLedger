@@ -113,9 +113,12 @@ internal static class MidnightFixtures
             new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, new Version(0, 8, 0), (_, _) => { }, _ => { });
 
     /// <summary>The Now screen as RenderingTests draws it: on battery with two external monitors, a minute of readings, today's history.</summary>
-    public static NowViewModel NowScreen()
+    public static NowViewModel NowScreen() => NowScreen(out _);
+
+    /// <summary>The Now screen, and the <paramref name="link"/> it reads, for a test that pushes another reading.</summary>
+    public static NowViewModel NowScreen(out FakeLink link)
     {
-        var link = new FakeLink { Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) };
+        link = new FakeLink { Status = Statuses.WithMonitors(Statuses.Dell, Statuses.Portable) };
         var ownPlug = Statuses.Dell.WattsNow;
         var monitors = ownPlug + Statuses.Portable.WattsNow;
         var history = new FakeHistory();
