@@ -72,6 +72,33 @@ and the App says "chip measured, rest of card estimated".
 - **Quality.** A UPS total (ActivePower or load of rated watts) and a power supply total count as Measured; the load of rated
   VA counts as Estimated.
 
+## 7. Workstation extras (2026-09-30, "measure more", part B)
+
+- **A UPS on another computer (NUT).** Settings takes a server, port (3493), the UPS's name there, and a username and
+  password for a server that lists only to known users. The service reads `LIST VAR <ups>` over TCP every 5 s on a thread of
+  its own, over one connection kept open, never sends LOGIN, and keeps the last answer for 15 s. Timeouts of 5 s; a server
+  that fails is retried after 5 s, doubling to a minute; DATA-STALE keeps the connection. Watts, best first:
+  `ups.realpower` (Measured); `ups.power` × `output.powerfactor` (Measured); `ups.load` × `ups.realpower.nominal`
+  (Measured); `ups.power` × 0.8 (Estimated); `ups.load` × `ups.power.nominal` × the factor or 0.8 (Estimated). It fills the
+  UPS fields only when no UPS on USB gave watts, and "What does it power?" decides for it as for a USB UPS. The password is
+  kept encrypted (DPAPI, the service's account) under its own settings key, never in the settings and never sent back: the
+  App sends one only when typed, an empty one to forget it, and it goes when no server is set up.
+- **Windows' power meters.** `\Power Meter(*)\Power` (milliwatts) is read only for an ACPI power meter (ACPI000D), the
+  platform's input power, told apart by WMI's `Win32_PowerMeter` device paths matched to the instances in order. A battery's
+  meter (PNP0C0A) is never read: the owner's laptop has only that one, reading nought on mains. Meters that can't be told
+  apart are not read. With several platform meters the largest is taken. Nought is no reading.
+- **A BMC (IPMI DCMI).** Where Windows' IPMI driver has a `root\wmi` `Microsoft_IPMI` instance, the service sends Get Power
+  Reading (NetFn 0x2C, cmd 0x02, `DC 01 00 00`) every 5 s on a thread of its own. The current watts count only while the state
+  byte says the measurement is on. A BMC without DCMI (0xC1) is asked again every 30 minutes.
+- **The total.** A machine's own meter (power meter first, then the BMC) is its Measured total, wall power already, after a
+  UPS the owner said powers this PC and before a power supply's readings; monitors with their own plug are added. Never on a
+  laptop running on its battery. TotalSource PowerMeter (6) and Bmc (7); the Now note says "This PC's own power meter
+  reading" or "This PC's management controller reading".
+- **Intel Arc through IGCL.** Where ControlLib.dll starts and a discrete Intel card reports `totalCardEnergyCounter`
+  (`ctlPowerTelemetryGet`, structure version 1), its joules over the telemetry timestamp's seconds are the card's Board
+  watts. A card Windows has switched off draws nought and isn't asked; one asleep at start, a library that is missing or won't
+  start, a card without the card counter, and five failures in a row all leave the card to Level Zero (§2), as before.
+
 ## Honest limits
 
 - None of AMD, Intel Arc, UPS or power supply reading has met real hardware; tests use fakes, plus Hardware tests that run
@@ -81,5 +108,10 @@ and the App says "chip measured, rest of card estimated".
   is low by the supply's losses rather than high by them.
 - A reading of nought watts from a UPS or a supply is taken as no reading, and both figures have plausible ceilings in the
   validator (UPS 5 kW, supply 2 kW); past those the report has been misread rather than the outlets loaded.
+- None of §7 has met real hardware beyond this: the owner's laptop has one power meter, its battery's, which is left alone;
+  its IGCL answers "platform not supported" (Tiger Lake), so IGCL's structures are checked against the header, not a card.
+  Whether IGCL answers in session 0 is unknown; where it doesn't, Level Zero reads the card. The layout of
+  `Microsoft_IPMI.RequestResponse`'s answer (whether the completion code leads the data) is handled both ways, untested. The
+  WMI and PDH order used to match power meters is assumed, and only matters beside a battery's meter.
 - Whether ADLX, ADL and Level Zero answer from the service in session 0 is untested. Where they don't, the reading falls back
   to the load estimate, as today.

@@ -211,8 +211,8 @@ public sealed class NutSource : ISensorSource
             }
             finally
             {
+                // The token source is left to the collector: Stop may still cancel it after an unforeseen end.
                 await CloseAsync().ConfigureAwait(false);
-                _stop.Dispose();
             }
         }
 
