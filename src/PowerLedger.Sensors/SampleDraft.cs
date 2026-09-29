@@ -36,6 +36,14 @@ public sealed class SampleDraft
 
     public string? PsuName { get; set; }
 
+    /// <summary>The machine's own input power, from a platform power meter or its management controller; wall power
+    /// already. The first meter source to fill it wins.</summary>
+    public double? SystemMeterW { get; set; }
+
+    public SystemMeterKind SystemMeter { get; set; }
+
+    public string? SystemMeterName { get; set; }
+
     /// <summary>The discrete graphics cards found so far this tick, in the order the sources added them.</summary>
     public IReadOnlyList<GpuCardDraft> Gpus => _gpus;
 
@@ -77,7 +85,8 @@ public sealed class SampleDraft
             Brightness, DisplayOn, MonitorCount,
             UserIdleSeconds, SessionLocked, Suspect: false,
             totals.Scope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName, PsuWallW,
-            cards.Count > 0 ? cards : null);
+            cards.Count > 0 ? cards : null,
+            SystemMeterW, SystemMeter, SystemMeterName);
     }
 
     private List<GpuCard> Cards() => _gpus.ConvertAll(card => card.ToCard());

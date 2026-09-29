@@ -32,6 +32,12 @@ public enum TotalSource
 
     /// <summary>The wall power a power supply reports it is drawing, taken as it is.</summary>
     PowerSupplyWall = 4,
+
+    /// <summary>The machine's own input power, from an ACPI power meter through Windows' power meter counters.</summary>
+    PowerMeter = 5,
+
+    /// <summary>The machine's own input power, as its baseboard management controller reports it over IPMI (DCMI).</summary>
+    Bmc = 6,
 }
 
 /// <summary>What the outlets of a UPS attached over USB power, as the user says. Stored as an integer: append new members,
@@ -65,6 +71,14 @@ public enum UpsPowerSource
 
     /// <summary>Its load percentage of its rated volt-amperes, at an assumed power factor of 0.8: an estimate.</summary>
     LoadOfRatedVoltAmps = 3,
+
+    /// <summary>Its apparent output power times the power factor it reports itself (NUT's ups.power and
+    /// output.powerfactor): measured.</summary>
+    ApparentPower = 4,
+
+    /// <summary>Its apparent output power at an assumed power factor of 0.8, for a UPS that reports no factor: an
+    /// estimate.</summary>
+    ApparentPowerAssumedFactor = 5,
 }
 
 /// <summary>A kind of device that reports power over USB. Piped as an integer: append new members, never renumber.</summary>

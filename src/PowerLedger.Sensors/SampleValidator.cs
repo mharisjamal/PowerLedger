@@ -58,6 +58,7 @@ public sealed class SampleValidator
         var ups = InRange(raw.UpsOutputW, _options.UpsMaxW, ref suspect);
         var psu = InRange(raw.PsuOutputW, _options.PsuMaxW, ref suspect);
         var wall = InRange(raw.PsuWallW, _options.PsuMaxW, ref suspect);
+        var meter = InRange(raw.SystemMeterW, _options.UpsMaxW, ref suspect);     // a machine's own meter, under a UPS's ceiling
 
         var brightness = Fraction(raw.Brightness, ref suspect);
         var load = Fraction(raw.CpuLoad, ref suspect) ?? 0;
@@ -76,6 +77,7 @@ public sealed class SampleValidator
             UpsOutputW = ups,
             PsuOutputW = psu,
             PsuWallW = wall,
+            SystemMeterW = meter,
             Suspect = suspect,
         };
         if (cards is null) return checkedSample;
