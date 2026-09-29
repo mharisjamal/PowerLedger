@@ -25,6 +25,9 @@ export default defineConfig(async () => {
             // the checks that both are set.
             FEEDBACK_REPO: "owner/feedback-test",
             FEEDBACK_GITHUB_TOKEN: "test-github-token",
+            // Every version is taken unless a test sets its own minimum (version.test.ts's strict), whatever the live
+            // minimum in wrangler.toml is raised to.
+            MIN_APP_VERSION: "0.0.0",
           },
           // Independent of wrangler.toml, whose r2_buckets block is commented out until R2 is
           // enabled on the account: the test Worker keeps an R2 bucket bound as REPORTS, so the
