@@ -52,6 +52,13 @@ internal sealed class ServiceForm : ObservableObject
     private bool _readPowerSupply = MachineProfile.DefaultLaptop.ReadPowerSupply;
     private IReadOnlyList<string> _upses = [];
     private IReadOnlyList<string> _powerSupplies = [];
+    private string _nutHost = "";
+    private string _nutPort = "";
+    private string _nutUps = "";
+    private string _nutUser = "";
+    private string? _nutPassword;
+    private bool _nutHasPassword;
+    private string? _nutSaid;
 
     /// <summary>The form is changing what it shows itself, as it loads the settings, follows the service's word for the
     /// monitors or takes the settings a save read again or sent, so nothing it changes is taken for the user's change.</summary>
@@ -163,6 +170,36 @@ internal sealed class ServiceForm : ObservableObject
         }
     }
 
+    /// <summary>The computer that shares a UPS over Network UPS Tools; blank for none.</summary>
+    public string NutHost { get => _nutHost; set => Change(ref _nutHost, value); }
+
+    public string NutPort { get => _nutPort; set => Change(ref _nutPort, value); }
+
+    /// <summary>The UPS's name on that computer, e.g. "myups".</summary>
+    public string NutUps { get => _nutUps; set => Change(ref _nutUps, value); }
+
+    public string NutUser { get => _nutUser; set => Change(ref _nutUser, value); }
+
+    /// <summary>A password the user typed for the UPS server, sent with the next save and then let go of; empty forgets the
+    /// one the service holds. Write only: the service never sends the password back, so there is nothing to show.</summary>
+    public string? NutPassword
+    {
+        get => null;
+        set
+        {
+            if (value is null) return;
+            _nutPassword = value;
+            OnChanged();
+        }
+    }
+
+    /// <summary>The service holds a password for the UPS server.</summary>
+    public bool NutHasPassword { get => _nutHasPassword; private set => SetProperty(ref _nutHasPassword, value); }
+
+    /// <summary>What the service says of the UPS server while it can't read it, e.g. "nas.local can't be reached"; null while it
+    /// reads it, or while none is set up.</summary>
+    public string? NutSaid { get => _nutSaid; private set => SetProperty(ref _nutSaid, value); }
+
     public string ExtrasWatts { get => _extrasWatts; set => Change(ref _extrasWatts, value); }
 
     /// <summary>The processor's rated watts; blank uses the bundled table.</summary>
@@ -211,8 +248,23 @@ internal sealed class ServiceForm : ObservableObject
         HistoryYears = Whole(settings.HistoryRetentionYears);
         UpsLoad = p.UpsLoad;
         ReadPowerSupply = p.ReadPowerSupply;
+        var nut = settings.Nut ?? NutSettings.Off;          // settings from a service before the UPS server hold none
+        NutHost = nut.Host;
+        NutPort = Whole(nut.Port);
+        NutUps = nut.Ups;
+        NutUser = nut.Username;
+        _nutPassword = null;
+        NutHasPassword = nut.HasPassword;
         IsLoaded = true;
     });
+
+    /// <summary>What the service's UPS server source says, shown while a server is set up and it can't read it. Call on the UI
+    /// thread.</summary>
+    public void ShowNut(IReadOnlyList<SourceStatus> sources)
+    {
+        var said = sources.OfType<SourceStatus>().FirstOrDefault(source => source.Name == "nut")?.Unavailable;
+        NutSaid = NutHost.Trim().Length > 0 ? said : null;
+    }
 
     /// <summary>Lists the UPSes and power supplies in the service's status, each in a line of its own, in its order. Call on
     /// the UI thread.</summary>
@@ -288,7 +340,7 @@ internal sealed class ServiceForm : ObservableObject
     internal ServiceSettings? Read(out string? problem)
     {
         problem = !IsLoaded ? "The service hasn't sent its settings yet." : null;
-        int ramSticks = 0, ssds = 0, hdds = 0, fans = 0, idle = 0, interval = 0, rawHours = 0, years = 0;
+        int ramSticks = 0, ssds = 0, hdds = 0, fans = 0, idle = 0, interval = 0, rawHours = 0, years = 0, nutPort = NutSettings.DefaultPort;
         double panel = 0, extras = 0;
         double? cpu = null, gpu = null;
         IReadOnlyList<MonitorChoice> choices = [];
@@ -303,7 +355,8 @@ internal sealed class ServiceForm : ObservableObject
             && Int(IdleMinutes, "the idle threshold in minutes", out idle, ref problem)
             && Int(SampleInterval, "the sample interval", out interval, ref problem)
             && Int(RawHours, "the hours of second-by-second history", out rawHours, ref problem)
-            && Int(HistoryYears, "the years of minute-by-minute history", out years, ref problem);
+            && Int(HistoryYears, "the years of minute-by-minute history", out years, ref problem)
+            && (string.IsNullOrWhiteSpace(NutPort) || Int(NutPort, "the UPS server's port", out nutPort, ref problem));
         if (problem is null && idle is < 1 or > 30) problem = "The idle threshold is between 1 and 30 minutes.";
         if (problem is not null) return null;
 
@@ -321,6 +374,11 @@ internal sealed class ServiceForm : ObservableObject
             SampleIntervalSeconds = interval,
             RawRetentionHours = rawHours,
             HistoryRetentionYears = years,
+            Nut = new NutSettings
+            {
+                Host = NutHost.Trim(), Port = nutPort, Ups = NutUps.Trim(), Username = NutUser.Trim(), Password = _nutPassword,
+                HasPassword = NutHasPassword,
+            },
         };
         problem = settings.Validate();
         return problem is null ? settings : null;
@@ -367,6 +425,11 @@ internal sealed class ServiceForm : ObservableObject
     {
         _profile = settings.Profile;
         _choices = settings.Profile.Monitors;
+        // The service took the password sent, or forgot it, and holds none once no UPS server is set up; the form lets go of
+        // it unless the user has typed another since.
+        var nut = settings.Nut ?? NutSettings.Off;
+        NutHasPassword = nut.IsSetUp && (nut.Password is { } sent ? sent.Length > 0 : nut.HasPassword);
+        if (ReferenceEquals(_nutPassword, nut.Password)) _nutPassword = null;
         Quietly(() =>
         {
             foreach (var row in Monitors)

@@ -52,6 +52,7 @@ internal sealed class SamplingLoop : BackgroundService
     private readonly RawSampleRepository _raw;
     private readonly InventoryRepository _inventory;
     private readonly SettingsStore _settingsStore;
+    private readonly NutSecret _nutSecret;
     private readonly SessionTracker _sessions;
     private readonly CalibrationKeeper _calibration;
     private readonly Rollups _rollups;
@@ -89,6 +90,7 @@ internal sealed class SamplingLoop : BackgroundService
         _raw = new RawSampleRepository(database);
         _inventory = new InventoryRepository(database);
         _settingsStore = new SettingsStore(new SettingsRepository(database));
+        _nutSecret = new NutSecret(new SettingsRepository(database));
         _sessions = new SessionTracker(new SessionRepository(database));
         _calibration = new CalibrationKeeper(new CalibrationRepository(database), _options.Calibration, _options.CalibrationSaveEvery);
         _rollups = new Rollups(_raw, new AggregateRepository(database));
@@ -390,6 +392,7 @@ internal sealed class SamplingLoop : BackgroundService
     {
         if (settings.Validate() is { } problem) throw new ArgumentException(problem, nameof(settings));
         var intervalChanged = settings.SampleIntervalSeconds != _settings.SampleIntervalSeconds;
+        settings = _nutSecret.Take(settings);                // the UPS server's password is kept apart, never stored or sent
         _settingsStore.Save(settings);
         Use(settings);
         return intervalChanged;

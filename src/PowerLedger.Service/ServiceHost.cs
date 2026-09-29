@@ -138,13 +138,15 @@ internal static class ServiceHost
         var shutdown = provider.GetRequiredService<ShutdownSignal>();
         var monitors = provider.GetRequiredService<MonitorBoard>();
         var board = provider.GetRequiredService<StatusBoard>();
+        var nutSecret = new NutSecret(new SettingsRepository(provider.GetRequiredService<SqliteDatabase>()));
         // In session 0 input is invisible, so idle time comes from the App; a console run reads its own session.
         Func<double?>? idle = asService ? signals.UserIdleSeconds : null;
         return new LoopEnvironment(
             Sensors: retired => new MachineSensorSet(MachineSensors.Create(
                 () => signals.DisplayOn, () => signals.SessionLocked, idle,
                 monitorsDetected: found => monitors.Detected(found, retired),
-                readPowerSupply: PowerSupplySwitch(board, retired))),
+                readPowerSupply: PowerSupplySwitch(board, retired),
+                nut: new NutSwitch(board, nutSecret.Password, retired).Current)),
             Inventory: HardwareInventory.Detect,
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
             SystemShuttingDown: () => shutdown.SystemShuttingDown,

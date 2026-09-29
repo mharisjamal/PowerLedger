@@ -289,7 +289,8 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         var desktop = _settings?.Profile.Chassis == ChassisKind.Desktop;
         // A UPS or a power supply that gives the total is a power sensor, whatever the machine's own rails report.
         IsSensorless = !Supported(status, "energy-meter") && (desktop || !Supported(status, "battery"))
-                       && status.Last?.Total is not (TotalSource.Ups or TotalSource.PowerSupply or TotalSource.PowerSupplyWall);
+                       && status.Last?.Total is not (TotalSource.Ups or TotalSource.PowerSupply or TotalSource.PowerSupplyWall
+                           or TotalSource.PowerMeter or TotalSource.Bmc);
         var interval = _settings?.SampleIntervalSeconds ?? 1;
         var learned = Format.Duration(status.Calibration.BatterySamples * interval / 3600.0);
         var needed = Format.Duration(status.Calibration.SamplesNeeded * interval / 3600.0);
@@ -437,6 +438,8 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         if (frame.Total == TotalSource.Ups) return "UPS output reading · " + samples;
         if (frame.Total == TotalSource.PowerSupplyWall) return "Power supply's own wall reading · " + samples;
         if (frame.Total == TotalSource.PowerSupply) return "Power supply's DC output, with its efficiency · " + samples;
+        if (frame.Total == TotalSource.PowerMeter) return "This PC's own power meter reading · " + samples;
+        if (frame.Total == TotalSource.Bmc) return "This PC's management controller reading · " + samples;
         return (frame.Quality, frame.Components.Monitors > 0) switch
         {
             (Quality.Measured, false) => "Windows battery report · " + samples,
@@ -454,6 +457,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     {
         TotalSource.Ups => "UPS output",
         TotalSource.PowerSupply or TotalSource.PowerSupplyWall => "power supply reading",
+        TotalSource.PowerMeter or TotalSource.Bmc => "power meter reading",
         _ => frame.Quality switch
         {
             Quality.Measured => "battery discharge",

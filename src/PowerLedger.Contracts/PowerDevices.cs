@@ -34,10 +34,11 @@ public enum TotalSource
     PowerSupplyWall = 4,
 
     /// <summary>The machine's own input power, from an ACPI power meter through Windows' power meter counters.</summary>
-    PowerMeter = 5,
+    /// <remarks>6, not 5: plan Z part A takes 5 (PlatformMeter) on its branch, and the two merge side by side.</remarks>
+    PowerMeter = 6,
 
     /// <summary>The machine's own input power, as its baseboard management controller reports it over IPMI (DCMI).</summary>
-    Bmc = 6,
+    Bmc = 7,
 }
 
 /// <summary>What the outlets of a UPS attached over USB power, as the user says. Stored as an integer: append new members,

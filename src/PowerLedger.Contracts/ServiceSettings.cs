@@ -34,6 +34,9 @@ public sealed record ServiceSettings
     /// <summary>Years of one-minute rows to keep; hour rows are kept for ever (spec §7).</summary>
     public int HistoryRetentionYears { get; init; } = 2;
 
+    /// <summary>A UPS on another computer, read over Network UPS Tools; off by default.</summary>
+    public NutSettings Nut { get; init; } = NutSettings.Off;
+
     public static ServiceSettings Default { get; } = new();
 
     /// <summary>Null when every value is acceptable; otherwise the first problem, in words the App can show.</summary>
@@ -48,6 +51,7 @@ public sealed record ServiceSettings
             return $"Second-by-second history must be kept between {MinRawRetentionHours} and {MaxRawRetentionHours} hours.";
         if (HistoryRetentionYears is < MinHistoryRetentionYears or > MaxHistoryRetentionYears)
             return $"Minute-by-minute history must be kept between {MinHistoryRetentionYears} and {MaxHistoryRetentionYears} years.";
+        if ((Nut ?? NutSettings.Off).Validate() is { } nut) return nut;
         return ValidateProfile(Profile);
     }
 

@@ -29,6 +29,34 @@
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Margin" Value="10,0,0,0" />
         </Style>
+        <!-- A typed secret, framed as a typed value is: the number face in a thin frame that turns amber while it has the keyboard. -->
+        <Style x:Key="Secret" TargetType="PasswordBox">
+            <Setter Property="FontFamily" Value="{StaticResource Font.Numbers}" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource Brush.Ink}" />
+            <Setter Property="Background" Value="{DynamicResource Brush.Panel}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.LineStrong}" />
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="3">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Brush.Amber}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <!-- A monitor's "Count it". One that runs off the PC always counts, so its box shows ticked, can't be unticked, and says why. -->
         <Style x:Key="Counts" TargetType="CheckBox" BasedOn="{StaticResource Tick}">
             <Style.Triggers>
@@ -185,6 +213,30 @@
                     <RadioButton Style="{StaticResource Choice}" Content="More"
                                  IsChecked="{Binding UpsLoad, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:UpsLoad.More}}" />
                 </StackPanel>
+                <!-- A UPS another computer shares over Network UPS Tools: the server, its port, the UPS's name there and, for a
+                     server that lists only to known users, a username and password, each row labelled. Once the service reads it,
+                     it is listed with the UPSes above and asks what it powers; until then, what the service says of it shows here. -->
+                <StackPanel Style="{StaticResource Row}">
+                    <TextBlock Style="{StaticResource Label}" Text="UPS on another computer (NUT)" />
+                    <TextBox Style="{StaticResource Field}" Width="150" Text="{Binding NutHost, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="UPS server"
+                             ToolTip="The computer that shares the UPS: a name or an IP address" />
+                    <TextBlock Style="{StaticResource Aside}" Text="port" />
+                    <TextBox Style="{StaticResource Field}" Width="56" Margin="8,0,0,0" Text="{Binding NutPort, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="UPS server port" />
+                </StackPanel>
+                <StackPanel Style="{StaticResource Row}">
+                    <TextBlock Style="{StaticResource Label}" Text="UPS name on that computer" />
+                    <TextBox Style="{StaticResource Field}" Width="150" Text="{Binding NutUps, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="UPS name on the server" />
+                </StackPanel>
+                <StackPanel Style="{StaticResource Row}">
+                    <TextBlock Style="{StaticResource Label}" Text="Username · password, if asked" />
+                    <TextBox Style="{StaticResource Field}" Width="100" Text="{Binding NutUser, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="UPS server username" />
+                    <PasswordBox Style="{StaticResource Secret}" Width="100" Margin="8,0,0,0" local:PasswordEntry.Typed="{Binding NutPassword, Mode=OneWayToSource}"
+                                 AutomationProperties.Name="UPS server password" />
+                    <TextBlock Style="{StaticResource Aside}" Text="saved" Visibility="{Binding NutHasPassword, Converter={StaticResource VisibleWhen}}" />
+                </StackPanel>
+                <TextBlock Style="{StaticResource Said}" Text="{Binding NutSaid}" Visibility="{Binding NutSaid, Converter={StaticResource VisibleWhenText}}" />
+                <TextBlock Style="{StaticResource Note}" Margin="0,2,0,6"
+                           Text="For a UPS that another computer, such as a NAS, shares with Network UPS Tools. Leave the server blank for none. The service keeps the password encrypted." />
                 <!-- Each power supply the service reads over USB, with the tick that stops it. The tick stays while reading is
                      off, when the service leaves the supply to its maker's program and may stop naming it. -->
                 <ItemsControl ItemsSource="{Binding PowerSupplies}" Focusable="False" Visibility="{Binding HasPowerSupply, Converter={StaticResource VisibleWhen}}">
