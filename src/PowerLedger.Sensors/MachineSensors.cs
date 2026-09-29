@@ -33,11 +33,14 @@ public sealed class MachineSensors : IDisposable
     /// first answers, and whenever they change (checked once a minute). Leave null to skip reading them.</param>
     /// <param name="readPowerSupply">The owner's tick for reading a power supply over USB, asked afresh before every read.
     /// Leave null where there is nobody to ask, which leaves any power supply alone altogether.</param>
+    /// <param name="nut">The owner's UPS on another computer (Network UPS Tools), asked afresh every tick; null while none is set
+    /// up. Leave out where there are no settings, which reads none.</param>
     public static MachineSensors Create(
         Func<bool> displayOn, Func<bool> sessionLocked,
         Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null,
         Action<IReadOnlyList<MonitorFacts>>? monitorsDetected = null,
-        Func<bool>? readPowerSupply = null)
+        Func<bool>? readPowerSupply = null,
+        Func<NutTarget?>? nut = null)
     {
         var display = new DisplaySource(displayOn, monitorsDetected);
         List<ISensorSource> sources =
@@ -46,7 +49,10 @@ public sealed class MachineSensors : IDisposable
             .. NvidiaAndTheRest(),
             new BatterySource(),
             new UpsSource(),
+            new NutSource(nut ?? (static () => null)),     // after the USB UPS, which it never overrides
             new PsuSource(readPowerSupply),
+            new PowerMeterSource(),
+            new IpmiSource(),                                // after the power meter, which it never overrides
             new CpuLoadSource(),
             new ActivitySource(sessionLocked, userIdleSeconds),
             display,
@@ -59,7 +65,7 @@ public sealed class MachineSensors : IDisposable
     {
         var nvidia = new NvidiaSource();
         return Graphics(
-            nvidia, static () => new AmdSource(), static () => new ArcSource(), static () => new GpuLoadSource(),
+            nvidia, static () => new AmdSource(), static () => new IntelCardSource(), static () => new GpuLoadSource(),
             otherCards: static () => DiscreteGpu.ReadVideoControllers() is not { } controllers || DiscreteGpu.HasCardBesideNvidia(controllers),
             nvidiaLoadsEveryCard: () => nvidia.LoadsEveryCard);
     }

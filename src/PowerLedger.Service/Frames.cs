@@ -39,6 +39,8 @@ internal static class Frames
                 UpsPowerSource.ActivePower => "real output power",
                 UpsPowerSource.LoadOfRatedWatts => "load of its rated watts",
                 UpsPowerSource.LoadOfRatedVoltAmps => "load of its rated VA, estimated",
+                UpsPowerSource.ApparentPower => "apparent power with its power factor",
+                UpsPowerSource.ApparentPowerAssumedFactor => "apparent power at an assumed factor, estimated",
                 _ => "",
             };
             devices.Add(Device(PowerDeviceKind.Ups, s.UpsName, s.UpsOutputW, how));

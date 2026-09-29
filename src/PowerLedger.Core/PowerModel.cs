@@ -5,10 +5,11 @@ namespace PowerLedger.Core;
 /// <summary>
 /// Turns one <see cref="Sample"/> into a <see cref="Reading"/> (spec §5).
 /// The total comes from the first of these that applies: a laptop's battery discharge rate while it runs on its battery;
-/// the output of a UPS the user says powers this PC, alone or with its monitors; what a power supply says it draws from the
-/// wall, which is a total already, or else its DC output over the efficiency of whatever feeds this machine, a desktop's
-/// supply read at the load it is carrying or a laptop's adapter; the processor's own meter of the whole platform
-/// (Snapdragon X's system rail), over the same efficiency on AC and as it is on battery; and otherwise the model, which sums the parts with a
+/// the output of a UPS the user says powers this PC, alone or with its monitors; the machine's own input meter, a platform
+/// power meter or its management controller, which is a total already; the processor's own meter of the whole platform
+/// (Snapdragon X's system rail), over the efficiency of whatever feeds this machine on AC and as it is on battery; what a
+/// power supply says it draws from the wall, which is a total already, or else its DC output over that efficiency, a
+/// desktop's supply read at the load it is carrying or a laptop's adapter; and otherwise the model, which sums the parts with a
 /// learned (laptop) or default "rest of system" baseline and divides by that same efficiency. Each of the measured totals
 /// counts only above zero, since a machine that runs draws something. A UPS or power supply total keeps the model's
 /// parts, and the rest is what the total leaves of them. The external monitors draw what the <see cref="IMonitorDraw"/>
@@ -131,8 +132,29 @@ public sealed class PowerModel
             // A UPS that powers this PC alone leaves out the monitors with plugs of their own; one that powers the monitors too
             // already holds them. A load of the rated volt-amperes assumes a power factor, so a total from it is an estimate.
             var total = _profile.UpsLoad == UpsLoad.ThisPc ? ups + monitors.OwnPlug : ups;
-            var upsQuality = s.UpsSource == UpsPowerSource.LoadOfRatedVoltAmps ? Quality.Estimated : Quality.Measured;
+            var upsQuality = s.UpsSource is UpsPowerSource.LoadOfRatedVoltAmps or UpsPowerSource.ApparentPowerAssumedFactor
+                ? Quality.Estimated
+                : Quality.Measured;
             return Build(s, total, upsQuality, WithRest(parts, total), userIdle, TotalSource.Ups);
+        }
+        if (!onItsBattery && SystemMeterWatts(s) is { } meter)
+        {
+            // The machine's own input meter, a platform power meter or its management controller, measures what it draws
+            // at its input, its supply's losses and all, so like a supply's wall figure nothing is divided.
+            var meterTotal = meter + monitors.OwnPlug;
+            var from = s.SystemMeter == SystemMeterKind.Bmc ? TotalSource.Bmc : TotalSource.PowerMeter;
+            return Build(s, meterTotal, Quality.Measured, WithRest(parts with { PsuLoss = 0 }, meterTotal), userIdle, from);
+        }
+        if (Finite(s.PlatformW) is { } platform && platform > 0)
+        {
+            // It comes before a power supply's figures: it meters the whole machine, where a supply may feed only part of it.
+            // The processor's own meter of the whole platform (Snapdragon X's system rail) measures the machine's DC draw,
+            // the display and anything running off the PC included, behind the charger, so battery charging is not in it.
+            // On AC the wall figure is that over the adapter's efficiency, as a power supply's DC output is; on battery,
+            // with no rate to read (a battery reporting relative units), it is the draw itself.
+            var drawn = platform / efficiency;
+            var railTotal = AtLeastTheDischarge(s, isLaptop, drawn + monitors.OwnPlug, monitors.OwnPlug);
+            return Build(s, railTotal, Quality.Measured, WithRest(parts with { PsuLoss = drawn - platform }, railTotal), userIdle, TotalSource.PlatformMeter);
         }
         if (!onItsBattery && WallWatts(s) is { } wall)
         {
@@ -151,16 +173,6 @@ public sealed class PowerModel
             var drawn = output / supply;
             var total = drawn + monitors.OwnPlug;
             return Build(s, total, Quality.Measured, WithRest(parts with { PsuLoss = drawn - output }, total), userIdle, TotalSource.PowerSupply);
-        }
-        if (Finite(s.PlatformW) is { } platform && platform > 0)
-        {
-            // The processor's own meter of the whole platform (Snapdragon X's system rail) measures the machine's DC draw,
-            // the display and anything running off the PC included, behind the charger, so battery charging is not in it.
-            // On AC the wall figure is that over the adapter's efficiency, as a power supply's DC output is; on battery,
-            // with no rate to read (a battery reporting relative units), it is the draw itself.
-            var drawn = platform / efficiency;
-            var railTotal = AtLeastTheDischarge(s, isLaptop, drawn + monitors.OwnPlug, monitors.OwnPlug);
-            return Build(s, railTotal, Quality.Measured, WithRest(parts with { PsuLoss = drawn - platform }, railTotal), userIdle, TotalSource.PlatformMeter);
         }
         var modelled = beforePsu + psuLoss + monitors.OwnPlug;
         var floored = AtLeastTheDischarge(s, isLaptop, modelled, monitors.OwnPlug);
@@ -200,6 +212,10 @@ public sealed class PowerModel
            && Finite(s.UpsOutputW) is { } watts && watts > 0
             ? watts
             : null;
+
+    /// <summary>The input watts the machine's own meter gave. Nought watts is no reading, as a UPS's is not.</summary>
+    private static double? SystemMeterWatts(Sample s)
+        => s.SystemMeter != SystemMeterKind.None && Finite(s.SystemMeterW) is { } watts && watts > 0 ? watts : null;
 
     /// <summary>The DC output watts a power supply gave, unless the user has turned reading it off. Nought watts is no
     /// reading of a running machine's rails, for the same reason a UPS's is not.</summary>

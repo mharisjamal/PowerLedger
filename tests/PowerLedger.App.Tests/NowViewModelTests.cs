@@ -81,6 +81,8 @@ public class NowViewModelTests
         "The processor's own meter of the whole machine · 1 s samples")]
     [InlineData(TotalSource.PlatformMeter, Quality.Measured, 37.7, "Live · platform meter · 14:32:07",
         "The processor's own meter of the whole machine, with the monitors' own figures · 1 s samples")]
+    [InlineData(TotalSource.PowerMeter, Quality.Measured, 0, "Live · power meter reading · 14:32:07", "This PC's own power meter reading · 1 s samples")]
+    [InlineData(TotalSource.Bmc, Quality.Measured, 0, "Live · power meter reading · 14:32:07", "This PC's management controller reading · 1 s samples")]
     public void A_total_from_a_ups_or_a_power_supply_says_which_it_came_from(
         TotalSource total, Quality quality, double monitors, string eyebrow, string note)
     {

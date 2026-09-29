@@ -435,6 +435,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
         Service.ShowMonitors(status.Monitors ?? []);                 // a service from before monitors lists none
         Service.ShowPowerDevices(status.PowerDevices ?? []);         // and one from before power devices reads none
+        Service.ShowNut(status.Sources);
         var c = status.Calibration;
         var learned = Format.Duration(c.BatterySamples * _sampleSeconds / 3600.0);
         // The battery on a desktop is a UPS, which powers more than the machine, so a desktop's readings never use it.

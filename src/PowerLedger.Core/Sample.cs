@@ -28,6 +28,11 @@ namespace PowerLedger.Core;
 /// <paramref name="DGpuScope"/> are their <see cref="GpuCard.Totals"/>. Null for a sample that has only those four.</param>
 /// <param name="PlatformW">The whole platform's DC watts from an energy-meter rail that meters it (Snapdragon X's
 /// <c>system</c>), display included and battery charging excluded; null where there is no such rail.</param>
+/// <param name="SystemMeterW">The machine's own input power, as a platform power meter or its management controller
+/// measures it (see <see cref="SystemMeterKind"/>); null when it has none or it gave no reading. Wall power already, like
+/// <paramref name="PsuWallW"/>: never divided by an efficiency.</param>
+/// <param name="SystemMeter">What gave <paramref name="SystemMeterW"/>.</param>
+/// <param name="SystemMeterName">What the meter is called, for the status screen.</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -53,7 +58,10 @@ public sealed record Sample(
     string? PsuName = null,
     double? PsuWallW = null,
     IReadOnlyList<GpuCard>? Gpus = null,
-    double? PlatformW = null)
+    double? PlatformW = null,
+    double? SystemMeterW = null,
+    SystemMeterKind SystemMeter = SystemMeterKind.None,
+    string? SystemMeterName = null)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>

@@ -60,6 +60,7 @@ public sealed class SampleValidator
         var wall = InRange(raw.PsuWallW, _options.PsuMaxW, ref suspect);
         // A whole-platform rail is energy over the tick, exact like the CPU's, and becomes the total like a UPS's.
         var platform = InRange(raw.PlatformW, _options.PlatformMaxW, ref suspect);
+        var meter = InRange(raw.SystemMeterW, _options.UpsMaxW, ref suspect);     // a machine's own meter, under a UPS's ceiling
 
         var brightness = Fraction(raw.Brightness, ref suspect);
         var load = Fraction(raw.CpuLoad, ref suspect) ?? 0;
@@ -79,6 +80,7 @@ public sealed class SampleValidator
             PsuOutputW = psu,
             PsuWallW = wall,
             PlatformW = platform,
+            SystemMeterW = meter,
             Suspect = suspect,
         };
         if (cards is null) return checkedSample;

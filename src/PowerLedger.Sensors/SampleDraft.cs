@@ -50,6 +50,14 @@ public sealed class SampleDraft
 
     public string? PsuName { get; set; }
 
+    /// <summary>The machine's own input power, from a platform power meter or its management controller; wall power
+    /// already. The first meter source to fill it wins.</summary>
+    public double? SystemMeterW { get; set; }
+
+    public SystemMeterKind SystemMeter { get; set; }
+
+    public string? SystemMeterName { get; set; }
+
     /// <summary>The discrete graphics cards found so far this tick, in the order the sources added them.</summary>
     public IReadOnlyList<GpuCardDraft> Gpus => _gpus;
 
@@ -91,7 +99,8 @@ public sealed class SampleDraft
             Brightness, DisplayOn, MonitorCount,
             UserIdleSeconds, SessionLocked, Suspect: false,
             totals.Scope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName, PsuWallW,
-            cards.Count > 0 ? cards : null, PlatformOwnDraw());
+            cards.Count > 0 ? cards : null, PlatformOwnDraw(),
+            SystemMeterW, SystemMeter, SystemMeterName);
     }
 
     /// <summary>The platform rail as the machine's own draw. Charging the battery is never the PC's consumption, so a rail
