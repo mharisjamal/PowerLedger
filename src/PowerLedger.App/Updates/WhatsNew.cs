@@ -8,6 +8,12 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.10.1",
+        [
+            "Aero floats on your desktop: only the glass is the window, and your desktop shows clearly between the panels.",
+            "Brighter glass, closer to the demo. Increase contrast in Settings keeps the darker, easier to read glass.",
+            "Aero uses far less of your PC while it is open, and its opening is smoother.",
+        ]),
         ("0.10.0",
         [
             "Aero, a new Liquid Glass look, is now the default, with a short tour the first time it opens. Switch look brings back Midnight or Classic.",
