@@ -8,6 +8,12 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.10.4",
+        [
+            "Aero has no frame around it any more, and its glass has thin, clean edges.",
+            "Clear shows whatever is behind PowerLedger, live: your desktop and your other windows.",
+            "More is measured: Snapdragon PCs, NVIDIA cards' own energy counter, and better battery readings.",
+        ]),
         ("0.10.3",
         [
             "Aero is now invite only. Enter your invite code in Settings, Look, to turn it on; everyone else uses Midnight.",
