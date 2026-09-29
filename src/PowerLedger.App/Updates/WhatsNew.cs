@@ -8,6 +8,12 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.10.3",
+        [
+            "Aero looks like its film: the glass glows with the Windows 11 bloom. Settings, Glass, Behind the glass has Aero bloom, My desktop or Plain.",
+            "The opening counts your figures up, and Replay intro and Play tour sit beside the window's buttons.",
+            "Aero's panels, charts and spacing follow the approved design more closely.",
+        ]),
         ("0.10.2",
         [
             "Aero's sidebar and panels stay clear glass over dark parts of your wallpaper too.",
