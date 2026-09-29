@@ -75,11 +75,22 @@ public class WhatsNewTests
             "Optional data sharing: help improve the estimates by sharing anonymous readings; ask in Settings → Privacy.",
         ]);
 
+    /// <summary>0.10.2 lifts the dark-theme frost over dark wallpaper.</summary>
+    [Fact]
+    public void The_0_10_2_points_match_exactly_and_come_first()
+    {
+        WhatsNew.Releases[0].Version.ShouldBe("0.10.2", "newest first");
+        PointsOf("0.10.2").ShouldBe([
+            "Aero's sidebar and panels stay clear glass over dark parts of your wallpaper too.",
+        ]);
+        WhatsNew.Since("0.10.1", "0.10.2").ShouldBe(PointsOf("0.10.2"));
+    }
+
     /// <summary>0.10.1 is Aero free-form over the desktop, brighter glass, and its CPU and intro fixes.</summary>
     [Fact]
-    public void The_0_10_1_points_match_exactly_and_come_first()
+    public void The_0_10_1_points_match_exactly()
     {
-        WhatsNew.Releases[0].Version.ShouldBe("0.10.1", "newest first");
+        WhatsNew.Releases[1].Version.ShouldBe("0.10.1");
         PointsOf("0.10.1").ShouldBe([
             "Aero floats on your desktop: only the glass is the window, and your desktop shows clearly between the panels.",
             "Brighter glass, closer to the demo. Increase contrast in Settings keeps the darker, easier to read glass.",
@@ -92,7 +103,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_0_points_match_exactly()
     {
-        WhatsNew.Releases[1].Version.ShouldBe("0.10.0");
+        WhatsNew.Releases[2].Version.ShouldBe("0.10.0");
         PointsOf("0.10.0").ShouldBe([
             "Aero, a new Liquid Glass look, is now the default, with a short tour the first time it opens. Switch look brings back Midnight or Classic.",
             "Settings has a Glass section: Clear, Tinted, Dark or your own colour, plus Reduce transparency and Increase contrast.",
@@ -107,7 +118,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_4_points_match_exactly()
     {
-        WhatsNew.Releases[2].Version.ShouldBe("0.9.4");
+        WhatsNew.Releases[3].Version.ShouldBe("0.9.4");
         PointsOf("0.9.4").ShouldBe(["Where the power went names each part: your processor, graphics card, monitors, and memory and drives."]);
         WhatsNew.Since("0.9.3", "0.9.4").ShouldBe(PointsOf("0.9.4"));
     }
@@ -116,7 +127,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_3_points_match_exactly()
     {
-        WhatsNew.Releases[3].Version.ShouldBe("0.9.3");
+        WhatsNew.Releases[4].Version.ShouldBe("0.9.3");
         PointsOf("0.9.3").ShouldBe(["Check now downloads a new version again and offers Restart to update, and the Midnight sidebar shows the version you have."]);
         WhatsNew.Since("0.9.2", "0.9.3").ShouldBe(PointsOf("0.9.3"));
     }
@@ -125,7 +136,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_2_points_match_exactly()
     {
-        WhatsNew.Releases[4].Version.ShouldBe("0.9.2");
+        WhatsNew.Releases[5].Version.ShouldBe("0.9.2");
         PointsOf("0.9.2").ShouldBe(["Check now installs a new version straight away, and PowerLedger looks for new versions every 15 minutes."]);
         WhatsNew.Since("0.9.1", "0.9.2").ShouldBe(PointsOf("0.9.2"));
     }
@@ -134,7 +145,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_1_points_match_exactly()
     {
-        WhatsNew.Releases[5].Version.ShouldBe("0.9.1");
+        WhatsNew.Releases[6].Version.ShouldBe("0.9.1");
         PointsOf("0.9.1").ShouldBe(["The Energy used card starts on Since start, and its button switches it to Today, This week or This month."]);
         WhatsNew.Since("0.9.0", "0.9.1").ShouldBe(PointsOf("0.9.1"));
     }
@@ -143,7 +154,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_0_points_match_exactly()
     {
-        WhatsNew.Releases[6].Version.ShouldBe("0.9.0");
+        WhatsNew.Releases[7].Version.ShouldBe("0.9.0");
         PointsOf("0.9.0").ShouldBe(
         [
             "PowerLedger now keeps itself up to date: new versions install on their own, and it reopens afterwards.",
@@ -156,7 +167,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_8_1_points_match_exactly()
     {
-        WhatsNew.Releases[7].Version.ShouldBe("0.8.1");
+        WhatsNew.Releases[8].Version.ShouldBe("0.8.1");
         PointsOf("0.8.1").ShouldBe(
         [
             "Every graphics card counts now, older NVIDIA cards such as the Quadro 6000 included, and a PC with several cards adds them all up.",
@@ -170,7 +181,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_8_0_points_match_exactly()
     {
-        WhatsNew.Releases[8].Version.ShouldBe("0.8.0");
+        WhatsNew.Releases[9].Version.ShouldBe("0.8.0");
         PointsOf("0.8.0").ShouldBe(
         [
             "A new look: a dashboard with your power, today's energy and idle waste at a glance. Prefer the classic look? Switch back any time in Settings → Preferences.",
