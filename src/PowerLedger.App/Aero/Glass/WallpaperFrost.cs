@@ -10,9 +10,8 @@ namespace PowerLedger.App.Aero;
 /// shown sharp behind everything, and frosted once, off the UI thread, into a small copy that each pane shows lined up
 /// with the wallpaper behind it: the HTML's <c>blur(26px) saturate(155%)</c> as three box blurs. It is frosted again only
 /// when the wallpaper, the Frost slider, the theme or the glass's strictness changes. The frosted copy is held within the
-/// frost bounds (A.C.FrostBrightest in dark, A.C.FrostDarkest in light), where text keeps 3:1 with the halo; on the
-/// strict glass (Increase contrast, Reduce transparency) within the backdrop bounds, where it keeps 4.5:1 over any
-/// wallpaper. The panes are lined up on layout, size and parallax changes, never per frame at rest; <see cref="AlignFor"/>
+/// frost bounds (A.C.FrostDarkest to A.C.FrostBrightest), where text keeps 3:1 with the halo; on the strict glass
+/// (Increase contrast, Reduce transparency) within the backdrop bounds, where it keeps 4.5:1 over any wallpaper. The panes are lined up on layout, size and parallax changes, never per frame at rest; <see cref="AlignFor"/>
 /// lines them up every frame for a bounded time only (the intro).
 /// </summary>
 internal sealed class WallpaperFrost : IDisposable
@@ -88,14 +87,14 @@ internal sealed class WallpaperFrost : IDisposable
         _path = path;
         var sharp = reload ? null : _sharp;
         if (_onScreen) _placement = WallpaperPlacement.Read();
-        // The bright glass lets the wallpaper through up to the frost bounds; the strict glass holds it within the backdrop's.
+        // The bright glass lets the wallpaper through within the frost bounds; the strict glass holds it within the backdrop's.
         var brightest = Token(theme, strict ? "A.C.BackdropBrightest" : "A.C.FrostBrightest");
         var darkest = Token(theme, strict ? "A.C.BackdropDarkest" : "A.C.FrostDarkest");
         var saturate = _window.TryFindResource("A.Glass.Saturate") is double s ? s : 1.55;
         Task.Run(() =>
         {
             var picture = sharp ?? Load(path);
-            var frosted = picture == null ? null : Frost(picture, radius, saturate, theme == Theme.Dark ? brightest : darkest, theme == Theme.Dark);
+            var frosted = picture == null ? null : Frost(picture, radius, saturate, darkest, brightest);
             return (picture, frosted);
         }).ContinueWith(done =>
         {
@@ -218,10 +217,12 @@ internal sealed class WallpaperFrost : IDisposable
 
     /// <summary>
     /// Frosts <paramref name="sharp"/> into a small frozen copy: three box blurs of <paramref name="radius"/> (a close
-    /// Gaussian), saturated by <paramref name="saturate"/>, then held within <paramref name="bound"/>'s luminance: no
-    /// brighter in the dark theme, no darker in the light one, the hue kept. Pure; safe off the UI thread.
+    /// Gaussian), saturated by <paramref name="saturate"/>, then held within the luminance of <paramref name="darkest"/>
+    /// and <paramref name="brightest"/>: a brighter pixel dimmed with its hue kept, a darker one lifted toward white, as
+    /// frosted glass lit from the room reads (Plan V: the dark bright glass has a floor, so a black corner of the desktop
+    /// under the sidebar still reads as the panes' glass). Pure; safe off the UI thread.
     /// </summary>
-    internal static BitmapSource Frost(BitmapSource sharp, double radius, double saturate, Color bound, bool dark)
+    internal static BitmapSource Frost(BitmapSource sharp, double radius, double saturate, Color darkest, Color brightest)
     {
         const int w = FrostWidth, h = FrostHeight;
         var small = new TransformedBitmap(sharp, new ScaleTransform((double)w / sharp.PixelWidth, (double)h / sharp.PixelHeight));
@@ -242,7 +243,8 @@ internal sealed class WallpaperFrost : IDisposable
                 BoxBlur(scratch, channels[c], w, h, r, rows: false);
             }
         }
-        var limit = Contrast.Luminance(bound);
+        var ceiling = Contrast.Luminance(brightest);
+        var floor = Contrast.Luminance(darkest);
         for (var i = 0; i < w * h; i++)
         {
             double b = channels[0][i], g = channels[1][i], red = channels[2][i];
@@ -252,14 +254,14 @@ internal sealed class WallpaperFrost : IDisposable
             red = Math.Clamp(grey + (red - grey) * saturate, 0, 255);
             var (lr, lg, lb) = (Linear(red), Linear(g), Linear(b));
             var luminance = .2126 * lr + .7152 * lg + .0722 * lb;
-            if (dark && luminance > limit)
+            if (luminance > ceiling)
             {
-                var k = limit / luminance;
+                var k = ceiling / luminance;
                 (lr, lg, lb) = (lr * k, lg * k, lb * k);
             }
-            else if (!dark && luminance < limit)
+            else if (luminance < floor)
             {
-                var k = (limit - luminance) / (1 - luminance);
+                var k = (floor - luminance) / (1 - luminance);
                 (lr, lg, lb) = (lr + (1 - lr) * k, lg + (1 - lg) * k, lb + (1 - lb) * k);
             }
             pixels[i * 4] = Gamma(lb);

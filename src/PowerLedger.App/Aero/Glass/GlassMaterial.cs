@@ -161,12 +161,16 @@ internal sealed class GlassMaterial : IDisposable
             top = Contrast.Over(top, frosted);
             bottom = Contrast.Over(bottom, frosted);
         }
-        // The ink family that reads better on this glass, each with its own halo.
+        // The theme's own ink family while it reads on this glass; otherwise the family that reads better, each with its
+        // own halo (the dark glass's floor, Plan V, can put dark ink within reach of light ink there: the theme keeps its own).
         var light = Palette(Theme.Dark);
         var dark = Palette(Theme.Light);
         var lightInk = (Color)light["A.C.Text"];
         var darkInk = (Color)dark["A.C.Text"];
-        var family = Worst(lightInk, GroundsOf(top, bottom, (Color)light["A.C.Halo"])) >= Worst(darkInk, GroundsOf(top, bottom, (Color)dark["A.C.Halo"])) ? light : dark;
+        var lightWorst = Worst(lightInk, GroundsOf(top, bottom, (Color)light["A.C.Halo"]));
+        var darkWorst = Worst(darkInk, GroundsOf(top, bottom, (Color)dark["A.C.Halo"]));
+        var ownWorst = ReferenceEquals(palette, light) ? lightWorst : darkWorst;
+        var family = ownWorst >= target ? palette : lightWorst >= darkWorst ? light : dark;
         var inkColour = ReferenceEquals(family, light) ? lightInk : darkInk;
         var haloColour = (Color)family["A.C.Halo"];
         var grounds = GroundsOf(top, bottom, haloColour);

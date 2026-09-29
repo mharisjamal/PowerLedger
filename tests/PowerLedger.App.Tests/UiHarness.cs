@@ -93,6 +93,7 @@ internal static class UiHarness
         bitmap.Render(visual);
         var png = new PngBitmapEncoder();
         png.Frames.Add(BitmapFrame.Create(bitmap));
+        Directory.CreateDirectory(Folder);   // a test run on its own, before any other has made it
         using var file = File.Create(Path.Combine(Folder, name));
         png.Save(file);
     }

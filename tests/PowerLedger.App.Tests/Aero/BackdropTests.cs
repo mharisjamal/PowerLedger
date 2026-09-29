@@ -61,16 +61,16 @@ public class BackdropTests
             var brightest = (Color)ThemeManager.Palette(Look.Aero, Theme.Dark)["A.C.BackdropBrightest"];
             var darkest = (Color)ThemeManager.Palette(Look.Aero, Theme.Light)["A.C.BackdropDarkest"];
 
-            var dark = Pixels(WallpaperFrost.Frost(halves, 10, 1.55, brightest, dark: true));
+            var dark = Pixels(WallpaperFrost.Frost(halves, 10, 1.55, Colors.Black, brightest));
             dark.Max(Contrast.Luminance).ShouldBeLessThanOrEqualTo(Contrast.Luminance(brightest) + 0.002, "no brighter than the dark palette allows");
             var middle = dark[150 * WallpaperFrost.FrostWidth + WallpaperFrost.FrostWidth / 2];
             Contrast.Luminance(middle).ShouldBeGreaterThan(0.001, "the edge is blurred into a ramp");
             Contrast.Luminance(dark[150 * WallpaperFrost.FrostWidth + WallpaperFrost.FrostWidth - 1]).ShouldBe(0, 0.001, "black stays black");
 
-            var light = Pixels(WallpaperFrost.Frost(halves, 10, 1.55, darkest, dark: false));
+            var light = Pixels(WallpaperFrost.Frost(halves, 10, 1.55, darkest, Colors.White));
             light.Min(Contrast.Luminance).ShouldBeGreaterThanOrEqualTo(Contrast.Luminance(darkest) - 0.002, "no darker than the light palette allows");
 
-            var sharp = Pixels(WallpaperFrost.Frost(halves, 0, 1, Colors.White, dark: true));
+            var sharp = Pixels(WallpaperFrost.Frost(halves, 0, 1, Colors.Black, Colors.White));
             Contrast.Luminance(sharp[150 * WallpaperFrost.FrostWidth + WallpaperFrost.FrostWidth / 2 - 2]).ShouldBe(1, 0.01, "no frost, no blur");
         });
 
@@ -79,9 +79,33 @@ public class BackdropTests
         => UiHarness.OnUi(() =>
         {
             var blue = Picture(200, 125, _ => Color.FromRgb(0x60, 0x90, 0xFF));
-            var frosted = Pixels(WallpaperFrost.Frost(blue, 4, 1, Color.FromRgb(0x22, 0x22, 0x22), dark: true))[1000];
+            var frosted = Pixels(WallpaperFrost.Frost(blue, 4, 1, Colors.Black, Color.FromRgb(0x22, 0x22, 0x22)))[1000];
             frosted.B.ShouldBeGreaterThan(frosted.R, "still blue");
             frosted.B.ShouldBeGreaterThan(frosted.G);
+        });
+
+    /// <summary>Plan V: the dark bright glass over the darkest of desktops (the black corner of a wallpaper under the
+    /// sidebar) is still lit glass, as the demo's reads, never a near-black slab beside brighter panes: the frost is held
+    /// above A.C.FrostDarkest as well as under A.C.FrostBrightest. The strict glass keeps black.</summary>
+    [Fact]
+    public void The_dark_bright_frost_lifts_black_to_its_floor_and_the_strict_one_keeps_it()
+        => UiHarness.OnUi(() =>
+        {
+            var dark = ThemeManager.Palette(Look.Aero, Theme.Dark);
+            var floor = (Color)dark["A.C.FrostDarkest"];
+            var ceiling = (Color)dark["A.C.FrostBrightest"];
+            Contrast.Luminance(floor).ShouldBeGreaterThan(Contrast.Luminance((Color)dark["A.C.BackdropDarkest"]) + 0.02, "the bright glass has a floor above black");
+            Contrast.Luminance(floor).ShouldBeLessThan(Contrast.Luminance(ceiling));
+
+            var black = Picture(200, 125, _ => Color.FromRgb(0x02, 0x03, 0x02));
+            var lifted = Pixels(WallpaperFrost.Frost(black, 4, 1.55, floor, ceiling));
+            lifted.Min(Contrast.Luminance).ShouldBe(Contrast.Luminance(floor), 0.003, "black lifted to the floor");
+            var strict = Pixels(WallpaperFrost.Frost(black, 4, 1.55, (Color)dark["A.C.BackdropDarkest"], (Color)dark["A.C.BackdropBrightest"]));
+            strict.Max(Contrast.Luminance).ShouldBeLessThan(0.002, "the strict glass lets black through");
+
+            var green = Picture(200, 125, _ => Color.FromRgb(0x10, 0x30, 0x10));
+            var tree = Pixels(WallpaperFrost.Frost(green, 4, 1, floor, ceiling))[1000];
+            tree.G.ShouldBeGreaterThan(tree.R, "a dark green lifted is still green");
         });
 
     [Fact]

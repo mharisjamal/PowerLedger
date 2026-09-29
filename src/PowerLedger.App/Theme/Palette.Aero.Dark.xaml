@@ -111,8 +111,9 @@
     <!-- The bright glass (0.10.1, the owner's choice, as the demo): how far the frost may let the desktop through
          before the glass holds it, and the halo behind the glass's content that keeps text at 3:1 there (counted as its
          colour at A.Glass.HaloShare). Increase contrast and Reduce transparency keep the backdrop bounds above, no halo,
-         and 4.5:1. -->
-    <Color x:Key="A.C.FrostDarkest">#000000</Color>
+         and 4.5:1. The floor (Plan V): a black corner of the desktop still frosts to lit glass, so the sidebar over it
+         reads as the panes' glass does, as the demo's, rather than a near-black slab. -->
+    <Color x:Key="A.C.FrostDarkest">#383838</Color>
     <Color x:Key="A.C.FrostBrightest">#A0A0A0</Color>
     <Color x:Key="A.C.Halo">#000000</Color>
     <sys:Double x:Key="A.Glass.HaloShare">0.3</sys:Double>
