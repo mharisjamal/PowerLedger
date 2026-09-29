@@ -68,7 +68,7 @@ public class ReportDataTests
         // aren't always added: one running off the laptop is already in the battery's report.
         ReportData.QualityLegend.ShouldBe(
             "Measured: Windows' battery report. Calibrated: a model with a baseline learned on battery, ±10%. Estimated: the model alone, ±20%. "
-            + "UPS and power supply readings count as measured, except a UPS that only gives its load as a share of its rated VA. "
+            + "UPS, power supply and platform meter readings count as measured, except a UPS that only gives its load as a share of its rated VA. "
             + "External monitors' watts come from their own figures in every mode.");
     }
 

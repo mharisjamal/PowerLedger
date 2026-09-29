@@ -32,6 +32,10 @@ public enum TotalSource
 
     /// <summary>The wall power a power supply reports it is drawing, taken as it is.</summary>
     PowerSupplyWall = 4,
+
+    /// <summary>The processor's own meter of the whole platform, display included (Snapdragon X's <c>system</c> energy
+    /// rail), with the adapter's efficiency allowed for on AC.</summary>
+    PlatformMeter = 5,
 }
 
 /// <summary>What the outlets of a UPS attached over USB power, as the user says. Stored as an integer: append new members,

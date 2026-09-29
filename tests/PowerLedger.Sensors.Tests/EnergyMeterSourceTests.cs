@@ -53,6 +53,27 @@ public class EnergyMeterSourceTests
     }
 
     [Fact]
+    public void A_whole_platform_rail_is_handed_on_for_the_total()
+    {
+        var draft = new SampleDraft();
+        From(new EnergyMeterReading(PackageW: 6.0, CoresW: 4.0, IntegratedGpuW: 0.8, MemoryW: 0.7, PlatformW: 14.0)).Contribute(draft);
+
+        draft.CpuPackageW.ShouldBe(6.0);
+        draft.PlatformW.ShouldBe(14.0);
+        draft.PlatformHoldsCharging.ShouldBe(QualcommRails.SystemHoldsCharging);
+    }
+
+    [Fact]
+    public void A_snapdragon_sample_carries_the_platform_figure()
+    {
+        using var sampler = new Sampler([From(new EnergyMeterReading(6.0, 4.0, 0.8, 0.7, PlatformW: 14.0))]);
+        var sample = sampler.Read(DateTimeOffset.UnixEpoch, 1);
+
+        sample.CpuPackageW.ShouldBe(6.0);
+        sample.PlatformW.ShouldBe(14.0);
+    }
+
+    [Fact]
     public void The_source_never_touches_fields_that_belong_to_others()
     {
         var draft = new SampleDraft { BatteryRateW = 34.2, CpuLoad = 0.5, Brightness = 0.6 };

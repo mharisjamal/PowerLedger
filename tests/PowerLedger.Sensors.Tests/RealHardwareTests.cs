@@ -22,6 +22,23 @@ public class RealHardwareTests
     }
 
     [Fact]
+    public void Each_battery_answers_with_its_capabilities_and_a_machine_battery_is_marked_as_one()
+    {
+        var capabilities = BatteryUnits.Capabilities();
+        var state = Win32.ReadBatteryState();
+        if (state is not { OwnBattery: true })
+        {
+            // A desktop, perhaps with a UPS: whatever it lists is short-term, so the machine's rate is never relative.
+            BatteryUnits.AnyRelative(capabilities).ShouldBeFalse();
+            return;
+        }
+
+        // Every laptop battery sets BATTERY_SYSTEM_BATTERY; a failed query would leave the list empty.
+        capabilities.ShouldNotBeEmpty();
+        capabilities.ShouldContain(flags => (flags & 0x80000000) != 0);
+    }
+
+    [Fact]
     public void The_energy_meter_reports_a_believable_package_wattage_well_inside_the_tick_budget()
     {
         using var meter = new EnergyMeter();

@@ -12,6 +12,8 @@ namespace PowerLedger.Sensors;
 /// <param name="MedianWindow">How many recent values the outlier test compares against.</param>
 /// <param name="OutlierFactor">A value this many times the median or more is treated as a spike.</param>
 /// <param name="TransitionSeconds">How long after an AC change a tick stays marked suspect.</param>
+/// <param name="PlatformMaxW">Upper plausible bound for a whole-platform energy rail (Snapdragon X's <c>system</c>). Those
+/// machines are thin laptops on adapters of 100 W or less, so past a battery's bound the rail has been misread.</param>
 public sealed record ValidatorOptions(
     double CpuMaxW = 400,
     double GpuMaxW = 700,
@@ -20,4 +22,5 @@ public sealed record ValidatorOptions(
     double PsuMaxW = 2000,
     int MedianWindow = 30,
     double OutlierFactor = 3,
-    double TransitionSeconds = 3);
+    double TransitionSeconds = 3,
+    double PlatformMaxW = 300);

@@ -26,6 +26,69 @@ public class SimpleSourcesTests
 
         draft.OnBattery.ShouldBeFalse();
         draft.BatteryRateW.ShouldBeNull();
+        // The charge is kept apart, where it is only ever taken off a figure that holds it and never counted as consumption.
+        draft.BatteryChargeW.ShouldNotBeNull().ShouldBe(25.0, 1e-9);
+    }
+
+    [Fact]
+    public void On_mains_a_discharging_battery_is_reported_since_the_adapter_is_not_carrying_the_load()
+    {
+        var draft = new SampleDraft();
+        new BatterySource(() => new Win32.BatteryState(AcOnLine: true, Present: true, Charging: false, Discharging: true, RateMilliwatts: -61_500)).Contribute(draft);
+
+        draft.OnBattery.ShouldBeFalse();
+        draft.BatteryRateW.ShouldNotBeNull().ShouldBe(61.5, 1e-9);
+        draft.BatteryChargeW.ShouldBeNull();
+    }
+
+    [Fact]
+    public void On_battery_nothing_is_a_charge()
+    {
+        var draft = new SampleDraft();
+        new BatterySource(() => Battery(ac: false)).Contribute(draft);
+        draft.BatteryChargeW.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_battery_reporting_relative_units_gives_no_watts_either_way()
+    {
+        // BATTERY_CAPACITY_RELATIVE: the rate is in units of its own, not milliwatts, so it is no reading of the machine.
+        var onBattery = new SampleDraft();
+        var source = new BatterySource(() => Battery(ac: false, rate: -340), relativeUnits: true);
+        source.Supported.ShouldBeTrue();
+        source.Contribute(onBattery);
+        onBattery.OnBattery.ShouldBeTrue();
+        onBattery.BatteryRateW.ShouldBeNull();
+
+        var charging = new SampleDraft();
+        new BatterySource(() => Battery(ac: true, rate: 250), relativeUnits: true).Contribute(charging);
+        charging.BatteryRateW.ShouldBeNull();
+        charging.BatteryChargeW.ShouldBeNull();
+
+        var heavy = new SampleDraft();
+        new BatterySource(() => new Win32.BatteryState(true, true, false, true, -600), relativeUnits: true).Contribute(heavy);
+        heavy.BatteryRateW.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_ups_on_mains_gives_neither_a_floor_nor_a_charge()
+    {
+        var ups = new Win32.BatteryState(AcOnLine: true, Present: true, Charging: true, Discharging: false, RateMilliwatts: 20_000, ShortTerm: true);
+        var draft = new SampleDraft();
+        new BatterySource(() => ups).Contribute(draft);
+        draft.BatteryRateW.ShouldBeNull();
+        draft.BatteryChargeW.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Relative_units_are_told_apart_by_the_battery_capability_flag()
+    {
+        const uint system = 0x80000000, relative = 0x40000000, shortTerm = 0x20000000;
+        BatteryUnits.AnyRelative([system]).ShouldBeFalse();
+        BatteryUnits.AnyRelative([system, system | relative]).ShouldBeTrue();
+        // A UPS is short-term and not the machine's battery, so its units say nothing about the machine's rate.
+        BatteryUnits.AnyRelative([system, shortTerm | relative]).ShouldBeFalse();
+        BatteryUnits.AnyRelative([]).ShouldBeFalse();
     }
 
     [Fact]

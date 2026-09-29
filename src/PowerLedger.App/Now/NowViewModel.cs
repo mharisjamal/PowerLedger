@@ -437,6 +437,13 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         if (frame.Total == TotalSource.Ups) return "UPS output reading · " + samples;
         if (frame.Total == TotalSource.PowerSupplyWall) return "Power supply's own wall reading · " + samples;
         if (frame.Total == TotalSource.PowerSupply) return "Power supply's DC output, with its efficiency · " + samples;
+        // Like the battery's report, the platform meter already holds a monitor running off the PC; its figure only splits it off.
+        if (frame.Total == TotalSource.PlatformMeter)
+        {
+            return frame.Components.Monitors > 0
+                ? "The processor's own meter of the whole machine, with the monitors' own figures · " + samples
+                : "The processor's own meter of the whole machine · " + samples;
+        }
         return (frame.Quality, frame.Components.Monitors > 0) switch
         {
             (Quality.Measured, false) => "Windows battery report · " + samples,
@@ -454,6 +461,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     {
         TotalSource.Ups => "UPS output",
         TotalSource.PowerSupply or TotalSource.PowerSupplyWall => "power supply reading",
+        TotalSource.PlatformMeter => "platform meter",
         _ => frame.Quality switch
         {
             Quality.Measured => "battery discharge",

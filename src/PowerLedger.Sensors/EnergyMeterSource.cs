@@ -1,11 +1,12 @@
 namespace PowerLedger.Sensors;
 
 /// <summary>
-/// Fills the CPU package and integrated-graphics watts from the Windows energy meter. Owns those two fields
+/// Fills the CPU package, integrated-graphics and whole-platform watts from the Windows energy meter. Owns those fields
 /// and nothing else: CPU load comes from <see cref="CpuLoadSource"/>, because load is available even where
 /// watts are not. The memory rail is read but not published, since the model has no field for it yet.
-/// Supported only where the meter has a package rail, so a supported meter means the processor is measured; one with
-/// only core, graphics or memory rails is unsupported and says why.
+/// Supported only where the meter has a package rail or a whole-platform rail (Snapdragon X's <c>system</c>), so a
+/// supported meter measures the processor, the platform or both; one with only core, graphics or memory rails is
+/// unsupported and says why.
 /// </summary>
 public sealed class EnergyMeterSource : ISensorSource
 {
@@ -40,6 +41,8 @@ public sealed class EnergyMeterSource : ISensorSource
         var reading = _read();
         draft.CpuPackageW = reading.PackageW;
         draft.IGpuW = reading.IntegratedGpuW;
+        draft.PlatformW = reading.PlatformW;
+        draft.PlatformHoldsCharging = QualcommRails.SystemHoldsCharging;
     }
 
     public void Dispose() => _meter?.Dispose();

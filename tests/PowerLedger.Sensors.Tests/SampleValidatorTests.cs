@@ -28,6 +28,22 @@ public class SampleValidatorTests
         validator.SuspectCount.ShouldBe(0);
     }
 
+    [Fact]
+    public void A_platform_rail_is_range_checked_but_never_spike_filtered()
+    {
+        var validator = new SampleValidator();
+        for (var second = 0; second < 40; second++) validator.Validate(Raw(second: second) with { PlatformW = 5 });
+
+        // A jump from idle to load is energy over the tick, a fact rather than a glitch.
+        var jump = validator.Validate(Raw(second: 40) with { PlatformW = 60 });
+        jump.PlatformW.ShouldBe(60);
+        jump.Suspect.ShouldBeFalse();
+
+        var misread = validator.Validate(Raw(second: 41) with { PlatformW = 3000 });
+        misread.PlatformW.ShouldBeNull();
+        misread.Suspect.ShouldBeTrue();
+    }
+
     [Theory]
     [InlineData(401.0)]
     [InlineData(-1.0)]

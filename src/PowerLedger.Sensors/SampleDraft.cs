@@ -14,7 +14,21 @@ public sealed class SampleDraft
     public double? CpuPackageW { get; set; }
     public double? IGpuW { get; set; }
     public double CpuLoad { get; set; }
+    /// <summary>Discharge watts, positive, whenever the machine's own battery is discharging: on battery, or on AC under a load
+    /// the adapter can't carry. Null while charging, idle or unknown, and on a battery that reports relative units.</summary>
     public double? BatteryRateW { get; set; }
+
+    /// <summary>Charge watts, positive, while the machine's own battery charges on AC; null otherwise. Never the PC's
+    /// consumption (see <see cref="BatterySource"/>): it is only ever taken off a figure that holds it.</summary>
+    public double? BatteryChargeW { get; set; }
+
+    /// <summary>What a whole-platform energy rail measured (Snapdragon X's <c>system</c>), DC side, display included.</summary>
+    public double? PlatformW { get; set; }
+
+    /// <summary>True when <see cref="PlatformW"/> is what the adapter delivers, battery charge included, rather than the
+    /// machine's own draw behind the charger (see <see cref="QualcommRails.SystemHoldsCharging"/>).</summary>
+    public bool PlatformHoldsCharging { get; set; }
+
     public bool OnBattery { get; set; }
     public double? Brightness { get; set; }
 
@@ -77,7 +91,15 @@ public sealed class SampleDraft
             Brightness, DisplayOn, MonitorCount,
             UserIdleSeconds, SessionLocked, Suspect: false,
             totals.Scope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName, PsuWallW,
-            cards.Count > 0 ? cards : null);
+            cards.Count > 0 ? cards : null, PlatformOwnDraw());
+    }
+
+    /// <summary>The platform rail as the machine's own draw. Charging the battery is never the PC's consumption, so a rail
+    /// that holds the charge has the charge taken off it; where the charge rate is unknown the rail is taken as it is.</summary>
+    private double? PlatformOwnDraw()
+    {
+        if (PlatformW is not { } platform || !PlatformHoldsCharging || OnBattery) return PlatformW;
+        return BatteryChargeW is { } charge && double.IsFinite(charge) && charge > 0 ? Math.Max(0, platform - charge) : platform;
     }
 
     private List<GpuCard> Cards() => _gpus.ConvertAll(card => card.ToCard());
