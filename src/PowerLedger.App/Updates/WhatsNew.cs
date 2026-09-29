@@ -10,6 +10,7 @@ internal static class WhatsNew
     [
         ("0.10.3",
         [
+            "Aero is now invite only. Enter your invite code in Settings, Look, to turn it on; everyone else uses Midnight.",
             "Aero looks like its film: the glass glows with the Windows 11 bloom. Settings, Glass, Behind the glass has Aero bloom, My desktop or Plain.",
             "The opening counts your figures up, and Replay intro and Play tour sit beside the window's buttons.",
             "Aero's panels, charts and spacing follow the approved design more closely.",

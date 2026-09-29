@@ -289,7 +289,7 @@ public class MidnightPageRenderingTests
                 (Top("Monitors") - Top("Start with Windows")).ShouldBe(Top("Look") - Top("Theme"), 1, theme.ToString());
                 var looks = AllOf<RadioButton>(view).Where(p => p.Content is "Classic" or "Midnight" or "Aero").ToList();
                 looks.Count.ShouldBe(3, theme.ToString());
-                looks.Single(p => p.IsChecked == true).Content.ShouldBe("Aero", theme.ToString());   // the default look
+                looks.Single(p => p.IsChecked == true).Content.ShouldBe("Midnight", theme.ToString());   // the default look
                 looks.Single(p => Equals(p.Content, "Classic")).IsChecked = true;
                 model.Look.ShouldBe(Look.Classic, theme.ToString());
                 looks.Single(p => p.IsChecked == true).Content.ShouldBe("Classic", theme.ToString());

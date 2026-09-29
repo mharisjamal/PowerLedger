@@ -9,12 +9,26 @@ namespace PowerLedger.App;
 /// <see cref="Show"/> called; <paramref name="fellBack"/> hears when that first window had to be Classic's instead.
 /// </summary>
 internal sealed class LookSwitcher(
-    Func<Look, IShellWindow> open, ThemeManager theme, Action<IShellWindow> retarget, Action<string> log, Action<Look>? fellBack = null)
+    Func<Look, IShellWindow> open, ThemeManager theme, Action<IShellWindow> retarget, Action<string> log, Action<Look>? fellBack = null,
+    Func<bool>? aeroUnlocked = null)
 {
     private IShellWindow? _current;
 
     /// <summary>The window of the look in use, opened (not shown) the first time it is asked for.</summary>
-    public IShellWindow Current => _current ??= open(Look);
+    public IShellWindow Current => _current ??= open(KeepToTheLock());
+
+    /// <summary>Aero is invite only (0.10.3): locked, it never opens, and a first window due in it opens in Midnight,
+    /// which <c>fellBack</c> hears so it is saved.</summary>
+    private bool AeroLocked => !(aeroUnlocked?.Invoke() ?? true);
+
+    private Look KeepToTheLock()
+    {
+        if (Look != Look.Aero || !AeroLocked) return Look;
+        log("Aero is invite only and not unlocked here, so Midnight opens instead.");
+        theme.Apply(Look.Midnight);
+        fellBack?.Invoke(Look.Midnight);
+        return Look.Midnight;
+    }
 
     /// <summary>
     /// Shows the window of the look in use, opening it the first time. Review 6: a saved look other than Classic whose
@@ -30,7 +44,7 @@ internal sealed class LookSwitcher(
             shown.Show();
             return shown;
         }
-        var look = Look;
+        var look = KeepToTheLock();
         IShellWindow? window = null;
         try
         {
@@ -64,6 +78,7 @@ internal sealed class LookSwitcher(
     public string? Switch(Look target)
     {
         if (target == Look) return null;
+        if (target == Look.Aero && AeroLocked) return AeroInvite.Locked;
         var previous = Look;
         var old = _current;
         var page = old?.Page;   // the shell is shared: the new window may move it to its own look's page as it opens

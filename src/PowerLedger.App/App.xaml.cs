@@ -149,7 +149,9 @@ public partial class App : Application
         // Review 6: a saved look that won't open at start opens Classic instead, which is then saved, through Settings as
         // any choice of look is, so the next start doesn't fail the same way; the switcher logs why.
         var settings = _settings;
-        _looks = new LookSwitcher(OpenWindow, _theme, Retarget, line => AppLog.Write(line), look => settings.Look = look);
+        var unlocked = _preferences;
+        _looks = new LookSwitcher(
+            OpenWindow, _theme, Retarget, line => AppLog.Write(line), look => settings.Look = look, () => unlocked.Current.AeroUnlocked);
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
         _settings.PropertyChanged += OnSettingsChanged;

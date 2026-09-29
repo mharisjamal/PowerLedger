@@ -3,7 +3,8 @@ namespace PowerLedger.App.Tests;
 /// <summary>The App's preferences held in memory, recording each change.</summary>
 internal sealed class FakeUiSettings : IUiSettings
 {
-    public UiPreferences Current { get; set; } = UiPreferences.Default;
+    /// <summary>Aero unlocked, as the tests from before the invite (0.10.3) have it; a test of the lock locks it.</summary>
+    public UiPreferences Current { get; set; } = UiPreferences.Default with { AeroUnlocked = true };
 
     public bool StartsWithWindows { get; private set; } = true;
 
@@ -19,8 +20,19 @@ internal sealed class FakeUiSettings : IUiSettings
     /// <summary>What <see cref="SetLook"/> answers instead of switching, for a test of a window that won't open.</summary>
     public string? LookProblem { get; set; }
 
+    public string? UnlockAero()
+    {
+        Current = Current with { AeroUnlocked = true };
+        Changes.Add("aero unlocked");
+        if (LookProblem is not null) return LookProblem;
+        Current = Current with { Look = Look.Aero, LookIntroduced = false, AeroIntroSeen = false };
+        Changes.Add("look Aero");
+        return null;
+    }
+
     public string? SetLook(Look look)
     {
+        if (look == Look.Aero && !Current.AeroUnlocked) return AeroInvite.Locked;
         if (LookProblem is not null) return LookProblem;
         Current = Current with { Look = look, LookIntroduced = true };
         Changes.Add($"look {look}");

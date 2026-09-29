@@ -21,28 +21,29 @@ internal sealed record UiPreferences
 
     public ThemeChoice Theme { get; init; } = ThemeChoice.System;
 
-    /// <summary>Which front end the window opens in (Midnight look design §1, Aero look design §1): Aero, the default (the
-    /// owner's decision, 2026-09-28), for a new install and for a ui.json from before the look existed; Classic or
-    /// Midnight once chosen. A name this version doesn't know reads as the default rather than failing the whole file. It
-    /// has a setter rather than init for the missing case: the JSON source generator gives an init-only property missing
-    /// from the file its type's default, which is Classic, where a setter is left alone.</summary>
+    /// <summary>Which front end the window opens in (Midnight look design §1, Aero look design §1): Midnight, the default
+    /// since Aero became invite only (0.10.3, the owner's decision), for a new install and for a ui.json from before the
+    /// look existed; Classic, or Aero once unlocked (<see cref="AeroUnlocked"/>), once chosen. A name this version doesn't
+    /// know reads as the default rather than failing the whole file. It has a setter rather than init for the missing
+    /// case: the JSON source generator gives an init-only property missing from the file its type's default, which is
+    /// Classic, where a setter is left alone.</summary>
     [JsonConverter(typeof(LookJsonConverter))]
-    public Look Look { get; set; } = Look.Aero;
+    public Look Look { get; set; } = Look.Midnight;
+
+    /// <summary>This PC entered the Aero invite code (<see cref="AeroInvite"/>), so Aero is a look it can choose; until
+    /// then every load puts a saved Aero back to Midnight (<see cref="Locked"/>). False for a ui.json from before it
+    /// existed, and for anything in it but true, which reads as locked rather than failing the file.</summary>
+    [JsonConverter(typeof(TrueOnlyJsonConverter))]
+    public bool AeroUnlocked { get; init; }
 
     /// <summary>The one-time banner that says this is the new look, with Switch back and Got it, has been retired: by one
     /// of its buttons or by any look switch (Midnight look design §1). It never shows again, in any look, until the move
     /// to Aero (<see cref="AeroIntroduced"/>) brings it back once.</summary>
     public bool LookIntroduced { get; init; }
 
-    /// <summary>
-    /// The one-time move to Aero has been made (Aero look design §1): every PC updating from 0.9.x lands on Aero once,
-    /// whatever look it had, with the new look's banner showing again; after that the user's choice sticks. The move is
-    /// made by <see cref="Introduced"/> as the store loads, and saved with whatever the App saves next.
-    /// <para>It is init-only with an initialiser of true on purpose, the reverse of the setters above: the JSON source
-    /// generator gives an init-only property missing from the file its type's default, false, so a ui.json from before
-    /// Aero is moved, while a new install's preferences, made in memory, have nothing to move.</para>
-    /// </summary>
-    public bool AeroIntroduced { get; init; } = true;
+    /// <summary>The one-time move to Aero of 0.10.0 to 0.10.2 was made. Retired in 0.10.3, when Aero became invite only
+    /// (<see cref="Locked"/>): kept only so a ui.json that has it still reads and writes it.</summary>
+    public bool AeroIntroduced { get; set; } = true;
 
     /// <summary>The look the one-time move to Aero moved this PC from, Classic or Midnight, for the banner's Switch back
     /// to return to (Aero look design §1); null for a PC that had none to leave (a new install, or no look saved, or one
@@ -121,11 +122,12 @@ internal sealed record UiPreferences
         AeroWindow = AeroWindow?.Sanitised(),
     };
 
-    /// <summary>The same preferences after the one-time move to Aero (<see cref="AeroIntroduced"/>): on Aero, with the new
-    /// look's banner to show; once made, the preferences as they are.</summary>
-    public UiPreferences Introduced() => AeroIntroduced
-        ? this
-        : this with { Look = Look.Aero, LookIntroduced = false, AeroIntroduced = true, LookBeforeAero = Look == Look.Aero ? null : Look };
+    /// <summary>The same preferences with Aero's lock kept (0.10.3): Aero without <see cref="AeroUnlocked"/> goes to
+    /// Midnight, with no new look's banner for the move. It runs on every load, so a hand-edited ui.json can't keep Aero
+    /// without the unlock either.</summary>
+    public UiPreferences Locked() => Look == Look.Aero && !AeroUnlocked
+        ? this with { Look = Look.Midnight, LookIntroduced = true }
+        : this;
 }
 
 /// <summary>Where Aero's window was left: spread over the work area or not, and its smaller layout's bounds in the
@@ -158,7 +160,7 @@ internal sealed class UiPreferencesStore(string path)
         try
         {
             if (!File.Exists(path)) return UiPreferences.Default;
-            return (JsonSerializer.Deserialize(File.ReadAllText(path), UiJson.Default.UiPreferences) ?? UiPreferences.Default).Sanitised().Introduced();
+            return (JsonSerializer.Deserialize(File.ReadAllText(path), UiJson.Default.UiPreferences) ?? UiPreferences.Default).Sanitised().Locked();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {

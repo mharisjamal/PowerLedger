@@ -17,6 +17,10 @@ internal interface IUiSettings
     /// the choice is left as it was, and the answer says why.</summary>
     string? SetLook(Look look);
 
+    /// <summary>The Aero invite code was entered (0.10.3): Aero is unlocked for good, then switched to, with its intro
+    /// video and banner due as on a first Aero open. When Aero's window can't open, it stays unlocked and the answer says why.</summary>
+    string? UnlockAero();
+
     /// <summary>Retires the one-time banner about the new look for good (<see cref="UiPreferences.LookIntroduced"/>).</summary>
     string? IntroduceLook();
 
@@ -82,8 +86,23 @@ internal sealed class AppPreferences(
 
     public string? SetLook(Look look)
     {
+        if (look == Look.Aero && !Current.AeroUnlocked) return AeroInvite.Locked;   // invite only: nothing switches
         if (switchLook?.Invoke(look) is { } problem) return problem;   // the old window stays, and so does the saved choice
         return Save(Current with { Look = look, LookIntroduced = true });
+    }
+
+    public string? UnlockAero()
+    {
+        var before = Current;
+        if (before.Look == Look.Aero) return Save(before with { AeroUnlocked = true });
+        // Saved before the switch, as Aero's window reads its banner and intro as it opens.
+        var saved = Save(before with { AeroUnlocked = true, LookIntroduced = false, AeroIntroSeen = false, LookBeforeAero = before.Look });
+        if (switchLook?.Invoke(Look.Aero) is { } problem)
+        {
+            Save(Current with { LookIntroduced = before.LookIntroduced, AeroIntroSeen = before.AeroIntroSeen, LookBeforeAero = before.LookBeforeAero });
+            return problem;
+        }
+        return Save(Current with { Look = Look.Aero }) ?? saved;
     }
 
     public string? IntroduceLook() => Current.LookIntroduced ? null : Save(Current with { LookIntroduced = true });

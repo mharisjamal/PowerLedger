@@ -411,4 +411,48 @@ public class LookSwitcherTests
             Should.Throw<InvalidOperationException>(() => looks.Show());
             looks.IsOpen.ShouldBeFalse();
         });
+
+    /// <summary>0.10.3: Aero is invite only. Locked, a switch to it is refused with nothing opened or applied.</summary>
+    [Fact]
+    public void A_switch_to_aero_while_locked_is_refused_and_opens_nothing()
+        => WithTheme((theme, _) =>
+        {
+            var looks = new LookSwitcher(
+                look => new FakeWindow(look, _events), theme, _ => _events.Add("retarget"), _log.Add, aeroUnlocked: () => false);
+            looks.Show();
+            _events.Clear();
+
+            looks.Switch(Look.Aero).ShouldBe(AeroInvite.Locked);
+
+            _events.ShouldBeEmpty();
+            looks.Look.ShouldBe(Look.Classic);
+            looks.Switch(Look.Midnight).ShouldBeNull("the other looks switch as ever");
+        });
+
+    /// <summary>A first window due in Aero while it is locked opens in Midnight, which the App hears so it is saved.</summary>
+    [Fact]
+    public void A_start_in_aero_while_locked_opens_midnight()
+        => WithTheme((theme, _) =>
+        {
+            theme.Apply(Look.Aero);
+            var fell = new List<Look>();
+            var looks = new LookSwitcher(look => new FakeWindow(look, _events), theme, _ => { }, _log.Add, fell.Add, () => false);
+
+            var shown = (FakeWindow)looks.Show();
+
+            shown.Look.ShouldBe(Look.Midnight);
+            looks.Look.ShouldBe(Look.Midnight);
+            fell.ShouldBe([Look.Midnight]);
+            _events.ShouldBe(["show Midnight"]);
+        });
+
+    [Fact]
+    public void A_start_in_aero_once_unlocked_opens_aero()
+        => WithTheme((theme, _) =>
+        {
+            theme.Apply(Look.Aero);
+            var looks = new LookSwitcher(look => new FakeWindow(look, _events), theme, _ => { }, _log.Add, aeroUnlocked: () => true);
+
+            ((FakeWindow)looks.Current).Look.ShouldBe(Look.Aero);
+        });
 }

@@ -339,7 +339,19 @@
                                 <RadioButton Style="{StaticResource Choice}" Content="Aero" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Aero}}" />
                             </StackPanel>
                         </Border>
+                        <TextBlock Style="{StaticResource Aside}" Text="Invite only" Visibility="{Binding AeroLocked, Converter={StaticResource VisibleWhen}}" />
                     </StackPanel>
+                    <!-- 0.10.3: Aero is invite only. Picking it while locked asks for the code here. -->
+                    <StackPanel Style="{StaticResource Row}" Visibility="{Binding EnteringAeroCode, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource Label}" Text="Invite code" />
+                        <TextBox Style="{StaticResource Field}" Width="110" Text="{Binding AeroCode, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Aero invite code">
+                            <TextBox.InputBindings>
+                                <KeyBinding Key="Return" Command="{Binding UnlockAero}" />
+                            </TextBox.InputBindings>
+                        </TextBox>
+                        <Button Style="{StaticResource M.Button.Outline}" Content="Unlock" Command="{Binding UnlockAero}" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Said}" Text="{Binding AeroCodeMessage}" Visibility="{Binding AeroCodeMessage, Converter={StaticResource VisibleWhenText}}" />
                     <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Start with Windows" />
                         <ToggleButton Style="{StaticResource M.Switch}" IsChecked="{Binding StartWithWindows}">

@@ -173,7 +173,7 @@ public class SettingsViewModelTests
         var model = Model();
         var changed = new List<string?>();
         model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
-        model.Look.ShouldBe(Look.Aero, "the default");
+        model.Look.ShouldBe(Look.Midnight, "the default");
 
         model.Look = Look.Classic;
 
@@ -220,11 +220,11 @@ public class SettingsViewModelTests
         switched.LookIntroduced.ShouldBeTrue("switching looks knows there are two");
     }
 
-    /// <summary>Aero look design §1: Aero is one of the choices, and choosing it from another look switches to it.</summary>
+    /// <summary>Aero look design §1: Aero, once unlocked, is one of the choices, and choosing it from another look switches to it.</summary>
     [Fact]
     public void Aero_can_be_chosen_from_another_look()
     {
-        _ui.Current = UiPreferences.Default with { Look = Look.Classic };
+        _ui.Current = UiPreferences.Default with { Look = Look.Classic, AeroUnlocked = true };
         var model = Model();
 
         model.Look = Look.Aero;

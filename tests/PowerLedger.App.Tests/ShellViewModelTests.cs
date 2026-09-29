@@ -289,4 +289,22 @@ public class ShellViewModelTests
 
         raised.ShouldBe(1);
     }
+
+    /// <summary>0.10.3: the title bars' Switch look never reaches Aero while it is locked; it toggles Classic and Midnight.</summary>
+    [Theory]
+    [InlineData("Classic", "Midnight")]
+    [InlineData("Midnight", "Classic")]
+    public void Switch_look_never_reaches_aero_while_locked(string from, string to)
+    {
+        _ui.Current = UiPreferences.Default with { Look = Enum.Parse<Look>(from), AeroUnlocked = false };
+        var shell = Shell();
+
+        shell.SwitchLook.Execute(null);
+        shell.SwitchLook.Execute(null);
+        shell.SwitchLook.Execute(null);
+
+        shell.Settings.Look.ShouldBe(Enum.Parse<Look>(to));
+        _ui.Changes.ShouldNotContain("look Aero");
+        shell.Settings.EnteringAeroCode.ShouldBeFalse();
+    }
 }

@@ -93,17 +93,17 @@ public sealed class UiPreferencesTests : IDisposable
         store.Load().ReadMonitorBrightness.ShouldBeFalse();
     }
 
-    /// <summary>Aero is the default (the owner's decision, 2026-09-28; Aero look design §1): a new install opens in it,
-    /// and a chosen Classic or Midnight survives a save and a load.</summary>
+    /// <summary>Midnight is the default since Aero became invite only (0.10.3): a new install opens in it, and a chosen
+    /// Classic or Midnight survives a save and a load.</summary>
     [Theory]
     [InlineData("Classic")]
     [InlineData("Midnight")]
-    public void The_look_is_aero_until_chosen_and_a_chosen_look_survives_a_save_and_a_load(string chosen)
+    public void The_look_is_midnight_until_chosen_and_a_chosen_look_survives_a_save_and_a_load(string chosen)
     {
         var store = new UiPreferencesStore(File);
-        store.Load().Look.ShouldBe(Look.Aero);
-        UiPreferences.Default.Look.ShouldBe(Look.Aero);
-        UiPreferences.Default.AeroIntroduced.ShouldBeTrue("a new install has nothing to move");
+        store.Load().Look.ShouldBe(Look.Midnight);
+        UiPreferences.Default.Look.ShouldBe(Look.Midnight);
+        UiPreferences.Default.AeroUnlocked.ShouldBeFalse();
 
         store.Save(UiPreferences.Default with { Look = Enum.Parse<Look>(chosen) });
 
@@ -111,29 +111,65 @@ public sealed class UiPreferencesTests : IDisposable
         System.IO.File.ReadAllText(File).ShouldContain($"\"{chosen}\"");
     }
 
-    /// <summary>Every PC updating from 0.7.x or earlier has a ui.json with no Look: it lands on Aero, told of it once.</summary>
+    /// <summary>A PC updating from 0.7.x or earlier has a ui.json with no Look: it opens in Midnight and keeps the rest.</summary>
     [Fact]
-    public void A_file_from_before_the_look_existed_opens_in_aero_and_keeps_the_rest()
+    public void A_file_from_before_the_look_existed_opens_in_midnight_and_keeps_the_rest()
     {
         Directory.CreateDirectory(_folder);
         System.IO.File.WriteAllText(File, """{ "Theme": "Light", "FirstRunDone": true, "Co2KgPerKwh": 0.23 }""");
 
         var read = new UiPreferencesStore(File).Load();
 
-        read.Look.ShouldBe(Look.Aero);
-        read.LookIntroduced.ShouldBeFalse("so it is told of the new look once");
+        read.Look.ShouldBe(Look.Midnight);
         read.Theme.ShouldBe(ThemeChoice.Light);
         read.FirstRunDone.ShouldBeTrue();
         read.Co2KgPerKwh.ShouldBe(0.23);
     }
 
-    /// <summary>Aero look design §1: every PC updating from 0.9.x lands on Aero once, whatever look it had, and is told of
-    /// it by the banner even when it had retired Midnight's; the move is counted as done, so it happens only once.</summary>
+    /// <summary>0.10.3: every PC on Aero without the invite code goes to Midnight, on every load, without the new look's
+    /// banner, and without Aero's intro; the rest of the file, the old Aero fields among it, still reads.</summary>
+    [Theory]
+    [InlineData("""{ "Theme": "Dark", "Look": "Aero", "LookIntroduced": false, "AeroIntroduced": true, "LookBeforeAero": "Classic", "AeroIntroSeen": true, "FirstRunDone": true }""")]
+    [InlineData("""{ "Theme": "Dark", "Look": "Aero", "LookIntroduced": true, "AeroIntroduced": true, "AeroIntroSeen": false, "FirstRunDone": true }""")]
+    [InlineData("""{ "Theme": "Dark", "Look": "Aero", "AeroUnlocked": false, "FirstRunDone": true }""")]
+    [InlineData("""{ "Theme": "Dark", "Look": "Aero", "AeroUnlocked": "yes", "FirstRunDone": true }""")]
+    [InlineData("""{ "Theme": "Dark", "Look": "aero", "AeroUnlocked": null, "FirstRunDone": true }""")]
+    public void Aero_without_the_unlock_goes_to_midnight_on_load_without_a_banner(string json)
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, json);
+        var store = new UiPreferencesStore(File);
+
+        var read = store.Load();
+
+        (read.Look, read.AeroUnlocked, read.LookIntroduced).ShouldBe((Look.Midnight, false, true));
+        read.Theme.ShouldBe(ThemeChoice.Dark);
+        read.FirstRunDone.ShouldBeTrue();
+        store.Save(read with { Look = Look.Aero });   // a hand edit back to Aero is undone again at the next load
+        store.Load().Look.ShouldBe(Look.Midnight);
+    }
+
+    [Fact]
+    public void Aero_with_the_unlock_stays_across_a_save_and_a_load()
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, """{ "Look": "Aero", "AeroUnlocked": true, "LookIntroduced": false, "FirstRunDone": true }""");
+        var store = new UiPreferencesStore(File);
+
+        var read = store.Load();
+
+        (read.Look, read.AeroUnlocked, read.LookIntroduced).ShouldBe((Look.Aero, true, false));
+        store.Save(read);
+        System.IO.File.ReadAllText(File).ShouldContain("\"AeroUnlocked\": true");
+        store.Load().ShouldBe(read);
+    }
+
+    /// <summary>Classic and Midnight are left as they are, locked or not, and nothing moves anyone to Aero any more.</summary>
     [Theory]
     [InlineData("Classic", true)]
     [InlineData("Midnight", true)]
     [InlineData("Midnight", false)]
-    public void A_file_from_before_aero_moves_to_aero_once_and_shows_the_banner(string look, bool introduced)
+    public void A_file_on_classic_or_midnight_keeps_its_look(string look, bool introduced)
     {
         Directory.CreateDirectory(_folder);
         System.IO.File.WriteAllText(
@@ -141,28 +177,9 @@ public sealed class UiPreferencesTests : IDisposable
 
         var read = new UiPreferencesStore(File).Load();
 
-        read.Look.ShouldBe(Look.Aero);
-        read.LookIntroduced.ShouldBeFalse();
-        read.AeroIntroduced.ShouldBeTrue();
-        read.LookBeforeAero.ShouldBe(Enum.Parse<Look>(look), "so the banner's Switch back goes back to it");
+        read.Look.ShouldBe(Enum.Parse<Look>(look));
+        read.LookIntroduced.ShouldBe(introduced);
         read.Theme.ShouldBe(ThemeChoice.Dark);
-        read.FirstRunDone.ShouldBeTrue();
-    }
-
-    /// <summary>A PC with no look saved, or already on Aero, had none before Aero to go back to.</summary>
-    [Theory]
-    [InlineData("""{ "FirstRunDone": true }""")]
-    [InlineData("""{ "Look": "Aero", "FirstRunDone": true }""")]
-    [InlineData("""{ "Look": "Neon", "FirstRunDone": true }""")]
-    public void A_file_with_no_look_before_aero_has_none_to_go_back_to(string json)
-    {
-        Directory.CreateDirectory(_folder);
-        System.IO.File.WriteAllText(File, json);
-
-        var read = new UiPreferencesStore(File).Load();
-
-        (read.Look, read.AeroIntroduced, read.LookBeforeAero).ShouldBe((Look.Aero, true, (Look?)null));
-        UiPreferences.Default.LookBeforeAero.ShouldBeNull();
     }
 
     [Theory]
@@ -178,25 +195,6 @@ public sealed class UiPreferencesTests : IDisposable
         store.Load().ShouldBe(saved);
     }
 
-    /// <summary>The move runs once: after it, a look switched back to is kept across starts.</summary>
-    [Fact]
-    public void After_the_move_to_aero_a_look_switched_back_to_stays()
-    {
-        Directory.CreateDirectory(_folder);
-        System.IO.File.WriteAllText(File, """{ "Look": "Midnight", "LookIntroduced": true, "FirstRunDone": true }""");
-        var store = new UiPreferencesStore(File);
-        store.Load().Look.ShouldBe(Look.Aero);
-
-        store.Save(store.Load() with { Look = Look.Midnight, LookIntroduced = true });   // Switch back, as AppPreferences saves it
-
-        var read = store.Load();
-        read.Look.ShouldBe(Look.Midnight);
-        read.LookIntroduced.ShouldBeTrue();
-        read.AeroIntroduced.ShouldBeTrue();
-        store.Load().Look.ShouldBe(Look.Midnight);
-        System.IO.File.ReadAllText(File).ShouldContain("\"AeroIntroduced\": true");
-    }
-
     [Theory]
     [InlineData("\"Neon\"")]
     [InlineData("2")]
@@ -208,7 +206,7 @@ public sealed class UiPreferencesTests : IDisposable
 
         var read = new UiPreferencesStore(File).Load();
 
-        read.Look.ShouldBe(Look.Aero);
+        read.Look.ShouldBe(Look.Midnight);
         read.Theme.ShouldBe(ThemeChoice.Dark);
         read.FirstRunDone.ShouldBeTrue();
     }

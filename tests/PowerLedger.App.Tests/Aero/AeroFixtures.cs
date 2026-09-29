@@ -8,7 +8,7 @@ namespace PowerLedger.App.Tests;
 internal static class AeroFixtures
 {
     public static FakeUiSettings Moved(Look? before = Look.Midnight, bool introduced = false)
-        => new() { Current = UiPreferences.Default with { Look = Look.Aero, LookIntroduced = introduced, LookBeforeAero = before } };
+        => new() { Current = UiPreferences.Default with { Look = Look.Aero, AeroUnlocked = true, LookIntroduced = introduced, LookBeforeAero = before } };
 
     public static ShellViewModel Shell(FakeSaver saver, FakeUiSettings? ui = null, FakeInsights? insights = null, int pendingApprovals = 0, Updater? updates = null)
         => Shell(saver, out _, ui, insights, pendingApprovals, updates);

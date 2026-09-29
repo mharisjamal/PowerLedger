@@ -159,7 +159,7 @@ public sealed class AppPreferencesTests : IDisposable
     public void A_look_switches_the_window_first_and_is_then_saved_and_the_new_look_needs_no_introducing_after()
     {
         var preferences = Preferences();
-        preferences.Current.Look.ShouldBe(Look.Aero, "the default");
+        preferences.Current.Look.ShouldBe(Look.Midnight, "the default");
 
         preferences.SetLook(Look.Classic).ShouldBeNull();
 
@@ -178,8 +178,53 @@ public sealed class AppPreferencesTests : IDisposable
 
         preferences.SetLook(Look.Classic).ShouldBe("Couldn't open the Classic look: no window.");
 
-        preferences.Current.Look.ShouldBe(Look.Aero);
-        Store.Load().Look.ShouldBe(Look.Aero);
+        preferences.Current.Look.ShouldBe(Look.Midnight);
+        Store.Load().Look.ShouldBe(Look.Midnight);
+    }
+
+    /// <summary>0.10.3: Aero is invite only. Locked, choosing it switches nothing and saves nothing.</summary>
+    [Fact]
+    public void Aero_while_locked_is_refused_without_a_switch()
+    {
+        var preferences = Preferences();
+
+        preferences.SetLook(Look.Aero).ShouldBe(AeroInvite.Locked);
+
+        _looks.ShouldBeEmpty();
+        preferences.Current.Look.ShouldBe(Look.Midnight);
+        System.IO.File.Exists(Path.Combine(_folder, "ui.json")).ShouldBeFalse();
+    }
+
+    /// <summary>The code unlocks Aero for good, saved before the switch, and Aero opens as on a first open: its intro and
+    /// banner due, Switch back going to the look left.</summary>
+    [Fact]
+    public void Unlocking_aero_saves_the_unlock_and_switches_to_aero_with_its_intro_due()
+    {
+        var preferences = Preferences();
+        preferences.SetLook(Look.Classic).ShouldBeNull();
+        preferences.SeeAeroIntro();
+
+        preferences.UnlockAero().ShouldBeNull();
+
+        _looks.ShouldBe([Look.Classic, Look.Aero]);
+        var read = Store.Load();
+        (read.Look, read.AeroUnlocked, read.LookIntroduced, read.AeroIntroSeen, read.LookBeforeAero)
+            .ShouldBe((Look.Aero, true, false, false, (Look?)Look.Classic));
+        preferences.Current.ShouldBe(read);
+        preferences.SetLook(Look.Midnight).ShouldBeNull();
+        preferences.SetLook(Look.Aero).ShouldBeNull("once unlocked, Aero is a normal choice");
+    }
+
+    [Fact]
+    public void Aero_whose_window_would_not_open_stays_unlocked_and_unswitched()
+    {
+        var preferences = Preferences();
+        _lookProblem = "Couldn't open the Aero look: no window.";
+
+        preferences.UnlockAero().ShouldBe("Couldn't open the Aero look: no window.");
+
+        var read = Store.Load();
+        (read.Look, read.AeroUnlocked, read.LookIntroduced).ShouldBe((Look.Midnight, true, false));
     }
 
     [Fact]
