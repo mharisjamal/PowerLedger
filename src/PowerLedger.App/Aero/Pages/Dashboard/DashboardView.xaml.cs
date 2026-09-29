@@ -31,6 +31,7 @@ public partial class DashboardView : UserControl
     private bool _narrow;
     private GlassPanel? _focused;
     private double _monthFill;
+    private string? _partsShown;
 
     public DashboardView()
     {
@@ -112,6 +113,9 @@ public partial class DashboardView : UserControl
             case nameof(DashboardViewModel.Live):
                 ShowNow();
                 break;
+            case nameof(DashboardViewModel.Parts):
+                ShowParts();
+                break;
             case nameof(DashboardViewModel.Month):
                 ShowMonth();
                 break;
@@ -142,6 +146,7 @@ public partial class DashboardView : UserControl
 
     private void ShowAll()
     {
+        ShowParts();
         ShowNow();
         ShowMonth();
         ShowDaily();
@@ -166,6 +171,18 @@ public partial class DashboardView : UserControl
         UnitButton.IsEnabled = detail?.PricePerKwh is not null;
         TodayKwh.Text = detail is null ? Format.Missing : Format.Kwh(detail.TodayKwh, culture);
         ChangeText.Text = DashboardFigures.Change(detail?.ChangeVsYesterday, culture);
+    }
+
+    /// <summary>The parts beside the pie, given again only when what the list shows (the parts, their models and their
+    /// shares as whole percents) has changed: the parts come new with every reading, and a list given them each second
+    /// built its rows again each second, a layout pass and a redraw of the whole pane (Plan U).</summary>
+    private void ShowParts()
+    {
+        var parts = _model?.Parts ?? [];
+        var shown = string.Join("\n", parts.Select(p => $"{p.Part}|{p.Name}|{p.Model}|{p.Share.ToString("0%", CultureInfo.CurrentCulture)}"));
+        if (shown == _partsShown && PartsList.ItemsSource is not null) return;
+        _partsShown = shown;
+        PartsList.ItemsSource = parts;
     }
 
     /// <summary>This month: cost or energy, the day of the month and its bar, the forecast, and the split by PC.</summary>
@@ -364,12 +381,13 @@ public partial class DashboardView : UserControl
         AeroMotion.Move(Live, LiveChart.RevealProperty, 1, AeroMotion.LineDraw, AeroMotion.Glide, from: 0);
         AeroMotion.Move(Daily, DailyChart.RevealProperty, 1, AeroMotion.DailyWipe, AeroMotion.Glide, from: 0);
         Pie.PlayRise();
-        AeroMotion.Move(MonthFill, WidthProperty, MonthBar.ActualWidth * _monthFill, AeroMotion.BarGrow, AeroMotion.Glide, from: 0,
-            done: () =>
-            {
-                MonthFill.BeginAnimation(WidthProperty, null);   // back to a plain width, which a resize then keeps in step
-                MonthFill.Width = MonthBar.ActualWidth * _monthFill;
-            });
+        // The bar grows on a scale from its left end, not its width: a width asks for a layout pass every frame (Plan U).
+        MonthFill.Width = MonthBar.ActualWidth * _monthFill;
+        var grow = new ScaleTransform(0, 1);
+        MonthFill.RenderTransformOrigin = new Point(0, .5);
+        MonthFill.RenderTransform = grow;
+        AeroMotion.Move(grow, ScaleTransform.ScaleXProperty, 1, AeroMotion.BarGrow, AeroMotion.Glide, from: 0,
+            done: () => MonthFill.RenderTransform = Transform.Identity);
     }
 
     // ---------------------------------------------------------------- the camera

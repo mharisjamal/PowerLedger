@@ -683,7 +683,10 @@
     </Style>
 
     <!-- ============ surfaces ============ -->
-    <!-- The glass pane: shadow outside only (cached), frost, tint, the bevelled rim, the top sheen, the pointer sheen. -->
+    <!-- The glass pane: shadow outside only (pre-rendered), frost, tint, the bevelled rim, the top sheen, the pointer sheen.
+         The shadow's cache is on the grid round the blurred borders and their clip, so the bitmap holds the finished,
+         clipped shadow: an Effect or Clip on the cached element itself is applied after the cache, on every frame that
+         touches the pane, and that re-blurred every pane's two shadows on each live reading (Plan U, measured). -->
     <Style TargetType="aero:GlassPanel">
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text}" />
         <Setter Property="FontFamily" Value="{DynamicResource A.F.Ui}" />
@@ -697,20 +700,21 @@
                 <ControlTemplate TargetType="aero:GlassPanel">
                     <Grid>
                         <Grid x:Name="PART_Shadow" Margin="-100" IsHitTestVisible="False">
-                            <Border Margin="100" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource A.B.Shadow}">
-                                <Border.CacheMode><BitmapCache /></Border.CacheMode>
-                                <Border.Effect>
-                                    <DropShadowEffect BlurRadius="{DynamicResource A.Glass.ShadowFarBlur}" ShadowDepth="{DynamicResource A.Glass.ShadowFarDepth}"
-                                                      Opacity="{DynamicResource A.Glass.ShadowFarOpacity}" Color="{DynamicResource A.C.Shadow}" Direction="270" RenderingBias="Performance" />
-                                </Border.Effect>
-                            </Border>
-                            <Border Margin="100" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource A.B.Shadow}">
-                                <Border.CacheMode><BitmapCache /></Border.CacheMode>
-                                <Border.Effect>
-                                    <DropShadowEffect BlurRadius="{DynamicResource A.Glass.ShadowNearBlur}" ShadowDepth="{DynamicResource A.Glass.ShadowNearDepth}"
-                                                      Opacity="{DynamicResource A.Glass.ShadowNearOpacity}" Color="{DynamicResource A.C.Shadow}" Direction="270" RenderingBias="Performance" />
-                                </Border.Effect>
-                            </Border>
+                            <Grid.CacheMode><BitmapCache SnapsToDevicePixels="True" /></Grid.CacheMode>
+                            <Grid x:Name="PART_ShadowClip">
+                                <Border Margin="100" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource A.B.Shadow}">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="{DynamicResource A.Glass.ShadowFarBlur}" ShadowDepth="{DynamicResource A.Glass.ShadowFarDepth}"
+                                                          Opacity="{DynamicResource A.Glass.ShadowFarOpacity}" Color="{DynamicResource A.C.Shadow}" Direction="270" RenderingBias="Performance" />
+                                    </Border.Effect>
+                                </Border>
+                                <Border Margin="100" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource A.B.Shadow}">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="{DynamicResource A.Glass.ShadowNearBlur}" ShadowDepth="{DynamicResource A.Glass.ShadowNearDepth}"
+                                                          Opacity="{DynamicResource A.Glass.ShadowNearOpacity}" Color="{DynamicResource A.C.Shadow}" Direction="270" RenderingBias="Performance" />
+                                    </Border.Effect>
+                                </Border>
+                            </Grid>
                         </Grid>
                         <Border x:Name="PART_Frost" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Frost}" IsHitTestVisible="False" />
                         <Border x:Name="PART_Tint" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Background}" />

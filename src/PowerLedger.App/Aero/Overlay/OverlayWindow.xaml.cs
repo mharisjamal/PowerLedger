@@ -10,7 +10,8 @@ namespace PowerLedger.App.Aero;
 
 /// <summary>
 /// The glass watts overlay (Aero look design §5): a small pill, always on top and out of the taskbar and Alt Tab, with the
-/// live watts rolling on a spring from <see cref="NowViewModel.Live"/> and, when chosen, the last 30 seconds under a thin
+/// live watts from <see cref="NowViewModel.Live"/>, changed in place once a second (a roll each reading kept the pill
+/// redrawing most of every second), and, when chosen, the last 30 seconds under a thin
 /// accent line; "No reading" while there is none. Right-click for its corner or Free (drag it anywhere), its opacity, the
 /// sparkline and Close, each saved through <see cref="SettingsViewModel.Overlay"/>, the one channel it follows
 /// (<see cref="OverlayHost"/> shows and closes it). It is placed in pixels by <see cref="OverlayPlacement"/>, again when
@@ -42,7 +43,7 @@ internal sealed partial class OverlayWindow : Window, IOverlay
             Closed += (_, _) => material?.Dispose();
         }
         Spark.Seconds = 30;
-        ShowLive(animate: false);
+        ShowLive();
         now.PropertyChanged += OnNowChanged;
         settings.PropertyChanged += OnSettingsChanged;
         Closed += (_, _) =>
@@ -151,7 +152,7 @@ internal sealed partial class OverlayWindow : Window, IOverlay
 
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(NowViewModel.Live)) ShowLive(animate: true);
+        if (e.PropertyName == nameof(NowViewModel.Live)) ShowLive();
     }
 
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
@@ -159,13 +160,13 @@ internal sealed partial class OverlayWindow : Window, IOverlay
         if (e.PropertyName == nameof(SettingsViewModel.Glass)) ApplyGlass();
     }
 
-    private void ShowLive(bool animate)
+    private void ShowLive()
     {
         var live = _now.Live;
         var reading = double.IsFinite(live.Watts);
         Number.Visibility = Unit.Visibility = reading ? Visibility.Visible : Visibility.Collapsed;
         NoReading.Visibility = reading ? Visibility.Collapsed : Visibility.Visible;
-        if (reading) Number.Set((int)Math.Round(Math.Max(0, live.Watts)), animate && !AeroMotion.Reduced);
+        if (reading) Number.Set((int)Math.Round(Math.Max(0, live.Watts)), animate: false);
         Spark.Samples = live.Spark;
         AutomationProperties.SetName(Glass, reading ? $"{Math.Round(Math.Max(0, live.Watts)):0} watts now" : "No reading");
     }

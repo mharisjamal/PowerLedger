@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 
 namespace PowerLedger.App.Aero;
 
@@ -49,8 +48,8 @@ internal sealed record LiveScale(double Lo, double Hi, double Step, IReadOnlyLis
 /// Last minute (Aero look design §1, the prototype's LiveChart on real readings): the last 60 s of <see
 /// cref="LivePanel.Spark"/> as the accent line with its glow, the day's average as a faint ghost, a marker and a value pill
 /// on the newest reading with the time under it, and a crosshair that reads any second under the pointer. A new reading
-/// redraws the line once and slides it a second's width into place on a composited transform, so the scroll costs nothing
-/// between readings and nothing runs at rest; under reduced motion it is simply redrawn.
+/// redraws the line once, in place: no slide, so a reading costs the compositor one frame, not a second of them (Plan U:
+/// the 1 s slide on every 1 s reading kept the render thread drawing at 60 fps, a third to a half of a core).
 /// </summary>
 internal sealed class LiveChart : FrameworkElement
 {
@@ -66,8 +65,8 @@ internal sealed class LiveChart : FrameworkElement
     private readonly VisualCollection _kids;
     private readonly DrawingVisual _static = new(), _line = new(), _marker = new(), _hover = new();
     private readonly ContainerVisual _clip = new();
-    private readonly TranslateTransform _slide = new();
-    private static readonly IEasingFunction SlideEase = ChartInk.Frozen(new PowerEase { Power = 4, EasingMode = EasingMode.EaseOut });
+    private object? _staticKey;
+    private bool _hoverDrawn;
     private LiveScale _scale = LiveScale.For([], double.NaN);
     private double? _hoverAge;
     private DateTimeOffset _newestAt = DateTimeOffset.Now;
@@ -77,8 +76,6 @@ internal sealed class LiveChart : FrameworkElement
         Cursor = Cursors.Cross;
         _kids = new VisualCollection(this) { _static, _clip, _marker, _hover };
         _clip.Children.Add(_line);
-        _line.Transform = _slide;
-        _marker.Transform = _slide;   // the marker rides on the newest reading as it slides in
         AutomationProperties.SetName(this, "Last minute");
         SizeChanged += (_, _) => Redraw();
     }
@@ -105,14 +102,11 @@ internal sealed class LiveChart : FrameworkElement
 
     private IReadOnlyList<SparkSample> Readings => Samples ?? [];
 
-    /// <summary>A new reading: the time of the newest moves on, and the line slides a second's width into place.</summary>
+    /// <summary>A new reading: the time of the newest moves on, and the line is redrawn where it now is.</summary>
     private void OnSamples()
     {
         _newestAt = DateTimeOffset.Now;
         Redraw();
-        var step = (LiveScale.X(0) - LiveScale.X(1)) * Sx;
-        if (Readings.Count > 1 && step > 0) AeroMotion.Move(_slide, TranslateTransform.XProperty, 0, 1000, SlideEase, from: step);
-        else _slide.BeginAnimation(TranslateTransform.XProperty, null);
         UpdateAutomation();
     }
 
@@ -131,26 +125,17 @@ internal sealed class LiveChart : FrameworkElement
         double sx = Sx, sy = Sy;
         var accent = ChartInk.Colour(this, "A.C.Accent", Color.FromRgb(0xD3, 0xF0, 0x3F));
         var axis = ChartInk.Brush(this, "A.C.Text3", Color.FromArgb(0x70, 0xF3, 0xF4, 0xF6));
-        var grid = ChartInk.Pen(ChartInk.Brush(this, "A.C.Grid", Color.FromArgb(0x0F, 255, 255, 255)), 1);
-        using (var dc = _static.RenderOpen())
+        var gridBrush = ChartInk.Brush(this, "A.C.Grid", Color.FromArgb(0x0F, 255, 255, 255));
+        var grid = ChartInk.Pen(gridBrush, 1);
+        // The scale, its labels and the ghost line are drawn again only when they change: most readings move the line
+        // alone, and redrawing the labels' text each second was about a third of what a reading cost (Plan U).
+        var ghostY = double.IsFinite(Average) && readings.Count > 0 ? Math.Round(_scale.Y(Average) * sy * 4) / 4 : double.NaN;
+        var key = (RenderSize, _scale.Lo, _scale.Hi, _scale.Step, ghostY, readings.Count == 0, axis.Color, gridBrush.Color,
+            ChartInk.Colour(this, "A.C.Ghost", Color.FromArgb(0x33, 255, 255, 255)), CultureInfo.CurrentCulture.Name);
+        if (!key.Equals(_staticKey))
         {
-            dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
-            foreach (var w in _scale.Grid)
-            {
-                var y = _scale.Y(w) * sy;
-                dc.DrawLine(grid, new Point(LiveScale.X0 * sx, y), new Point(LiveScale.X1 * sx, y));
-                ChartInk.At(dc, ChartInk.Text(this, Format.Scale(w, _scale.Step, CultureInfo.CurrentCulture), 11, axis), 0, y + 4);
-            }
-            if (double.IsFinite(Average) && readings.Count > 0)
-            {
-                var ghost = ChartInk.Pen(ChartInk.Brush(this, "A.C.Ghost", Color.FromArgb(0x33, 255, 255, 255)), 1.5, [4, 4]);
-                var y = _scale.Y(Average) * sy;
-                dc.DrawLine(ghost, new Point(LiveScale.X0 * sx, y), new Point(LiveScale.X1 * sx, y));
-            }
-            if (readings.Count == 0)
-            {
-                ChartInk.At(dc, ChartInk.Text(this, Format.NoReading, 13, axis), ActualWidth / 2, ActualHeight / 2, 1);
-            }
+            _staticKey = key;
+            DrawStatic(readings, axis, grid, sx, sy);
         }
         var points = readings.OrderByDescending(s => s.AgeSeconds).Select(s => new Point(LiveScale.X(s.AgeSeconds) * sx, _scale.Y(s.Watts) * sy)).ToList();
         using (var dc = _line.RenderOpen())
@@ -171,8 +156,33 @@ internal sealed class LiveChart : FrameworkElement
                 Marker(dc, LiveScale.X(0) * sx, _scale.Y(newest.Watts) * sy, newest.Watts, _newestAt, accent);
             }
         }
-        DrawHover(accent);
+        if (_hoverAge is not null || _hoverDrawn) DrawHover(accent);
         UpdateReveal();
+    }
+
+    /// <summary>The gridlines and their watts, the day's average as the ghost line, or "No reading".</summary>
+    private void DrawStatic(IReadOnlyList<SparkSample> readings, Brush axis, Pen grid, double sx, double sy)
+    {
+        using (var dc = _static.RenderOpen())
+        {
+            dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
+            foreach (var w in _scale.Grid)
+            {
+                var y = _scale.Y(w) * sy;
+                dc.DrawLine(grid, new Point(LiveScale.X0 * sx, y), new Point(LiveScale.X1 * sx, y));
+                ChartInk.At(dc, ChartInk.Text(this, Format.Scale(w, _scale.Step, CultureInfo.CurrentCulture), 11, axis), 0, y + 4);
+            }
+            if (double.IsFinite(Average) && readings.Count > 0)
+            {
+                var ghost = ChartInk.Pen(ChartInk.Brush(this, "A.C.Ghost", Color.FromArgb(0x33, 255, 255, 255)), 1.5, [4, 4]);
+                var y = _scale.Y(Average) * sy;
+                dc.DrawLine(ghost, new Point(LiveScale.X0 * sx, y), new Point(LiveScale.X1 * sx, y));
+            }
+            if (readings.Count == 0)
+            {
+                ChartInk.At(dc, ChartInk.Text(this, Format.NoReading, 13, axis), ActualWidth / 2, ActualHeight / 2, 1);
+            }
+        }
     }
 
     /// <summary>The marker, its value pill above and its time pill on the axis under it.</summary>
@@ -199,7 +209,9 @@ internal sealed class LiveChart : FrameworkElement
     private void DrawHover(Color accent)
     {
         using var dc = _hover.RenderOpen();
+        _hoverDrawn = false;
         if (_hoverAge is not { } age || Readings.Count == 0) return;
+        _hoverDrawn = true;
         var nearest = Readings.MinBy(s => Math.Abs(s.AgeSeconds - age));
         Marker(dc, LiveScale.X(nearest.AgeSeconds) * Sx, _scale.Y(nearest.Watts) * Sy, nearest.Watts, _newestAt.AddSeconds(-nearest.AgeSeconds), accent);
     }
@@ -207,7 +219,8 @@ internal sealed class LiveChart : FrameworkElement
     private void UpdateReveal()
     {
         if (ActualWidth <= 0) return;
-        _clip.Clip = new RectangleGeometry(new Rect(-20, -40, Math.Max(0, (LiveScale.X0 + Reveal * (LiveScale.X1 + 12 - LiveScale.X0)) * Sx + 20), ActualHeight + 80));
+        var shown = new Rect(-20, -40, Math.Max(0, (LiveScale.X0 + Reveal * (LiveScale.X1 + 12 - LiveScale.X0)) * Sx + 20), ActualHeight + 80);
+        if (_clip.Clip is not RectangleGeometry { Rect: var was } || was != shown) _clip.Clip = new RectangleGeometry(shown);
         _marker.Opacity = Reveal < .98 || _hoverAge is not null ? 0 : 1;
     }
 
@@ -225,6 +238,7 @@ internal sealed class LiveChart : FrameworkElement
         using (_hover.RenderOpen())
         {
         }
+        _hoverDrawn = false;
         UpdateReveal();
     }
 }

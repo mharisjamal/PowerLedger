@@ -289,7 +289,8 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <aero:PieChart3D x:Name="Pie" Height="150" VerticalAlignment="Center" Parts="{Binding Parts}" />
-                            <ItemsControl x:Name="PartsList" Grid.Column="2" VerticalAlignment="Center" Focusable="False" ItemsSource="{Binding Parts}">
+                            <!-- Filled by the view (ShowParts) only when what it shows changes, not with every reading. -->
+                            <ItemsControl x:Name="PartsList" Grid.Column="2" VerticalAlignment="Center" Focusable="False">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type local:DashboardPart}">
                                         <Border CornerRadius="12" Padding="10,6" Margin="0,0,0,2" Background="Transparent" MouseEnter="PartEnter" MouseLeave="PartLeave"

@@ -62,9 +62,13 @@ internal sealed class DailyChart : FrameworkElement
     public static readonly DependencyProperty PreviousProperty = DependencyProperty.Register(nameof(Previous), typeof(IReadOnlyList<double>),
         typeof(DailyChart), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    /// <summary>The wipe moves only the clip over the month's line (<see cref="_wipe"/>): the axis, its labels and the line
+    /// are drawn once, not on every frame of the intro, where the labels' text had cost about 10 ms a frame (Plan U).</summary>
     public static readonly DependencyProperty RevealProperty = DependencyProperty.Register(nameof(Reveal), typeof(double),
-        typeof(DailyChart), new FrameworkPropertyMetadata(1.0, FrameworkPropertyMetadataOptions.AffectsRender));
+        typeof(DailyChart), new FrameworkPropertyMetadata(1.0, (d, e) => ((DailyChart)d).OnReveal((double)e.OldValue, (double)e.NewValue)));
 
+    /// <summary>The wipe's clip, drawn by reference: changing its rectangle moves the wipe without drawing again.</summary>
+    private readonly RectangleGeometry _wipe = new();
     private int? _tip;
 
     public DailyChart()
@@ -82,6 +86,12 @@ internal sealed class DailyChart : FrameworkElement
     /// <summary>How much of the month is wiped in, 0 to 1.</summary>
     public double Reveal { get => (double)GetValue(RevealProperty); set => SetValue(RevealProperty, value); }
 
+    /// <summary>How many times the chart has been drawn, for a test: the wipe moves a clip, not a redraw.</summary>
+    internal int Draws { get; private set; }
+
+    /// <summary>The wipe's clip, for a test.</summary>
+    internal Rect Wipe => _wipe.Rect;
+
     /// <summary>The day the tip is on, 0 based: the pointer's, else the last.</summary>
     internal int TipIndex => _tip ?? Math.Max(0, (Days?.Count ?? 0) - 1);
 
@@ -92,6 +102,18 @@ internal sealed class DailyChart : FrameworkElement
         AutomationProperties.SetHelpText(this, days.Count == 0 ? Format.NoReading
             : $"{Format.Kwh(days.Sum(d => d.Kwh), CultureInfo.CurrentCulture)} kWh over {days.Count} days, the most {Format.Kwh(days.Max(d => d.Kwh), CultureInfo.CurrentCulture)} kWh");
     }
+
+    /// <summary>The wipe moved: its clip follows; the tip, drawn only once the wipe is all but done, is drawn again as it
+    /// comes or goes.</summary>
+    private void OnReveal(double was, double now)
+    {
+        _wipe.Rect = WipeRect(now);
+        if (was < TipAt != now < TipAt) InvalidateVisual();
+    }
+
+    private const double TipAt = .98;
+
+    private Rect WipeRect(double reveal) => new(0, -10, Math.Clamp(reveal, 0, 1) * Math.Max(0, ActualWidth), Math.Max(0, ActualHeight) + 20);
 
     private int MonthDays => Days is { Count: > 0 } days ? DateTime.DaysInMonth(days[0].Day.Year, days[0].Day.Month) : 30;
 
@@ -115,6 +137,7 @@ internal sealed class DailyChart : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
+        Draws++;
         double sx = ActualWidth / DailyScale.Width, sy = ActualHeight / DailyScale.Height;
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
         var days = Days ?? [];
@@ -149,7 +172,8 @@ internal sealed class DailyChart : FrameworkElement
         }
 
         var top = days.Select((d, i) => P(i + 1, d.Kwh)).ToList();
-        dc.PushClip(new RectangleGeometry(new Rect(0, -10, Math.Clamp(Reveal, 0, 1) * ActualWidth, ActualHeight + 20)));
+        _wipe.Rect = WipeRect(Reveal);
+        dc.PushClip(_wipe);
         // The HTML's hatch: 5 px accent stripes every 10 px at minus 45 degrees.
         var hatch = ChartInk.Frozen(new DrawingBrush(new GeometryDrawing(accent, null, new RectangleGeometry(new Rect(0, 0, 5, 10))))
         {
@@ -167,7 +191,7 @@ internal sealed class DailyChart : FrameworkElement
         }
         dc.Pop();
 
-        if (Reveal < .98) return;
+        if (Reveal < TipAt) return;
         var t = Math.Min(TipIndex, days.Count - 1);
         var (x, yTip) = (top[t].X, top[t].Y);
         dc.DrawLine(ChartInk.Pen(ChartInk.Brush(this, "A.C.GuideStrong", Color.FromArgb(0x59, 255, 255, 255)), 1, [3, 4]),
