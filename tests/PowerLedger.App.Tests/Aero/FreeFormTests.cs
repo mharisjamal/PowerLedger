@@ -234,6 +234,25 @@ public class FreeFormWindowTests
             Holds(new Point(bellLeft.X - 5, bellLeft.Y + bell.ActualHeight / 2)).ShouldBeFalse("the gap between two pills");
         });
 
+    /// <summary>WindowChrome takes a window's region off as it extends the glass frame (0.10.4, the window drawn with its
+    /// alpha): the shape comes back after, and at rest it is never given again.</summary>
+    [Fact]
+    public void The_shape_comes_back_after_windowchrome_takes_it_off_and_rests()
+        => OnWindow((window, _) =>
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            bool Corner() => RegionNative.Holds(hwnd, 5, 5);
+            Corner().ShouldBeFalse("the shape is on");
+            var chrome = System.Windows.Shell.WindowChrome.GetWindowChrome(window);
+            chrome.GlassFrameThickness = new Thickness(0);
+            chrome.GlassFrameThickness = new Thickness(-1);
+            UiHarness.Pump(TimeSpan.FromMilliseconds(400));
+            Corner().ShouldBeFalse("the shape is put back");
+            var given = RegionNative.Applied;
+            UiHarness.Pump(TimeSpan.FromMilliseconds(800));
+            RegionNative.Applied.ShouldBe(given, "no shape is given at rest");
+        });
+
     [Fact]
     public void The_grip_and_the_shapes_edges_resize_the_window_ahead_of_its_chrome()
         => OnWindow((window, _) =>

@@ -115,10 +115,14 @@ internal static class RegionNative
     private const int RGN_AND = 1;
     private const int RGN_OR = 2;
 
+    /// <summary>How many times a shape has been given to a window, for a test: once per change, never at rest.</summary>
+    internal static int Applied { get; private set; }
+
     /// <summary>Gives the window the union of <paramref name="pieces"/> as its shape; none gives it no shape at all.</summary>
     public static void Apply(IntPtr hwnd, IReadOnlyList<RegionPiece> pieces)
     {
         if (hwnd == IntPtr.Zero) return;
+        Applied++;
         var union = CreateRectRgn(0, 0, 0, 0);
         if (union == IntPtr.Zero) return;
         foreach (var piece in pieces)
