@@ -269,8 +269,10 @@
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Behind the glass" />
                                 <StackPanel Orientation="Horizontal">
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Desktop" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Desktop}}" />
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="My wallpaper" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Wallpaper}}" />
+                                    <!-- Aero bloom (0.10.3, the default): the approved video's glass, over Windows' bloom; My desktop frosts the
+                                         user's own wallpaper; Plain. -->
+                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Aero bloom" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Bloom}}" />
+                                    <RadioButton Style="{StaticResource A.OptItem}" Content="My desktop" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Wallpaper}}" />
                                     <RadioButton Style="{StaticResource A.OptItem}" Content="Plain" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Plain}}" />
                                 </StackPanel>
                             </StackPanel>

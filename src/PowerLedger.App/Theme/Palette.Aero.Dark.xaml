@@ -115,6 +115,13 @@
          reads as the panes' glass does, as the demo's, rather than a near-black slab. -->
     <Color x:Key="A.C.FrostDarkest">#383838</Color>
     <Color x:Key="A.C.FrostBrightest">#A0A0A0</Color>
+    <!-- Aero bloom's grounds (0.10.3): the frosted bloom's darkest and brightest under the stage, as the video's glass
+         shows it (AeroBloom; measured from Windows' img19 through the frost). -->
+    <Color x:Key="A.C.BloomDarkest">#000117</Color>
+    <Color x:Key="A.C.BloomBrightest">#00A4FF</Color>
+    <!-- Whether the glass has its halo (GlassMaterial works it out: none on the strict glass, nor on Aero bloom where text
+         reads at 3:1 without it). -->
+    <sys:Boolean x:Key="A.Glass.HaloOn">True</sys:Boolean>
     <Color x:Key="A.C.Halo">#000000</Color>
     <sys:Double x:Key="A.Glass.HaloShare">0.3</sys:Double>
     <sys:Double x:Key="A.Glass.HaloBlur">6</sys:Double>
@@ -289,6 +296,7 @@
     <sys:Double x:Key="A.T.Axis">11</sys:Double>
     <sys:Double x:Key="A.T.Modal">20</sys:Double>
     <sys:Double x:Key="A.T.BigLine">42</sys:Double>
+    <sys:Double x:Key="A.T.BigMonthLine">35.7</sys:Double>
 
     <!-- G1's additions for the style contract: the soft focus ring's radius, the toast's capsule, a disabled control's
          opacity, and the brush a glass pane's shadow is cast from. -->

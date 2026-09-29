@@ -252,13 +252,19 @@ public class ContrastTests
     [InlineData("Light", "Colour")]
     public void Aeros_text_reads_on_the_bright_glass_at_three_to_one_with_its_halo(string theme, string style)
     {
-        var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style) };
-        var map = Mapped(settings, Enum.Parse<Theme>(theme));
-        var share = UiHarness.OnUi(() => (double)ThemeManager.Palette(Look.Aero, Enum.Parse<Theme>(theme))["A.Glass.HaloShare"]);
-        foreach (var (where, ground, tiers) in GlassGrounds(map, ["A.C.FrostDarkest", "A.C.FrostBrightest"], share))
+        // My desktop frosts the wallpaper within the frost bounds; Aero bloom (0.10.3) frosts the bloom whole, whose grounds
+        // are its own darkest and brightest, with the halo only where text needs it.
+        foreach (var (backdrop, grounds) in new[] { (GlassBackdrop.Wallpaper, new[] { "A.C.FrostDarkest", "A.C.FrostBrightest" }), (GlassBackdrop.Bloom, ["A.C.BloomDarkest", "A.C.BloomBrightest"]) })
         {
-            foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
-                Contrast.Ratio(Contrast.Over(map[text], ground), ground).ShouldBeGreaterThanOrEqualTo(GlassMaterial.GlassContrast, $"{text} on {where}, {style}, {theme}");
+            var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), Backdrop = backdrop };
+            var map = Mapped(settings, Enum.Parse<Theme>(theme));
+            var haloOn = UiHarness.OnUi(() => GlassMaterial.Map(settings, Enum.Parse<Theme>(theme))[GlassMaterial.HaloOnKey] is true);
+            var share = haloOn ? UiHarness.OnUi(() => (double)ThemeManager.Palette(Look.Aero, Enum.Parse<Theme>(theme))["A.Glass.HaloShare"]) : 0;
+            foreach (var (where, ground, tiers) in GlassGrounds(map, grounds, share))
+            {
+                foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
+                    Contrast.Ratio(Contrast.Over(map[text], ground), ground).ShouldBeGreaterThanOrEqualTo(GlassMaterial.GlassContrast, $"{text} on {where}, {style}, {theme}, {backdrop}");
+            }
         }
     }
 

@@ -19,18 +19,24 @@ internal enum BackdropKind
 
     /// <summary>The palette's plain ground.</summary>
     Plain,
+
+    /// <summary>The Windows 11 bloom the approved video shows (0.10.3), mapped across the stage and frosted once under the
+    /// panes, whatever the desktop is (AeroBloom).</summary>
+    Bloom,
 }
 
 /// <summary>
-/// The backdrop decision (Aero look design §6), pure: the desktop only where Windows can blur it (the system backdrop,
-/// Windows 11 22H2 and later, with Transparency effects on) and the user wants it and hasn't asked for less
-/// transparency; otherwise the wallpaper when there is one; otherwise plain. Never a transparent window over nothing.
+/// The backdrop decision (Aero look design §6), pure: Aero bloom whenever it is chosen (it is always there: Windows' own
+/// picture, or one drawn like it); the desktop only where Windows can blur it (the system backdrop, Windows 11 22H2 and
+/// later, with Transparency effects on) and the user wants it and hasn't asked for less transparency; otherwise the
+/// wallpaper when there is one; otherwise plain. Never a transparent window over nothing.
 /// </summary>
 internal static class BackdropRules
 {
     public static BackdropKind Choose(GlassBackdrop wanted, bool reduceTransparency, bool hasSystemBackdrop, bool transparencyOn, bool hasWallpaper)
     {
         if (wanted == GlassBackdrop.Plain) return BackdropKind.Plain;
+        if (wanted == GlassBackdrop.Bloom) return BackdropKind.Bloom;
         if (wanted == GlassBackdrop.Desktop && !reduceTransparency && hasSystemBackdrop && transparencyOn) return BackdropKind.SeeThrough;
         return hasWallpaper ? BackdropKind.Wallpaper : BackdropKind.Plain;
     }
@@ -164,14 +170,16 @@ internal sealed class Backdrop : IDisposable
     /// shape, and no parallax. Its surfaces float over the real desktop, which never drifts, so a scene drifting behind
     /// the glass would part the frost from what really lies behind it; and a tilted pane can't be a window region's
     /// rounded rectangle.</param>
-    public Backdrop(Window window, Border scene, GlassMaterial material, Func<Theme> theme, FrameworkElement? tilt = null, bool onScreen = false)
+    /// <param name="stage">What Aero bloom is mapped across (the window's stage); null maps it across the scene.</param>
+    public Backdrop(Window window, Border scene, GlassMaterial material, Func<Theme> theme, FrameworkElement? tilt = null, bool onScreen = false,
+        FrameworkElement? stage = null)
     {
         _window = window;
         _scene = scene;
         _material = material;
         _theme = theme;
         _onScreen = onScreen;
-        _frost = new WallpaperFrost(window, scene, onScreen);
+        _frost = new WallpaperFrost(window, scene, onScreen, stage);
         _parallax = new Parallax(window, scene, tilt, _frost.Align);
         _material.Changed += OnGlassChanged;
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero) Hook();
@@ -196,7 +204,7 @@ internal sealed class Backdrop : IDisposable
     {
         if (_disposed) return;
         var glass = _material.Current;
-        var path = glass.Backdrop == GlassBackdrop.Plain ? null : AeroNative.WallpaperPath();
+        var path = glass.Backdrop is GlassBackdrop.Plain or GlassBackdrop.Bloom ? null : AeroNative.WallpaperPath();
         var kind = BackdropRules.Choose(glass.Backdrop, glass.ReduceTransparency, AeroNative.HasSystemBackdrop, AeroNative.TransparencyOn, path != null);
         var hwnd = new WindowInteropHelper(_window).Handle;
         var dark = _theme() == Theme.Dark;
@@ -224,7 +232,8 @@ internal sealed class Backdrop : IDisposable
             _window.SetResourceReference(Window.BackgroundProperty, "A.B.Plain");
             if (_source?.CompositionTarget != null && _window.TryFindResource("A.C.Plain") is Color plain) _source.CompositionTarget.BackgroundColor = plain;
             _scene.SetResourceReference(Border.BackgroundProperty, "A.B.Plain");
-            _frost.Show(kind == BackdropKind.Wallpaper ? path : null, glass, _theme());
+            if (kind == BackdropKind.Bloom) _frost.ShowBloom(glass, _theme());
+            else _frost.Show(kind == BackdropKind.Wallpaper ? path : null, glass, _theme());
         }
         _parallax.Enabled = kind == BackdropKind.Wallpaper && glass.Parallax && !_onScreen;
         if (kind == Kind) return;

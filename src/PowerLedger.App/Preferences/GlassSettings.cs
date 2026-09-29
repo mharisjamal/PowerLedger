@@ -24,13 +24,17 @@ internal enum GlassAccent
     Rose,
 }
 
-/// <summary>What shows through Aero's glass (Aero look design §3): the desktop itself through the system backdrop, the
-/// user's wallpaper frosted once, or a plain ground.</summary>
+/// <summary>What Aero's glass frosts (Aero look design §3): the Windows 11 bloom the approved video shows (Bloom, the
+/// default since 0.10.3, "Aero bloom" in Settings), the user's own wallpaper ("My desktop"), or a plain ground. Desktop,
+/// the desktop itself through the system backdrop, was the default before 0.10.3 and is no longer offered: a file that
+/// still says it moves to Bloom as it loads (<see cref="GlassSettings.Sanitised"/>), since nobody could tell it apart
+/// from never having chosen.</summary>
 internal enum GlassBackdrop
 {
     Desktop,
     Wallpaper,
     Plain,
+    Bloom,
 }
 
 /// <summary>Where the watts overlay sits (Aero look design §5): a corner of the work area, or where it was dragged.</summary>
@@ -74,7 +78,7 @@ internal sealed partial record GlassSettings
     public GlassAccent Accent { get; set; } = GlassAccent.Lime;
 
     [JsonConverter(typeof(GlassBackdropJsonConverter))]
-    public GlassBackdrop Backdrop { get; set; } = GlassBackdrop.Desktop;
+    public GlassBackdrop Backdrop { get; set; } = GlassBackdrop.Bloom;
 
     /// <summary>An opaque frosted fill instead of see-through glass.</summary>
     public bool ReduceTransparency { get; set; }
@@ -96,8 +100,8 @@ internal sealed partial record GlassSettings
     public static GlassSettings Default { get; } = new();
 
     /// <summary>The same settings with a name this version doesn't know put back to its default, the tint colour
-    /// normalised to upper-case #RRGGBB or put back, and the sliders clamped to 0 to 1 (a number that isn't one put
-    /// back).</summary>
+    /// normalised to upper-case #RRGGBB or put back, the sliders clamped to 0 to 1 (a number that isn't one put back), and
+    /// the old default backdrop, Desktop, moved to Aero bloom (0.10.3): a saved My desktop or Plain was chosen and stays.</summary>
     public GlassSettings Sanitised() => this with
     {
         Style = Enum.IsDefined(Style) ? Style : Default.Style,
@@ -106,7 +110,7 @@ internal sealed partial record GlassSettings
         Frost = Fraction(Frost, Default.Frost),
         EdgeLight = Fraction(EdgeLight, Default.EdgeLight),
         Accent = Enum.IsDefined(Accent) ? Accent : Default.Accent,
-        Backdrop = Enum.IsDefined(Backdrop) ? Backdrop : Default.Backdrop,
+        Backdrop = Enum.IsDefined(Backdrop) && Backdrop != GlassBackdrop.Desktop ? Backdrop : Default.Backdrop,
     };
 
     /// <summary><paramref name="value"/> clamped to 0 to 1; <paramref name="fallback"/> for a value that is no number.</summary>

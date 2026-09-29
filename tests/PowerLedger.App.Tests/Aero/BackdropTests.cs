@@ -24,6 +24,8 @@ public class BackdropTests
     [InlineData("Desktop", false, false, true, false, "Plain")]
     [InlineData("Desktop", false, true, false, false, "Plain")]
     [InlineData("Desktop", true, true, true, true, "Wallpaper")]
+    [InlineData("Bloom", false, false, false, false, "Bloom")]
+    [InlineData("Bloom", true, true, true, true, "Bloom")]
     [InlineData("Wallpaper", false, true, true, true, "Wallpaper")]
     [InlineData("Wallpaper", false, true, true, false, "Plain")]
     [InlineData("Plain", false, true, true, true, "Plain")]

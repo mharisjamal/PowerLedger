@@ -154,15 +154,16 @@ public class GlassMaterialTests
                 {
                     foreach (var tint in new[] { GlassSettings.DefaultTint, "#FFE600", "#101010", "#FFFFFF" })
                     {
-                        foreach (var (reduce, increase) in new[] { (false, false), (true, false), (false, true) })
+                        foreach (var (reduce, increase, behind) in new[] { (false, false, GlassBackdrop.Wallpaper), (false, false, GlassBackdrop.Bloom), (true, false, GlassBackdrop.Bloom), (false, true, GlassBackdrop.Bloom) })
                         {
-                            var settings = new GlassSettings { Style = style, TintStrength = strength, TintColor = tint, ReduceTransparency = reduce, IncreaseContrast = increase };
+                            var settings = new GlassSettings { Style = style, TintStrength = strength, TintColor = tint, ReduceTransparency = reduce, IncreaseContrast = increase, Backdrop = behind };
                             var map = GlassMaterial.Map(settings, theme);
                             var strict = reduce || increase;
-                            var share = strict ? 0 : (double)ThemeManager.Palette(Look.Aero, theme)["A.Glass.HaloShare"];
+                            var share = strict || map[GlassMaterial.HaloOnKey] is false ? 0 : (double)ThemeManager.Palette(Look.Aero, theme)["A.Glass.HaloShare"];
                             var halo = (Color)map["A.C.Halo"];
                             var target = strict ? GlassMaterial.StrictContrast : GlassMaterial.GlassContrast;
-                            var frost = strict ? new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" } : ["A.C.FrostDarkest", "A.C.FrostBrightest"];
+                            var frost = strict ? new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" }
+                                : behind == GlassBackdrop.Bloom ? ["A.C.BloomDarkest", "A.C.BloomBrightest"] : ["A.C.FrostDarkest", "A.C.FrostBrightest"];
                             foreach (var (backdrop, glassBackdrop) in new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" }.Zip(frost))
                             {
                                 foreach (var fill in new[] { "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom" })

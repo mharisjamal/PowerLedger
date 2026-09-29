@@ -320,13 +320,14 @@ public class FreeFormWindowTests
             Color C(string key) => (Color)map[key];
             var palette = GlassMaterial.Palette(theme);
             var strict = GlassMaterial.Strict(settings);
-            var brightest = C(strict ? (theme == Theme.Dark ? "A.C.BackdropBrightest" : "A.C.BackdropDarkest") : (theme == Theme.Dark ? "A.C.FrostBrightest" : "A.C.FrostDarkest"));
-            var share = strict ? 0 : (double)palette["A.Glass.HaloShare"];
+            // Aero bloom (the default since 0.10.3) is frosted whole: its grounds are its own darkest and brightest.
+            var grounds = strict ? [C(theme == Theme.Dark ? "A.C.BackdropBrightest" : "A.C.BackdropDarkest")] : new[] { C("A.C.BloomDarkest"), C("A.C.BloomBrightest") };
+            var share = strict || map[GlassMaterial.HaloOnKey] is false ? 0 : (double)palette["A.Glass.HaloShare"];
             var halo = C("A.C.Halo");
             var washes = strict ? new[] { C("A.C.ModalTop"), C("A.C.ModalBottom") } : [Colors.Transparent];
             if (strict) map["A.B.PillFill"].ShouldBeSameAs(map["A.B.ModalFill"]);
             else ((SolidColorBrush)map["A.B.PillFill"]).Color.ShouldBe(Colors.Transparent);
-            foreach (var wash in washes)
+            foreach (var (wash, brightest) in washes.SelectMany(w => grounds.Select(g => (w, g))))
             {
                 var glass = Contrast.Over(Color.FromArgb((byte)Math.Round(255 * share), halo.R, halo.G, halo.B), Contrast.Over(wash, brightest));
                 foreach (var fill in new[] { Contrast.Over(C("A.C.BtnFill"), glass), Contrast.Over(C("A.C.OutlineHover"), Contrast.Over(C("A.C.BtnFill"), glass)) })

@@ -222,11 +222,24 @@ public sealed class UiPreferencesTests : IDisposable
         read.Overlay.ShouldBe(OverlaySettings.Default);
         var glass = GlassSettings.Default;
         (glass.Style, glass.TintColor, glass.TintStrength, glass.Frost, glass.EdgeLight).ShouldBe((GlassStyle.Tinted, "#7466D8", 0.5, 0.6, 0.6));
-        (glass.Accent, glass.Backdrop, glass.ReduceTransparency, glass.IncreaseContrast).ShouldBe((GlassAccent.Lime, GlassBackdrop.Desktop, false, false));
+        (glass.Accent, glass.Backdrop, glass.ReduceTransparency, glass.IncreaseContrast).ShouldBe((GlassAccent.Lime, GlassBackdrop.Bloom, false, false));
         (glass.ReduceMotion, glass.Parallax).ShouldBe(((bool?)null, true));
         var overlay = OverlaySettings.Default;
         (overlay.Enabled, overlay.Position, overlay.Left, overlay.Top, overlay.Opacity, overlay.Sparkline)
             .ShouldBe((false, OverlayPosition.TopRight, (double?)null, (double?)null, 1.0, true));
+    }
+
+    [Theory]
+    [InlineData("Desktop", "Bloom")]
+    [InlineData("Wallpaper", "Wallpaper")]
+    [InlineData("Plain", "Plain")]
+    [InlineData("Bloom", "Bloom")]
+    [InlineData("Sideways", "Bloom")]
+    public void The_old_default_backdrop_moves_to_aero_bloom_and_a_chosen_one_stays(string saved, string loaded)
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, $$"""{ "Glass": { "Backdrop": "{{saved}}" } }""");
+        new UiPreferencesStore(File).Load().Glass.Backdrop.ShouldBe(Enum.Parse<GlassBackdrop>(loaded));
     }
 
     [Fact]

@@ -12,7 +12,9 @@ namespace PowerLedger.App.Aero;
 /// when the wallpaper, the Frost slider, the theme or the glass's strictness changes. The frosted copy is held within the
 /// frost bounds (A.C.FrostDarkest to A.C.FrostBrightest), where text keeps 3:1 with the halo; on the strict glass
 /// (Increase contrast, Reduce transparency) within the backdrop bounds, where it keeps 4.5:1 over any wallpaper. The panes are lined up on layout, size and parallax changes, never per frame at rest; <see cref="AlignFor"/>
-/// lines them up every frame for a bounded time only (the intro).
+/// lines them up every frame for a bounded time only (the intro). Aero bloom (0.10.3, <see cref="ShowBloom"/>) is the same
+/// frost over Windows' bloom picture instead, mapped across the stage as the approved video shows it rather than lined up
+/// with the screen, and not held within the frost bounds: the video's glass glows with it.
 /// </summary>
 internal sealed class WallpaperFrost : IDisposable
 {
@@ -26,6 +28,8 @@ internal sealed class WallpaperFrost : IDisposable
     private readonly Window _window;
     private readonly Border _scene;
     private readonly bool _onScreen;
+    private readonly FrameworkElement? _stage;
+    private bool _bloom;
     private string? _path;
     private BitmapSource? _sharp;
     private BitmapSource? _frosted;
@@ -41,11 +45,13 @@ internal sealed class WallpaperFrost : IDisposable
     /// <param name="onScreen">True for Aero's free-form window (0.10.1): the wallpaper is lined up with the screen, where
     /// Windows draws it, so the frost in each pane is the wallpaper really behind it and the scene, seen only at the
     /// panes' soft edges, matches the desktop around them. False lines it up with the scene, filled (a sample window).</param>
-    public WallpaperFrost(Window window, Border scene, bool onScreen = false)
+    /// <param name="stage">What Aero bloom is mapped across; null maps it across the scene.</param>
+    public WallpaperFrost(Window window, Border scene, bool onScreen = false, FrameworkElement? stage = null)
     {
         _window = window;
         _scene = scene;
         _onScreen = onScreen;
+        _stage = stage;
     }
 
     /// <summary>How many CompositionTarget.Rendering handlers Aero's glass has on now, on every window: none at rest.</summary>
@@ -59,13 +65,20 @@ internal sealed class WallpaperFrost : IDisposable
 
     /// <summary>Shows <paramref name="path"/>'s wallpaper frosted for <paramref name="glass"/> in <paramref name="theme"/>;
     /// null takes the frost off the panes (see-through or plain).</summary>
-    public void Show(string? path, GlassSettings glass, Theme theme)
+    public void Show(string? path, GlassSettings glass, Theme theme) => Show(path, glass, theme, bloom: false);
+
+    /// <summary>Shows Aero bloom frosted for <paramref name="glass"/> in <paramref name="theme"/> (AeroBloom): Windows' bloom
+    /// picture, or one drawn like it where Windows has none.</summary>
+    public void ShowBloom(GlassSettings glass, Theme theme) => Show(AeroBloom.Key, glass, theme, bloom: true);
+
+    private void Show(string? path, GlassSettings glass, Theme theme, bool bloom)
     {
         if (_disposed) return;
         if (path == null)
         {
             _generation++;
             _path = null;
+            _bloom = false;
             _frosted = null;
             _sceneBrush = null;
             _made = null;
@@ -73,7 +86,7 @@ internal sealed class WallpaperFrost : IDisposable
             foreach (var pane in Panes()) pane.Frost = null;
             return;
         }
-        var radius = Radius(glass, _window);
+        var radius = bloom ? AeroBloom.Radius(glass, _window) : Radius(glass, _window);
         var strict = GlassMaterial.Strict(glass);
         var wanted = (path, radius, theme, strict);
         if (_made == wanted && _frosted != null)
@@ -85,25 +98,27 @@ internal sealed class WallpaperFrost : IDisposable
         var generation = ++_generation;
         var reload = path != _path || _sharp == null;
         _path = path;
+        _bloom = bloom;
         var sharp = reload ? null : _sharp;
-        if (_onScreen) _placement = WallpaperPlacement.Read();
-        // The bright glass lets the wallpaper through within the frost bounds; the strict glass holds it within the backdrop's.
-        var brightest = Token(theme, strict ? "A.C.BackdropBrightest" : "A.C.FrostBrightest");
-        var darkest = Token(theme, strict ? "A.C.BackdropDarkest" : "A.C.FrostDarkest");
+        if (_onScreen && !bloom) _placement = WallpaperPlacement.Read();
+        // The bright glass lets the wallpaper through within the frost bounds, and the bloom through whole, as the video's
+        // glass does (its darkest and brightest are GlassMaterial's grounds there); the strict glass holds either within
+        // the backdrop's bounds.
+        var brightest = strict ? Token(theme, "A.C.BackdropBrightest") : bloom ? Colors.White : Token(theme, "A.C.FrostBrightest");
+        var darkest = strict ? Token(theme, "A.C.BackdropDarkest") : bloom ? Colors.Black : Token(theme, "A.C.FrostDarkest");
         var saturate = _window.TryFindResource("A.Glass.Saturate") is double s ? s : 1.55;
-        Task.Run(() =>
+        (BitmapSource? Picture, BitmapSource? Frosted) Make()
         {
-            var picture = sharp ?? Load(path);
-            var frosted = picture == null ? null : Frost(picture, radius, saturate, darkest, brightest);
-            return (picture, frosted);
-        }).ContinueWith(done =>
+            var picture = sharp ?? (bloom ? AeroBloom.Load() : Load(path));
+            return (picture, picture == null ? null : Frost(picture, radius, saturate, darkest, brightest));
+        }
+        void Apply((BitmapSource? Picture, BitmapSource? Frosted) made)
         {
-            if (_disposed || generation != _generation || done.Status != TaskStatus.RanToCompletion) return;
-            var (picture, frosted) = done.Result;
+            var (picture, frosted) = made;
             if (picture == null || frosted == null) return;
             _sharp = picture;
             _frosted = frosted;
-            if (_onScreen)
+            if (_onScreen || bloom)
             {
                 _sceneBrush = new ImageBrush(picture) { ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill, Viewport = Place() };
                 _scene.Background = _sceneBrush;
@@ -117,6 +132,21 @@ internal sealed class WallpaperFrost : IDisposable
             Listen(true);
             Align();
             Made?.Invoke();
+        }
+        // Aero bloom is one fixed picture: frosted once for the whole App (AeroBloom.Frosted), and before a window first
+        // shows it is frosted there and then, so the panes rise as glass from their first frame rather than dark until a
+        // frost lands (a fifth of a second, measured; once made it is instant).
+        var key = (radius, saturate, darkest, brightest);
+        if (bloom && (AeroBloom.Cached(key) != null || !_window.IsVisible))
+        {
+            Apply(AeroBloom.Cached(key) ?? AeroBloom.Remember(key, Make()));
+            return;
+        }
+        Task.Run(Make).ContinueWith(done =>
+        {
+            if (_disposed || generation != _generation || done.Status != TaskStatus.RanToCompletion) return;
+            if (bloom) AeroBloom.Remember(key, done.Result);
+            Apply(done.Result);
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
@@ -191,6 +221,19 @@ internal sealed class WallpaperFrost : IDisposable
     private Rect Place()
     {
         var size = new Size(_sharp!.PixelWidth, _sharp.PixelHeight);
+        if (_bloom && _stage is { ActualWidth: > 0, ActualHeight: > 0 } stage && PresentationSource.FromVisual(_scene) != null)
+        {
+            try
+            {
+                var bloom = AeroBloom.Place(stage.TransformToVisual(_scene).TransformBounds(new Rect(stage.RenderSize)), size);
+                return new Rect(Math.Round(bloom.X, 2), Math.Round(bloom.Y, 2), Math.Round(bloom.Width, 2), Math.Round(bloom.Height, 2));
+            }
+            catch (InvalidOperationException)
+            {
+                // The stage isn't under the scene's window yet.
+            }
+        }
+        if (_bloom) return ImageRect(new Size(_scene.ActualWidth, _scene.ActualHeight), size);
         if (_onScreen && PresentationSource.FromVisual(_scene) != null)
         {
             var hwnd = new System.Windows.Interop.WindowInteropHelper(_window).Handle;

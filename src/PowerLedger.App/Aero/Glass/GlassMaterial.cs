@@ -109,7 +109,7 @@ internal sealed class GlassMaterial : IDisposable
         {
             if (!_applied.Contains(key) || !Same(_applied[key], value)) _applied[key] = value;
         }
-        var halo = Halo(Current, theme, (Color)map["A.C.Halo"]);
+        var halo = map[HaloOnKey] is true ? Halo(Current, theme, (Color)map["A.C.Halo"]) : null;
         if (!_applied.Contains(HaloKey) || !Same(_applied[HaloKey], halo)) _applied[HaloKey] = halo;
         Changed?.Invoke(Current);
     }
@@ -143,10 +143,14 @@ internal sealed class GlassMaterial : IDisposable
         // and A.C.FrostBrightest, and text keeps 3:1 there with the soft halo behind it (A.Glass.Halo, counted as its colour
         // at A.Glass.HaloShare). Increase contrast and Reduce transparency keep the strict glass: the frost held within
         // the backdrop bounds, no halo, and 4.5:1.
+        // Aero bloom (0.10.3): the frost is the bloom itself, whole, so its grounds are the frosted bloom's darkest and
+        // brightest under the stage (A.C.BloomDarkest and A.C.BloomBrightest), and the halo stays only where text needs it
+        // there for 3:1.
         var strict = Strict(settings);
+        var bloom = settings.Backdrop == GlassBackdrop.Bloom;
         var target = strict ? StrictContrast : GlassContrast;
-        var low = strict ? darkest : colours["A.C.FrostDarkest"];
-        var high = strict ? brightest : colours["A.C.FrostBrightest"];
+        var low = strict ? darkest : colours[bloom ? "A.C.BloomDarkest" : "A.C.FrostDarkest"];
+        var high = strict ? brightest : colours[bloom ? "A.C.BloomBrightest" : "A.C.FrostBrightest"];
         var share = strict ? 0 : (double)palette["A.Glass.HaloShare"];
         Color[] GroundsOf(Color tintTop, Color tintBottom, Color halo)
             => new[] { low, high }.SelectMany(b => new[] { Contrast.Over(tintTop, b), Contrast.Over(tintBottom, b) })
@@ -173,6 +177,14 @@ internal sealed class GlassMaterial : IDisposable
         var family = ownWorst >= target ? palette : lightWorst >= darkWorst ? light : dark;
         var inkColour = ReferenceEquals(family, light) ? lightInk : darkInk;
         var haloColour = (Color)family["A.C.Halo"];
+        var haloOn = !strict;
+        if (bloom && !strict)
+        {
+            var withHalo = share;
+            share = 0;
+            if (Worst(inkColour, GroundsOf(top, bottom, haloColour)) >= target) haloOn = false;
+            else share = withHalo;
+        }
         var grounds = GroundsOf(top, bottom, haloColour);
         if (Worst(inkColour, grounds) < target)
         {
@@ -255,6 +267,7 @@ internal sealed class GlassMaterial : IDisposable
         result["A.B.PillFill"] = strict ? result["A.B.ModalFill"] : Solid(Colors.Transparent);
 
         result["A.Glass.Frost"] = (double)palette["A.Glass.Frost"] * settings.Frost / DemoFrost;
+        result[HaloOnKey] = haloOn;
 
         // The shared keys the accent reaches: Midnight's and Classic's accent, focus, CPU part and charts, so the dialogs
         // and the pie follow the chosen accent.
@@ -309,6 +322,9 @@ internal sealed class GlassMaterial : IDisposable
 
     /// <summary>Where the halo is: the GlassPanel template's content takes it as its Effect.</summary>
     public const string HaloKey = "A.Glass.Halo";
+
+    /// <summary>Whether this glass has the halo: not on the strict glass, nor on Aero bloom where text reads at 3:1 without it.</summary>
+    public const string HaloOnKey = "A.Glass.HaloOn";
 
     /// <summary>The halo behind the glass's content (0.10.1): a soft shadow in <paramref name="colour"/>, the ink's
     /// opposite, which GlassMaterial counts as that colour at A.Glass.HaloShare under the text; null (none) on the strict
