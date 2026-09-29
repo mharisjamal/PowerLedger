@@ -118,7 +118,12 @@ internal sealed class WallpaperFrost : IDisposable
             if (picture == null || frosted == null) return;
             _sharp = picture;
             _frosted = frosted;
-            if (_onScreen || bloom)
+            if (_onScreen)
+            {
+                // The free-form window is clear outside its glass (0.10.4): the scene only lines the frost up.
+                _sceneBrush = new ImageBrush(picture) { ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill, Viewport = Place() };
+            }
+            else if (bloom)
             {
                 _sceneBrush = new ImageBrush(picture) { ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill, Viewport = Place() };
                 _scene.Background = _sceneBrush;

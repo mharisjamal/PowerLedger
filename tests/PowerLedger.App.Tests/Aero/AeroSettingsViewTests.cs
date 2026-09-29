@@ -154,11 +154,33 @@ public class AeroSettingsViewTests
             {
                 GlassSwitch Named(string name) => MidnightHost.AllOf<GlassSwitch>(view).Single(s => System.Windows.Automation.AutomationProperties.GetName(s) == name);
 
-                Named("Tilt and parallax").IsChecked.ShouldBe(true);
-                Named("Tilt and parallax").KnobOffset.ShouldBe(GlassSwitch.Travel);
+                // No Tilt and parallax in Aero's Settings (0.10.4): the free-form window never tilts.
+                MidnightHost.AllOf<GlassSwitch>(view).ShouldNotContain(s => System.Windows.Automation.AutomationProperties.GetName(s) == "Tilt and parallax");
                 Named("Increase contrast").KnobOffset.ShouldBe(GlassSwitch.Travel);
                 Named("Reduce transparency").KnobOffset.ShouldBe(0);
                 Named("Reduce motion").IsChecked.ShouldBe(false);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
+    /// <summary>Clear always shows the live desktop (0.10.4): the backdrop choice rests with a short note, and Plain is
+    /// gone.</summary>
+    [Theory]
+    [InlineData("Clear", false)]
+    [InlineData("Tinted", true)]
+    public void Clear_rests_the_backdrop_choice_and_says_why(string style, bool choosable)
+        => UiHarness.OnUi(() =>
+        {
+            var settings = Screen(GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style) });
+            var (window, view) = Page(settings, Theme.Dark, 1440);
+            try
+            {
+                ((FrameworkElement)view.FindName("BackdropChoice")).IsEnabled.ShouldBe(choosable);
+                ((FrameworkElement)view.FindName("ClearNote")).Visibility.ShouldBe(choosable ? Visibility.Collapsed : Visibility.Visible);
+                MidnightHost.AllOf<RadioButton>(view).ShouldNotContain(r => r.Content as string == "Plain");
             }
             finally
             {

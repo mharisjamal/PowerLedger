@@ -230,7 +230,7 @@ public sealed class UiPreferencesTests : IDisposable
     [Theory]
     [InlineData("Desktop", "Bloom")]
     [InlineData("Wallpaper", "Wallpaper")]
-    [InlineData("Plain", "Plain")]
+    [InlineData("Plain", "Bloom")]
     [InlineData("Bloom", "Bloom")]
     [InlineData("Sideways", "Bloom")]
     public void The_old_default_backdrop_moves_to_aero_bloom_and_a_chosen_one_stays(string saved, string loaded)

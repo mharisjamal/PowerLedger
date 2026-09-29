@@ -31,6 +31,7 @@ internal partial class AeroWindow
     private DateTime _followUntil;
     private bool _following;
     private bool _spread;
+    private bool _checking;
 
     /// <summary>How many frame hooks Aero's windows hold to follow their shape: none at rest.</summary>
     internal static int ShapeHooks { get; private set; }
@@ -74,7 +75,10 @@ internal partial class AeroWindow
     {
         if (_hwnd is not { IsDisposed: false, CompositionTarget: { } target } || WindowState == WindowState.Minimized || ActualWidth <= 0) return;
         var pieces = RegionMath.Pieces(Surfaces(), target.TransformToDevice.M11, new Size(ActualWidth, ActualHeight));
-        if (pieces.Count == 0 || pieces.SequenceEqual(_shape)) return;   // nothing laid out yet: stay whole rather than vanish
+        if (pieces.Count == 0) return;   // nothing laid out yet: stay whole rather than vanish
+        // The same shape still on the window: nothing to tell. WindowChrome takes a window's region off as it extends the
+        // glass frame (0.10.4: the window is drawn with its alpha), so one gone is put back.
+        if (pieces.SequenceEqual(_shape) && RegionNative.HasRegion(_hwnd.Handle)) return;
         _shape = pieces;
         RegionNative.Apply(_hwnd.Handle, pieces);
     }
@@ -193,6 +197,16 @@ internal partial class AeroWindow
     /// window's own to hit-test.</summary>
     private IntPtr ShapeHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg is RegionNative.WM_WINDOWPOSCHANGED or RegionNative.WM_DWMCOMPOSITIONCHANGED && !_checking)
+        {
+            // WindowChrome hears these after this hook and may take the shape off: see that it is still there after.
+            _checking = true;
+            Dispatcher.BeginInvoke(() =>
+            {
+                _checking = false;
+                Reshape();
+            }, System.Windows.Threading.DispatcherPriority.Loaded);
+        }
         if (msg != RegionNative.WM_NCHITTEST || WindowState != WindowState.Normal || !IsLoaded) return IntPtr.Zero;
         var at = lParam.ToInt64();
         var p = PointFromScreen(new Point((short)(at & 0xFFFF), (short)((at >> 16) & 0xFFFF)));

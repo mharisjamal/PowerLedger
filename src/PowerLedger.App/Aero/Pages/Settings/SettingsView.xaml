@@ -268,13 +268,14 @@
                             </StackPanel>
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Behind the glass" />
-                                <StackPanel Orientation="Horizontal">
-                                    <!-- Aero bloom (0.10.3, the default): the approved video's glass, over Windows' bloom; My desktop frosts the
-                                         user's own wallpaper; Plain. -->
+                                <!-- Aero bloom (0.10.3, the default): the approved video's glass, over Windows' bloom; My desktop frosts the
+                                     user's own wallpaper. Clear always shows the user's own desktop (0.10.4), so the choice rests. -->
+                                <StackPanel x:Name="BackdropChoice" Orientation="Horizontal" IsEnabled="{Binding BackdropChoosable}">
                                     <RadioButton Style="{StaticResource A.OptItem}" Content="Aero bloom" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Bloom}}" />
                                     <RadioButton Style="{StaticResource A.OptItem}" Content="My desktop" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Wallpaper}}" />
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Plain" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Plain}}" />
                                 </StackPanel>
+                                <TextBlock x:Name="ClearNote" Style="{StaticResource SwitchText}" Text="Clear shows your own desktop." Foreground="{DynamicResource A.B.Text2}"
+                                           Visibility="{Binding BackdropChoosable, Converter={StaticResource HiddenWhen}}" />
                             </StackPanel>
                             <!-- The existing Theme choice, here beside the glass it colours. -->
                             <StackPanel Style="{StaticResource Row}" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
@@ -302,12 +303,8 @@
                                 <Button Style="{StaticResource A.OutlineBtn}" Content="Follow Windows" Command="{Binding FollowWindows}" Height="30" Margin="12,0,0,0"
                                         Visibility="{Binding FollowsWindows, Converter={StaticResource HiddenWhen}}" />
                             </StackPanel>
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Tilt and parallax" />
-                                <aero:GlassSwitch IsChecked="{Binding Parallax}" IsEnabled="{Binding ParallaxAvailable}" AutomationProperties.Name="Tilt and parallax"
-                                                  ToolTipService.ShowOnDisabled="True" ToolTip="Off while motion is reduced" />
-                                <TextBlock Style="{StaticResource SwitchText}" Text="Panels lean toward the pointer" />
-                            </StackPanel>
+                            <!-- No Tilt and parallax here (0.10.4): Aero's free-form window floats its glass over the real desktop,
+                                 which never tilts, so the switch would do nothing. -->
                         </StackPanel>
 
                         <!-- The preview tile: a pane of the chosen glass over a small scene, so a choice shows before the user looks

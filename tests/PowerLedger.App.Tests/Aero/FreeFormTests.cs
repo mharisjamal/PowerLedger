@@ -300,14 +300,10 @@ public class FreeFormWindowTests
             AeroWindow.ShapeHooks.ShouldBe(0);
         });
 
-    /// <summary>Each top-bar pill floats over the desktop on its own. On the bright glass its button's light fill is its
-    /// wash, as the demo's, over the frost at its brightest and the halo: 3:1. On the strict glass the dialogs' denser
-    /// wash, over the brightest backdrop: 4.5:1.</summary>
+    /// <summary>Each top-bar pill floats over the desktop on its own. On the strict glass (Increase contrast) its wash is
+    /// the dialogs' denser one, over the brightest backdrop: 4.5:1. The default glass is the video's (0.10.4): the
+    /// button's own light fill is the wash (<see cref="The_default_top_bar_pill_is_the_videos_button_alone"/>).</summary>
     [Theory]
-    [InlineData("Dark", "Tinted", false)]
-    [InlineData("Light", "Tinted", false)]
-    [InlineData("Dark", "Clear", false)]
-    [InlineData("Dark", "Colour", false)]
     [InlineData("Dark", "Tinted", true)]
     [InlineData("Light", "Tinted", true)]
     [InlineData("Dark", "Dark", true)]
@@ -341,65 +337,40 @@ public class FreeFormWindowTests
             }
         });
 
-    /// <summary>The halo as drawn: GlassPanel lays GlassMaterial's halo twice behind its content, and beside thin text it
-    /// darkens the glass by at least the share the contrast rules count; the strict glass has none.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void The_default_top_bar_pill_is_the_videos_button_alone(string themeName)
+        => UiHarness.OnUi(() =>
+        {
+            var map = GlassMaterial.Map(GlassSettings.Default, Enum.Parse<Theme>(themeName));
+            ((SolidColorBrush)map["A.B.PillFill"]).Color.ShouldBe(Colors.Transparent);
+            map[GlassMaterial.HaloOnKey].ShouldBe(false);
+        });
+
+    /// <summary>No halo behind the glass's content (0.10.4): the approved video has none, on any glass.</summary>
     [Fact]
-    public void The_halo_lays_down_at_least_the_share_the_contrast_rules_count()
+    public void The_glass_lays_no_halo_behind_its_content()
         => UiHarness.OnUi(() =>
         {
             var window = AeroHost.Dressed(new Window { Width = 420, Height = 140, WindowStyle = WindowStyle.None, Left = -20000, ShowInTaskbar = false, ShowActivated = false }, Theme.Dark);
             var settings = GlassSettings.Default;
             using var material = new GlassMaterial(window, () => settings, () => Theme.Dark);
-            var words = new System.Windows.Controls.TextBlock { Text = "Wednesday 24   kWh used today", FontSize = 12, Foreground = Brushes.White, Margin = new Thickness(24) };
-            var pane = new GlassPanel { Content = words, HasShadow = false, SheenEnabled = false, Background = Brushes.Transparent };
-            window.Content = new System.Windows.Controls.Border { Background = new SolidColorBrush(Color.FromRgb(160, 160, 160)), Child = pane };
+            var pane = new GlassPanel { Content = new System.Windows.Controls.TextBlock { Text = "Wednesday 24" }, HasShadow = false, SheenEnabled = false };
+            window.Content = pane;
             try
             {
                 window.Show();
                 window.UpdateLayout();
-                pane.Template.FindName("PART_Halo", pane).ShouldBeOfType<System.Windows.Controls.Border>().Effect.ShouldNotBeNull();
-                var share = (double)GlassMaterial.Palette(Theme.Dark)["A.Glass.HaloShare"];
-                MeasuredShare(pane, words).ShouldBeGreaterThanOrEqualTo(share);
-
+                pane.Template.FindName("PART_Halo", pane).ShouldBeOfType<System.Windows.Controls.Border>().Effect.ShouldBeNull();
                 settings = settings with { IncreaseContrast = true };
                 material.Refresh();
                 window.UpdateLayout();
-                pane.Template.FindName("PART_Halo", pane).ShouldBeOfType<System.Windows.Controls.Border>().Effect.ShouldBeNull("the strict glass has no halo");
+                pane.Template.FindName("PART_Halo", pane).ShouldBeOfType<System.Windows.Controls.Border>().Effect.ShouldBeNull();
             }
             finally
             {
                 window.Close();
             }
         });
-
-    /// <summary>How much darker the glass is within two pixels of the text's strokes than away from the text, on average.</summary>
-    private static double MeasuredShare(GlassPanel pane, FrameworkElement words)
-    {
-        int w = (int)pane.ActualWidth, h = (int)pane.ActualHeight;
-        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(pane);
-        var px = new byte[w * h * 4];
-        bitmap.CopyPixels(px, w * 4, 0);
-        int G(int x, int y) => px[(y * w + x) * 4 + 1];
-        var box = words.TransformToAncestor(pane).TransformBounds(new Rect(words.RenderSize));
-        var ground = G((int)box.Left - 16, (int)box.Top - 12);   // the glass away from the text
-        var glyph = new bool[w, h];
-        for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) glyph[x, y] = G(x, y) > ground + 15;
-        double sum = 0;
-        var n = 0;
-        for (var y = (int)box.Top; y < (int)box.Bottom; y++)
-        {
-            for (var x = (int)box.Left; x < (int)box.Right; x++)
-            {
-                if (glyph[x, y] || G(x, y) > ground) continue;   // a stroke, or a stroke's soft edge
-                var near = false;
-                for (var dy = -2; dy <= 2 && !near; dy++) for (var dx = -2; dx <= 2 && !near; dx++) near = glyph[x + dx, y + dy];
-                if (!near) continue;
-                sum += G(x, y);
-                n++;
-            }
-        }
-        n.ShouldBeGreaterThan(50);
-        return 1 - sum / n / ground;
-    }
 }

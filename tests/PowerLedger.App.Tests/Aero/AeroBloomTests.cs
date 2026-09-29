@@ -80,20 +80,34 @@ public class AeroBloomTests
     }
 
     [Theory]
-    [InlineData(false, 3.0)]
-    [InlineData(true, 4.5)]
-    public void Text_on_the_bloom_reads_at_3_to_1_and_at_4_5_on_the_strict_glass(bool increase, double target)
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void The_bloom_glass_is_the_videos_own_with_no_halo(string themeName)
     {
-        var settings = GlassSettings.Default with { Backdrop = GlassBackdrop.Bloom, IncreaseContrast = increase };
+        // 0.10.4, the owner's choice: parity with the video over WCAG. The demo's tint and the video's text steps, and no
+        // halo.
+        var theme = Enum.Parse<Theme>(themeName);
+        var (map, own, dark) = UiHarness.OnUi(() => (GlassMaterial.Map(GlassSettings.Default with { Backdrop = GlassBackdrop.Bloom }, theme), ThemeManager.Palette(Look.Aero, theme), ThemeManager.Palette(Look.Aero, Theme.Dark)));
+        map[GlassMaterial.HaloOnKey].ShouldBe(false);
+        map["A.C.GlassTintTop"].ShouldBe(own["A.C.GlassTintTop"]);
+        map["A.C.GlassTintBottom"].ShouldBe(own["A.C.GlassTintBottom"]);
+        var text = (Color)map["A.C.Text"];
+        text.ShouldBe((Color)own["A.C.Text"], "each theme keeps its own ink on the bloom");
+        map["A.C.Text2"].ShouldBe(Color.FromArgb(0xB2, text.R, text.G, text.B), "the HTML's --text-2, 70 % (178.5, rounded to even)");
+        map["A.C.Text3"].ShouldBe(Color.FromArgb(0x70, text.R, text.G, text.B), "the HTML's --text-3, 44 %");
+    }
+
+    [Fact]
+    public void Text_on_the_bloom_reads_at_4_5_to_1_under_increase_contrast()
+    {
+        var settings = GlassSettings.Default with { Backdrop = GlassBackdrop.Bloom, IncreaseContrast = true };
         var (map, palette) = UiHarness.OnUi(() => (GlassMaterial.Map(settings, Theme.Dark), ThemeManager.Palette(Look.Aero, Theme.Dark)));
         var text = (Color)map["A.C.Text"];
         var top = (Color)map["A.C.GlassTintTop"];
-        var share = map[GlassMaterial.HaloOnKey] is true ? (double)palette["A.Glass.HaloShare"] : 0;
-        var halo = (Color)map["A.C.Halo"];
-        string[] keys = increase ? ["A.C.BackdropDarkest", "A.C.BackdropBrightest"] : ["A.C.BloomDarkest", "A.C.BloomBrightest"];
-        var grounds = keys.Select(k => (Color)palette[k])
-            .Select(b => Contrast.Over(Color.FromArgb((byte)Math.Round(share * 255), halo.R, halo.G, halo.B), Contrast.Over(top, b)));
-        grounds.Min(g => Contrast.Ratio(Contrast.Over(text, g), g)).ShouldBeGreaterThanOrEqualTo(target);
-        if (increase) map[GlassMaterial.HaloOnKey].ShouldBe(false, "no halo on the strict glass");
+        var grounds = new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" }.Select(k => Contrast.Over(top, (Color)palette[k]));
+        grounds.Min(g => Contrast.Ratio(Contrast.Over(text, g), g)).ShouldBeGreaterThanOrEqualTo(4.5);
+        map["A.C.Text2"].ShouldBe(text);
+        map["A.C.Text3"].ShouldBe(text);
+        map[GlassMaterial.HaloOnKey].ShouldBe(false);
     }
 }

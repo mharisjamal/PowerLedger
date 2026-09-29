@@ -738,9 +738,9 @@
                         <Border x:Name="PART_Frost" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Frost}" IsHitTestVisible="False" />
                         <Border x:Name="PART_Tint" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Background}" />
                         <Border x:Name="PART_Rim" CornerRadius="{TemplateBinding CornerRadius}" BorderBrush="{DynamicResource A.B.Rim}" BorderThickness="1" IsHitTestVisible="False" />
-                        <Border CornerRadius="{TemplateBinding CornerRadius}" Margin="1" BorderBrush="{DynamicResource A.B.RimDark}" BorderThickness="3" IsHitTestVisible="False" />
-                        <Border CornerRadius="{TemplateBinding CornerRadius}" Margin="1" BorderBrush="{DynamicResource A.B.RimInner}" BorderThickness="1.5" IsHitTestVisible="False" />
-                        <Border CornerRadius="{TemplateBinding CornerRadius}" Margin="1" Background="{DynamicResource A.B.TopSheen}" IsHitTestVisible="False" />
+                        <Border x:Name="PART_RimDark" CornerRadius="{TemplateBinding CornerRadius}" Margin="1" BorderBrush="{DynamicResource A.B.RimDark}" BorderThickness="3" IsHitTestVisible="False" />
+                        <Border x:Name="PART_RimInner" CornerRadius="{TemplateBinding CornerRadius}" Margin="1" BorderBrush="{DynamicResource A.B.RimInner}" BorderThickness="1.5" IsHitTestVisible="False" />
+                        <Border x:Name="PART_TopSheen" CornerRadius="{TemplateBinding CornerRadius}" Margin="1" Background="{DynamicResource A.B.TopSheen}" IsHitTestVisible="False" />
                         <Border x:Name="PART_Sheen" CornerRadius="{TemplateBinding CornerRadius}" Opacity="0" IsHitTestVisible="False" />
                         <!-- The halo (0.10.1): a soft shadow behind the content, laid twice (one alone darkens the ground by a sixth
                              beside thin text; two by about three eighths), that keeps text readable on the bright glass; none on
@@ -750,6 +750,14 @@
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Effect="{DynamicResource A.Glass.Halo}" />
                         </Border>
                     </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="HasRim" Value="False">
+                            <Setter TargetName="PART_Rim" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="PART_RimDark" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="PART_RimInner" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="PART_TopSheen" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -810,6 +818,7 @@
         <Setter Property="Background" Value="{DynamicResource A.B.PillFill}" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="HasShadow" Value="False" />
+        <Setter Property="HasRim" Value="False" />
         <Setter Property="SheenEnabled" Value="False" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="CornerRadius" Value="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" />

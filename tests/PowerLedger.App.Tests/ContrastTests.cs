@@ -250,31 +250,29 @@ public class ContrastTests
     [InlineData("Light", "Tinted")]
     [InlineData("Light", "Clear")]
     [InlineData("Light", "Colour")]
-    public void Aeros_text_reads_on_the_bright_glass_at_three_to_one_with_its_halo(string theme, string style)
+    public void Aeros_default_glass_takes_the_videos_text_steps_with_no_halo(string theme, string style)
     {
-        // My desktop frosts the wallpaper within the frost bounds; Aero bloom (0.10.3) frosts the bloom whole, whose grounds
-        // are its own darkest and brightest, with the halo only where text needs it.
-        foreach (var (backdrop, grounds) in new[] { (GlassBackdrop.Wallpaper, new[] { "A.C.FrostDarkest", "A.C.FrostBrightest" }), (GlassBackdrop.Bloom, ["A.C.BloomDarkest", "A.C.BloomBrightest"]) })
+        // 0.10.4, the owner's choice: parity with the approved video over WCAG. Whatever is behind it, the default glass has
+        // no halo and the HTML's text steps (--text-2 70 %, --text-3 44 % of the ink); Increase contrast is the strict glass.
+        foreach (var backdrop in new[] { GlassBackdrop.Wallpaper, GlassBackdrop.Bloom })
         {
             var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), Backdrop = backdrop };
+            UiHarness.OnUi(() => GlassMaterial.Map(settings, Enum.Parse<Theme>(theme))[GlassMaterial.HaloOnKey]).ShouldBe(false);
             var map = Mapped(settings, Enum.Parse<Theme>(theme));
-            var haloOn = UiHarness.OnUi(() => GlassMaterial.Map(settings, Enum.Parse<Theme>(theme))[GlassMaterial.HaloOnKey] is true);
-            var share = haloOn ? UiHarness.OnUi(() => (double)ThemeManager.Palette(Look.Aero, Enum.Parse<Theme>(theme))["A.Glass.HaloShare"]) : 0;
-            foreach (var (where, ground, tiers) in GlassGrounds(map, grounds, share))
-            {
-                foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
-                    Contrast.Ratio(Contrast.Over(map[text], ground), ground).ShouldBeGreaterThanOrEqualTo(GlassMaterial.GlassContrast, $"{text} on {where}, {style}, {theme}, {backdrop}");
-            }
+            var ink = map["A.C.Text"];
+            map["A.C.Text2"].ShouldBe(Color.FromArgb(0xB2, ink.R, ink.G, ink.B), $"{style}, {theme}, {backdrop}");
+            map["A.C.Text3"].ShouldBe(Color.FromArgb(0x70, ink.R, ink.G, ink.B), $"{style}, {theme}, {backdrop}");
         }
     }
 
-    /// <summary>Increase contrast and Reduce transparency keep the strict glass exactly: the frost held within the
-    /// backdrop bounds, no halo, and every tier at 4.5:1 on the glass, its wells, menus and dialogs.</summary>
+    /// <summary>Increase contrast keeps the strict glass exactly (0.10.4: it alone): the frost held within the backdrop
+    /// bounds, no halo, and every tier at 4.5:1 on the glass, its wells, menus and dialogs, with or without Reduce
+    /// transparency.</summary>
     [Theory]
     [InlineData("Dark", true, false)]
-    [InlineData("Dark", false, true)]
+    [InlineData("Dark", true, true)]
     [InlineData("Light", true, false)]
-    [InlineData("Light", false, true)]
+    [InlineData("Light", true, true)]
     public void Aeros_strict_glass_keeps_four_and_a_half_to_one(string theme, bool increase, bool reduce)
     {
         var settings = GlassSettings.Default with { IncreaseContrast = increase, ReduceTransparency = reduce };

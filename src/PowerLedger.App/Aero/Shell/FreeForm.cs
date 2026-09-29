@@ -110,6 +110,8 @@ internal static class AeroLayout
 internal static class RegionNative
 {
     public const int WM_NCHITTEST = 0x0084;
+    public const int WM_WINDOWPOSCHANGED = 0x0047;
+    public const int WM_DWMCOMPOSITIONCHANGED = 0x031E;
     private const int RGN_AND = 1;
     private const int RGN_OR = 2;
 
@@ -144,6 +146,9 @@ internal static class RegionNative
     {
         if (hwnd != IntPtr.Zero) SetWindowRgn(hwnd, IntPtr.Zero, true);
     }
+
+    /// <summary>Whether the window has a shape at all.</summary>
+    public static bool HasRegion(IntPtr hwnd) => hwnd != IntPtr.Zero && GetWindowRgnBox(hwnd, out _) != 0;
 
     /// <summary>Whether the window's shape holds the window-relative device point, for a test; true with no shape.</summary>
     public static bool Holds(IntPtr hwnd, int x, int y)
@@ -182,4 +187,13 @@ internal static class RegionNative
 
     [DllImport("user32.dll")]
     private static extern int GetWindowRgn(IntPtr hwnd, IntPtr region);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowRgnBox(IntPtr hwnd, out Box box);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Box
+    {
+        public int Left, Top, Right, Bottom;
+    }
 }

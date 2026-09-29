@@ -30,18 +30,21 @@ public class GlassMaterialTests
             var palette = ThemeManager.Palette(Look.Aero, theme);
             var map = GlassMaterial.Map(GlassSettings.Default, theme);
             map.Count.ShouldBeGreaterThan(100);
-            // The bright glass lets more of the desktop through than the palette's strict glass is drawn for: its quieter
-            // text steps are stronger and its light wells fainter, so each still reads there.
-            string[] moved = ["A.C.Text2", "A.C.Text3", "A.C.Well", "A.C.Well2", "A.C.Well3", "A.C.WellHover", "A.C.MenuHover", "A.C.ChartWell",
-                "A.B.Text2", "A.B.Text3", "A.B.Well", "A.B.Well2", "A.B.Well3", "A.B.WellHover", "A.B.MenuHover", "A.B.ChartWell"];
+            // The video's glass (0.10.4): the palette's own tokens but the text steps, which are the video's (70 and 44 %
+            // of the ink), and the menus and dialogs, as dense as their text needs. Aero bloom's grounds are the video's, so
+            // the light theme reads in the video's light ink there: its ink family moves too.
+            string[] moved = ["A.C.Text2", "A.C.Text3", "A.B.Text2", "A.B.Text3", "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom", "A.B.MenuFill", "A.B.ModalFill"];
+            var dark = ThemeManager.Palette(Look.Aero, Theme.Dark);
             foreach (var (key, value) in map)
             {
                 palette.Contains(key).ShouldBeTrue($"{key} is not a palette key");
                 if (moved.Contains(key)) continue;
+                if (theme == Theme.Light && dark.Contains(key) && Describe(value) == Describe(dark[key])) continue;
                 Describe(value).ShouldBe(Describe(palette[key]), $"{key}, {theme}");
             }
-            foreach (var key in new[] { "A.C.Text2", "A.C.Text3" })
-                ((Color)map[key]).A.ShouldBeGreaterThanOrEqualTo(((Color)palette[key]).A, $"{key} only ever stronger, {theme}");
+            var ink = (Color)map["A.C.Text"];
+            map["A.C.Text2"].ShouldBe(Color.FromArgb(0xB2, ink.R, ink.G, ink.B));
+            map["A.C.Text3"].ShouldBe(Color.FromArgb(0x70, ink.R, ink.G, ink.B));
             var strict = GlassMaterial.Map(GlassSettings.Default with { IncreaseContrast = true }, theme);
             foreach (var key in new[] { "A.C.Well", "A.C.Well2", "A.C.Well3" })
                 ((Color)strict[key]).ShouldBe((Color)palette[key], $"the strict glass keeps {key}, {theme}");
@@ -57,7 +60,7 @@ public class GlassMaterialTests
                 => (Color)GlassMaterial.Map(new GlassSettings { Style = style, TintStrength = strength, TintColor = tint }, theme)["A.C.GlassTintTop"];
             var tinted = Top(GlassStyle.Tinted);
             tinted.ShouldBe((Color)ThemeManager.Palette(Look.Aero, theme)["A.C.GlassTintTop"], "Tinted is the demo's");
-            Top(GlassStyle.Clear).A.ShouldBeLessThan(tinted.A, "Clear is a low tint");
+            Top(GlassStyle.Clear).ShouldBe(Color.FromArgb((byte)Math.Round(GlassMaterial.ClearTop * 255), 0, 0, 0), "Clear dims the live desktop a little");
             if (theme == Theme.Dark) Top(GlassStyle.Dark).ShouldBe(Color.FromArgb(140, 0, 0, 0), "Dark is black at 55 %");
             else Top(GlassStyle.Dark).ShouldSatisfyAllConditions(
                 dark => (dark.R, dark.G, dark.B).ShouldBe(((byte)0, (byte)0, (byte)0)),
@@ -92,13 +95,24 @@ public class GlassMaterialTests
 
     [Theory]
     [MemberData(nameof(Themes))]
-    public void Reduce_transparency_fills_the_glass_menus_and_dialogs(string themeName)
+    public void Reduce_transparency_makes_the_glass_denser_and_still_glass(string themeName)
         => UiHarness.OnUi(() =>
         {
-            var map = GlassMaterial.Map(new GlassSettings { ReduceTransparency = true }, Enum.Parse<Theme>(themeName));
-            foreach (var key in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom", "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom" })
-                ((Color)map[key]).A.ShouldBe((byte)255, key);
-            ((LinearGradientBrush)map["A.B.GlassTint"]).GradientStops.ShouldAllBe(stop => stop.Color.A == 255);
+            // 0.10.4: nothing is ever solid. The tint is dense, the menus and dialogs denser, and the frost still shows.
+            var theme = Enum.Parse<Theme>(themeName);
+            var plain = GlassMaterial.Map(new GlassSettings(), theme);
+            var map = GlassMaterial.Map(new GlassSettings { ReduceTransparency = true }, theme);
+            foreach (var key in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom" })
+            {
+                ((Color)map[key]).A.ShouldBe((byte)Math.Round(GlassMaterial.ReducedAlpha * 255), key);
+                ((Color)map[key]).A.ShouldBeGreaterThan(((Color)plain[key]).A, key);
+            }
+            foreach (var key in new[] { "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom" })
+            {
+                ((Color)map[key]).A.ShouldBeGreaterThanOrEqualTo((byte)Math.Round(GlassMaterial.ReducedMenuAlpha * 255), key);
+                ((Color)map[key]).A.ShouldBeLessThan((byte)255, key);
+            }
+            ((LinearGradientBrush)map["A.B.GlassTint"]).GradientStops.ShouldAllBe(stop => stop.Color.A < 255);
         });
 
     [Theory]
@@ -154,7 +168,8 @@ public class GlassMaterialTests
                 {
                     foreach (var tint in new[] { GlassSettings.DefaultTint, "#FFE600", "#101010", "#FFFFFF" })
                     {
-                        foreach (var (reduce, increase, behind) in new[] { (false, false, GlassBackdrop.Wallpaper), (false, false, GlassBackdrop.Bloom), (true, false, GlassBackdrop.Bloom), (false, true, GlassBackdrop.Bloom) })
+                        // Increase contrast alone holds text to a ratio (0.10.4): the default glass takes the video's steps.
+                        foreach (var (reduce, increase, behind) in new[] { (false, true, GlassBackdrop.Wallpaper), (true, true, GlassBackdrop.Bloom), (false, true, GlassBackdrop.Bloom) })
                         {
                             var settings = new GlassSettings { Style = style, TintStrength = strength, TintColor = tint, ReduceTransparency = reduce, IncreaseContrast = increase, Backdrop = behind };
                             var map = GlassMaterial.Map(settings, theme);

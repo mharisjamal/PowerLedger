@@ -24,8 +24,14 @@ public class GlassPanel : ContentControl
     public static readonly DependencyProperty SheenEnabledProperty = DependencyProperty.Register(nameof(SheenEnabled),
         typeof(bool), typeof(GlassPanel), new PropertyMetadata(true));
 
+    public static readonly DependencyProperty HasRimProperty = DependencyProperty.Register(nameof(HasRim),
+        typeof(bool), typeof(GlassPanel), new PropertyMetadata(true));
+
     public static readonly DependencyProperty HasShadowProperty = DependencyProperty.Register(nameof(HasShadow),
         typeof(bool), typeof(GlassPanel), new PropertyMetadata(true, (d, _) => ((GlassPanel)d).UpdateClip()));
+
+    /// <summary>How far outside the pane its shadow starts, in its units.</summary>
+    public const double ShadowGap = 2;
 
     private static readonly List<GlassPanel> Panes = [];
 
@@ -52,6 +58,10 @@ public class GlassPanel : ContentControl
     public Brush? Frost { get => (Brush?)GetValue(FrostProperty); set => SetValue(FrostProperty, value); }
 
     public bool SheenEnabled { get => (bool)GetValue(SheenEnabledProperty); set => SetValue(SheenEnabledProperty, value); }
+
+    /// <summary>Whether the pane draws its own rim, inner lines and top sheen; false under a control that draws its own
+    /// (a top-bar pill round a glass button, as the demo's .gbtn), so the two never double into a thick outline.</summary>
+    public bool HasRim { get => (bool)GetValue(HasRimProperty); set => SetValue(HasRimProperty, value); }
 
     public bool HasShadow { get => (bool)GetValue(HasShadowProperty); set => SetValue(HasShadowProperty, value); }
 
@@ -123,7 +133,9 @@ public class GlassPanel : ContentControl
         var m = -_shadow.Margin.Left;
         var r = CornerRadius.TopLeft;
         var outer = new RectangleGeometry(new Rect(0, 0, ActualWidth + 2 * m, ActualHeight + 2 * m));
-        var inner = new RectangleGeometry(new Rect(m, m, ActualWidth, ActualHeight), r, r);
+        // A little off the pane (0.10.4): the free-form window's shape stands a pixel outside each pane, and no shadow may
+        // darken that edge into an outline; the shadow shows where it falls on other glass, as the demo's does.
+        var inner = new RectangleGeometry(new Rect(m - ShadowGap, m - ShadowGap, ActualWidth + 2 * ShadowGap, ActualHeight + 2 * ShadowGap), r + ShadowGap, r + ShadowGap);
         var clip = new CombinedGeometry(GeometryCombineMode.Exclude, outer, inner);
         clip.Freeze();
         // Inside the shadow's cache (PART_ShadowClip), so the clip is drawn into the bitmap once, not on every frame.

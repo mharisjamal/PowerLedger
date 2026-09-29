@@ -17,20 +17,38 @@ namespace PowerLedger.App.Tests;
 public class BackdropTests
 {
     [Theory]
-    [InlineData("Desktop", false, true, true, true, "SeeThrough")]
-    [InlineData("Desktop", false, true, true, false, "SeeThrough")]
-    [InlineData("Desktop", false, true, false, true, "Wallpaper")]
-    [InlineData("Desktop", false, false, true, true, "Wallpaper")]
-    [InlineData("Desktop", false, false, true, false, "Plain")]
-    [InlineData("Desktop", false, true, false, false, "Plain")]
-    [InlineData("Desktop", true, true, true, true, "Wallpaper")]
-    [InlineData("Bloom", false, false, false, false, "Bloom")]
-    [InlineData("Bloom", true, true, true, true, "Bloom")]
-    [InlineData("Wallpaper", false, true, true, true, "Wallpaper")]
-    [InlineData("Wallpaper", false, true, true, false, "Plain")]
-    [InlineData("Plain", false, true, true, true, "Plain")]
-    public void The_backdrop_is_see_through_only_where_windows_can_blur_it(string wanted, bool reduce, bool system, bool transparency, bool wallpaper, string expected)
-        => BackdropRules.Choose(Enum.Parse<GlassBackdrop>(wanted), reduce, system, transparency, wallpaper).ShouldBe(Enum.Parse<BackdropKind>(expected));
+    [InlineData("Desktop", true, true, "SeeThrough")]
+    [InlineData("Desktop", true, false, "SeeThrough")]
+    [InlineData("Desktop", false, true, "Wallpaper")]
+    [InlineData("Desktop", false, false, "Plain")]
+    [InlineData("Bloom", true, false, "Bloom")]
+    [InlineData("Bloom", false, true, "Bloom")]
+    [InlineData("Wallpaper", true, true, "Wallpaper")]
+    [InlineData("Wallpaper", true, false, "Plain")]
+    [InlineData("Plain", true, true, "Plain")]
+    public void The_desktop_shows_live_only_on_the_free_form_window(string wanted, bool onScreen, bool wallpaper, string expected)
+        => BackdropRules.Choose(Enum.Parse<GlassBackdrop>(wanted), onScreen, wallpaper).ShouldBe(Enum.Parse<BackdropKind>(expected));
+
+    [Theory]
+    [InlineData("Bloom")]
+    [InlineData("Wallpaper")]
+    [InlineData("Plain")]
+    [InlineData("Desktop")]
+    public void Clear_shows_the_live_desktop_whatever_backdrop_is_saved(string saved)
+    {
+        var glass = GlassSettings.Default with { Style = GlassStyle.Clear, Backdrop = Enum.Parse<GlassBackdrop>(saved) };
+        glass.Source.ShouldBe(GlassBackdrop.Desktop);
+        BackdropRules.Choose(glass.Source, onScreen: true, hasWallpaper: true).ShouldBe(BackdropKind.SeeThrough);
+        BackdropRules.Choose(glass.Sanitised().Source, onScreen: true, hasWallpaper: false).ShouldBe(BackdropKind.SeeThrough);
+    }
+
+    [Theory]
+    [InlineData("Tinted", "Bloom", "Bloom")]
+    [InlineData("Dark", "Wallpaper", "Wallpaper")]
+    [InlineData("Colour", "Plain", "Bloom")]
+    public void The_other_styles_keep_their_backdrop_and_plain_is_gone(string style, string saved, string source)
+        => (GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), Backdrop = Enum.Parse<GlassBackdrop>(saved) }).Sanitised().Source
+            .ShouldBe(Enum.Parse<GlassBackdrop>(source));
 
     [Fact]
     public void The_wallpaper_fills_the_scene_as_uniform_to_fill_draws_it()

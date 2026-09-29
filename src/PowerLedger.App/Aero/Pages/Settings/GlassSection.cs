@@ -101,6 +101,9 @@ internal sealed class GlassSection : ObservableObject
 
     public GlassBackdrop Backdrop { get => Glass.Backdrop; set => Change(Glass with { Backdrop = value }); }
 
+    /// <summary>What is behind the glass can be chosen: not under Clear, which always shows the user's own desktop.</summary>
+    public bool BackdropChoosable => Glass.Style != GlassStyle.Clear;
+
     public bool ReduceTransparency { get => Glass.ReduceTransparency; set => Change(Glass with { ReduceTransparency = value }); }
 
     public bool IncreaseContrast { get => Glass.IncreaseContrast; set => Change(Glass with { IncreaseContrast = value }); }
@@ -156,7 +159,7 @@ internal sealed class GlassSection : ObservableObject
     private static readonly string[] Shown =
     [
         nameof(Style), nameof(IsColour), nameof(TintColor), nameof(ChosenTint), nameof(Tint), nameof(TintStrength), nameof(Frost), nameof(EdgeLight),
-        nameof(Accent), nameof(Backdrop), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ReduceMotion),
+        nameof(Accent), nameof(Backdrop), nameof(BackdropChoosable), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ReduceMotion),
         nameof(FollowsWindows), nameof(ReduceMotionNote), nameof(Parallax), nameof(ParallaxAvailable),
     ];
 }

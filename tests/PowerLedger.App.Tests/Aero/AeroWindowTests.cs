@@ -86,9 +86,8 @@ public class AeroWindowTests
             shell.Page.ShouldBe(Page.Now, "a closed window no longer follows the shell");
         });
 
-    /// <summary>Review 11: the window draws on the Aero palette put on it, in each theme, whatever the application's is:
-    /// its ground is the palette's plain ground where the backdrop is plain, and the palette's wash over the desktop where
-    /// Windows can show the desktop through it (Plan S G4).</summary>
+    /// <summary>Review 11: the window draws on the Aero palette put on it, in each theme, whatever the application's is;
+    /// since 0.10.4 it has no ground of its own at all, in either theme.</summary>
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
@@ -106,10 +105,10 @@ public class AeroWindowTests
                 window.UpdateLayout();
                 var palette = ThemeManager.Palette(Look.Aero, theme);
                 var room = (Border)window.FindName("Room");
-                if (window.BackdropKind == Aero.BackdropKind.SeeThrough)
-                    ((SolidColorBrush)room.Background).Color.ShouldBe((Color)palette["A.C.SeeThroughWash"], $"Aero's {theme} wash over the desktop");
-                else
-                    MidnightHost.PixelOf(window, 960, 640, 2, 2).ShouldBe((Color)palette["A.C.Plain"], $"Aero's {theme} plain ground");
+                // The free-form window is clear outside its glass (0.10.4): no ground, no wash; the desktop shows there.
+                room.Background.ShouldBeNull();
+                window.Background.ShouldBe(Brushes.Transparent);
+                MidnightHost.PixelOf(window, 960, 640, 2, 2).A.ShouldBe((byte)0, $"Aero's {theme} window is clear outside its glass");
             }
             finally
             {

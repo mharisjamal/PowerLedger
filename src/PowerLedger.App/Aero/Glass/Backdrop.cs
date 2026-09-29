@@ -11,7 +11,10 @@ namespace PowerLedger.App.Aero;
 /// <summary>What shows behind Aero's glass on this PC now (Aero look design §3, §6).</summary>
 internal enum BackdropKind
 {
-    /// <summary>The desktop itself, blurred by the DWM system backdrop (acrylic) under a light wash.</summary>
+    /// <summary>The desktop itself, live (0.10.4, Clear): whatever is behind the window, other windows too, through the
+    /// window's own alpha, under the glass's tint only. Not blurred: with Windows' Transparency effects off, DWM's system
+    /// backdrop paints solid grey across the whole window rectangle and the accent blur black (measured on screen), and
+    /// the window's alpha is the one way the live desktop shows; it shows the same with them on.</summary>
     SeeThrough,
 
     /// <summary>The user's wallpaper, sharp around the panes and frosted once under them.</summary>
@@ -26,18 +29,19 @@ internal enum BackdropKind
 }
 
 /// <summary>
-/// The backdrop decision (Aero look design §6), pure: Aero bloom whenever it is chosen (it is always there: Windows' own
-/// picture, or one drawn like it); the desktop only where Windows can blur it (the system backdrop, Windows 11 22H2 and
-/// later, with Transparency effects on) and the user wants it and hasn't asked for less transparency; otherwise the
-/// wallpaper when there is one; otherwise plain. Never a transparent window over nothing.
+/// The backdrop decision (Aero look design §6), pure, from <see cref="GlassSettings.Source"/>: Aero bloom whenever it is
+/// chosen (it is always there: Windows' own picture, or one drawn like it); the desktop itself, live, for Clear on the
+/// free-form window, which is clear outside its glass (a window drawn whole, a sample, frosts the wallpaper instead);
+/// otherwise the wallpaper when there is one; otherwise plain (a solid-colour desktop, which the free-form window shows
+/// through its tint).
 /// </summary>
 internal static class BackdropRules
 {
-    public static BackdropKind Choose(GlassBackdrop wanted, bool reduceTransparency, bool hasSystemBackdrop, bool transparencyOn, bool hasWallpaper)
+    public static BackdropKind Choose(GlassBackdrop wanted, bool onScreen, bool hasWallpaper)
     {
-        if (wanted == GlassBackdrop.Plain) return BackdropKind.Plain;
         if (wanted == GlassBackdrop.Bloom) return BackdropKind.Bloom;
-        if (wanted == GlassBackdrop.Desktop && !reduceTransparency && hasSystemBackdrop && transparencyOn) return BackdropKind.SeeThrough;
+        if (wanted == GlassBackdrop.Desktop && onScreen) return BackdropKind.SeeThrough;
+        if (wanted == GlassBackdrop.Plain) return BackdropKind.Plain;
         return hasWallpaper ? BackdropKind.Wallpaper : BackdropKind.Plain;
     }
 }
@@ -57,7 +61,11 @@ internal static class AeroNative
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     public const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+    public const int DWMWA_BORDER_COLOR = 34;
+    public const int DWMWCP_DONOTROUND = 1;
     public const int DWMWCP_ROUND = 2;
+    /// <summary>DWMWA_BORDER_COLOR's "no border at all" (Windows 11).</summary>
+    public const int DWMWA_COLOR_NONE = unchecked((int)0xFFFFFFFE);
     public const int DWMSBT_NONE = 1;
     public const int DWMSBT_TRANSIENTWINDOW = 3;
     public const int WM_SETTINGCHANGE = 0x001A;
@@ -204,25 +212,31 @@ internal sealed class Backdrop : IDisposable
     {
         if (_disposed) return;
         var glass = _material.Current;
-        var path = glass.Backdrop is GlassBackdrop.Plain or GlassBackdrop.Bloom ? null : AeroNative.WallpaperPath();
-        var kind = BackdropRules.Choose(glass.Backdrop, glass.ReduceTransparency, AeroNative.HasSystemBackdrop, AeroNative.TransparencyOn, path != null);
+        var wanted = glass.Source;
+        var path = wanted == GlassBackdrop.Wallpaper || (wanted == GlassBackdrop.Desktop && !_onScreen) ? AeroNative.WallpaperPath() : null;
+        var kind = BackdropRules.Choose(wanted, _onScreen, path != null);
         var hwnd = new WindowInteropHelper(_window).Handle;
         var dark = _theme() == Theme.Dark;
         if (hwnd != IntPtr.Zero)
         {
             AeroNative.SetDword(hwnd, AeroNative.DWMWA_USE_IMMERSIVE_DARK_MODE, dark ? 1 : 0);
-            AeroNative.SetDword(hwnd, AeroNative.DWMWA_WINDOW_CORNER_PREFERENCE, AeroNative.DWMWCP_ROUND);
+            // The free-form window (0.10.4) is only its glass: no Windows border round the window's rectangle, and no
+            // rounding of it (the glass pieces round themselves).
+            AeroNative.SetDword(hwnd, AeroNative.DWMWA_WINDOW_CORNER_PREFERENCE, _onScreen ? AeroNative.DWMWCP_DONOTROUND : AeroNative.DWMWCP_ROUND);
+            if (_onScreen) AeroNative.SetDword(hwnd, AeroNative.DWMWA_BORDER_COLOR, AeroNative.DWMWA_COLOR_NONE);
         }
         var chrome = WindowChrome.GetWindowChrome(_window);
-        if (kind == BackdropKind.SeeThrough && hwnd != IntPtr.Zero)
+        // The free-form window whatever is behind its glass (0.10.4): the window is drawn with its alpha, so outside the
+        // glass it is clear and each piece's anti-aliased edge meets the real desktop, rather than the window's ground
+        // showing in the region's edge pixels; and under Clear the desktop and its windows show live through the glass.
+        if (_onScreen && hwnd != IntPtr.Zero)
         {
             if (chrome != null) chrome.GlassFrameThickness = new Thickness(-1);
             _window.Background = Brushes.Transparent;
             if (_source?.CompositionTarget != null) _source.CompositionTarget.BackgroundColor = Colors.Transparent;
             AeroNative.ExtendFrame(hwnd, -1);
-            AeroNative.SetDword(hwnd, AeroNative.DWMWA_SYSTEMBACKDROP_TYPE, AeroNative.DWMSBT_TRANSIENTWINDOW);
-            _scene.SetResourceReference(Border.BackgroundProperty, "A.B.SeeThroughWash");
-            _frost.Show(null, glass, _theme());
+            if (AeroNative.HasSystemBackdrop) AeroNative.SetDword(hwnd, AeroNative.DWMWA_SYSTEMBACKDROP_TYPE, AeroNative.DWMSBT_NONE);
+            _scene.Background = null;
         }
         else
         {
@@ -232,9 +246,10 @@ internal sealed class Backdrop : IDisposable
             _window.SetResourceReference(Window.BackgroundProperty, "A.B.Plain");
             if (_source?.CompositionTarget != null && _window.TryFindResource("A.C.Plain") is Color plain) _source.CompositionTarget.BackgroundColor = plain;
             _scene.SetResourceReference(Border.BackgroundProperty, "A.B.Plain");
-            if (kind == BackdropKind.Bloom) _frost.ShowBloom(glass, _theme());
-            else _frost.Show(kind == BackdropKind.Wallpaper ? path : null, glass, _theme());
         }
+        if (kind == BackdropKind.SeeThrough) _frost.Show(null, glass, _theme());
+        else if (kind == BackdropKind.Bloom) _frost.ShowBloom(glass, _theme());
+        else _frost.Show(kind == BackdropKind.Wallpaper ? path : null, glass, _theme());
         _parallax.Enabled = kind == BackdropKind.Wallpaper && glass.Parallax && !_onScreen;
         if (kind == Kind) return;
         Kind = kind;

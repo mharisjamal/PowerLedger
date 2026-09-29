@@ -121,7 +121,7 @@
     <Color x:Key="A.C.BloomBrightest">#00A4FF</Color>
     <!-- Whether the glass has its halo (GlassMaterial works it out: none on the strict glass, nor on Aero bloom where text
          reads at 3:1 without it). -->
-    <sys:Boolean x:Key="A.Glass.HaloOn">True</sys:Boolean>
+    <sys:Boolean x:Key="A.Glass.HaloOn">False</sys:Boolean>
     <Color x:Key="A.C.Halo">#000000</Color>
     <sys:Double x:Key="A.Glass.HaloShare">0.3</sys:Double>
     <sys:Double x:Key="A.Glass.HaloBlur">6</sys:Double>
