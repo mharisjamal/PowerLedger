@@ -100,7 +100,7 @@ public class AeroSettingsViewTests
                     titles.ShouldContain(section);
                 }
                 MidnightHost.AllOf<GlassPanel>(view).Count().ShouldBeGreaterThanOrEqualTo(10, "each section a glass pane, and the preview's");
-                var styles = MidnightHost.AllOf<RadioButton>(view).Where(r => r.Content is "Clear" or "Tinted" or "Dark" or "Colour" && r.Style == view.FindResource("A.OptItem")).ToList();
+                var styles = MidnightHost.AllOf<RadioButton>(view).Where(r => r.Content is "Clear" or "Tinted" or "Dark" or "Colour" && r.Style == view.FindResource("A.SegOpt")).ToList();
                 styles.Single(r => r.IsChecked == true).Content.ShouldBe(styleName);
                 var wheel = MidnightHost.AllOf<ColourWheel>(view).Single();
                 wheel.IsVisible.ShouldBe(style == GlassStyle.Colour, "the presets and the wheel show for Colour only");
@@ -128,7 +128,7 @@ public class AeroSettingsViewTests
             var (window, view) = Page(settings, Theme.Dark, 1440);
             try
             {
-                var dark = MidnightHost.AllOf<RadioButton>(view).First(r => r.Content is "Dark" && r.Style == view.FindResource("A.OptItem"));
+                var dark = MidnightHost.AllOf<RadioButton>(view).First(r => r.Content is "Dark" && r.Style == view.FindResource("A.SegOpt"));
                 dark.IsChecked = true;
                 var overlay = MidnightHost.AllOf<GlassSwitch>(view).Single(s => System.Windows.Automation.AutomationProperties.GetName(s) == "Watts overlay");
                 overlay.IsChecked = true;
@@ -143,7 +143,7 @@ public class AeroSettingsViewTests
             }
         });
 
-    /// <summary>The switches show what is saved: tilt and parallax on by default, the others as chosen.</summary>
+    /// <summary>The switches show what is saved.</summary>
     [Fact]
     public void The_switches_show_the_saved_glass()
         => UiHarness.OnUi(() =>

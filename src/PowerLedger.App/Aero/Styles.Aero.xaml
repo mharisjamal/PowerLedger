@@ -469,12 +469,13 @@
         <Setter Property="FontSize" Value="{DynamicResource A.T.Small}" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text2}" />
         <Setter Property="Margin" Value="0,0,6,0" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
                         <Border x:Name="Box" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
-                                BorderBrush="{DynamicResource A.B.Line}" BorderThickness="1" Background="Transparent" />
+                                BorderBrush="{DynamicResource A.B.Line}" BorderThickness="{TemplateBinding BorderThickness}" Background="Transparent" />
                         <Border x:Name="Hover" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
                                 Background="{DynamicResource A.B.OutlineHover}" Opacity="0" />
                         <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center" RecognizesAccessKey="True" />
@@ -498,6 +499,38 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- A choice of a few (0.10.4, Settings' Style, Behind the glass and Appearance): the demo's .seg, one hairline capsule
+         round the options, the chosen one the white pill with its soft shadow, the rest the quieter text on the glass. -->
+    <Style x:Key="A.SegGroup" TargetType="Border">
+        <Setter Property="Height" Value="40" />
+        <Setter Property="Padding" Value="4" />
+        <Setter Property="CornerRadius" Value="20" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BorderBrush" Value="{DynamicResource A.B.Line}" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style x:Key="A.SegOpt" TargetType="RadioButton" BasedOn="{StaticResource A.OptItem}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontSize" Value="{DynamicResource A.T.Control}" />
+        <Setter Property="Effect">
+            <Setter.Value>
+                <DropShadowEffect ShadowDepth="2" BlurRadius="10" Opacity="0" Direction="270" RenderingBias="Performance" />
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter Property="Effect">
+                    <Setter.Value>
+                        <DropShadowEffect ShadowDepth="2" BlurRadius="10" Opacity="0.18" Direction="270" RenderingBias="Performance" />
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <!-- ============ inputs ============ -->

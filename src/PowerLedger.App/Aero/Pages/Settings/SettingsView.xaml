@@ -188,12 +188,14 @@
                         <StackPanel Margin="0,0,24,0">
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Style" />
+                                <Border Style="{StaticResource A.SegGroup}">
                                 <StackPanel Orientation="Horizontal">
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Clear" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Clear}}" />
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Tinted" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Tinted}}" />
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Dark" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Dark}}" />
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Colour" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Colour}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Clear" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Clear}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Tinted" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Tinted}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Dark" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Dark}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Colour" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Colour}}" />
                                 </StackPanel>
+                                </Border>
                             </StackPanel>
                             <!-- Colour: 8 presets and the wheel. -->
                             <StackPanel Style="{StaticResource Row}" Visibility="{Binding IsColour, Converter={StaticResource VisibleWhen}}">
@@ -270,21 +272,25 @@
                                 <TextBlock Style="{StaticResource Label}" Text="Behind the glass" />
                                 <!-- Aero bloom (0.10.3, the default): the approved video's glass, over Windows' bloom; My desktop frosts the
                                      user's own wallpaper. Clear always shows the user's own desktop (0.10.4), so the choice rests. -->
+                                <Border Style="{StaticResource A.SegGroup}">
                                 <StackPanel x:Name="BackdropChoice" Orientation="Horizontal" IsEnabled="{Binding BackdropChoosable}">
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Aero bloom" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Bloom}}" />
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="My desktop" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Wallpaper}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Aero bloom" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Bloom}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="My desktop" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Wallpaper}}" />
                                 </StackPanel>
+                                </Border>
                                 <TextBlock x:Name="ClearNote" Style="{StaticResource SwitchText}" Text="Clear shows your own desktop." Foreground="{DynamicResource A.B.Text2}"
                                            Visibility="{Binding BackdropChoosable, Converter={StaticResource HiddenWhen}}" />
                             </StackPanel>
                             <!-- The existing Theme choice, here beside the glass it colours. -->
                             <StackPanel Style="{StaticResource Row}" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
                                 <TextBlock Style="{StaticResource Label}" Text="Appearance" />
+                                <Border Style="{StaticResource A.SegGroup}">
                                 <StackPanel Orientation="Horizontal">
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Like Windows" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.System}}" />
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Dark" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Dark}}" />
-                                    <RadioButton Style="{StaticResource A.OptItem}" Content="Light" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Light}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Like Windows" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.System}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Dark" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Dark}}" />
+                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Light" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Light}}" />
                                 </StackPanel>
+                                </Border>
                             </StackPanel>
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Reduce transparency" />
