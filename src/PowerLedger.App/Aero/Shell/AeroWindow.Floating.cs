@@ -228,6 +228,7 @@ internal partial class AeroWindow
             AeroMotion.Move(scale, ScaleTransform.ScaleYProperty, 1, AeroMotion.Modal, AeroMotion.Spring, from: .4);
         }
         AeroMotion.Fade(modal, OpacityProperty, 1, AeroMotion.Modal, AeroMotion.Glide, from: 0);
+        FollowShapeFor(AeroMotion.MoveMs(AeroMotion.Modal));   // the window's shape grows with it out of the trigger
         Frost(modal);
         _modal = modal;
         _modalFrom = trigger;
@@ -281,6 +282,7 @@ internal partial class AeroWindow
         AeroMotion.Move(shift, TranslateTransform.YProperty, 0, AeroMotion.Toast, AeroMotion.Spring, from: 16);
         AeroMotion.Move(scale, ScaleTransform.ScaleXProperty, 1, AeroMotion.Toast, AeroMotion.Spring, from: .9);
         AeroMotion.Move(scale, ScaleTransform.ScaleYProperty, 1, AeroMotion.Toast, AeroMotion.Spring, from: .9);
+        FollowShapeFor(AeroMotion.MoveMs(AeroMotion.Toast));
         Frost(toast);
         UIElementAutomationPeer.CreatePeerForElement(toast)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
         _toast = toast;

@@ -25,9 +25,12 @@ internal sealed class WallpaperFrost : IDisposable
 
     private readonly Window _window;
     private readonly Border _scene;
+    private readonly bool _onScreen;
     private string? _path;
     private BitmapSource? _sharp;
     private BitmapSource? _frosted;
+    private ImageBrush? _sceneBrush;
+    private (int Style, bool Tile) _placement = (WallpaperPlacement.Fill, false);
     private (string? Path, double Radius, Theme Theme)? _made;
     private int _generation;
     private bool _listening;
@@ -35,10 +38,14 @@ internal sealed class WallpaperFrost : IDisposable
     private bool _rendering;
     private bool _disposed;
 
-    public WallpaperFrost(Window window, Border scene)
+    /// <param name="onScreen">True for Aero's free-form window (0.10.1): the wallpaper is lined up with the screen, where
+    /// Windows draws it, so the frost in each pane is the wallpaper really behind it and the scene, seen only at the
+    /// panes' soft edges, matches the desktop around them. False lines it up with the scene, filled (a sample window).</param>
+    public WallpaperFrost(Window window, Border scene, bool onScreen = false)
     {
         _window = window;
         _scene = scene;
+        _onScreen = onScreen;
     }
 
     /// <summary>How many CompositionTarget.Rendering handlers Aero's glass has on now, on every window: none at rest.</summary>
@@ -60,6 +67,7 @@ internal sealed class WallpaperFrost : IDisposable
             _generation++;
             _path = null;
             _frosted = null;
+            _sceneBrush = null;
             _made = null;
             Listen(false);
             foreach (var pane in Panes()) pane.Frost = null;
@@ -77,6 +85,7 @@ internal sealed class WallpaperFrost : IDisposable
         var reload = path != _path || _sharp == null;
         _path = path;
         var sharp = reload ? null : _sharp;
+        if (_onScreen) _placement = WallpaperPlacement.Read();
         var brightest = Token(theme, "A.C.BackdropBrightest");
         var darkest = Token(theme, "A.C.BackdropDarkest");
         var saturate = _window.TryFindResource("A.Glass.Saturate") is double s ? s : 1.55;
@@ -92,7 +101,16 @@ internal sealed class WallpaperFrost : IDisposable
             if (picture == null || frosted == null) return;
             _sharp = picture;
             _frosted = frosted;
-            _scene.Background = Frozen(new ImageBrush(picture) { Stretch = Stretch.UniformToFill });
+            if (_onScreen)
+            {
+                _sceneBrush = new ImageBrush(picture) { ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill, Viewport = Place() };
+                _scene.Background = _sceneBrush;
+            }
+            else
+            {
+                _sceneBrush = null;
+                _scene.Background = Frozen(new ImageBrush(picture) { Stretch = Stretch.UniformToFill });
+            }
             foreach (var pane in Panes()) pane.Frost = null;   // fresh brushes on the new copy
             Listen(true);
             Align();
@@ -112,7 +130,8 @@ internal sealed class WallpaperFrost : IDisposable
     public void Align()
     {
         if (_frosted == null || _scene.ActualWidth <= 0 || _sharp == null) return;
-        var image = ImageRect(new Size(_scene.ActualWidth, _scene.ActualHeight), new Size(_sharp.PixelWidth, _sharp.PixelHeight));
+        var image = Place();
+        if (_sceneBrush != null && _sceneBrush.Viewport != image) _sceneBrush.Viewport = image;
         foreach (var pane in Panes())
         {
             if (!pane.IsVisible || pane.ActualWidth <= 0) continue;
@@ -163,6 +182,28 @@ internal sealed class WallpaperFrost : IDisposable
     {
         var frost = scope.TryFindResource("A.Glass.Frost") is double f ? f : 26 * glass.Frost / GlassMaterial.DemoFrost;
         return Math.Max(0, frost / 2.6);
+    }
+
+    /// <summary>Where the wallpaper lies in the scene's units: where Windows draws it on the window's screen, or filling
+    /// the scene when not lined up with the screen (or not on one yet).</summary>
+    private Rect Place()
+    {
+        var size = new Size(_sharp!.PixelWidth, _sharp.PixelHeight);
+        if (_onScreen && PresentationSource.FromVisual(_scene) != null)
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(_window).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                var screen = System.Windows.Forms.Screen.FromHandle(hwnd).Bounds;
+                var all = System.Windows.Forms.SystemInformation.VirtualScreen;
+                var on = WallpaperPlacement.Place(_placement.Style, _placement.Tile, new Rect(screen.X, screen.Y, screen.Width, screen.Height),
+                    new Rect(all.X, all.Y, all.Width, all.Height), size);
+                var topLeft = _scene.PointFromScreen(on.TopLeft);
+                var bottomRight = _scene.PointFromScreen(on.BottomRight);
+                return new Rect(Math.Round(topLeft.X, 2), Math.Round(topLeft.Y, 2), Math.Round(bottomRight.X - topLeft.X, 2), Math.Round(bottomRight.Y - topLeft.Y, 2));
+            }
+        }
+        return ImageRect(new Size(_scene.ActualWidth, _scene.ActualHeight), size);
     }
 
     /// <summary>Where UniformToFill draws an image of <paramref name="image"/> pixels in a box of <paramref name="box"/>.</summary>
@@ -301,11 +342,13 @@ internal sealed class WallpaperFrost : IDisposable
         {
             _window.LayoutUpdated += OnLayout;
             _scene.SizeChanged += OnSize;
+            if (_onScreen) _window.LocationChanged += OnLayout;   // the wallpaper stays with the screen as the window moves
         }
         else
         {
             _window.LayoutUpdated -= OnLayout;
             _scene.SizeChanged -= OnSize;
+            _window.LocationChanged -= OnLayout;
         }
     }
 
@@ -325,5 +368,55 @@ internal sealed class WallpaperFrost : IDisposable
         _rendering = false;
         RenderingHooks--;
         CompositionTarget.Rendering -= OnFrame;
+    }
+}
+
+/// <summary>
+/// Where Windows draws the wallpaper on a screen, pure: Fill (Windows' default, and any style it may add later) covers
+/// the screen and crops the overflow evenly; Fit shows it whole; Stretch fills the screen exactly; Center (and Tile, read
+/// as Center) sets it at its own size in the middle; Span covers every screen together.
+/// </summary>
+internal static class WallpaperPlacement
+{
+    public const int Center = 0;
+    public const int Stretch = 2;
+    public const int Fit = 6;
+    public const int Fill = 10;
+    public const int Span = 22;
+
+    /// <summary>The picture's rectangle, in the same pixels as <paramref name="screen"/> and <paramref name="all"/>.</summary>
+    public static Rect Place(int style, bool tile, Rect screen, Rect all, Size image)
+    {
+        if (image.Width <= 0 || image.Height <= 0) return screen;
+        return style switch
+        {
+            Stretch => screen,
+            Fit => Scaled(screen, image, Math.Min(screen.Width / image.Width, screen.Height / image.Height)),
+            Center => Scaled(screen, image, 1),
+            Span => Scaled(all, image, Math.Max(all.Width / image.Width, all.Height / image.Height)),
+            _ => Scaled(screen, image, Math.Max(screen.Width / image.Width, screen.Height / image.Height)),
+        };
+    }
+
+    /// <summary>Control Panel, Desktop: WallpaperStyle and TileWallpaper, as Windows keeps them; Fill when unreadable.</summary>
+    public static (int Style, bool Tile) Read()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop");
+            var style = int.TryParse(key?.GetValue("WallpaperStyle") as string, out var s) ? s : Fill;
+            var tile = key?.GetValue("TileWallpaper") as string == "1";
+            return (style, tile);
+        }
+        catch (System.Security.SecurityException)
+        {
+            return (Fill, false);
+        }
+    }
+
+    private static Rect Scaled(Rect box, Size image, double scale)
+    {
+        double w = image.Width * scale, h = image.Height * scale;
+        return new Rect(box.X + (box.Width - w) / 2, box.Y + (box.Height - h) / 2, w, h);
     }
 }

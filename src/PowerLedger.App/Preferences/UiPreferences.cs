@@ -102,6 +102,10 @@ internal sealed record UiPreferences
     /// null reads as the defaults, as <see cref="Glass"/> does.</summary>
     public OverlaySettings Overlay { get; set; } = OverlaySettings.Default;
 
+    /// <summary>Aero's window as last left (0.10.1, free-form): spread over the screen's work area, or the smaller
+    /// centred layout at its bounds. Null until Aero's window has closed once, which opens it spread, as the demo.</summary>
+    public AeroPlacement? AeroWindow { get; init; }
+
     public static UiPreferences Default { get; } = new();
 
     /// <summary>The same preferences with anything out of range put back to its default.</summary>
@@ -114,6 +118,7 @@ internal sealed record UiPreferences
         Co2KgPerKwh = double.IsFinite(Co2KgPerKwh) && Co2KgPerKwh >= 0 && Co2KgPerKwh < MaxCo2KgPerKwh ? Co2KgPerKwh : Co2.DefaultKgPerKwh,
         Glass = (Glass ?? GlassSettings.Default).Sanitised(),
         Overlay = (Overlay ?? OverlaySettings.Default).Sanitised(),
+        AeroWindow = AeroWindow?.Sanitised(),
     };
 
     /// <summary>The same preferences after the one-time move to Aero (<see cref="AeroIntroduced"/>): on Aero, with the new
@@ -121,6 +126,25 @@ internal sealed record UiPreferences
     public UiPreferences Introduced() => AeroIntroduced
         ? this
         : this with { Look = Look.Aero, LookIntroduced = false, AeroIntroduced = true, LookBeforeAero = Look == Look.Aero ? null : Look };
+}
+
+/// <summary>Where Aero's window was left: spread over the work area or not, and its smaller layout's bounds in the
+/// window's units (zero width for none yet).</summary>
+internal sealed record AeroPlacement
+{
+    public bool Spread { get; init; } = true;
+
+    public double Left { get; init; }
+
+    public double Top { get; init; }
+
+    public double Width { get; init; }
+
+    public double Height { get; init; }
+
+    /// <summary>The same placement, or null when its bounds aren't numbers a window can take.</summary>
+    public AeroPlacement? Sanitised()
+        => new[] { Left, Top, Width, Height }.All(double.IsFinite) && Width >= 0 && Height >= 0 ? this : null;
 }
 
 /// <summary>Reads and writes ui.json. Reading never fails: a missing or damaged file gives the defaults.</summary>

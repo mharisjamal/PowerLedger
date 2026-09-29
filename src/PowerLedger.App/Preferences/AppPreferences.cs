@@ -51,6 +51,10 @@ internal interface IUiSettings
     /// <summary>Saves the watts overlay's choices, put in range first (Aero look design §5).</summary>
     string? SetOverlay(OverlaySettings overlay);
 
+    /// <summary>Remembers where Aero's window was left (<see cref="UiPreferences.AeroWindow"/>); nothing is written when
+    /// it is where it was.</summary>
+    string? PlaceAero(AeroPlacement placement);
+
     /// <summary>Stamps <see cref="UiPreferences.FirstRunAt"/> with now when the first run is done but nothing stamped it
     /// yet: an install from before this field existed. Does nothing before the first run finishes, or once stamped.</summary>
     string? EnsureFirstRunAt();
@@ -122,6 +126,9 @@ internal sealed class AppPreferences(
     public string? SetGlass(GlassSettings glass) => Save(Current with { Glass = glass.Sanitised() });
 
     public string? SetOverlay(OverlaySettings overlay) => Save(Current with { Overlay = overlay.Sanitised() });
+
+    public string? PlaceAero(AeroPlacement placement)
+        => placement.Sanitised() is { } kept && kept != Current.AeroWindow ? Save(Current with { AeroWindow = kept }) : null;
 
     public string? EnsureFirstRunAt()
         => Current.FirstRunDone && Current.FirstRunAt is null ? Save(Current with { FirstRunAt = DateTimeOffset.UtcNow }) : null;

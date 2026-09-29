@@ -774,8 +774,29 @@
         <Setter Property="SheenEnabled" Value="False" />
         <Setter Property="AutomationProperties.LiveSetting" Value="Polite" />
     </Style>
+    <!-- A top-bar or caption pill (0.10.1, free-form): each floats on its own over the desktop, so each is a glass capsule
+         of its own under its button: the frost (or the wash over the see-through desktop), the rim, and the dialogs' denser
+         wash in place of the panes' light tint, so its words and icon read at 4.5:1 with the button's own fill and hover on
+         top. The window's shape ends at its edge, so a shadow could never show: none is drawn. -->
+    <Style x:Key="A.TopPill" TargetType="aero:GlassPanel" BasedOn="{StaticResource {x:Type aero:GlassPanel}}">
+        <Setter Property="Background" Value="{DynamicResource A.B.ModalFill}" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HasShadow" Value="False" />
+        <Setter Property="SheenEnabled" Value="False" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="CornerRadius" Value="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" />
+    </Style>
+    <!-- The resize grip: a small glass disc off the stage's bottom-right corner, in the smaller layout only. -->
+    <Style x:Key="A.Grip" TargetType="aero:GlassPanel" BasedOn="{StaticResource A.TopPill}">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="HorizontalAlignment" Value="Right" />
+        <Setter Property="VerticalAlignment" Value="Bottom" />
+        <Setter Property="Margin" Value="0,0,3,3" />
+        <Setter Property="ToolTip" Value="Resize" />
+    </Style>
 
-    <!-- A well: the quieter surface inside a pane, with its light top edge. -->
+    <!-- A well:the quieter surface inside a pane, with its light top edge. -->
     <Style x:Key="A.Well" TargetType="Border">
         <Setter Property="CornerRadius" Value="{DynamicResource A.R.Well}" />
         <Setter Property="Background" Value="{DynamicResource A.B.Well}" />

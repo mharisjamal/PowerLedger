@@ -12,7 +12,8 @@ namespace PowerLedger.App.Aero;
 /// of the way each frame; here a timer steps at 30 Hz by the same amount per unit of time, runs only while the pointer
 /// has somewhere to go, and stops once settled, so a still pointer costs nothing. Off under reduced motion, when the
 /// Glass settings turn it off, and whenever the backdrop isn't the wallpaper (see-through glass has nothing of its own to
-/// shift).
+/// shift). Since 0.10.1 Aero's own window keeps it off (Backdrop's onScreen): its panes float over the real desktop,
+/// which doesn't drift, and its window region can't follow a skewed pane.
 /// </summary>
 internal sealed class Parallax : IDisposable
 {

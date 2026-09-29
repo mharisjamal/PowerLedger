@@ -153,19 +153,25 @@ internal sealed class Backdrop : IDisposable
     private readonly Func<Theme> _theme;
     private readonly WallpaperFrost _frost;
     private readonly Parallax _parallax;
+    private readonly bool _onScreen;
     private HwndSource? _source;
     private bool _disposed;
 
     /// <param name="window">The Aero window, before or after its handle exists.</param>
     /// <param name="scene">The layer behind everything, filling the window.</param>
     /// <param name="tilt">What tilts with the pointer (the panes' container), or null for none.</param>
-    public Backdrop(Window window, Border scene, GlassMaterial material, Func<Theme> theme, FrameworkElement? tilt = null)
+    /// <param name="onScreen">Aero's free-form window (0.10.1): the wallpaper lined up with the screen behind the window's
+    /// shape, and no parallax. Its surfaces float over the real desktop, which never drifts, so a scene drifting behind
+    /// the glass would part the frost from what really lies behind it; and a tilted pane can't be a window region's
+    /// rounded rectangle.</param>
+    public Backdrop(Window window, Border scene, GlassMaterial material, Func<Theme> theme, FrameworkElement? tilt = null, bool onScreen = false)
     {
         _window = window;
         _scene = scene;
         _material = material;
         _theme = theme;
-        _frost = new WallpaperFrost(window, scene);
+        _onScreen = onScreen;
+        _frost = new WallpaperFrost(window, scene, onScreen);
         _parallax = new Parallax(window, scene, tilt, _frost.Align);
         _material.Changed += OnGlassChanged;
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero) Hook();
@@ -220,7 +226,7 @@ internal sealed class Backdrop : IDisposable
             _scene.SetResourceReference(Border.BackgroundProperty, "A.B.Plain");
             _frost.Show(kind == BackdropKind.Wallpaper ? path : null, glass, _theme());
         }
-        _parallax.Enabled = kind == BackdropKind.Wallpaper && glass.Parallax;
+        _parallax.Enabled = kind == BackdropKind.Wallpaper && glass.Parallax && !_onScreen;
         if (kind == Kind) return;
         Kind = kind;
         KindChanged?.Invoke(kind);

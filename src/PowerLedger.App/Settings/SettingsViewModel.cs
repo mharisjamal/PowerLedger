@@ -200,6 +200,13 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(AeroIntroSeen));
     }
 
+    /// <summary>Where Aero's window was left (0.10.1): spread or not, and its smaller layout's bounds; null before it
+    /// was ever closed.</summary>
+    public AeroPlacement? AeroPlacement => _ui.Current.AeroWindow;
+
+    /// <summary>Saves where Aero's window is left. A file that can't be written loses only this, so nothing is said.</summary>
+    public void PlaceAero(AeroPlacement placement) => _ui.PlaceAero(placement);
+
     /// <summary>Applies when ticked.</summary>
     public bool StartWithWindows
     {

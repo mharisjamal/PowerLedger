@@ -120,6 +120,13 @@ internal sealed class FakeUiSettings : IUiSettings
         return null;
     }
 
+    /// <summary>Kept, not counted among <see cref="Changes"/>: Aero's window saves where it was left as it closes.</summary>
+    public string? PlaceAero(AeroPlacement placement)
+    {
+        Current = Current with { AeroWindow = placement.Sanitised() };
+        return null;
+    }
+
     /// <summary>Tests can set this to control what a first run is stamped with; UtcNow otherwise.</summary>
     public Func<DateTimeOffset> Now { get; set; } = () => DateTimeOffset.UtcNow;
 }

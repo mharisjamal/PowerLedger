@@ -59,9 +59,9 @@ internal partial class AeroWindow : Window, IShellWindow
         // The glass itself (Aero look design §3): the A.* tokens on this window, repainted live as Settings' Glass or the
         // theme changes, never among the application's resources.
         _glass = GlassMaterial.For(this, shell.Settings, theme);
-        // What shows behind the glass (design §3): the desktop, the wallpaper frosted once, or the plain ground; the stage
-        // tilts a little with the pointer over the wallpaper.
-        _backdrop = new Backdrop(this, Room, _glass, () => theme.Current, tilt: Stage);
+        // What shows behind the glass (design §3): the desktop, the wallpaper frosted once, or the plain ground, lined up
+        // with the screen: the window is only its glass (0.10.1, free-form), so the glass frosts what lies behind it there.
+        _backdrop = new Backdrop(this, Room, _glass, () => theme.Current, onScreen: true);
         UpdateRequiredCover.DataContext = updates;
         UpdateCover.Attach(UpdateRequiredCover, [Side, TopBar, Banners, Pages], UpdateNowButton);
         _size = new Extent(Width, Height);
@@ -97,6 +97,7 @@ internal partial class AeroWindow : Window, IShellWindow
         Loaded += (_, _) =>
         {
             Fit();
+            ShowState();
             MovePill(animate: false);
             PlayIntro();
             // Once laid out, ahead of anything idle: the dialog opens over the stage as its panes rise.
@@ -181,19 +182,25 @@ internal partial class AeroWindow : Window, IShellWindow
     protected override void OnSourceInitialized(EventArgs e)
     {
         FitToScreen();
+        StartShaping();
         base.OnSourceInitialized(e);
     }
 
-    /// <summary>As MainWindow.FitToScreen: once, before the window first shows, on the monitor Windows chose, at that monitor's DPI.</summary>
+    /// <summary>As MainWindow.FitToScreen: once, before the window first shows, on the monitor Windows chose, at that
+    /// monitor's DPI; then the layout last left (0.10.1): spread over the work area unless the smaller one was chosen.</summary>
     private void FitToScreen()
     {
         if (WindowStartupLocation != WindowStartupLocation.CenterScreen) return;
         var handle = new WindowInteropHelper(this).Handle;
         if (HwndSource.FromHwnd(handle)?.CompositionTarget is not { } target) return;
-        var pixels = System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
-        var topLeft = target.TransformFromDevice.Transform(new Point(pixels.Left, pixels.Top));
-        var bottomRight = target.TransformFromDevice.Transform(new Point(pixels.Right, pixels.Bottom));
-        FitTo(new Bounds(topLeft.X, topLeft.Y, bottomRight.X - topLeft.X, bottomRight.Y - topLeft.Y));
+        Bounds ToUnits(System.Drawing.Rectangle pixels)
+        {
+            var topLeft = target.TransformFromDevice.Transform(new Point(pixels.Left, pixels.Top));
+            var bottomRight = target.TransformFromDevice.Transform(new Point(pixels.Right, pixels.Bottom));
+            return new Bounds(topLeft.X, topLeft.Y, bottomRight.X - topLeft.X, bottomRight.Y - topLeft.Y);
+        }
+        FitTo(ToUnits(System.Windows.Forms.Screen.FromHandle(handle).WorkingArea));
+        OpenLayout(new Bounds(Left, Top, Width, Height), ToUnits);
     }
 
     /// <summary>Shown: the page it has for Classic's Now, the Dashboard's Aero figures, and a first read of what the sidebar,
@@ -221,7 +228,10 @@ internal partial class AeroWindow : Window, IShellWindow
         if (e.PropertyName == nameof(ShellViewModel.Page)) ShowOwnPage();
         if (e.PropertyName == nameof(ShellViewModel.IsSetup)) AutoPlayIntroVideo();   // the wizard done, the intro's turn
         if (e.PropertyName is nameof(ShellViewModel.Page) or nameof(ShellViewModel.IsSetup))
+        {
             Dispatcher.BeginInvoke(() => MovePill(animate: true), DispatcherPriority.Loaded);
+            FollowShapeFor(AeroMotion.MoveMs(PageArrives));   // the page's panes glide up into place
+        }
     }
 
     // ---------------------------------------------------------------- layout
@@ -264,6 +274,7 @@ internal partial class AeroWindow : Window, IShellWindow
         MaximizeIcon.Data = (System.Windows.Media.Geometry)FindResource(max ? "A.I.Restore" : "A.I.Maximize");
         MaximizeButton.ToolTip = max ? "Restore" : "Maximize";
         AutomationProperties.SetName(MaximizeButton, max ? "Restore" : "Maximize");
+        Grip.Visibility = WindowState == WindowState.Normal ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---------------------------------------------------------------- the intro
@@ -279,8 +290,10 @@ internal partial class AeroWindow : Window, IShellWindow
         for (var i = 0; i < panes.Length; i++) Rise(panes[i], i);
         FrameworkElement[] contents = [SideContent, TopBar];
         for (var i = 0; i < contents.Length; i++) Glide(contents[i], i);
-        // The frost follows the panes while they rise, then stops.
+        // The frost follows the panes while they rise, then stops; so does the window's shape, until the page's last pane
+        // (the Dashboard's carry on the stagger) is in place.
         AlignFrostFor(AeroMotion.MoveMs(AeroMotion.ContentDelay + AeroMotion.ContentIn + 8 * AeroMotion.Stagger));
+        FollowShapeFor(AeroMotion.MoveMs(AeroMotion.PaneIn + 12 * AeroMotion.Stagger));
         Dispatcher.BeginInvoke(() => IntroPending = false, DispatcherPriority.ContextIdle);
     }
 
@@ -289,7 +302,11 @@ internal partial class AeroWindow : Window, IShellWindow
     internal void AlignFrostFor(double ms)
     {
         if (ms > 0) _backdrop.AlignFor(TimeSpan.FromMilliseconds(ms));
+        FollowShapeFor(ms);
     }
+
+    /// <summary>How long a page arriving glides (AeroPageHost's), with a frame to spare.</summary>
+    private const double PageArrives = 500;
 
     /// <summary>What the backdrop chose, for a test.</summary>
     internal BackdropKind BackdropKind => _backdrop.Kind;
