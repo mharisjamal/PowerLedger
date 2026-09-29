@@ -10,7 +10,8 @@ namespace PowerLedger.App.Tests;
 
 /// <summary>
 /// Plan S G3: the Glass settings mapped to the glass. The demo's settings give the palette's own tokens; each style,
-/// slider and switch moves the tokens it should; no setting leaves text under 4.5:1 on the glass; and the material on a
+/// slider and switch moves the tokens it should; no setting leaves text under its contrast on the glass (3:1 with the halo
+/// on the bright glass, 4.5:1 on the strict glass: 0.10.1, the owner's choice); and the material on a
 /// window repaints it live when Settings raises Glass, on the window and never the application. Renders of the sample
 /// for every style and switch go to %TEMP%\powerledger-renders\aero-glass-*.
 /// </summary>
@@ -29,11 +30,21 @@ public class GlassMaterialTests
             var palette = ThemeManager.Palette(Look.Aero, theme);
             var map = GlassMaterial.Map(GlassSettings.Default, theme);
             map.Count.ShouldBeGreaterThan(100);
+            // The bright glass lets more of the desktop through than the palette's strict glass is drawn for: its quieter
+            // text steps are stronger and its light wells fainter, so each still reads there.
+            string[] moved = ["A.C.Text2", "A.C.Text3", "A.C.Well", "A.C.Well2", "A.C.Well3", "A.C.WellHover", "A.C.MenuHover", "A.C.ChartWell",
+                "A.B.Text2", "A.B.Text3", "A.B.Well", "A.B.Well2", "A.B.Well3", "A.B.WellHover", "A.B.MenuHover", "A.B.ChartWell"];
             foreach (var (key, value) in map)
             {
                 palette.Contains(key).ShouldBeTrue($"{key} is not a palette key");
+                if (moved.Contains(key)) continue;
                 Describe(value).ShouldBe(Describe(palette[key]), $"{key}, {theme}");
             }
+            foreach (var key in new[] { "A.C.Text2", "A.C.Text3" })
+                ((Color)map[key]).A.ShouldBeGreaterThanOrEqualTo(((Color)palette[key]).A, $"{key} only ever stronger, {theme}");
+            var strict = GlassMaterial.Map(GlassSettings.Default with { IncreaseContrast = true }, theme);
+            foreach (var key in new[] { "A.C.Well", "A.C.Well2", "A.C.Well3" })
+                ((Color)strict[key]).ShouldBe((Color)palette[key], $"the strict glass keeps {key}, {theme}");
         });
 
     [Theory]
@@ -50,7 +61,9 @@ public class GlassMaterialTests
             if (theme == Theme.Dark) Top(GlassStyle.Dark).ShouldBe(Color.FromArgb(140, 0, 0, 0), "Dark is black at 55 %");
             else Top(GlassStyle.Dark).ShouldSatisfyAllConditions(
                 dark => (dark.R, dark.G, dark.B).ShouldBe(((byte)0, (byte)0, (byte)0)),
-                dark => dark.A.ShouldBeGreaterThan((byte)140, "denser over a light scene, so the white ink it takes reads"));
+                dark => dark.A.ShouldBeGreaterThanOrEqualTo((byte)140, "at least the 55 %, so the white ink it takes reads"),
+                dark => ((Color)GlassMaterial.Map(new GlassSettings { Style = GlassStyle.Dark, IncreaseContrast = true }, theme)["A.C.GlassTintTop"]).A
+                    .ShouldBeGreaterThan((byte)140, "denser on the strict glass over a light scene"));
             var colour = Top(GlassStyle.Colour, tint: "#FF8000");
             (colour.R, colour.G, colour.B).ShouldBe(((byte)0xFF, (byte)0x80, (byte)0x00), "Colour is the user's hue");
             colour.A.ShouldBe((byte)Math.Round(0.3 * 255));
@@ -126,11 +139,12 @@ public class GlassMaterialTests
             }
         });
 
-    /// <summary>Aero look design §7: text on the glass over the darkest and brightest backdrop reads at 4.5:1 for each
-    /// style, at any strength, with either switch.</summary>
+    /// <summary>Aero look design §7, as the owner chose for 0.10.1: on the strict glass (Increase contrast, Reduce
+    /// transparency) text over the darkest and brightest backdrop reads at 4.5:1; on the bright glass, over the frost's
+    /// darkest and brightest with the halo, at 3:1; menus and dialogs at 4.5:1 either way; each style, any strength.</summary>
     [Theory]
     [MemberData(nameof(Themes))]
-    public void No_style_or_switch_leaves_text_under_four_and_a_half_to_one(string themeName)
+    public void No_style_or_switch_leaves_text_under_its_contrast(string themeName)
         => UiHarness.OnUi(() =>
         {
             var theme = Enum.Parse<Theme>(themeName);
@@ -144,7 +158,12 @@ public class GlassMaterialTests
                         {
                             var settings = new GlassSettings { Style = style, TintStrength = strength, TintColor = tint, ReduceTransparency = reduce, IncreaseContrast = increase };
                             var map = GlassMaterial.Map(settings, theme);
-                            foreach (var backdrop in new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" })
+                            var strict = reduce || increase;
+                            var share = strict ? 0 : (double)ThemeManager.Palette(Look.Aero, theme)["A.Glass.HaloShare"];
+                            var halo = (Color)map["A.C.Halo"];
+                            var target = strict ? GlassMaterial.StrictContrast : GlassMaterial.GlassContrast;
+                            var frost = strict ? new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" } : ["A.C.FrostDarkest", "A.C.FrostBrightest"];
+                            foreach (var (backdrop, glassBackdrop) in new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" }.Zip(frost))
                             {
                                 foreach (var fill in new[] { "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom" })
                                 {
@@ -157,11 +176,12 @@ public class GlassMaterialTests
                                 }
                                 foreach (var tintKey in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom" })
                                 {
-                                    var glass = Contrast.Over((Color)map[tintKey], (Color)map[backdrop]);
+                                    var glass = Contrast.Over(Color.FromArgb((byte)Math.Round(255 * share), halo.R, halo.G, halo.B),
+                                        Contrast.Over((Color)map[tintKey], (Color)map[glassBackdrop]));
                                     foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" })
                                     {
                                         Contrast.Ratio(Contrast.Over((Color)map[text], glass), glass)
-                                            .ShouldBeGreaterThanOrEqualTo(4.5, $"{text} on {tintKey} over {backdrop}: {settings}, {theme}");
+                                            .ShouldBeGreaterThanOrEqualTo(target, $"{text} on {tintKey} over {glassBackdrop}: {settings}, {theme}");
                                     }
                                 }
                             }

@@ -300,33 +300,105 @@ public class FreeFormWindowTests
             AeroWindow.ShapeHooks.ShouldBe(0);
         });
 
+    /// <summary>Each top-bar pill floats over the desktop on its own. On the bright glass its button's light fill is its
+    /// wash, as the demo's, over the frost at its brightest and the halo: 3:1. On the strict glass the dialogs' denser
+    /// wash, over the brightest backdrop: 4.5:1.</summary>
     [Theory]
-    [InlineData("Dark", "Tinted")]
-    [InlineData("Light", "Tinted")]
-    [InlineData("Dark", "Clear")]
-    [InlineData("Light", "Clear")]
-    [InlineData("Dark", "Dark")]
-    [InlineData("Dark", "Colour")]
-    public void A_top_bar_pill_reads_over_the_brightest_backdrop(string themeName, string style)
+    [InlineData("Dark", "Tinted", false)]
+    [InlineData("Light", "Tinted", false)]
+    [InlineData("Dark", "Clear", false)]
+    [InlineData("Dark", "Colour", false)]
+    [InlineData("Dark", "Tinted", true)]
+    [InlineData("Light", "Tinted", true)]
+    [InlineData("Dark", "Dark", true)]
+    public void A_top_bar_pill_reads_over_the_brightest_backdrop(string themeName, string style, bool increaseContrast)
         => UiHarness.OnUi(() =>
         {
             var theme = Enum.Parse<Theme>(themeName);
-            var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style) };
+            var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), IncreaseContrast = increaseContrast };
             var map = GlassMaterial.Map(settings, theme);
             Color C(string key) => (Color)map[key];
             var palette = GlassMaterial.Palette(theme);
-            var brightest = (Color)palette["A.C.BackdropBrightest"];
-            foreach (var tint in new[] { "A.C.ModalTop", "A.C.ModalBottom" })
+            var strict = GlassMaterial.Strict(settings);
+            var brightest = C(strict ? (theme == Theme.Dark ? "A.C.BackdropBrightest" : "A.C.BackdropDarkest") : (theme == Theme.Dark ? "A.C.FrostBrightest" : "A.C.FrostDarkest"));
+            var share = strict ? 0 : (double)palette["A.Glass.HaloShare"];
+            var halo = C("A.C.Halo");
+            var washes = strict ? new[] { C("A.C.ModalTop"), C("A.C.ModalBottom") } : [Colors.Transparent];
+            if (strict) map["A.B.PillFill"].ShouldBeSameAs(map["A.B.ModalFill"]);
+            else ((SolidColorBrush)map["A.B.PillFill"]).Color.ShouldBe(Colors.Transparent);
+            foreach (var wash in washes)
             {
-                // The pill's glass over the backdrop, its button's fill on that, and at rest or under the pointer.
-                var glass = Contrast.Over(C(tint), brightest);
+                var glass = Contrast.Over(Color.FromArgb((byte)Math.Round(255 * share), halo.R, halo.G, halo.B), Contrast.Over(wash, brightest));
                 foreach (var fill in new[] { Contrast.Over(C("A.C.BtnFill"), glass), Contrast.Over(C("A.C.OutlineHover"), Contrast.Over(C("A.C.BtnFill"), glass)) })
                 {
                     foreach (var text in new[] { "A.C.Text", "A.C.Text2" })
                     {
-                        Contrast.Ratio(Contrast.Over(C(text), fill), fill).ShouldBeGreaterThanOrEqualTo(4.5, $"{text} on a pill at {tint}, {style}, {theme}");
+                        Contrast.Ratio(Contrast.Over(C(text), fill), fill).ShouldBeGreaterThanOrEqualTo(strict ? GlassMaterial.StrictContrast : GlassMaterial.GlassContrast,
+                            $"{text} on a pill, {style}, {theme}, {(strict ? "strict" : "bright")}");
                     }
                 }
             }
         });
+
+    /// <summary>The halo as drawn: GlassPanel lays GlassMaterial's halo twice behind its content, and beside thin text it
+    /// darkens the glass by at least the share the contrast rules count; the strict glass has none.</summary>
+    [Fact]
+    public void The_halo_lays_down_at_least_the_share_the_contrast_rules_count()
+        => UiHarness.OnUi(() =>
+        {
+            var window = AeroHost.Dressed(new Window { Width = 420, Height = 140, WindowStyle = WindowStyle.None, Left = -20000, ShowInTaskbar = false, ShowActivated = false }, Theme.Dark);
+            var settings = GlassSettings.Default;
+            using var material = new GlassMaterial(window, () => settings, () => Theme.Dark);
+            var words = new System.Windows.Controls.TextBlock { Text = "Wednesday 24   kWh used today", FontSize = 12, Foreground = Brushes.White, Margin = new Thickness(24) };
+            var pane = new GlassPanel { Content = words, HasShadow = false, SheenEnabled = false, Background = Brushes.Transparent };
+            window.Content = new System.Windows.Controls.Border { Background = new SolidColorBrush(Color.FromRgb(160, 160, 160)), Child = pane };
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+                pane.Template.FindName("PART_Halo", pane).ShouldBeOfType<System.Windows.Controls.Border>().Effect.ShouldNotBeNull();
+                var share = (double)GlassMaterial.Palette(Theme.Dark)["A.Glass.HaloShare"];
+                MeasuredShare(pane, words).ShouldBeGreaterThanOrEqualTo(share);
+
+                settings = settings with { IncreaseContrast = true };
+                material.Refresh();
+                window.UpdateLayout();
+                pane.Template.FindName("PART_Halo", pane).ShouldBeOfType<System.Windows.Controls.Border>().Effect.ShouldBeNull("the strict glass has no halo");
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
+    /// <summary>How much darker the glass is within two pixels of the text's strokes than away from the text, on average.</summary>
+    private static double MeasuredShare(GlassPanel pane, FrameworkElement words)
+    {
+        int w = (int)pane.ActualWidth, h = (int)pane.ActualHeight;
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(pane);
+        var px = new byte[w * h * 4];
+        bitmap.CopyPixels(px, w * 4, 0);
+        int G(int x, int y) => px[(y * w + x) * 4 + 1];
+        var box = words.TransformToAncestor(pane).TransformBounds(new Rect(words.RenderSize));
+        var ground = G((int)box.Left - 16, (int)box.Top - 12);   // the glass away from the text
+        var glyph = new bool[w, h];
+        for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) glyph[x, y] = G(x, y) > ground + 15;
+        double sum = 0;
+        var n = 0;
+        for (var y = (int)box.Top; y < (int)box.Bottom; y++)
+        {
+            for (var x = (int)box.Left; x < (int)box.Right; x++)
+            {
+                if (glyph[x, y] || G(x, y) > ground) continue;   // a stroke, or a stroke's soft edge
+                var near = false;
+                for (var dy = -2; dy <= 2 && !near; dy++) for (var dx = -2; dx <= 2 && !near; dx++) near = glyph[x + dx, y + dy];
+                if (!near) continue;
+                sum += G(x, y);
+                n++;
+            }
+        }
+        n.ShouldBeGreaterThan(50);
+        return 1 - sum / n / ground;
+    }
 }

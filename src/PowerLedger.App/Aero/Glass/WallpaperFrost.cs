@@ -9,8 +9,9 @@ namespace PowerLedger.App.Aero;
 /// The wallpaper backdrop (Aero look design §3, Plan S G4 and G5): the user's wallpaper, read once (SPI_GETDESKWALLPAPER),
 /// shown sharp behind everything, and frosted once, off the UI thread, into a small copy that each pane shows lined up
 /// with the wallpaper behind it: the HTML's <c>blur(26px) saturate(155%)</c> as three box blurs. It is frosted again only
-/// when the wallpaper, the Frost slider or the theme changes. The frosted copy is held within the palette's backdrop
-/// bounds (A.C.BackdropBrightest in dark, A.C.BackdropDarkest in light), so text on the glass keeps 4.5:1 over any
+/// when the wallpaper, the Frost slider, the theme or the glass's strictness changes. The frosted copy is held within the
+/// frost bounds (A.C.FrostBrightest in dark, A.C.FrostDarkest in light), where text keeps 3:1 with the halo; on the
+/// strict glass (Increase contrast, Reduce transparency) within the backdrop bounds, where it keeps 4.5:1 over any
 /// wallpaper. The panes are lined up on layout, size and parallax changes, never per frame at rest; <see cref="AlignFor"/>
 /// lines them up every frame for a bounded time only (the intro).
 /// </summary>
@@ -31,7 +32,7 @@ internal sealed class WallpaperFrost : IDisposable
     private BitmapSource? _frosted;
     private ImageBrush? _sceneBrush;
     private (int Style, bool Tile) _placement = (WallpaperPlacement.Fill, false);
-    private (string? Path, double Radius, Theme Theme)? _made;
+    private (string? Path, double Radius, Theme Theme, bool Strict)? _made;
     private int _generation;
     private bool _listening;
     private DateTime _alignUntil;
@@ -74,7 +75,8 @@ internal sealed class WallpaperFrost : IDisposable
             return;
         }
         var radius = Radius(glass, _window);
-        var wanted = (path, radius, theme);
+        var strict = GlassMaterial.Strict(glass);
+        var wanted = (path, radius, theme, strict);
         if (_made == wanted && _frosted != null)
         {
             Listen(true);
@@ -86,8 +88,9 @@ internal sealed class WallpaperFrost : IDisposable
         _path = path;
         var sharp = reload ? null : _sharp;
         if (_onScreen) _placement = WallpaperPlacement.Read();
-        var brightest = Token(theme, "A.C.BackdropBrightest");
-        var darkest = Token(theme, "A.C.BackdropDarkest");
+        // The bright glass lets the wallpaper through up to the frost bounds; the strict glass holds it within the backdrop's.
+        var brightest = Token(theme, strict ? "A.C.BackdropBrightest" : "A.C.FrostBrightest");
+        var darkest = Token(theme, strict ? "A.C.BackdropDarkest" : "A.C.FrostDarkest");
         var saturate = _window.TryFindResource("A.Glass.Saturate") is double s ? s : 1.55;
         Task.Run(() =>
         {

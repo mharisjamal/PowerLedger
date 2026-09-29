@@ -5,9 +5,10 @@
          only. First every key Classic's and Midnight's palettes define, in glass colours: a pale ground, white glass, ink
          text, and the lime deepened to an olive that stands off white glass at 3:1 with a near black ink on it. The rim is
          a dark hairline with a white inner light, as light glass reads. Then Aero's own tokens, under A., from the approved HTML through the prototype's Tokens.xaml. ContrastTests
-         holds all of it to WCAG AA: text on the glass over the darkest and the brightest backdrop the look allows
-         (A.C.BackdropDarkest and A.C.BackdropBrightest, which WallpaperFrost and the see-through wash keep it within) at
-         4.5:1, the accent, the rim and the focus ring at 3:1. -->
+         holds the strict glass (Increase contrast, Reduce transparency) to WCAG AA: text on the glass over the darkest and
+         the brightest backdrop the look allows (A.C.BackdropDarkest and A.C.BackdropBrightest, which WallpaperFrost and the
+         see-through wash keep it within) at 4.5:1, the accent, the rim and the focus ring at 3:1. The default glass is
+         brighter by the owner's choice (0.10.1): text at 3:1 over A.C.FrostDarkest and A.C.FrostBrightest with the halo. -->
     <SolidColorBrush x:Key="Brush.Ground" Color="#EEF0F3" />
     <SolidColorBrush x:Key="Brush.Panel" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Brush.Raised" Color="#F5F6F8" />
@@ -107,6 +108,19 @@
     <Color x:Key="A.C.BackdropBrightest">#FFFFFF</Color>
     <Color x:Key="A.C.SeeThroughWash">#33FFFFFF</Color>
     <Color x:Key="A.C.Plain">#E9EBEF</Color>
+    <!-- The bright glass (0.10.1, the owner's choice, as the demo): how far the frost may let the desktop through
+         before the glass holds it, and the halo behind the glass's content that keeps text at 3:1 there (counted as its
+         colour at A.Glass.HaloShare). Increase contrast and Reduce transparency keep the backdrop bounds above, no halo,
+         and 4.5:1. -->
+    <Color x:Key="A.C.FrostDarkest">#808080</Color>
+    <Color x:Key="A.C.FrostBrightest">#FFFFFF</Color>
+    <Color x:Key="A.C.Halo">#FFFFFF</Color>
+    <sys:Double x:Key="A.Glass.HaloShare">0.3</sys:Double>
+    <sys:Double x:Key="A.Glass.HaloBlur">6</sys:Double>
+    <sys:Double x:Key="A.Glass.HaloOpacity">1</sys:Double>
+    <!-- The halo itself: GlassMaterial lays one on the bright glass; the palette alone draws none, so the strict
+         glass, which GlassMaterial gives none, finds none here either. -->
+    <x:Null x:Key="A.Glass.Halo" />
 
     <!-- Glass: white at 55 % over a light backdrop, a dark hairline rim and a white inner light -->
     <Color x:Key="A.C.GlassTintTop">#8CFFFFFF</Color>
@@ -220,6 +234,7 @@
     <SolidColorBrush x:Key="A.B.White" Color="#FFFFFF" />
     <SolidColorBrush x:Key="A.B.Plain" Color="{StaticResource A.C.Plain}" />
     <SolidColorBrush x:Key="A.B.SeeThroughWash" Color="{StaticResource A.C.SeeThroughWash}" />
+    <SolidColorBrush x:Key="A.B.PillFill" Color="Transparent" />
 
     <LinearGradientBrush x:Key="A.B.GlassTint" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Offset="0" Color="{StaticResource A.C.GlassTintTop}" />

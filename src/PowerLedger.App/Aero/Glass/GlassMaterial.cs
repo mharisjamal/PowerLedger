@@ -53,7 +53,7 @@ internal sealed class GlassMaterial : IDisposable
         "A.C.GuideStrong", "A.C.BtnFill", "A.C.BtnFillHover", "A.C.BtnEdge", "A.C.BtnTop", "A.C.OutlineHover", "A.C.NavFillA", "A.C.NavFillB",
         "A.C.NavHover", "A.C.NavIcon", "A.C.NavIndicator", "A.C.NavIndicatorTop", "A.C.SwitchOff", "A.C.MenuHover", "A.C.RimA", "A.C.RimB",
         "A.C.RimC", "A.C.RimD", "A.C.RimInner", "A.C.RimDark", "A.C.TopSheen", "A.C.PointerSheen", "A.C.Ink", "A.C.Pill", "A.C.MenuFill",
-        "A.C.MenuEdge", "A.C.ModalTop", "A.C.ModalBottom",
+        "A.C.MenuEdge", "A.C.ModalTop", "A.C.ModalBottom", "A.C.Halo",
     ];
 
     /// <summary>The single-colour brushes the palette builds from a token, rebuilt here when their token changes.</summary>
@@ -103,10 +103,14 @@ internal sealed class GlassMaterial : IDisposable
         if (_disposed) return;
         Current = _read();
         AeroMotion.SetOverride(Current.ReduceMotion);
-        foreach (var (key, value) in Map(Current, _theme()))
+        var theme = _theme();
+        var map = Map(Current, theme);
+        foreach (var (key, value) in map)
         {
             if (!_applied.Contains(key) || !Same(_applied[key], value)) _applied[key] = value;
         }
+        var halo = Halo(Current, theme, (Color)map["A.C.Halo"]);
+        if (!_applied.Contains(HaloKey) || !Same(_applied[HaloKey], halo)) _applied[HaloKey] = halo;
         Changed?.Invoke(Current);
     }
 
@@ -135,6 +139,19 @@ internal sealed class GlassMaterial : IDisposable
         var darkest = colours["A.C.BackdropDarkest"];
         var brightest = colours["A.C.BackdropBrightest"];
 
+        // Bright glass (0.10.1, the owner's choice, as the demo): the frost lets the desktop through up to A.C.FrostDarkest
+        // and A.C.FrostBrightest, and text keeps 3:1 there with the soft halo behind it (A.Glass.Halo, counted as its colour
+        // at A.Glass.HaloShare). Increase contrast and Reduce transparency keep the strict glass: the frost held within
+        // the backdrop bounds, no halo, and 4.5:1.
+        var strict = Strict(settings);
+        var target = strict ? StrictContrast : GlassContrast;
+        var low = strict ? darkest : colours["A.C.FrostDarkest"];
+        var high = strict ? brightest : colours["A.C.FrostBrightest"];
+        var share = strict ? 0 : (double)palette["A.Glass.HaloShare"];
+        Color[] GroundsOf(Color tintTop, Color tintBottom, Color halo)
+            => new[] { low, high }.SelectMany(b => new[] { Contrast.Over(tintTop, b), Contrast.Over(tintBottom, b) })
+                .Select(g => Contrast.Over(WithAlpha(halo, share), g)).ToArray();
+
         // The tint.
         var (top, bottom) = Tint(settings, colours);
         if (settings.ReduceTransparency)
@@ -144,22 +161,23 @@ internal sealed class GlassMaterial : IDisposable
             top = Contrast.Over(top, frosted);
             bottom = Contrast.Over(bottom, frosted);
         }
-        // The ink family that reads better on this glass.
-        var grounds = new[] { darkest, brightest }.SelectMany(b => new[] { Contrast.Over(top, b), Contrast.Over(bottom, b) }).ToArray();
+        // The ink family that reads better on this glass, each with its own halo.
         var light = Palette(Theme.Dark);
         var dark = Palette(Theme.Light);
         var lightInk = (Color)light["A.C.Text"];
         var darkInk = (Color)dark["A.C.Text"];
-        var family = Worst(lightInk, grounds) >= Worst(darkInk, grounds) ? light : dark;
+        var family = Worst(lightInk, GroundsOf(top, bottom, (Color)light["A.C.Halo"])) >= Worst(darkInk, GroundsOf(top, bottom, (Color)dark["A.C.Halo"])) ? light : dark;
         var inkColour = ReferenceEquals(family, light) ? lightInk : darkInk;
-        if (Worst(inkColour, grounds) < 4.5)
+        var haloColour = (Color)family["A.C.Halo"];
+        var grounds = GroundsOf(top, bottom, haloColour);
+        if (Worst(inkColour, grounds) < target)
         {
             // Neither ink reads on this tint over both backdrops (black at 55 % over a light scene, a bright hue): the
             // tint is drawn toward the pole the ink reads on, and made denser, until it does.
             var pole = ReferenceEquals(family, light) ? Colors.Black : Colors.White;
-            top = Toward(top, pole, inkColour, darkest, brightest);
-            bottom = Toward(bottom, pole, inkColour, darkest, brightest);
-            grounds = new[] { darkest, brightest }.SelectMany(b => new[] { Contrast.Over(top, b), Contrast.Over(bottom, b) }).ToArray();
+            top = Toward(top, pole, inkColour, tint => GroundsOf(tint, tint, haloColour), target);
+            bottom = Toward(bottom, pole, inkColour, tint => GroundsOf(tint, tint, haloColour), target);
+            grounds = GroundsOf(top, bottom, haloColour);
         }
         colours["A.C.GlassTintTop"] = top;
         colours["A.C.GlassTintBottom"] = bottom;
@@ -179,8 +197,16 @@ internal sealed class GlassMaterial : IDisposable
             colours["A.C.SeeThroughWash"] = Scaled(colours["A.C.SeeThroughWash"], 2);
         }
 
-        // Text: full strength under Increase contrast; otherwise each quieter step raised where this glass needs it.
+        // The wells text sits in: on the bright glass, a light well over a light frost is let back toward the glass until
+        // the ink reads on it (the glass itself reads).
         var text = colours["A.C.Text"];
+        if (!strict)
+        {
+            foreach (var key in new[] { "A.C.Well", "A.C.Well2", "A.C.Well3", "A.C.WellHover", "A.C.MenuHover", "A.C.ChartWell" })
+                colours[key] = Quieter(colours[key], text, grounds, target);
+        }
+
+        // Text: full strength under Increase contrast; otherwise each quieter step raised where this glass needs it.
         if (settings.IncreaseContrast)
         {
             colours["A.C.Text2"] = colours["A.C.Text3"] = text;
@@ -189,8 +215,15 @@ internal sealed class GlassMaterial : IDisposable
         {
             var chart = grounds.Select(g => Contrast.Over(colours["A.C.ChartWell"], g));
             var quiet = grounds.Concat(new[] { "A.C.Well", "A.C.WellHover", "A.C.MenuHover" }.SelectMany(w => grounds.Select(g => Contrast.Over(colours[w], g)))).ToArray();
-            colours["A.C.Text2"] = Readable(colours["A.C.Text2"], quiet);
-            colours["A.C.Text3"] = Readable(colours["A.C.Text3"], grounds.Concat(chart).ToArray());
+            if (!strict)
+            {
+                // A top-bar pill on the bright glass: the frost and the halo under its button's light fill, at rest and
+                // under the pointer (the household's second line is Text2).
+                var pills = new[] { low, high }.Select(b => Contrast.Over(colours["A.C.BtnFill"], Contrast.Over(WithAlpha(haloColour, share), b)));
+                quiet = quiet.Concat(pills).Concat(pills.Select(g => Contrast.Over(colours["A.C.OutlineHover"], g))).ToArray();
+            }
+            colours["A.C.Text2"] = Readable(colours["A.C.Text2"], quiet, target);
+            colours["A.C.Text3"] = Readable(colours["A.C.Text3"], grounds.Concat(chart).ToArray(), target);
         }
 
         // Menus and dialogs: opaque under Reduce transparency; otherwise as dense as their text needs over either backdrop.
@@ -214,6 +247,9 @@ internal sealed class GlassMaterial : IDisposable
         result["A.B.TopSheen"] = TopSheen(colours["A.C.TopSheen"]);
         result["A.B.NavFill"] = Frozen(new LinearGradientBrush(colours["A.C.NavFillA"], colours["A.C.NavFillB"], new Point(0, 0), new Point(1, 0)));
         result["A.B.ModalFill"] = Vertical(colours["A.C.ModalTop"], colours["A.C.ModalBottom"]);
+        // A top-bar pill: the bright glass's frost under its button's own light fill, as the demo; strict, the dialogs' wash.
+        result["A.B.PillFill"] = strict ? result["A.B.ModalFill"] : Solid(Colors.Transparent);
+
         result["A.Glass.Frost"] = (double)palette["A.Glass.Frost"] * settings.Frost / DemoFrost;
 
         // The shared keys the accent reaches: Midnight's and Classic's accent, focus, CPU part and charts, so the dialogs
@@ -267,18 +303,56 @@ internal sealed class GlassMaterial : IDisposable
             ? 0.4 + 0.6 * tintStrength / DemoTintStrength
             : 1 + 1.2 * (tintStrength - DemoTintStrength) / (1 - DemoTintStrength);
 
+    /// <summary>Where the halo is: the GlassPanel template's content takes it as its Effect.</summary>
+    public const string HaloKey = "A.Glass.Halo";
+
+    /// <summary>The halo behind the glass's content (0.10.1): a soft shadow in <paramref name="colour"/>, the ink's
+    /// opposite, which GlassMaterial counts as that colour at A.Glass.HaloShare under the text; null (none) on the strict
+    /// glass.</summary>
+    public static System.Windows.Media.Effects.DropShadowEffect? Halo(GlassSettings settings, Theme theme, Color colour)
+    {
+        if (Strict(settings.Sanitised())) return null;
+        var palette = Palette(theme);
+        return Frozen(new System.Windows.Media.Effects.DropShadowEffect
+        {
+            Color = colour, ShadowDepth = 0, BlurRadius = (double)palette["A.Glass.HaloBlur"], Opacity = (double)palette["A.Glass.HaloOpacity"],
+            RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance,
+        });
+    }
+
+    /// <summary>Text on the strict glass (Increase contrast, Reduce transparency): WCAG AA.</summary>
+    public const double StrictContrast = 4.5;
+
+    /// <summary>Text on the bright glass, over the frost at its brightest with the halo behind it (the owner's choice).</summary>
+    public const double GlassContrast = 3.0;
+
+    /// <summary>Whether the glass is the strict one: the frost held within the backdrop bounds, no halo, 4.5:1.</summary>
+    public static bool Strict(GlassSettings settings) => settings.IncreaseContrast || settings.ReduceTransparency;
+
     /// <summary><paramref name="tint"/> drawn toward <paramref name="pole"/> and made denser, in small steps, until
-    /// <paramref name="ink"/> reads on it at 4.5:1 over both backdrops.</summary>
-    private static Color Toward(Color tint, Color pole, Color ink, Color darkest, Color brightest)
+    /// <paramref name="ink"/> reads on it at <paramref name="target"/> over every ground it may sit on.</summary>
+    private static Color Toward(Color tint, Color pole, Color ink, Func<Color, Color[]> groundsOf, double target)
     {
         for (var step = 1; step <= 40; step++)
         {
             var t = step / 40.0;
             var mixed = Mix(tint, pole, t);
             var candidate = WithAlpha(mixed, tint.A / 255.0 + (0.92 - tint.A / 255.0) * t);
-            if (Worst(ink, [Contrast.Over(candidate, darkest), Contrast.Over(candidate, brightest)]) >= 4.5) return candidate;
+            if (Worst(ink, groundsOf(candidate)) >= target) return candidate;
         }
         return WithAlpha(pole, 0.92);
+    }
+
+    /// <summary><paramref name="well"/> made fainter, a step at a time, until <paramref name="ink"/> reads on it at
+    /// <paramref name="target"/> over every ground; the glass under it reads, so it always comes to rest.</summary>
+    private static Color Quieter(Color well, Color ink, Color[] grounds, double target)
+    {
+        for (var alpha = (int)well.A; alpha > 0; alpha--)
+        {
+            var candidate = Color.FromArgb((byte)alpha, well.R, well.G, well.B);
+            if (Worst(ink, grounds.Select(g => Contrast.Over(candidate, g))) >= target) return candidate;
+        }
+        return Color.FromArgb(0, well.R, well.G, well.B);
     }
 
     /// <summary><paramref name="fill"/> made denser, a step at a time, until <paramref name="text"/> reads on it at 4.5:1
@@ -297,12 +371,12 @@ internal sealed class GlassMaterial : IDisposable
     private static double Worst(Color ink, IEnumerable<Color> grounds) => grounds.Min(g => Contrast.Ratio(Contrast.Over(ink, g), g));
 
     /// <summary><paramref name="text"/> with its alpha raised, in steps of 1/255, until it reads at 4.5:1 on every ground.</summary>
-    private static Color Readable(Color text, Color[] grounds)
+    private static Color Readable(Color text, Color[] grounds, double target)
     {
         for (var alpha = (int)text.A; alpha < 255; alpha++)
         {
             var candidate = Color.FromArgb((byte)alpha, text.R, text.G, text.B);
-            if (Worst(candidate, grounds) >= 4.5) return candidate;
+            if (Worst(candidate, grounds) >= target) return candidate;
         }
         return Color.FromArgb(255, text.R, text.G, text.B);
     }
@@ -339,8 +413,11 @@ internal sealed class GlassMaterial : IDisposable
     }
 
     /// <summary>Whether a token already holds this value, so an unchanged one is not set again and nothing repaints.</summary>
-    private static bool Same(object? old, object value) => (old, value) switch
+    private static bool Same(object? old, object? value) => (old, value) switch
     {
+        (null, null) => true,
+        (System.Windows.Media.Effects.DropShadowEffect a, System.Windows.Media.Effects.DropShadowEffect b)
+            => a.Color == b.Color && a.BlurRadius == b.BlurRadius && a.Opacity == b.Opacity && a.ShadowDepth == b.ShadowDepth,
         (Color a, Color b) => a == b,
         (double a, double b) => a == b,
         (SolidColorBrush a, SolidColorBrush b) => a.Color == b.Color && a.Opacity == b.Opacity,

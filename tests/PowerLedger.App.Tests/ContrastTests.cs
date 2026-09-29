@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using PowerLedger.App.Aero;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
@@ -237,6 +238,84 @@ public class ContrastTests
 
     private static readonly string[] AeroAccents = ["Lime", "Ice", "Indigo", "Amber", "Rose"];
 
+    /// <summary>The bright glass (0.10.1, the owner's choice, as the demo): with GlassMaterial's default settings in each
+    /// style, every text tier reads at 3:1 on the glass, its chart well and its wells, over the frost at its darkest and
+    /// its brightest (the busiest a wallpaper may get once frosted), with the halo behind the text counted as its colour
+    /// at A.Glass.HaloShare (HaloTests measure what it really lays down).</summary>
+    [Theory]
+    [InlineData("Dark", "Tinted")]
+    [InlineData("Dark", "Clear")]
+    [InlineData("Dark", "Dark")]
+    [InlineData("Dark", "Colour")]
+    [InlineData("Light", "Tinted")]
+    [InlineData("Light", "Clear")]
+    [InlineData("Light", "Colour")]
+    public void Aeros_text_reads_on_the_bright_glass_at_three_to_one_with_its_halo(string theme, string style)
+    {
+        var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style) };
+        var map = Mapped(settings, Enum.Parse<Theme>(theme));
+        var share = UiHarness.OnUi(() => (double)ThemeManager.Palette(Look.Aero, Enum.Parse<Theme>(theme))["A.Glass.HaloShare"]);
+        foreach (var (where, ground, tiers) in GlassGrounds(map, ["A.C.FrostDarkest", "A.C.FrostBrightest"], share))
+        {
+            foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
+                Contrast.Ratio(Contrast.Over(map[text], ground), ground).ShouldBeGreaterThanOrEqualTo(GlassMaterial.GlassContrast, $"{text} on {where}, {style}, {theme}");
+        }
+    }
+
+    /// <summary>Increase contrast and Reduce transparency keep the strict glass exactly: the frost held within the
+    /// backdrop bounds, no halo, and every tier at 4.5:1 on the glass, its wells, menus and dialogs.</summary>
+    [Theory]
+    [InlineData("Dark", true, false)]
+    [InlineData("Dark", false, true)]
+    [InlineData("Light", true, false)]
+    [InlineData("Light", false, true)]
+    public void Aeros_strict_glass_keeps_four_and_a_half_to_one(string theme, bool increase, bool reduce)
+    {
+        var settings = GlassSettings.Default with { IncreaseContrast = increase, ReduceTransparency = reduce };
+        GlassMaterial.Strict(settings).ShouldBeTrue();
+        UiHarness.OnUi(() => GlassMaterial.Halo(settings, Enum.Parse<Theme>(theme), Colors.Black)).ShouldBeNull("no halo on the strict glass");
+        var map = Mapped(settings, Enum.Parse<Theme>(theme));
+        foreach (var (where, ground, tiers) in GlassGrounds(map, ["A.C.BackdropDarkest", "A.C.BackdropBrightest"], 0))
+        {
+            foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
+                Contrast.Ratio(Contrast.Over(map[text], ground), ground).ShouldBeGreaterThanOrEqualTo(GlassMaterial.StrictContrast, $"{text} on {where}, {theme}");
+        }
+        foreach (var backdrop in new[] { "A.C.BackdropDarkest", "A.C.BackdropBrightest" })
+        {
+            foreach (var fill in new[] { "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom" })
+            {
+                var ground = Contrast.Over(map[fill], map[backdrop]);
+                foreach (var text in new[] { "A.C.Text", "A.C.Text2" })
+                    Contrast.Ratio(Contrast.Over(map[text], ground), ground).ShouldBeGreaterThanOrEqualTo(4.5, $"{text} on {fill} over {backdrop}, {theme}");
+            }
+        }
+    }
+
+    private static Dictionary<string, Color> Mapped(GlassSettings settings, Theme theme) => UiHarness.OnUi(()
+        => GlassMaterial.Map(settings, theme).Where(p => p.Value is Color).ToDictionary(p => p.Key, p => (Color)p.Value));
+
+    /// <summary>Where text sits on GlassMaterial's glass over each of <paramref name="backdrops"/>: the tint's top and foot,
+    /// the halo at <paramref name="share"/> over that, then the chart well (three tiers), the quiet wells (two) and the
+    /// brighter wells (the ink), which lie over the halo as the content they are.</summary>
+    private static IEnumerable<(string Where, Color Ground, int Tiers)> GlassGrounds(Dictionary<string, Color> map, string[] backdrops, double share)
+    {
+        var halo = map["A.C.Halo"];
+        foreach (var backdrop in backdrops)
+        {
+            foreach (var tint in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom" })
+            {
+                var glass = Contrast.Over(Color.FromArgb((byte)Math.Round(255 * share), halo.R, halo.G, halo.B), Contrast.Over(map[tint], map[backdrop]));
+                var where = $"{tint} over {backdrop}";
+                yield return (where, glass, 3);
+                yield return ($"A.C.ChartWell in {where}", Contrast.Over(map["A.C.ChartWell"], glass), 3);
+                foreach (var well in new[] { "A.C.Well", "A.C.WellHover", "A.C.MenuHover" })
+                    yield return ($"{well} in {where}", Contrast.Over(map[well], glass), 2);
+                foreach (var well in new[] { "A.C.Well2", "A.C.Well3" })
+                    yield return ($"{well} in {where}", Contrast.Over(map[well], glass), 1);
+            }
+        }
+    }
+
     /// <summary>The glass as it reads over the darkest and the brightest backdrop, at the tint's top and its foot.</summary>
     private static IEnumerable<(string Where, Color Glass)> AeroGlass(Dictionary<string, Color> aero)
     {
@@ -333,6 +412,6 @@ public class ContrastTests
     private static Dictionary<string, Type> Keys(Look look, Theme theme) => UiHarness.OnUi(() =>
     {
         var dictionary = new ResourceDictionary { Source = LookRules.PaletteFor(look, theme) };
-        return dictionary.Keys.Cast<string>().ToDictionary(key => key, key => dictionary[key].GetType());
+        return dictionary.Keys.Cast<string>().ToDictionary(key => key, key => dictionary[key]?.GetType() ?? typeof(void));   // null: A.Glass.Halo, none
     });
 }

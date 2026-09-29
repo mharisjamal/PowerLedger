@@ -719,8 +719,13 @@
                         <Border CornerRadius="{TemplateBinding CornerRadius}" Margin="1" BorderBrush="{DynamicResource A.B.RimInner}" BorderThickness="1.5" IsHitTestVisible="False" />
                         <Border CornerRadius="{TemplateBinding CornerRadius}" Margin="1" Background="{DynamicResource A.B.TopSheen}" IsHitTestVisible="False" />
                         <Border x:Name="PART_Sheen" CornerRadius="{TemplateBinding CornerRadius}" Opacity="0" IsHitTestVisible="False" />
-                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <!-- The halo (0.10.1): a soft shadow behind the content, laid twice (one alone darkens the ground by a sixth
+                             beside thin text; two by about three eighths), that keeps text readable on the bright glass; none on
+                             the strict glass (GlassMaterial). -->
+                        <Border x:Name="PART_Halo" Effect="{DynamicResource A.Glass.Halo}">
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Effect="{DynamicResource A.Glass.Halo}" />
+                        </Border>
                     </Grid>
                 </ControlTemplate>
             </Setter.Value>
@@ -775,11 +780,11 @@
         <Setter Property="AutomationProperties.LiveSetting" Value="Polite" />
     </Style>
     <!-- A top-bar or caption pill (0.10.1, free-form): each floats on its own over the desktop, so each is a glass capsule
-         of its own under its button: the frost (or the wash over the see-through desktop), the rim, and the dialogs' denser
-         wash in place of the panes' light tint, so its words and icon read at 4.5:1 with the button's own fill and hover on
-         top. The window's shape ends at its edge, so a shadow could never show: none is drawn. -->
+         of its own under its button: the frost (or the wash over the see-through desktop), the rim, and A.B.PillFill: on the
+         bright glass nothing, so the button's own light fill is the wash, as the demo's, and its words read at 3:1 with the
+         halo; on the strict glass the dialogs' denser wash, at 4.5:1. The window's shape ends at its edge, so a shadow could never show: none is drawn. -->
     <Style x:Key="A.TopPill" TargetType="aero:GlassPanel" BasedOn="{StaticResource {x:Type aero:GlassPanel}}">
-        <Setter Property="Background" Value="{DynamicResource A.B.ModalFill}" />
+        <Setter Property="Background" Value="{DynamicResource A.B.PillFill}" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="HasShadow" Value="False" />
         <Setter Property="SheenEnabled" Value="False" />
