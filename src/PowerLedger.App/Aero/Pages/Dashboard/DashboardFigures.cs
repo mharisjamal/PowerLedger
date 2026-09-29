@@ -37,6 +37,38 @@ internal static class DashboardFigures
             : $"{soFar} so far";
     }
 
+    /// <summary>A figure part of the way through the intro's count-up (the demo's <c>countUp</c>): the first number in
+    /// <paramref name="shown"/> at <paramref name="k"/> of its value (0 to 1), with its decimals and grouping kept and the
+    /// words round it as they are: "$0.47" at a half is "$0.24", "2.74 kWh" "1.37 kWh". Text without a number, or at 1,
+    /// is left as it is.</summary>
+    public static string Counted(string shown, double k, CultureInfo culture)
+    {
+        if (k >= 1 || string.IsNullOrEmpty(shown)) return shown;
+        var start = shown.IndexOfAny(Digits);
+        if (start < 0) return shown;
+        var format = culture.NumberFormat;
+        var point = format.NumberDecimalSeparator is [var p] ? p : '.';
+        var groups = new[] { format.NumberGroupSeparator, format.CurrencyGroupSeparator }.Where(g => g.Length == 1).Select(g => g[0]).ToHashSet();
+        var end = start;
+        while (end < shown.Length && (char.IsAsciiDigit(shown[end])
+               || end + 1 < shown.Length && char.IsAsciiDigit(shown[end + 1]) && (shown[end] == point || groups.Contains(shown[end]))))
+            end++;
+        var token = shown[start..end];
+        var at = token.LastIndexOf(point);
+        var decimals = at < 0 ? 0 : token.Length - at - 1;
+        var group = token.FirstOrDefault(groups.Contains);
+        if (!decimal.TryParse(new string([.. token.Where(char.IsAsciiDigit)]), NumberStyles.None, CultureInfo.InvariantCulture, out var units)) return shown;
+        var scale = (decimal)Math.Pow(10, decimals);
+        var counted = decimal.Round(units * (decimal)Math.Clamp(k, 0, 1), MidpointRounding.AwayFromZero);
+        var integer = decimal.Truncate(counted / scale).ToString(CultureInfo.InvariantCulture);
+        if (group != default)
+            for (var i = integer.Length - 3; i > 0; i -= 3) integer = integer.Insert(i, group.ToString());
+        var fraction = decimals == 0 ? "" : point + (counted % scale).ToString("0", CultureInfo.InvariantCulture).PadLeft(decimals, '0');
+        return shown[..start] + integer + fraction + shown[end..];
+    }
+
+    private static readonly char[] Digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+
     /// <summary>"Day 8 of 30".</summary>
     public static string DayOf(int day, int days) => $"Day {day.ToString(CultureInfo.CurrentCulture)} of {days.ToString(CultureInfo.CurrentCulture)}";
 

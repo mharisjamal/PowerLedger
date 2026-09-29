@@ -25,6 +25,11 @@ public partial class DashboardView : UserControl
     /// <summary>Under this width the page is one column: the panes one under another.</summary>
     internal const double OneColumnBelow = 860;
 
+    /// <summary>How far the intro's count-up has gone, 0 to 1 (the demo's <c>countUp</c>): Power now's watts, today's kWh
+    /// and This month's figure show this much of their value while it runs, and all of it at 1, where it rests.</summary>
+    internal static readonly DependencyProperty CountProperty = DependencyProperty.Register(nameof(Count), typeof(double), typeof(DashboardView),
+        new PropertyMetadata(1.0, (d, _) => ((DashboardView)d).ShowCounted()));
+
     private DashboardViewModel? _model;
     private ShellViewModel? _shell;
     private bool _costMode;
@@ -32,6 +37,7 @@ public partial class DashboardView : UserControl
     private GlassPanel? _focused;
     private double _monthFill;
     private string? _partsShown;
+    private readonly List<DispatcherTimer> _tour = [];
 
     public DashboardView()
     {
@@ -42,13 +48,16 @@ public partial class DashboardView : UserControl
         SizeChanged += (_, _) => Reflow();
         PreviewKeyDown += (_, e) =>
         {
-            if (e.Key != Key.Escape || _focused is null) return;
+            if (e.Key != Key.Escape || _focused is null && !Touring) return;
             e.Handled = true;
+            StopTour();
             Unfocus();
         };
         PreviewMouseLeftButtonDown += (_, e) =>
         {
-            if (_focused is not null && !IsWithin(e.OriginalSource as DependencyObject, _focused)) Unfocus();
+            if (_focused is null || IsWithin(e.OriginalSource as DependencyObject, _focused)) return;
+            StopTour();
+            Unfocus();
         };
         MonthBar.SizeChanged += (_, _) => MonthFill.Width = MonthBar.ActualWidth * _monthFill;
     }
@@ -62,6 +71,12 @@ public partial class DashboardView : UserControl
     /// <summary>Whether the page is in one column, for a test.</summary>
     internal bool OneColumn => _narrow;
 
+    /// <summary>The intro's count-up, 0 to 1; 1 at rest.</summary>
+    internal double Count { get => (double)GetValue(CountProperty); set => SetValue(CountProperty, value); }
+
+    /// <summary>Whether the tour (the demo's Play tour) is under way.</summary>
+    internal bool Touring => _tour.Count > 0;
+
     private void Attach(DashboardViewModel? model)
     {
         if (_model is not null) _model.PropertyChanged -= OnModelChanged;
@@ -74,6 +89,7 @@ public partial class DashboardView : UserControl
 
     private void Detach()
     {
+        StopTour();
         if (_model is not null) _model.PropertyChanged -= OnModelChanged;
         if (_shell is not null)
         {
@@ -162,14 +178,14 @@ public partial class DashboardView : UserControl
         var (value, unit) = DashboardFigures.PowerNow(model.Live.Watts, _costMode, detail?.PricePerKwh, detail?.Currency, culture);
         var rolls = !_costMode || detail?.PricePerKwh is null;
         rolls &= double.IsFinite(model.Live.Watts);
-        if (rolls) NowRoll.Value = (int)Math.Round(Math.Max(0, model.Live.Watts));
+        if (rolls) NowRoll.Value = (int)Math.Round(Math.Max(0, model.Live.Watts) * Count);
         NowRoll.Visibility = rolls ? Visibility.Visible : Visibility.Collapsed;
         NowValue.Visibility = rolls ? Visibility.Collapsed : Visibility.Visible;
-        NowValue.Text = value;
+        NowValue.Text = DashboardFigures.Counted(value, Count, culture);
         NowUnit.Text = unit;
         AutomationProperties.SetName(NowFigure, unit.Length == 0 ? value : $"{value} {unit}");
         UnitButton.IsEnabled = detail?.PricePerKwh is not null;
-        TodayKwh.Text = detail is null ? Format.Missing : Format.Kwh(detail.TodayKwh, culture);
+        TodayKwh.Text = detail is null ? Format.Missing : DashboardFigures.Counted(Format.Kwh(detail.TodayKwh, culture), Count, culture);
         ChangeText.Text = DashboardFigures.Change(detail?.ChangeVsYesterday, culture);
     }
 
@@ -190,7 +206,7 @@ public partial class DashboardView : UserControl
     {
         if (_model is not { } model) return;
         var energy = MonthEnergy.IsChecked == true;
-        MonthBig.Text = DashboardFigures.MonthBig(model.Month, energy);
+        ShowMonthBig();
         MonthSub.Text = DashboardFigures.MonthSub(model.Month, energy);
         if (model.Detail is { } detail)
         {
@@ -203,6 +219,20 @@ public partial class DashboardView : UserControl
         ForecastText.Visibility = forecast is null ? Visibility.Collapsed : Visibility.Visible;
         var rows = YourPcs.Rows(_shell?.Household.Members ?? [], model.Live.Watts, CultureInfo.CurrentCulture);
         MonthSplit.ItemsSource = rows.Take(3).ToList();
+    }
+
+    /// <summary>This month's big figure, as far as the count-up has gone.</summary>
+    private void ShowMonthBig()
+    {
+        if (_model is { } model)
+            MonthBig.Text = DashboardFigures.Counted(DashboardFigures.MonthBig(model.Month, MonthEnergy.IsChecked == true), Count, CultureInfo.CurrentCulture);
+    }
+
+    /// <summary>A frame of the count-up: the counted figures again, nothing else.</summary>
+    private void ShowCounted()
+    {
+        ShowNow();
+        ShowMonthBig();
     }
 
     /// <summary>Energy each day's month button and legend.</summary>
@@ -356,7 +386,7 @@ public partial class DashboardView : UserControl
 
     /// <summary>The window's intro carried on (design §1): the panes rise after the window's own, their content glides in,
     /// then the charts draw.</summary>
-    private void PlayIntro(int after)
+    internal void PlayIntro(int after)
     {
         var panes = Panes;
         for (var i = 0; i < panes.Length; i++) AeroWindow.Rise(panes[i], after + i);
@@ -365,14 +395,25 @@ public partial class DashboardView : UserControl
         Live.Reveal = 0;
         Daily.Reveal = 0;
         Pie.Rise = 0;
+        if (!AeroMotion.Reduced) Count = 0;   // the figures wait at nothing while the panes rise
         var start = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Math.Max(1, AeroMotion.MoveMs(AeroMotion.ChartsStart))) };
         start.Tick += (_, _) =>
         {
             start.Stop();
             DrawCharts();
+            CountUp();
         };
         start.Start();
     }
+
+    /// <summary>The intro's figures count up from nothing with the charts (the demo's countUp, 1.1 s on its curve), then
+    /// the count lets go: no clock is left running or holding (Plan U). Under reduced motion they are simply there.</summary>
+    private void CountUp()
+        => AeroMotion.Move(this, CountProperty, 1, AeroMotion.CountUp, AeroMotion.Quart, from: 0, done: () =>
+        {
+            SetValue(CountProperty, 1.0);
+            BeginAnimation(CountProperty, null);
+        });
 
     /// <summary>The charts draw in: Last minute's line from the left, the month wiped in, the pie's slices rising in turn,
     /// the month's bar growing. Under reduced motion they are simply there.</summary>
@@ -388,12 +429,39 @@ public partial class DashboardView : UserControl
         MonthFill.RenderTransform = grow;
         AeroMotion.Move(grow, ScaleTransform.ScaleXProperty, 1, AeroMotion.BarGrow, AeroMotion.Glide, from: 0,
             done: () => MonthFill.RenderTransform = Transform.Identity);
+        // So do the split's bars, as the demo's (every [data-w] bar grows with the count).
+        foreach (var fill in SplitFills())
+        {
+            var bar = new ScaleTransform(0, 1);
+            fill.RenderTransformOrigin = new Point(0, .5);
+            fill.RenderTransform = bar;
+            AeroMotion.Move(bar, ScaleTransform.ScaleXProperty, 1, AeroMotion.BarGrow, AeroMotion.Glide, from: 0,
+                done: () => fill.RenderTransform = Transform.Identity);
+        }
+    }
+
+    /// <summary>The split's bar fills, each PC's.</summary>
+    private List<Border> SplitFills()
+    {
+        var fills = new List<Border>();
+        void Walk(DependencyObject node)
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+            {
+                var child = VisualTreeHelper.GetChild(node, i);
+                if (child is Border { Name: "SplitFill" } fill) fills.Add(fill);
+                else Walk(child);
+            }
+        }
+        Walk(MonthSplit);
+        return fills;
     }
 
     // ---------------------------------------------------------------- the camera
 
     private void FocusClick(object sender, RoutedEventArgs e)
     {
+        StopTour();
         if (sender is not FrameworkElement { Tag: string name } || FindName(name) is not GlassPanel pane) return;
         if (_focused == pane) Unfocus();
         else FocusPane(pane);
@@ -441,6 +509,47 @@ public partial class DashboardView : UserControl
             pane.IsHitTestVisible = true;
         }
         _focused = null;
+    }
+
+    /// <summary>
+    /// The demo's Play tour: the camera pushes in on Power now, Energy each day, Where the power goes and History in turn,
+    /// <see cref="AeroMotion.TourStep"/> apart, then comes back to the whole page. A click outside the pane in focus, an
+    /// expand button, Esc, the page changing or the intro replaying ends it.
+    /// </summary>
+    internal void PlayTour()
+    {
+        StopTour();
+        GlassPanel[] stops = [PNow, PDaily, PParts, PHist];
+        for (var i = 0; i < stops.Length; i++)
+        {
+            var pane = stops[i];
+            At(i * AeroMotion.TourStep, () => FocusPane(pane));
+        }
+        At(stops.Length * AeroMotion.TourStep, () =>
+        {
+            StopTour();
+            Unfocus();
+        });
+    }
+
+    /// <summary>Ends the tour where it is; the camera stays on the pane it had reached.</summary>
+    internal void StopTour()
+    {
+        foreach (var timer in _tour) timer.Stop();
+        _tour.Clear();
+    }
+
+    private void At(double ms, Action step)
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher) { Interval = TimeSpan.FromMilliseconds(Math.Max(1, ms)) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            _tour.Remove(timer);
+            if (IsLoaded) step();
+        };
+        _tour.Add(timer);
+        timer.Start();
     }
 
     private static bool IsWithin(DependencyObject? node, DependencyObject scope)

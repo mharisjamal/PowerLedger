@@ -91,6 +91,9 @@ public static class AeroMotion
     /// <summary>CSS's own <c>ease</c>, which the HTML's hover transitions take.</summary>
     public static readonly CubicBezierEase Ease = Frozen(new CubicBezierEase(.25, .1, .25, 1));
 
+    /// <summary>The demo's own count-up curve, 1 - (1 - t)^4 (its <c>ease</c> function), for the intro's figures.</summary>
+    public static readonly QuarticEase Quart = Frozen(new QuarticEase { EasingMode = EasingMode.EaseOut });
+
     // Durations, in milliseconds.
     public const double Hover = 250;
     public const double Press = 350;
@@ -116,6 +119,7 @@ public static class AeroMotion
     public const double Toast = 500;
     public const double ToastHold = 2600;
     public const double Camera = 1000;
+    public const double TourStep = 2300;
     public const double FocusFade = 700;
     public const double Sheen = 500;
     public const double TableFade = 220;

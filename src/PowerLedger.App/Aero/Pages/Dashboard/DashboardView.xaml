@@ -9,7 +9,8 @@
          Open report, the day of the month, the forecast from Insights, the split by PC); Energy each day (a month against
          the one before, with its picker); Where the power goes (the 3D pie with each part's model under its name); and the
          history table (Day, Week, Month, Year; the top bar's search; Save CSV). Two columns from 860 px of page, one under
-         860. The panes are glass; their insides are wells, never glass on glass. -->
+         860. The panes are glass; their insides are wells, never glass on glass. A pane's padding is the demo's 20 px and
+         18 px plus the 1 px border its .glass has inside its box. -->
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -58,7 +59,9 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+    <!-- The page scrolls under the wheel and the keyboard with no bar of its own: the window is only its glass (0.10.1), so a
+         bar beside the panes was never on screen, and it only took the panes' width from the demo's. -->
+    <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" Focusable="False">
         <Grid x:Name="Camera" RenderTransformOrigin="0,0" Margin="0,0,0,4">
             <Grid.RenderTransform>
                 <TransformGroup>
@@ -81,7 +84,7 @@
                 </Grid.RowDefinitions>
 
                 <!-- ============ Power now and Last minute ============ -->
-                <aero:GlassPanel x:Name="PNow" Padding="20,18" AutomationProperties.Name="Power now">
+                <aero:GlassPanel x:Name="PNow" Padding="21,19" AutomationProperties.Name="Power now">
                     <Grid x:Name="NowContent">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="256" />
@@ -94,7 +97,7 @@
                                 <RowDefinition Height="10" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <Border Style="{StaticResource A.Well}" Padding="16,14,12,14">
+                            <Border Style="{StaticResource A.Well}" Padding="16,13,12,14">
                                 <Grid>
                                     <DockPanel VerticalAlignment="Top">
                                         <Grid Width="34" Height="34">
@@ -111,7 +114,7 @@
                                     <StackPanel x:Name="NowFigure" Orientation="Horizontal" VerticalAlignment="Bottom" Focusable="False">
                                         <aero:RollingNumber x:Name="NowRoll" DigitSize="{DynamicResource A.T.Big}" DigitWeight="Medium" VerticalAlignment="Bottom" />
                                         <TextBlock x:Name="NowValue" Style="{StaticResource A.Text.Big}" TextTrimming="None" VerticalAlignment="Bottom" Visibility="Collapsed" />
-                                        <TextBlock x:Name="NowUnit" Style="{StaticResource A.Text.Secondary}" FontSize="{DynamicResource A.T.Mid}" Margin="7,0,0,5" VerticalAlignment="Bottom" Text="W" />
+                                        <TextBlock x:Name="NowUnit" Style="{StaticResource A.Text.Secondary}" FontSize="{DynamicResource A.T.Mid}" Margin="9,0,0,2" VerticalAlignment="Bottom" Text="W" />
                                     </StackPanel>
                                 </Grid>
                             </Border>
@@ -121,15 +124,18 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="108" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Margin="14,12" VerticalAlignment="Center">
-                                        <TextBlock x:Name="TodayKwh" Style="{StaticResource A.Text.Mid}" Text="0" />
-                                        <TextBlock Text="kWh used today" Style="{StaticResource A.Label}" />
-                                    </StackPanel>
+                                    <!-- The demo's .pair .a: the figure at the top, its label at the foot. -->
+                                    <DockPanel Margin="14,12">
+                                        <TextBlock DockPanel.Dock="Bottom" Text="kWh used today" Style="{StaticResource A.Label}" />
+                                        <TextBlock x:Name="TodayKwh" Style="{StaticResource A.Text.Mid}" Text="0" VerticalAlignment="Top" />
+                                    </DockPanel>
                                     <Border Grid.Column="1" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.Well2}">
                                         <StackPanel>
-                                            <TextBlock x:Name="ChangeText" Style="{StaticResource A.Text.Number}" FontSize="18" HorizontalAlignment="Center" Margin="8,11,8,7" Text="N/A" />
+                                            <TextBlock x:Name="ChangeText" Style="{StaticResource A.Text.Number}" FontSize="18" HorizontalAlignment="Center" Margin="8,11,8,7" Text="N/A"
+                                                       LineHeight="24" LineStackingStrategy="BlockLineHeight" />
                                             <Border CornerRadius="16" Background="{DynamicResource A.B.Well3}" Margin="4,0,4,4" Padding="4,9">
-                                                <TextBlock Text="vs yesterday" Style="{StaticResource A.Text.Body}" FontSize="{DynamicResource A.T.Small}" HorizontalAlignment="Center" />
+                                                <TextBlock Text="vs yesterday" Style="{StaticResource A.Text.Body}" FontSize="{DynamicResource A.T.Small}" HorizontalAlignment="Center"
+                                                           LineHeight="16.8" LineStackingStrategy="BlockLineHeight" />
                                             </Border>
                                         </StackPanel>
                                     </Border>
@@ -137,7 +143,7 @@
                             </Border>
                         </Grid>
                         <Border Grid.Column="2" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.ChartWell}"
-                                BorderBrush="{DynamicResource A.B.ChartWellTop}" BorderThickness="0,1,0,0" Padding="12,12,12,6">
+                                BorderBrush="{DynamicResource A.B.ChartWellTop}" BorderThickness="0,1,0,0" Padding="12,11,12,6">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -154,14 +160,14 @@
                                                    ToolTip="The last 60 seconds of readings; the dashed line is today's average" />
                                     </StackPanel>
                                 </DockPanel>
-                                <aero:LiveChart x:Name="Live" Grid.Row="1" Margin="0,6,0,0" Samples="{Binding Live.Spark}" Average="{Binding Live.AverageW}" />
+                                <aero:LiveChart x:Name="Live" Grid.Row="1" Samples="{Binding Live.Spark}" Average="{Binding Live.AverageW}" />
                             </Grid>
                         </Border>
                     </Grid>
                 </aero:GlassPanel>
 
                 <!-- ============ This month ============ -->
-                <aero:GlassPanel x:Name="PMonth" Grid.Column="2" Padding="20,18" AutomationProperties.Name="This month">
+                <aero:GlassPanel x:Name="PMonth" Grid.Column="2" Padding="21,19" AutomationProperties.Name="This month">
                     <Grid x:Name="MonthContent">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -190,14 +196,15 @@
                             <TextBlock x:Name="DayOfText" DockPanel.Dock="Left" Style="{StaticResource A.Text.Muted}" FontSize="{DynamicResource A.T.Tiny}" />
                             <TextBlock x:Name="ForecastText" Style="{StaticResource A.Text.Secondary}" FontSize="{DynamicResource A.T.Tiny}" HorizontalAlignment="Right" Margin="12,0,0,0" />
                         </DockPanel>
-                        <ItemsControl x:Name="MonthSplit" Grid.Row="6" Focusable="False" AutomationProperties.Name="This month by PC">
+                        <!-- Each row with the demo's 8 px under it, the last's taken back, so the split sits on the pane's foot. -->
+                        <ItemsControl x:Name="MonthSplit" Grid.Row="6" Margin="0,0,0,-8" Focusable="False" AutomationProperties.Name="This month by PC">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type local:PcRow}">
                                     <Grid Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="80" />
                                             <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="72" />
+                                            <ColumnDefinition Width="64" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="{Binding Name}" Style="{StaticResource A.Text.Body}" FontSize="{DynamicResource A.T.Label}" />
                                         <Grid Grid.Column="1" Height="6" Margin="10,0">
@@ -206,7 +213,7 @@
                                                 <ColumnDefinition Width="{Binding Share, Converter={StaticResource ShareColumn}, ConverterParameter=Rest}" />
                                             </Grid.ColumnDefinitions>
                                             <Border Grid.ColumnSpan="2" CornerRadius="3" Background="{DynamicResource A.B.TrackSoft}" />
-                                            <Border CornerRadius="3">
+                                            <Border x:Name="SplitFill" CornerRadius="3">
                                                 <Border.Style>
                                                     <Style TargetType="Border">
                                                         <Setter Property="Background" Value="{DynamicResource A.B.Violet}" />
@@ -228,7 +235,7 @@
                 </aero:GlassPanel>
 
                 <!-- ============ Energy each day ============ -->
-                <aero:GlassPanel x:Name="PDaily" Grid.Row="2" Padding="20,18" AutomationProperties.Name="Energy each day">
+                <aero:GlassPanel x:Name="PDaily" Grid.Row="2" Padding="21,19" AutomationProperties.Name="Energy each day">
                     <Grid x:Name="DailyContent">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -253,18 +260,21 @@
                                 <TextBlock Text="Energy each day" Style="{StaticResource A.PanelTitle}" Margin="10,0,0,0" />
                             </StackPanel>
                         </DockPanel>
+                        <!-- The demo's legend: each entry a dot, its month and its total, 7 px apart; the entries 18 px apart. -->
                         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,-2,0,4">
                             <Ellipse Width="9" Height="9" Fill="{DynamicResource A.B.Accent}" VerticalAlignment="Center" />
-                            <TextBlock Margin="7,0,18,0" Style="{StaticResource A.Text.Secondary}" FontSize="{DynamicResource A.T.Label}"><Run x:Name="LegendName" /> <Run x:Name="LegendKwh" Foreground="{DynamicResource A.B.Text}" FontWeight="Medium" /></TextBlock>
+                            <TextBlock x:Name="LegendName" Margin="7,0,0,0" Style="{StaticResource A.Text.Secondary}" FontSize="{DynamicResource A.T.Label}" />
+                            <TextBlock x:Name="LegendKwh" Margin="7,0,18,0" Style="{StaticResource A.Text.Body}" FontSize="{DynamicResource A.T.Label}" FontWeight="Medium" />
                             <Ellipse Width="9" Height="9" Fill="{DynamicResource A.B.Muted}" VerticalAlignment="Center" />
-                            <TextBlock Margin="7,0,0,0" Style="{StaticResource A.Text.Secondary}" FontSize="{DynamicResource A.T.Label}"><Run x:Name="LegendPrevious" /> <Run x:Name="LegendPreviousKwh" Foreground="{DynamicResource A.B.Text}" FontWeight="Medium" /></TextBlock>
+                            <TextBlock x:Name="LegendPrevious" Margin="7,0,0,0" Style="{StaticResource A.Text.Secondary}" FontSize="{DynamicResource A.T.Label}" />
+                            <TextBlock x:Name="LegendPreviousKwh" Margin="7,0,0,0" Style="{StaticResource A.Text.Body}" FontSize="{DynamicResource A.T.Label}" FontWeight="Medium" />
                         </StackPanel>
                         <aero:DailyChart x:Name="Daily" Grid.Row="2" Days="{Binding Detail.Daily}" Previous="{Binding Detail.DailyPrevious}" />
                     </Grid>
                 </aero:GlassPanel>
 
                 <!-- ============ Where the power goes ============ -->
-                <aero:GlassPanel x:Name="PParts" Grid.Row="2" Grid.Column="2" Padding="20,18" AutomationProperties.Name="Where the power goes">
+                <aero:GlassPanel x:Name="PParts" Grid.Row="2" Grid.Column="2" Padding="21,19" AutomationProperties.Name="Where the power goes">
                     <Grid x:Name="PartsContent">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -284,17 +294,32 @@
                         </DockPanel>
                         <Grid Grid.Row="1">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="160" />
+                                <!-- The demo's pie is 186 wide; 172 leaves the list room for the App's own names ("Rest of system") beside
+                                     it, each with its part's model under it (design §1), which the demo's four words didn't need. -->
+                                <ColumnDefinition Width="172" />
                                 <ColumnDefinition Width="4" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <aero:PieChart3D x:Name="Pie" Height="150" VerticalAlignment="Center" Parts="{Binding Parts}" />
+                            <aero:PieChart3D x:Name="Pie" Parts="{Binding Parts}" />
                             <!-- Filled by the view (ShowParts) only when what it shows changes, not with every reading. -->
                             <ItemsControl x:Name="PartsList" Grid.Column="2" VerticalAlignment="Center" Focusable="False">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type local:DashboardPart}">
-                                        <Border CornerRadius="12" Padding="10,6" Margin="0,0,0,2" Background="Transparent" MouseEnter="PartEnter" MouseLeave="PartLeave"
+                                        <!-- The demo's row (7 px above and below, 3 apart); a row with a model under its name keeps to 4 px, so
+                                             four of them fit beside the pie. -->
+                                        <Border CornerRadius="12" Background="Transparent" MouseEnter="PartEnter" MouseLeave="PartLeave"
                                                 AutomationProperties.Name="{Binding Name}">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Padding" Value="10,4" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Model, Converter={StaticResource VisibleWhenText}}" Value="Collapsed">
+                                                            <Setter Property="Padding" Value="10,7" />
+                                                            <Setter Property="Margin" Value="0,0,0,3" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="10" />
@@ -318,7 +343,7 @@
                 </aero:GlassPanel>
 
                 <!-- ============ History ============ -->
-                <aero:GlassPanel x:Name="PHist" Grid.Row="4" Grid.ColumnSpan="3" Padding="20,18,20,12" AutomationProperties.Name="History">
+                <aero:GlassPanel x:Name="PHist" Grid.Row="4" Grid.ColumnSpan="3" Padding="21,19" AutomationProperties.Name="History">
                     <Grid x:Name="HistContent">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -358,15 +383,16 @@
                                 <TextBlock Text="History" Style="{StaticResource A.PanelTitle}" Margin="10,0,0,0" />
                             </StackPanel>
                         </DockPanel>
+                        <!-- The columns in the demo's proportions, as its table lays its figures out at the demo's width. -->
                         <Border Grid.Row="1" Style="{StaticResource A.Table.Header}" Padding="0,0,0,8">
                             <Grid x:Name="HistHead">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="2.4*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="1.35*" />
+                                    <ColumnDefinition Width="234*" />
+                                    <ColumnDefinition Width="169*" />
+                                    <ColumnDefinition Width="124*" />
+                                    <ColumnDefinition Width="145*" />
+                                    <ColumnDefinition Width="134*" />
+                                    <ColumnDefinition Width="207*" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="SpanHead" Margin="14,0" Text="Day" />
                                 <TextBlock Grid.Column="1" Margin="14,0" Text="Energy" HorizontalAlignment="Right" />
@@ -380,15 +406,15 @@
                             <ItemsControl x:Name="HistRows" ItemsSource="{Binding HistoryShown}" Focusable="False" AutomationProperties.Name="History by period">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type local:HistoryRow}">
-                                        <Border Style="{StaticResource A.Table.Row}" Padding="0,9" AutomationProperties.Name="{Binding Period}">
+                                        <Border Style="{StaticResource A.Table.Row}" Padding="0,9" MinHeight="0" AutomationProperties.Name="{Binding Period}">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="2.4*" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="1.35*" />
+                                                    <ColumnDefinition Width="234*" />
+                                                    <ColumnDefinition Width="169*" />
+                                                    <ColumnDefinition Width="124*" />
+                                                    <ColumnDefinition Width="145*" />
+                                                    <ColumnDefinition Width="134*" />
+                                                    <ColumnDefinition Width="207*" />
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Margin="14,0" Text="{Binding Period}" Style="{StaticResource Cell}" HorizontalAlignment="Left" />
                                                 <TextBlock Grid.Column="1" Margin="14,0" Text="{Binding Energy}" Style="{StaticResource Cell}" />

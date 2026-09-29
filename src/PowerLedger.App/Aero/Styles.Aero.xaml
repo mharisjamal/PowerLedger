@@ -57,8 +57,11 @@
         <Setter Property="LineHeight" Value="{DynamicResource A.T.BigLine}" />
         <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
     </Style>
+    <!-- This month's figure: the demo's .month .big, 34 px on .big's line of 1.05. -->
     <Style x:Key="A.Text.BigMonth" TargetType="TextBlock" BasedOn="{StaticResource A.Text.Number}">
         <Setter Property="FontSize" Value="{DynamicResource A.T.BigMonth}" />
+        <Setter Property="LineHeight" Value="{DynamicResource A.T.BigMonthLine}" />
+        <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
     </Style>
     <Style x:Key="A.Text.Mid" TargetType="TextBlock" BasedOn="{StaticResource A.Text.Number}">
         <Setter Property="FontSize" Value="{DynamicResource A.T.Mid}" />
@@ -102,7 +105,8 @@
     </Style>
 
     <!-- ============ buttons ============ -->
-    <!-- gbtn: a glass pill, a hairline rim and a light top edge; brighter under the pointer. -->
+    <!-- gbtn: a glass pill, a hairline rim and a light top edge; brighter under the pointer. Its content sits inside the
+         rim, as the CSS border is inside the box: the padding is counted from the rim in. -->
     <Style x:Key="A.GlassBtn" TargetType="ButtonBase" BasedOn="{StaticResource A.Hoverable}">
         <Setter Property="Padding" Value="13,0" />
         <Setter Property="Height" Value="34" />
@@ -116,8 +120,10 @@
                                 Background="{DynamicResource A.B.OutlineHover}" Opacity="0" />
                         <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" Margin="1"
                                 BorderBrush="{DynamicResource A.B.BtnTop}" BorderThickness="0,1,0,0" />
-                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True" />
+                        <Border Margin="1">
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True" />
+                        </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -152,13 +158,15 @@
                                 Background="{DynamicResource A.B.OutlineHover}" Opacity="0" />
                         <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" Margin="1"
                                 BorderBrush="{DynamicResource A.B.BtnTop}" BorderThickness="0,1,0,0" />
-                        <StackPanel Orientation="Horizontal" Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Center">
-                            <Grid Width="8" Height="8" Margin="0,0,8,0">
-                                <Ellipse Fill="{DynamicResource A.B.Muted}" />
-                                <Ellipse x:Name="On" Fill="{DynamicResource A.B.Accent}" Opacity="0" />
-                            </Grid>
-                            <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" />
-                        </StackPanel>
+                        <Border Margin="1">
+                            <StackPanel Orientation="Horizontal" Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <Grid Width="8" Height="8" Margin="0,0,8,0">
+                                    <Ellipse Fill="{DynamicResource A.B.Muted}" />
+                                    <Ellipse x:Name="On" Fill="{DynamicResource A.B.Accent}" Opacity="0" />
+                                </Grid>
+                                <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" />
+                            </StackPanel>
+                        </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -198,8 +206,10 @@
                                 Background="{DynamicResource A.B.OutlineHover}" Opacity="0" />
                         <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
                                 BorderBrush="{DynamicResource A.B.Line}" BorderThickness="1" Background="Transparent" />
-                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"
-                                          RecognizesAccessKey="True" />
+                        <Border Margin="1">
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -402,7 +412,16 @@
     <!-- seg: a segmented choice (History's span); the white pill behind is the view's indicator. -->
     <Style x:Key="A.SegItem" TargetType="RadioButton" BasedOn="{StaticResource A.Hoverable}">
         <Setter Property="Height" Value="32" />
-        <Setter Property="Padding" Value="20,0" />
+        <!-- 20 px each side, and the demo's .03em letter-spacing, which WPF text can't draw, kept in the button's width so
+             the white pill has the demo's size. -->
+        <Setter Property="Padding">
+            <Setter.Value>
+                <MultiBinding Converter="{x:Static aero:Tracking.SegPadding}">
+                    <Binding Path="Content" RelativeSource="{RelativeSource Self}" />
+                    <Binding Path="FontSize" RelativeSource="{RelativeSource Self}" />
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text2}" />
         <Setter Property="Template">
             <Setter.Value>
@@ -805,13 +824,14 @@
         <Setter Property="ToolTip" Value="Resize" />
     </Style>
 
-    <!-- A well:the quieter surface inside a pane, with its light top edge. -->
+    <!-- A well: the quieter surface inside a pane, with its light top edge. The demo draws that edge as an inset shadow,
+         inside the padding; here it is a border, so the top padding is a pixel less. -->
     <Style x:Key="A.Well" TargetType="Border">
         <Setter Property="CornerRadius" Value="{DynamicResource A.R.Well}" />
         <Setter Property="Background" Value="{DynamicResource A.B.Well}" />
         <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellTop}" />
         <Setter Property="BorderThickness" Value="0,1,0,0" />
-        <Setter Property="Padding" Value="16,14" />
+        <Setter Property="Padding" Value="16,13,16,14" />
     </Style>
 
     <!-- ============ menus ============ -->

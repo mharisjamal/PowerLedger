@@ -131,7 +131,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- ============ the sidebar ============ -->
-            <aero:GlassPanel x:Name="Side" Padding="14,18" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
+            <aero:GlassPanel x:Name="Side" Padding="15,19" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
                 <Grid x:Name="SideContent">
                     <!-- In reading order, which is the keyboard's: the brand, the pages and PCs, Switch look, the foot. -->
                     <Grid.RowDefinitions>
@@ -189,7 +189,8 @@
                                 <Ellipse Fill="{DynamicResource A.B.Well2}" />
                                 <aero:Icon Data="{StaticResource A.I.Moon}" Size="14" />
                             </Grid>
-                            <TextBlock Text="Switch look" Style="{StaticResource WideText}" Foreground="{DynamicResource A.B.Text2}" Margin="10,0,0,0" VerticalAlignment="Center" />
+                            <TextBlock Text="Switch look" Style="{StaticResource WideText}" Foreground="{DynamicResource A.B.Text2}" FontSize="{DynamicResource A.T.Control}"
+                                       Margin="10,0,0,0" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
 
@@ -261,16 +262,18 @@
                 </Grid.RowDefinitions>
 
                 <!-- The top bar -->
+                <!-- The search is the demo's 330 px wide while the bar has room for it (its column takes nearly all the free width,
+                     up to 330), and gives way to the pills in a narrower window. -->
                 <Grid x:Name="TopBar" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" MaxWidth="330" />
+                        <ColumnDefinition Width="100*" MaxWidth="330" />
                         <ColumnDefinition Width="*" MinWidth="12" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <aero:GlassPanel x:Name="SearchGlass" Height="46" CornerRadius="{DynamicResource A.R.Search}" Padding="18,0,6,0" VerticalAlignment="Center">
+                    <aero:GlassPanel x:Name="SearchGlass" Height="46" CornerRadius="{DynamicResource A.R.Search}" Padding="19,0,7,0" VerticalAlignment="Center">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -278,9 +281,9 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <aero:Icon Data="{StaticResource A.I.Search}" Opacity="0.7" VerticalAlignment="Center" />
-                            <TextBlock x:Name="SearchHint" Grid.Column="1" Text="Search history" Margin="12,0,0,0" Foreground="{DynamicResource A.B.Text2}"
+                            <TextBlock x:Name="SearchHint" Grid.Column="1" Text="Search history" Margin="10,0,0,0" Foreground="{DynamicResource A.B.Text2}"
                                        VerticalAlignment="Center" IsHitTestVisible="False" />
-                            <TextBox x:Name="Search" Grid.Column="1" Margin="10,0,6,0" Style="{StaticResource A.SearchBox}" AutomationProperties.Name="Search history"
+                            <TextBox x:Name="Search" Grid.Column="1" Margin="8,0,6,0" Style="{StaticResource A.SearchBox}" AutomationProperties.Name="Search history"
                                      TextChanged="SearchChanged" />
                             <Border Grid.Column="2" Height="34" Padding="10,0" CornerRadius="{DynamicResource A.R.Button}" Background="{DynamicResource A.B.Well3}"
                                     VerticalAlignment="Center" Style="{StaticResource Wide}">
@@ -329,10 +332,11 @@
                                 <aero:Icon Data="{StaticResource A.I.House}" Foreground="{DynamicResource A.B.Ink}" />
                             </Grid>
                             <StackPanel Margin="10,0,0,0" VerticalAlignment="Center" Style="{StaticResource Wide}">
-                                <TextBlock Text="Home" FontSize="{DynamicResource A.T.Body}" FontWeight="Medium" />
-                                <TextBlock x:Name="HouseholdLine" FontSize="11.5" Foreground="{DynamicResource A.B.Text2}" />
+                                <!-- The demo's .who .t: two lines at 1.2. -->
+                                <TextBlock Text="Home" FontSize="{DynamicResource A.T.Body}" FontWeight="Medium" LineHeight="16.8" LineStackingStrategy="BlockLineHeight" />
+                                <TextBlock x:Name="HouseholdLine" FontSize="11.5" Foreground="{DynamicResource A.B.Text2}" LineHeight="13.8" LineStackingStrategy="BlockLineHeight" />
                             </StackPanel>
-                            <aero:Icon Data="{StaticResource A.I.Chevron}" Size="14" StrokeWidth="2.6" Margin="12,0,0,0" VerticalAlignment="Center" />
+                            <aero:Icon Data="{StaticResource A.I.Chevron}" Size="14" StrokeWidth="2.6" Margin="16,0,0,0" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     </aero:GlassPanel>
@@ -397,6 +401,28 @@
         <!-- ============ the caption: the window's buttons, each a glass pill of its own ============ -->
         <Grid x:Name="Caption" Height="52" VerticalAlignment="Top" Margin="24,0">
             <StackPanel x:Name="CaptionButtons" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True">
+                <!-- The demo's own pill group (its .demo, bottom right there): Replay intro plays the opening again, Play tour
+                     pushes the camera in on the Dashboard's panes in turn. Up here beside the window's buttons, on its own glass:
+                     the stage's foot has no room for it outside the panes, and it would sit on the History pane's glass. -->
+                <aero:GlassPanel x:Name="DemoControls" Style="{StaticResource A.TopPill}" Padding="6" Margin="0,0,12,0"
+                                 Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="ReplayButton" Style="{StaticResource A.GlassBtn}" Height="30" FontSize="{DynamicResource A.T.Small}" Click="ReplayIntroClick"
+                                AutomationProperties.Name="Replay intro" ToolTip="Play the opening again">
+                            <StackPanel Orientation="Horizontal">
+                                <aero:Icon Data="{StaticResource A.I.Replay}" Size="13" StrokeWidth="2.2" VerticalAlignment="Center" />
+                                <TextBlock Text="Replay intro" Margin="8,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="TourButton" Style="{StaticResource A.GlassBtn}" Height="30" FontSize="{DynamicResource A.T.Small}" Margin="6,0,0,0" Click="PlayTourClick"
+                                AutomationProperties.Name="Play tour" ToolTip="Show the Dashboard's panes one by one">
+                            <StackPanel Orientation="Horizontal">
+                                <aero:Icon Data="{StaticResource A.I.Play}" Size="13" Filled="True" VerticalAlignment="Center" />
+                                <TextBlock Text="Play tour" Margin="8,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </aero:GlassPanel>
                 <aero:GlassPanel Style="{StaticResource A.TopPill}" Margin="0,0,6,0">
                     <Button Style="{StaticResource A.RoundGlassBtn}" Width="30" Height="30" Click="MinimizeClick" ToolTip="Minimize" AutomationProperties.Name="Minimize">
                         <aero:Icon Data="{StaticResource A.I.Minimize}" Size="14" />

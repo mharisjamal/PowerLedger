@@ -59,9 +59,10 @@ internal partial class AeroWindow : Window, IShellWindow
         // The glass itself (Aero look design §3): the A.* tokens on this window, repainted live as Settings' Glass or the
         // theme changes, never among the application's resources.
         _glass = GlassMaterial.For(this, shell.Settings, theme);
-        // What shows behind the glass (design §3): the desktop, the wallpaper frosted once, or the plain ground, lined up
-        // with the screen: the window is only its glass (0.10.1, free-form), so the glass frosts what lies behind it there.
-        _backdrop = new Backdrop(this, Room, _glass, () => theme.Current, onScreen: true);
+        // What the glass frosts (design §3): Aero bloom mapped across the stage (0.10.3, the default, as the approved video),
+        // the wallpaper frosted once and lined up with the screen, or the plain ground. The window is only its glass (0.10.1,
+        // free-form), so the real desktop shows between the panes whichever it is.
+        _backdrop = new Backdrop(this, Room, _glass, () => theme.Current, onScreen: true, stage: Stage);
         UpdateRequiredCover.DataContext = updates;
         UpdateCover.Attach(UpdateRequiredCover, [Side, TopBar, Banners, Pages], UpdateNowButton);
         _size = new Extent(Width, Height);
@@ -242,7 +243,7 @@ internal partial class AeroWindow : Window, IShellWindow
     {
         var narrow = ActualWidth > 0 && ActualWidth < NarrowBelow;
         SideColumn.Width = new GridLength(narrow ? SideNarrow : SideWide);
-        Side.Padding = narrow ? new Thickness(8, 18, 8, 18) : new Thickness(14, 18, 14, 18);
+        Side.Padding = narrow ? new Thickness(9, 19, 9, 19) : new Thickness(15, 19, 15, 19);   // the demo's padding and its 1 px border
         Dispatcher.BeginInvoke(() => MovePill(animate: false), DispatcherPriority.Loaded);
     }
 
@@ -296,6 +297,39 @@ internal partial class AeroWindow : Window, IShellWindow
         FollowShapeFor(AeroMotion.MoveMs(AeroMotion.PaneIn + 12 * AeroMotion.Stagger));
         Dispatcher.BeginInvoke(() => IntroPending = false, DispatcherPriority.ContextIdle);
     }
+
+    /// <summary>The Dashboard on show, if it is.</summary>
+    private Aero.DashboardView? Dashboard => Pages.Showing as Aero.DashboardView;
+
+    /// <summary>
+    /// The demo's Replay intro: the opening again, as when the window first shows (the sidebar and the search rise, the
+    /// Dashboard's panes after them, the content glides in, the charts draw and the figures count up). It closes a
+    /// dialog, ends a tour and brings the camera back first, and brings the Dashboard up, whose panes carry the intro on.
+    /// </summary>
+    internal void ReplayIntro()
+    {
+        if (_shell.IsSetup) return;
+        CloseModal();
+        Dashboard?.StopTour();
+        Dashboard?.Unfocus();
+        IntroPending = true;
+        PlayIntro();
+        if (_shell.Page != Page.Dashboard) _shell.Page = Page.Dashboard;   // the Dashboard arriving sees the intro pending
+        else Dashboard?.PlayIntro(IntroPanes);
+    }
+
+    /// <summary>The demo's Play tour, on the Dashboard (brought up first): the camera on each of its panes in turn.</summary>
+    internal void PlayTour()
+    {
+        if (_shell.IsSetup) return;
+        CloseModal();
+        if (_shell.Page != Page.Dashboard) _shell.Page = Page.Dashboard;
+        Dispatcher.BeginInvoke(() => Dashboard?.PlayTour(), DispatcherPriority.ContextIdle);   // once the page is laid out
+    }
+
+    private void ReplayIntroClick(object sender, RoutedEventArgs e) => ReplayIntro();
+
+    private void PlayTourClick(object sender, RoutedEventArgs e) => PlayTour();
 
     /// <summary>Lines the wallpaper's frost up with the panes every frame for <paramref name="ms"/>, while they move (the
     /// intro, the camera), then stops: nothing runs at rest (Plan S G5).</summary>

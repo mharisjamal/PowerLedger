@@ -26,6 +26,22 @@ public class AeroDashboardFiguresTests
     public void The_change_against_yesterday_carries_its_sign(double? change, string text)
         => DashboardFigures.Change(change, English).ShouldBe(text);
 
+    [Theory]
+    [InlineData("$0.47", 0.5, "$0.24")]
+    [InlineData("$0.47", 0, "$0.00")]
+    [InlineData("2.74 kWh", 0.5, "1.37 kWh")]
+    [InlineData("0.284", 0.25, "0.071")]
+    [InlineData("$1,234.50", 0.5, "$617.25")]
+    [InlineData("$12,345", 0.5, "$6,173")]
+    [InlineData("N/A", 0.5, "N/A")]
+    [InlineData("$0.47", 1, "$0.47")]
+    public void A_figure_counts_up_keeping_its_decimals_and_words(string shown, double k, string expected)
+        => DashboardFigures.Counted(shown, k, English).ShouldBe(expected);
+
+    [Fact]
+    public void A_figure_counts_up_in_its_own_culture()
+        => DashboardFigures.Counted("1.234,56 €", 0.5, CultureInfo.GetCultureInfo("de-DE")).ShouldBe("617,28 €");
+
     [Fact]
     public void This_month_reads_as_cost_or_as_energy_with_the_other_under_it()
     {

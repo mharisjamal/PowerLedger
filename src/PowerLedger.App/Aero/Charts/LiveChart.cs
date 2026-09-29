@@ -202,7 +202,9 @@ internal sealed class LiveChart : FrameworkElement
             ChartInk.Brush(this, "A.C.Text", Color.FromRgb(0xF3, 0xF4, 0xF6)));
         var tw = Math.Max(68, time.Width + 14);
         var tx = Math.Min(x - tw / 2, LiveScale.X1 * sx - tw);
-        ChartInk.Pill(dc, new Rect(tx, LiveScale.Y1 * sy + 4, tw, 19), ChartInk.Brush(this, "A.C.TimePill", Color.FromArgb(0x40, 0, 0, 0)), guide);
+        // The demo's time pill: a solid hairline at 30 % white round it, not the guide's dashes.
+        var rim = ChartInk.Pen(ChartInk.Brush(Color.FromArgb(0x4D, 255, 255, 255)), 1);
+        ChartInk.Pill(dc, new Rect(tx, LiveScale.Y1 * sy + 4, tw, 19), ChartInk.Brush(this, "A.C.TimePill", Color.FromArgb(0x40, 0, 0, 0)), rim);
         ChartInk.At(dc, time, tx + tw / 2, LiveScale.Y1 * sy + 17, 1);
     }
 
