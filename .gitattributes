@@ -4,3 +4,5 @@ assets/monitors/*.csv -text
 *.ttf binary
 *.mp4 binary
 *.jpg binary
+*.ps binary
+*.png binary

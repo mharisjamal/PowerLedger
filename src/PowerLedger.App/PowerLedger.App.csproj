@@ -12,6 +12,8 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- WFO0003 wants DPI awareness set through WinForms' startup API, which a WPF app never calls; WPF reads it from the manifest. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <!-- The liquid glass's capture calls DXGI and Direct3D 11 through their vtables (Aero\LiquidGlass\CaptureNative.cs). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -36,6 +38,12 @@
     <!-- Plan S intro: the Aero intro video and its poster, loose files beside the exe (MediaElement plays from a path),
          so the publish, and the installer's recursive copy of it, carry them under Assets\Intro. -->
     <Content Include="Assets\Intro\aero-intro.mp4;Assets\Intro\aero-intro.jpg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The liquid glass passes, compiled from Aero\LiquidGlass\Shaders\*.fx by scripts\liquid-glass\compile-shaders.ps1. -->
+    <EmbeddedResource Include="Aero\LiquidGlass\Shaders\*.ps" LogicalName="PowerLedger.App.Aero.LiquidGlass.Shaders.%(Filename).ps" />
+    <None Include="Aero\LiquidGlass\Shaders\*.fx" />
   </ItemGroup>
 
   <ItemGroup>

@@ -99,6 +99,14 @@ internal sealed partial record GlassSettings
     /// <summary>Tilt and parallax on the panels as the pointer moves; off under reduced motion whatever this says.</summary>
     public bool Parallax { get; set; } = true;
 
+    /// <summary>Let screenshots and screen sharing see PowerLedger's windows (the owner's switch, 2026-10-01). Off, the
+    /// default, the liquid glass shows the live screen behind it and every window of ours is left out of screen capture
+    /// (WDA_EXCLUDEFROMCAPTURE), so the glass never captures itself; on, the windows are captured like any other and the
+    /// glass shows the wallpaper through the same recipe instead (LiquidGlassSources.AllowScreenshots). Anything but
+    /// JSON's true reads as off.</summary>
+    [JsonConverter(typeof(TrueOnlyJsonConverter))]
+    public bool ShowInScreenshots { get; set; }
+
     // No carbon factor here: the Carbon insight reads Settings' one CO₂ per kWh (UiPreferences.Co2KgPerKwh), which Now and
     // the Report use too; GridFactors only suggests a figure for Windows' region. A CarbonGramsPerKwh an earlier build
     // wrote is ignored as the file loads.

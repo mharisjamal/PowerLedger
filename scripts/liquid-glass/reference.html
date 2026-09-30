@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- The liquid glass reference page (docs/superpowers/specs/2026-10-01-aero-liquid-glass-engine.md): reference.ps1
+     screenshots it in headless Edge, and the engine's tests compare against those shots. The hash is
+     mode,left,top,width,height (the glass's box in CSS pixels); the page is 720 by 500.
+       dispx, dispy  the backdrop is a coordinate pattern in device pixels, every channel at or above sRGB 136, where a
+                     trip through 8 bit linearRGB loses nothing: x (dispx) or y (dispy) = (red - 136) + 64 * (green - 136).
+                     The glass has only the url filter, so each device pixel under it names the one it was moved from.
+       full          the whole recipe over a test picture, 28 px corners -->
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;background:#000;overflow:hidden}
+canvas{position:absolute;left:0;top:0;width:720px;height:500px;image-rendering:pixelated}
+#glass{position:absolute}
+.dispx,.dispy{backdrop-filter:url(#displacementFilter)}
+.full{backdrop-filter:brightness(1.1) blur(2px) url(#displacementFilter);border-radius:28px}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="displacementFilter">
+    <feTurbulence type="turbulence" baseFrequency="0.01" numOctaves="2" result="turbulence"/>
+    <feDisplacementMap in="SourceGraphic" in2="turbulence" scale="200" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
+<canvas id="c"></canvas>
+<div id="glass"></div>
+<script>
+const [mode, boxLeft, boxTop, boxWidth, boxHeight] = (location.hash.slice(1) || 'dispx,200,150,320,200').split(',');
+const glass = document.getElementById('glass');
+Object.assign(glass.style, { left: boxLeft + "px", top: boxTop + "px", width: boxWidth + "px", height: boxHeight + "px" });
+glass.className = mode;
+const dpr = window.devicePixelRatio, c = document.getElementById('c');
+c.width = Math.round(720 * dpr); c.height = Math.round(500 * dpr);
+const g = c.getContext('2d'), img = g.createImageData(c.width, c.height);
+for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) {
+  const i = (y * c.width + x) * 4;
+  if (mode === 'full') {
+    // soft colour fields, fine stripes and a checker, so brightness, blur and displacement all show (CSS pixels)
+    const u = x / dpr, v = y / dpr, s = ((Math.floor(u / 16) + Math.floor(v / 16)) & 1);
+    img.data[i] = Math.round(128 + 110 * Math.sin(u / 37) * (s ? 1 : 0.6));
+    img.data[i + 1] = Math.round(128 + 110 * Math.cos(v / 23));
+    img.data[i + 2] = (Math.floor(u) % 12 < 6) ? 230 : 40;
+  } else {
+    const n = mode === 'dispx' ? x : y;
+    img.data[i] = 136 + (n & 63); img.data[i + 1] = 136 + (n >> 6); img.data[i + 2] = 200;
+  }
+  img.data[i + 3] = 255;
+}
+g.putImageData(img, 0, 0);
+</script></body></html>

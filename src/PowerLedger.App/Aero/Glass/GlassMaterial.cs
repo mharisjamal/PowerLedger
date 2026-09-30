@@ -105,6 +105,7 @@ internal sealed class GlassMaterial : IDisposable
         if (_disposed) return;
         Current = _read();
         AeroMotion.SetOverride(Current.ReduceMotion);
+        LiquidGlassSources.AllowScreenshots = Current.ShowInScreenshots;
         var map = Map(Current, _theme());
         foreach (var (key, value) in map)
         {

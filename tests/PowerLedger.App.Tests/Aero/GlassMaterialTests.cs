@@ -268,6 +268,25 @@ public class GlassMaterialTests
             }
         });
 
+    [Fact]
+    public void Show_in_screenshots_reaches_the_liquid_glass_at_once()
+        => UiHarness.OnUi(() =>
+        {
+            var settings = new GlassSettings { ShowInScreenshots = true };
+            using var material = new GlassMaterial(new Border(), () => settings, () => Theme.Dark);
+            try
+            {
+                LiquidGlassSources.AllowScreenshots.ShouldBeTrue();
+                settings = new GlassSettings();
+                material.Refresh();
+                LiquidGlassSources.AllowScreenshots.ShouldBeFalse();
+            }
+            finally
+            {
+                LiquidGlassSources.AllowScreenshots = false;
+            }
+        });
+
     /// <summary>The one live channel (Plan S 0.4): Settings raises Glass, and the window's glass changes, on the window only.</summary>
     [Fact]
     public void Raising_glass_repaints_the_window_live_and_never_the_application()
