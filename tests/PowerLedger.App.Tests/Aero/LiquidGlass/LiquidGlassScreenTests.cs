@@ -18,6 +18,7 @@ public class LiquidGlassScreenTests(ITestOutputHelper output)
             var glass = new LiquidGlassBackdrop();
             var fake = new FakeGlassSource(null, Rect.Empty);
             LiquidGlassSources.Override = _ => fake;
+            LiquidGlassSources.ExcludeFromCapture = false;
             var root = new Grid { Background = Brushes.Black };
             root.Children.Add(glass);
             var window = ScreenCapture.Show(root, 200, 200, 100, 100);
@@ -68,6 +69,7 @@ public class LiquidGlassScreenTests(ITestOutputHelper output)
             {
                 window.Close();
                 LiquidGlassSources.Override = null;
+                LiquidGlassSources.ExcludeFromCapture = true;
             }
         }));
         output.WriteLine(result.Item1);

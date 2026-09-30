@@ -10,9 +10,45 @@ namespace PowerLedger.App.Aero;
 internal static class LiquidGlassSources
 {
     private static readonly Dictionary<HwndSource, (ILiquidGlassSource Source, int Pieces)> Windows = [];
+    private static bool _allowScreenshots;
+    private static bool _excludeFromCapture = true;
 
     /// <summary>When set, every window's source comes from here instead of the screen.</summary>
     public static Func<HwndSource, ILiquidGlassSource>? Override { get; set; }
+
+    /// <summary>
+    /// The owner's switch (GlassSettings.ShowInScreenshots, which GlassMaterial copies here): true lets screenshots and
+    /// screen sharing see our windows (WDA_NONE on each), stops the live capture and shows the wallpaper through the
+    /// same recipe; false, the default, leaves the windows out of capture and shows the live screen. Applies at once.
+    /// </summary>
+    public static bool AllowScreenshots
+    {
+        get => _allowScreenshots;
+        set
+        {
+            if (_allowScreenshots == value) return;
+            _allowScreenshots = value;
+            ApplyAll();
+        }
+    }
+
+    /// <summary>The render harness's switch, apart from the owner's: false leaves our windows capturable (an on-screen
+    /// BitBlt check) whatever <see cref="AllowScreenshots"/> says. Pair it with <see cref="Override"/>: live glass on a
+    /// capturable window would show itself.</summary>
+    public static bool ExcludeFromCapture
+    {
+        get => _excludeFromCapture;
+        set
+        {
+            if (_excludeFromCapture == value) return;
+            _excludeFromCapture = value;
+            ApplyAll();
+        }
+    }
+
+    /// <summary>False keeps every window on the wallpaper: Windows before 10 2004 has no WDA_EXCLUDEFROMCAPTURE, so a live
+    /// capture there would show the glass to itself.</summary>
+    public static bool CaptureAllowed { get; set; } = Environment.OSVersion.Version >= new Version(10, 0, 19041);
 
     /// <summary>The windows with glass now, for the tests.</summary>
     internal static IReadOnlyList<ILiquidGlassSource> Live
@@ -34,7 +70,7 @@ internal static class LiquidGlassSources
                 Windows[window] = (entry.Source, entry.Pieces + 1);
                 return entry.Source;
             }
-            var source = Override?.Invoke(window) ?? new NoGlassSource();   // the live capture comes next
+            var source = Override?.Invoke(window) ?? new WindowGlassSource(window);
             Windows[window] = (source, 1);
             window.Disposed += OnWindowDisposed;
             return source;
@@ -71,18 +107,8 @@ internal static class LiquidGlassSources
         (gone as IDisposable)?.Dispose();
     }
 
-    private sealed class NoGlassSource : ILiquidGlassSource
+    private static void ApplyAll()
     {
-        public LiquidGlassSourceKind Kind => LiquidGlassSourceKind.None;
-
-        public System.Windows.Media.ImageSource? Image => null;
-
-        public System.Windows.Rect ScreenBounds => System.Windows.Rect.Empty;
-
-        public event Action? Changed
-        {
-            add { }
-            remove { }
-        }
+        foreach (var source in Live.OfType<WindowGlassSource>()) source.Apply();
     }
 }

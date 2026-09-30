@@ -12,6 +12,8 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- WFO0003 wants DPI awareness set through WinForms' startup API, which a WPF app never calls; WPF reads it from the manifest. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <!-- The liquid glass's capture calls DXGI and Direct3D 11 through their vtables (Aero\LiquidGlass\CaptureNative.cs). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
