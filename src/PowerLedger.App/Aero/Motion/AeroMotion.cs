@@ -127,6 +127,9 @@ public static class AeroMotion
     public const double Pulse = 1800;
     public const double NumberRoll = 600;
 
+    /// <summary>The grab bar easing between its glows (idle, near, over).</summary>
+    public const double Grab = 200;
+
     // Distances and scales.
     public const double PaneRise = 22;
     public const double PaneScale = .95;
