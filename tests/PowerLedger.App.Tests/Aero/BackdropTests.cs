@@ -29,26 +29,28 @@ public class BackdropTests
     public void The_desktop_shows_live_only_on_the_free_form_window(string wanted, bool onScreen, bool wallpaper, string expected)
         => BackdropRules.Choose(Enum.Parse<GlassBackdrop>(wanted), onScreen, wallpaper).ShouldBe(Enum.Parse<BackdropKind>(expected));
 
+    /// <summary>0.10.6, the owner's choice: every style shows what is really behind PowerLedger, whatever backdrop an
+    /// earlier version saved; a style only changes the tint laid over it.</summary>
     [Theory]
-    [InlineData("Bloom")]
-    [InlineData("Wallpaper")]
-    [InlineData("Plain")]
-    [InlineData("Desktop")]
-    public void Clear_shows_the_live_desktop_whatever_backdrop_is_saved(string saved)
+    [MemberData(nameof(StylesAndSaved))]
+    public void Every_style_shows_the_live_desktop_whatever_backdrop_is_saved(string style, string saved)
     {
-        var glass = GlassSettings.Default with { Style = GlassStyle.Clear, Backdrop = Enum.Parse<GlassBackdrop>(saved) };
+        var glass = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), Backdrop = Enum.Parse<GlassBackdrop>(saved) };
         glass.Source.ShouldBe(GlassBackdrop.Desktop);
+        glass.Sanitised().Backdrop.ShouldBe(GlassBackdrop.Desktop, "and the saved choice is gone once the file is read");
         BackdropRules.Choose(glass.Source, onScreen: true, hasWallpaper: true).ShouldBe(BackdropKind.SeeThrough);
         BackdropRules.Choose(glass.Sanitised().Source, onScreen: true, hasWallpaper: false).ShouldBe(BackdropKind.SeeThrough);
     }
 
-    [Theory]
-    [InlineData("Tinted", "Bloom", "Bloom")]
-    [InlineData("Dark", "Wallpaper", "Wallpaper")]
-    [InlineData("Colour", "Plain", "Bloom")]
-    public void The_other_styles_keep_their_backdrop_and_plain_is_gone(string style, string saved, string source)
-        => (GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), Backdrop = Enum.Parse<GlassBackdrop>(saved) }).Sanitised().Source
-            .ShouldBe(Enum.Parse<GlassBackdrop>(source));
+    public static TheoryData<string, string> StylesAndSaved()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var style in Enum.GetNames<GlassStyle>())
+        {
+            foreach (var saved in Enum.GetNames<GlassBackdrop>()) data.Add(style, saved);
+        }
+        return data;
+    }
 
     [Fact]
     public void The_wallpaper_fills_the_scene_as_uniform_to_fill_draws_it()

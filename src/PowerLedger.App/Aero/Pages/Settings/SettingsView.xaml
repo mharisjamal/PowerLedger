@@ -145,7 +145,8 @@
                     <Setter.Value>
                         <ControlTemplate TargetType="DatePicker">
                             <Grid x:Name="PART_Root">
-                                <Border CornerRadius="{DynamicResource A.R.Button}" Background="{DynamicResource A.B.Well}" BorderBrush="{DynamicResource A.B.WellEdge}" BorderThickness="1" />
+                                <Border CornerRadius="{DynamicResource A.R.Button}" Background="{DynamicResource A.B.Well}" />
+                                <Border CornerRadius="{DynamicResource A.R.Button}" BorderBrush="{DynamicResource A.B.WellEdge}" BorderThickness="1" />
                                 <DockPanel>
                                     <Button x:Name="PART_Button" DockPanel.Dock="Right" Style="{StaticResource A.GhostBtn}" Height="30" Width="30" Padding="0" Margin="0,0,4,0"
                                             Focusable="False" AutomationProperties.Name="Choose a date">
@@ -233,11 +234,8 @@
                                 <Slider Style="{StaticResource Slider}" Value="{Binding TintStrength, Delay=150}" AutomationProperties.Name="Tint strength" />
                                 <TextBlock Style="{StaticResource Percent}" Text="{Binding TintStrength, StringFormat={}{0:P0}}" />
                             </StackPanel>
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Frost" />
-                                <Slider Style="{StaticResource Slider}" Value="{Binding Frost, Delay=150}" AutomationProperties.Name="Frost" />
-                                <TextBlock Style="{StaticResource Percent}" Text="{Binding Frost, StringFormat={}{0:P0}}" />
-                            </StackPanel>
+                            <!-- No Frost here (0.10.6): the glass shows what is really behind the window, which Windows doesn't blur
+                                 for it, so the slider would do nothing. -->
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Edge light" />
                                 <Slider Style="{StaticResource Slider}" Value="{Binding EdgeLight, Delay=150}" AutomationProperties.Name="Edge light" />
@@ -268,19 +266,7 @@
                                     </RadioButton>
                                 </StackPanel>
                             </StackPanel>
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Behind the glass" />
-                                <!-- Aero bloom (0.10.3, the default): the approved video's glass, over Windows' bloom; My desktop frosts the
-                                     user's own wallpaper. Clear always shows the user's own desktop (0.10.4), so the choice rests. -->
-                                <Border Style="{StaticResource A.SegGroup}">
-                                <StackPanel x:Name="BackdropChoice" Orientation="Horizontal" IsEnabled="{Binding BackdropChoosable}">
-                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Aero bloom" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Bloom}}" />
-                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="My desktop" IsChecked="{Binding Backdrop, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassBackdrop.Wallpaper}}" />
-                                </StackPanel>
-                                </Border>
-                                <TextBlock x:Name="ClearNote" Style="{StaticResource SwitchText}" Text="Clear shows your own desktop." Foreground="{DynamicResource A.B.Text2}"
-                                           Visibility="{Binding BackdropChoosable, Converter={StaticResource HiddenWhen}}" />
-                            </StackPanel>
+                            <!-- No "Behind the glass" here (0.10.6): every style shows what is really behind PowerLedger. -->
                             <!-- The existing Theme choice, here beside the glass it colours. -->
                             <StackPanel Style="{StaticResource Row}" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
                                 <TextBlock Style="{StaticResource Label}" Text="Appearance" />
@@ -295,7 +281,7 @@
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Reduce transparency" />
                                 <aero:GlassSwitch IsChecked="{Binding ReduceTransparency}" AutomationProperties.Name="Reduce transparency" />
-                                <TextBlock Style="{StaticResource SwitchText}" Text="Solid frosted glass instead of see-through" />
+                                <TextBlock Style="{StaticResource SwitchText}" Text="Denser glass that shows less of what is behind it" />
                             </StackPanel>
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Increase contrast" />

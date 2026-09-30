@@ -170,7 +170,7 @@
 
     <!-- A well of figures, as the demo's kv-wrap: a faint top light, the rows inside. -->
     <Style x:Key="A.Page.Figures" TargetType="Border" BasedOn="{StaticResource A.Well}">
-        <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellTop}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellLit}" />
         <Setter Property="BorderThickness" Value="0,1,0,0" />
         <Setter Property="Padding" Value="0,2" />
     </Style>

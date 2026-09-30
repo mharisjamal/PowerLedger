@@ -107,6 +107,9 @@
     <Color x:Key="A.C.BackdropDarkest">#D0D0D0</Color>
     <Color x:Key="A.C.BackdropBrightest">#FFFFFF</Color>
     <Color x:Key="A.C.SeeThroughWash">#33FFFFFF</Color>
+    <!-- The dim under a pill that floats on its own (0.10.6): GlassMaterial works out how much its words need over
+         whatever window is behind; the palette alone lays none. -->
+    <Color x:Key="A.C.PillDim">#00000000</Color>
     <Color x:Key="A.C.Plain">#E9EBEF</Color>
     <!-- The bright glass (0.10.1, the owner's choice, as the demo): how far the frost may let the desktop through
          before the glass holds it, and the halo behind the glass's content that keeps text at 3:1 there (counted as its
@@ -138,8 +141,10 @@
     <Color x:Key="A.C.RimD">#59101216</Color>
     <Color x:Key="A.C.RimInner">#B3FFFFFF</Color>
     <Color x:Key="A.C.RimDark">#0A000000</Color>
-    <Color x:Key="A.C.TopSheen">#99FFFFFF</Color>
+    <Color x:Key="A.C.TopSheen">#E6FFFFFF</Color>
     <Color x:Key="A.C.PointerSheen">#40FFFFFF</Color>
+    <!-- The soft shade toward a pane's edges: the demo's inset 0 0 26px, at its full strength (half of it shows at the edge). -->
+    <Color x:Key="A.C.InnerShade">#0A000000</Color>
     <Color x:Key="A.C.Shadow">#000000</Color>
     <sys:Double x:Key="A.Glass.ShadowFarBlur">60</sys:Double>
     <sys:Double x:Key="A.Glass.ShadowFarDepth">30</sys:Double>
@@ -159,8 +164,15 @@
     <Color x:Key="A.C.WellHover">#14000000</Color>
     <Color x:Key="A.C.WellEdge">#0D000000</Color>
     <Color x:Key="A.C.WellTop">#99FFFFFF</Color>
+    <!-- A well's top border, which its fill doesn't reach under: the fill, the 1 px ring and the top light as one. -->
+    <Color x:Key="A.C.WellLit">#A4EEEEEE</Color>
+    <!-- The quietest edge and top light (the demo's .nav a and .pair): a ring at 4 %, a top line at 12 %. -->
+    <Color x:Key="A.C.SoftEdge">#0D000000</Color>
+    <Color x:Key="A.C.SoftTop">#99FFFFFF</Color>
     <Color x:Key="A.C.Line">#38000000</Color>
     <Color x:Key="A.C.ChartWell">#0A000000</Color>
+    <!-- The chart well's top border: its fill and its top light as one. -->
+    <Color x:Key="A.C.ChartWellLit">#85F5F5F5</Color>
     <Color x:Key="A.C.ChartWellTop">#80FFFFFF</Color>
     <Color x:Key="A.C.Grid">#12000000</Color>
     <Color x:Key="A.C.Track">#1A000000</Color>
@@ -177,6 +189,8 @@
     <Color x:Key="A.C.BtnEdge">#1F000000</Color>
     <Color x:Key="A.C.BtnTop">#CCFFFFFF</Color>
     <Color x:Key="A.C.OutlineHover">#0D000000</Color>
+    <!-- The ghost button's top light (the demo's .btn.ghost, 18 %). -->
+    <Color x:Key="A.C.GhostTop">#99FFFFFF</Color>
     <Color x:Key="A.C.AccentTop">#59FFFFFF</Color>
     <Color x:Key="A.C.AccentHover">#14FFFFFF</Color>
     <Color x:Key="A.C.WhiteRound">#FFFFFFFF</Color>
@@ -211,6 +225,11 @@
     <SolidColorBrush x:Key="A.B.WellHover" Color="{StaticResource A.C.WellHover}" />
     <SolidColorBrush x:Key="A.B.WellEdge" Color="{StaticResource A.C.WellEdge}" />
     <SolidColorBrush x:Key="A.B.WellTop" Color="{StaticResource A.C.WellTop}" />
+    <SolidColorBrush x:Key="A.B.WellLit" Color="{StaticResource A.C.WellLit}" />
+    <SolidColorBrush x:Key="A.B.SoftEdge" Color="{StaticResource A.C.SoftEdge}" />
+    <SolidColorBrush x:Key="A.B.SoftTop" Color="{StaticResource A.C.SoftTop}" />
+    <SolidColorBrush x:Key="A.B.ChartWellLit" Color="{StaticResource A.C.ChartWellLit}" />
+    <SolidColorBrush x:Key="A.B.GhostTop" Color="{StaticResource A.C.GhostTop}" />
     <SolidColorBrush x:Key="A.B.Line" Color="{StaticResource A.C.Line}" />
     <SolidColorBrush x:Key="A.B.ChartWell" Color="{StaticResource A.C.ChartWell}" />
     <SolidColorBrush x:Key="A.B.ChartWellTop" Color="{StaticResource A.C.ChartWellTop}" />

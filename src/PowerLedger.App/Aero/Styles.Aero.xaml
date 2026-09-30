@@ -105,8 +105,9 @@
     </Style>
 
     <!-- ============ buttons ============ -->
-    <!-- gbtn: a glass pill, a hairline rim and a light top edge; brighter under the pointer. Its content sits inside the
-         rim, as the CSS border is inside the box: the padding is counted from the rim in. -->
+    <!-- gbtn: a glass pill, as the demo's: white at 12 % right to its edge, a 1 px rim at 22 % over it, and inside the
+         rim a light top line at 25 %; nothing else, no second ring. Brighter under the pointer. Its content sits inside
+         the rim, as the CSS border is inside the box: the padding is counted from the rim in. -->
     <Style x:Key="A.GlassBtn" TargetType="ButtonBase" BasedOn="{StaticResource A.Hoverable}">
         <Setter Property="Padding" Value="13,0" />
         <Setter Property="Height" Value="34" />
@@ -115,9 +116,11 @@
                 <ControlTemplate TargetType="ButtonBase">
                     <Grid>
                         <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
-                                Background="{DynamicResource A.B.BtnFill}" BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
+                                Background="{DynamicResource A.B.BtnFill}" />
                         <Border x:Name="Hover" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
                                 Background="{DynamicResource A.B.OutlineHover}" Opacity="0" />
+                        <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
                         <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" Margin="1"
                                 BorderBrush="{DynamicResource A.B.BtnTop}" BorderThickness="0,1,0,0" />
                         <Border Margin="1">
@@ -153,9 +156,11 @@
                 <ControlTemplate TargetType="ToggleButton">
                     <Grid>
                         <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
-                                Background="{DynamicResource A.B.BtnFill}" BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
+                                Background="{DynamicResource A.B.BtnFill}" />
                         <Border x:Name="Hover" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
                                 Background="{DynamicResource A.B.OutlineHover}" Opacity="0" />
+                        <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
                         <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" Margin="1"
                                 BorderBrush="{DynamicResource A.B.BtnTop}" BorderThickness="0,1,0,0" />
                         <Border Margin="1">
@@ -260,7 +265,7 @@
     <Style x:Key="A.GhostBtn" TargetType="ButtonBase" BasedOn="{StaticResource A.AccentBtn}">
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text}" />
         <Setter Property="Background" Value="{DynamicResource A.B.Well2}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellTop}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource A.B.GhostTop}" />
     </Style>
 
     <!-- white-round: the unit switch on Power now. -->
@@ -357,7 +362,9 @@
     </Style>
 
     <!-- ============ navigation ============ -->
-    <!-- The sidebar's pages: the icon's disc turns the accent when chosen; the glass pill behind is the window's indicator. -->
+    <!-- The sidebar's pages: the icon's disc turns the accent when chosen; the glass pill behind is the window's indicator.
+         The demo's .nav a: its faint fill right to the edge, a 1 px ring at 4 % over it and a light top line at 12 % on
+         the same first row, so the edge is never darker than the fill. -->
     <Style x:Key="A.NavItem" TargetType="RadioButton" BasedOn="{StaticResource A.Hoverable}">
         <Setter Property="Height" Value="48" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text2}" />
@@ -367,11 +374,13 @@
                 <ControlTemplate TargetType="RadioButton">
                     <Grid Background="Transparent">
                         <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
-                                Background="{DynamicResource A.B.NavFill}" BorderBrush="{DynamicResource A.B.WellEdge}" BorderThickness="1" />
-                        <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" Margin="1"
-                                BorderBrush="{DynamicResource A.B.WellTop}" BorderThickness="0,1,0,0" />
+                                Background="{DynamicResource A.B.NavFill}" />
                         <Border x:Name="Hover" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
                                 Background="{DynamicResource A.B.NavHover}" Opacity="0" />
+                        <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                BorderBrush="{DynamicResource A.B.SoftEdge}" BorderThickness="1" />
+                        <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                BorderBrush="{DynamicResource A.B.SoftTop}" BorderThickness="0,1,0,0" />
                         <StackPanel Orientation="Horizontal" Margin="6,0">
                             <Grid Width="36" Height="36">
                                 <Ellipse Fill="{DynamicResource A.B.NavIcon}" />
@@ -583,7 +592,8 @@
         </Setter>
     </Style>
 
-    <!-- A typed value: a well with a light top edge; the accent edge while it has the keyboard. -->
+    <!-- A typed value: a well as the demo's .well, its fill right to the edge, a 1 px ring at 5 % over it and a light top
+         line on the first row; the accent edge while it has the keyboard. -->
     <Style x:Key="A.Field" TargetType="TextBox">
         <Setter Property="FontFamily" Value="{DynamicResource A.F.Ui}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Control}" />
@@ -601,9 +611,9 @@
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
                     <Grid>
-                        <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                                CornerRadius="{DynamicResource A.R.MenuItem}" />
-                        <Border Margin="1" CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{DynamicResource A.B.WellTop}" BorderThickness="0,1,0,0" />
+                        <Border x:Name="Frame" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource A.R.MenuItem}" />
+                        <Border CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" />
+                        <Border CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{DynamicResource A.B.WellTop}" BorderThickness="0,1,0,0" />
                         <Border x:Name="Ring" CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{DynamicResource A.B.Accent}" BorderThickness="2" Opacity="0" />
                         <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" VerticalAlignment="Center" />
                     </Grid>
@@ -642,9 +652,9 @@
             <Setter.Value>
                 <ControlTemplate TargetType="PasswordBox">
                     <Grid>
-                        <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                                CornerRadius="{DynamicResource A.R.MenuItem}" />
-                        <Border Margin="1" CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{DynamicResource A.B.WellTop}" BorderThickness="0,1,0,0" />
+                        <Border x:Name="Frame" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource A.R.MenuItem}" />
+                        <Border CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" />
+                        <Border CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{DynamicResource A.B.WellTop}" BorderThickness="0,1,0,0" />
                         <Border x:Name="Ring" CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{DynamicResource A.B.Accent}" BorderThickness="2" Opacity="0" />
                         <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" VerticalAlignment="Center" />
                     </Grid>
@@ -677,7 +687,8 @@
                 <ControlTemplate TargetType="CheckBox">
                     <StackPanel Orientation="Horizontal" Background="Transparent">
                         <Grid Width="20" Height="20" VerticalAlignment="Center">
-                            <Border x:Name="Box" CornerRadius="6" Background="{DynamicResource A.B.Well2}" BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
+                            <Border x:Name="Box" CornerRadius="6" Background="{DynamicResource A.B.Well2}" />
+                            <Border CornerRadius="6" BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
                             <Grid x:Name="On" Opacity="0">
                                 <Border CornerRadius="6" Background="{DynamicResource A.B.Accent}" />
                                 <aero:Icon Data="{StaticResource A.I.Check}" Size="14" StrokeWidth="2.8" Foreground="{DynamicResource A.B.AccentInk}" />
@@ -776,7 +787,9 @@
     </Style>
 
     <!-- ============ surfaces ============ -->
-    <!-- The glass pane: shadow outside only (pre-rendered), frost, tint, the bevelled rim, the top sheen, the pointer sheen.
+    <!-- The glass pane: shadow outside only (pre-rendered), frost where a window has its own, the tint, the edge as the
+         demo's .glass (GlassEdge: the 1 px rim, the light and dark lines inside it, the top sheen, the inner shade), the
+         pointer sheen.
          The shadow's cache is on the grid round the blurred borders and their clip, so the bitmap holds the finished,
          clipped shadow: an Effect or Clip on the cached element itself is applied after the cache, on every frame that
          touches the pane, and that re-blurred every pane's two shadows on each live reading (Plan U, measured). -->
@@ -811,10 +824,10 @@
                         </Grid>
                         <Border x:Name="PART_Frost" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Frost}" IsHitTestVisible="False" />
                         <Border x:Name="PART_Tint" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Background}" />
-                        <Border x:Name="PART_Rim" CornerRadius="{TemplateBinding CornerRadius}" BorderBrush="{DynamicResource A.B.Rim}" BorderThickness="1" IsHitTestVisible="False" />
-                        <Border x:Name="PART_RimDark" CornerRadius="{TemplateBinding CornerRadius}" Margin="1" BorderBrush="{DynamicResource A.B.RimDark}" BorderThickness="3" IsHitTestVisible="False" />
-                        <Border x:Name="PART_RimInner" CornerRadius="{TemplateBinding CornerRadius}" Margin="1" BorderBrush="{DynamicResource A.B.RimInner}" BorderThickness="1.5" IsHitTestVisible="False" />
-                        <Border x:Name="PART_TopSheen" CornerRadius="{TemplateBinding CornerRadius}" Margin="1" Background="{DynamicResource A.B.TopSheen}" IsHitTestVisible="False" />
+                        <aero:GlassEdge x:Name="PART_Edge" CornerRadius="{TemplateBinding CornerRadius}"
+                                        RimA="{DynamicResource A.C.RimA}" RimB="{DynamicResource A.C.RimB}" RimC="{DynamicResource A.C.RimC}" RimD="{DynamicResource A.C.RimD}"
+                                        Light="{DynamicResource A.C.RimInner}" Dark="{DynamicResource A.C.RimDark}" Sheen="{DynamicResource A.C.TopSheen}"
+                                        Shade="{DynamicResource A.C.InnerShade}" />
                         <Border x:Name="PART_Sheen" CornerRadius="{TemplateBinding CornerRadius}" Opacity="0" IsHitTestVisible="False" />
                         <!-- The halo (0.10.1): a soft shadow behind the content, laid twice (one alone darkens the ground by a sixth
                              beside thin text; two by about three eighths), that keeps text readable on the bright glass; none on
@@ -826,10 +839,7 @@
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="HasRim" Value="False">
-                            <Setter TargetName="PART_Rim" Property="Visibility" Value="Collapsed" />
-                            <Setter TargetName="PART_RimDark" Property="Visibility" Value="Collapsed" />
-                            <Setter TargetName="PART_RimInner" Property="Visibility" Value="Collapsed" />
-                            <Setter TargetName="PART_TopSheen" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="PART_Edge" Property="Visibility" Value="Collapsed" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -884,10 +894,11 @@
         <Setter Property="SheenEnabled" Value="False" />
         <Setter Property="AutomationProperties.LiveSetting" Value="Polite" />
     </Style>
-    <!-- A top-bar or caption pill (0.10.1, free-form): each floats on its own over the desktop, so each is a glass capsule
-         of its own under its button: the frost (or the wash over the see-through desktop), the rim, and A.B.PillFill: on the
-         bright glass nothing, so the button's own light fill is the wash, as the demo's, and its words read at 3:1 with the
-         halo; on the strict glass the dialogs' denser wash, at 4.5:1. The window's shape ends at its edge, so a shadow could never show: none is drawn. -->
+    <!-- A top-bar or caption pill (0.10.1, free-form): each floats on its own over the desktop, so each is a piece of the
+         window's shape under its button, and paints only A.B.PillFill: the dim its words need at 3:1 over whatever window
+         is behind (none where the button's own fill is enough), or on the strict glass the dialogs' denser wash, at 4.5:1.
+         The rim, the fill and the top light are the button's own, as the demo's .gbtn: the pane draws none, so nothing
+         doubles. The window's shape ends at its edge, so a shadow could never show: none is drawn. -->
     <Style x:Key="A.TopPill" TargetType="aero:GlassPanel" BasedOn="{StaticResource {x:Type aero:GlassPanel}}">
         <Setter Property="Background" Value="{DynamicResource A.B.PillFill}" />
         <Setter Property="Padding" Value="0" />
@@ -907,19 +918,20 @@
         <Setter Property="ToolTip" Value="Resize" />
     </Style>
 
-    <!-- A well: the quieter surface inside a pane, with its light top edge. The demo draws that edge as an inset shadow,
-         inside the padding; here it is a border, so the top padding is a pixel less. -->
+    <!-- A well: the quieter surface inside a pane, with its light top edge. The demo draws that edge as an inset shadow
+         over the well's fill, inside the padding; here it is a border, which the fill doesn't reach under, so its brush is
+         the fill, the ring and the top light as one (A.B.WellLit), and the top padding is a pixel less. -->
     <Style x:Key="A.Well" TargetType="Border">
         <Setter Property="CornerRadius" Value="{DynamicResource A.R.Well}" />
         <Setter Property="Background" Value="{DynamicResource A.B.Well}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellTop}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellLit}" />
         <Setter Property="BorderThickness" Value="0,1,0,0" />
         <Setter Property="Padding" Value="16,13,16,14" />
     </Style>
 
     <!-- ============ menus ============ -->
-    <!-- A menu: a dark glass card with the rim, springing out of what it hangs from (opacity and scale .9 to 1, a 6 px
-         drop); under reduced motion only the fade is left. -->
+    <!-- A menu: a dark glass card as the demo's .menu, a 1 px edge at 16 % and inside it a light top line at 25 %, springing
+         out of what it hangs from (opacity and scale .9 to 1, a 6 px drop); under reduced motion only the fade is left. -->
     <Style x:Key="A.Menu" TargetType="ContextMenu">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="HasDropShadow" Value="False" />
@@ -942,8 +954,8 @@
                                 <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270" Opacity="0.35" Color="{DynamicResource A.C.Shadow}" RenderingBias="Performance" />
                             </Border.Effect>
                         </Border>
-                        <Border CornerRadius="{DynamicResource A.R.Menu}" BorderBrush="{DynamicResource A.B.Rim}" BorderThickness="1" />
-                        <Border CornerRadius="{DynamicResource A.R.Menu}" Margin="1" Background="{DynamicResource A.B.TopSheen}" />
+                        <Border CornerRadius="{DynamicResource A.R.Menu}" BorderBrush="{DynamicResource A.B.MenuEdge}" BorderThickness="1" />
+                        <Border CornerRadius="{DynamicResource A.R.Menu}" Margin="1" BorderBrush="{DynamicResource A.B.BtnTop}" BorderThickness="0,1,0,0" />
                         <StackPanel Margin="6" IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
                     </Grid>
                     <ControlTemplate.Triggers>

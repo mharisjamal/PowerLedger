@@ -220,24 +220,29 @@ public sealed class UiPreferencesTests : IDisposable
         read.Overlay.ShouldBe(OverlaySettings.Default);
         var glass = GlassSettings.Default;
         (glass.Style, glass.TintColor, glass.TintStrength, glass.Frost, glass.EdgeLight).ShouldBe((GlassStyle.Tinted, "#7466D8", 0.5, 0.6, 0.6));
-        (glass.Accent, glass.Backdrop, glass.ReduceTransparency, glass.IncreaseContrast).ShouldBe((GlassAccent.Lime, GlassBackdrop.Bloom, false, false));
+        (glass.Accent, glass.Backdrop, glass.ReduceTransparency, glass.IncreaseContrast).ShouldBe((GlassAccent.Lime, GlassBackdrop.Desktop, false, false));
         (glass.ReduceMotion, glass.Parallax).ShouldBe(((bool?)null, true));
         var overlay = OverlaySettings.Default;
         (overlay.Enabled, overlay.Position, overlay.Left, overlay.Top, overlay.Opacity, overlay.Sparkline)
             .ShouldBe((false, OverlayPosition.TopRight, (double?)null, (double?)null, 1.0, true));
     }
 
+    /// <summary>0.10.6, the owner's choice: every style shows what is really behind PowerLedger, so whatever backdrop an
+    /// earlier version saved (Aero bloom, My desktop, Plain) moves to the live desktop as the file loads.</summary>
     [Theory]
-    [InlineData("Desktop", "Bloom")]
-    [InlineData("Wallpaper", "Wallpaper")]
-    [InlineData("Plain", "Bloom")]
-    [InlineData("Bloom", "Bloom")]
-    [InlineData("Sideways", "Bloom")]
-    public void The_old_default_backdrop_moves_to_aero_bloom_and_a_chosen_one_stays(string saved, string loaded)
+    [InlineData("Desktop")]
+    [InlineData("Wallpaper")]
+    [InlineData("Plain")]
+    [InlineData("Bloom")]
+    [InlineData("Sideways")]
+    public void Any_saved_backdrop_moves_to_the_live_desktop(string saved)
     {
         Directory.CreateDirectory(_folder);
-        System.IO.File.WriteAllText(File, $$"""{ "Glass": { "Backdrop": "{{saved}}" } }""");
-        new UiPreferencesStore(File).Load().Glass.Backdrop.ShouldBe(Enum.Parse<GlassBackdrop>(loaded));
+        System.IO.File.WriteAllText(File, $$"""{ "Glass": { "Style": "Dark", "Backdrop": "{{saved}}" } }""");
+        var glass = new UiPreferencesStore(File).Load().Glass;
+        glass.Backdrop.ShouldBe(GlassBackdrop.Desktop);
+        glass.Source.ShouldBe(GlassBackdrop.Desktop);
+        glass.Style.ShouldBe(GlassStyle.Dark, "the rest of the glass is kept");
     }
 
     [Fact]
@@ -249,7 +254,7 @@ public sealed class UiPreferencesTests : IDisposable
             Glass = new GlassSettings
             {
                 Style = GlassStyle.Colour, TintColor = "#12AB9F", TintStrength = 0.8, Frost = 0.2, EdgeLight = 1, Accent = GlassAccent.Rose,
-                Backdrop = GlassBackdrop.Wallpaper, ReduceTransparency = true, IncreaseContrast = true, ReduceMotion = false, Parallax = false,
+                ReduceTransparency = true, IncreaseContrast = true, ReduceMotion = false, Parallax = false,
             },
             Overlay = new OverlaySettings { Enabled = true, Position = OverlayPosition.Free, Left = -1200.5, Top = 40, Opacity = 0.7, Sparkline = false },
         };
@@ -259,7 +264,7 @@ public sealed class UiPreferencesTests : IDisposable
         store.Load().ShouldBe(saved);
         var json = System.IO.File.ReadAllText(File);
         json.ShouldContain("\"Colour\"");
-        json.ShouldContain("\"Wallpaper\"");
+        json.ShouldContain("\"Desktop\"");
         json.ShouldContain("\"Free\"");
     }
 

@@ -166,20 +166,23 @@ public class AeroSettingsViewTests
             }
         });
 
-    /// <summary>Clear always shows the live desktop (0.10.4): the backdrop choice rests with a short note, and Plain is
-    /// gone.</summary>
+    /// <summary>Every style shows what is really behind PowerLedger (0.10.6): Settings has no "Behind the glass" choice,
+    /// nor a Frost slider, which would do nothing.</summary>
     [Theory]
-    [InlineData("Clear", false)]
-    [InlineData("Tinted", true)]
-    public void Clear_rests_the_backdrop_choice_and_says_why(string style, bool choosable)
+    [InlineData("Clear")]
+    [InlineData("Tinted")]
+    public void The_glass_section_offers_no_backdrop_and_no_frost(string style)
         => UiHarness.OnUi(() =>
         {
             var settings = Screen(GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style) });
             var (window, view) = Page(settings, Theme.Dark, 1440);
             try
             {
-                ((FrameworkElement)view.FindName("BackdropChoice")).IsEnabled.ShouldBe(choosable);
-                ((FrameworkElement)view.FindName("ClearNote")).Visibility.ShouldBe(choosable ? Visibility.Collapsed : Visibility.Visible);
+                view.FindName("BackdropChoice").ShouldBeNull();
+                view.FindName("ClearNote").ShouldBeNull();
+                MidnightHost.AllOf<TextBlock>(view).ShouldNotContain(t => t.Text == "Behind the glass" || t.Text == "Frost");
+                MidnightHost.AllOf<RadioButton>(view).ShouldNotContain(r => r.Content as string == "Aero bloom" || r.Content as string == "My desktop");
+                MidnightHost.AllOf<Slider>(view).ShouldNotContain(s => System.Windows.Automation.AutomationProperties.GetName(s) == "Frost");
                 MidnightHost.AllOf<RadioButton>(view).ShouldNotContain(r => r.Content as string == "Plain");
             }
             finally

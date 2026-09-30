@@ -99,10 +99,12 @@ public class AeroDemoControlsTests
             {
                 window.Show();
                 UiHarness.Pump(TimeSpan.FromMilliseconds(100));
-                var group = (GlassPanel)window.FindName("DemoControls");
+                var group = (StackPanel)window.FindName("DemoControls");
                 ((Panel)window.FindName("CaptionButtons")).Children[0].ShouldBe(group);
-                var names = UiHarness.Find<StackPanel>(group)!.Children.OfType<Button>().Select(AutomationProperties.GetName).ToList();
-                names.ShouldBe(["Replay intro", "Play tour"]);
+                // Each its own pill, as the caption's buttons are: no glass round the two.
+                var pills = group.Children.OfType<GlassPanel>().ToList();
+                pills.Select(pill => AutomationProperties.GetName((Button)pill.Content)).ShouldBe(["Replay intro", "Play tour"]);
+                pills.ShouldAllBe(pill => !pill.HasRim);
                 group.IsVisible.ShouldBeTrue();
             }
             finally

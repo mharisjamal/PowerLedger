@@ -76,7 +76,7 @@
 
                     <!-- The chart in the demo's chart well: darker than the glass, so the parts read against it. -->
                     <Border Margin="0,12,0,0" Padding="12,12,12,8" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.ChartWell}"
-                            BorderBrush="{DynamicResource A.B.ChartWellTop}" BorderThickness="0,1,0,0">
+                            BorderBrush="{DynamicResource A.B.ChartWellLit}" BorderThickness="0,1,0,0">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,6">
                                 <TextBlock DockPanel.Dock="Right" Style="{StaticResource A.Label}" Text="{Binding UnitLabel}" VerticalAlignment="Center" />

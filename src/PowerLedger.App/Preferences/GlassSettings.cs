@@ -4,8 +4,9 @@ using System.Text.RegularExpressions;
 
 namespace PowerLedger.App;
 
-/// <summary>How Aero's glass is tinted (Aero look design §3): barely (Clear), the demo's violet wash (Tinted, the
-/// default), black at about 55 % (Dark), or the user's own <see cref="GlassSettings.TintColor"/> (Colour).</summary>
+/// <summary>How Aero's glass is tinted over what is really behind it (Aero look design §3): a light dim (Clear), the
+/// demo's tint over a dim (Tinted, the default), black at about 55 % (Dark), or the user's own
+/// <see cref="GlassSettings.TintColor"/> (Colour).</summary>
 internal enum GlassStyle
 {
     Clear,
@@ -24,11 +25,11 @@ internal enum GlassAccent
     Rose,
 }
 
-/// <summary>What Aero's glass frosts (Aero look design §3): the Windows 11 bloom the approved video shows (Bloom, the
-/// default since 0.10.3, "Aero bloom" in Settings) or the user's own wallpaper ("My desktop"). Desktop, the desktop itself
-/// through the system backdrop, was the default before 0.10.3 and is no longer offered: a file that still says it moves
-/// to Bloom as it loads (<see cref="GlassSettings.Sanitised"/>), since nobody could tell it apart from never having
-/// chosen. Plain, a solid ground, is gone too (0.10.4) and moves to Bloom the same way.</summary>
+/// <summary>What is behind Aero's glass. Since 0.10.6 (the owner's choice) it is always Desktop: what is really behind
+/// PowerLedger, the desktop and the windows open on it, live, under every style's tint; Settings no longer asks. The
+/// other names are what earlier versions saved (Bloom, the Windows 11 picture the video shows, the default from 0.10.3;
+/// Wallpaper, "My desktop"; Plain, a solid ground): a file that says any of them moves to Desktop as it loads
+/// (<see cref="GlassSettings.Sanitised"/>).</summary>
 internal enum GlassBackdrop
 {
     Desktop,
@@ -78,7 +79,7 @@ internal sealed partial record GlassSettings
     public GlassAccent Accent { get; set; } = GlassAccent.Lime;
 
     [JsonConverter(typeof(GlassBackdropJsonConverter))]
-    public GlassBackdrop Backdrop { get; set; } = GlassBackdrop.Bloom;
+    public GlassBackdrop Backdrop { get; set; } = GlassBackdrop.Desktop;
 
     /// <summary>An opaque frosted fill instead of see-through glass.</summary>
     public bool ReduceTransparency { get; set; }
@@ -99,15 +100,14 @@ internal sealed partial record GlassSettings
 
     public static GlassSettings Default { get; } = new();
 
-    /// <summary>What is behind the glass in force (0.10.4, the owner's choice): Clear always the desktop itself, live, with
-    /// whatever windows are open on it; the other styles <see cref="Backdrop"/>, Aero bloom or My desktop.</summary>
+    /// <summary>What is behind the glass in force (0.10.6, the owner's choice): the desktop itself, live, with whatever
+    /// windows are open on it, under every style; a style only changes the tint laid over it.</summary>
     [JsonIgnore]
-    public GlassBackdrop Source => Style == GlassStyle.Clear ? GlassBackdrop.Desktop : Backdrop;
+    public GlassBackdrop Source => GlassBackdrop.Desktop;
 
     /// <summary>The same settings with a name this version doesn't know put back to its default, the tint colour
     /// normalised to upper-case #RRGGBB or put back, the sliders clamped to 0 to 1 (a number that isn't one put back), and
-    /// the old default backdrop, Desktop, moved to Aero bloom (0.10.3), as Plain is (0.10.4: nothing behind the glass is
-    /// ever solid); a saved My desktop was chosen and stays.</summary>
+    /// any saved backdrop (Aero bloom, My desktop, Plain) moved to the live desktop (0.10.6).</summary>
     public GlassSettings Sanitised() => this with
     {
         Style = Enum.IsDefined(Style) ? Style : Default.Style,
@@ -116,7 +116,7 @@ internal sealed partial record GlassSettings
         Frost = Fraction(Frost, Default.Frost),
         EdgeLight = Fraction(EdgeLight, Default.EdgeLight),
         Accent = Enum.IsDefined(Accent) ? Accent : Default.Accent,
-        Backdrop = Backdrop is GlassBackdrop.Bloom or GlassBackdrop.Wallpaper ? Backdrop : Default.Backdrop,
+        Backdrop = GlassBackdrop.Desktop,
     };
 
     /// <summary><paramref name="value"/> clamped to 0 to 1; <paramref name="fallback"/> for a value that is no number.</summary>

@@ -69,7 +69,7 @@ internal partial class AeroWindow
         var rows = YourPcs.Rows(_shell.Household.Members, _shell.Now.Live.Watts, CultureInfo.CurrentCulture);
         var items = new List<Control> { Header(_shell.Household.HasHousehold ? "Your household" : "Not in a household yet") };
         items.AddRange(rows.Select(row => Item(row.Name, row.Figure, () => _shell.Page = Page.Household)));
-        items.Add(new Separator());
+        items.Add(Rule());
         items.Add(Item("Open Household", null, () => _shell.Page = Page.Household));
         items.Add(Item("Add a PC", null, () => _shell.Household.AddPc.Execute(null)));
         Open(HouseholdButton, items);
@@ -132,6 +132,15 @@ internal partial class AeroWindow
         face.SetResourceReference(TextBlock.ForegroundProperty, "A.B.Text3");
         face.SetResourceReference(TextBlock.FontSizeProperty, "A.T.Tiny");
         return new MenuItem { Header = face, Focusable = false, IsHitTestVisible = false, Padding = new Thickness(0) };
+    }
+
+    /// <summary>A rule between a menu's parts. It names its own style: a context menu gives its item style (A.MenuItem) to
+    /// every item that has none of its own, and that style on a separator stops the menu opening at all.</summary>
+    private static Separator Rule()
+    {
+        var rule = new Separator();
+        rule.SetResourceReference(StyleProperty, MenuItem.SeparatorStyleKey);
+        return rule;
     }
 
     private static MenuItem Line(string text)

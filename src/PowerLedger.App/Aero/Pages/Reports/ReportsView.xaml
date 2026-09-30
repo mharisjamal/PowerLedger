@@ -207,7 +207,7 @@
                             <TextBlock Style="{StaticResource A.Page.Title}" Text="Energy each day" />
                         </DockPanel>
                         <Border Padding="12,12,12,8" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.ChartWell}"
-                                BorderBrush="{DynamicResource A.B.ChartWellTop}" BorderThickness="0,1,0,0">
+                                BorderBrush="{DynamicResource A.B.ChartWellLit}" BorderThickness="0,1,0,0">
                             <app:DailyBars Style="{StaticResource A.Page.DailyBars}" Days="{Binding Data.Days}" AutomationProperties.Name="Energy each day" />
                         </Border>
                     </StackPanel>

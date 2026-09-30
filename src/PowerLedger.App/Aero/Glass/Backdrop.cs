@@ -11,10 +11,10 @@ namespace PowerLedger.App.Aero;
 /// <summary>What shows behind Aero's glass on this PC now (Aero look design §3, §6).</summary>
 internal enum BackdropKind
 {
-    /// <summary>The desktop itself, live (0.10.4, Clear): whatever is behind the window, other windows too, through the
-    /// window's own alpha, under the glass's tint only. Not blurred: with Windows' Transparency effects off, DWM's system
-    /// backdrop paints solid grey across the whole window rectangle and the accent blur black (measured on screen), and
-    /// the window's alpha is the one way the live desktop shows; it shows the same with them on.</summary>
+    /// <summary>The desktop itself, live (0.10.4 for Clear, 0.10.6 for every style): whatever is behind the window, other
+    /// windows too, through the window's own alpha, under the glass's tint only. Not blurred: with Windows' Transparency
+    /// effects off, DWM's system backdrop paints solid grey across the whole window rectangle and the accent blur black
+    /// (measured on screen), and the window's alpha is the one way the live desktop shows; it shows the same with them on.</summary>
     SeeThrough,
 
     /// <summary>The user's wallpaper, sharp around the panes and frosted once under them.</summary>
@@ -29,11 +29,10 @@ internal enum BackdropKind
 }
 
 /// <summary>
-/// The backdrop decision (Aero look design §6), pure, from <see cref="GlassSettings.Source"/>: Aero bloom whenever it is
-/// chosen (it is always there: Windows' own picture, or one drawn like it); the desktop itself, live, for Clear on the
-/// free-form window, which is clear outside its glass (a window drawn whole, a sample, frosts the wallpaper instead);
-/// otherwise the wallpaper when there is one; otherwise plain (a solid-colour desktop, which the free-form window shows
-/// through its tint).
+/// The backdrop decision (Aero look design §6), pure, from <see cref="GlassSettings.Source"/>, which since 0.10.6 is always
+/// the desktop: on the free-form window the desktop itself, live, under every style; a window drawn whole (a sample)
+/// frosts the wallpaper instead, or stands on the plain ground where there is none. Aero bloom and the chosen wallpaper
+/// are what earlier versions offered: nothing asks for them now, and their code rests here unused.
 /// </summary>
 internal static class BackdropRules
 {
@@ -212,7 +211,9 @@ internal sealed class Backdrop : IDisposable
     {
         if (_disposed) return;
         var glass = _material.Current;
-        var wanted = glass.Source;
+        // The free-form window shows what is really behind it, whatever was saved (0.10.6). A window drawn whole (a sample)
+        // has no desktop behind its glass: it keeps the picture its settings name, Aero bloom where they name none.
+        var wanted = _onScreen ? glass.Source : glass.Backdrop == GlassBackdrop.Desktop ? GlassBackdrop.Bloom : glass.Backdrop;
         var path = wanted == GlassBackdrop.Wallpaper || (wanted == GlassBackdrop.Desktop && !_onScreen) ? AeroNative.WallpaperPath() : null;
         var kind = BackdropRules.Choose(wanted, _onScreen, path != null);
         var hwnd = new WindowInteropHelper(_window).Handle;

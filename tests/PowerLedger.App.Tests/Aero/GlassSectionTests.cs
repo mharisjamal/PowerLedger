@@ -34,7 +34,6 @@ public class GlassSectionTests
         glass.Style.ShouldBe(GlassStyle.Dark);
         glass.Frost.ShouldBe(0.3);
         glass.Accent.ShouldBe(GlassAccent.Rose);
-        glass.Backdrop.ShouldBe(GlassBackdrop.Plain);
         glass.IsColour.ShouldBeFalse();
     }
 
@@ -49,17 +48,16 @@ public class GlassSectionTests
         glass.Frost = 0.2;
         glass.EdgeLight = 0.9;
         glass.Accent = GlassAccent.Ice;
-        glass.Backdrop = GlassBackdrop.Wallpaper;
         glass.ReduceTransparency = true;
         glass.IncreaseContrast = true;
         glass.Parallax = false;
 
         settings.Glass.ShouldBe(GlassSettings.Default with
         {
-            Style = GlassStyle.Clear, TintStrength = 0.8, Frost = 0.2, EdgeLight = 0.9, Accent = GlassAccent.Ice, Backdrop = GlassBackdrop.Wallpaper,
+            Style = GlassStyle.Clear, TintStrength = 0.8, Frost = 0.2, EdgeLight = 0.9, Accent = GlassAccent.Ice,
             ReduceTransparency = true, IncreaseContrast = true, Parallax = false,
         });
-        _ui.Changes.Count(c => c.StartsWith("glass", StringComparison.Ordinal)).ShouldBe(9);
+        _ui.Changes.Count(c => c.StartsWith("glass", StringComparison.Ordinal)).ShouldBe(8);
     }
 
     [Fact]

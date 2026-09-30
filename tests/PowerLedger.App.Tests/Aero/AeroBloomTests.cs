@@ -82,23 +82,21 @@ public class AeroBloomTests
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
-    public void The_bloom_glass_is_the_videos_own_with_no_halo(string themeName)
+    public void The_default_glass_keeps_the_videos_text_steps_with_no_halo(string themeName)
     {
-        // 0.10.4, the owner's choice: parity with the video over WCAG. The demo's tint and the video's text steps, and no
-        // halo.
+        // 0.10.4, the owner's choice: parity with the video over WCAG: the video's text steps, and no halo. Since 0.10.6
+        // the glass is over the live desktop, not the bloom, whatever backdrop a file names.
         var theme = Enum.Parse<Theme>(themeName);
         var (map, own, dark) = UiHarness.OnUi(() => (GlassMaterial.Map(GlassSettings.Default with { Backdrop = GlassBackdrop.Bloom }, theme), ThemeManager.Palette(Look.Aero, theme), ThemeManager.Palette(Look.Aero, Theme.Dark)));
         map[GlassMaterial.HaloOnKey].ShouldBe(false);
-        map["A.C.GlassTintTop"].ShouldBe(own["A.C.GlassTintTop"]);
-        map["A.C.GlassTintBottom"].ShouldBe(own["A.C.GlassTintBottom"]);
         var text = (Color)map["A.C.Text"];
-        text.ShouldBe((Color)own["A.C.Text"], "each theme keeps its own ink on the bloom");
+        text.ShouldBe((Color)own["A.C.Text"], "each theme keeps its own ink on the Tinted glass");
         map["A.C.Text2"].ShouldBe(Color.FromArgb(0xB2, text.R, text.G, text.B), "the HTML's --text-2, 70 % (178.5, rounded to even)");
         map["A.C.Text3"].ShouldBe(Color.FromArgb(0x70, text.R, text.G, text.B), "the HTML's --text-3, 44 %");
     }
 
     [Fact]
-    public void Text_on_the_bloom_reads_at_4_5_to_1_under_increase_contrast()
+    public void Text_reads_at_4_5_to_1_under_increase_contrast_whatever_backdrop_was_saved()
     {
         var settings = GlassSettings.Default with { Backdrop = GlassBackdrop.Bloom, IncreaseContrast = true };
         var (map, palette) = UiHarness.OnUi(() => (GlassMaterial.Map(settings, Theme.Dark), ThemeManager.Palette(Look.Aero, Theme.Dark)));

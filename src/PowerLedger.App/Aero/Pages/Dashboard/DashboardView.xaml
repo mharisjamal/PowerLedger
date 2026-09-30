@@ -124,6 +124,9 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="108" />
                                     </Grid.ColumnDefinitions>
+                                    <!-- The demo's .pair: a light top line (12 %) over the fill, under the delta. -->
+                                    <Border Grid.ColumnSpan="2" CornerRadius="{DynamicResource A.R.Well}" BorderBrush="{DynamicResource A.B.SoftTop}" BorderThickness="0,1,0,0"
+                                            IsHitTestVisible="False" />
                                     <!-- The demo's .pair .a: the figure at the top, its label at the foot. -->
                                     <DockPanel Margin="14,12">
                                         <TextBlock DockPanel.Dock="Bottom" Text="kWh used today" Style="{StaticResource A.Label}" />
@@ -143,7 +146,7 @@
                             </Border>
                         </Grid>
                         <Border Grid.Column="2" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.ChartWell}"
-                                BorderBrush="{DynamicResource A.B.ChartWellTop}" BorderThickness="0,1,0,0" Padding="12,11,12,6">
+                                BorderBrush="{DynamicResource A.B.ChartWellLit}" BorderThickness="0,1,0,0" Padding="12,11,12,6">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -363,6 +366,10 @@
                                         <Border.RenderTransform>
                                             <TranslateTransform x:Name="SegX" />
                                         </Border.RenderTransform>
+                                        <!-- The demo's .seg-ind: 0 2px 10px at 18 %. A small surface. -->
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="10" ShadowDepth="2" Direction="270" Opacity="0.18" Color="{DynamicResource A.C.Shadow}" RenderingBias="Performance" />
+                                        </Border.Effect>
                                     </Border>
                                     <StackPanel x:Name="SegItems" Orientation="Horizontal" KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Once">
                                         <RadioButton Style="{StaticResource A.SegItem}" Content="Day" Checked="SpanChecked"

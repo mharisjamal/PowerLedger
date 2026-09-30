@@ -21,8 +21,9 @@ internal sealed record AccentSwatch(GlassAccent Accent, string Name, string Hex)
 
 /// <summary>
 /// Settings' Glass section in Aero (Aero look design §3), like the iPhone's: Clear, Tinted, Dark or a Colour of the user's
-/// own from 8 presets or a hue and saturation wheel; tint strength, frost and edge light; the accent; what shows behind
-/// the glass; Reduce transparency, Increase contrast and Reduce motion; tilt and parallax. Each choice sets
+/// own from 8 presets or a hue and saturation wheel; tint strength and edge light; the accent; Reduce transparency,
+/// Increase contrast and Reduce motion. What is behind the glass is no choice (0.10.6): every style shows what is really
+/// behind PowerLedger. Each choice sets
 /// <see cref="SettingsViewModel.Glass"/> to a new record with the one field changed, which saves it in range and raises
 /// it, the one live channel the glass follows (Plan S 0.4); the section follows that channel back, so it shows what was
 /// kept whoever changed it. Reduce motion shows Windows' setting until the user changes it here, and Follow Windows hands
@@ -99,11 +100,6 @@ internal sealed class GlassSection : ObservableObject
 
     public GlassAccent Accent { get => Glass.Accent; set => Change(Glass with { Accent = value }); }
 
-    public GlassBackdrop Backdrop { get => Glass.Backdrop; set => Change(Glass with { Backdrop = value }); }
-
-    /// <summary>What is behind the glass can be chosen: not under Clear, which always shows the user's own desktop.</summary>
-    public bool BackdropChoosable => Glass.Style != GlassStyle.Clear;
-
     public bool ReduceTransparency { get => Glass.ReduceTransparency; set => Change(Glass with { ReduceTransparency = value }); }
 
     public bool IncreaseContrast { get => Glass.IncreaseContrast; set => Change(Glass with { IncreaseContrast = value }); }
@@ -159,7 +155,7 @@ internal sealed class GlassSection : ObservableObject
     private static readonly string[] Shown =
     [
         nameof(Style), nameof(IsColour), nameof(TintColor), nameof(ChosenTint), nameof(Tint), nameof(TintStrength), nameof(Frost), nameof(EdgeLight),
-        nameof(Accent), nameof(Backdrop), nameof(BackdropChoosable), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ReduceMotion),
+        nameof(Accent), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ReduceMotion),
         nameof(FollowsWindows), nameof(ReduceMotionNote), nameof(Parallax), nameof(ParallaxAvailable),
     ];
 }

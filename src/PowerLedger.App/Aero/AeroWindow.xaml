@@ -152,12 +152,15 @@
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
                         <StackPanel>
                             <Grid x:Name="Nav">
+                                <!-- The demo's .nav-ind: white at 10 % right to the edge, its light top line (22 %) on the first row. -->
                                 <Border x:Name="NavIndicator" Height="48" VerticalAlignment="Top" IsHitTestVisible="False" Opacity="0"
                                         CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
-                                        Background="{DynamicResource A.B.NavIndicator}" BorderBrush="{DynamicResource A.B.NavIndicatorTop}" BorderThickness="0,1,0,0">
+                                        Background="{DynamicResource A.B.NavIndicator}">
                                     <Border.RenderTransform>
                                         <TranslateTransform x:Name="NavY" />
                                     </Border.RenderTransform>
+                                    <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                            BorderBrush="{DynamicResource A.B.NavIndicatorTop}" BorderThickness="0,1,0,0" />
                                 </Border>
                                 <StackPanel x:Name="NavItems" KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Once">
                                     <RadioButton Style="{StaticResource NavItem}" Tag="{StaticResource A.I.Dashboard}" AutomationProperties.Name="Dashboard" Checked="NavChecked"
@@ -285,14 +288,14 @@
                                        VerticalAlignment="Center" IsHitTestVisible="False" />
                             <TextBox x:Name="Search" Grid.Column="1" Margin="8,0,6,0" Style="{StaticResource A.SearchBox}" AutomationProperties.Name="Search history"
                                      TextChanged="SearchChanged" />
-                            <Border Grid.Column="2" Height="34" Padding="10,0" CornerRadius="{DynamicResource A.R.Button}" Background="{DynamicResource A.B.Well3}"
+                            <Border Grid.Column="2" Height="34" Padding="10,0" CornerRadius="{DynamicResource A.R.Button}" Background="{DynamicResource A.B.WellHover}"
                                     VerticalAlignment="Center" Style="{StaticResource Wide}">
                                 <TextBlock Text="Ctrl K" FontSize="{DynamicResource A.T.Small}" Foreground="{DynamicResource A.B.Text2}" VerticalAlignment="Center" />
                             </Border>
                         </Grid>
                     </aero:GlassPanel>
-                    <!-- Each pill floats on its own over the desktop (0.10.1), so each is glass of its own: frost, the tint and a
-                         rim under its button (A.TopPill). -->
+                    <!-- Each pill floats on its own over the desktop (0.10.1): a piece of the window's shape under its button
+                         (A.TopPill), which draws the demo's .gbtn itself. -->
                     <!-- The watts overlay (design §5): on or off, through Settings, where the overlay listens. -->
                     <aero:GlassPanel x:Name="OverlayPill" Grid.Column="2" Style="{StaticResource A.TopPill}" Margin="0,0,10,0">
                         <ToggleButton x:Name="OverlayButton" Style="{StaticResource A.GlassToggle}" Height="46"
@@ -401,12 +404,12 @@
         <!-- ============ the caption: the window's buttons, each a glass pill of its own ============ -->
         <Grid x:Name="Caption" Height="52" VerticalAlignment="Top" Margin="24,0">
             <StackPanel x:Name="CaptionButtons" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True">
-                <!-- The demo's own pill group (its .demo, bottom right there): Replay intro plays the opening again, Play tour
-                     pushes the camera in on the Dashboard's panes in turn. Up here beside the window's buttons, on its own glass:
-                     the stage's foot has no room for it outside the panes, and it would sit on the History pane's glass. -->
-                <aero:GlassPanel x:Name="DemoControls" Style="{StaticResource A.TopPill}" Padding="6" Margin="0,0,12,0"
-                                 Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
-                    <StackPanel Orientation="Horizontal">
+                <!-- The demo's own pills (its .demo, bottom right there): Replay intro plays the opening again, Play tour pushes
+                     the camera in on the Dashboard's panes in turn. Up here beside the window's buttons: the stage's foot has
+                     no room for them outside the panes. Each is a pill of its own, as the caption's are (0.10.6): a group's
+                     glass round them read as a wide border. -->
+                <StackPanel x:Name="DemoControls" Orientation="Horizontal" Margin="0,0,12,0" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
+                    <aero:GlassPanel Style="{StaticResource A.TopPill}">
                         <Button x:Name="ReplayButton" Style="{StaticResource A.GlassBtn}" Height="30" FontSize="{DynamicResource A.T.Small}" Click="ReplayIntroClick"
                                 AutomationProperties.Name="Replay intro" ToolTip="Play the opening again">
                             <StackPanel Orientation="Horizontal">
@@ -414,15 +417,17 @@
                                 <TextBlock Text="Replay intro" Margin="8,0,0,0" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <Button x:Name="TourButton" Style="{StaticResource A.GlassBtn}" Height="30" FontSize="{DynamicResource A.T.Small}" Margin="6,0,0,0" Click="PlayTourClick"
+                    </aero:GlassPanel>
+                    <aero:GlassPanel Style="{StaticResource A.TopPill}" Margin="6,0,0,0">
+                        <Button x:Name="TourButton" Style="{StaticResource A.GlassBtn}" Height="30" FontSize="{DynamicResource A.T.Small}" Click="PlayTourClick"
                                 AutomationProperties.Name="Play tour" ToolTip="Show the Dashboard's panes one by one">
                             <StackPanel Orientation="Horizontal">
                                 <aero:Icon Data="{StaticResource A.I.Play}" Size="13" Filled="True" VerticalAlignment="Center" />
                                 <TextBlock Text="Play tour" Margin="8,0,0,0" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                    </StackPanel>
-                </aero:GlassPanel>
+                    </aero:GlassPanel>
+                </StackPanel>
                 <aero:GlassPanel Style="{StaticResource A.TopPill}" Margin="0,0,6,0">
                     <Button Style="{StaticResource A.RoundGlassBtn}" Width="30" Height="30" Click="MinimizeClick" ToolTip="Minimize" AutomationProperties.Name="Minimize">
                         <aero:Icon Data="{StaticResource A.I.Minimize}" Size="14" />
@@ -443,8 +448,12 @@
 
         <!-- The grip (0.10.1): a small glass disc off the stage's bottom-right corner that resizes the smaller layout. -->
         <aero:GlassPanel x:Name="Grip" Style="{StaticResource A.Grip}" AutomationProperties.Name="Resize">
-            <Path Data="M 10,3 L 3,10 M 10,7 L 7,10" Stroke="{DynamicResource A.B.Text2}" StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Grid>
+                <Ellipse Fill="{DynamicResource A.B.BtnFill}" />
+                <Ellipse Stroke="{DynamicResource A.B.BtnEdge}" StrokeThickness="1" />
+                <Path Data="M 10,3 L 3,10 M 10,7 L 7,10" Stroke="{DynamicResource A.B.Text2}" StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Grid>
         </aero:GlassPanel>
 
         <!-- ============ dialogs and toasts float here, over everything ============ -->

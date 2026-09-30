@@ -319,52 +319,50 @@ public class FreeFormWindowTests
             AeroWindow.ShapeHooks.ShouldBe(0);
         });
 
-    /// <summary>Each top-bar pill floats over the desktop on its own. On the strict glass (Increase contrast) its wash is
-    /// the dialogs' denser one, over the brightest backdrop: 4.5:1. The default glass is the video's (0.10.4): the
-    /// button's own light fill is the wash (<see cref="The_default_top_bar_pill_is_the_videos_button_alone"/>).</summary>
+    /// <summary>Each top-bar pill floats over the desktop on its own, over whatever window is behind it (0.10.6). Under its
+    /// button's own light fill it lays only the dim its words need: at 3:1 over a white window and a black one, 4.5:1 on
+    /// the strict glass; and nothing where the button's fill is enough (the light theme's).</summary>
     [Theory]
+    [InlineData("Dark", "Tinted", false)]
+    [InlineData("Dark", "Clear", false)]
     [InlineData("Dark", "Tinted", true)]
+    [InlineData("Light", "Tinted", false)]
     [InlineData("Light", "Tinted", true)]
     [InlineData("Dark", "Dark", true)]
-    public void A_top_bar_pill_reads_over_the_brightest_backdrop(string themeName, string style, bool increaseContrast)
+    [InlineData("Light", "Dark", false)]
+    public void A_top_bar_pill_reads_over_a_white_window_and_a_black_one(string themeName, string style, bool increaseContrast)
         => UiHarness.OnUi(() =>
         {
             var theme = Enum.Parse<Theme>(themeName);
             var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), IncreaseContrast = increaseContrast };
             var map = GlassMaterial.Map(settings, theme);
             Color C(string key) => (Color)map[key];
-            var palette = GlassMaterial.Palette(theme);
-            var strict = GlassMaterial.Strict(settings);
-            // Aero bloom (the default since 0.10.3) is frosted whole: its grounds are its own darkest and brightest.
-            var grounds = strict ? [C(theme == Theme.Dark ? "A.C.BackdropBrightest" : "A.C.BackdropDarkest")] : new[] { C("A.C.BloomDarkest"), C("A.C.BloomBrightest") };
-            var share = strict || map[GlassMaterial.HaloOnKey] is false ? 0 : (double)palette["A.Glass.HaloShare"];
-            var halo = C("A.C.Halo");
-            var washes = strict ? new[] { C("A.C.ModalTop"), C("A.C.ModalBottom") } : [Colors.Transparent];
-            if (strict) map["A.B.PillFill"].ShouldBeSameAs(map["A.B.ModalFill"]);
-            else ((SolidColorBrush)map["A.B.PillFill"]).Color.ShouldBe(Colors.Transparent);
-            foreach (var (wash, brightest) in washes.SelectMany(w => grounds.Select(g => (w, g))))
+            var dim = ((SolidColorBrush)map["A.B.PillFill"]).Color;
+            dim.ShouldBe(C("A.C.PillDim"));
+            map[GlassMaterial.HaloOnKey].ShouldBe(false);
+            foreach (var behind in new[] { Colors.White, Colors.Black })
             {
-                var glass = Contrast.Over(Color.FromArgb((byte)Math.Round(255 * share), halo.R, halo.G, halo.B), Contrast.Over(wash, brightest));
+                var glass = Contrast.Over(dim, behind);
                 foreach (var fill in new[] { Contrast.Over(C("A.C.BtnFill"), glass), Contrast.Over(C("A.C.OutlineHover"), Contrast.Over(C("A.C.BtnFill"), glass)) })
                 {
-                    foreach (var text in new[] { "A.C.Text", "A.C.Text2" })
-                    {
-                        Contrast.Ratio(Contrast.Over(C(text), fill), fill).ShouldBeGreaterThanOrEqualTo(strict ? GlassMaterial.StrictContrast : GlassMaterial.GlassContrast,
-                            $"{text} on a pill, {style}, {theme}, {(strict ? "strict" : "bright")}");
-                    }
+                    Contrast.Ratio(Contrast.Over(C("A.C.Text"), fill), fill).ShouldBeGreaterThanOrEqualTo(
+                        increaseContrast ? GlassMaterial.StrictContrast : GlassMaterial.GlassContrast, $"a pill's words over {behind}, {style}, {theme}");
                 }
             }
         });
 
-    [Theory]
-    [InlineData("Dark")]
-    [InlineData("Light")]
-    public void The_default_top_bar_pill_is_the_videos_button_alone(string themeName)
+    /// <summary>The pill is the demo's button over what is behind it: over a dark desktop its fill is the demo's white at
+    /// 12 % exactly (the dim under it is black), and the light theme's button needs no dim at all.</summary>
+    [Fact]
+    public void The_default_top_bar_pill_is_the_videos_button_over_the_dim_its_words_need()
         => UiHarness.OnUi(() =>
         {
-            var map = GlassMaterial.Map(GlassSettings.Default, Enum.Parse<Theme>(themeName));
-            ((SolidColorBrush)map["A.B.PillFill"]).Color.ShouldBe(Colors.Transparent);
-            map[GlassMaterial.HaloOnKey].ShouldBe(false);
+            var dark = GlassMaterial.Map(GlassSettings.Default, Theme.Dark);
+            var dim = ((SolidColorBrush)dark["A.B.PillFill"]).Color;
+            (dim.R, dim.G, dim.B).ShouldBe(((byte)0, (byte)0, (byte)0), "black under the light ink");
+            dim.A.ShouldBeInRange((byte)110, (byte)150, "about half: the least that keeps the words at 3:1 over a white window");
+            Contrast.Over((Color)dark["A.C.BtnFill"], Contrast.Over(dim, Colors.Black)).ShouldBe(Contrast.Over((Color)dark["A.C.BtnFill"], Colors.Black));
+            ((SolidColorBrush)GlassMaterial.Map(GlassSettings.Default, Theme.Light)["A.B.PillFill"]).Color.A.ShouldBe((byte)0, "the light button's fill is enough");
         });
 
     /// <summary>No halo behind the glass's content (0.10.4): the approved video has none, on any glass.</summary>
