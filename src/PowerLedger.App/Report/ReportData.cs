@@ -70,7 +70,7 @@ internal sealed record ReportData(
     /// is already in the battery's report, and its figure only splits it off.</summary>
     public const string QualityLegend =
         "Measured: Windows' battery report. Calibrated: a model with a baseline learned on battery, ±10%. Estimated: the model alone, ±20%. "
-        + "UPS, power supply and platform meter readings count as measured, except a UPS that only gives its load as a share of its rated VA. "
+        + "UPS, power supply, power meter, management controller and platform meter readings count as measured, except a UPS that gives its power only in VA, without its real watts. "
         + "External monitors' watts come from their own figures in every mode.";
 
     public static ReportData Empty { get; } = new(
