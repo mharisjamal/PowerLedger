@@ -157,6 +157,25 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
             return 0;
         }));
 
+    [Fact]
+    public void Allowing_screenshots_clears_the_affinity_and_shows_the_wallpaper_and_back()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            using var scene = Show();
+            UiHarness.PumpUntil(() => scene.Glass.Kind == LiquidGlassSourceKind.Live, TimeSpan.FromSeconds(10), "the live picture");
+            LiquidGlassSources.AllowScreenshots = true;
+            GetWindowDisplayAffinity(scene.Handle, out var affinity).ShouldBeTrue();
+            affinity.ShouldBe(CaptureNative.WDA_NONE);
+            var wallpaper = AeroNative.WallpaperPath() != null ? LiquidGlassSourceKind.Wallpaper : LiquidGlassSourceKind.None;
+            scene.Glass.Kind.ShouldBe(wallpaper);
+            scene.Source.Subscriber.ShouldBeNull();
+            LiquidGlassSources.AllowScreenshots = false;
+            GetWindowDisplayAffinity(scene.Handle, out affinity).ShouldBeTrue();
+            affinity.ShouldBe(CaptureNative.WDA_EXCLUDEFROMCAPTURE);
+            UiHarness.PumpUntil(() => scene.Glass.Kind == LiquidGlassSourceKind.Live, TimeSpan.FromSeconds(10), "the live picture again");
+            return 0;
+        }));
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hwnd, out CaptureNative.RECT rect);

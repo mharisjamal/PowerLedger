@@ -297,6 +297,28 @@ public sealed class UiPreferencesTests : IDisposable
         System.IO.File.ReadAllText(File).ShouldContain("\"EdgeLightReset\": true");
     }
 
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("\"ShowInScreenshots\": true,", true)]
+    [InlineData("\"ShowInScreenshots\": false,", false)]
+    [InlineData("\"ShowInScreenshots\": \"yes\",", false)]
+    [InlineData("\"ShowInScreenshots\": 1,", false)]
+    [InlineData("\"ShowInScreenshots\": null,", false)]
+    [InlineData("\"ShowInScreenshots\": { \"on\": true },", false)]
+    public void Showing_in_screenshots_is_off_until_chosen_and_anything_but_true_reads_as_off(string field, bool expected)
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, $$"""{ "Glass": { {{field}} "Style": "Dark" } }""");
+        var store = new UiPreferencesStore(File);
+
+        var read = store.Load();
+
+        read.Glass.ShowInScreenshots.ShouldBe(expected);
+        read.Glass.Style.ShouldBe(GlassStyle.Dark, "the rest of the glass is kept");
+        store.Save(read with { Glass = read.Glass with { ShowInScreenshots = true } });
+        store.Load().Glass.ShowInScreenshots.ShouldBeTrue("chosen, it sticks");
+    }
+
     [Fact]
     public void A_new_install_needs_no_edge_light_reset()
     {
