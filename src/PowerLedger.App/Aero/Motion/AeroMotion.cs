@@ -130,6 +130,9 @@ public static class AeroMotion
     /// <summary>The grab bar easing between its glows (idle, near, over).</summary>
     public const double Grab = 200;
 
+    /// <summary>The side scroll bar easing between hidden, near and over.</summary>
+    public const double ScrollFade = 200;
+
     // Distances and scales.
     public const double PaneRise = 22;
     public const double PaneScale = .95;

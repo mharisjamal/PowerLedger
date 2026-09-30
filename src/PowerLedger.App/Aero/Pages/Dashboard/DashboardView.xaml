@@ -59,9 +59,9 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <!-- The page scrolls under the wheel and the keyboard with no bar of its own: the window is only its glass (0.10.1), so a
-         bar beside the panes was never on screen, and it only took the panes' width from the demo's. -->
-    <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+    <!-- The page scrolls under the wheel and the keyboard; its side bar (0.10.8, Aero's ScrollViewer style) overlays the
+         panes' edge, hidden until the pointer comes near or the page scrolls, so it takes none of their width. -->
+    <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
         <Grid x:Name="Camera" RenderTransformOrigin="0,0" Margin="0,0,0,4">
             <Grid.RenderTransform>
                 <TransformGroup>

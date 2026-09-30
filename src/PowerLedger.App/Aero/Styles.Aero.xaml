@@ -1121,12 +1121,41 @@
     <Style TargetType="ContextMenu" BasedOn="{StaticResource A.Menu}" />
     <Style TargetType="MenuItem" BasedOn="{StaticResource A.MenuItem}" />
 
-    <!-- Thin scroll bars: a glass thumb, no arrows, 8 px. -->
+    <!-- The side scroll bar (0.10.8): a thin capsule thumb as the demo's .gbtn, the white fill at 12 % brightened on it by
+         the hover wash (about 20 %), a 1 px edge at 22 %; no track, no arrows. The thumb takes the pointer across the
+         whole strip; the capsule, 6 wide (10 on it, ScrollGlow), sits 4 in from the pane's edge. -->
     <Style x:Key="A.ScrollThumb" TargetType="Thumb">
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
-                    <Border CornerRadius="4" Background="{DynamicResource A.B.Well3}" />
+                    <Grid Background="Transparent">
+                        <Grid x:Name="PART_Capsule" Width="{x:Static aero:ScrollGlow.Thin}" HorizontalAlignment="Right" Margin="0,0,4,0">
+                            <Border CornerRadius="{Binding ActualWidth, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                    Background="{DynamicResource A.B.BtnFill}" />
+                            <Border x:Name="PART_Bright" Opacity="0" CornerRadius="{Binding ActualWidth, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                    Background="{DynamicResource A.B.OutlineHover}" />
+                            <Border CornerRadius="{Binding ActualWidth, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                    BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
+                        </Grid>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="A.ScrollThumbH" TargetType="Thumb">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Grid Background="Transparent">
+                        <Grid x:Name="PART_Capsule" Height="{x:Static aero:ScrollGlow.Thin}" VerticalAlignment="Bottom" Margin="0,0,0,4">
+                            <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                    Background="{DynamicResource A.B.BtnFill}" />
+                            <Border x:Name="PART_Bright" Opacity="0" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                    Background="{DynamicResource A.B.OutlineHover}" />
+                            <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                    BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
+                        </Grid>
+                    </Grid>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -1143,13 +1172,13 @@
         </Setter>
     </Style>
     <Style TargetType="ScrollBar">
-        <Setter Property="Width" Value="8" />
-        <Setter Property="MinWidth" Value="8" />
+        <Setter Property="Width" Value="{x:Static aero:ScrollGlow.Strip}" />
+        <Setter Property="MinWidth" Value="{x:Static aero:ScrollGlow.Strip}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ScrollBar">
-                    <Track x:Name="PART_Track" IsDirectionReversed="True" Margin="1,4">
+                    <Track x:Name="PART_Track" IsDirectionReversed="True" Margin="0,4">
                         <Track.DecreaseRepeatButton>
                             <RepeatButton Style="{StaticResource A.ScrollPage}" Command="ScrollBar.PageUpCommand" />
                         </Track.DecreaseRepeatButton>
@@ -1167,12 +1196,12 @@
             <Trigger Property="Orientation" Value="Horizontal">
                 <Setter Property="Width" Value="Auto" />
                 <Setter Property="MinWidth" Value="0" />
-                <Setter Property="Height" Value="8" />
-                <Setter Property="MinHeight" Value="8" />
+                <Setter Property="Height" Value="{x:Static aero:ScrollGlow.Strip}" />
+                <Setter Property="MinHeight" Value="{x:Static aero:ScrollGlow.Strip}" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ScrollBar">
-                            <Track x:Name="PART_Track" Margin="4,1">
+                            <Track x:Name="PART_Track" Margin="4,0">
                                 <Track.DecreaseRepeatButton>
                                     <RepeatButton Style="{StaticResource A.ScrollPage}" Command="ScrollBar.PageLeftCommand" />
                                 </Track.DecreaseRepeatButton>
@@ -1180,7 +1209,7 @@
                                     <RepeatButton Style="{StaticResource A.ScrollPage}" Command="ScrollBar.PageRightCommand" />
                                 </Track.IncreaseRepeatButton>
                                 <Track.Thumb>
-                                    <Thumb Style="{StaticResource A.ScrollThumb}" />
+                                    <Thumb Style="{StaticResource A.ScrollThumbH}" />
                                 </Track.Thumb>
                             </Track>
                         </ControlTemplate>
@@ -1188,6 +1217,54 @@
                 </Setter>
             </Trigger>
         </Style.Triggers>
+    </Style>
+    <!-- A scroll bar's host: a clear glass piece, so a shown bar is a piece of the free-form window's shape (as the grab
+         bar is); ScrollGlow hides it at rest, when it is no piece at all. No frost, rim, sheen or shadow. -->
+    <Style x:Key="A.ScrollHost" TargetType="aero:GlassPanel">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HasShadow" Value="False" />
+        <Setter Property="HasRim" Value="False" />
+        <Setter Property="SheenEnabled" Value="False" />
+        <Setter Property="Visibility" Value="Hidden" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="aero:GlassPanel">
+                    <ContentPresenter />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- Every scrolling surface: the bars overlay the content (no layout shift), each in its host at the pane's right or
+         bottom edge, hidden at rest and lit by ScrollGlow. -->
+    <Style TargetType="ScrollViewer">
+        <Setter Property="aero:ScrollGlow.Enabled" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollViewer">
+                    <Grid Background="{TemplateBinding Background}">
+                        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Margin="{TemplateBinding Padding}"
+                                                CanContentScroll="{TemplateBinding CanContentScroll}" CanHorizontallyScroll="False" CanVerticallyScroll="False"
+                                                Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
+                        <aero:GlassPanel x:Name="PART_VerticalHost" Style="{StaticResource A.ScrollHost}" HorizontalAlignment="Right" Width="{x:Static aero:ScrollGlow.Strip}">
+                            <ScrollBar x:Name="PART_VerticalScrollBar" Orientation="Vertical" Cursor="Arrow" Opacity="0" Minimum="0"
+                                       AutomationProperties.AutomationId="VerticalScrollBar"
+                                       Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}"
+                                       Value="{Binding VerticalOffset, Mode=OneWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                        </aero:GlassPanel>
+                        <aero:GlassPanel x:Name="PART_HorizontalHost" Style="{StaticResource A.ScrollHost}" VerticalAlignment="Bottom" Height="{x:Static aero:ScrollGlow.Strip}">
+                            <ScrollBar x:Name="PART_HorizontalScrollBar" Orientation="Horizontal" Cursor="Arrow" Opacity="0" Minimum="0"
+                                       AutomationProperties.AutomationId="HorizontalScrollBar"
+                                       Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}"
+                                       Value="{Binding HorizontalOffset, Mode=OneWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                       Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}" />
+                        </aero:GlassPanel>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Tooltips: the HTML's chart tip, a pill-white bubble with the ink's words, fading in; no glass. -->
