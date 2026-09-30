@@ -598,7 +598,7 @@
                         <Ellipse x:Name="PART_Knob" Width="24" Height="24" HorizontalAlignment="Left" Margin="3,0,0,0" Fill="{DynamicResource A.B.Knob}">
                             <Ellipse.RenderTransform><TranslateTransform /></Ellipse.RenderTransform>
                             <Ellipse.Effect>
-                                <DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270" Opacity="0.45" Color="#00051E" RenderingBias="Performance" />
+                                <DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270" Opacity="0.45" Color="{DynamicResource A.C.Navy}" RenderingBias="Performance" />
                             </Ellipse.Effect>
                         </Ellipse>
                     </Grid>
@@ -787,7 +787,7 @@
                 <ControlTemplate TargetType="Thumb">
                     <Ellipse Fill="{DynamicResource A.B.Knob}">
                         <Ellipse.Effect>
-                            <DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270" Opacity="0.45" Color="#00051E" RenderingBias="Performance" />
+                            <DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270" Opacity="0.45" Color="{DynamicResource A.C.Navy}" RenderingBias="Performance" />
                         </Ellipse.Effect>
                     </Ellipse>
                 </ControlTemplate>
@@ -970,7 +970,7 @@
                         </Grid.RenderTransform>
                         <Border CornerRadius="{DynamicResource A.R.Menu}" Background="{DynamicResource A.B.MenuFill}" Opacity="0.6">
                             <Border.Effect>
-                                <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270" Opacity="0.5" Color="#00051E" RenderingBias="Performance" />
+                                <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270" Opacity="0.5" Color="{DynamicResource A.C.Navy}" RenderingBias="Performance" />
                             </Border.Effect>
                         </Border>
                         <aero:GlassPanel CornerRadius="{DynamicResource A.R.Menu}" Background="{DynamicResource A.B.MenuFill}" HasShadow="False">

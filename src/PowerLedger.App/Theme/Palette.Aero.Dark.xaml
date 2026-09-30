@@ -149,6 +149,8 @@
         <GradientStop Offset="1" Color="#E6E9F2" />
     </RadialGradientBrush>
     <SolidColorBrush x:Key="A.B.SliderTop" Color="#B3FFFFFF" />
+    <!-- The mockup's shadow navy, under a knob and a menu (rgba(0,5,30)). -->
+    <Color x:Key="A.C.Navy">#00051E</Color>
     <!-- The hairline between the buttons of a glass group (the mockup's .sep, white at 22 %). -->
     <SolidColorBrush x:Key="A.B.GroupSep" Color="#38FFFFFF" />
     <LinearGradientBrush x:Key="A.B.PillGlass" StartPoint="0,0" EndPoint="0,1">

@@ -32,9 +32,10 @@ public class AeroGlassRenderingTests
                 UiHarness.Render(window, AeroGlassSample.Width, AeroGlassSample.Height, $"aero-glass-sample-{themeName.ToLowerInvariant()}.png");
                 var palette = ThemeManager.Palette(Look.Aero, theme);
                 var accent = UiHarness.Find<Button>(window, b => b.Style == window.FindResource("A.AccentBtn"))!;
-                var at = accent.TranslatePoint(new Point(4, accent.ActualHeight / 2), window);
-                MidnightHost.PixelOf(window, AeroGlassSample.Width, AeroGlassSample.Height, (int)at.X, (int)at.Y)
-                    .ShouldBe((Color)palette["A.C.Accent"], "the accent button is the palette's accent");
+                // 0.10.9: the accent action is the recipe's glass under the accent at 86 % (the mockup's lime glass).
+                var at = accent.TranslatePoint(new Point(14, accent.ActualHeight / 2), window);
+                Contrast.Difference(MidnightHost.PixelOf(window, AeroGlassSample.Width, AeroGlassSample.Height, (int)at.X, (int)at.Y), (Color)palette["A.C.Accent"])
+                    .ShouldBeLessThan(25, "the accent button is the accent's glass");
 
                 var side = UiHarness.Find<GlassPanel>(window)!;
                 var inside = side.TranslatePoint(new Point(side.ActualWidth / 2, side.ActualHeight - 30), window);
@@ -45,8 +46,7 @@ public class AeroGlassRenderingTests
                 var rim = side.TranslatePoint(new Point(side.ActualWidth / 2, 0.5), window);
                 var rimPixel = MidnightHost.PixelOf(window, AeroGlassSample.Width, AeroGlassSample.Height, (int)rim.X, (int)rim.Y);
                 var below = MidnightHost.PixelOf(window, AeroGlassSample.Width, AeroGlassSample.Height, (int)rim.X, (int)rim.Y + 12);
-                if (theme == Theme.Dark) Contrast.Luminance(rimPixel).ShouldBeGreaterThan(Contrast.Luminance(below), "the rim catches the light");
-                else Contrast.Luminance(rimPixel).ShouldBeLessThan(Contrast.Luminance(below), "light glass is drawn by a dark hairline");
+                Contrast.Luminance(rimPixel).ShouldBeGreaterThan(Contrast.Luminance(below), "the recipe's white glow lights the edge, in either theme");
             }
             finally
             {

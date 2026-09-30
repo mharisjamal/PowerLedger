@@ -165,14 +165,15 @@ public class ContrastTests
         => Keys(Look.Aero, Theme.Dark).OrderBy(k => k.Key).ShouldBe(Keys(Look.Aero, Theme.Light).OrderBy(k => k.Key));
 
     /// <summary>Plan S G2: Aero's text reads at 4.5:1 on the glass wherever a pane can sit, over the darkest and the
-    /// brightest backdrop the look allows (WallpaperFrost and the see-through wash keep the scene between them), at the
-    /// tint's top and its foot, and in the wells, menus and dialogs laid on it.</summary>
+    /// brightest backdrop the look allows, at the tint's top and its foot, and in the wells, menus and dialogs laid on it.
+    /// 0.10.9: the recipe's glass has no tint (the owner's choice), so the palette alone promises nothing on bare glass
+    /// over a light backdrop; the promise is the strict glass's (Increase contrast), which lays the tint the text needs.</summary>
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
-    public void Aeros_text_reads_on_the_glass_over_every_backdrop_at_four_and_a_half_to_one(string theme)
+    public void Aeros_text_reads_on_the_strict_glass_over_every_backdrop_at_four_and_a_half_to_one(string theme)
     {
-        var aero = Aero(Enum.Parse<Theme>(theme));
+        var aero = Mapped(GlassSettings.Default with { IncreaseContrast = true }, Enum.Parse<Theme>(theme));
         foreach (var (where, ground, tiers) in AeroGrounds(aero))
         {
             foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
@@ -190,7 +191,8 @@ public class ContrastTests
     [InlineData("Light")]
     public void Aeros_accents_and_focus_ring_stand_off_the_glass_at_three_to_one(string theme)
     {
-        var aero = Aero(Enum.Parse<Theme>(theme));
+        // On the strict glass, as the text above: untinted, the glass is whatever is behind it.
+        var aero = Mapped(GlassSettings.Default with { IncreaseContrast = true }, Enum.Parse<Theme>(theme));
         foreach (var (where, glass) in AeroGlass(aero))
         {
             Contrast.Ratio(aero["A.C.Accent"], glass).ShouldBeGreaterThanOrEqualTo(3, $"the accent on {where}, {theme}");

@@ -192,6 +192,9 @@ public class LiquidGlassProofTests
                 UiHarness.OnUi(() =>
                 {
                     var ground = Load(background);
+                    // The engine is handed the mockup's background where the window lies, as the live capture hands it the
+                    // screen, so the glass bends and blurs the same picture the browser's does.
+                    LiquidGlassSources.Override = source => Behind(ground, source, 1440, 900);
                     var window = AeroHost.Window(AeroFixtures.Shell(saver), theme);
                     using var motion = AeroMotion.Force(true);
                     window.Width = 1440;
@@ -199,19 +202,31 @@ public class LiquidGlassProofTests
                     window.Show();
                     try
                     {
-                        UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+                        UiHarness.Pump(TimeSpan.FromMilliseconds(600));
                         window.Page = page;
-                        UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+                        UiHarness.Pump(TimeSpan.FromMilliseconds(1500));
                         window.UpdateLayout();
                         Write(Over(ground, window, 1440, 900), Path.Combine(pages, $"{page}-{theme}.png"));
                     }
                     finally
                     {
                         window.CloseForSwitch();
+                        LiquidGlassSources.Override = null;
+                        UiHarness.NoCapture();
                     }
                 });
             }
         }
+    }
+
+    /// <summary>A source that lays <paramref name="ground"/> over the window <paramref name="source"/> shows, whose size in
+    /// units is <paramref name="width"/> by <paramref name="height"/>: what a see-through window at that place would have
+    /// behind it.</summary>
+    internal static ILiquidGlassSource Behind(BitmapSource ground, HwndSource source, double width, double height)
+    {
+        var window = (Window)source.RootVisual;
+        var scale = source.CompositionTarget.TransformToDevice.M11;
+        return new FakeGlassSource(ground, new Rect(window.Left * scale, window.Top * scale, width * scale, height * scale));
     }
 
     /// <summary><paramref name="visual"/> drawn over <paramref name="ground"/>, both at 96 DPI.</summary>

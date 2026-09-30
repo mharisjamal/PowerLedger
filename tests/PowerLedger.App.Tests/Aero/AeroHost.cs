@@ -17,6 +17,7 @@ internal static class AeroHost
     public static T Dressed<T>(T window, Theme theme)
         where T : Window
     {
+        UiHarness.NoCapture();
         window.Resources.MergedDictionaries.Add(ThemeManager.Palette(Look.Aero, theme));
         window.Resources.MergedDictionaries.Add(new SharedDictionary { Source = new Uri(Styles, UriKind.Absolute) });
         return window;
@@ -28,6 +29,7 @@ internal static class AeroHost
     /// no intro video, and its banner shows as before. Call on the UI thread.</summary>
     public static AeroWindow Window(ShellViewModel shell, Theme theme = Theme.Dark, Updater? updates = null, Action? feedback = null, AeroIntro? intro = null)
     {
+        UiHarness.NoCapture();
         var app = Application.Current.Resources.MergedDictionaries;
         var before = app.Count;
         var manager = new ThemeManager(Application.Current, theme == Theme.Dark ? ThemeChoice.Dark : ThemeChoice.Light);

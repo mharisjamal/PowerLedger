@@ -178,8 +178,10 @@ internal sealed class GlassMaterial : IDisposable
             var reads = (Color)family["A.C.Text"];
             var pole = ReferenceEquals(family, light) ? Colors.Black : Colors.White;
             var inWell = (Color)family["A.C.Well"];
-            top = Held(top, pole, reads, inWell, StrictContrast);
-            bottom = Held(bottom, pole, reads, inWell, StrictContrast);
+            // Held for a well on it and then for a control's hover wash on it, the lighter of what words sit on.
+            var hover = colours["A.C.GlassHover"];
+            top = Held(Held(top, pole, reads, inWell, StrictContrast), pole, reads, hover, StrictContrast);
+            bottom = Held(Held(bottom, pole, reads, inWell, StrictContrast), pole, reads, hover, StrictContrast);
         }
         colours["A.C.GlassTintTop"] = top;
         colours["A.C.GlassTintBottom"] = bottom;
@@ -248,9 +250,10 @@ internal sealed class GlassMaterial : IDisposable
     {
         var edge = GlassSettings.Fraction(edgeLight, GlassSettings.DefaultEdgeLight);
         var recipe = LiquidGlassRecipe.HighlightOpacity;
-        return edge <= GlassSettings.DefaultEdgeLight
+        var glow = edge <= GlassSettings.DefaultEdgeLight
             ? recipe * edge / GlassSettings.DefaultEdgeLight
             : recipe + (1 - recipe) * (edge - GlassSettings.DefaultEdgeLight) / (1 - GlassSettings.DefaultEdgeLight);
+        return Math.Round(glow, 6);
     }
 
     /// <summary>The mockup's text shadow, <c>0 1px 2px</c> in <paramref name="colour"/>: a Gaussian of deviation 1 (half the
