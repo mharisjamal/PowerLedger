@@ -20,6 +20,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Headless Edge's shots of the liquid glass recipe (scripts/liquid-glass/reference.ps1), cropped to the glass. -->
+    <None Include="Aero\LiquidGlass\Reference\*.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\PowerLedger.App\PowerLedger.App.csproj" />
     <ProjectReference Include="..\..\src\PowerLedger.Contracts\PowerLedger.Contracts.csproj" />
     <ProjectReference Include="..\..\src\PowerLedger.Core\PowerLedger.Core.csproj" />
