@@ -23,53 +23,42 @@ public class GlassMaterialTests
 
     [Theory]
     [MemberData(nameof(Themes))]
-    public void The_demos_settings_give_the_palettes_own_tokens(string themeName)
+    public void The_default_settings_give_the_palettes_own_tokens(string themeName)
         => UiHarness.OnUi(() =>
         {
             var theme = Enum.Parse<Theme>(themeName);
             var palette = ThemeManager.Palette(Look.Aero, theme);
-            var map = GlassMaterial.Map(GlassSettings.Default with { EdgeLight = GlassMaterial.DemoEdgeLight }, theme);
+            var map = GlassMaterial.Map(GlassSettings.Default, theme);
             map.Count.ShouldBeGreaterThan(100);
-            // The video's glass (0.10.4): the palette's own tokens but the text steps, which are the video's (70 and 44 %
-            // of the ink), the menus and dialogs, as dense as their text needs, and (0.10.6) the tint and the pill's dim,
-            // which carry the dim the ink needs over whatever window is behind. Each theme keeps its own ink.
+            // The recipe's glass (0.10.9): the palette's own tokens but the text steps (the mockup's, 80 and 60 % of the
+            // ink), the menus and dialogs, as dense as their text needs, and the text shadow the palette leaves to it.
             string[] moved = ["A.C.Text2", "A.C.Text3", "A.B.Text2", "A.B.Text3", "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom", "A.B.MenuFill", "A.B.ModalFill",
-                "A.C.GlassTintTop", "A.C.GlassTintBottom", "A.B.GlassTint", "A.C.PillDim", "A.B.PillFill"];
+                GlassMaterial.TextShadowKey];
             foreach (var (key, value) in map)
             {
                 palette.Contains(key).ShouldBeTrue($"{key} is not a palette key");
                 if (moved.Contains(key)) continue;
                 Describe(value).ShouldBe(Describe(palette[key]), $"{key}, {theme}");
             }
-            // Over a dark desktop the dark theme's glass is the demo's tint exactly: the dim under it is black.
-            if (theme == Theme.Dark)
-            {
-                foreach (var key in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom" })
-                {
-                    var (seen, own) = (Contrast.Over((Color)map[key], Colors.Black), Contrast.Over((Color)palette[key], Colors.Black));
-                    Math.Abs(seen.R - own.R).ShouldBeLessThanOrEqualTo(2, $"{key} over black: {seen} against {own}");
-                    Math.Abs(seen.B - own.B).ShouldBeLessThanOrEqualTo(2, $"{key} over black: {seen} against {own}");
-                }
-            }
-            else
-            {
-                map["A.C.GlassTintTop"].ShouldBe(palette["A.C.GlassTintTop"], "the light glass needs nothing under it");
-                map["A.C.GlassTintBottom"].ShouldBe(palette["A.C.GlassTintBottom"]);
-            }
+            ((LinearGradientBrush)map["A.B.GlassTint"]).GradientStops.ShouldAllBe(stop => stop.Color.A == 0, "no tint, as the recipe");
+            map[GlassMaterial.GlowKey].ShouldBe(LiquidGlassRecipe.HighlightOpacity, "the owner's 10 % is the recipe's 70 %");
+            map[GlassMaterial.LiveKey].ShouldBe(true);
             var ink = (Color)map["A.C.Text"];
-            map["A.C.Text2"].ShouldBe(Color.FromArgb(0xB2, ink.R, ink.G, ink.B));
-            map["A.C.Text3"].ShouldBe(Color.FromArgb(0x70, ink.R, ink.G, ink.B));
+            map["A.C.Text2"].ShouldBe(Color.FromArgb(0xCC, ink.R, ink.G, ink.B));
+            map["A.C.Text3"].ShouldBe(Color.FromArgb(0x99, ink.R, ink.G, ink.B));
+            map["A.C.NavText"].ShouldBe(Color.FromArgb(0xE0, ink.R, ink.G, ink.B), "the mockup's pages, 88 %");
+            map["A.C.SegText"].ShouldBe(Color.FromArgb(0xD9, ink.R, ink.G, ink.B), "the mockup's segmented words, 85 %");
             var strict = GlassMaterial.Map(GlassSettings.Default with { IncreaseContrast = true }, theme);
             foreach (var key in new[] { "A.C.Well", "A.C.Well2", "A.C.Well3" })
                 ((Color)strict[key]).ShouldBe((Color)palette[key], $"the strict glass keeps {key}, {theme}");
         });
 
-    /// <summary>0.10.6, the owner's choice: every style is a tint over what is really behind the window. Clear a light
-    /// dim; Tinted the demo's tint over a dim; Dark black at about 55 %; Colour the user's hue; each scaled by Tint
-    /// strength, and none under the dim its ink needs over a white window.</summary>
+    /// <summary>0.10.9, the owner's recipe: no tint by default. Clear and Tinted lay none at the default strength and at most
+    /// the mockup's own at full (white at 2 and 10 %); Dark lays the mockup's smoked navy at 55 %, Colour the hue at 36 %,
+    /// each scaled by Tint strength around its default.</summary>
     [Theory]
     [MemberData(nameof(Themes))]
-    public void Each_style_tints_as_the_design_says(string themeName)
+    public void Each_style_tints_as_the_mockup_says(string themeName)
         => UiHarness.OnUi(() =>
         {
             var theme = Enum.Parse<Theme>(themeName);
@@ -79,40 +68,27 @@ public class GlassMaterialTests
             Color Top(GlassStyle style, double strength = 0.5, string tint = GlassSettings.DefaultTint) => (Color)Map(style, strength, tint)["A.C.GlassTintTop"];
             var light = (Color)ThemeManager.Palette(Look.Aero, Theme.Dark)["A.C.Text"];
 
-            // Clear and Dark are black in either theme, with the light ink: Clear the least that reads, Dark the 55 %.
-            foreach (var style in new[] { GlassStyle.Clear, GlassStyle.Dark })
+            foreach (var style in new[] { GlassStyle.Clear, GlassStyle.Tinted })
             {
-                var top = Top(style);
-                (top.R, top.G, top.B).ShouldBe(((byte)0, (byte)0, (byte)0), $"{style} is black");
-                Map(style)["A.C.Text"].ShouldBe(light, $"{style} takes the light ink, {theme}");
+                Top(style).A.ShouldBe((byte)0, $"{style} is untinted at the default strength");
+                Top(style, 0).A.ShouldBe((byte)0, $"{style} at 0");
+                Map(style)["A.C.Text"].ShouldBe(palette["A.C.Text"], $"{style} keeps the theme's ink");
             }
-            Top(GlassStyle.Dark).A.ShouldBe((byte)140, "Dark is black at 55 %");
-            Top(GlassStyle.Clear).A.ShouldBeGreaterThanOrEqualTo((byte)Math.Round(GlassMaterial.ClearTop * 255), "Clear is at least its light dim");
-            Top(GlassStyle.Clear).A.ShouldBeLessThan(Top(GlassStyle.Dark).A, "and lighter than Dark");
-            Top(GlassStyle.Clear, 1).A.ShouldBe((byte)Math.Round(GlassMaterial.ClearTop * 2.2 * 255), "at full strength its own dim is more than the floor");
+            Top(GlassStyle.Clear, 1).ShouldBe(Color.FromArgb(5, 255, 255, 255), "Clear at full strength: the mockup's white at 2 %");
+            Top(GlassStyle.Tinted, 1).ShouldBe(Color.FromArgb(26, 255, 255, 255), "Tinted at full strength: the mockup's white at 10 %");
 
-            // Tinted is the demo's tint: over a dark desktop exactly the palette's in the dark theme (the dim under it is black).
-            var own = (Color)palette["A.C.GlassTintTop"];
-            if (theme == Theme.Dark) Contrast.Over(Top(GlassStyle.Tinted), Colors.Black).ShouldBe(Contrast.Over(own, Colors.Black), "the demo's white at 13 %");
-            else Top(GlassStyle.Tinted).ShouldBe(own, "the light glass needs no dim");
-            Map(GlassStyle.Tinted)["A.C.Text"].ShouldBe(palette["A.C.Text"], "Tinted keeps the theme's ink");
+            Top(GlassStyle.Dark).ShouldBe(Color.FromArgb(140, 12, 16, 28), "Dark is the mockup's smoked navy at 55 %");
+            Map(GlassStyle.Dark)["A.C.Text"].ShouldBe(light, $"Dark takes the light ink, {theme}");
 
-            // Colour is the user's hue at 30 %, over the dim its ink needs.
-            var hue = Color.FromArgb((byte)Math.Round(0.3 * 255), 0xFF, 0x80, 0x00);
-            var colour = Top(GlassStyle.Colour, tint: "#FF8000");
-            var ground = theme == Theme.Dark ? Colors.Black : Colors.White;
-            var (seen, wanted) = (Contrast.Over(colour, ground), Contrast.Over(hue, ground));
-            (Math.Abs(seen.R - wanted.R) <= 2 && Math.Abs(seen.G - wanted.G) <= 2 && Math.Abs(seen.B - wanted.B) <= 2)
-                .ShouldBeTrue($"Colour over its own ground is the hue at 30 %: {seen} against {wanted}, {theme}");
-
-            foreach (var style in Enum.GetValues<GlassStyle>())
+            Top(GlassStyle.Colour, tint: "#FF8000").ShouldBe(Color.FromArgb((byte)Math.Round(0.36 * 255), 0xFF, 0x80, 0x00), "Colour is the hue at the mockup's 36 %");
+            foreach (var style in new[] { GlassStyle.Dark, GlassStyle.Colour })
             {
-                Top(style, 0).A.ShouldBeLessThanOrEqualTo(Top(style, 0.5).A, $"{style}: no more at 0");
+                Top(style, 0).A.ShouldBeLessThan(Top(style, 0.5).A, $"{style}: less at 0");
                 Top(style, 1).A.ShouldBeGreaterThan(Top(style, 0.5).A, $"{style}: more at 1");
             }
         });
 
-    public static TheoryData<string, string, double, bool, bool, string> EveryGlass()
+    public static TheoryData<string, string, double, bool, bool, string> EveryStrictGlass()
     {
         var data = new TheoryData<string, string, double, bool, bool, string>();
         foreach (var theme in new[] { "Dark", "Light" })
@@ -121,7 +97,7 @@ public class GlassMaterialTests
             {
                 foreach (var strength in new[] { 0.0, 0.5, 1.0 })
                 {
-                    foreach (var (contrast, reduce) in new[] { (false, false), (true, false), (false, true), (true, true) })
+                    foreach (var (contrast, reduce) in new[] { (true, false), (false, true), (true, true) })
                     {
                         foreach (var tint in style == "Colour" ? new[] { GlassSettings.DefaultTint, "#FFE600", "#101010", "#FFFFFF" } : [GlassSettings.DefaultTint])
                             data.Add(theme, style, strength, contrast, reduce, tint);
@@ -132,12 +108,12 @@ public class GlassMaterialTests
         return data;
     }
 
-    /// <summary>0.10.6: anything may be behind the glass, a white window or a black one. Whatever the style, its strength
-    /// and the switches, the main text reads at 3:1 on the glass, in a well on it, and on a pill that floats on its own;
-    /// at 4.5:1 under Increase contrast.</summary>
+    /// <summary>The recipe's glass has no tint, so over a white window light text is the window's own to spoil: that is the
+    /// owner's choice (0.10.9). The strict glass (Increase contrast, Reduce transparency) holds every text step at 4.5:1 on
+    /// the glass, in a well on it and under a control's hover wash, over a white window and a black one.</summary>
     [Theory]
-    [MemberData(nameof(EveryGlass))]
-    public void The_main_text_reads_over_a_white_window_and_over_a_black_one(string themeName, string style, double strength, bool contrast, bool reduce, string tint)
+    [MemberData(nameof(EveryStrictGlass))]
+    public void On_the_strict_glass_the_text_reads_over_a_white_window_and_over_a_black_one(string themeName, string style, double strength, bool contrast, bool reduce, string tint)
         => UiHarness.OnUi(() =>
         {
             var settings = new GlassSettings
@@ -146,71 +122,51 @@ public class GlassMaterialTests
             };
             var map = GlassMaterial.Map(settings, Enum.Parse<Theme>(themeName));
             Color C(string key) => (Color)map[key];
-            var target = contrast ? GlassMaterial.StrictContrast : GlassMaterial.GlassContrast;
             var text = C("A.C.Text");
+            C("A.C.Text2").ShouldBe(text, "every step whole");
             foreach (var (name, behind) in new[] { ("a white window", Colors.White), ("a black window", Colors.Black) })
             {
                 foreach (var tintKey in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom" })
                 {
                     var glass = Contrast.Over(C(tintKey), behind);
-                    Contrast.Ratio(Contrast.Over(text, glass), glass).ShouldBeGreaterThanOrEqualTo(target, $"on the glass ({tintKey}) over {name}: {settings}");
+                    Contrast.Ratio(Contrast.Over(text, glass), glass).ShouldBeGreaterThanOrEqualTo(GlassMaterial.StrictContrast, $"on the glass ({tintKey}) over {name}: {settings}");
                     var well = Contrast.Over(C("A.C.Well"), glass);
-                    Contrast.Ratio(Contrast.Over(text, well), well).ShouldBeGreaterThanOrEqualTo(target, $"in a well ({tintKey}) over {name}: {settings}");
+                    Contrast.Ratio(Contrast.Over(text, well), well).ShouldBeGreaterThanOrEqualTo(GlassMaterial.StrictContrast, $"in a well ({tintKey}) over {name}: {settings}");
                 }
-                var pill = Contrast.Over(C("A.C.BtnFill"), Contrast.Over(((SolidColorBrush)map["A.B.PillFill"]).Color, behind));
-                Contrast.Ratio(Contrast.Over(text, pill), pill).ShouldBeGreaterThanOrEqualTo(target, $"on a pill over {name}: {settings}");
             }
             ((LinearGradientBrush)map["A.B.GlassTint"]).GradientStops.ShouldAllBe(stop => stop.Color.A < 255, "still glass");
         });
 
+    /// <summary>Edge light (0.10.9) is the glowing edge's opacity: the owner's 10 % is the recipe's 70 %, 0 is none, 100 %
+    /// fully white, straight lines between.</summary>
     [Fact]
-    public void Frost_scales_the_blur_and_edge_light_the_rim()
-        => UiHarness.OnUi(() =>
-        {
-            double Frost(double frost) => (double)GlassMaterial.Map(new GlassSettings { Frost = frost }, Theme.Dark)["A.Glass.Frost"];
-            Frost(0.6).ShouldBe(26);
-            Frost(0).ShouldBe(0);
-            Frost(1).ShouldBe(26 / 0.6, 1e-9);
-            byte Rim(double edge) => ((Color)GlassMaterial.Map(new GlassSettings { EdgeLight = edge }, Theme.Dark)["A.C.RimA"]).A;
-            Rim(0).ShouldBe((byte)0);
-            Rim(0.6).ShouldBe((byte)0x77);
-            Rim(1).ShouldBeGreaterThan((byte)0x77);
-            var brush = (LinearGradientBrush)GlassMaterial.Map(new GlassSettings { EdgeLight = 1 }, Theme.Dark)["A.B.Rim"];
-            brush.GradientStops[0].Color.A.ShouldBe(Rim(1), "the brush carries the colour");
-        });
-
-    /// <summary>0.10.8: Edge light defaults to 10 %, a soft edge, and every rim stop there is still a faint hairline.</summary>
-    [Theory]
-    [MemberData(nameof(Themes))]
-    public void The_default_edge_light_is_a_faint_hairline_not_nothing(string themeName)
+    public void Edge_light_is_the_glows_opacity_with_the_owners_ten_percent_at_the_recipes_seventy()
         => UiHarness.OnUi(() =>
         {
             GlassSettings.Default.EdgeLight.ShouldBe(0.1);
-            var theme = Enum.Parse<Theme>(themeName);
-            var soft = GlassMaterial.Map(GlassSettings.Default, theme);
-            var demo = GlassMaterial.Map(GlassSettings.Default with { EdgeLight = GlassMaterial.DemoEdgeLight }, theme);
-            foreach (var key in new[] { "A.C.RimA", "A.C.RimB", "A.C.RimC", "A.C.RimD" })
-            {
-                var a = ((Color)soft[key]).A;
-                a.ShouldBeGreaterThanOrEqualTo((byte)Math.Floor(GlassMaterial.RimFloor * 255), $"{key} shows, {theme}");
-                a.ShouldBeLessThan(((Color)demo[key]).A, $"{key} is softer than the demo's, {theme}");
-            }
-            ((LinearGradientBrush)soft["A.B.Rim"]).GradientStops.ShouldAllBe(stop => stop.Color.A > 0);
-            ((Color)GlassMaterial.Map(GlassSettings.Default with { EdgeLight = 0 }, theme)["A.C.RimC"]).A.ShouldBe((byte)0, "off is off");
+            double Glow(double edge) => (double)GlassMaterial.Map(new GlassSettings { EdgeLight = edge }, Theme.Dark)[GlassMaterial.GlowKey];
+            Glow(0.1).ShouldBe(0.7, 1e-9);
+            Glow(0).ShouldBe(0);
+            Glow(0.05).ShouldBe(0.35, 1e-9);
+            Glow(1).ShouldBe(1, 1e-9);
+            Glow(0.55).ShouldBe(0.85, 1e-9);
+            double Frost(double frost) => (double)GlassMaterial.Map(new GlassSettings { Frost = frost }, Theme.Dark)["A.Glass.Frost"];
+            Frost(0.6).ShouldBe(26);
         });
 
     [Theory]
     [MemberData(nameof(Themes))]
-    public void Reduce_transparency_makes_the_glass_denser_and_still_glass(string themeName)
+    public void Reduce_transparency_turns_the_live_backdrop_off_and_makes_the_glass_denser_and_still_glass(string themeName)
         => UiHarness.OnUi(() =>
         {
-            // 0.10.4: nothing is ever solid. The tint is dense, the menus and dialogs denser, and the frost still shows.
+            // Nothing is ever solid. The tint is dense, the menus and dialogs denser, and what is behind still shows a little.
             var theme = Enum.Parse<Theme>(themeName);
             var plain = GlassMaterial.Map(new GlassSettings(), theme);
             var map = GlassMaterial.Map(new GlassSettings { ReduceTransparency = true }, theme);
+            map[GlassMaterial.LiveKey].ShouldBe(false, "the engine's live backdrop is off");
             foreach (var key in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom" })
             {
-                ((Color)map[key]).A.ShouldBe((byte)Math.Round(GlassMaterial.ReducedAlpha * 255), key);
+                ((Color)map[key]).A.ShouldBeGreaterThanOrEqualTo((byte)Math.Round(GlassMaterial.ReducedAlpha * 255), key);
                 ((Color)map[key]).A.ShouldBeGreaterThan(((Color)plain[key]).A, key);
             }
             foreach (var key in new[] { "A.C.MenuFill", "A.C.ModalTop", "A.C.ModalBottom" })
@@ -223,20 +179,18 @@ public class GlassMaterialTests
 
     [Theory]
     [MemberData(nameof(Themes))]
-    public void Increase_contrast_makes_the_rim_solid_the_text_full_and_the_wash_darker(string themeName)
+    public void Increase_contrast_lays_the_tint_the_text_needs_and_the_text_full(string themeName)
         => UiHarness.OnUi(() =>
         {
             var theme = Enum.Parse<Theme>(themeName);
             var plain = GlassMaterial.Map(GlassSettings.Default, theme);
             var map = GlassMaterial.Map(new GlassSettings { IncreaseContrast = true }, theme);
-            var rims = new[] { "A.C.RimA", "A.C.RimB", "A.C.RimC", "A.C.RimD" }.Select(key => (Color)map[key]).Distinct().ToList();
-            rims.Count.ShouldBe(1, "one colour all round");
-            rims[0].A.ShouldBeGreaterThanOrEqualTo((byte)204);
             map["A.C.Text2"].ShouldBe(map["A.C.Text"]);
             map["A.C.Text3"].ShouldBe(map["A.C.Text"]);
+            map["A.C.NavText"].ShouldBe(map["A.C.Text"]);
+            ((Color)map["A.C.GlassTintTop"]).A.ShouldBeGreaterThan((byte)0, "a tint where the recipe has none");
             ((Color)map["A.C.SeeThroughWash"]).A.ShouldBeGreaterThan(((Color)plain["A.C.SeeThroughWash"]).A);
-            var glass = Contrast.Over((Color)map["A.C.GlassTintBottom"], (Color)map["A.C.BackdropBrightest"]);
-            Contrast.Ratio(Contrast.Over(rims[0], glass), glass).ShouldBeGreaterThanOrEqualTo(3, "a solid rim reads all round");
+            map[GlassMaterial.LiveKey].ShouldBe(true, "the live backdrop stays: only the tint and the text change");
         });
 
     [Theory]

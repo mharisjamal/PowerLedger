@@ -1,11 +1,10 @@
 using System.Runtime.InteropServices;
 using System.Windows;
-using Microsoft.Win32;
 
 namespace PowerLedger.App.Aero;
 
-/// <summary>The Win32 calls the watts overlay needs: out of the taskbar and Alt Tab, placed in pixels, the displays with
-/// their scales, and the blur of what is behind the pill.</summary>
+/// <summary>The Win32 calls the watts overlay needs: out of the taskbar and Alt Tab, placed in pixels, and the displays
+/// with their scales. What is behind the pill is the liquid glass engine's (0.10.9), not Windows' blur.</summary>
 internal static class OverlayNative
 {
     public const int WM_DISPLAYCHANGE = 0x007E;
@@ -52,53 +51,6 @@ internal static class OverlayNative
         return displays;
     }
 
-    /// <summary>Settings, Personalization, Colours, Transparency effects: off, Windows paints every backdrop solid.</summary>
-    public static bool TransparencyOn
-    {
-        get
-        {
-            try
-            {
-                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-                return key?.GetValue("EnableTransparency") is not int value || value != 0;
-            }
-            catch (Exception error) when (error is System.Security.SecurityException or UnauthorizedAccessException or System.IO.IOException)
-            {
-                return true;
-            }
-        }
-    }
-
-    /// <summary>Acrylic blur of what is behind the window, with <paramref name="tintAbgr"/> over it, or none; whether
-    /// Windows took it.</summary>
-    public static bool Blur(IntPtr window, bool on, uint tintAbgr)
-    {
-        var policy = new AccentPolicy { State = on ? 4 : 0, Flags = 2, Gradient = tintAbgr };
-        var size = Marshal.SizeOf(policy);
-        var data = Marshal.AllocHGlobal(size);
-        try
-        {
-            Marshal.StructureToPtr(policy, data, false);
-            var composition = new CompositionData { Attribute = 19, Data = data, Size = size };
-            return SetWindowCompositionAttribute(window, ref composition) != 0;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(data);
-        }
-    }
-
-    /// <summary>Trims the window's blur to a rounded rectangle, the pill; <see cref="IntPtr.Zero"/> as the region lifts it.
-    /// Windows owns the region once set.</summary>
-    public static void Shape(IntPtr window, Rect? pixels, double radius)
-    {
-        var region = pixels is { } r
-            ? CreateRoundRectRgn((int)Math.Round(r.Left), (int)Math.Round(r.Top), (int)Math.Round(r.Right) + 1, (int)Math.Round(r.Bottom) + 1,
-                (int)Math.Round(radius * 2), (int)Math.Round(radius * 2))
-            : IntPtr.Zero;
-        _ = SetWindowRgn(window, region, true);
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
     {
@@ -117,23 +69,6 @@ internal static class OverlayNative
         public NativeRect Monitor;
         public NativeRect Work;
         public uint Flags;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct AccentPolicy
-    {
-        public int State;
-        public int Flags;
-        public uint Gradient;
-        public int Animation;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct CompositionData
-    {
-        public int Attribute;
-        public IntPtr Data;
-        public int Size;
     }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
@@ -160,13 +95,4 @@ internal static class OverlayNative
 
     [DllImport("shcore.dll")]
     private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
-
-    [DllImport("user32.dll")]
-    private static extern int SetWindowCompositionAttribute(IntPtr window, ref CompositionData data);
-
-    [DllImport("gdi32.dll")]
-    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
-
-    [DllImport("user32.dll")]
-    private static extern int SetWindowRgn(IntPtr window, IntPtr region, [MarshalAs(UnmanagedType.Bool)] bool redraw);
 }

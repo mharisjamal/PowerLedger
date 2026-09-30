@@ -356,7 +356,8 @@ public partial class DashboardView : UserControl
 
     // ---------------------------------------------------------------- one column or two
 
-    /// <summary>Two columns as the demo, or the panes one under another under <see cref="OneColumnBelow"/>.</summary>
+    /// <summary>Two columns as the mockup lays them (Power now and This month 280 high, Energy each day and Where the power
+    /// goes 494, the right column 384 wide), or the panes one under another under <see cref="OneColumnBelow"/>.</summary>
     private void Reflow()
     {
         var narrow = ActualWidth > 0 && ActualWidth < OneColumnBelow;
@@ -364,10 +365,10 @@ public partial class DashboardView : UserControl
         _narrow = narrow;
         Layout.RowDefinitions.Clear();
         Layout.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 16);
-        Layout.ColumnDefinitions[2].Width = new GridLength(narrow ? 0 : 380);
+        Layout.ColumnDefinitions[2].Width = new GridLength(narrow ? 0 : 384);
         (GlassPanel Pane, double Height)[] order = narrow
-            ? [(PNow, 262), (PMonth, double.NaN), (PDaily, 238), (PParts, 238), (PHist, double.NaN)]
-            : [(PNow, 262), (PDaily, 238), (PHist, double.NaN)];
+            ? [(PNow, 280), (PMonth, double.NaN), (PDaily, 320), (PParts, 320), (PHist, double.NaN)]
+            : [(PNow, 280), (PDaily, 494), (PHist, double.NaN)];
         for (var i = 0; i < order.Length; i++)
         {
             if (i > 0) Layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(16) });

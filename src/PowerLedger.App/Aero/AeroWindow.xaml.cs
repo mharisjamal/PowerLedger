@@ -23,7 +23,7 @@ internal partial class AeroWindow : Window, IShellWindow
     /// <summary>Under this width the sidebar is a column of icons (design §1: the demo's stage, kept usable at 960 px).</summary>
     internal const double NarrowBelow = 1100;
 
-    private const double SideWide = 240;
+    private const double SideWide = 244;
     private const double SideNarrow = 76;
 
     private readonly ShellViewModel _shell;
@@ -248,7 +248,7 @@ internal partial class AeroWindow : Window, IShellWindow
     {
         var narrow = ActualWidth > 0 && ActualWidth < NarrowBelow;
         SideColumn.Width = new GridLength(narrow ? SideNarrow : SideWide);
-        Side.Padding = narrow ? new Thickness(9, 19, 9, 19) : new Thickness(15, 19, 15, 19);   // the demo's padding and its 1 px border
+        Side.Padding = narrow ? new Thickness(9, 24, 9, 24) : new Thickness(14, 24, 14, 24);   // the mockup's padding
         Dispatcher.BeginInvoke(() => MovePill(animate: false), DispatcherPriority.Loaded);
     }
 

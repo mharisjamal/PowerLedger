@@ -206,8 +206,7 @@
                             <TextBlock DockPanel.Dock="Right" Style="{StaticResource A.Label}" Text="kWh" VerticalAlignment="Center" Margin="0,0,0,12" />
                             <TextBlock Style="{StaticResource A.Page.Title}" Text="Energy each day" />
                         </DockPanel>
-                        <Border Padding="12,12,12,8" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.ChartWell}"
-                                BorderBrush="{DynamicResource A.B.ChartWellLit}" BorderThickness="0,1,0,0">
+                        <Border Padding="12,12,12,8" Style="{StaticResource A.Well}">
                             <app:DailyBars Style="{StaticResource A.Page.DailyBars}" Days="{Binding Data.Days}" AutomationProperties.Name="Energy each day" />
                         </Border>
                     </StackPanel>

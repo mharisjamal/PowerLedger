@@ -318,7 +318,7 @@
                                 </Rectangle>
                                 <Ellipse Width="120" Height="120" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-20,-30,0,0" Fill="{DynamicResource A.B.Accent}" Opacity="0.85" />
                                 <Ellipse Width="90" Height="90" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-18,-22" Fill="{DynamicResource A.B.Pill}" Opacity="0.7" />
-                                <aero:GlassPanel CornerRadius="{DynamicResource A.R.Well}" Margin="26,36" Padding="18,14" SheenEnabled="False" HasShadow="False">
+                                <aero:GlassPanel CornerRadius="{DynamicResource A.R.Well}" Margin="26,36" Padding="18,14">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
                                             <Ellipse Width="7" Height="7" Fill="{DynamicResource A.B.Accent}" VerticalAlignment="Center" Margin="0,0,8,0" />

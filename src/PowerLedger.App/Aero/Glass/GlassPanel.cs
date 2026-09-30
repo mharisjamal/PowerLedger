@@ -1,44 +1,47 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 
 namespace PowerLedger.App.Aero;
 
 /// <summary>
-/// A Liquid Glass pane (Aero look design §3), drawn by its style in Styles.Aero.xaml: the frost (the blurred scene
-/// behind, when the window paints its own backdrop: <see cref="Frost"/>), a light tint, a crisp light rim with a faint dark
-/// line inside it, a soft sheen along the top, a sheen that follows the pointer, and a shadow drawn only outside the pane.
-/// The shadow is blurred and clipped to the outside into one cached bitmap, again only when the pane's size or the glass
-/// changes, so live content inside never re-blurs it; the pointer sheen moves only while the pointer is over the pane.
-/// Nothing here runs at rest.
+/// A liquid glass piece (0.10.9, the owner's recipe; Styles.Aero.xaml draws it): every Aero glass surface is one, from a
+/// pane to a pill, a bubble, a menu or the grab bar. Its template lays, bottom to top:
+/// <list type="number">
+/// <item>the engine's <see cref="LiquidGlassBackdrop"/>: what is behind the window, brightened, blurred and bent by the
+/// turbulence, clipped to the piece;</item>
+/// <item>the shadows (<see cref="GlassShadow"/>): the recipe's drop shadow of what the piece paints, and a bubble's own
+/// soft shadow under it (<see cref="Bubble"/>);</item>
+/// <item>the tint (Background): none by default, the lime of Open report, the Dark or Colour style's;</item>
+/// <item>the glowing edge (<see cref="GlassGlow"/>, <see cref="HasGlow"/>);</item>
+/// <item>the content, above the glow so its text reads.</item>
+/// </list>
+/// Nothing here runs at rest: the edge and the shadows are drawn once, again only when the piece's size or the glass
+/// changes.
 /// </summary>
 public class GlassPanel : ContentControl
 {
     public static readonly DependencyProperty CornerRadiusProperty = DependencyProperty.Register(nameof(CornerRadius),
-        typeof(CornerRadius), typeof(GlassPanel), new PropertyMetadata(new CornerRadius(26), (d, _) => ((GlassPanel)d).UpdateClip()));
+        typeof(CornerRadius), typeof(GlassPanel), new PropertyMetadata(new CornerRadius(LiquidGlassRecipe.CornerRadius)));
 
     public static readonly DependencyProperty FrostProperty = DependencyProperty.Register(nameof(Frost), typeof(Brush),
         typeof(GlassPanel), new PropertyMetadata(null));
 
-    public static readonly DependencyProperty SheenEnabledProperty = DependencyProperty.Register(nameof(SheenEnabled),
-        typeof(bool), typeof(GlassPanel), new PropertyMetadata(true));
-
-    public static readonly DependencyProperty HasRimProperty = DependencyProperty.Register(nameof(HasRim),
+    public static readonly DependencyProperty HasGlowProperty = DependencyProperty.Register(nameof(HasGlow),
         typeof(bool), typeof(GlassPanel), new PropertyMetadata(true));
 
     public static readonly DependencyProperty HasShadowProperty = DependencyProperty.Register(nameof(HasShadow),
-        typeof(bool), typeof(GlassPanel), new PropertyMetadata(true, (d, _) => ((GlassPanel)d).UpdateClip()));
+        typeof(bool), typeof(GlassPanel), new PropertyMetadata(true));
 
-    /// <summary>How far outside the pane its shadow starts, in its units.</summary>
-    public const double ShadowGap = 2;
+    public static readonly DependencyProperty BubbleProperty = DependencyProperty.Register(nameof(Bubble),
+        typeof(bool), typeof(GlassPanel), new PropertyMetadata(false));
+
+    private static readonly DependencyPropertyKey IsNestedKey = DependencyProperty.RegisterReadOnly(nameof(IsNested),
+        typeof(bool), typeof(GlassPanel), new PropertyMetadata(false));
+
+    public static readonly DependencyProperty IsNestedProperty = IsNestedKey.DependencyProperty;
 
     private static readonly List<GlassPanel> Panes = [];
-
-    private FrameworkElement? _shadow;
-    private FrameworkElement? _shadowClip;
-    private Border? _sheen;
-    private RadialGradientBrush? _sheenBrush;
 
     public GlassPanel()
     {
@@ -46,99 +49,41 @@ public class GlassPanel : ContentControl
         Loaded += (_, _) =>
         {
             if (!Panes.Contains(this)) Panes.Add(this);
+            SetValue(IsNestedKey, Outer(this) is not null);
         };
         Unloaded += (_, _) => Panes.Remove(this);
-        SizeChanged += (_, _) => UpdateClip();
     }
 
+    /// <summary>The piece's corners: the recipe's 28 for a pane; a capsule binds half its height (Capsule).</summary>
     public CornerRadius CornerRadius { get => (CornerRadius)GetValue(CornerRadiusProperty); set => SetValue(CornerRadiusProperty, value); }
 
-    /// <summary>The frosted scene behind the pane, lined up with it by the backdrop (WallpaperFrost); null when the
-    /// window is see-through and the system backdrop does the blur, or the backdrop is plain.</summary>
+    /// <summary>What earlier versions laid under the tint: a frosted copy of the wallpaper (WallpaperFrost). Since 0.10.9 the
+    /// engine's backdrop is the glass's only picture of what is behind it, and the template draws no frost.</summary>
     public Brush? Frost { get => (Brush?)GetValue(FrostProperty); set => SetValue(FrostProperty, value); }
 
-    public bool SheenEnabled { get => (bool)GetValue(SheenEnabledProperty); set => SetValue(SheenEnabledProperty, value); }
+    /// <summary>Whether the piece draws the recipe's glowing edge; false for a bare hit area (a scroll bar's host).</summary>
+    public bool HasGlow { get => (bool)GetValue(HasGlowProperty); set => SetValue(HasGlowProperty, value); }
 
-    /// <summary>Whether the pane draws its own rim, inner lines and top sheen; false under a control that draws its own
-    /// (a top-bar pill round a glass button, as the demo's .gbtn), so the two never double into a thick outline.</summary>
-    public bool HasRim { get => (bool)GetValue(HasRimProperty); set => SetValue(HasRimProperty, value); }
-
+    /// <summary>Whether the piece draws the recipe's drop shadow.</summary>
     public bool HasShadow { get => (bool)GetValue(HasShadowProperty); set => SetValue(HasShadowProperty, value); }
 
-    /// <summary>Every loaded pane on this thread, so a window's backdrop can line each one's frost up with the scene.</summary>
+    /// <summary>A bubble floating on glass (the chosen page, a segmented control's choice, a figure): the mockup's
+    /// <c>.bubble</c>, a soft shadow under it as well.</summary>
+    public bool Bubble { get => (bool)GetValue(BubbleProperty); set => SetValue(BubbleProperty, value); }
+
+    /// <summary>Whether the piece sits on another piece's glass, whose content's text shadow already reaches it.</summary>
+    public bool IsNested => (bool)GetValue(IsNestedProperty);
+
+    /// <summary>Every loaded piece on this thread, so a window's shape can follow each one.</summary>
     public static IReadOnlyList<GlassPanel> Live => Panes;
 
-    public override void OnApplyTemplate()
+    /// <summary>The piece <paramref name="pane"/> sits on, or null for one on its own.</summary>
+    internal static GlassPanel? Outer(DependencyObject pane)
     {
-        base.OnApplyTemplate();
-        _shadow = GetTemplateChild("PART_Shadow") as FrameworkElement;
-        _shadowClip = GetTemplateChild("PART_ShadowClip") as FrameworkElement ?? _shadow;
-        _sheen = GetTemplateChild("PART_Sheen") as Border;
-        _sheenBrush = null;
-        UpdateClip();
-    }
-
-    /// <summary>Fades the pointer sheen out, as a pane does when the camera leaves it.</summary>
-    public void HideSheen()
-    {
-        if (_sheen != null) AeroMotion.Fade(_sheen, OpacityProperty, 0, AeroMotion.Sheen, AeroMotion.Glide);
-    }
-
-    protected override void OnMouseEnter(MouseEventArgs e)
-    {
-        base.OnMouseEnter(e);
-        if (_sheen == null || !SheenEnabled) return;
-        _sheen.Background = SheenBrush();
-        AeroMotion.Fade(_sheen, OpacityProperty, 1, AeroMotion.Sheen, AeroMotion.Glide);
-    }
-
-    protected override void OnMouseLeave(MouseEventArgs e)
-    {
-        base.OnMouseLeave(e);
-        HideSheen();
-    }
-
-    protected override void OnMouseMove(MouseEventArgs e)
-    {
-        base.OnMouseMove(e);
-        if (_sheenBrush == null || !SheenEnabled) return;
-        var p = e.GetPosition(this);
-        _sheenBrush.Center = p;
-        _sheenBrush.GradientOrigin = p;
-    }
-
-    /// <summary>The HTML's <c>radial-gradient(420px circle at the pointer, sheen, transparent 55%)</c>, in the palette's
-    /// colour of the moment (GlassMaterial may have changed it).</summary>
-    private RadialGradientBrush SheenBrush()
-    {
-        var colour = TryFindResource("A.C.PointerSheen") is Color c ? c : Color.FromArgb(0x1A, 255, 255, 255);
-        var radius = TryFindResource("A.Glass.SheenRadius") is double r ? r : 420;
-        if (_sheenBrush is { } existing && existing.GradientStops[0].Color == colour && existing.RadiusX == radius) return existing;
-        var stops = new GradientStopCollection { new(colour, 0), new(Color.FromArgb(0, colour.R, colour.G, colour.B), .55) };
-        _sheenBrush = new RadialGradientBrush(stops) { MappingMode = BrushMappingMode.Absolute, RadiusX = radius, RadiusY = radius };
-        return _sheenBrush;
-    }
-
-    /// <summary>Clips the shadow to the outside of the pane, so the tint shows the scene, not the shadow's own body.</summary>
-    private void UpdateClip()
-    {
-        if (_shadow == null) return;
-        if (!HasShadow)
+        for (var node = VisualTreeHelper.GetParent(pane); node is not null; node = VisualTreeHelper.GetParent(node))
         {
-            _shadow.Visibility = Visibility.Collapsed;
-            return;
+            if (node is GlassPanel outer) return outer;
         }
-        _shadow.Visibility = Visibility.Visible;
-        if (ActualWidth <= 0) return;
-        var m = -_shadow.Margin.Left;
-        var r = CornerRadius.TopLeft;
-        var outer = new RectangleGeometry(new Rect(0, 0, ActualWidth + 2 * m, ActualHeight + 2 * m));
-        // A little off the pane (0.10.4): the free-form window's shape stands a pixel outside each pane, and no shadow may
-        // darken that edge into an outline; the shadow shows where it falls on other glass, as the demo's does.
-        var inner = new RectangleGeometry(new Rect(m - ShadowGap, m - ShadowGap, ActualWidth + 2 * ShadowGap, ActualHeight + 2 * ShadowGap), r + ShadowGap, r + ShadowGap);
-        var clip = new CombinedGeometry(GeometryCombineMode.Exclude, outer, inner);
-        clip.Freeze();
-        // Inside the shadow's cache (PART_ShadowClip), so the clip is drawn into the bitmap once, not on every frame.
-        _shadowClip!.Clip = clip;
+        return null;
     }
 }

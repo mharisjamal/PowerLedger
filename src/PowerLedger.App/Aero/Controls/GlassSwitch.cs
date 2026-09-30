@@ -12,8 +12,8 @@ namespace PowerLedger.App.Aero;
 /// </summary>
 public sealed class GlassSwitch : ToggleButton
 {
-    /// <summary>How far the knob travels: the 46 px track less the 22 px knob and its 3 px insets.</summary>
-    public const double Travel = 18;
+    /// <summary>How far the knob travels: the Styles board's 52 px track less its 24 px knob and their 3 px insets.</summary>
+    public const double Travel = 22;
 
     private FrameworkElement? _on;
     private TranslateTransform? _knob;

@@ -82,17 +82,18 @@ public class AeroBloomTests
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
-    public void The_default_glass_keeps_the_videos_text_steps_with_no_halo(string themeName)
+    public void The_default_glass_keeps_the_mockups_text_steps_with_its_text_shadow(string themeName)
     {
-        // 0.10.4, the owner's choice: parity with the video over WCAG: the video's text steps, and no halo. Since 0.10.6
-        // the glass is over the live desktop, not the bloom, whatever backdrop a file names.
+        // 0.10.9, the owner's liquid glass: the mockup's text steps (its .sub at 80 %, a quieter 60 %) and its text shadow
+        // (.t: 0 1px 2px, navy at 28 %). The glass is over the live desktop, not the bloom, whatever backdrop a file names.
         var theme = Enum.Parse<Theme>(themeName);
-        var (map, own, dark) = UiHarness.OnUi(() => (GlassMaterial.Map(GlassSettings.Default with { Backdrop = GlassBackdrop.Bloom }, theme), ThemeManager.Palette(Look.Aero, theme), ThemeManager.Palette(Look.Aero, Theme.Dark)));
-        map[GlassMaterial.HaloOnKey].ShouldBe(false);
+        var (map, own) = UiHarness.OnUi(() => (GlassMaterial.Map(GlassSettings.Default with { Backdrop = GlassBackdrop.Bloom }, theme), ThemeManager.Palette(Look.Aero, theme)));
+        var shadow = map[GlassMaterial.TextShadowKey].ShouldBeOfType<System.Windows.Media.Effects.DropShadowEffect>();
+        (shadow.Color, shadow.ShadowDepth, shadow.Direction, Math.Round(shadow.Opacity, 2)).ShouldBe((Color.FromRgb(0, 10, 40), 1d, 270d, 0.28));
         var text = (Color)map["A.C.Text"];
         text.ShouldBe((Color)own["A.C.Text"], "each theme keeps its own ink on the Tinted glass");
-        map["A.C.Text2"].ShouldBe(Color.FromArgb(0xB2, text.R, text.G, text.B), "the HTML's --text-2, 70 % (178.5, rounded to even)");
-        map["A.C.Text3"].ShouldBe(Color.FromArgb(0x70, text.R, text.G, text.B), "the HTML's --text-3, 44 %");
+        map["A.C.Text2"].ShouldBe(Color.FromArgb(0xCC, text.R, text.G, text.B), "the mockup's .sub, 80 %");
+        map["A.C.Text3"].ShouldBe(Color.FromArgb(0x99, text.R, text.G, text.B), "a quieter 60 %");
     }
 
     [Fact]
@@ -106,6 +107,5 @@ public class AeroBloomTests
         grounds.Min(g => Contrast.Ratio(Contrast.Over(text, g), g)).ShouldBeGreaterThanOrEqualTo(4.5);
         map["A.C.Text2"].ShouldBe(text);
         map["A.C.Text3"].ShouldBe(text);
-        map[GlassMaterial.HaloOnKey].ShouldBe(false);
     }
 }
