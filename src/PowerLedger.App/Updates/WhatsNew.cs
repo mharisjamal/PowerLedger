@@ -8,6 +8,12 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.10.6",
+        [
+            "Aero's pills, buttons and panels have the demo's thin glass edges.",
+            "Every glass style now shows what is really behind PowerLedger.",
+            "Aero opens with its reveal every time, as in the video.",
+        ]),
         ("0.10.5",
         [
             "More is measured on workstations and servers: Windows power meters, a UPS on another computer (Network UPS Tools), Intel Arc card power and server power readings.",
