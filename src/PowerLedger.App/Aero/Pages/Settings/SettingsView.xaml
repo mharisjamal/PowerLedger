@@ -521,6 +521,31 @@
                                              IsChecked="{Binding UpsLoad, Converter={StaticResource Is}, ConverterParameter={x:Static contracts:UpsLoad.More}}" />
                             </WrapPanel>
                         </StackPanel>
+                        <!-- A UPS another computer shares over Network UPS Tools, as Classic and Midnight ask for it, in Aero's wells: the
+                             server, its port, the UPS's name there and, for a server that lists only to known users, a username and
+                             password. Once the service reads it, it is listed with the UPSes above and asks what it powers; until then,
+                             what the service says of it shows under the rows. -->
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="UPS on another computer (NUT)" />
+                            <TextBox Style="{StaticResource Field}" Width="200" Text="{Binding NutHost, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="UPS server"
+                                     ToolTip="The computer that shares the UPS: a name or an IP address" />
+                            <TextBlock Style="{StaticResource Aside}" Text="port" />
+                            <TextBox Style="{StaticResource Field}" Margin="10,0,0,0" Text="{Binding NutPort, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="UPS server port" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="UPS name on that computer" />
+                            <TextBox Style="{StaticResource Field}" Width="200" Text="{Binding NutUps, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="UPS name on the server" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource Label}" Text="Username · password, if asked" />
+                            <TextBox Style="{StaticResource Field}" Width="140" Text="{Binding NutUser, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="UPS server username" />
+                            <PasswordBox Style="{StaticResource A.Secret}" Width="140" Margin="8,0,0,0" app:PasswordEntry.Typed="{Binding NutPassword, Mode=OneWayToSource}"
+                                         AutomationProperties.Name="UPS server password" />
+                            <TextBlock Style="{StaticResource Aside}" Text="saved" Visibility="{Binding NutHasPassword, Converter={StaticResource VisibleWhen}}" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource Said}" Margin="212,2,0,4" Text="{Binding NutSaid}" Visibility="{Binding NutSaid, Converter={StaticResource VisibleWhenText}}" />
+                        <TextBlock Style="{StaticResource RowNote}" Margin="212,2,0,6"
+                                   Text="For a UPS that another computer, such as a NAS, shares with Network UPS Tools. Leave the server blank for none. The service keeps the password encrypted." />
                         <ItemsControl ItemsSource="{Binding PowerSupplies}" Focusable="False" Visibility="{Binding HasPowerSupply, Converter={StaticResource VisibleWhen}}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>

@@ -623,6 +623,47 @@
         </Setter>
     </Style>
 
+    <!-- A typed secret, in the same well as a typed value: the light top edge, the hover wash and the accent ring while it
+         has the keyboard. -->
+    <Style x:Key="A.Secret" TargetType="PasswordBox">
+        <Setter Property="FontFamily" Value="{DynamicResource A.F.Ui}" />
+        <Setter Property="FontSize" Value="{DynamicResource A.T.Control}" />
+        <Setter Property="Foreground" Value="{DynamicResource A.B.Text}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource A.B.Text}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource A.B.Accent}" />
+        <Setter Property="Background" Value="{DynamicResource A.B.Well}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellEdge}" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="MinHeight" Value="38" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="PasswordBox">
+                    <Grid>
+                        <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                CornerRadius="{DynamicResource A.R.MenuItem}" />
+                        <Border Margin="1" CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{DynamicResource A.B.WellTop}" BorderThickness="0,1,0,0" />
+                        <Border x:Name="Ring" CornerRadius="{DynamicResource A.R.MenuItem}" BorderBrush="{DynamicResource A.B.Accent}" BorderThickness="2" Opacity="0" />
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" VerticalAlignment="Center" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Frame" Property="Background" Value="{DynamicResource A.B.WellHover}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Ring" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="{DynamicResource A.Opacity.Disabled}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- A yes or no: a glass square that fills with the accent and its ink's tick. -->
     <Style x:Key="A.Tick" TargetType="CheckBox">
         <Setter Property="FontFamily" Value="{DynamicResource A.F.Ui}" />

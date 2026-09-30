@@ -188,6 +188,65 @@ public class AeroSettingsViewTests
             }
         });
 
+    /// <summary>The UPS on another computer (Network UPS Tools, 0.10.5), as Classic and Midnight ask for it, in Aero's own
+    /// wells: the server and port, the UPS's name there, a username and a password that goes one way, what the service says
+    /// of the server and the note. Drawn in both themes to <c>aero-settings-nut-*.png</c>.</summary>
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    public void The_network_ups_section_is_drawn_in_aero_s_wells(string themeName)
+        => UiHarness.OnUi(() =>
+        {
+            var settings = Screen(GlassSettings.Default);
+            var (window, view) = Page(settings, Enum.Parse<Theme>(themeName), 1440);
+            try
+            {
+                settings.Service.NutHost = "nas.local";
+                settings.Service.NutUps = "myups";
+                settings.Service.ShowNut([new PowerLedger.Contracts.SourceStatus("nut", true, "nas.local can't be reached: nothing answered at that address", 0, null)]);
+                window.UpdateLayout();
+
+                var texts = MidnightHost.AllOf<TextBlock>(view).Where(t => t.IsVisible).Select(t => t.Text).ToList();
+                texts.ShouldContain("UPS on another computer (NUT)");
+                texts.ShouldContain("UPS name on that computer");
+                texts.ShouldContain("Username · password, if asked");
+                texts.ShouldContain("nas.local can't be reached: nothing answered at that address");
+                texts.ShouldContain(t => t.StartsWith("For a UPS that another computer, such as a NAS, shares with Network UPS Tools.", StringComparison.Ordinal));
+
+                TextBox Box(string name) => MidnightHost.AllOf<TextBox>(view).Single(b => System.Windows.Automation.AutomationProperties.GetName(b) == name);
+                foreach (var name in new[] { "UPS server", "UPS server port", "UPS name on the server", "UPS server username" })
+                {
+                    Box(name).IsVisible.ShouldBeTrue(name);
+                    Box(name).Style.ShouldBe(view.FindResource("Field"), name);
+                }
+                Box("UPS server").Text.ShouldBe("nas.local");
+                Box("UPS server port").Text.ShouldBe("3493");
+
+                // Drawn while the service's word on the server shows, before the save a typed password makes clears it.
+                Directory.CreateDirectory(UiHarness.Folder);
+                UiHarness.Render(WholePage(window, view, 1440), 1440, WholeHeight(view), $"aero-settings-nut-{themeName.ToLowerInvariant()}.png");
+
+                var secret = MidnightHost.AllOf<PasswordBox>(view).Single();
+                System.Windows.Automation.AutomationProperties.GetName(secret).ShouldBe("UPS server password");
+                secret.Style.ShouldBe(view.FindResource("A.Secret"));
+                secret.ActualHeight.ShouldBe(Box("UPS server username").ActualHeight, 0.5, "the password sits in a well of the field's height");
+                secret.Password = "sec ret";
+                secret.RaiseEvent(new System.Windows.Input.KeyboardFocusChangedEventArgs(System.Windows.Input.Keyboard.PrimaryDevice, 0, secret, null)
+                {
+                    RoutedEvent = UIElement.LostKeyboardFocusEvent,
+                });
+                UiHarness.Pump(TimeSpan.FromMilliseconds(200));
+                settings.Service.NutHasPassword.ShouldBeTrue("handed on and saved when the box is left, as Classic and Midnight do");
+                window.UpdateLayout();
+                MidnightHost.AllOf<TextBlock>(view).ShouldContain(t => t.Text == "saved" && t.IsVisible);
+
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
     /// <summary>Every control a keyboard reaches has a name a screen reader can say.</summary>
     [Fact]
     public void Every_switch_slider_and_swatch_has_a_name()
