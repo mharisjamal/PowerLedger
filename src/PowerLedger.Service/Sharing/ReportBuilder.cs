@@ -191,7 +191,7 @@ internal static partial class ReportBuilder
             && In(m.CpuLoad, 0, 1) && Share(m.GpuLoad) && Share(m.Brightness)
             && new[] { m.DisplayOnS, m.IdleS, m.LockedS, m.BatteryS, m.MeasuredS, m.CalibratedS, m.EstimatedS }
                 .All(seconds => In(seconds, 0, 120))
-            && m.Samples is >= 0 and <= 100_000 && m.TotalSource is >= 0 and <= 4 && m.GpuScope is >= 0 and <= 2
+            && m.Samples is >= 0 and <= 100_000 && m.TotalSource is >= 0 and <= 7 && m.GpuScope is >= 0 and <= 2
             && m.MeasuredMask is >= 0 and <= 7;
     }
 

@@ -96,4 +96,17 @@ describe("checkMinutes", () => {
     (m.unattributedW as number[])[0] = -5000.1;
     expect(checkMinutes(m)).not.toBeNull();
   });
+
+  // 0.10.5 adds PlatformMeter (5), PowerMeter (6) and Bmc (7); older clients send 0 to 4, which still pass.
+  it("allows every totalSource from 0 to 7", () => {
+    const m = baseMinutes(8);
+    m.totalSource = [0, 1, 2, 3, 4, 5, 6, 7];
+    expect(checkMinutes(m)).toBeNull();
+  });
+
+  it("fails totalSource 8", () => {
+    const m = baseMinutes(1);
+    (m.totalSource as number[])[0] = 8;
+    expect(checkMinutes(m)).not.toBeNull();
+  });
 });

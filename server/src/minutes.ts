@@ -31,7 +31,8 @@ const SPECS: readonly ColumnSpec[] = [
   { key: "calibratedS", min: 0, max: 120 },
   { key: "estimatedS", min: 0, max: 120 },
   { key: "samples", min: 0, max: 100000, integer: true },
-  { key: "totalSource", min: 0, max: 4, integer: true },
+  // 5 PlatformMeter, 6 PowerMeter and 7 Bmc since 0.10.5; older clients send only 0 to 4, which stay valid.
+  { key: "totalSource", min: 0, max: 7, integer: true },
   { key: "gpuScope", min: 0, max: 2, integer: true },
   { key: "measuredMask", min: 0, max: 7, integer: true },
 ];

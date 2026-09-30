@@ -184,6 +184,21 @@ public class ReportTests
     }
 
     [Fact]
+    public void A_minute_from_every_total_source_goes_and_one_past_them_is_left_out()
+    {
+        var sources = Enum.GetValues<TotalSource>().Select(source => (int)source).ToList();
+        sources.Max().ShouldBe(7);   // raise the server's range (server/src/minutes.ts) with any new source
+        var minutes = sources.Select(source => SharingFakes.Minute(source) with { TotalSource = source })
+            .Append(SharingFakes.Minute(8) with { TotalSource = 8 })
+            .ToList();
+
+        var report = ReportBuilder.Build(SharingFakes.Inputs() with { Minutes = minutes });
+
+        report.Power.ShouldNotBeNull().Minutes.TotalSource.ShouldBe(sources.ToArray());
+        ReportSchema.Problems(ReportJson.Write(report)).ShouldBeNull();
+    }
+
+    [Fact]
     public void A_minute_that_doesnt_come_after_the_last_one_kept_is_left_out_so_the_day_still_goes()
     {
         // Oldest first, as the outbox gives them: the time zone moved back an hour at 10:02, so the day's minutes run
