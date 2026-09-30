@@ -17,9 +17,12 @@ internal interface IUiSettings
     /// the choice is left as it was, and the answer says why.</summary>
     string? SetLook(Look look);
 
-    /// <summary>The Aero invite code was entered (0.10.3): Aero is unlocked for good, then switched to, with its intro
-    /// video and banner due as on a first Aero open. When Aero's window can't open, it stays unlocked and the answer says why.</summary>
-    string? UnlockAero();
+    /// <summary>Keeps the id this PC asked for Aero under (<see cref="UiPreferences.AeroRequestId"/>).</summary>
+    string? SetAeroRequestId(string id);
+
+    /// <summary>Keeps what the server last said of this PC's Aero request (0.10.7). Approval only unlocks: the look stays
+    /// as it is. A revoke locks Aero again and, when the window is in Aero, switches it to Midnight.</summary>
+    string? SetAeroApproved(bool approved);
 
     /// <summary>Retires the one-time banner about the new look for good (<see cref="UiPreferences.LookIntroduced"/>).</summary>
     string? IntroduceLook();
@@ -86,23 +89,21 @@ internal sealed class AppPreferences(
 
     public string? SetLook(Look look)
     {
-        if (look == Look.Aero && !Current.AeroUnlocked) return AeroInvite.Locked;   // invite only: nothing switches
+        if (look == Look.Aero && !Current.AeroApproved) return AeroAccess.Locked;   // by request: nothing switches
         if (switchLook?.Invoke(look) is { } problem) return problem;   // the old window stays, and so does the saved choice
         return Save(Current with { Look = look, LookIntroduced = true });
     }
 
-    public string? UnlockAero()
+    public string? SetAeroRequestId(string id) => id == Current.AeroRequestId ? null : Save(Current with { AeroRequestId = id });
+
+    public string? SetAeroApproved(bool approved)
     {
-        var before = Current;
-        if (before.Look == Look.Aero) return Save(before with { AeroUnlocked = true });
-        // Saved before the switch, as Aero's window reads its banner and intro as it opens.
-        var saved = Save(before with { AeroUnlocked = true, LookIntroduced = false, AeroIntroSeen = false, LookBeforeAero = before.Look });
-        if (switchLook?.Invoke(Look.Aero) is { } problem)
-        {
-            Save(Current with { LookIntroduced = before.LookIntroduced, AeroIntroSeen = before.AeroIntroSeen, LookBeforeAero = before.LookBeforeAero });
-            return problem;
-        }
-        return Save(Current with { Look = Look.Aero }) ?? saved;
+        if (approved == Current.AeroApproved) return null;
+        var saved = Save(Current with { AeroApproved = approved });
+        if (approved || Current.Look != Look.Aero) return saved;
+        // Revoked while in Aero: Midnight, saved even if its window won't open, so the next start isn't Aero either.
+        var problem = switchLook?.Invoke(Look.Midnight);
+        return Save(Current with { Look = Look.Midnight, LookIntroduced = true }) ?? problem ?? saved;
     }
 
     public string? IntroduceLook() => Current.LookIntroduced ? null : Save(Current with { LookIntroduced = true });

@@ -1935,7 +1935,7 @@ public class RenderingTests
     }
 
     /// <summary>Preferences in the Classic look: Midnight is the default, so a Classic window's user chose Classic.</summary>
-    private static FakeUiSettings ClassicUi() => new() { Current = UiPreferences.Default with { Look = Look.Classic, LookIntroduced = true, AeroUnlocked = true } };
+    private static FakeUiSettings ClassicUi() => new() { Current = UiPreferences.Default with { Look = Look.Classic, LookIntroduced = true, AeroApproved = true } };
 
     /// <summary>The wizard against a running service that detected two external monitors: one in Energy Star's list, one
     /// estimated from its size.</summary>

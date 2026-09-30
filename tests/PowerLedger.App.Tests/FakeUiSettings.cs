@@ -3,8 +3,8 @@ namespace PowerLedger.App.Tests;
 /// <summary>The App's preferences held in memory, recording each change.</summary>
 internal sealed class FakeUiSettings : IUiSettings
 {
-    /// <summary>Aero unlocked, as the tests from before the invite (0.10.3) have it; a test of the lock locks it.</summary>
-    public UiPreferences Current { get; set; } = UiPreferences.Default with { AeroUnlocked = true };
+    /// <summary>Aero approved, as the tests from before the lock (0.10.3) have it; a test of the lock locks it.</summary>
+    public UiPreferences Current { get; set; } = UiPreferences.Default with { AeroApproved = true };
 
     public bool StartsWithWindows { get; private set; } = true;
 
@@ -20,19 +20,28 @@ internal sealed class FakeUiSettings : IUiSettings
     /// <summary>What <see cref="SetLook"/> answers instead of switching, for a test of a window that won't open.</summary>
     public string? LookProblem { get; set; }
 
-    public string? UnlockAero()
+    public string? SetAeroRequestId(string id)
     {
-        Current = Current with { AeroUnlocked = true };
-        Changes.Add("aero unlocked");
-        if (LookProblem is not null) return LookProblem;
-        Current = Current with { Look = Look.Aero, LookIntroduced = false, AeroIntroSeen = false };
-        Changes.Add("look Aero");
+        Current = Current with { AeroRequestId = id };
+        Changes.Add($"aero request {id}");
+        return null;
+    }
+
+    public string? SetAeroApproved(bool approved)
+    {
+        Current = Current with { AeroApproved = approved };
+        Changes.Add($"aero approved {approved}");
+        if (!approved && Current.Look == Look.Aero)
+        {
+            Current = Current with { Look = Look.Midnight, LookIntroduced = true };
+            Changes.Add("look Midnight");
+        }
         return null;
     }
 
     public string? SetLook(Look look)
     {
-        if (look == Look.Aero && !Current.AeroUnlocked) return AeroInvite.Locked;
+        if (look == Look.Aero && !Current.AeroApproved) return AeroAccess.Locked;
         if (LookProblem is not null) return LookProblem;
         Current = Current with { Look = look, LookIntroduced = true };
         Changes.Add($"look {look}");

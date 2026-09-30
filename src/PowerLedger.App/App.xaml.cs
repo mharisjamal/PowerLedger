@@ -64,6 +64,7 @@ public partial class App : Application
     private CrashForwarder? _crashForwarder;
     private UsageCounter? _usage;
     private bool _exiting;
+    private AeroAccess? _aero;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -132,9 +133,12 @@ public partial class App : Application
         _updates.CloseRequested += ExitUi;   // the blocking window's Close PowerLedger (Plan Q §3)
         var updates = _updates;
         _now.StatusRead += status => updates.Apply(status.Updates);
+        // 0.10.7: Aero by request, asked for and checked on the data server; approval is announced, never switched to.
+        _aero = new AeroAccess(_preferences, new HttpAeroServer(http), threads, TimeProvider.System, copyToClipboard: CopyToClipboard);
+        _aero.Approved += () => _tray?.Announce("PowerLedger", AeroAccess.ReadyText, ShowWindow);
         _settings = new SettingsViewModel(
             _link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency(), _updates,
-            openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard);
+            openSent: OpenSentWindow, openBrowser: OpenPage, copyToClipboard: CopyToClipboard, aero: _aero);
         _settings.Privacy.Applied += consent => _usage?.ConsentChanged(consent);   // data-sharing design §3: known to usage counting at once
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
@@ -151,7 +155,7 @@ public partial class App : Application
         var settings = _settings;
         var unlocked = _preferences;
         _looks = new LookSwitcher(
-            OpenWindow, _theme, Retarget, line => AppLog.Write(line), look => settings.Look = look, () => unlocked.Current.AeroUnlocked);
+            OpenWindow, _theme, Retarget, line => AppLog.Write(line), look => settings.Look = look, () => unlocked.Current.AeroApproved);
         _usage = new UsageCounter(_link, _preferences, threads, TimeProvider.System, zone, CultureInfo.CurrentUICulture);
         _shell.PropertyChanged += OnShellChanged;
         _settings.PropertyChanged += OnSettingsChanged;
@@ -187,6 +191,7 @@ public partial class App : Application
         _brightness.Start();
         _updates.Start();
         _usage.Start();
+        _aero.Start();
         // A minute after start, then hourly (Updater's own cadence): pending feedback goes out once the PC is online again.
         _feedbackRetryTimer = TimeProvider.System.CreateTimer(_ => _ = _feedbackSender!.RetryPendingAsync(), null, Updater.FirstCheck, Updater.CheckEvery);
         if (!options.StartInTray) ShowWindow();
@@ -568,6 +573,7 @@ public partial class App : Application
             _brightness?.Dispose();
             _brightnessReader?.Dispose();
             _feedbackRetryTimer?.Dispose();
+            _aero?.Dispose();
             _feedbackWindow?.Close();
             _whatsNewWindow?.Close();
             if (_looks is { IsOpen: true }) _looks.Current.CloseForSwitch();   // for good, shown or hidden

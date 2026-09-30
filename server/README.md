@@ -25,6 +25,13 @@ for the design.
 - `GET /admin/stats`, `GET /admin/list` and `GET /admin/object`, all behind `ADMIN_TOKEN`, are for the owner only:
   install and upload counts, a paged list of stored reports (or, with `kind=history`, history chunks), and streaming
   one report's or chunk's bytes back out.
+- `POST /v1/aero/request` `{"id","name"}` and `GET /v1/aero/status?id=` (0.10.7): Aero by request. The App makes an id,
+  `AERO-` and 5 Crockford base32 characters, and sends it with the PC's name (1 to 64 characters); asking again changes
+  nothing. Status answers `{"state"}`, one of none, pending, approved or revoked; the id is its own bearer, and both are
+  under the per-address limit. The owner's `GET /v1/admin/aero`, `POST /v1/admin/aero/approve` and
+  `POST /v1/admin/aero/revoke` `{"id"}` are behind `ADMIN_TOKEN`, through `tools/aero.mjs`:
+  `node tools/aero.mjs --url <worker> list`, `approve AERO-XXXXX` or `revoke AERO-XXXXX`. Table `aero_requests`
+  (`0008_aero_requests.sql`).
 - `POST /v1/feedback` takes what a user writes in the App's feedback box and files it as an issue in the owner's
   PRIVATE GitHub repo (see Feedback, below).
 - A daily cron (`retention.ts`) drops reports whose day is more than 3 years old, history chunks whose last hour

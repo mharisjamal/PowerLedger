@@ -182,49 +182,49 @@ public sealed class AppPreferencesTests : IDisposable
         Store.Load().Look.ShouldBe(Look.Midnight);
     }
 
-    /// <summary>0.10.3: Aero is invite only. Locked, choosing it switches nothing and saves nothing.</summary>
+    /// <summary>0.10.3, by request since 0.10.7: locked, choosing Aero switches nothing and saves nothing.</summary>
     [Fact]
     public void Aero_while_locked_is_refused_without_a_switch()
     {
         var preferences = Preferences();
 
-        preferences.SetLook(Look.Aero).ShouldBe(AeroInvite.Locked);
+        preferences.SetLook(Look.Aero).ShouldBe(AeroAccess.Locked);
 
         _looks.ShouldBeEmpty();
         preferences.Current.Look.ShouldBe(Look.Midnight);
         System.IO.File.Exists(Path.Combine(_folder, "ui.json")).ShouldBeFalse();
     }
 
-    /// <summary>The code unlocks Aero for good, saved before the switch, and Aero opens as on a first open: its intro and
-    /// banner due, Switch back going to the look left.</summary>
+    /// <summary>0.10.7: approval is saved and unlocks Aero, but switches nothing; after it Aero is a normal choice.</summary>
     [Fact]
-    public void Unlocking_aero_saves_the_unlock_and_switches_to_aero_with_its_intro_due()
+    public void Approval_unlocks_aero_without_switching_to_it()
     {
         var preferences = Preferences();
-        preferences.SetLook(Look.Classic).ShouldBeNull();
-        preferences.SeeAeroIntro();
+        preferences.SetAeroRequestId("AERO-ABC12").ShouldBeNull();
 
-        preferences.UnlockAero().ShouldBeNull();
+        preferences.SetAeroApproved(true).ShouldBeNull();
 
-        _looks.ShouldBe([Look.Classic, Look.Aero]);
+        _looks.ShouldBeEmpty();
         var read = Store.Load();
-        (read.Look, read.AeroUnlocked, read.LookIntroduced, read.AeroIntroSeen, read.LookBeforeAero)
-            .ShouldBe((Look.Aero, true, false, false, (Look?)Look.Classic));
-        preferences.Current.ShouldBe(read);
-        preferences.SetLook(Look.Midnight).ShouldBeNull();
-        preferences.SetLook(Look.Aero).ShouldBeNull("once unlocked, Aero is a normal choice");
+        (read.Look, read.AeroApproved, read.AeroRequestId).ShouldBe((Look.Midnight, true, "AERO-ABC12"));
+        preferences.SetLook(Look.Aero).ShouldBeNull("once approved, Aero is a normal choice");
+        _looks.ShouldBe([Look.Aero]);
     }
 
+    /// <summary>0.10.7: a revoke locks Aero again and moves a window in Aero to Midnight, saved.</summary>
     [Fact]
-    public void Aero_whose_window_would_not_open_stays_unlocked_and_unswitched()
+    public void A_revoke_locks_aero_and_moves_out_of_it_to_midnight()
     {
         var preferences = Preferences();
-        _lookProblem = "Couldn't open the Aero look: no window.";
+        preferences.SetAeroApproved(true);
+        preferences.SetLook(Look.Aero);
 
-        preferences.UnlockAero().ShouldBe("Couldn't open the Aero look: no window.");
+        preferences.SetAeroApproved(false).ShouldBeNull();
 
+        _looks.ShouldBe([Look.Aero, Look.Midnight]);
         var read = Store.Load();
-        (read.Look, read.AeroUnlocked, read.LookIntroduced).ShouldBe((Look.Midnight, true, false));
+        (read.Look, read.AeroApproved).ShouldBe((Look.Midnight, false));
+        preferences.SetLook(Look.Aero).ShouldBe(AeroAccess.Locked);
     }
 
     [Fact]

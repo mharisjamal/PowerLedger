@@ -636,6 +636,18 @@
                         <Button x:Name="WatchIntroButton" Style="{StaticResource A.OutlineBtn}" Content="Watch the Aero intro" Height="30" Margin="12,0,0,0"
                                 Click="WatchIntroClick" AutomationProperties.Name="Watch the Aero intro" />
                     </StackPanel>
+                    <!-- 0.10.7: Aero is by request. While locked, Request Aero sends this PC's request ID, which the owner approves. -->
+                    <StackPanel Style="{StaticResource Row}" Visibility="{Binding AeroLocked, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource Label}" Text="Aero" />
+                        <Button Style="{StaticResource A.OutlineBtn}" Content="Request Aero" Command="{Binding Aero.Request}" AutomationProperties.Name="Request Aero" />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding Aero.HasRequested, Converter={StaticResource VisibleWhen}, FallbackValue=Collapsed}">
+                        <TextBlock Style="{StaticResource RowNote}" Text="{Binding Aero.RequestText}" />
+                        <StackPanel Style="{StaticResource Row}">
+                            <TextBlock Style="{StaticResource RowNote}" Text="{Binding Aero.Status, StringFormat=Status: {0}}" VerticalAlignment="Center" />
+                            <Button Style="{StaticResource A.OutlineBtn}" Content="Copy ID" Command="{Binding Aero.CopyId}" Margin="12,0,0,0" AutomationProperties.Name="Copy request ID" />
+                        </StackPanel>
+                    </StackPanel>
                     <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Start with Windows" />
                         <aero:GlassSwitch IsChecked="{Binding StartWithWindows}" AutomationProperties.Name="Start with Windows" />

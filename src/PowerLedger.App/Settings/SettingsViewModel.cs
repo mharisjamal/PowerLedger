@@ -46,14 +46,12 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     private IReadOnlyList<SourceLine> _sources = [];
     private string _database = "";
     private string? _notice;
-    private bool _enteringAeroCode;
-    private string _aeroCode = "";
-    private string? _aeroCodeMessage;
 
     public SettingsViewModel(
         IServiceLink link, IMachineHistory history, IUiSettings ui, UiThreads threads, TimeProvider clock, TimeZoneInfo zone,
         CultureInfo culture, string regionCurrency, Updater? updates = null, Action? openSent = null, Action<Uri>? openBrowser = null,
-        Action<string>? copyToClipboard = null, Func<bool>? windowsReducesMotion = null, Func<string?>? windowsRegion = null)
+        Action<string>? copyToClipboard = null, Func<bool>? windowsReducesMotion = null, Func<string?>? windowsRegion = null,
+        AeroAccess? aero = null)
     {
         _link = link;
         _history = history;
@@ -81,7 +79,8 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         GlassSection = new GlassSection(this, windowsReducesMotion ?? (() => !System.Windows.SystemParameters.ClientAreaAnimation));
         OverlaySection = new OverlaySection(this);
         ToggleOverlay = new RelayCommand(() => Overlay = Overlay with { Enabled = !Overlay.Enabled });
-        UnlockAero = new RelayCommand(Unlock);
+        Aero = aero;
+        if (aero is not null) aero.LockChanged += OnAeroLockChanged;
     }
 
     /// <summary>"Run setup again": the shell shows the wizard.</summary>
@@ -138,7 +137,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             if (value == _ui.Current.Look) return;
             if (value == Look.Aero && AeroLocked)
             {
-                EnteringAeroCode = true;   // invite only (0.10.3): picking Aero asks for the code, and nothing switches
+                AppMessage = AeroAccess.Locked;   // by request (0.10.7): nothing switches until the owner approves
                 OnPropertyChanged();
                 return;
             }
@@ -148,37 +147,18 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Aero is invite only (0.10.3) and this PC hasn't entered the code.</summary>
-    public bool AeroLocked => !_ui.Current.AeroUnlocked;
+    /// <summary>Aero is by request (0.10.7) and the owner hasn't approved this PC.</summary>
+    public bool AeroLocked => !_ui.Current.AeroApproved;
 
-    /// <summary>Aero was picked while locked: the invite code box and Unlock show.</summary>
-    public bool EnteringAeroCode { get => _enteringAeroCode; private set => SetProperty(ref _enteringAeroCode, value); }
+    /// <summary>Request Aero, its id and where it stands, for the Look row while locked; null in tests without it.</summary>
+    public AeroAccess? Aero { get; }
 
-    /// <summary>The invite code, as typed.</summary>
-    public string AeroCode { get => _aeroCode; set => SetProperty(ref _aeroCode, value); }
-
-    /// <summary>Why the code didn't unlock Aero, or null.</summary>
-    public string? AeroCodeMessage { get => _aeroCodeMessage; private set => SetProperty(ref _aeroCodeMessage, value); }
-
-    /// <summary>Unlock: a valid code unlocks Aero for good and switches to it; a wrong one says so and switches nothing.</summary>
-    public ICommand UnlockAero { get; }
-
-    private void Unlock()
+    /// <summary>Approved or revoked: the lock and, after a revoke out of Aero, the look show again.</summary>
+    private void OnAeroLockChanged()
     {
-        if (!AeroInvite.IsValid(AeroCode))
-        {
-            AeroCodeMessage = AeroInvite.Invalid;
-            return;
-        }
-        AeroCodeMessage = null;
-        AppMessage = _ui.UnlockAero();
-        AeroCode = "";
-        EnteringAeroCode = false;
         OnPropertyChanged(nameof(AeroLocked));
         OnPropertyChanged(nameof(Look));
         OnPropertyChanged(nameof(LookIntroduced));
-        OnPropertyChanged(nameof(LookBeforeAero));
-        OnPropertyChanged(nameof(AeroIntroSeen));
     }
 
     /// <summary>Aero's glass (Aero look design §3), chosen as a whole by the Glass section: saved in range, then raised, so
@@ -311,6 +291,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public void Show()
     {
         _threads.Background(() => _ = ReadAllAsync(refill: true));
+        Aero?.Check();   // 0.10.7: where the Aero request stands, each time Settings shows
         _timer ??= _clock.CreateTimer(_ => _ = ReadStatusAsync(), null, StatusEvery, StatusEvery);
     }
 
@@ -325,6 +306,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         Tariff.Saved -= ReadTariffs;
         Service.Saved -= OnSaved;
         _link.ConnectionChanged -= OnConnectionChanged;
+        if (Aero is not null) Aero.LockChanged -= OnAeroLockChanged;
         Hide();
     }
 

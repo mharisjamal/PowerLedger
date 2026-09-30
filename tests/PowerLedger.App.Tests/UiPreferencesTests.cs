@@ -103,7 +103,7 @@ public sealed class UiPreferencesTests : IDisposable
         var store = new UiPreferencesStore(File);
         store.Load().Look.ShouldBe(Look.Midnight);
         UiPreferences.Default.Look.ShouldBe(Look.Midnight);
-        UiPreferences.Default.AeroUnlocked.ShouldBeFalse();
+        UiPreferences.Default.AeroApproved.ShouldBeFalse();
 
         store.Save(UiPreferences.Default with { Look = Enum.Parse<Look>(chosen) });
 
@@ -131,9 +131,9 @@ public sealed class UiPreferencesTests : IDisposable
     [Theory]
     [InlineData("""{ "Theme": "Dark", "Look": "Aero", "LookIntroduced": false, "AeroIntroduced": true, "LookBeforeAero": "Classic", "AeroIntroSeen": true, "FirstRunDone": true }""")]
     [InlineData("""{ "Theme": "Dark", "Look": "Aero", "LookIntroduced": true, "AeroIntroduced": true, "AeroIntroSeen": false, "FirstRunDone": true }""")]
-    [InlineData("""{ "Theme": "Dark", "Look": "Aero", "AeroUnlocked": false, "FirstRunDone": true }""")]
-    [InlineData("""{ "Theme": "Dark", "Look": "Aero", "AeroUnlocked": "yes", "FirstRunDone": true }""")]
-    [InlineData("""{ "Theme": "Dark", "Look": "aero", "AeroUnlocked": null, "FirstRunDone": true }""")]
+    [InlineData("""{ "Theme": "Dark", "Look": "Aero", "AeroApproved": false, "FirstRunDone": true }""")]
+    [InlineData("""{ "Theme": "Dark", "Look": "Aero", "AeroApproved": "yes", "FirstRunDone": true }""")]
+    [InlineData("""{ "Theme": "Dark", "Look": "aero", "AeroApproved": null, "FirstRunDone": true }""")]
     public void Aero_without_the_unlock_goes_to_midnight_on_load_without_a_banner(string json)
     {
         Directory.CreateDirectory(_folder);
@@ -142,25 +142,54 @@ public sealed class UiPreferencesTests : IDisposable
 
         var read = store.Load();
 
-        (read.Look, read.AeroUnlocked, read.LookIntroduced).ShouldBe((Look.Midnight, false, true));
+        (read.Look, read.AeroApproved, read.LookIntroduced).ShouldBe((Look.Midnight, false, true));
         read.Theme.ShouldBe(ThemeChoice.Dark);
         read.FirstRunDone.ShouldBeTrue();
         store.Save(read with { Look = Look.Aero });   // a hand edit back to Aero is undone again at the next load
         store.Load().Look.ShouldBe(Look.Midnight);
     }
 
+    /// <summary>0.10.7: 0.10.3's invite-code unlock, AeroUnlocked, is no longer read, so a PC on Aero by the old code
+    /// opens in Midnight and asks again.</summary>
+    [Fact]
+    public void The_old_invite_unlock_is_ignored_and_aero_goes_to_midnight()
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, """{ "Look": "Aero", "AeroUnlocked": true, "LookIntroduced": true, "FirstRunDone": true }""");
+
+        var read = new UiPreferencesStore(File).Load();
+
+        (read.Look, read.AeroApproved, read.AeroRequestId).ShouldBe((Look.Midnight, false, (string?)null));
+        read.FirstRunDone.ShouldBeTrue();
+    }
+
+    /// <summary>The request id is kept across a save and a load; anything that isn't one reads as none.</summary>
+    [Theory]
+    [InlineData("AERO-ABC12", "AERO-ABC12")]
+    [InlineData("AERO-ABCDU", null)]
+    [InlineData("aero-abc12", null)]
+    [InlineData("", null)]
+    public void The_aero_request_id_is_kept_when_it_is_one(string saved, string? expected)
+    {
+        Directory.CreateDirectory(_folder);
+        var store = new UiPreferencesStore(File);
+        store.Save(UiPreferences.Default with { AeroRequestId = saved });
+
+        store.Load().AeroRequestId.ShouldBe(expected);
+    }
+
     [Fact]
     public void Aero_with_the_unlock_stays_across_a_save_and_a_load()
     {
         Directory.CreateDirectory(_folder);
-        System.IO.File.WriteAllText(File, """{ "Look": "Aero", "AeroUnlocked": true, "LookIntroduced": false, "FirstRunDone": true }""");
+        System.IO.File.WriteAllText(File, """{ "Look": "Aero", "AeroApproved": true, "LookIntroduced": false, "FirstRunDone": true }""");
         var store = new UiPreferencesStore(File);
 
         var read = store.Load();
 
-        (read.Look, read.AeroUnlocked, read.LookIntroduced).ShouldBe((Look.Aero, true, false));
+        (read.Look, read.AeroApproved, read.LookIntroduced).ShouldBe((Look.Aero, true, false));
         store.Save(read);
-        System.IO.File.ReadAllText(File).ShouldContain("\"AeroUnlocked\": true");
+        System.IO.File.ReadAllText(File).ShouldContain("\"AeroApproved\": true");
         store.Load().ShouldBe(read);
     }
 

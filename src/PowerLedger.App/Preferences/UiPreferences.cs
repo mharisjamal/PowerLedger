@@ -23,18 +23,23 @@ internal sealed record UiPreferences
 
     /// <summary>Which front end the window opens in (Midnight look design §1, Aero look design §1): Midnight, the default
     /// since Aero became invite only (0.10.3, the owner's decision), for a new install and for a ui.json from before the
-    /// look existed; Classic, or Aero once unlocked (<see cref="AeroUnlocked"/>), once chosen. A name this version doesn't
+    /// look existed; Classic, or Aero once unlocked (<see cref="AeroApproved"/>), once chosen. A name this version doesn't
     /// know reads as the default rather than failing the whole file. It has a setter rather than init for the missing
     /// case: the JSON source generator gives an init-only property missing from the file its type's default, which is
     /// Classic, where a setter is left alone.</summary>
     [JsonConverter(typeof(LookJsonConverter))]
     public Look Look { get; set; } = Look.Midnight;
 
-    /// <summary>This PC entered the Aero invite code (<see cref="AeroInvite"/>), so Aero is a look it can choose; until
-    /// then every load puts a saved Aero back to Midnight (<see cref="Locked"/>). False for a ui.json from before it
-    /// existed, and for anything in it but true, which reads as locked rather than failing the file.</summary>
+    /// <summary>The owner approved this PC's Aero request (0.10.7, <see cref="AeroAccess"/>), as the server last said, so
+    /// Aero is a look it can choose; until then every load puts a saved Aero back to Midnight (<see cref="Locked"/>).
+    /// False for a ui.json from before it existed, and for anything in it but true, which reads as locked rather than
+    /// failing the file. 0.10.3's AeroUnlocked, from the invite code, is no longer read: those PCs ask again.</summary>
     [JsonConverter(typeof(TrueOnlyJsonConverter))]
-    public bool AeroUnlocked { get; init; }
+    public bool AeroApproved { get; init; }
+
+    /// <summary>The id this PC asked for Aero under (0.10.7), AERO- and 5 Crockford base32 characters, made once when
+    /// Request Aero is first pressed; null before. Any other text in the file reads as null.</summary>
+    public string? AeroRequestId { get; init; }
 
     /// <summary>The one-time banner that says this is the new look, with Switch back and Got it, has been retired: by one
     /// of its buttons or by any look switch (Midnight look design §1). It never shows again, in any look, until the move
@@ -114,6 +119,7 @@ internal sealed record UiPreferences
     {
         Theme = Enum.IsDefined(Theme) ? Theme : ThemeChoice.System,
         Look = Enum.IsDefined(Look) ? Look : Default.Look,
+        AeroRequestId = AeroAccess.IsId(AeroRequestId) ? AeroRequestId : null,
         LookBeforeAero = LookBeforeAero is { } before && Enum.IsDefined(before) && before != Look.Aero ? before : null,
         EnergyPeriod = Enum.IsDefined(EnergyPeriod) ? EnergyPeriod : Default.EnergyPeriod,
         Co2KgPerKwh = double.IsFinite(Co2KgPerKwh) && Co2KgPerKwh >= 0 && Co2KgPerKwh < MaxCo2KgPerKwh ? Co2KgPerKwh : Co2.DefaultKgPerKwh,
@@ -122,10 +128,10 @@ internal sealed record UiPreferences
         AeroWindow = AeroWindow?.Sanitised(),
     };
 
-    /// <summary>The same preferences with Aero's lock kept (0.10.3): Aero without <see cref="AeroUnlocked"/> goes to
-    /// Midnight, with no new look's banner for the move. It runs on every load, so a hand-edited ui.json can't keep Aero
-    /// without the unlock either.</summary>
-    public UiPreferences Locked() => Look == Look.Aero && !AeroUnlocked
+    /// <summary>The same preferences with Aero's lock kept (0.10.3, by request since 0.10.7): Aero without
+    /// <see cref="AeroApproved"/> goes to Midnight, with no new look's banner for the move. It runs on every load, so a
+    /// ui.json from 0.10.3 to 0.10.6, unlocked by the old invite code, opens in Midnight.</summary>
+    public UiPreferences Locked() => Look == Look.Aero && !AeroApproved
         ? this with { Look = Look.Midnight, LookIntroduced = true }
         : this;
 }

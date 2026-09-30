@@ -412,7 +412,7 @@ public class LookSwitcherTests
             looks.IsOpen.ShouldBeFalse();
         });
 
-    /// <summary>0.10.3: Aero is invite only. Locked, a switch to it is refused with nothing opened or applied.</summary>
+    /// <summary>0.10.3, by request since 0.10.7: locked, a switch to it is refused with nothing opened or applied.</summary>
     [Fact]
     public void A_switch_to_aero_while_locked_is_refused_and_opens_nothing()
         => WithTheme((theme, _) =>
@@ -422,7 +422,7 @@ public class LookSwitcherTests
             looks.Show();
             _events.Clear();
 
-            looks.Switch(Look.Aero).ShouldBe(AeroInvite.Locked);
+            looks.Switch(Look.Aero).ShouldBe(AeroAccess.Locked);
 
             _events.ShouldBeEmpty();
             looks.Look.ShouldBe(Look.Classic);

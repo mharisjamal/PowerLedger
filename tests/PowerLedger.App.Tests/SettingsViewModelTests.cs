@@ -224,7 +224,7 @@ public class SettingsViewModelTests
     [Fact]
     public void Aero_can_be_chosen_from_another_look()
     {
-        _ui.Current = UiPreferences.Default with { Look = Look.Classic, AeroUnlocked = true };
+        _ui.Current = UiPreferences.Default with { Look = Look.Classic, AeroApproved = true };
         var model = Model();
 
         model.Look = Look.Aero;

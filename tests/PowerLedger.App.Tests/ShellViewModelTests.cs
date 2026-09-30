@@ -296,7 +296,7 @@ public class ShellViewModelTests
     [InlineData("Midnight", "Classic")]
     public void Switch_look_never_reaches_aero_while_locked(string from, string to)
     {
-        _ui.Current = UiPreferences.Default with { Look = Enum.Parse<Look>(from), AeroUnlocked = false };
+        _ui.Current = UiPreferences.Default with { Look = Enum.Parse<Look>(from), AeroApproved = false };
         var shell = Shell();
 
         shell.SwitchLook.Execute(null);
@@ -305,6 +305,5 @@ public class ShellViewModelTests
 
         shell.Settings.Look.ShouldBe(Enum.Parse<Look>(to));
         _ui.Changes.ShouldNotContain("look Aero");
-        shell.Settings.EnteringAeroCode.ShouldBeFalse();
     }
 }

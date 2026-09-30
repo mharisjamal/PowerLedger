@@ -8,6 +8,10 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.10.7",
+        [
+            "Aero is now by request: press Request Aero in Settings, Look, and send your request ID to the PowerLedger owner. Earlier invite codes no longer work.",
+        ]),
         ("0.10.6",
         [
             "Aero's pills, buttons and panels have the demo's thin glass edges.",
