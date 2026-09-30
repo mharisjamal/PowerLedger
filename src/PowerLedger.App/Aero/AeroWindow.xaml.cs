@@ -70,6 +70,7 @@ internal partial class AeroWindow : Window, IShellWindow
         ShowIntro();
         ShowPcs();
         ShowBell();
+        StartGrabBar();
         // Nothing in the shell changes until the window shows: a switch whose new window fails to show puts the page back
         // as it was, which a window that had already mapped it here would have changed under it (as MidnightWindow).
         shell.PropertyChanged += OnShellChanged;

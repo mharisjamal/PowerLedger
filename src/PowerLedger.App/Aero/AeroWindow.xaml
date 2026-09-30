@@ -403,6 +403,9 @@
 
         <!-- ============ the caption: the window's buttons, each a glass pill of its own ============ -->
         <Grid x:Name="Caption" Height="52" VerticalAlignment="Top" Margin="24,0">
+            <!-- The grab bar (visionOS's): centred over the stage, a piece of the shape of its own that moves the whole window;
+                 AeroWindow.GrabBar keeps it clear of the buttons in a narrow window. -->
+            <aero:GrabBar x:Name="Grab" Style="{StaticResource A.GrabBar}" HorizontalAlignment="Left" VerticalAlignment="Center" />
             <StackPanel x:Name="CaptionButtons" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True">
                 <!-- The demo's own pills (its .demo, bottom right there): Replay intro plays the opening again, Play tour pushes
                      the camera in on the Dashboard's panes in turn. Up here beside the window's buttons: the stage's foot has

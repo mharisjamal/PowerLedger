@@ -917,6 +917,46 @@
         <Setter Property="Margin" Value="0,0,3,3" />
         <Setter Property="ToolTip" Value="Resize" />
     </Style>
+    <!-- The grab bar (visionOS's, top middle): a piece of the window's shape 120 by 22 that takes the pointer, and in it only
+         the bar, 56 by 6, as the demo's .gbtn straight over the live background (no dim: it has no words to keep
+         readable, and a dim would cancel the light it gives): the white fill at 12 %, the 1 px edge at 22 % and the top
+         light at 25 %. The bar's opacity is GrabBar's (a quarter at rest, half near, whole on it, where
+         the hover wash brightens it a touch); the focus ring hugs the bar, inside the shape. No frost, rim, sheen or shadow:
+         the hit area around the bar is clear. -->
+    <Style x:Key="A.GrabBar" TargetType="aero:GrabBar">
+        <Setter Property="Width" Value="{x:Static aero:GrabBar.HitWidth}" />
+        <Setter Property="Height" Value="{x:Static aero:GrabBar.HitHeight}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HasShadow" Value="False" />
+        <Setter Property="HasRim" Value="False" />
+        <Setter Property="SheenEnabled" Value="False" />
+        <Setter Property="Cursor" Value="SizeAll" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="CornerRadius" Value="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="aero:GrabBar">
+                    <Grid Background="{TemplateBinding Background}">
+                        <Border x:Name="PART_Focus" Width="68" Height="18" CornerRadius="9" BorderBrush="{DynamicResource A.B.Accent}" BorderThickness="2"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False" />
+                        <Grid x:Name="PART_Bar" Width="{x:Static aero:GrabBar.BarWidth}" Height="{x:Static aero:GrabBar.BarHeight}" Opacity="0.25"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                            <Border CornerRadius="3" Background="{DynamicResource A.B.BtnFill}" />
+                            <Border x:Name="PART_Bright" CornerRadius="3" Background="{DynamicResource A.B.OutlineHover}" Opacity="0" />
+                            <Border CornerRadius="3" BorderBrush="{DynamicResource A.B.BtnEdge}" BorderThickness="1" />
+                            <Border CornerRadius="2" Margin="1" BorderBrush="{DynamicResource A.B.BtnTop}" BorderThickness="0,1,0,0" />
+                        </Grid>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="PART_Focus" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 
     <!-- A well: the quieter surface inside a pane, with its light top edge. The demo draws that edge as an inset shadow
          over the well's fill, inside the padding; here it is a border, which the fill doesn't reach under, so its brush is
