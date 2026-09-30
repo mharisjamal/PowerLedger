@@ -133,15 +133,38 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
     /// Only a laptop's readings come from its own battery: the battery a desktop shows is a UPS, which powers more than
     /// the machine, so that battery is never the reason a desktop's readings are measured. A UPS or power supply read
     /// directly over USB is different: when one gives the machine's total (spec: Plan L), its reading is measured unless
-    /// the UPS itself gives only its load as a share of its rated VA. A laptop keeps its own story regardless, since one
-    /// running off its battery never takes either as its total, and the wizard is asked about the laptop, not the mains.</summary>
-    internal static string ReadingsFor(ServiceStatus? status, ChassisKind chassis)
+    /// the UPS itself gives only its load as a share of its rated VA. A UPS on another computer (<paramref name="nut"/>, the
+    /// one set up in Settings) is read over the network instead, and the service names it "myups on nas.local". A machine's
+    /// own meter, Windows' power meter or its management controller, is measured the same way. A laptop keeps its own story
+    /// regardless, since one running off its battery never takes any of these as its total, and the wizard is asked about
+    /// the laptop, not the mains. The processor's meter of the whole platform (Snapdragon X) is the exception: it measures
+    /// on battery and plugged in alike.</summary>
+    internal static string ReadingsFor(ServiceStatus? status, ChassisKind chassis, NutSettings? nut = null)
     {
         if (status is null) return "The service isn't running yet. Once it is, each reading on the Now screen shows its quality.";
+        if (status.Last is { Total: TotalSource.PlatformMeter })
+        {
+            return "This machine's processor meters the whole machine, display included, so its readings are measured, on battery and plugged in.";
+        }
+        if (chassis != ChassisKind.Laptop && status.Last is { Total: TotalSource.PowerMeter })
+        {
+            return "This machine has a power meter of its own that Windows reads, so its readings are measured.";
+        }
+        if (chassis != ChassisKind.Laptop && status.Last is { Total: TotalSource.Bmc })
+        {
+            return "This machine's management controller reports what it draws, so its readings are measured.";
+        }
         if (chassis != ChassisKind.Laptop && status.Last is { Total: TotalSource.Ups or TotalSource.PowerSupply or TotalSource.PowerSupplyWall } last)
         {
             var kind = last.Total == TotalSource.Ups ? PowerDeviceKind.Ups : PowerDeviceKind.PowerSupply;
             var name = status.PowerDevices?.FirstOrDefault(d => d.Kind == kind)?.Name ?? (kind == PowerDeviceKind.Ups ? "UPS" : "power supply");
+            if (kind == PowerDeviceKind.Ups && nut is { IsSetUp: true } && name.StartsWith($"{nut.Ups.Trim()} on {nut.Host.Trim()}", StringComparison.Ordinal))
+            {
+                return last.Quality == Quality.Measured
+                    ? $"This machine reads its UPS {name} over the network (Network UPS Tools), so its readings are measured."
+                    : $"This machine reads its UPS {name} over the network (Network UPS Tools). "
+                      + "A UPS that gives its power only in VA, without its real watts, is estimated, not measured.";
+            }
             return last.Quality == Quality.Measured
                 ? $"This machine reads its {name} over USB, so its readings are measured."
                 : $"This machine reads its {name} over USB. "
@@ -174,7 +197,7 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
             if (status is not null) Machine.ShowMonitors(status.Monitors ?? []);   // a service before monitors lists none
             Detected = detected?.Summary(_culture) ?? "The service hasn't detected this machine yet; it does when it starts.";
             _status = status;
-            Readings = ReadingsFor(_status, Machine.Chassis);
+            Readings = ReadingsFor(_status, Machine.Chassis, MachineNut());
         });
     }
 
@@ -187,8 +210,11 @@ internal sealed class WizardViewModel : ObservableObject, IDisposable
     /// <summary>The readings step speaks of the chassis the machine step chose. Raised on the UI thread.</summary>
     private void OnMachineChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ServiceForm.Chassis)) Readings = ReadingsFor(_status, Machine.Chassis);
+        if (e.PropertyName == nameof(ServiceForm.Chassis)) Readings = ReadingsFor(_status, Machine.Chassis, MachineNut());
     }
+
+    /// <summary>The UPS on another computer the machine form holds, as Settings set it up.</summary>
+    private NutSettings MachineNut() => new() { Host = Machine.NutHost, Ups = Machine.NutUps };
 
     private void FinishSetup()
     {

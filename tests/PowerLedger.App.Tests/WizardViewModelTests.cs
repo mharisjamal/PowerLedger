@@ -201,6 +201,40 @@ public class WizardViewModelTests
                       + "A UPS that only gives its load as a share of its rated VA is estimated, not measured.");
     }
 
+    /// <summary>A UPS on another computer (0.10.5) is read over the network, not USB: the wizard says so when the UPS giving
+    /// the total is the one set up in Settings, as the service names it ("myups on nas.local").</summary>
+    [Theory]
+    [InlineData(Quality.Measured, "This machine reads its UPS myups on nas.local over the network (Network UPS Tools), so its readings are measured.")]
+    [InlineData(Quality.Estimated, "This machine reads its UPS myups on nas.local over the network (Network UPS Tools). "
+                                   + "A UPS that gives its power only in VA, without its real watts, is estimated, not measured.")]
+    public void A_ups_on_another_computer_is_said_to_be_read_over_the_network(Quality quality, string said)
+    {
+        var status = Statuses.Running() with
+        {
+            Last = Frames.At(Now, quality: quality) with { Total = TotalSource.Ups },
+            PowerDevices = [new PowerDeviceStatus(PowerDeviceKind.Ups, "myups on nas.local", 140, "real output power")],
+        };
+        var nut = new NutSettings { Host = "nas.local", Ups = "myups" };
+
+        WizardViewModel.ReadingsFor(status, ChassisKind.Desktop, nut).ShouldBe(said);
+        WizardViewModel.ReadingsFor(status with { PowerDevices = [Statuses.Ups] }, ChassisKind.Desktop, nut)
+            .ShouldStartWith("This machine reads its APC Back-UPS ES 850G2 over USB", Case.Sensitive, "a UPS on USB answers first");
+    }
+
+    [Theory]
+    [InlineData(TotalSource.PowerMeter, ChassisKind.Desktop, "This machine has a power meter of its own that Windows reads, so its readings are measured.")]
+    [InlineData(TotalSource.Bmc, ChassisKind.Desktop, "This machine's management controller reports what it draws, so its readings are measured.")]
+    [InlineData(TotalSource.PlatformMeter, ChassisKind.Laptop,
+        "This machine's processor meters the whole machine, display included, so its readings are measured, on battery and plugged in.")]
+    [InlineData(TotalSource.PlatformMeter, ChassisKind.Desktop,
+        "This machine's processor meters the whole machine, display included, so its readings are measured, on battery and plugged in.")]
+    public void A_machine_measured_by_its_own_meter_is_told_which(TotalSource total, ChassisKind chassis, string said)
+    {
+        var status = Statuses.Running(energyMeter: true, battery: true) with { Last = Frames.At(Now, quality: Quality.Measured) with { Total = total } };
+
+        WizardViewModel.ReadingsFor(status, chassis).ShouldBe(said);
+    }
+
     [Fact]
     public void A_measured_ups_or_power_supply_with_no_matching_device_listed_still_says_which_kind()
     {

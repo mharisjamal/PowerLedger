@@ -465,7 +465,8 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         TotalSource.Ups => "UPS output",
         TotalSource.PowerSupply or TotalSource.PowerSupplyWall => "power supply reading",
         TotalSource.PlatformMeter => "platform meter",
-        TotalSource.PowerMeter or TotalSource.Bmc => "power meter reading",
+        TotalSource.PowerMeter => "power meter reading",
+        TotalSource.Bmc => "management controller",
         _ => frame.Quality switch
         {
             Quality.Measured => "battery discharge",
