@@ -30,7 +30,10 @@ public class LiquidGlassProofTests
             byte[] edge = [95, 79, 62, 47, 34, 23, 15, 9, 5, 3, 1, 1, 0];
             for (var i = 0; i < edge.Length; i++)
                 (GlassGlow.Glow(i + 0.5, 0.7) * 255).ShouldBe(edge[i], 3.5, $"the model, pixel {i} in");
+            // At the browser's scale, 1: drawn off any window, the glow would take the process's own.
+            GlassGlow.ScaleOverride = 1;
             var (pixels, stride) = Draw(new GlassGlow { Width = 400, Height = 200 }, 400, 200, Colors.Black);
+            GlassGlow.ScaleOverride = null;
             for (var i = 0; i < edge.Length; i++)
             {
                 ((double)pixels[(100 * stride) + (i * 4) + 2]).ShouldBe(edge[i], 4, $"the left edge, pixel {i} in");
@@ -44,7 +47,9 @@ public class LiquidGlassProofTests
     public void The_corner_light_is_a_crescent_in_the_top_left_corner_only()
         => UiHarness.OnUi(() =>
         {
+            GlassGlow.ScaleOverride = 1;
             var (pixels, stride) = Draw(new GlassGlow { Width = 400, Height = 200 }, 400, 200, Colors.Black);
+            GlassGlow.ScaleOverride = null;
             byte At(int x, int y) => pixels[(y * stride) + (x * 4) + 2];
             Math.Max(At(8, 8), At(9, 9)).ShouldBeGreaterThan((byte)150, "lit on the diagonal, top left");
             Math.Max(At(391, 8), At(390, 9)).ShouldBeLessThan((byte)110, "only the glow top right");

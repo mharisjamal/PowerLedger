@@ -96,6 +96,9 @@
     <ControlTemplate x:Key="A.Glass.Template" TargetType="aero:GlassPanel">
         <Grid>
             <aero:LiquidGlassBackdrop x:Name="PART_Backdrop" CornerRadius="{TemplateBinding CornerRadius}" IsLive="{DynamicResource A.Glass.Live}" />
+            <!-- Empty but for a dialog or a toast, which float over the window's own panes: the window lays the stage under
+                 it here (AeroWindow.Frost), as the browser's backdrop filter would read the page beneath. -->
+            <Border x:Name="PART_Frost" IsHitTestVisible="False" />
             <aero:GlassShadow x:Name="PART_Shadow" CornerRadius="{TemplateBinding CornerRadius}" Tint="{TemplateBinding Background}"
                               Glow="{DynamicResource A.Glass.Glow}" Casts="{TemplateBinding HasShadow}" Bubble="{TemplateBinding Bubble}" />
             <Border x:Name="PART_Tint" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Background}" IsHitTestVisible="False" />
@@ -161,6 +164,9 @@
     <Style x:Key="A.GlassBtn" TargetType="ButtonBase" BasedOn="{StaticResource A.Hoverable}">
         <Setter Property="Padding" Value="16,0" />
         <Setter Property="Height" Value="36" />
+        <!-- The mockup's .cap words: 14, medium. -->
+        <Setter Property="FontSize" Value="{DynamicResource A.T.Body}" />
+        <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Template">
             <Setter.Value>
@@ -195,6 +201,8 @@
          would lie glass on glass, only the hover's white wash and the press. -->
     <Style x:Key="A.CapBtn" TargetType="ButtonBase" BasedOn="{StaticResource A.Hoverable}">
         <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="{DynamicResource A.T.Body}" />
+        <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Height" Value="40" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Template">
@@ -564,12 +572,15 @@
         </Setter>
     </Style>
 
-    <!-- A choice of a few (Settings' Style, Behind the glass and Appearance), the mockup's Style row: the options side by
-         side with no frame of their own, the chosen one the white glass pill. -->
+    <!-- A choice of a few (Settings' Style and Appearance), the kit's: the options in a well (its .well, a capsule 42 high,
+         4 in), the chosen one the white glass pill. -->
     <Style x:Key="A.SegGroup" TargetType="Border">
-        <Setter Property="Height" Value="40" />
-        <Setter Property="Padding" Value="4" />
-        <Setter Property="CornerRadius" Value="20" />
+        <Setter Property="Height" Value="42" />
+        <Setter Property="Padding" Value="3" />
+        <Setter Property="CornerRadius" Value="21" />
+        <Setter Property="Background" Value="{DynamicResource A.B.InsetFill}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource A.B.InsetEdge}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="HorizontalAlignment" Value="Left" />
     </Style>
     <Style x:Key="A.SegOpt" TargetType="RadioButton" BasedOn="{StaticResource A.OptItem}">

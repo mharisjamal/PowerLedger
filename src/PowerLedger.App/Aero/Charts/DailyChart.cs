@@ -50,9 +50,11 @@ internal static class DailyScale
 }
 
 /// <summary>
-/// Energy each day (Aero look design §1, the prototype's DailyChart on real days): the chosen month's days as a hatched
-/// area under the accent line, the month before as a dashed line, and a tip on the day under the pointer ("$0.27 on the
-/// 17th"), today's when the pointer is away. Drawn on demand only; the intro wipes it in through <see cref="Reveal"/>.
+/// Energy each day (Aero look design §1; 0.10.9, the mockup's bars): the chosen month's days as glass bars, each a capsule
+/// with the recipe's glowing edge and the latest in the accent's glass (the mockup's lime at 78 %), the month before as a
+/// dashed line, and a tip on the day under the pointer ("$0.27 on the 17th"), today's when the pointer is away. The bars
+/// lie on the chart's well and bend nothing of their own: glass on glass would bend the pane's picture twice. Drawn on
+/// demand only; the intro wipes it in through <see cref="Reveal"/>.
 /// </summary>
 internal sealed class DailyChart : FrameworkElement
 {
@@ -74,6 +76,7 @@ internal sealed class DailyChart : FrameworkElement
     public DailyChart()
     {
         Cursor = Cursors.Cross;
+        RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.NearestNeighbor);   // the bars' edges, pixel for pixel
         AutomationProperties.SetName(this, "Energy each day");
     }
 
@@ -174,20 +177,26 @@ internal sealed class DailyChart : FrameworkElement
         var top = days.Select((d, i) => P(i + 1, d.Kwh)).ToList();
         _wipe.Rect = WipeRect(Reveal);
         dc.PushClip(_wipe);
-        // The HTML's hatch: 5 px accent stripes every 10 px at minus 45 degrees.
-        var hatch = ChartInk.Frozen(new DrawingBrush(new GeometryDrawing(accent, null, new RectangleGeometry(new Rect(0, 0, 5, 10))))
-        {
-            TileMode = TileMode.Tile, Viewport = new Rect(0, 0, 10, 10), ViewportUnits = BrushMappingMode.Absolute,
-            Viewbox = new Rect(0, 0, 10, 10), ViewboxUnits = BrushMappingMode.Absolute, Transform = new RotateTransform(-45), Opacity = .85,
-        });
-        if (top.Count > 1)
-        {
-            dc.DrawGeometry(hatch, null, ChartInk.Smooth(top, close: true, baseY: DailyScale.Y1 * sy));
-            dc.DrawGeometry(null, ChartInk.Pen(accent, 2, round: true), ChartInk.Smooth(top));
-        }
+        // The mockup's bars: 80 % of a day's slot, rounded to capsules (its 14 px corners, or half the width), each lit by the
+        // recipe's edge; the latest day in the accent's glass.
+        var slot = (DailyScale.X1 - DailyScale.X0) / Math.Max(1, monthDays - 1) * sx;
+        var width = Math.Max(4, slot * 0.8);
+        var baseline = DailyScale.Y1 * sy;
+        var glow = TryFindResource(GlassMaterial.GlowKey) is double g ? g : LiquidGlassRecipe.HighlightOpacity;
+        var scale = GlassGlow.ScaleOverride ?? VisualTreeHelper.GetDpi(this).DpiScaleX;
+        var latest = ChartInk.Brush(Color.FromArgb((byte)Math.Round(0.78 * 255), accentColour.R, accentColour.G, accentColour.B));
         for (var i = 0; i < top.Count; i++)
         {
-            if (i % 3 == 0 || i == top.Count - 1) dc.DrawEllipse(accent, null, top[i], 3.5, 3.5);
+            var height = Math.Max(width, baseline - top[i].Y);
+            var bar = new Rect(top[i].X - width / 2, baseline - height, width, height);
+            var radius = Math.Min(14, width / 2);
+            if (i == top.Count - 1) dc.DrawRoundedRectangle(latest, null, bar, radius, radius);
+            if (glow > 0)
+            {
+                dc.PushTransform(new TranslateTransform(bar.X, bar.Y));
+                foreach (var (source, target) in GlassGlow.For(bar.Width, bar.Height, radius, glow, scale).Parts(bar.Width, bar.Height, scale)) dc.DrawImage(source, target);
+                dc.Pop();
+            }
         }
         dc.Pop();
 

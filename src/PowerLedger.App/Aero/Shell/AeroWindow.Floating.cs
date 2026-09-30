@@ -311,11 +311,11 @@ internal partial class AeroWindow
     // ---------------------------------------------------------------- frost for what floats
 
     /// <summary>
-    /// Real frost on a dialog or a toast (the prototype's AttachFrost): the stage under it, blurred, in its frost layer,
-    /// so the panes behind read as glass seen through glass rather than as text through a tint. BlurEffect is kept to
-    /// these small surfaces (CLAUDE.md), and the view of the stage is lined up when the pane is laid out or the window
-    /// resized, never per frame; the spring it opens on moves it a little off its rest place for a moment, which the
-    /// blur hides.
+    /// What a dialog or a toast floats over: the window's own stage under it, in its frost layer over the engine's
+    /// backdrop (which shows what is behind the window, not the window's own panes), blurred by the recipe's deviation of
+    /// 2 (a WPF radius of 6), so the panes behind read through the glass as the browser's backdrop filter reads the page.
+    /// BlurEffect is kept to these small surfaces (CLAUDE.md), and the view of the stage is lined up when the pane is laid
+    /// out or the window resized, never per frame.
     /// </summary>
     private void Frost(GlassPanel pane)
     {
@@ -329,7 +329,7 @@ internal partial class AeroWindow
         layers.SetBinding(Panel.BackgroundProperty, new System.Windows.Data.Binding(nameof(Background)) { Source = this });
         layers.Children.Add(new System.Windows.Shapes.Rectangle { Fill = room });
         layers.Children.Add(new System.Windows.Shapes.Rectangle { Fill = brush });
-        layers.Effect = new BlurEffect { Radius = 24, KernelType = KernelType.Gaussian, RenderingBias = RenderingBias.Performance };
+        layers.Effect = new BlurEffect { Radius = 3 * LiquidGlassRecipe.BlurDeviation, KernelType = KernelType.Gaussian, RenderingBias = RenderingBias.Performance };
         host.Child = layers;
         void Align()
         {

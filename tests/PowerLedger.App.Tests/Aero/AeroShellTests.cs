@@ -259,7 +259,7 @@ public class AeroShellTests
                 element.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
                 names.Add(AutomationProperties.GetName((DependencyObject)Keyboard.FocusedElement));
             }
-            names.Take(9).ShouldBe(["This PC", "Laptop-2", "Switch look", "Search history", "Watts overlay", "Approvals and alerts", "Service", "Household", "Show cost per hour"],
+            names.Take(9).ShouldBe(["This PC", "Laptop-2", "Switch look", "Search history", "Approvals and alerts", "Watts overlay", "Service", "Household", "Show cost per hour"],
                 "a group of pages is one stop, as a radio group is; then the PCs, Switch look, the top bar and the page");
         });
     }

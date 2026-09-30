@@ -8,6 +8,10 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.10.9",
+        [
+            "Aero is real liquid glass: the background ripples and bends through every panel, with a soft glowing edge.",
+        ]),
         ("0.10.8",
         [
             "Aero has a side scrollbar that lights up when your pointer comes near.",

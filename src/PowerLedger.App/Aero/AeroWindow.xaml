@@ -145,7 +145,8 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10,0,10,20" AutomationProperties.Name="PowerLedger">
+                    <!-- The brand, then the pages 24 under it (the mockup's 20 and its column's 4 px gap). -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10,0,10,24" AutomationProperties.Name="PowerLedger">
                         <Grid Width="34" Height="34">
                             <Ellipse Fill="{DynamicResource A.B.Accent}" />
                             <aero:Icon Data="{StaticResource A.I.Bolt}" Size="17" Filled="True" Foreground="{DynamicResource A.B.AccentInk}" />
