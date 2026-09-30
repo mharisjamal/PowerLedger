@@ -34,6 +34,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
     private MonitorCapture.Subscriber? _subscriber;
     private IntPtr _monitor;
     private WriteableBitmap? _bitmap;
+    private RECT _placed;
     private int _posted;
     private bool _disposed;
 
@@ -192,6 +193,14 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
             case WM_WINDOWPOSCHANGED or WM_SHOWWINDOW or WM_SIZE or WM_DPICHANGED:
                 if (_subscriber != null) Follow();
                 else if (Kind == LiquidGlassSourceKind.Wallpaper && msg == WM_WINDOWPOSCHANGED) ShowWallpaper();   // another monitor
+                // Moved (a drag, a corner): the pieces place themselves on the picture at once, where the margin still
+                // holds what is under them, rather than a frame later when the new region's picture lands.
+                GetWindowRect(_hwnd, out var r);
+                if (r.Left != _placed.Left || r.Top != _placed.Top || r.Right != _placed.Right || r.Bottom != _placed.Bottom)
+                {
+                    _placed = r;
+                    if (Image != null) Changed?.Invoke();
+                }
                 break;
             case WM_DISPLAYCHANGE:
                 _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>

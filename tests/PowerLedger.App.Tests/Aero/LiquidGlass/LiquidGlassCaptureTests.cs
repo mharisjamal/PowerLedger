@@ -158,6 +158,48 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
         }));
 
     [Fact]
+    public void A_layered_topmost_pill_shares_the_monitors_capture_and_is_left_out_of_it_too()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            using var scene = Show();
+            // The watts overlay's kind of window: layered (AllowsTransparency), topmost, a capsule over the main window.
+            var pillGlass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(22) };
+            var pill = new Window
+            {
+                WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, Topmost = true, ShowActivated = false,
+                ShowInTaskbar = false, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.Manual, Left = 420, Top = 360,
+                Width = 160, Height = 44, UseLayoutRounding = true,
+                Content = new Border { CornerRadius = new CornerRadius(22), Background = new SolidColorBrush(Ours), Child = pillGlass },
+            };
+            pill.Show();
+            try
+            {
+                UiHarness.PumpUntil(() => scene.Glass.Kind == LiquidGlassSourceKind.Live && pillGlass.Kind == LiquidGlassSourceKind.Live, TimeSpan.FromSeconds(10), "both live");
+                UiHarness.Pump(TimeSpan.FromMilliseconds(400));
+                var handle = new WindowInteropHelper(pill).Handle;
+                GetWindowDisplayAffinity(handle, out var affinity).ShouldBeTrue();
+                affinity.ShouldBe(CaptureNative.WDA_EXCLUDEFROMCAPTURE);
+                var sources = LiquidGlassSources.Live.OfType<WindowGlassSource>().ToList();
+                sources.Count.ShouldBe(2);
+                sources[0].Subscriber!.Session.ShouldBeSameAs(sources[1].Subscriber!.Session, "one capture per monitor feeds both windows");
+                GetWindowRect(handle, out var r);
+                foreach (var source in sources)
+                {
+                    var under = new CroppedBitmap((BitmapSource)source.Image!, new Int32Rect(r.Left - (int)source.ScreenBounds.X, r.Top - (int)source.ScreenBounds.Y, r.Right - r.Left, r.Bottom - r.Top));
+                    var (desk, ours, other) = Count(under);
+                    output.WriteLine($"under the pill, in a picture at {source.ScreenBounds}: desk {desk}, ours {ours}, other {other}");
+                    ours.ShouldBe(0);
+                    desk.ShouldBe((r.Right - r.Left) * (r.Bottom - r.Top));
+                }
+            }
+            finally
+            {
+                pill.Close();
+            }
+            return 0;
+        }));
+
+    [Fact]
     public void Allowing_screenshots_clears_the_affinity_and_shows_the_wallpaper_and_back()
         => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
         {
