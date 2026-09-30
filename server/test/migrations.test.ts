@@ -10,7 +10,7 @@ describe("the D1 schema", () => {
     ).all<{ name: string }>();
 
     expect(names.results.map((row) => row.name)).toEqual(
-      expect.arrayContaining(["installs", "reports", "requests", "tombstones", "report_bodies", "feedback_addresses", "histories"]),
+      expect.arrayContaining(["installs", "reports", "requests", "tombstones", "report_bodies", "feedback_addresses", "histories", "aero_requests"]),
     );
   });
 

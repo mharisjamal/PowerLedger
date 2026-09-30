@@ -1,4 +1,5 @@
 import { handleAdmin } from "./admin";
+import { handleAeroAdmin, handleAeroRequest, handleAeroStatus } from "./aero";
 import { handleFeedback } from "./feedback";
 import { handleHistory } from "./history";
 import { handleHouseholdRoutes } from "./households/routes";
@@ -28,6 +29,15 @@ export default {
     }
     if (request.method === "POST" && url.pathname === "/v1/feedback") {
       return handleFeedback(request, env);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/aero/request") {
+      return handleAeroRequest(request, env);
+    }
+    if (request.method === "GET" && url.pathname === "/v1/aero/status") {
+      return handleAeroStatus(request, env);
+    }
+    if (url.pathname === "/v1/admin/aero" || url.pathname.startsWith("/v1/admin/aero/")) {
+      return handleAeroAdmin(request, env);
     }
     if (url.pathname.startsWith("/admin/")) {
       return handleAdmin(request, env);
