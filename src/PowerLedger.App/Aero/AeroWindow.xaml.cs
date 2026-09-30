@@ -59,9 +59,9 @@ internal partial class AeroWindow : Window, IShellWindow
         // The glass itself (Aero look design §3): the A.* tokens on this window, repainted live as Settings' Glass or the
         // theme changes, never among the application's resources.
         _glass = GlassMaterial.For(this, shell.Settings, theme);
-        // What the glass frosts (design §3): Aero bloom mapped across the stage (0.10.3, the default, as the approved video),
-        // the wallpaper frosted once and lined up with the screen, or the plain ground. The window is only its glass (0.10.1,
-        // free-form), so the real desktop shows between the panes whichever it is.
+        // What is behind the glass (0.10.6, the owner's choice): what is really behind the window, the desktop and the
+        // windows open on it, live, through the window's own alpha, under every style's tint. The window is only its glass
+        // (0.10.1, free-form), so the same desktop shows between the panes.
         _backdrop = new Backdrop(this, Room, _glass, () => theme.Current, onScreen: true, stage: Stage);
         UpdateRequiredCover.DataContext = updates;
         UpdateCover.Attach(UpdateRequiredCover, [Side, TopBar, Banners, Pages], UpdateNowButton);
@@ -100,7 +100,7 @@ internal partial class AeroWindow : Window, IShellWindow
             Fit();
             ShowState();
             MovePill(animate: false);
-            PlayIntro();
+            QueueReveal();
             // Once laid out, ahead of anything idle: the dialog opens over the stage as its panes rise.
             Dispatcher.BeginInvoke(AutoPlayIntroVideo, DispatcherPriority.Loaded);
         };
@@ -184,6 +184,8 @@ internal partial class AeroWindow : Window, IShellWindow
     {
         FitToScreen();
         StartShaping();
+        // Held before the first frame is drawn, so the panes never flash in fully formed ahead of the reveal.
+        if (!AeroMotion.Reduced) HoldReveal();
         base.OnSourceInitialized(e);
     }
 
@@ -212,6 +214,8 @@ internal partial class AeroWindow : Window, IShellWindow
         AnnounceIntro();
         if (!IsVisible) return;
         if (_shell.Dashboard is { } dashboard) dashboard.Detailed = true;
+        // Shown again, from the tray: the reveal plays every time the window opens (0.10.6), not only the first.
+        if (_shown && IsLoaded) QueueReveal();
         if (_shown) return;
         _shown = true;
         _shell.Household.Refresh();
@@ -280,6 +284,87 @@ internal partial class AeroWindow : Window, IShellWindow
 
     // ---------------------------------------------------------------- the intro
 
+    /// <summary>True from the moment the panes are held at the reveal's start until the reveal begins: a Dashboard that
+    /// loads in that time holds its panes too and waits for the window, rather than starting on its own.</summary>
+    internal bool RevealHeld { get; private set; }
+
+    /// <summary>How many times the reveal has begun, for a test.</summary>
+    internal int Reveals { get; private set; }
+
+    /// <summary>How many frames go to the screen with the panes held before the reveal begins.</summary>
+    internal const int HeldFrames = 2;
+
+    private int _heldFrames;
+    private bool _waitingForFrames;
+
+    /// <summary>
+    /// The reveal, every time the window opens (0.10.6): at start, from the tray and after a look switch. The panes are
+    /// held at its start (clear, 22 px down, at 95 %) before anything is painted, so nothing flashes in fully formed; it
+    /// begins only once the work queued for the show is done and the window has really painted with them held, so a slow
+    /// start can't swallow its first half second, as it did when it began as the window loaded. Under reduced motion
+    /// nothing is held and nothing travels: the panes are simply there.
+    /// </summary>
+    internal void QueueReveal()
+    {
+        IntroPending = true;
+        if (AeroMotion.Reduced)
+        {
+            RevealHeld = false;
+            Reveal();
+            return;
+        }
+        HoldReveal();
+        if (_waitingForFrames) return;
+        _waitingForFrames = true;
+        _heldFrames = 0;
+        // After everything the show queued (layout, the first paint, the pages' first figures): then whole frames.
+        Dispatcher.BeginInvoke(() => CompositionTarget.Rendering += OnHeldFrame, DispatcherPriority.ContextIdle);
+    }
+
+    /// <summary>The window's panes, and the page's, at the reveal's start.</summary>
+    private void HoldReveal()
+    {
+        RevealHeld = true;
+        foreach (var pane in RevealPanes) Held(pane, AeroMotion.PaneRise, AeroMotion.PaneScale);
+        foreach (var content in RevealContents) Held(content, AeroMotion.ContentRise, 1);
+        if (Dashboard is { } dashboard) dashboard.HoldIntro();
+        else if (Pages.Showing is { } page) Held(page, AeroMotion.PaneRise, AeroMotion.PaneScale);
+    }
+
+    private void OnHeldFrame(object? sender, EventArgs e)
+    {
+        if (++_heldFrames < HeldFrames) return;
+        CompositionTarget.Rendering -= OnHeldFrame;
+        _waitingForFrames = false;
+        if (!IsLoaded || !IsVisible) return;   // closed or hidden again meanwhile: the next show holds and waits anew
+        Reveal();
+    }
+
+    /// <summary>The reveal itself: the window's panes, then the page's.</summary>
+    private void Reveal()
+    {
+        RevealHeld = false;
+        Reveals++;
+        PlayIntro();
+        if (Dashboard is { IsLoaded: true } dashboard) dashboard.PlayIntro(IntroPanes);
+        else if (Pages.Showing is { IsLoaded: true } page and not Aero.DashboardView) Rise(page, IntroPanes);
+    }
+
+    /// <summary>The window's own panes that rise, and what glides in inside them.</summary>
+    private FrameworkElement[] RevealPanes => [Side, SearchGlass];
+
+    private FrameworkElement[] RevealContents => [SideContent, TopBar];
+
+    /// <summary>Holds <paramref name="element"/> at the reveal's start: clear, <paramref name="rise"/> down and at
+    /// <paramref name="scale"/>, with no clock running on it.</summary>
+    internal static void Held(FrameworkElement element, double rise, double scale)
+    {
+        element.BeginAnimation(OpacityProperty, null);
+        element.Opacity = 0;
+        element.RenderTransformOrigin = new Point(.5, .5);
+        element.RenderTransform = new TransformGroup { Children = { new ScaleTransform(scale, scale), new TranslateTransform(0, rise) } };
+    }
+
     /// <summary>
     /// The demo's opening (design §1): the sidebar and the search rise in on the spring, 75 ms apart, the page's panes
     /// after them (the Dashboard carries on the stagger), then the content glides in and the charts draw. Under reduced
@@ -287,9 +372,9 @@ internal partial class AeroWindow : Window, IShellWindow
     /// </summary>
     private void PlayIntro()
     {
-        FrameworkElement[] panes = [Side, SearchGlass];
+        var panes = RevealPanes;
         for (var i = 0; i < panes.Length; i++) Rise(panes[i], i);
-        FrameworkElement[] contents = [SideContent, TopBar];
+        var contents = RevealContents;
         for (var i = 0; i < contents.Length; i++) Glide(contents[i], i);
         // The frost follows the panes while they rise, then stops; so does the window's shape, until the page's last pane
         // (the Dashboard's carry on the stagger) is in place.
@@ -355,6 +440,7 @@ internal partial class AeroWindow : Window, IShellWindow
         pane.RenderTransform = new TransformGroup { Children = { scale, shift } };
         if (AeroMotion.Reduced)
         {
+            pane.RenderTransform = Transform.Identity;
             AeroMotion.Fade(pane, OpacityProperty, 1, AeroMotion.ReducedFade, AeroMotion.Glide, from: 0);
             return;
         }
@@ -368,7 +454,14 @@ internal partial class AeroWindow : Window, IShellWindow
     /// <summary>A pane's content gliding in after the panes: 8 px up and in, on the glide.</summary>
     internal static void Glide(FrameworkElement content, int index)
     {
-        if (AeroMotion.Reduced) return;
+        if (AeroMotion.Reduced)
+        {
+            // Simply there, whatever held it.
+            content.BeginAnimation(OpacityProperty, null);
+            content.Opacity = 1;
+            content.RenderTransform = Transform.Identity;
+            return;
+        }
         var shift = new TranslateTransform();
         content.RenderTransform = shift;
         var delay = AeroMotion.ContentDelay + index * AeroMotion.Stagger;

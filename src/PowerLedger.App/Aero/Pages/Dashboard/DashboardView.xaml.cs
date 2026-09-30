@@ -116,7 +116,12 @@ public partial class DashboardView : UserControl
         Reflow();
         ShowAll();
         Dispatcher.BeginInvoke(() => MoveSeg(animate: false), DispatcherPriority.Loaded);
-        if (Window.GetWindow(this) is AeroWindow { IntroPending: true } window) PlayIntro(window.IntroPanes);
+        // The window's reveal: held with its panes until it has painted, or carried on at once when it is already under way.
+        if (Window.GetWindow(this) is AeroWindow { IntroPending: true } window)
+        {
+            if (window.RevealHeld) HoldIntro();
+            else PlayIntro(window.IntroPanes);
+        }
         else DrawCharts();
     }
 
@@ -384,18 +389,41 @@ public partial class DashboardView : UserControl
 
     // ---------------------------------------------------------------- the intro and the charts
 
+    /// <summary>What glides in inside the panes.</summary>
+    private FrameworkElement[] Contents => [NowContent, MonthContent, DailyContent, PartsContent, HistContent];
+
+    /// <summary>The panes held at the reveal's start (clear, down, smaller), the charts undrawn and the figures at
+    /// nothing, until the window has painted and plays it (0.10.6).</summary>
+    internal void HoldIntro()
+    {
+        foreach (var pane in Panes) AeroWindow.Held(pane, AeroMotion.PaneRise, AeroMotion.PaneScale);
+        foreach (var content in Contents) AeroWindow.Held(content, AeroMotion.ContentRise, 1);
+        Undraw();
+    }
+
+    /// <summary>The charts undrawn and the figures at nothing, with no clock holding them where they were.</summary>
+    private void Undraw()
+    {
+        Live.BeginAnimation(LiveChart.RevealProperty, null);
+        Daily.BeginAnimation(DailyChart.RevealProperty, null);
+        Pie.BeginAnimation(PieChart3D.RiseProperty, null);
+        Live.Reveal = 0;
+        Daily.Reveal = 0;
+        Pie.Rise = 0;
+        if (AeroMotion.Reduced) return;
+        BeginAnimation(CountProperty, null);
+        Count = 0;   // the figures wait at nothing while the panes rise
+    }
+
     /// <summary>The window's intro carried on (design §1): the panes rise after the window's own, their content glides in,
     /// then the charts draw.</summary>
     internal void PlayIntro(int after)
     {
         var panes = Panes;
         for (var i = 0; i < panes.Length; i++) AeroWindow.Rise(panes[i], after + i);
-        FrameworkElement[] contents = [NowContent, MonthContent, DailyContent, PartsContent, HistContent];
+        var contents = Contents;
         for (var i = 0; i < contents.Length; i++) AeroWindow.Glide(contents[i], after + i);
-        Live.Reveal = 0;
-        Daily.Reveal = 0;
-        Pie.Rise = 0;
-        if (!AeroMotion.Reduced) Count = 0;   // the figures wait at nothing while the panes rise
+        Undraw();
         var start = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Math.Max(1, AeroMotion.MoveMs(AeroMotion.ChartsStart))) };
         start.Tick += (_, _) =>
         {
