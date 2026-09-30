@@ -248,7 +248,7 @@ public sealed class UiPreferencesTests : IDisposable
         read.Glass.ShouldBe(GlassSettings.Default);
         read.Overlay.ShouldBe(OverlaySettings.Default);
         var glass = GlassSettings.Default;
-        (glass.Style, glass.TintColor, glass.TintStrength, glass.Frost, glass.EdgeLight).ShouldBe((GlassStyle.Tinted, "#7466D8", 0.5, 0.6, 0.6));
+        (glass.Style, glass.TintColor, glass.TintStrength, glass.Frost, glass.EdgeLight).ShouldBe((GlassStyle.Tinted, "#7466D8", 0.5, 0.6, 0.1));
         (glass.Accent, glass.Backdrop, glass.ReduceTransparency, glass.IncreaseContrast).ShouldBe((GlassAccent.Lime, GlassBackdrop.Desktop, false, false));
         (glass.ReduceMotion, glass.Parallax).ShouldBe(((bool?)null, true));
         var overlay = OverlaySettings.Default;
@@ -272,6 +272,36 @@ public sealed class UiPreferencesTests : IDisposable
         glass.Backdrop.ShouldBe(GlassBackdrop.Desktop);
         glass.Source.ShouldBe(GlassBackdrop.Desktop);
         glass.Style.ShouldBe(GlassStyle.Dark, "the rest of the glass is kept");
+    }
+
+    /// <summary>0.10.8, the owner's choice: a file from before it (no flag, or anything but true for it) has its Edge light
+    /// put to 10 % once as it loads; saved with the flag, the user's choice after that sticks.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("\"EdgeLightReset\": false,")]
+    [InlineData("\"EdgeLightReset\": \"yes\",")]
+    [InlineData("\"EdgeLightReset\": null,")]
+    public void A_saved_edge_light_is_reset_to_ten_percent_once(string flag)
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, $$"""{ {{flag}} "Glass": { "Style": "Dark", "EdgeLight": 0.6 } }""");
+        var store = new UiPreferencesStore(File);
+
+        var read = store.Load();
+
+        read.Glass.EdgeLight.ShouldBe(0.1);
+        read.Glass.Style.ShouldBe(GlassStyle.Dark, "the rest of the glass is kept");
+        read.EdgeLightReset.ShouldBeTrue();
+        store.Save(read with { Glass = read.Glass with { EdgeLight = 0.7 } });
+        store.Load().Glass.EdgeLight.ShouldBe(0.7, "chosen after the reset, it sticks");
+        System.IO.File.ReadAllText(File).ShouldContain("\"EdgeLightReset\": true");
+    }
+
+    [Fact]
+    public void A_new_install_needs_no_edge_light_reset()
+    {
+        UiPreferences.Default.EdgeLightReset.ShouldBeTrue();
+        new UiPreferencesStore(File).Load().Glass.EdgeLight.ShouldBe(0.1);
     }
 
     [Fact]
@@ -378,7 +408,7 @@ public sealed class UiPreferencesTests : IDisposable
         Directory.CreateDirectory(_folder);
         var number = written.ToString(System.Globalization.CultureInfo.InvariantCulture);
         System.IO.File.WriteAllText(File, $$"""
-            { "AeroIntroduced": true,
+            { "AeroIntroduced": true, "EdgeLightReset": true,
               "Glass": { "TintStrength": {{number}}, "Frost": {{number}}, "EdgeLight": {{number}} },
               "Overlay": { "Opacity": {{number}} } }
             """);

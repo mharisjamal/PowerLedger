@@ -104,6 +104,14 @@ internal sealed record UiPreferences
     /// <see cref="Look"/>'s does.</summary>
     public GlassSettings Glass { get; set; } = GlassSettings.Default;
 
+    /// <summary>0.10.8's one-time Edge light reset has run (the owner's choice): a ui.json without it, or with anything
+    /// but true for it, has its saved Edge light put to the new default, 10 %, as it loads (<see cref="EdgeLightOnce"/>);
+    /// from then on the user's choice sticks. True for a new install, which starts at 10 % anyway. Init rather than a
+    /// setter on purpose: the JSON source generator gives an init-only property missing from the file its type's
+    /// default, false, which is what marks an older file for the reset.</summary>
+    [JsonConverter(typeof(TrueOnlyJsonConverter))]
+    public bool EdgeLightReset { get; init; } = true;
+
     /// <summary>The watts overlay, as Settings' Overlay section and its own menu chose it (Aero look design §5); missing or
     /// null reads as the defaults, as <see cref="Glass"/> does.</summary>
     public OverlaySettings Overlay { get; set; } = OverlaySettings.Default;
@@ -134,6 +142,12 @@ internal sealed record UiPreferences
     public UiPreferences Locked() => Look == Look.Aero && !AeroApproved
         ? this with { Look = Look.Midnight, LookIntroduced = true }
         : this;
+
+    /// <summary>The same preferences with 0.10.8's Edge light reset made, once: a file from before it has its Edge light
+    /// put to 10 % and the reset marked done, which the next save keeps.</summary>
+    public UiPreferences EdgeLightOnce() => EdgeLightReset
+        ? this
+        : this with { Glass = (Glass ?? GlassSettings.Default) with { EdgeLight = GlassSettings.DefaultEdgeLight }, EdgeLightReset = true };
 }
 
 /// <summary>Where Aero's window was left: spread over the work area or not, and its smaller layout's bounds in the
@@ -166,7 +180,7 @@ internal sealed class UiPreferencesStore(string path)
         try
         {
             if (!File.Exists(path)) return UiPreferences.Default;
-            return (JsonSerializer.Deserialize(File.ReadAllText(path), UiJson.Default.UiPreferences) ?? UiPreferences.Default).Sanitised().Locked();
+            return (JsonSerializer.Deserialize(File.ReadAllText(path), UiJson.Default.UiPreferences) ?? UiPreferences.Default).Sanitised().Locked().EdgeLightOnce();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {

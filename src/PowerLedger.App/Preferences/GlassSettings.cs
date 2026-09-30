@@ -72,8 +72,13 @@ internal sealed partial record GlassSettings
     /// <summary>How much the glass blurs what is behind it, 0 to 1 (the Frost slider).</summary>
     public double Frost { get; set; } = 0.6;
 
-    /// <summary>How bright the glass's rim is, 0 to 1 (the Edge light slider).</summary>
-    public double EdgeLight { get; set; } = 0.6;
+    /// <summary>How bright the glass's rim is, 0 to 1 (the Edge light slider). 10 % since 0.10.8 (the owner's choice): a
+    /// soft hairline rather than the demo's 60 %; <see cref="UiPreferences.EdgeLightReset"/> brought every saved value
+    /// to it once.</summary>
+    public double EdgeLight { get; set; } = DefaultEdgeLight;
+
+    /// <summary>Edge light's default since 0.10.8.</summary>
+    public const double DefaultEdgeLight = 0.1;
 
     [JsonConverter(typeof(GlassAccentJsonConverter))]
     public GlassAccent Accent { get; set; } = GlassAccent.Lime;

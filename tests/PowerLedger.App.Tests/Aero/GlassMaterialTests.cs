@@ -28,7 +28,7 @@ public class GlassMaterialTests
         {
             var theme = Enum.Parse<Theme>(themeName);
             var palette = ThemeManager.Palette(Look.Aero, theme);
-            var map = GlassMaterial.Map(GlassSettings.Default, theme);
+            var map = GlassMaterial.Map(GlassSettings.Default with { EdgeLight = GlassMaterial.DemoEdgeLight }, theme);
             map.Count.ShouldBeGreaterThan(100);
             // The video's glass (0.10.4): the palette's own tokens but the text steps, which are the video's (70 and 44 %
             // of the ink), the menus and dialogs, as dense as their text needs, and (0.10.6) the tint and the pill's dim,
@@ -177,6 +177,26 @@ public class GlassMaterialTests
             Rim(1).ShouldBeGreaterThan((byte)0x77);
             var brush = (LinearGradientBrush)GlassMaterial.Map(new GlassSettings { EdgeLight = 1 }, Theme.Dark)["A.B.Rim"];
             brush.GradientStops[0].Color.A.ShouldBe(Rim(1), "the brush carries the colour");
+        });
+
+    /// <summary>0.10.8: Edge light defaults to 10 %, a soft edge, and every rim stop there is still a faint hairline.</summary>
+    [Theory]
+    [MemberData(nameof(Themes))]
+    public void The_default_edge_light_is_a_faint_hairline_not_nothing(string themeName)
+        => UiHarness.OnUi(() =>
+        {
+            GlassSettings.Default.EdgeLight.ShouldBe(0.1);
+            var theme = Enum.Parse<Theme>(themeName);
+            var soft = GlassMaterial.Map(GlassSettings.Default, theme);
+            var demo = GlassMaterial.Map(GlassSettings.Default with { EdgeLight = GlassMaterial.DemoEdgeLight }, theme);
+            foreach (var key in new[] { "A.C.RimA", "A.C.RimB", "A.C.RimC", "A.C.RimD" })
+            {
+                var a = ((Color)soft[key]).A;
+                a.ShouldBeGreaterThanOrEqualTo((byte)Math.Floor(GlassMaterial.RimFloor * 255), $"{key} shows, {theme}");
+                a.ShouldBeLessThan(((Color)demo[key]).A, $"{key} is softer than the demo's, {theme}");
+            }
+            ((LinearGradientBrush)soft["A.B.Rim"]).GradientStops.ShouldAllBe(stop => stop.Color.A > 0);
+            ((Color)GlassMaterial.Map(GlassSettings.Default with { EdgeLight = 0 }, theme)["A.C.RimC"]).A.ShouldBe((byte)0, "off is off");
         });
 
     [Theory]

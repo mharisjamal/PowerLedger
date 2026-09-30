@@ -11,6 +11,7 @@ internal static class WhatsNew
         ("0.10.8",
         [
             "Aero has a side scrollbar that lights up when your pointer comes near.",
+            "Aero's glass edges are softer by default (Edge light 10%).",
         ]),
         ("0.10.7",
         [

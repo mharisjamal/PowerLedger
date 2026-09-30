@@ -75,13 +75,14 @@ public class WhatsNewTests
             "Optional data sharing: help improve the estimates by sharing anonymous readings; ask in Settings → Privacy.",
         ]);
 
-    /// <summary>0.10.8: Aero's side scroll bar, lit as the pointer comes near.</summary>
+    /// <summary>0.10.8: Aero's side scroll bar, lit as the pointer comes near, and the softer 10 % Edge light.</summary>
     [Fact]
     public void The_0_10_8_points_match_exactly_and_come_first()
     {
         WhatsNew.Releases[0].Version.ShouldBe("0.10.8", "newest first");
         PointsOf("0.10.8").ShouldBe([
             "Aero has a side scrollbar that lights up when your pointer comes near.",
+            "Aero's glass edges are softer by default (Edge light 10%).",
         ]);
         WhatsNew.Since("0.10.7", "0.10.8").ShouldBe(PointsOf("0.10.8"));
     }

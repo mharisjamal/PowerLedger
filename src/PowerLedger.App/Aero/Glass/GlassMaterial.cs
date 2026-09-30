@@ -34,6 +34,11 @@ internal sealed class GlassMaterial : IDisposable
     public const double DemoEdgeLight = 0.6;
     public const double DemoFrost = 0.6;
 
+    /// <summary>The faintest a rim stop is drawn while Edge light is on at all: a hairline, not nothing.</summary>
+    public const double RimFloor = 0.06;
+
+    private static readonly string[] RimStops = ["A.C.RimA", "A.C.RimB", "A.C.RimC", "A.C.RimD"];
+
     /// <summary>The Dark style's black, at the tint's top and its foot (the HTML's 55 %).</summary>
     public const double DarkTop = 0.55;
     public const double DarkBottom = 0.45;
@@ -189,9 +194,16 @@ internal sealed class GlassMaterial : IDisposable
         }
 
         // The rim and sheens: Edge light scales them around the demo's; Increase contrast makes the rim solid.
+        // Low but on (0.10.8's default is 10 %), each rim stop keeps at least a faint hairline, RimFloor, never more than
+        // its own at the demo's.
         var edge = settings.EdgeLight / DemoEdgeLight;
         foreach (var key in new[] { "A.C.RimA", "A.C.RimB", "A.C.RimC", "A.C.RimD", "A.C.RimInner", "A.C.RimDark", "A.C.TopSheen", "A.C.PointerSheen" })
-            colours[key] = Scaled(colours[key], edge);
+        {
+            var own = colours[key];
+            colours[key] = Scaled(own, edge);
+            if (settings.EdgeLight > 0 && RimStops.Contains(key))
+                colours[key] = WithAlpha(own, Math.Max(colours[key].A / 255.0, Math.Min(own.A / 255.0, RimFloor)));
+        }
         if (settings.IncreaseContrast)
         {
             var solid = WithAlpha(colours["A.C.RimA"], Math.Max(colours["A.C.RimA"].A / 255.0, 0.8));
