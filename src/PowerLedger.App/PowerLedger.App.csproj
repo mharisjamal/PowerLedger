@@ -39,6 +39,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The liquid glass passes, compiled from Aero\LiquidGlass\Shaders\*.fx by scripts\liquid-glass\compile-shaders.ps1. -->
+    <EmbeddedResource Include="Aero\LiquidGlass\Shaders\*.ps" LogicalName="PowerLedger.App.Aero.LiquidGlass.Shaders.%(Filename).ps" />
+    <None Include="Aero\LiquidGlass\Shaders\*.fx" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="PowerLedger.App.Tests" />
   </ItemGroup>
 

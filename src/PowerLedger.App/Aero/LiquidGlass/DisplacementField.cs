@@ -118,13 +118,14 @@ internal sealed class DisplacementField
     /// <summary>
     /// The source map the displacement shader reads for a box of <paramref name="boxWidth"/> by <paramref name="boxHeight"/>
     /// device pixels drawn with <paramref name="margin"/> device pixels round it: Bgra32, (box + 2 margin) square, opaque,
-    /// each texel naming the box pixel its colour comes from (Source) in 12 bits a side: red the x's high 8, green the y's
-    /// high 8, blue the x's low 4 then the y's low 4. The margin's texels name themselves (they are clipped away).
+    /// each texel naming how far away the box pixel its colour comes from lies (Source minus itself), plus 2048, in 12 bits
+    /// a side: red the x's high 8, green the y's high 8, blue the x's low 4 then the y's low 4. The margin's texels stay
+    /// put (they are clipped away).
     /// </summary>
     public byte[] SourceMap(int boxWidth, int boxHeight, int margin, double scale)
     {
         if (boxWidth > Width || boxHeight > Height) throw new ArgumentException("The field is smaller than the box.");
-        if (boxWidth + 2 * margin > 4096 || boxHeight + 2 * margin > 4096) throw new ArgumentException("A source map names at most 4096 pixels a side.");
+        if (boxWidth > 2048 || boxHeight > 2048) throw new ArgumentException("A source map moves at most 2047 pixels a side.");
         int w = boxWidth + 2 * margin, h = boxHeight + 2 * margin;
         var map = new byte[w * h * 4];
         Parallel.For(0, h, row =>
@@ -132,11 +133,12 @@ internal sealed class DisplacementField
             for (var column = 0; column < w; column++)
             {
                 int x = column - margin, y = row - margin;
-                var (sx, sy) = x >= 0 && y >= 0 && x < boxWidth && y < boxHeight ? Source(x, y, boxWidth, boxHeight, scale) : (Math.Clamp(x, 0, boxWidth - 1), Math.Clamp(y, 0, boxHeight - 1));
+                var (sx, sy) = x >= 0 && y >= 0 && x < boxWidth && y < boxHeight ? Source(x, y, boxWidth, boxHeight, scale) : (x, y);
+                int mx = sx - x + 2048, my = sy - y + 2048;
                 var at = (row * w + column) * 4;
-                map[at] = (byte)(((sx & 15) << 4) | (sy & 15));   // blue
-                map[at + 1] = (byte)(sy >> 4);                      // green
-                map[at + 2] = (byte)(sx >> 4);                      // red
+                map[at] = (byte)(((mx & 15) << 4) | (my & 15));   // blue
+                map[at + 1] = (byte)(my >> 4);                      // green
+                map[at + 2] = (byte)(mx >> 4);                      // red
                 map[at + 3] = 255;
             }
         });
