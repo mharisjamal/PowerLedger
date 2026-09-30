@@ -124,7 +124,7 @@ internal partial class AeroWindow : Window, IShellWindow
     internal bool IntroPending { get; private set; } = true;
 
     /// <summary>How many of the window's own panes rise before a page's, so a page's panes carry on the stagger.</summary>
-    internal int IntroPanes => 2;
+    internal int IntroPanes => 1;
 
     /// <summary>The bounds a switch carries over: the restored ones once shown, so a maximised window hands on the size it
     /// comes back to. Setting them places the window by hand, so it no longer fits itself to the screen it opens on.</summary>
@@ -350,8 +350,9 @@ internal partial class AeroWindow : Window, IShellWindow
         else if (Pages.Showing is { IsLoaded: true } page and not Aero.DashboardView) Rise(page, IntroPanes);
     }
 
-    /// <summary>The window's own panes that rise, and what glides in inside them.</summary>
-    private FrameworkElement[] RevealPanes => [Side, SearchGlass];
+    /// <summary>The window's own panes that rise, and what glides in inside them. The demo's search is not a rising pane:
+    /// it glides in with the top bar, as its other pills do, so the page's first pane follows the sidebar at once.</summary>
+    private FrameworkElement[] RevealPanes => [Side];
 
     private FrameworkElement[] RevealContents => [SideContent, TopBar];
 
