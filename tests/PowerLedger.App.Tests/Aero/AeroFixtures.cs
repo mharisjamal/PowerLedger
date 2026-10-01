@@ -39,6 +39,6 @@ internal static class AeroFixtures
         };
         var summary = new FakeHistory { Snapshot = Snapshots.Typical(MidnightFixtures.Now, MidnightFixtures.DaySeries(new DateTimeOffset(MidnightFixtures.Now.Date, TimeSpan.Zero))), First = MidnightFixtures.Now.AddDays(-40) };
         return new DashboardViewModel(now, history, summary, new FakeTimeProvider(MidnightFixtures.Now), TimeZoneInfo.Utc, MidnightFixtures.English, UiThreads.Inline,
-            new FakeUiSettings(), new FakeHardware(), saver);
+            new FakeUiSettings(), new FakeHardware());
     }
 }

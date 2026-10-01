@@ -305,8 +305,8 @@
     <!-- Type -->
     <!-- Geist, the demo's face, bundled (Fonts/Geist, SIL OFL); Segoe UI Variable where a glyph is missing. -->
     <FontFamily x:Key="A.F.Ui">pack://application:,,,/PowerLedger;component/Fonts/Geist/#Geist, Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI</FontFamily>
-    <!-- The mockup's figures in Geist Mono; JetBrains Mono, bundled, stands in for it (Geist Mono is not bundled). -->
-    <FontFamily x:Key="A.F.Mono">pack://application:,,,/PowerLedger;component/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
+    <!-- The mockup's figures in Geist Mono, bundled (Fonts/GeistMono, SIL OFL); JetBrains Mono where a glyph is missing. -->
+    <FontFamily x:Key="A.F.Mono">pack://application:,,,/PowerLedger;component/Fonts/GeistMono/#Geist Mono, pack://application:,,,/PowerLedger;component/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
     <sys:Double x:Key="A.T.Big">40</sys:Double>
     <sys:Double x:Key="A.T.BigMonth">34</sys:Double>
     <sys:Double x:Key="A.T.Mid">22</sys:Double>

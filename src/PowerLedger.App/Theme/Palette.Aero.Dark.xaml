@@ -24,9 +24,9 @@
     <SolidColorBrush x:Key="Brush.Calibrated" Color="#F1D57A" />
     <SolidColorBrush x:Key="Brush.Estimated" Color="#7FD4FF" />
     <SolidColorBrush x:Key="Brush.PartCpu" Color="#D3F03F" />
-    <SolidColorBrush x:Key="Brush.PartGpu" Color="#2F7552" />
-    <SolidColorBrush x:Key="Brush.PartDisplay" Color="#7466D8" />
-    <SolidColorBrush x:Key="Brush.PartRest" Color="#4E93B5" />
+    <SolidColorBrush x:Key="Brush.PartGpu" Color="#35C08A" />
+    <SolidColorBrush x:Key="Brush.PartDisplay" Color="#9D8CFF" />
+    <SolidColorBrush x:Key="Brush.PartRest" Color="#4AB3E8" />
 
     <!-- Midnight's own keys, in Aero's colours. -->
     <SolidColorBrush x:Key="M.Ground" Color="#0E0F12" />
@@ -46,11 +46,11 @@
     <SolidColorBrush x:Key="M.Good" Color="#34D399" />
     <SolidColorBrush x:Key="M.Bad" Color="#F87171" />
     <SolidColorBrush x:Key="M.Warn" Color="#F5B942" />
-    <!-- The demo's pie, exactly: the accent, the green, the violet and the blue. GlassMaterial moves PartCpu with the accent. -->
+    <!-- The liquid glass mockup's ring, exactly (0.10.9): the accent, the green, the violet and the blue. GlassMaterial moves PartCpu with the accent. -->
     <SolidColorBrush x:Key="M.PartCpu" Color="#D3F03F" />
-    <SolidColorBrush x:Key="M.PartGpu" Color="#2F7552" />
-    <SolidColorBrush x:Key="M.PartDisplay" Color="#7466D8" />
-    <SolidColorBrush x:Key="M.PartRest" Color="#4E93B5" />
+    <SolidColorBrush x:Key="M.PartGpu" Color="#35C08A" />
+    <SolidColorBrush x:Key="M.PartDisplay" Color="#9D8CFF" />
+    <SolidColorBrush x:Key="M.PartRest" Color="#4AB3E8" />
     <!-- The quality chips: the ground, and the text on it. -->
     <SolidColorBrush x:Key="M.ChipMeasured" Color="#2A3310" />
     <SolidColorBrush x:Key="M.ChipMeasuredText" Color="#D3F03F" />
@@ -306,8 +306,8 @@
     <!-- Type -->
     <!-- Geist, the demo's face, bundled (Fonts/Geist, SIL OFL); Segoe UI Variable where a glyph is missing. -->
     <FontFamily x:Key="A.F.Ui">pack://application:,,,/PowerLedger;component/Fonts/Geist/#Geist, Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI</FontFamily>
-    <!-- The mockup's figures in Geist Mono; JetBrains Mono, bundled, stands in for it (Geist Mono is not bundled). -->
-    <FontFamily x:Key="A.F.Mono">pack://application:,,,/PowerLedger;component/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
+    <!-- The mockup's figures in Geist Mono, bundled (Fonts/GeistMono, SIL OFL); JetBrains Mono where a glyph is missing. -->
+    <FontFamily x:Key="A.F.Mono">pack://application:,,,/PowerLedger;component/Fonts/GeistMono/#Geist Mono, pack://application:,,,/PowerLedger;component/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
     <sys:Double x:Key="A.T.Big">40</sys:Double>
     <sys:Double x:Key="A.T.BigMonth">34</sys:Double>
     <sys:Double x:Key="A.T.Mid">22</sys:Double>

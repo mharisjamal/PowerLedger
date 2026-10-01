@@ -1,10 +1,11 @@
 using PowerLedger.App.Aero;
+using PowerLedger.Contracts;
 using Shouldly;
 
 namespace PowerLedger.App.Tests;
 
-/// <summary>Plan S D3: the geometry behind Aero's Dashboard charts, pure: Last minute's scale and time axis, Energy each
-/// day's scale and days, and the 3D pie's slices.</summary>
+/// <summary>Plan S D3 and 0.10.9: the geometry behind Aero's Dashboard charts, pure: Last minute's scale and time axis,
+/// Energy each day's bars and their tips, and the ring's arcs.</summary>
 public class AeroChartGeometryTests
 {
     [Fact]
@@ -34,10 +35,10 @@ public class AeroChartGeometryTests
     }
 
     [Theory]
-    [InlineData(0, 392)]
-    [InlineData(60, 34)]
-    [InlineData(30, 213)]
-    [InlineData(90, 34)]
+    [InlineData(0, 400)]
+    [InlineData(60, 0)]
+    [InlineData(30, 200)]
+    [InlineData(90, 0)]
     public void A_readings_age_places_it_from_now_at_the_right_back_to_a_minute_at_the_left(double age, double x)
         => LiveScale.X(age).ShouldBe(x, 1e-9);
 
@@ -50,32 +51,15 @@ public class AeroChartGeometryTests
         scale.Y(45).ShouldBe((LiveScale.Y0 + LiveScale.Y1) / 2, 1e-9);
     }
 
+    /// <summary>The mockup's busiest bar stands at 90 % of the well's room, every other in proportion, an empty one a sliver.</summary>
     [Theory]
-    [InlineData(2.02, 2.5)]
-    [InlineData(1.84, 2)]
-    [InlineData(0, 0.5)]
-    [InlineData(7.3, 8)]
-    [InlineData(13, 15)]
-    [InlineData(0.31, 0.5)]
-    public void Energy_each_days_ceiling_is_a_round_figure_over_the_busiest_day(double busiest, double max)
-        => DailyScale.Ceiling(busiest).ShouldBe(max);
-
-    [Theory]
-    [InlineData(30, "1 5 10 15 20 25 30")]
-    [InlineData(31, "1 5 10 15 20 25 31")]
-    [InlineData(28, "1 5 10 15 20 28")]
-    public void The_days_are_labelled_every_five_and_the_last(int days, string labels)
-        => string.Join(' ', DailyScale.Labels(days)).ShouldBe(labels);
-
-    [Fact]
-    public void Days_spread_across_the_width_from_the_1st_to_the_months_last()
-    {
-        DailyScale.X(1, 30).ShouldBe(DailyScale.X0);
-        DailyScale.X(30, 30).ShouldBe(DailyScale.X1);
-        DailyScale.X(31, 31).ShouldBe(DailyScale.X1);
-        DailyScale.Y(0, 2).ShouldBe(DailyScale.Y1);
-        DailyScale.Y(2, 2).ShouldBe(DailyScale.Y0);
-    }
+    [InlineData(2.0, 2.0, 0.9)]
+    [InlineData(1.0, 2.0, 0.45)]
+    [InlineData(0.0, 2.0, BarScale.Least)]
+    [InlineData(0.0, 0.0, BarScale.Least)]
+    [InlineData(double.NaN, 2.0, BarScale.Least)]
+    public void A_bar_stands_in_proportion_to_the_busiest(double kwh, double busiest, double share)
+        => BarScale.Share(kwh, busiest).ShouldBe(share, 1e-9);
 
     [Theory]
     [InlineData(1, "1st")]
@@ -88,58 +72,40 @@ public class AeroChartGeometryTests
     [InlineData(21, "21st")]
     [InlineData(22, "22nd")]
     [InlineData(23, "23rd")]
-    public void The_tip_names_the_day_as_an_ordinal(int day, string name) => DailyScale.Ordinal(day).ShouldBe(name);
+    public void The_tip_names_the_day_as_an_ordinal(int day, string name) => EnergyBars.Ordinal(day).ShouldBe(name);
 
     [Fact]
-    public void The_tip_gives_the_days_cost_or_without_one_its_energy()
+    public void The_tip_names_the_period_and_its_figure()
     {
         var english = System.Globalization.CultureInfo.GetCultureInfo("en-US");
-        new DailyDay(new DateOnly(2026, 9, 17), 0.84, "$0.27").Tip(english).ShouldBe("$0.27 on the 17th");
-        new DailyDay(new DateOnly(2026, 9, 2), 0.84, null).Tip(english).ShouldBe("0.840 kWh on the 2nd");
+        EnergyBars.Tip(HistorySpan.Day, new DateOnly(2026, 9, 17), "$0.27", english).ShouldBe("$0.27 on the 17th");
+        EnergyBars.Tip(HistorySpan.Week, new DateOnly(2026, 9, 7), "1.84 kWh", english).ShouldBe("1.84 kWh in the week from the 7th");
+        EnergyBars.Tip(HistorySpan.Month, new DateOnly(2026, 9, 1), "$5.73", english).ShouldBe("$5.73 in September");
+        EnergyBars.Label(HistorySpan.Month, new DateOnly(2026, 9, 1), english).ShouldBe("Sep");
+        EnergyBars.Label(HistorySpan.Day, new DateOnly(2026, 9, 17), english).ShouldBe("17");
     }
 
     [Fact]
-    public void The_pies_slices_go_round_from_the_top_in_the_parts_order()
+    public void The_rings_arcs_go_round_from_the_top_in_the_parts_order()
     {
-        var slices = PieSlices.From([0.46, 0.28, 0.17, 0.09]);
+        var arcs = RingArcs.From([(Part.Cpu, 0.46), (Part.Gpu, 0.28), (Part.Display, 0.17), (Part.Rest, 0.09)]);
 
-        slices.Count.ShouldBe(4);
-        slices[0].A0.ShouldBe(-Math.PI / 2, 1e-9);
-        slices[3].A1.ShouldBe(-Math.PI / 2 + 2 * Math.PI, 1e-9);
-        slices[0].A1.ShouldBe(slices[1].A0, 1e-9);
-        (slices[0].A1 - slices[0].A0).ShouldBe(0.46 * 2 * Math.PI, 1e-9);
-        slices[0].Height.ShouldBeGreaterThan(slices[3].Height, "a bigger share stands taller");
-        slices.Select(s => s.Index).ShouldBe([0, 1, 2, 3]);
+        arcs.Count.ShouldBe(4);
+        arcs[0].From.ShouldBe(0);
+        arcs[0].To.ShouldBe(0.46, 1e-9);
+        arcs[1].From.ShouldBe(arcs[0].To, 1e-9);
+        arcs[3].To.ShouldBe(1, 1e-9);
+        arcs.Select(a => a.Part).ShouldBe([Part.Cpu, Part.Gpu, Part.Display, Part.Rest]);
     }
 
     [Fact]
-    public void Shares_that_dont_add_up_are_scaled_and_empty_ones_have_no_slice()
+    public void Shares_that_dont_add_up_are_scaled_and_empty_ones_have_no_arc()
     {
-        var slices = PieSlices.From([0.2, 0, 0.2]);
+        var arcs = RingArcs.From([(Part.Cpu, 0.2), (Part.Gpu, 0), (Part.Display, 0.2)]);
 
-        slices.Select(s => s.Index).ShouldBe([0, 2]);
-        (slices[0].A1 - slices[0].A0).ShouldBe(Math.PI, 1e-9);
-        PieSlices.From([0, 0, 0, 0]).ShouldBeEmpty();
-        PieSlices.From([double.NaN, 1]).Select(s => s.Index).ShouldBe([1]);
-    }
-
-    /// <summary>The slices are painted back to front: the one furthest up the tilted disc first.</summary>
-    [Fact]
-    public void The_pie_paints_the_far_slices_first()
-    {
-        var order = PieSlices.PaintOrder(PieSlices.From([0.1, 0.4, 0.3, 0.2]));
-
-        order.Select(s => s.Index).ShouldBe([0, 3, 1, 2], "the thin slice at the top is furthest back, the one low on the left nearest");
-    }
-
-    [Fact]
-    public void Each_slice_rises_in_turn()
-    {
-        Enumerable.Range(0, 4).Select(i => PieSlices.Progress(0, i, 4)).ShouldAllBe(p => p == 0);
-        Enumerable.Range(0, 4).Select(i => PieSlices.Progress(1, i, 4)).ShouldAllBe(p => p == 1);
-        var early = PieSlices.Progress(0.2, 0, 4);
-        early.ShouldBeGreaterThan(0, "the first starts at once");
-        PieSlices.Progress(0.2, 3, 4).ShouldBe(0, "the last waits its three staggers");
-        PieSlices.Progress(0.6, 0, 4).ShouldBeGreaterThan(PieSlices.Progress(0.6, 1, 4));
+        arcs.Select(a => a.Part).ShouldBe([Part.Cpu, Part.Display]);
+        arcs[0].To.ShouldBe(0.5, 1e-9);
+        RingArcs.From([(Part.Cpu, 0), (Part.Gpu, 0)]).ShouldBeEmpty();
+        RingArcs.From([(Part.Cpu, double.NaN), (Part.Gpu, 1)]).Select(a => a.Part).ShouldBe([Part.Gpu]);
     }
 }

@@ -3,17 +3,17 @@
                     xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
                     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                     mc:Ignorable="po">
-    <!-- Aero's icons (Plan S 0.8), the approved HTML's own SVG paths on a 24 unit grid (tools/AeroPreview/Icons.xaml),
+    <!-- Aero's icons (Plan S 0.8; 0.10.9, the liquid glass mockup's own SVG paths) on a 24 unit grid (tools/AeroPreview/Icons.xaml),
          drawn by the Icon control at any size in the inherited foreground; stroked with round caps unless Filled. Merged by
          Styles.Aero.xaml. Frozen: every view shares the one geometry. -->
-    <PathGeometry x:Key="A.I.Bolt" po:Freeze="True" Figures="M13.5,2 L4,14 H10.5 L9.5,22 L20,9.5 H13.2 Z" />
+    <PathGeometry x:Key="A.I.Bolt" po:Freeze="True" Figures="M13,2 L4,14 H11 L10,22 L19,10 H12 Z" />
     <GeometryGroup x:Key="A.I.Dashboard" po:Freeze="True">
-        <RectangleGeometry Rect="3,3,7,9" RadiusX="2" RadiusY="2" />
-        <RectangleGeometry Rect="14,3,7,5" RadiusX="2" RadiusY="2" />
-        <RectangleGeometry Rect="14,12,7,9" RadiusX="2" RadiusY="2" />
-        <RectangleGeometry Rect="3,16,7,5" RadiusX="2" RadiusY="2" />
+        <RectangleGeometry Rect="3,3,7,7" RadiusX="2" RadiusY="2" />
+        <RectangleGeometry Rect="14,3,7,7" RadiusX="2" RadiusY="2" />
+        <RectangleGeometry Rect="3,14,7,7" RadiusX="2" RadiusY="2" />
+        <RectangleGeometry Rect="14,14,7,7" RadiusX="2" RadiusY="2" />
     </GeometryGroup>
-    <PathGeometry x:Key="A.I.History" po:Freeze="True" Figures="M3,12 a9,9 0 1 0 3,-6.7 M3,4 v5 h5 M12,7 v5 l3,2" />
+    <PathGeometry x:Key="A.I.History" po:Freeze="True" Figures="M3,12 a9,9 0 1 0 3,-6.7 L3,8 M3,3 v5 h5 M12,7 v5 l3,2" />
     <PathGeometry x:Key="A.I.Replay" po:Freeze="True" Figures="M3,12 a9,9 0 1 0 3,-6.7 M3,4 v5 h5" />
     <!-- The intro's speaker (Plan S intro): sounding, and crossed out while muted. -->
     <PathGeometry x:Key="A.I.Speaker" po:Freeze="True" Figures="M4,9 h4 l5,-4 v14 l-5,-4 h-4 Z M16.5,8.5 a5,5 0 0 1 0,7 M19,6 a8.5,8.5 0 0 1 0,12" />
@@ -23,17 +23,17 @@
         <PathGeometry Figures="M9,2 v4 M15,2 v4 M9,18 v4 M15,18 v4 M2,9 h4 M2,15 h4 M18,9 h4 M18,15 h4" />
     </GeometryGroup>
     <!-- Insights, new with the page (Aero look design §4): a line that climbs, with the spark of a finding at its peak. -->
-    <PathGeometry x:Key="A.I.Insights" po:Freeze="True" Figures="M3,18 l5,-5 l4,3 l6,-7 M18,3 v4 M16,5 h4" />
-    <PathGeometry x:Key="A.I.Report" po:Freeze="True" Figures="M14,3 H7 a2,2 0 0 0 -2,2 v14 a2,2 0 0 0 2,2 h10 a2,2 0 0 0 2,-2 V8 Z M14,3 v5 h5 M9,13 h6 M9,17 h4" />
-    <PathGeometry x:Key="A.I.House" po:Freeze="True" Figures="M3,11 L12,4 L21,11 M5,10 v10 h14 V10" />
+    <PathGeometry x:Key="A.I.Insights" po:Freeze="True" Figures="M3,17 l6,-6 l4,4 l8,-8 M14,7 h7 v7" />
+    <PathGeometry x:Key="A.I.Report" po:Freeze="True" Figures="M14,3 H6 a2,2 0 0 0 -2,2 v14 a2,2 0 0 0 2,2 h12 a2,2 0 0 0 2,-2 V9 Z M14,3 v6 h6 M8,13 h8 M8,17 h5" />
+    <PathGeometry x:Key="A.I.House" po:Freeze="True" Figures="M3,11 L12,3 L21,11 v9 a1,1 0 0 1 -1,1 h-5 v-6 H9 v6 H4 a1,1 0 0 1 -1,-1 Z" />
     <GeometryGroup x:Key="A.I.Gear" po:Freeze="True">
         <EllipseGeometry Center="12,12" RadiusX="3" RadiusY="3" />
-        <PathGeometry Figures="M12,2 v3 M12,19 v3 M4.9,4.9 l2.1,2.1 M17,17 l2.1,2.1 M2,12 h3 M19,12 h3 M4.9,19.1 L7,17 M17,7 l2.1,-2.1" />
+        <PathGeometry Figures="M12,2 v3 M12,19 v3 M4.2,4.2 l2.1,2.1 M17.7,17.7 l2.1,2.1 M2,12 h3 M19,12 h3 M4.2,19.8 l2.1,-2.1 M17.7,6.3 l2.1,-2.1" />
     </GeometryGroup>
     <PathGeometry x:Key="A.I.Moon" po:Freeze="True" Figures="M12,3 a9,9 0 1 0 9,9 a7,7 0 0 1 -9,-9 z" />
     <GeometryGroup x:Key="A.I.Search" po:Freeze="True">
         <EllipseGeometry Center="11,11" RadiusX="7" RadiusY="7" />
-        <PathGeometry Figures="M20,20 l-4,-4" />
+        <PathGeometry Figures="M21,21 l-4.3,-4.3" />
     </GeometryGroup>
     <PathGeometry x:Key="A.I.Bell" po:Freeze="True" Figures="M6,8 a6,6 0 1 1 12,0 c0,7 3,9 3,9 H3 c0,0 3,-2 3,-9 M10.3,21 a1.9,1.9 0 0 0 3.4,0" />
     <PathGeometry x:Key="A.I.Chevron" po:Freeze="True" Figures="M6,9 l6,6 l6,-6" />
@@ -57,8 +57,8 @@
     </GeometryGroup>
     <PathGeometry x:Key="A.I.Close" po:Freeze="True" Figures="M7,7 l10,10 M17,7 l-10,10" />
     <GeometryGroup x:Key="A.I.Overlay" po:Freeze="True">
-        <RectangleGeometry Rect="2.5,8,19,8" RadiusX="4" RadiusY="4" />
-        <PathGeometry Figures="M6.5,12 h4" />
+        <RectangleGeometry Rect="3,8,18,8" RadiusX="4" RadiusY="4" />
+        <EllipseGeometry Center="8,12" RadiusX="0.75" RadiusY="0.75" />
     </GeometryGroup>
     <PathGeometry x:Key="A.I.Check" po:Freeze="True" Figures="M5,12.5 l4.5,4.5 L19,7.5" />
 </ResourceDictionary>

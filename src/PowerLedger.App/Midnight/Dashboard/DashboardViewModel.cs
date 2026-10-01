@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Globalization;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PowerLedger.Contracts;
@@ -43,14 +42,9 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private IReadOnlyList<DashboardPart> _parts = [];
     private readonly IUiSettings? _ui;
     private EnergyPeriod _energyPeriod;
-    private readonly IFileSaver _saver;
     private bool _detailed;
-    private DateOnly? _dailyMonth;
     private HistorySpan _historySpan;
-    private string _historyQuery = "";
     private DashboardDetail? _detail;
-    private IReadOnlyList<DateOnly> _dailyMonths = [];
-    private string? _saved;
 
     /// <summary>One pass over the history, read together so every card agrees on the moment.</summary>
     /// <param name="Pill">The chart's range when it was read, so a later pass keeps its chart only for the same range.</param>
@@ -65,15 +59,13 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         EnergyReading? Energy = null, DetailReading? More = null);
 
     /// <summary>Aero's reads (Aero look design §1), made only while <see cref="Detailed"/>: yesterday to the same time,
-    /// the last seven days by the day (the parts' trends and the Day table), the chosen month and the one before by the
-    /// day, and the history table's span by the day when it isn't the seven days.</summary>
-    private sealed record DetailReading(
-        RangeReport? Yesterday, RangeReport? Week, DateOnly Month, RangeReport? Daily, RangeReport? DailyBefore, HistorySpan Span, RangeReport? Table);
+    /// the last seven days by the day (the parts' trends), and Energy each day's fourteen periods of its span, by the day.</summary>
+    private sealed record DetailReading(RangeReport? Yesterday, RangeReport? Week, HistorySpan Span, RangeReport? Bars);
 
     /// <summary>The titles Aero's reads go by, which none of Midnight's share.</summary>
     internal const string YesterdayTitle = "Yesterday to date";
     internal const string WeekByDayTitle = "Seven days by the day";
-    internal const string TableTitle = "History table";
+    internal const string BarsTitle = "Energy each day";
 
     /// <summary>What the energy card's period needs beyond the snapshot, the average day and last month to date, which
     /// every pass reads anyway: today and this month need nothing more.</summary>
@@ -83,10 +75,9 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private sealed record EnergyReading(EnergyPeriod Period, RangeReport? SoFar = null, RangeReport? SamePoint = null, RangeReport? Whole = null);
 
     /// <param name="ui">Where the energy card's period is kept between runs; none keeps it for this run only.</param>
-    /// <param name="saver">Where Aero's Save CSV asks to save the history table; Windows' Save dialog when none is given.</param>
     public DashboardViewModel(
         NowViewModel now, IRangeHistory history, IHistory summary, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, UiThreads threads,
-        IUiSettings? ui = null, IHardwareNames? hardware = null, IFileSaver? saver = null)
+        IUiSettings? ui = null, IHardwareNames? hardware = null)
     {
         _now = now;
         _history = history;
@@ -98,8 +89,6 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         _ui = ui;
         _energyPeriod = ui?.Current.EnergyPeriod ?? UiPreferences.Default.EnergyPeriod;
         ChooseEnergyPeriod = new RelayCommand<EnergyPeriod>(period => EnergyPeriod = period);
-        _saver = saver ?? new FileSaver();
-        SaveHistory = new RelayCommand(SaveHistoryCsv);
         _now.PropertyChanged += OnNowChanged;
         Rebuild();
         if (hardware is not null)
@@ -206,24 +195,8 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <summary>Aero's figures from the last pass that read them; null until one has, and kept through a pass that threw.</summary>
     public DashboardDetail? Detail { get => _detail; private set => SetProperty(ref _detail, value); }
 
-    /// <summary>The month Energy each day draws, as the first of it; this month until the picker chooses another. A
-    /// choice reads it at once.</summary>
-    public DateOnly DailyMonth
-    {
-        get => _dailyMonth ?? FirstOfMonth(Ranges.LocalDay(_clock.GetUtcNow(), _zone));
-        set
-        {
-            if (FirstOfMonth(value) == DailyMonth) return;
-            _dailyMonth = FirstOfMonth(value);
-            OnPropertyChanged();
-            Refresh(chart: false);
-        }
-    }
-
-    /// <summary>The months the picker offers, newest first: this one back to the history's first, a year at the most.</summary>
-    public IReadOnlyList<DateOnly> DailyMonths { get => _dailyMonths; private set => SetProperty(ref _dailyMonths, value); }
-
-    /// <summary>The history table's span; a change reads it at once.</summary>
+    /// <summary>Energy each day's span (the mockup's Day, Week and Month): fourteen days, weeks or months; a change reads
+    /// it at once.</summary>
     public HistorySpan HistorySpan
     {
         get => _historySpan;
@@ -232,26 +205,6 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _historySpan, value)) Refresh(chart: false);
         }
     }
-
-    /// <summary>The top bar's search (Ctrl K): the history table shows the rows that mention it.</summary>
-    public string HistoryQuery
-    {
-        get => _historyQuery;
-        set
-        {
-            if (SetProperty(ref _historyQuery, value ?? "")) OnPropertyChanged(nameof(HistoryShown));
-        }
-    }
-
-    /// <summary>The history table's rows the search leaves.</summary>
-    public IReadOnlyList<HistoryRow> HistoryShown => HistoryTable.Matching(Detail?.History ?? [], HistoryQuery);
-
-    /// <summary>Save CSV: the rows shown, to a file the user names.</summary>
-    public IRelayCommand SaveHistory { get; }
-
-    /// <summary>What the last save came to, "Saved PowerLedger history by day.csv" or why it couldn't; the window says it
-    /// as a toast. Null until a save.</summary>
-    public string? Saved { get => _saved; private set => SetProperty(ref _saved, value); }
 
     /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
     public void Show()
@@ -290,7 +243,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         var pill = Range;
         var parts = PartsRange;
         var energy = EnergyPeriod;
-        var detail = Detailed ? (DailyMonth, HistorySpan) : ((DateOnly Month, HistorySpan Span)?)null;
+        HistorySpan? detail = Detailed ? HistorySpan : null;
         var kept =chart || _read is not { Chart: not null } last || last.Pill != pill ? null : _read;
         _threads.Background(() =>
         {
@@ -300,7 +253,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             {
                 if (kept is not null && !SameCut(kept.ChartRange, RangeFor(pill, now))) kept = null;   // a new day
                 reading = Read(now, pill, parts, energy, kept);
-                if (detail is { } wanted) reading = reading with { More = ReadDetail(now, wanted.Month, wanted.Span) };
+                if (detail is { } span) reading = reading with { More = ReadDetail(now, span) };
             }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
@@ -364,25 +317,17 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Aero's reads, by the day (Aero look design §1): yesterday from midnight to the same time as now, the last
-    /// seven days, the chosen month and the one before it, and the history table's span unless it is the seven days.</summary>
-    private DetailReading ReadDetail(DateTimeOffset now, DateOnly month, HistorySpan span)
+    /// seven days, and Energy each day's fourteen periods of <paramref name="span"/>.</summary>
+    private DetailReading ReadDetail(DateTimeOffset now, HistorySpan span)
     {
         var day = TimeSpan.FromDays(1);
         var today = Ranges.LocalDay(now, _zone);
-        var before = month.AddMonths(-1);
-        var table = span == HistorySpan.Day ? null
-            : _history.Read(Ranges.Days(HistoryTable.FirstDay(span, today), today, now, _zone, _culture) with { Title = TableTitle, Bucket = day }, _zone);
         return new DetailReading(
             _history.Read(Before(Ranges.Today(now, _zone, _culture), 1, _zone) with { Title = YesterdayTitle }, _zone),
             _history.Read(Ranges.LastDays(7, now, _zone, _culture) with { Title = WeekByDayTitle, Bucket = day }, _zone),
-            month,
-            _history.Read(Ranges.Month(month.Year, month.Month, now, _zone, _culture) with { Bucket = day }, _zone),
-            _history.Read(Ranges.Month(before.Year, before.Month, now, _zone, _culture) with { Bucket = day }, _zone),
             span,
-            table);
+            _history.Read(Ranges.Days(EnergyBars.FirstDay(span, today), today, now, _zone, _culture) with { Title = BarsTitle, Bucket = day }, _zone));
     }
-
-    private static DateOnly FirstOfMonth(DateOnly day) => new(day.Year, day.Month, 1);
 
     /// <summary>Aero's figures from the last reading, when it read them; a pass without them (Midnight's, or one that
     /// threw) leaves the last ones be. On the UI thread.</summary>
@@ -393,62 +338,12 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         var snapshot = read.Snapshot;
         var todayKwh = Math.Max(0, snapshot?.Today.EnergyKwh ?? 0);
         var yesterday = more.Yesterday?.Totals.EnergyKwh;
-        var current = more.Month == FirstOfMonth(today);
-        var daily = Enumerable.Range(1, current ? today.Day : DateTime.DaysInMonth(more.Month.Year, more.Month.Month)).Select(d =>
-        {
-            var date = more.Month.AddDays(d - 1);
-            var found = more.Daily?.Days.FirstOrDefault(row => row.Day == date);
-            return new DailyDay(date, Math.Max(0, found?.EnergyKwh ?? 0),
-                found?.Currency is { } currency ? Money.Format(found.Cost, currency, _culture) : null);
-        }).ToList();
-        var before = more.Month.AddMonths(-1);
-        var previous = Enumerable.Range(1, DateTime.DaysInMonth(before.Year, before.Month))
-            .Select(d => Math.Max(0, more.DailyBefore?.Days.FirstOrDefault(row => row.Day == before.AddDays(d - 1))?.EnergyKwh ?? 0))
-            .ToList();
-        var first = read.FirstRow is { } row ? FirstOfMonth(Ranges.LocalDay(row, _zone)) : FirstOfMonth(today);
-        DailyMonths = [.. Enumerable.Range(0, 12).Select(i => FirstOfMonth(today).AddMonths(-i)).Where(month => month >= first)];
         Detail = new DashboardDetail(
             todayKwh,
             yesterday is > 0 ? (todayKwh - yesterday.Value) / yesterday.Value : null,
             snapshot?.Tariff?.PricePerKwh, snapshot?.Tariff?.Currency,
             today.Day, DateTime.DaysInMonth(today.Year, today.Month),
-            more.Month, daily, previous, daily.Sum(d => d.Kwh), previous.Sum(),
-            more.Span, HistoryTable.Rows(more.Span, more.Span == HistorySpan.Day ? more.Week : more.Table, today, _culture));
-        OnPropertyChanged(nameof(HistoryShown));
-    }
-
-    /// <summary>Writes the rows shown beside the file chosen and moves it into place, off the UI thread, as the Report's
-    /// saves do, so a failed write leaves any earlier file whole; a cancel says nothing.</summary>
-    private void SaveHistoryCsv()
-    {
-        var span = Detail?.Span ?? HistorySpan;
-        var text = HistoryTable.Text(HistoryTable.Csv(span, HistoryShown));
-        Saved = null;   // the same outcome again is news again
-        if (_saver.Ask(HistoryTable.FileName(span), "CSV file|*.csv") is not { } path) return;
-        _threads.Background(() =>
-        {
-            var partial = path + ".partial";
-            string outcome;
-            try
-            {
-                File.WriteAllText(partial, text, new System.Text.UTF8Encoding(false));
-                File.Move(partial, path, overwrite: true);
-                outcome = "Saved " + Path.GetFileName(path);
-            }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            {
-                try
-                {
-                    File.Delete(partial);
-                }
-                catch (Exception left) when (left is IOException or UnauthorizedAccessException)
-                {
-                    // The next save writes over it.
-                }
-                outcome = "Couldn't save: " + error.Message;
-            }
-            _threads.Post(() => Saved = outcome);
-        });
+            more.Span, EnergyBars.From(more.Span, more.Bars, today, _culture));
     }
 
     /// <summary>A reading of nothing, for a pass that threw: the chart's range as well as it can be named, and no data.</summary>

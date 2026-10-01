@@ -3,23 +3,12 @@ using System.Globalization;
 namespace PowerLedger.App;
 
 /// <summary>
-/// Aero's Switch look (Aero look design §2) and its banner's Switch back (§1): the sidebar's item offers the other two
-/// looks, each chosen through <see cref="SettingsViewModel.Look"/> so it is saved; Switch back goes to the look the move
-/// to Aero left (<see cref="UiPreferences.LookBeforeAero"/>), Midnight when it left none.
+/// Aero's banner's Switch back (Aero look design §1): it goes to the look the move to Aero left (<see
+/// cref="UiPreferences.LookBeforeAero"/>), Midnight when it left none, chosen through <see cref="SettingsViewModel.Look"/>
+/// so it is saved. Settings' Look row chooses any look.
 /// </summary>
 internal static class AeroLooks
 {
-    /// <summary>The looks Switch look offers, Midnight first as the nearer of the two.</summary>
-    public static IReadOnlyList<Look> Others { get; } = [Look.Midnight, Look.Classic];
-
-    /// <summary>A few words under each look's name in the menu.</summary>
-    public static string Describe(Look look) => look switch
-    {
-        Look.Midnight => "Dark and quiet, without the glass",
-        Look.Classic => "The original look",
-        _ => "Liquid glass",
-    };
-
     /// <summary>Where Switch back goes: the look before Aero, Midnight when there was none (or it was Aero already).</summary>
     public static Look SwitchBackTo(Look? before) => before is Look.Classic or Look.Midnight ? before.Value : Look.Midnight;
 }
@@ -73,6 +62,6 @@ internal static class YourPcs
     private static IEnumerable<PcRow> Others(IEnumerable<HouseholdMemberDisplay> members)
         => members.Where(m => !m.IsThisPc).Select(m => new PcRow(Initials.Letters(m.Name), m.Name, m.Energy + " kWh", false, m.Share, m.Energy + " kWh"));
 
-    /// <summary>The household button's second line.</summary>
-    public static string Summary(int pcs) => pcs > 1 ? $"{pcs.ToString(CultureInfo.CurrentCulture)} PCs in this household" : "This PC only";
+    /// <summary>The household button's second line, the mockup's "2 PCs".</summary>
+    public static string Summary(int pcs) => pcs > 1 ? $"{pcs.ToString(CultureInfo.CurrentCulture)} PCs" : "1 PC";
 }

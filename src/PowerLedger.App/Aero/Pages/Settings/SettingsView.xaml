@@ -16,7 +16,7 @@
             <aero:SameText x:Key="SameText" />
 
             <!-- The page's measures: the gap round the page and between panes, the label column, a pane's padding. -->
-            <Thickness x:Key="Page.Margin">28,24,28,32</Thickness>
+            <Thickness x:Key="Page.Margin">0,0,0,16</Thickness>
             <Thickness x:Key="Pane.Gap">0,0,0,16</Thickness>
             <Thickness x:Key="Pane.Padding">24,20,24,22</Thickness>
             <sys:Double x:Key="Label.Width">200</sys:Double>
@@ -82,37 +82,124 @@
                 <Setter Property="MaxWidth" Value="420" />
             </Style>
 
-            <!-- A colour to choose: a round swatch, ringed when chosen, the accent ring round it under the keyboard. -->
-            <Style x:Key="Swatch" TargetType="RadioButton" BasedOn="{StaticResource A.Hoverable}">
-                <Setter Property="Width" Value="30" />
-                <Setter Property="Height" Value="30" />
-                <Setter Property="Margin" Value="0,0,10,0" />
+            <!-- ============ the Styles board's Glass (0.10.9): the four style cards and the Glass pane in two columns ============ -->
+            <!-- The board's .lab (14 medium, white at 90 %) and .cap (12.5 medium at 75 %). -->
+            <Style x:Key="Lab" TargetType="TextBlock" BasedOn="{StaticResource A.Text.Body}">
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontWeight" Value="Medium" />
+                <Setter Property="Foreground" Value="{DynamicResource A.B.NavText}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="Cap" TargetType="TextBlock" BasedOn="{StaticResource A.Text.Secondary}">
+                <Setter Property="FontSize" Value="{DynamicResource A.T.Small}" />
+                <Setter Property="FontWeight" Value="Medium" />
+                <Setter Property="Margin" Value="0,2,0,0" />
+            </Style>
+            <!-- The board's .well: navy from 22 % at its top to 10 % at its foot, its inset shade and the hairline of light
+                 along its foot as a one-pixel edge, 20 corners. -->
+            <Style x:Key="BoardWell" TargetType="Border">
+                <Setter Property="CornerRadius" Value="20" />
+                <Setter Property="BorderBrush" Value="{DynamicResource A.B.InsetEdge}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Background">
+                    <Setter.Value>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Offset="0" Color="#38000A28" />
+                            <GradientStop Offset="1" Color="#1A000A28" />
+                        </LinearGradientBrush>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <!-- A row of the Glass pane: its words at the left, its control at the right (the board's space-between). -->
+            <Style x:Key="GlassRow" TargetType="DockPanel">
+                <Setter Property="LastChildFill" Value="False" />
+                <Setter Property="MinHeight" Value="34" />
+            </Style>
+            <!-- A style card (the board's): a glass card 300 high, 22 in, of its style's glass; its name 17 semibold and its badge
+                 on a small glass pill; a live "Power now" in the board's well; its note under it. A click chooses the style;
+                 the chosen card wears the accent's ring, as does the one the keyboard is on. -->
+            <Style x:Key="StyleCard" TargetType="RadioButton" BasedOn="{StaticResource A.Hoverable}">
+                <Setter Property="Height" Value="300" />
+                <Setter Property="GroupName" Value="StyleCards" />
+                <Setter Property="aero:Press.Enabled" Value="False" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="RadioButton">
-                            <Grid Background="Transparent">
-                                <Ellipse x:Name="Ring" Stroke="{DynamicResource A.B.Text}" StrokeThickness="2" Opacity="0" />
-                                <Ellipse Margin="4" Fill="{TemplateBinding Background}" Stroke="{DynamicResource A.B.WellTop}" StrokeThickness="1" />
+                            <Grid>
+                                <aero:GlassPanel Background="{Binding Tint}" Padding="22">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <aero:GlassPanel DockPanel.Dock="Right" Style="{StaticResource A.Glass.Capsule}" Height="28" Padding="12,0" Bubble="True" Background="#1FFFFFFF">
+                                                <TextBlock Text="{Binding Badge}" FontSize="12" FontWeight="Medium" VerticalAlignment="Center" />
+                                            </aero:GlassPanel>
+                                            <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        </DockPanel>
+                                        <Border Style="{StaticResource BoardWell}" Margin="0,18,0,0" Padding="17">
+                                            <StackPanel>
+                                                <TextBlock Text="Power now" FontSize="{DynamicResource A.T.Small}" FontWeight="Medium" Foreground="{DynamicResource A.B.Text2}" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                    <TextBlock Text="{Binding Watts}" FontSize="44" FontWeight="SemiBold" VerticalAlignment="Bottom" />
+                                                    <TextBlock Text="{Binding Unit}" FontSize="20" FontWeight="Medium" Foreground="{DynamicResource A.B.Text2}" Margin="6,0,0,7" VerticalAlignment="Bottom" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Text="{Binding Note}" FontSize="13" LineHeight="19.5" TextWrapping="Wrap" Margin="0,16,0,0" Foreground="{DynamicResource A.B.NavText}" />
+                                    </StackPanel>
+                                </aero:GlassPanel>
+                                <Border x:Name="Ring" CornerRadius="31" Margin="-3" BorderBrush="{DynamicResource A.B.Accent}" BorderThickness="2" Visibility="Collapsed" IsHitTestVisible="False" />
                             </Grid>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsChecked" Value="True">
-                                    <Setter TargetName="Ring" Property="Opacity" Value="1" />
+                                    <Setter TargetName="Ring" Property="Visibility" Value="Visible" />
                                 </Trigger>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Ring" Property="Opacity" Value="0.5" />
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="Ring" Property="Visibility" Value="Visible" />
                                 </Trigger>
-                                <MultiTrigger>
-                                    <MultiTrigger.Conditions>
-                                        <Condition Property="IsMouseOver" Value="True" />
-                                        <Condition Property="IsChecked" Value="True" />
-                                    </MultiTrigger.Conditions>
-                                    <Setter TargetName="Ring" Property="Opacity" Value="1" />
-                                </MultiTrigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
             </Style>
+            <!-- An accent, the board's glass sphere: 32 across, lit from its upper left (the Background's radial), a soft shadow
+                 under it (0 4px 10px, navy at 40 %), a little shade at its foot; the chosen one ringed in white at 90 %, 3 px. -->
+            <Style x:Key="Sphere" TargetType="RadioButton" BasedOn="{StaticResource A.Hoverable}">
+                <Setter Property="Width" Value="32" />
+                <Setter Property="Height" Value="32" />
+                <Setter Property="Margin" Value="12,0,0,0" />
+                <Setter Property="FocusVisualStyle" Value="{StaticResource A.Focus.Pill}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Grid>
+                                <Ellipse x:Name="Ring" Margin="-3" Fill="#E6FFFFFF" Visibility="Collapsed" />
+                                <Ellipse Fill="{TemplateBinding Background}">
+                                    <Ellipse.Effect>
+                                        <DropShadowEffect BlurRadius="14" ShadowDepth="4" Direction="270" Opacity="0.4" Color="#00051E" RenderingBias="Performance" />
+                                    </Ellipse.Effect>
+                                </Ellipse>
+                                <Ellipse>
+                                    <Ellipse.Fill>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Offset="0.7" Color="#00000000" />
+                                            <GradientStop Offset="1" Color="#26000000" />
+                                        </LinearGradientBrush>
+                                    </Ellipse.Fill>
+                                </Ellipse>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Ring" Property="Visibility" Value="Visible" />
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Opacity" Value="0.9" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- A preset tint: a swatch that is a button, ticked while it is the Colour style's tint. -->
             <Style x:Key="Preset" TargetType="Button" BasedOn="{StaticResource A.Hoverable}">
                 <Setter Property="Width" Value="30" />
@@ -171,188 +258,220 @@
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
-        <StackPanel Margin="{StaticResource Page.Margin}" MaxWidth="1040">
+        <StackPanel Margin="{StaticResource Page.Margin}">
             <Border Style="{StaticResource A.Well}" Margin="{StaticResource Pane.Gap}" Visibility="{Binding Notice, Converter={StaticResource VisibleWhenText}}">
                 <TextBlock Style="{StaticResource A.Text.Body}" TextWrapping="Wrap" Text="{Binding Notice}" />
             </Border>
 
-            <!-- Glass (Aero look design §3), like the iPhone's. Each control sets one field of SettingsViewModel.Glass, which saves
-                 it and repaints the look; the preview tile shows the choice at once. -->
-            <aero:GlassPanel Style="{StaticResource Pane}" DataContext="{Binding GlassSection}" x:Name="GlassPane">
+            <!-- The four glass styles (0.10.9, the Styles board's cards): each a card of its style's glass with a live "Power
+                 now" in it, the board's 26 apart; a click chooses the style, as the Style choice under them does. -->
+            <ItemsControl x:Name="StyleCards" Margin="-13,0,-13,24" Focusable="False" AutomationProperties.Name="Glass styles"
+                          KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Once">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Rows="1" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type aero:StyleCard}">
+                        <RadioButton Style="{StaticResource StyleCard}" Margin="13,0" IsChecked="{Binding IsChosen}" Checked="StyleCardChecked"
+                                     AutomationProperties.Name="{Binding Name, StringFormat={}{0} glass}" AutomationProperties.HelpText="{Binding Note}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- Glass (Aero look design §3; the Styles board's pane): 28 by 32 in, its head and Reset, then two columns 48
+                 apart and rows 22 apart: Style and Accent, Tint strength and Edge light, Reduce transparency and Increase
+                 contrast, Reduce motion and the Watts overlay, then Show PowerLedger in screenshots; the Colour style's tint
+                 under them while it is chosen. Each control sets one field of SettingsViewModel.Glass, which saves it and
+                 repaints the look. -->
+            <aero:GlassPanel Style="{StaticResource Pane}" DataContext="{Binding GlassSection}" x:Name="GlassPane" Padding="32,28" Margin="0,0,0,16">
                 <StackPanel>
-                    <DockPanel Margin="0,0,0,12">
-                        <Button DockPanel.Dock="Right" Style="{StaticResource A.OutlineBtn}" Content="Reset" Command="{Binding Reset}" Height="30"
+                    <DockPanel Margin="0,0,0,22">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource A.GhostBtn}" Content="Reset" Command="{Binding Reset}" Height="36" Padding="16,0"
                                 AutomationProperties.Name="Reset the glass" />
-                        <TextBlock Style="{StaticResource A.PanelTitle}" Text="Glass" />
+                        <TextBlock Style="{StaticResource A.PanelTitle}" FontSize="20" Text="Glass" />
                     </DockPanel>
-                    <WrapPanel>
-                        <StackPanel Margin="0,0,24,0">
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Style" />
-                                <Border Style="{StaticResource A.SegGroup}">
-                                <StackPanel Orientation="Horizontal">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="48" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="22" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="22" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="22" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="22" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Style: the board's segmented well, the chosen one the white glass pill. -->
+                        <DockPanel Style="{StaticResource GlassRow}">
+                            <TextBlock Style="{StaticResource Lab}" Text="Style" />
+                            <Border DockPanel.Dock="Right" Style="{StaticResource A.SegGroup}">
+                                <StackPanel Orientation="Horizontal" KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Once">
                                     <RadioButton Style="{StaticResource A.SegOpt}" Content="Clear" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Clear}}" />
                                     <RadioButton Style="{StaticResource A.SegOpt}" Content="Tinted" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Tinted}}" />
                                     <RadioButton Style="{StaticResource A.SegOpt}" Content="Dark" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Dark}}" />
                                     <RadioButton Style="{StaticResource A.SegOpt}" Content="Colour" IsChecked="{Binding Style, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassStyle.Colour}}" />
                                 </StackPanel>
-                                </Border>
-                            </StackPanel>
-                            <!-- Colour: 8 presets and the wheel. -->
-                            <StackPanel Style="{StaticResource Row}" Visibility="{Binding IsColour, Converter={StaticResource VisibleWhen}}">
-                                <TextBlock Style="{StaticResource Label}" Text="Tint colour" VerticalAlignment="Top" Margin="0,6,12,0" />
-                                <StackPanel>
-                                    <ItemsControl ItemsSource="{x:Static aero:GlassSection.Presets}" Focusable="False" Width="160">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <WrapPanel />
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate DataType="{x:Type aero:TintPreset}">
-                                                <Button Style="{StaticResource Preset}" ToolTip="{Binding Name}" AutomationProperties.Name="{Binding Name}"
-                                                        Command="{Binding DataContext.ChoosePreset, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding Hex}">
-                                                    <Button.Background>
-                                                        <SolidColorBrush Color="{Binding Colour}" />
-                                                    </Button.Background>
-                                                    <Button.Tag>
-                                                        <MultiBinding Converter="{StaticResource SameText}">
-                                                            <Binding Path="Hex" />
-                                                            <Binding Path="DataContext.ChosenTint" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
-                                                        </MultiBinding>
-                                                    </Button.Tag>
-                                                </Button>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <aero:ColourWheel Width="160" Height="160" Margin="0,4,0,0" Colour="{Binding Tint, Delay=150}"
-                                                     AutomationProperties.Name="Tint colour wheel" />
-                                </StackPanel>
-                            </StackPanel>
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Tint strength" />
-                                <Slider Style="{StaticResource Slider}" Value="{Binding TintStrength, Delay=150}" AutomationProperties.Name="Tint strength" />
-                                <TextBlock Style="{StaticResource Percent}" Text="{Binding TintStrength, StringFormat={}{0:P0}}" />
-                            </StackPanel>
-                            <!-- No Frost here (0.10.6): the glass shows what is really behind the window, which Windows doesn't blur
-                                 for it, so the slider would do nothing. -->
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Edge light" />
-                                <Slider Style="{StaticResource Slider}" Value="{Binding EdgeLight, Delay=150}" AutomationProperties.Name="Edge light" />
-                                <TextBlock Style="{StaticResource Percent}" Text="{Binding EdgeLight, StringFormat={}{0:P0}}" />
-                            </StackPanel>
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Accent" />
-                                <StackPanel Orientation="Horizontal">
-                                    <RadioButton Style="{StaticResource Swatch}" ToolTip="Lime" AutomationProperties.Name="Lime accent"
-                                                 IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Lime}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Lime}" /></RadioButton.Background>
-                                    </RadioButton>
-                                    <RadioButton Style="{StaticResource Swatch}" ToolTip="Ice" AutomationProperties.Name="Ice accent"
-                                                 IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Ice}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Ice}" /></RadioButton.Background>
-                                    </RadioButton>
-                                    <RadioButton Style="{StaticResource Swatch}" ToolTip="Indigo" AutomationProperties.Name="Indigo accent"
-                                                 IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Indigo}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Indigo}" /></RadioButton.Background>
-                                    </RadioButton>
-                                    <RadioButton Style="{StaticResource Swatch}" ToolTip="Amber" AutomationProperties.Name="Amber accent"
-                                                 IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Amber}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Amber}" /></RadioButton.Background>
-                                    </RadioButton>
-                                    <RadioButton Style="{StaticResource Swatch}" ToolTip="Rose" AutomationProperties.Name="Rose accent"
-                                                 IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Rose}}">
-                                        <RadioButton.Background><SolidColorBrush Color="{DynamicResource A.C.Accent.Rose}" /></RadioButton.Background>
-                                    </RadioButton>
-                                </StackPanel>
-                            </StackPanel>
-                            <!-- No "Behind the glass" here (0.10.6): every style shows what is really behind PowerLedger. -->
-                            <!-- The existing Theme choice, here beside the glass it colours. -->
-                            <StackPanel Style="{StaticResource Row}" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                                <TextBlock Style="{StaticResource Label}" Text="Appearance" />
-                                <Border Style="{StaticResource A.SegGroup}">
-                                <StackPanel Orientation="Horizontal">
-                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Like Windows" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.System}}" />
-                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Dark" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Dark}}" />
-                                    <RadioButton Style="{StaticResource A.SegOpt}" Content="Light" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Light}}" />
-                                </StackPanel>
-                                </Border>
-                            </StackPanel>
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Reduce transparency" />
-                                <aero:GlassSwitch IsChecked="{Binding ReduceTransparency}" AutomationProperties.Name="Reduce transparency" />
-                                <TextBlock Style="{StaticResource SwitchText}" Text="Denser glass, still glass" />
-                            </StackPanel>
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Increase contrast" />
-                                <aero:GlassSwitch IsChecked="{Binding IncreaseContrast}" AutomationProperties.Name="Increase contrast" />
-                                <TextBlock Style="{StaticResource SwitchText}" Text="Stronger text on a denser tint" />
-                            </StackPanel>
-                            <!-- The live glass keeps PowerLedger's windows out of screenshots and screen shares (0.10.9, the owner's
-                                 choice): on, they appear in them, and the glass shows the wallpaper instead. -->
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Show PowerLedger in screenshots" TextWrapping="Wrap" />
-                                <aero:GlassSwitch x:Name="ScreenshotsSwitch" IsChecked="{Binding ShowInScreenshots}" AutomationProperties.Name="Show PowerLedger in screenshots"
-                                                  AutomationProperties.HelpText="Off: the glass shows the windows behind it live, and PowerLedger stays out of screenshots and screen shares. On: it appears in them, and the glass uses your wallpaper." />
-                                <TextBlock Style="{StaticResource SwitchText}" TextWrapping="Wrap" MaxWidth="420"
-                                           Text="Off: the glass shows the windows behind it live, and PowerLedger stays out of screenshots and screen shares. On: it appears in them, and the glass uses your wallpaper." />
-                            </StackPanel>
-                            <StackPanel Style="{StaticResource Row}">
-                                <TextBlock Style="{StaticResource Label}" Text="Reduce motion" />
-                                <aero:GlassSwitch IsChecked="{Binding ReduceMotion}" AutomationProperties.Name="Reduce motion" />
-                                <TextBlock Style="{StaticResource SwitchText}" Text="{Binding ReduceMotionNote}" Foreground="{DynamicResource A.B.Text2}" />
-                                <Button Style="{StaticResource A.OutlineBtn}" Content="Follow Windows" Command="{Binding FollowWindows}" Height="30" Margin="12,0,0,0"
-                                        Visibility="{Binding FollowsWindows, Converter={StaticResource HiddenWhen}}" />
-                            </StackPanel>
-                            <!-- No Tilt and parallax here (0.10.4): Aero's free-form window floats its glass over the real desktop,
-                                 which never tilts, so the switch would do nothing. -->
-                        </StackPanel>
+                            </Border>
+                        </DockPanel>
 
-                        <!-- The preview tile: a pane of the chosen glass over a small scene, so a choice shows before the user looks
-                             anywhere else. -->
-                        <StackPanel Margin="0,6,0,0">
-                            <TextBlock Style="{StaticResource A.Text.Small}" Foreground="{DynamicResource A.B.Text3}" Text="Preview" Margin="0,0,0,8" />
-                            <Grid x:Name="Preview" Width="240" Height="180" AutomationProperties.Name="Preview of the glass">
-                                <Grid.Clip>
-                                    <RectangleGeometry Rect="0,0,240,180" RadiusX="20" RadiusY="20" />
-                                </Grid.Clip>
-                                <Rectangle>
-                                    <Rectangle.Fill>
-                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                            <GradientStop Offset="0" Color="{DynamicResource A.C.Violet}" />
-                                            <GradientStop Offset="0.55" Color="{DynamicResource A.C.Blue}" />
-                                            <GradientStop Offset="1" Color="{DynamicResource A.C.Green}" />
-                                        </LinearGradientBrush>
-                                    </Rectangle.Fill>
-                                </Rectangle>
-                                <Ellipse Width="120" Height="120" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-20,-30,0,0" Fill="{DynamicResource A.B.Accent}" Opacity="0.85" />
-                                <Ellipse Width="90" Height="90" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-18,-22" Fill="{DynamicResource A.B.Pill}" Opacity="0.7" />
-                                <aero:GlassPanel CornerRadius="{DynamicResource A.R.Well}" Margin="26,36" Padding="18,14">
-                                    <StackPanel>
-                                        <StackPanel Orientation="Horizontal">
-                                            <Ellipse Width="7" Height="7" Fill="{DynamicResource A.B.Accent}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                            <TextBlock Style="{StaticResource A.Text.Small}" Text="Power now" Foreground="{DynamicResource A.B.Text2}" />
-                                        </StackPanel>
-                                        <TextBlock Margin="0,6,0,0">
-                                            <Run Text="412" FontSize="{DynamicResource A.T.Mid}" FontWeight="SemiBold" /><Run Text=" W" FontSize="{DynamicResource A.T.Body}" Foreground="{DynamicResource A.B.Text2}" />
-                                        </TextBlock>
-                                    </StackPanel>
-                                </aero:GlassPanel>
-                            </Grid>
-                        </StackPanel>
-                    </WrapPanel>
+                        <!-- Accent: five glass spheres 12 apart. -->
+                        <DockPanel Grid.Column="2" Style="{StaticResource GlassRow}">
+                            <TextBlock Style="{StaticResource Lab}" Text="Accent" />
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Once">
+                                <RadioButton Style="{StaticResource Sphere}" Margin="0" ToolTip="Lime" AutomationProperties.Name="Lime accent"
+                                             IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Lime}}">
+                                    <RadioButton.Background>
+                                        <RadialGradientBrush GradientOrigin="0.35,0.3" Center="0.35,0.3" RadiusX="0.85" RadiusY="0.85">
+                                            <GradientStop Offset="0" Color="#F4FFB0" /><GradientStop Offset="0.6" Color="#C9E63E" />
+                                        </RadialGradientBrush>
+                                    </RadioButton.Background>
+                                </RadioButton>
+                                <RadioButton Style="{StaticResource Sphere}" ToolTip="Ice" AutomationProperties.Name="Ice accent"
+                                             IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Ice}}">
+                                    <RadioButton.Background>
+                                        <RadialGradientBrush GradientOrigin="0.35,0.3" Center="0.35,0.3" RadiusX="0.85" RadiusY="0.85">
+                                            <GradientStop Offset="0" Color="#E0F6FF" /><GradientStop Offset="0.6" Color="#7FD4FF" />
+                                        </RadialGradientBrush>
+                                    </RadioButton.Background>
+                                </RadioButton>
+                                <RadioButton Style="{StaticResource Sphere}" ToolTip="Indigo" AutomationProperties.Name="Indigo accent"
+                                             IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Indigo}}">
+                                    <RadioButton.Background>
+                                        <RadialGradientBrush GradientOrigin="0.35,0.3" Center="0.35,0.3" RadiusX="0.85" RadiusY="0.85">
+                                            <GradientStop Offset="0" Color="#E8EAFF" /><GradientStop Offset="0.6" Color="#9AA2FF" />
+                                        </RadialGradientBrush>
+                                    </RadioButton.Background>
+                                </RadioButton>
+                                <RadioButton Style="{StaticResource Sphere}" ToolTip="Amber" AutomationProperties.Name="Amber accent"
+                                             IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Amber}}">
+                                    <RadioButton.Background>
+                                        <RadialGradientBrush GradientOrigin="0.35,0.3" Center="0.35,0.3" RadiusX="0.85" RadiusY="0.85">
+                                            <GradientStop Offset="0" Color="#FFF1C9" /><GradientStop Offset="0.6" Color="#FFC857" />
+                                        </RadialGradientBrush>
+                                    </RadioButton.Background>
+                                </RadioButton>
+                                <RadioButton Style="{StaticResource Sphere}" ToolTip="Rose" AutomationProperties.Name="Rose accent"
+                                             IsChecked="{Binding Accent, Converter={StaticResource Is}, ConverterParameter={x:Static app:GlassAccent.Rose}}">
+                                    <RadioButton.Background>
+                                        <RadialGradientBrush GradientOrigin="0.35,0.3" Center="0.35,0.3" RadiusX="0.85" RadiusY="0.85">
+                                            <GradientStop Offset="0" Color="#FFE0EA" /><GradientStop Offset="0.6" Color="#FF8FB1" />
+                                        </RadialGradientBrush>
+                                    </RadioButton.Background>
+                                </RadioButton>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- The sliders: the label 140 wide, the slider the rest, 18 apart, its figure in the mono face 40 wide. -->
+                        <DockPanel Grid.Row="2" LastChildFill="True">
+                            <TextBlock Style="{StaticResource Lab}" Width="140" Text="Tint strength" />
+                            <TextBlock DockPanel.Dock="Right" Width="40" Margin="18,0,0,0" TextAlignment="Right" VerticalAlignment="Center" FontFamily="{DynamicResource A.F.Mono}"
+                                       FontSize="13" FontWeight="Medium" Text="{Binding TintStrength, StringFormat={}{0:P0}}" />
+                            <Slider Style="{StaticResource A.Slider}" Margin="18,0,0,0" Minimum="0" Maximum="1" VerticalAlignment="Center" Value="{Binding TintStrength, Delay=150}" AutomationProperties.Name="Tint strength" />
+                        </DockPanel>
+                        <!-- No Frost here (0.10.6): the glass shows what is really behind the window, which Windows doesn't blur
+                             for it, so the slider would do nothing. -->
+                        <DockPanel Grid.Row="2" Grid.Column="2" LastChildFill="True">
+                            <TextBlock Style="{StaticResource Lab}" Width="140" Text="Edge light" />
+                            <TextBlock DockPanel.Dock="Right" Width="40" Margin="18,0,0,0" TextAlignment="Right" VerticalAlignment="Center" FontFamily="{DynamicResource A.F.Mono}"
+                                       FontSize="13" FontWeight="Medium" Text="{Binding EdgeLight, StringFormat={}{0:P0}}" />
+                            <Slider Style="{StaticResource A.Slider}" Margin="18,0,0,0" Minimum="0" Maximum="1" VerticalAlignment="Center" Value="{Binding EdgeLight, Delay=150}" AutomationProperties.Name="Edge light" />
+                        </DockPanel>
+
+                        <!-- The switches: the words and the board's caption under them at the left, the switch at the right. -->
+                        <DockPanel Grid.Row="4" Style="{StaticResource GlassRow}">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Lab}" Text="Reduce transparency" />
+                                <TextBlock Style="{StaticResource Cap}" Text="Denser glass, still glass" />
+                            </StackPanel>
+                            <aero:GlassSwitch DockPanel.Dock="Right" IsChecked="{Binding ReduceTransparency}" AutomationProperties.Name="Reduce transparency" />
+                        </DockPanel>
+                        <DockPanel Grid.Row="4" Grid.Column="2" Style="{StaticResource GlassRow}">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Lab}" Text="Increase contrast" />
+                                <TextBlock Style="{StaticResource Cap}" Text="Stronger edges and text" />
+                            </StackPanel>
+                            <aero:GlassSwitch DockPanel.Dock="Right" IsChecked="{Binding IncreaseContrast}" AutomationProperties.Name="Increase contrast" />
+                        </DockPanel>
+                        <DockPanel Grid.Row="6" Style="{StaticResource GlassRow}">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Lab}" Text="Reduce motion" />
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Cap}" Text="{Binding ReduceMotionNote}" />
+                                    <Button Style="{StaticResource A.GhostBtn}" Content="Follow Windows" Command="{Binding FollowWindows}" Height="26" Padding="12,0" Margin="10,0,0,0"
+                                            FontSize="{DynamicResource A.T.Small}" Visibility="{Binding FollowsWindows, Converter={StaticResource HiddenWhen}}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <aero:GlassSwitch DockPanel.Dock="Right" IsChecked="{Binding ReduceMotion}" AutomationProperties.Name="Reduce motion" />
+                        </DockPanel>
+                        <!-- The watts overlay (Aero look design §5): on or off here; its corner, opacity and sparkline in Overlay below. -->
+                        <DockPanel Grid.Row="6" Grid.Column="2" Style="{StaticResource GlassRow}" DataContext="{Binding DataContext.OverlaySection, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Lab}" Text="Watts overlay" />
+                                <TextBlock Style="{StaticResource Cap}" Text="A glass pill over other windows" />
+                            </StackPanel>
+                            <aero:GlassSwitch DockPanel.Dock="Right" IsChecked="{Binding Enabled}" AutomationProperties.Name="Watts overlay" />
+                        </DockPanel>
+                        <!-- The live glass keeps PowerLedger's windows out of screenshots and screen shares (0.10.9, the owner's
+                             choice): on, they appear in them, and the glass shows the wallpaper instead. -->
+                        <DockPanel Grid.Row="8" Style="{StaticResource GlassRow}">
+                            <StackPanel VerticalAlignment="Center" MaxWidth="420" HorizontalAlignment="Left">
+                                <TextBlock Style="{StaticResource Lab}" Text="Show PowerLedger in screenshots" />
+                                <TextBlock Style="{StaticResource Cap}" TextWrapping="Wrap" Text="Off keeps it out of captures; on, the glass shows your wallpaper" />
+                            </StackPanel>
+                            <aero:GlassSwitch x:Name="ScreenshotsSwitch" DockPanel.Dock="Right" IsChecked="{Binding ShowInScreenshots}" AutomationProperties.Name="Show PowerLedger in screenshots"
+                                              AutomationProperties.HelpText="Off: the glass shows the windows behind it live, and PowerLedger stays out of screenshots and screen shares. On: it appears in them, and the glass uses your wallpaper."
+                                              ToolTip="Off: the glass shows the windows behind it live, and PowerLedger stays out of screenshots and screen shares. On: it appears in them, and the glass uses your wallpaper." />
+                        </DockPanel>
+                        <!-- No Tilt and parallax here (0.10.4): Aero's free-form window floats its glass over the real desktop,
+                             which never tilts, so the switch would do nothing. -->
+
+                        <!-- The Colour style's tint: 8 presets and the wheel, while Colour is chosen. -->
+                        <DockPanel Grid.Row="9" Grid.ColumnSpan="3" Margin="0,22,0,0" Visibility="{Binding IsColour, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock Style="{StaticResource Lab}" Width="140" Text="Tint colour" VerticalAlignment="Top" Margin="0,6,0,0" />
+                            <ItemsControl ItemsSource="{x:Static aero:GlassSection.Presets}" Focusable="False" Width="160" VerticalAlignment="Top" Margin="18,0,24,0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type aero:TintPreset}">
+                                        <Button Style="{StaticResource Preset}" ToolTip="{Binding Name}" AutomationProperties.Name="{Binding Name}"
+                                                Command="{Binding DataContext.ChoosePreset, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding Hex}">
+                                            <Button.Background>
+                                                <SolidColorBrush Color="{Binding Colour}" />
+                                            </Button.Background>
+                                            <Button.Tag>
+                                                <MultiBinding Converter="{StaticResource SameText}">
+                                                    <Binding Path="Hex" />
+                                                    <Binding Path="DataContext.ChosenTint" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
+                                                </MultiBinding>
+                                            </Button.Tag>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <aero:ColourWheel Width="160" Height="160" HorizontalAlignment="Left" Colour="{Binding Tint, Delay=150}" AutomationProperties.Name="Tint colour wheel" />
+                        </DockPanel>
+                    </Grid>
                 </StackPanel>
             </aero:GlassPanel>
 
-            <!-- The watts overlay (Aero look design §5): on or off, its corner, opacity and sparkline, as its own menu has them. -->
+            <!-- The watts overlay's place (Aero look design §5): its corner, opacity and sparkline, as its own menu has them; it
+                 is switched on and off in Glass above. -->
             <aero:GlassPanel Style="{StaticResource Pane}" DataContext="{Binding OverlaySection}">
                 <StackPanel>
                     <TextBlock Style="{StaticResource Title}" Text="Overlay" />
-                    <StackPanel Style="{StaticResource Row}">
-                        <TextBlock Style="{StaticResource Label}" Text="Watts overlay" />
-                        <aero:GlassSwitch IsChecked="{Binding Enabled}" AutomationProperties.Name="Watts overlay" />
-                        <TextBlock Style="{StaticResource SwitchText}" Text="The watts now in a small glass pill over other windows" />
-                    </StackPanel>
                     <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Where" />
                         <WrapPanel MaxWidth="560">
@@ -636,7 +755,18 @@
                     <TextBlock Style="{StaticResource RowNote}" Text="Use your electricity supplier's figure for its grid; 0.40 is the world average." />
                     <TextBlock Style="{StaticResource Said}" Text="{Binding Co2Message}" Visibility="{Binding Co2Message, Converter={StaticResource VisibleWhenText}}" />
                     <!-- Aero look design §1: the look, in every look. -->
+                    <!-- The existing Theme choice. -->
                     <StackPanel Style="{StaticResource Row}" Margin="0,12,0,6">
+                        <TextBlock Style="{StaticResource Label}" Text="Appearance" />
+                        <Border Style="{StaticResource A.SegGroup}">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Style="{StaticResource A.SegOpt}" Content="Like Windows" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.System}}" />
+                                <RadioButton Style="{StaticResource A.SegOpt}" Content="Dark" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Dark}}" />
+                                <RadioButton Style="{StaticResource A.SegOpt}" Content="Light" IsChecked="{Binding Theme, Converter={StaticResource Is}, ConverterParameter={x:Static app:ThemeChoice.Light}}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel Style="{StaticResource Row}">
                         <TextBlock Style="{StaticResource Label}" Text="Look" />
                         <RadioButton Style="{StaticResource A.OptItem}" Content="Classic" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Classic}}" />
                         <RadioButton Style="{StaticResource A.OptItem}" Content="Midnight" IsChecked="{Binding Look, Converter={StaticResource Is}, ConverterParameter={x:Static app:Look.Midnight}}" />
@@ -644,6 +774,23 @@
                         <!-- Plan S intro: the intro video again, any time, out of this button; it counts against nothing. -->
                         <Button x:Name="WatchIntroButton" Style="{StaticResource A.OutlineBtn}" Content="Watch the Aero intro" Height="30" Margin="12,0,0,0"
                                 Click="WatchIntroClick" AutomationProperties.Name="Watch the Aero intro" />
+                    </StackPanel>
+                    <!-- 0.10.9: the demo's Replay intro and Play tour, off the window's chrome and here: the opening again, or the
+                         camera on the Dashboard's panes one by one. -->
+                    <StackPanel Style="{StaticResource Row}">
+                        <TextBlock Style="{StaticResource Label}" Text="Intro and tour" />
+                        <Button x:Name="ReplayButton" Style="{StaticResource A.OutlineBtn}" Height="30" Click="ReplayIntroClick" AutomationProperties.Name="Replay intro" ToolTip="Play the opening again">
+                            <StackPanel Orientation="Horizontal">
+                                <aero:Icon Data="{StaticResource A.I.Replay}" Size="13" StrokeWidth="2.2" VerticalAlignment="Center" />
+                                <TextBlock Text="Replay intro" Margin="8,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="TourButton" Style="{StaticResource A.OutlineBtn}" Height="30" Margin="8,0,0,0" Click="PlayTourClick" AutomationProperties.Name="Play tour" ToolTip="Show the Dashboard's panes one by one">
+                            <StackPanel Orientation="Horizontal">
+                                <aero:Icon Data="{StaticResource A.I.Play}" Size="12" Filled="True" VerticalAlignment="Center" />
+                                <TextBlock Text="Play tour" Margin="8,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
                     <!-- 0.10.7: Aero is by request. While locked, Request Aero sends this PC's request ID, which the owner approves. -->
                     <StackPanel Style="{StaticResource Row}" Visibility="{Binding AeroLocked, Converter={StaticResource VisibleWhen}}">

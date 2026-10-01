@@ -64,7 +64,7 @@ internal partial class AeroWindow : Window, IShellWindow
         // (0.10.1, free-form), so the same desktop shows between the panes.
         _backdrop = new Backdrop(this, Room, _glass, () => theme.Current, onScreen: true, stage: Stage);
         UpdateRequiredCover.DataContext = updates;
-        UpdateCover.Attach(UpdateRequiredCover, [Side, TopBar, Banners, Pages], UpdateNowButton);
+        UpdateCover.Attach(UpdateRequiredCover, [Side, SearchGlass, BellPill, OverlayButton, HouseholdButton, Banners, Pages], UpdateNowButton);
         _size = new Extent(Width, Height);
         _minimum = new Extent(MinWidth, MinHeight);
         ShowIntro();
@@ -414,10 +414,6 @@ internal partial class AeroWindow : Window, IShellWindow
         Dispatcher.BeginInvoke(() => Dashboard?.PlayTour(), DispatcherPriority.ContextIdle);   // once the page is laid out
     }
 
-    private void ReplayIntroClick(object sender, RoutedEventArgs e) => ReplayIntro();
-
-    private void PlayTourClick(object sender, RoutedEventArgs e) => PlayTour();
-
     /// <summary>Lines the wallpaper's frost up with the panes every frame for <paramref name="ms"/>, while they move (the
     /// intro, the camera), then stops: nothing runs at rest (Plan S G5).</summary>
     internal void AlignFrostFor(double ms)
@@ -515,14 +511,13 @@ internal partial class AeroWindow : Window, IShellWindow
 
     // ---------------------------------------------------------------- search
 
-    /// <summary>The top bar's search narrows the Dashboard's history table (design §1), and brings the Dashboard up to
-    /// show it.</summary>
+    /// <summary>The top bar's search (the mockup's Search history, Ctrl K) searches the History page, and brings it up to
+    /// show what it finds.</summary>
     private void SearchChanged(object sender, TextChangedEventArgs e)
     {
         SearchHint.Visibility = Search.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (_shell.Dashboard is not { } dashboard) return;
-        dashboard.HistoryQuery = Search.Text;
-        if (Search.Text.Length > 0 && !_shell.IsSetup && _shell.Page != Page.Dashboard) _shell.Page = Page.Dashboard;
+        _shell.Breakdown.Search = Search.Text;
+        if (Search.Text.Length > 0 && !_shell.IsSetup && _shell.Page != Page.Breakdown) _shell.Page = Page.Breakdown;
     }
 
     private void OnKey(object sender, KeyEventArgs e)

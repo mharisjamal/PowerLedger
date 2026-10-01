@@ -9,8 +9,8 @@ namespace PowerLedger.App.Tests;
 
 /// <summary>
 /// Plan W (0.10.3, the approved demo exactly): the intro's figures count up, as the demo's do, and let go when done; the
-/// demo's own controls, Replay intro and Play tour, sit beside the window's buttons: one plays the opening again, the
-/// other pushes the camera in on the Dashboard's panes in turn.
+/// demo's own controls, Replay intro and Play tour (in Settings since 0.10.9, off the window's chrome): one plays the
+/// opening again, the other pushes the camera in on the Dashboard's panes in turn.
 /// </summary>
 [Trait("Category", "UI")]
 [Collection(AeroMotionScope.Name)]
@@ -89,25 +89,32 @@ public class AeroDemoControlsTests
             }
         });
 
+    /// <summary>0.10.9: the mockup's chrome has no Replay intro or Play tour; they are Settings' buttons, and the window's
+    /// minimise, maximise and close sit on the top bar's capsule after Home.</summary>
     [Fact]
-    public void The_demos_controls_sit_beside_the_windows_buttons_and_leave_while_the_wizard_has_the_window()
+    public void The_demos_controls_are_in_settings_and_the_windows_buttons_on_the_top_bar()
         => UiHarness.OnUi(() =>
         {
             using var saver = new FakeSaver();
-            var window = AeroHost.Window(AeroFixtures.Shell(saver));
+            var shell = AeroFixtures.Shell(saver);
+            var window = AeroHost.Window(shell);
             try
             {
                 window.Show();
                 UiHarness.Pump(TimeSpan.FromMilliseconds(100));
-                var group = (StackPanel)window.FindName("DemoControls");
-                ((Panel)window.FindName("CaptionButtons")).Children[0].ShouldBe(group);
-                // 0.10.9: one glass capsule group, the mockup's, the two bare on it (never glass on glass).
-                var pill = group.Children.OfType<GlassPanel>().Single();
-                var buttons = MidnightHost.AllOf<Button>(pill).ToList();
-                buttons.Select(AutomationProperties.GetName).ShouldBe(["Replay intro", "Play tour"]);
-                buttons.ShouldAllBe(button => button.Style == window.FindResource("A.CapBtn"));
-                pill.HasGlow.ShouldBeTrue();
-                group.IsVisible.ShouldBeTrue();
+                window.FindName("DemoControls").ShouldBeNull();
+                window.FindName("CaptionButtons").ShouldBeNull();
+                var group = (GlassPanel)window.FindName("TopGroup");
+                var buttons = MidnightHost.AllOf<Button>((DependencyObject)window.FindName("WindowButtons")).ToList();
+                buttons.Select(AutomationProperties.GetName).ShouldBe(["Minimize", "Maximize", "Close"]);
+                buttons.ShouldAllBe(button => button.Style == window.FindResource("A.WindowBtn"));
+                MidnightHost.AllOf<Button>(group).Select(AutomationProperties.GetName).ShouldBe(["Approvals and alerts", "Household", "Minimize", "Maximize", "Close"]);
+
+                shell.Page = Page.Settings;
+                UiHarness.PumpUntil(() => window.PageHost.Showing is PowerLedger.App.Aero.SettingsView { IsLoaded: true }, TimeSpan.FromSeconds(5), "Settings");
+                var settings = window.PageHost.Showing!;
+                MidnightHost.AllOf<Button>(settings).Select(AutomationProperties.GetName).ShouldContain("Replay intro");
+                MidnightHost.AllOf<Button>(settings).Select(AutomationProperties.GetName).ShouldContain("Play tour");
             }
             finally
             {
@@ -175,14 +182,14 @@ public class AeroDemoControlsTests
                 var view = Settle(window, before);
                 window.PlayTour();
                 var now = (GlassPanel)view.FindName("PNow");
-                var daily = (GlassPanel)view.FindName("PDaily");
+                var month = (GlassPanel)view.FindName("PMonth");
                 UiHarness.PumpUntil(() => view.Focused == now, TimeSpan.FromSeconds(2), "the camera on Power now");
                 view.Touring.ShouldBeTrue();
-                UiHarness.PumpUntil(() => view.Focused == daily, TimeSpan.FromMilliseconds(AeroMotion.TourStep + 2000), "the camera on Energy each day");
+                UiHarness.PumpUntil(() => view.Focused == month, TimeSpan.FromMilliseconds(AeroMotion.TourStep + 2000), "the camera on This month");
                 view.StopTour();
                 view.Touring.ShouldBeFalse();
                 UiHarness.Pump(TimeSpan.FromMilliseconds(AeroMotion.TourStep + 200));
-                view.Focused.ShouldBe(daily, "a stopped tour goes no further");
+                view.Focused.ShouldBe(month, "a stopped tour goes no further");
                 view.Unfocus();
             }
             finally

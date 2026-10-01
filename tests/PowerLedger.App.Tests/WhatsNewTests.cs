@@ -82,6 +82,8 @@ public class WhatsNewTests
         WhatsNew.Releases[0].Version.ShouldBe("0.10.9", "newest first");
         PointsOf("0.10.9").ShouldBe([
             "Aero is real liquid glass: the background ripples and bends through every panel, with a soft glowing edge.",
+            "Aero's Dashboard and Settings are laid out as the new design: fourteen glass bars by day, week or month, a ring for where the power goes, and a glass card for each style.",
+            "The window's buttons sit on the top bar, and Replay intro and Play tour are in Settings.",
         ]);
         WhatsNew.Since("0.10.8", "0.10.9").ShouldBe(PointsOf("0.10.9"));
     }

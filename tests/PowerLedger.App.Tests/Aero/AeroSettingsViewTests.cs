@@ -287,7 +287,8 @@ public class AeroSettingsViewTests
                 toggle.IsChecked.ShouldBe(false, "off by default");
                 LiquidGlassSources.AllowScreenshots.ShouldBeFalse();
                 System.Windows.Automation.AutomationProperties.GetName(toggle).ShouldBe("Show PowerLedger in screenshots");
-                UiHarness.Find<TextBlock>(view, t => t.Text.StartsWith("Off: the glass shows the windows behind it live", StringComparison.Ordinal)).ShouldNotBeNull();
+                System.Windows.Automation.AutomationProperties.GetHelpText(toggle).ShouldStartWith("Off: the glass shows the windows behind it live");
+                UiHarness.Find<TextBlock>(view, t => t.Text == "Off keeps it out of captures; on, the glass shows your wallpaper").ShouldNotBeNull("the board's short caption");
                 UiHarness.Render(WholePage(window, view, 1440), 1440, WholeHeight(view), "aero-settings-screenshots-off-Dark.png");
 
                 toggle.IsChecked = true;

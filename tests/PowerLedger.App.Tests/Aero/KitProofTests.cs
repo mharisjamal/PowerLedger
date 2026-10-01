@@ -101,7 +101,15 @@ public class KitProofTests
             unit.Margin = new Thickness(6, 4, 0, 0);
             unit.SetResourceReference(TextBlock.ForegroundProperty, "A.B.Text2");
             pill.Children.Add(unit);
-            At(new GlassPanel { Style = S("A.Glass.Capsule"), Padding = new Thickness(18, 0, 22, 0), HasShadow = false, Content = pill }, 758, 562, 240, 56);
+            // The kit's sparkline: its path's ten points (y 18, 16, 19, 12, 14, 9, 13, 6, 10, 7 of 26), oldest first.
+            double[] heights = [18, 16, 19, 12, 14, 9, 13, 6, 10, 7];
+            var spark = new PowerLedger.App.Aero.Sparkline { Width = 90, Height = 26, Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, Seconds = 30,
+                Samples = [.. heights.Select((y, i) => new SparkSample((heights.Length - 1 - i) * 30.0 / (heights.Length - 1), 26 - y))] };
+            spark.SetResourceReference(PowerLedger.App.Aero.Sparkline.StrokeProperty, "A.B.Accent");
+            pill.Children.Add(spark);
+            At(new GlassPanel { Style = S("A.Glass.Capsule"), Padding = new Thickness(18, 0, 22, 0), HasShadow = false, Content = pill }, 758, 562, double.NaN, 58);
+            var note = At(new TextBlock { Text = "Always on top, anywhere on screen. Right click for corner, opacity and the 30 second graph.", FontSize = 12.5, FontWeight = FontWeights.Medium, TextWrapping = TextWrapping.Wrap }, 758, 644, 540);
+            note.SetResourceReference(TextBlock.ForegroundProperty, "A.B.Text2");
 
             window.Show();
             try

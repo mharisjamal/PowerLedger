@@ -71,11 +71,13 @@
     <!-- A table's column heads and cells, inside A.Table.Header and A.Table.Row, which give the 14 px sides and the
          demo's small muted heads and rows that light on hover; a cell keeps 14 from the next. -->
     <Style x:Key="A.Page.Head.Cell" TargetType="TextBlock">
+        <Setter Property="Effect" Value="{DynamicResource A.Glass.TextShadow}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Small}" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text3}" />
         <Setter Property="VerticalAlignment" Value="Bottom" />
     </Style>
     <Style x:Key="A.Page.Cell" TargetType="TextBlock">
+        <Setter Property="Effect" Value="{DynamicResource A.Glass.TextShadow}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Control}" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
@@ -94,6 +96,7 @@
 
     <!-- A key and its value in a well, as the demo's report and household dialogs list them. -->
     <Style x:Key="A.Page.Key" TargetType="TextBlock">
+        <Setter Property="Effect" Value="{DynamicResource A.Glass.TextShadow}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Body}" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text2}" />
         <Setter Property="Margin" Value="14,11" />
@@ -101,6 +104,7 @@
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
     <Style x:Key="A.Page.Value" TargetType="TextBlock">
+        <Setter Property="Effect" Value="{DynamicResource A.Glass.TextShadow}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Body}" />
         <Setter Property="Margin" Value="14,11" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -112,12 +116,14 @@
 
     <!-- Words under a control, and the line that says how a save or an action went. -->
     <Style x:Key="A.Page.Note" TargetType="TextBlock">
+        <Setter Property="Effect" Value="{DynamicResource A.Glass.TextShadow}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Small}" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text2}" />
         <Setter Property="TextWrapping" Value="Wrap" />
         <Setter Property="Margin" Value="0,6,0,0" />
     </Style>
     <Style x:Key="A.Page.Prose" TargetType="TextBlock">
+        <Setter Property="Effect" Value="{DynamicResource A.Glass.TextShadow}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Body}" />
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
@@ -154,6 +160,7 @@
     </Style>
 
     <Style x:Key="A.Page.Section" TargetType="TextBlock">
+        <Setter Property="Effect" Value="{DynamicResource A.Glass.TextShadow}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Small}" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text3}" />
         <Setter Property="Margin" Value="0,0,0,8" />

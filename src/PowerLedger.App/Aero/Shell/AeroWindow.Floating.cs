@@ -52,7 +52,8 @@ internal partial class AeroWindow
         Open(BellButton, items);
     }
 
-    /// <summary>The service pulse: its state, and Restart (or Start, while it's down).</summary>
+    /// <summary>The sidebar's foot (the mockup's Service running): the service's state, and Restart (or Start, while it's
+    /// down), in a menu above it.</summary>
     private void ServiceClick(object sender, RoutedEventArgs e)
     {
         var status = _shell.Now.Status;
@@ -60,39 +61,31 @@ internal partial class AeroWindow
         items.Add(status.Running
             ? Item("Restart the service", null, () => OpenModal(ServiceButton, RestartDialog()))
             : Item("Start the service", null, () => _shell.Now.StartService.Execute(null)));
-        Open(ServiceButton, items);
+        Open(ServiceButton, items, above: true);
     }
 
-    /// <summary>The household button: the PCs with their figures, the Household page and Add a PC.</summary>
+    /// <summary>The household button, the kit's menu: the household and its PCs first (Open Household), then Add a PC,
+    /// Rename this PC and, past a rule, Leave the household; without a household, this PC alone, Add a PC and Rename.</summary>
     private void HouseholdClick(object sender, RoutedEventArgs e)
     {
-        var rows = YourPcs.Rows(_shell.Household.Members, _shell.Now.Live.Watts, CultureInfo.CurrentCulture);
-        var items = new List<Control> { Header(_shell.Household.HasHousehold ? "Your household" : "Not in a household yet") };
-        items.AddRange(rows.Select(row => Item(row.Name, row.Figure, () => _shell.Page = Page.Household)));
-        items.Add(Rule());
-        items.Add(Item("Open Household", null, () => _shell.Page = Page.Household));
-        items.Add(Item("Add a PC", null, () => _shell.Household.AddPc.Execute(null)));
-        Open(HouseholdButton, items);
-    }
-
-    /// <summary>Switch look: the other two looks, each with a line of what it is (design §2).</summary>
-    private void SwitchLookClick(object sender, RoutedEventArgs e)
-    {
-        var items = new List<Control> { Header("Switch look") };
-        foreach (var look in AeroLooks.Others)
+        var household = _shell.Household;
+        var rows = YourPcs.Rows(household.Members, _shell.Now.Live.Watts, CultureInfo.CurrentCulture);
+        var items = new List<Control>
         {
-            var face = new StackPanel();
-            face.Children.Add(new TextBlock { Text = look.ToString() });
-            var line = new TextBlock { Text = AeroLooks.Describe(look), Margin = new Thickness(0, 2, 0, 0) };
-            line.SetResourceReference(TextBlock.ForegroundProperty, "A.B.Text2");
-            line.SetResourceReference(TextBlock.FontSizeProperty, "A.T.Small");
-            face.Children.Add(line);
-            var item = Item("", null, () => SwitchTo(look));
-            item.Header = face;
-            AutomationProperties.SetName(item, look.ToString());
-            items.Add(item);
+            Item(household.HasHousehold ? $"Home, {YourPcs.Summary(rows.Count)}" : "This PC only", null, () => _shell.Page = Page.Household),
+            Item("Add a PC", null, () => household.AddPc.Execute(null)),
+            Item("Rename this PC", null, () => _shell.Page = Page.Household),
+        };
+        if (household.HasHousehold)
+        {
+            items.Add(Rule());
+            items.Add(Item("Leave the household", null, () =>
+            {
+                _shell.Page = Page.Household;
+                household.AskLeave.Execute(null);
+            }));
         }
-        Open(SwitchLookButton, items, above: true);
+        Open(HouseholdButton, items);
     }
 
     /// <summary>Opens <paramref name="items"/> as a glass menu under <paramref name="trigger"/>, its right edge on the

@@ -36,9 +36,10 @@ public class AeroIdleTests
                 UiHarness.PumpUntil(() => !window.IntroPending, TimeSpan.FromSeconds(10), "the intro to begin");
                 var view = (AeroDashboard)window.PageHost.Showing!;
                 var live = UiHarness.Find<LiveChart>(view)!;
-                var daily = UiHarness.Find<DailyChart>(view)!;
-                var pie = UiHarness.Find<PieChart3D>(view)!;
-                UiHarness.PumpUntil(() => live.Reveal == 1 && daily.Reveal == 1 && pie.Rise == 1 && FrameClock.ActiveSince(before).Count == 0
+                var bars = UiHarness.Find<EnergyBarChart>(view)!;
+                var ring = UiHarness.Find<DonutChart>(view)!;
+                UiHarness.PumpUntil(() => live.Reveal == 1 && ring.Sweep == 1 && bars.BarPieces.All(b => b.RenderTransform == System.Windows.Media.Transform.Identity)
+                    && FrameClock.ActiveSince(before).Count == 0
                     && FrameClock.RenderingHandlers == handlers, TimeSpan.FromSeconds(20), "the intro to settle");
                 var roll = UiHarness.Find<RollingNumber>(view, r => r.Name == "NowRoll")!;
                 var (shown, samples) = (roll.Text, live.Samples);

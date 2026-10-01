@@ -138,18 +138,17 @@
             <!-- ============ the sidebar ============ -->
             <aero:GlassPanel x:Name="Side" Padding="14,24" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
                 <Grid x:Name="SideContent">
-                    <!-- In reading order, which is the keyboard's: the brand, the pages and PCs, Switch look, the foot. -->
+                    <!-- In reading order, which is the keyboard's: the brand, the pages and PCs, the foot. -->
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <!-- The brand, then the pages 24 under it (the mockup's 20 and its column's 4 px gap). -->
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10,0,10,24" AutomationProperties.Name="PowerLedger">
                         <Grid Width="34" Height="34">
                             <Ellipse Fill="{DynamicResource A.B.Accent}" />
-                            <aero:Icon Data="{StaticResource A.I.Bolt}" Size="17" Filled="True" Foreground="{DynamicResource A.B.AccentInk}" />
+                            <aero:Icon Data="{StaticResource A.I.Bolt}" Size="17" StrokeWidth="2.2" Foreground="{DynamicResource A.B.AccentInk}" />
                         </Grid>
                         <TextBlock Text="PowerLedger" Style="{StaticResource WideText}" Margin="11,0,0,0" FontSize="{DynamicResource A.T.Brand}" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </StackPanel>
@@ -186,21 +185,9 @@
                             <ItemsControl x:Name="Pcs" Focusable="False" ItemTemplate="{StaticResource PcRow}" AutomationProperties.Name="Your PCs" />
                         </StackPanel>
                     </ScrollViewer>
-                    <!-- Switch look: a small menu of the other two looks (design §2). -->
-                    <Button x:Name="SwitchLookButton" Grid.Row="2" Style="{StaticResource A.RowBtn}" Foreground="{DynamicResource A.B.Text2}"
-                            Click="SwitchLookClick" AutomationProperties.Name="Switch look" ToolTip="Switch look">
-                        <StackPanel Orientation="Horizontal">
-                            <Grid Width="30" Height="30">
-                                <Ellipse Fill="{DynamicResource A.B.Well2}" />
-                                <aero:Icon Data="{StaticResource A.I.Moon}" Size="14" />
-                            </Grid>
-                            <TextBlock Text="Switch look" Style="{StaticResource WideText}" Foreground="{DynamicResource A.B.Text2}" FontSize="{DynamicResource A.T.Control}"
-                                       Margin="10,0,0,0" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-
-                    <!-- The foot: the update card when there is something to say, then the version and the service's state. -->
-                    <StackPanel Grid.Row="3" Margin="0,10,0,0">
+                    <!-- The foot: the update card when there is something to say, then the service's state and the version, the
+                         mockup's .sub line; the line is a button that opens the service's menu (its state, Restart or Start). -->
+                    <StackPanel Grid.Row="2" Margin="0,10,0,0">
                         <Border x:Name="UpdateCard" Style="{StaticResource A.Well}" Padding="14,12" Margin="0,0,0,10" AutomationProperties.Name="Update"
                                 Visibility="{Binding ShowCard, Converter={StaticResource VisibleWhen}, FallbackValue=Collapsed}">
                             <StackPanel>
@@ -220,27 +207,37 @@
                                         Command="{Binding ShowWhatsNew}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
                             </StackPanel>
                         </Border>
-                        <DockPanel Margin="14,0">
-                            <TextBlock x:Name="VersionLine" DockPanel.Dock="Right" Style="{StaticResource WideText}" Foreground="{DynamicResource A.B.Text2}" FontSize="{DynamicResource A.T.Small}" FontWeight="Medium"
-                                       VerticalAlignment="Center" Text="{Binding ShortName}" ToolTip="{Binding RunningName}"
-                                       AutomationProperties.Name="{Binding RunningName}" />
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" ToolTip="{Binding Now.Status.State}">
-                                <Ellipse x:Name="StateDot" Width="8" Height="8" VerticalAlignment="Center">
-                                    <Ellipse.Style>
-                                        <Style TargetType="Ellipse">
-                                            <Setter Property="Fill" Value="{DynamicResource M.Bad}" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Now.Status.Running}" Value="True">
-                                                    <Setter Property="Fill" Value="{DynamicResource A.B.Accent}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Ellipse.Style>
-                                </Ellipse>
-                                <TextBlock Style="{StaticResource WideText}" Margin="8,0,0,0" Foreground="{DynamicResource A.B.Text2}" FontSize="{DynamicResource A.T.Small}" FontWeight="Medium"
-                                           Text="{Binding Now.Status.State}" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </DockPanel>
+                        <Button x:Name="ServiceButton" Style="{StaticResource A.RowBtn}" Padding="14,4" Margin="0" Click="ServiceClick"
+                                AutomationProperties.Name="Service" ToolTip="{Binding Now.Status.State}">
+                            <DockPanel>
+                                <TextBlock x:Name="VersionLine" DockPanel.Dock="Right" Style="{StaticResource WideText}" Foreground="{DynamicResource A.B.Text2}" FontSize="{DynamicResource A.T.Small}" FontWeight="Medium"
+                                           VerticalAlignment="Center" Text="{Binding ShortName}" ToolTip="{Binding RunningName}"
+                                           AutomationProperties.Name="{Binding RunningName}" />
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <!-- The mockup's dot: 8 across, the accent with its glow (0 0 10px) while the service runs; a still red
+                                         one while it doesn't. -->
+                                    <Ellipse x:Name="StateDot" Width="8" Height="8" VerticalAlignment="Center">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{DynamicResource M.Bad}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Now.Status.Running}" Value="True">
+                                                        <Setter Property="Fill" Value="{DynamicResource A.B.Accent}" />
+                                                        <Setter Property="Effect">
+                                                            <Setter.Value>
+                                                                <DropShadowEffect ShadowDepth="0" BlurRadius="10" Opacity="1" Color="{DynamicResource A.C.Accent}" RenderingBias="Performance" />
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock Style="{StaticResource WideText}" Margin="8,0,0,0" Foreground="{DynamicResource A.B.Text2}" FontSize="{DynamicResource A.T.Small}" FontWeight="Medium"
+                                               Text="{Binding Now.Status.State}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DockPanel>
+                        </Button>
                     </StackPanel>
 
                 </Grid>
@@ -267,8 +264,9 @@
                 </Grid.RowDefinitions>
 
                 <!-- The top bar, the mockup's: the search a glass capsule 360 wide (its words 20 in, the Ctrl K key a glass bubble
-                     at its right), and at the right one glass capsule group, the bell, the overlay, the service and the household
-                     bare on it between hairlines, as the mockup's Alerts, Overlay and Home. -->
+                     at its right), and at the right one glass capsule group, the bell, the overlay and the household bare on it
+                     between hairlines, as the mockup's Alerts, Overlay and Home; after Home, past one more hairline, the window's
+                     own minimise, maximise and close as small glyphs on the same glass. -->
                 <Grid x:Name="TopBar" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="100*" MaxWidth="360" />
@@ -306,20 +304,10 @@
                             </Grid>
                             <Border Style="{StaticResource A.GroupSep}" />
                             <!-- The watts overlay (design §5): on or off, through Settings, where the overlay listens. -->
-                            <ToggleButton x:Name="OverlayButton" Style="{StaticResource A.CapToggle}" Padding="12,0"
+                            <ToggleButton x:Name="OverlayButton" Style="{StaticResource A.CapToggle}"
                                           Command="{Binding Settings.ToggleOverlay}" IsChecked="{Binding Settings.OverlaySection.Enabled, Mode=OneWay}" AutomationProperties.Name="Watts overlay" ToolTip="Show the watts over other windows">
                                 <aero:Icon Data="{StaticResource A.I.Overlay}" Size="19" />
                             </ToggleButton>
-                            <Border Style="{StaticResource A.GroupSep}" />
-                            <Button x:Name="ServiceButton" Style="{StaticResource A.RoundCapBtn}"
-                                    Click="ServiceClick" AutomationProperties.Name="Service" ToolTip="{Binding Now.Status.State}">
-                                <Grid>
-                                    <!-- Measuring: the accent dot breathing; stopped: a still red one. -->
-                                    <aero:PulseDot x:Name="ServicePulse" Size="9" Visibility="{Binding Now.Status.Running, Converter={StaticResource VisibleWhen}}" />
-                                    <Ellipse x:Name="ServiceDot" Width="9" Height="9" IsHitTestVisible="False" Fill="{DynamicResource M.Bad}"
-                                             Visibility="{Binding Now.Status.Running, Converter={StaticResource HiddenWhen}}" />
-                                </Grid>
-                            </Button>
                             <Border Style="{StaticResource A.GroupSep}" />
                             <Button x:Name="HouseholdButton" Style="{StaticResource A.CapBtn}" Padding="6,0,14,0" Click="HouseholdClick" AutomationProperties.Name="Household">
                                 <StackPanel Orientation="Horizontal">
@@ -334,6 +322,18 @@
                                     </StackPanel>
                                 </StackPanel>
                             </Button>
+                            <Border Style="{StaticResource A.GroupSep}" />
+                            <StackPanel x:Name="WindowButtons" Orientation="Horizontal" WindowChrome.IsHitTestVisibleInChrome="True">
+                                <Button Style="{StaticResource A.WindowBtn}" Click="MinimizeClick" ToolTip="Minimize" AutomationProperties.Name="Minimize">
+                                    <aero:Icon Data="{StaticResource A.I.Minimize}" Size="13" />
+                                </Button>
+                                <Button x:Name="MaximizeButton" Style="{StaticResource A.WindowBtn}" Click="MaximizeClick" ToolTip="Maximize" AutomationProperties.Name="Maximize">
+                                    <aero:Icon x:Name="MaximizeIcon" Data="{StaticResource A.I.Maximize}" Size="13" StrokeWidth="1.8" />
+                                </Button>
+                                <Button Style="{StaticResource A.WindowBtn}" Click="CloseClick" ToolTip="Close to the tray" AutomationProperties.Name="Close">
+                                    <aero:Icon Data="{StaticResource A.I.Close}" Size="13" />
+                                </Button>
+                            </StackPanel>
                         </StackPanel>
                     </aero:GlassPanel>
                 </Grid>
@@ -394,49 +394,11 @@
             </Grid>
         </Grid>
 
-        <!-- ============ the caption: the strip above the top bar, 28 high: the grab bar and the window's own buttons ============ -->
+        <!-- ============ the caption: the strip above the top bar, 28 high, with only the grab bar in it ============ -->
         <Grid x:Name="Caption" Height="28" VerticalAlignment="Top" Margin="14,0">
             <!-- The grab bar (visionOS's), the mockup's: its hit area 6 down, centred over the stage, a piece of the shape of its
-                 own that moves the whole window; AeroWindow.GrabBar keeps it clear of the buttons in a narrow window. -->
+                 own that moves the whole window. -->
             <aero:GrabBar x:Name="Grab" Style="{StaticResource A.GrabBar}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,6,0,0" />
-            <StackPanel x:Name="CaptionButtons" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,0,0" WindowChrome.IsHitTestVisibleInChrome="True">
-                <!-- The demo's own pills: Replay intro plays the opening again, Play tour pushes the camera in on the Dashboard's
-                     panes in turn; one small glass capsule group, the buttons bare on it. -->
-                <StackPanel x:Name="DemoControls" Orientation="Horizontal" Margin="0,0,8,0" Visibility="{Binding IsSetup, Converter={StaticResource HiddenWhen}}">
-                    <aero:GlassPanel Style="{StaticResource A.TopPill}" Height="22" Padding="3,0">
-                        <StackPanel Orientation="Horizontal">
-                            <Button x:Name="ReplayButton" Style="{StaticResource A.CapBtn}" Height="22" Padding="9,0" FontSize="{DynamicResource A.T.Axis}" Click="ReplayIntroClick"
-                                    AutomationProperties.Name="Replay intro" ToolTip="Play the opening again">
-                                <StackPanel Orientation="Horizontal">
-                                    <aero:Icon Data="{StaticResource A.I.Replay}" Size="11" StrokeWidth="2.2" VerticalAlignment="Center" />
-                                    <TextBlock Text="Replay intro" Margin="6,0,0,0" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </Button>
-                            <Border Style="{StaticResource A.GroupSep}" Height="12" />
-                            <Button x:Name="TourButton" Style="{StaticResource A.CapBtn}" Height="22" Padding="9,0" FontSize="{DynamicResource A.T.Axis}" Click="PlayTourClick"
-                                    AutomationProperties.Name="Play tour" ToolTip="Show the Dashboard's panes one by one">
-                                <StackPanel Orientation="Horizontal">
-                                    <aero:Icon Data="{StaticResource A.I.Play}" Size="11" Filled="True" VerticalAlignment="Center" />
-                                    <TextBlock Text="Play tour" Margin="6,0,0,0" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </Button>
-                        </StackPanel>
-                    </aero:GlassPanel>
-                </StackPanel>
-                <aero:GlassPanel x:Name="WindowButtons" Style="{StaticResource A.TopPill}" Height="22" Padding="3,0">
-                    <StackPanel Orientation="Horizontal">
-                        <Button Style="{StaticResource A.RoundCapBtn}" Width="28" Height="22" Click="MinimizeClick" ToolTip="Minimize" AutomationProperties.Name="Minimize">
-                            <aero:Icon Data="{StaticResource A.I.Minimize}" Size="12" />
-                        </Button>
-                        <Button x:Name="MaximizeButton" Style="{StaticResource A.RoundCapBtn}" Width="28" Height="22" Click="MaximizeClick" ToolTip="Maximize" AutomationProperties.Name="Maximize">
-                            <aero:Icon x:Name="MaximizeIcon" Data="{StaticResource A.I.Maximize}" Size="12" StrokeWidth="1.8" />
-                        </Button>
-                        <Button Style="{StaticResource A.RoundCapBtn}" Width="28" Height="22" Click="CloseClick" ToolTip="Close to the tray" AutomationProperties.Name="Close">
-                            <aero:Icon Data="{StaticResource A.I.Close}" Size="12" />
-                        </Button>
-                    </StackPanel>
-                </aero:GlassPanel>
-            </StackPanel>
         </Grid>
 
         <!-- The grip (0.10.1): a small glass disc off the stage's bottom-right corner that resizes the smaller layout. -->
@@ -452,8 +414,8 @@
         </Grid>
 
         <!-- Plan Q §3: while this version is below the data server's minimum, a glass dialog on a scrim covers the page under
-             the caption, whose buttons stay, so the window can still go to the tray. -->
-        <Grid x:Name="UpdateRequiredCover" Margin="0,52,0,0" Visibility="{Binding UpdateRequired, Converter={StaticResource VisibleWhen}, FallbackValue=Collapsed}">
+             the top bar, whose window buttons stay (the rest of it is disabled), so the window can still go to the tray. -->
+        <Grid x:Name="UpdateRequiredCover" Margin="0,86,0,0" Visibility="{Binding UpdateRequired, Converter={StaticResource VisibleWhen}, FallbackValue=Collapsed}">
             <Border Background="{DynamicResource A.B.Scrim}" />
             <aero:GlassPanel Style="{StaticResource A.Modal}" AutomationProperties.Name="{Binding RequiredTitle}">
                 <StackPanel>

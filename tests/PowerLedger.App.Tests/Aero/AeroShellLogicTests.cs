@@ -10,14 +10,6 @@ public class AeroShellLogicTests
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
     private static readonly DateTimeOffset Now = new(2026, 9, 8, 14, 32, 7, TimeSpan.Zero);
 
-    [Fact]
-    public void Switch_look_offers_the_other_two_looks_midnight_first()
-    {
-        AeroLooks.Others.ShouldBe([Look.Midnight, Look.Classic]);
-        AeroLooks.Describe(Look.Midnight).ShouldNotBeNullOrWhiteSpace();
-        AeroLooks.Describe(Look.Classic).ShouldNotBeNullOrWhiteSpace();
-    }
-
     [Theory]
     [InlineData(null, "Midnight")]
     [InlineData("Classic", "Classic")]
@@ -93,10 +85,10 @@ public class AeroShellLogicTests
     }
 
     [Theory]
-    [InlineData(0, "This PC only")]
-    [InlineData(1, "This PC only")]
-    [InlineData(2, "2 PCs in this household")]
-    [InlineData(4, "4 PCs in this household")]
+    [InlineData(0, "1 PC")]
+    [InlineData(1, "1 PC")]
+    [InlineData(2, "2 PCs")]
+    [InlineData(4, "4 PCs")]
     public void The_household_button_counts_the_pcs(int pcs, string line) => YourPcs.Summary(pcs).ShouldBe(line);
 
     [Theory]

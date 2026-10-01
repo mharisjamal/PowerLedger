@@ -196,7 +196,9 @@ public class LiquidGlassProofTests
                 using var saver = new FakeSaver();
                 UiHarness.OnUi(() =>
                 {
-                    var ground = Load(background);
+                    // Settings is drawn over the Styles board's own background (0.10.9), the rest over Main's.
+                    var styles = Path.Combine(dir, "ref", "Styles-bg.png");
+                    var ground = Load(page == Page.Settings && File.Exists(styles) ? styles : background);
                     // The engine is handed the mockup's background where the window lies, as the live capture hands it the
                     // screen, so the glass bends and blurs the same picture the browser's does.
                     LiquidGlassSources.Override = source => Behind(ground, source, 1440, 900);
@@ -212,6 +214,7 @@ public class LiquidGlassProofTests
                         UiHarness.Pump(TimeSpan.FromMilliseconds(1500));
                         window.UpdateLayout();
                         Write(Over(ground, window, 1440, 900), Path.Combine(pages, $"{page}-{theme}.png"));
+                        File.WriteAllText(Path.Combine(pages, $"{page}-{theme}.json"), Regions(window));
                     }
                     finally
                     {
@@ -222,6 +225,34 @@ public class LiquidGlassProofTests
                 });
             }
         }
+    }
+
+    /// <summary>Where the pieces the mockup's boards have lie in <paramref name="window"/>, as JSON (name, x, y, width,
+    /// height), for the proof sheets' region by region comparison.</summary>
+    private static string Regions(Window window)
+    {
+        var found = new List<string>();
+        void Add(string name, FrameworkElement? element)
+        {
+            if (element is not { IsVisible: true } || element.ActualWidth <= 0) return;
+            var r = element.TransformToAncestor(window).TransformBounds(new Rect(element.RenderSize));
+            found.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{{\"name\":\"{name}\",\"x\":{r.X:0.#},\"y\":{r.Y:0.#},\"w\":{r.Width:0.#},\"h\":{r.Height:0.#}}}"));
+        }
+        FrameworkElement? Named(DependencyObject scope, string name) => UiHarness.Find<FrameworkElement>(scope, e => e.Name == name);
+        Add("Root", window.Content as FrameworkElement);
+        Add("Stage", Named(window, "Stage"));
+        foreach (var name in new[] { "Side", "SearchGlass", "TopGroup", "Grab" }) Add(name, Named(window, name));
+        if (((AeroWindow)window).PageHost.Showing is FrameworkElement view)
+        {
+            foreach (var name in new[] { "PNow", "PMonth", "PDaily", "PParts", "GlassPane" }) Add(name, Named(view, name));
+            var cards = UiHarness.Find<ItemsControl>(view, i => i.Name == "StyleCards");
+            if (cards is not null)
+            {
+                for (var i = 0; i < cards.Items.Count; i++)
+                    Add($"Card{i}", (cards.ItemContainerGenerator.ContainerFromIndex(i) as DependencyObject) is { } c ? UiHarness.Find<RadioButton>(c, _ => true) : null);
+            }
+        }
+        return "[" + string.Join(",", found) + "]";
     }
 
     /// <summary>A source that lays <paramref name="ground"/> over the window <paramref name="source"/> shows, whose size in

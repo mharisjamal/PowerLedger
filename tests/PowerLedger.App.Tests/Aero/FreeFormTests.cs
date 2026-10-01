@@ -367,13 +367,15 @@ public class FreeFormWindowTests
     /// <summary>The mockup's text shadow (.t: 0 1px 2px, navy at 28 %) lies once under a piece's content: a piece on another's
     /// glass takes none of its own, which the outer one's already reaches.</summary>
     [Fact]
-    public void The_content_carries_the_mockups_text_shadow_once()
+    public void The_text_carries_the_mockups_text_shadow_and_nothing_else_does()
         => UiHarness.OnUi(() =>
         {
             var window = AeroHost.Dressed(new Window { Width = 420, Height = 140, WindowStyle = WindowStyle.None, Left = -20000, ShowInTaskbar = false, ShowActivated = false }, Theme.Dark);
             var settings = GlassSettings.Default;
             using var material = new GlassMaterial(window, () => settings, () => Theme.Dark);
-            var inner = new GlassPanel { Content = new System.Windows.Controls.TextBlock { Text = "+12%" }, Margin = new Thickness(20) };
+            var text = new System.Windows.Controls.TextBlock { Text = "+12%" };
+            var icon = new Icon { Data = System.Windows.Media.Geometry.Parse("M0,0 L10,10"), Size = 12 };
+            var inner = new GlassPanel { Content = new System.Windows.Controls.StackPanel { Children = { text, icon } }, Margin = new Thickness(20) };
             var pane = new GlassPanel { Content = inner, HasShadow = false };
             window.Content = pane;
             try
@@ -381,10 +383,12 @@ public class FreeFormWindowTests
                 window.Show();
                 window.UpdateLayout();
                 UiHarness.Pump(TimeSpan.FromMilliseconds(50));
-                var shadow = pane.Template.FindName("PART_Content", pane).ShouldBeOfType<System.Windows.Controls.ContentPresenter>().Effect
-                    .ShouldBeOfType<System.Windows.Media.Effects.DropShadowEffect>();
+                // 0.10.9: the mockup's .t and .sub shadow text alone, so the text carries it, not the piece's content.
+                var shadow = text.Effect.ShouldBeOfType<System.Windows.Media.Effects.DropShadowEffect>();
                 (shadow.ShadowDepth, Math.Round(shadow.Opacity, 2)).ShouldBe((1d, 0.28));
+                icon.Effect.ShouldBeNull("an icon has none");
                 inner.IsNested.ShouldBeTrue();
+                pane.Template.FindName("PART_Content", pane).ShouldBeOfType<System.Windows.Controls.ContentPresenter>().Effect.ShouldBeNull("never the whole content");
                 inner.Template.FindName("PART_Content", inner).ShouldBeOfType<System.Windows.Controls.ContentPresenter>().Effect.ShouldBeNull();
             }
             finally

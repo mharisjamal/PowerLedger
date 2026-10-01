@@ -7,37 +7,35 @@ namespace PowerLedger.App.Tests;
 /// <summary>
 /// Plan U: what the intro costs a frame. Measured on the real App, the intro ran at about 10 frames a second; the daily
 /// chart's wipe redrew its axis and labels on every frame, and the month's bar grew on its width, a layout pass a frame.
+/// Since 0.10.9 the bars are glass pieces that grow on a scale from their feet, and let go of it once grown.
 /// </summary>
 [Trait("Category", "UI")]
 [Collection(AeroMotionScope.Name)]   // AeroMotion's override is one for the process
 public class AeroIntroCostTests
 {
     [Fact]
-    public void The_daily_wipe_moves_a_clip_and_draws_nothing_again()
+    public void The_bars_grow_on_a_scale_and_let_it_go()
         => UiHarness.OnUi(() =>
         {
-            var window = AeroHost.Dressed(new Window { Width = 700, Height = 260, Left = -20000, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None }, Theme.Dark);
-            var chart = new DailyChart
+            using var motion = AeroMotion.Force(false);
+            var window = AeroHost.Dressed(new Window { Width = 700, Height = 360, Left = -20000, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None }, Theme.Dark);
+            var chart = new EnergyBarChart
             {
-                Days = [.. Enumerable.Range(1, 12).Select(d => new DailyDay(new DateOnly(2026, 9, d), 0.2 + d * 0.01, null))],
-                Reveal = 0,
+                Bars = [.. Enumerable.Range(1, 14).Select(d => new EnergyBar(new DateOnly(2026, 9, d), d.ToString(System.Globalization.CultureInfo.InvariantCulture), 0.2 + d * 0.01, "tip"))],
             };
             window.Content = chart;
             try
             {
                 window.Show();
                 UiHarness.Pump(TimeSpan.FromMilliseconds(50));
-                var draws = chart.Draws;
-                draws.ShouldBeGreaterThan(0);
-                chart.Reveal = .5;
-                window.UpdateLayout();
-                chart.Wipe.Width.ShouldBe(chart.ActualWidth / 2, 0.01);
-                chart.Reveal = .9;
-                window.UpdateLayout();
-                chart.Draws.ShouldBe(draws, "the wipe is the clip's, not a redraw of the axis and its text");
-                chart.Reveal = 1;
-                window.UpdateLayout();
-                chart.Draws.ShouldBe(draws + 1, "the tip comes once the wipe is done");
+                chart.BarPieces.Count.ShouldBe(14);
+                var heights = chart.BarPieces.Select(b => b.ActualHeight).ToList();
+                chart.Grow(300, 10);
+                UiHarness.Pump(TimeSpan.FromMilliseconds(80));
+                chart.BarPieces.ShouldContain(b => b.RenderTransform is System.Windows.Media.ScaleTransform, "growing on a scale");
+                chart.BarPieces.Select(b => b.ActualHeight).ShouldBe(heights, "no height animated, so no layout pass a frame");
+                UiHarness.PumpUntil(() => chart.BarPieces.All(b => b.RenderTransform == System.Windows.Media.Transform.Identity), TimeSpan.FromSeconds(5), "the bars to settle");
+                chart.BarPieces[13].ActualHeight.ShouldBeGreaterThan(chart.BarPieces[0].ActualHeight, "the busiest stands tallest");
             }
             finally
             {

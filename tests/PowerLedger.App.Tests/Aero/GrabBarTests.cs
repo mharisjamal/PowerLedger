@@ -33,12 +33,6 @@ public class GrabBarTests
         GrabBar.OpacityOf(GrabGlow.Over).ShouldBe(1);
     }
 
-    [Theory]
-    [InlineData(1232, 800, 556)]   // room: centred
-    [InlineData(672, 342, 210)]    // a narrow window: left of the buttons, 12 DIP clear
-    [InlineData(100, 50, 0)]       // never off the caption
-    public void The_bar_is_centred_unless_that_would_cover_the_buttons(double width, double buttonsLeft, double left)
-        => AeroWindow.GrabLeft(width, GrabBar.HitWidth, buttonsLeft, AeroWindow.GrabGap).ShouldBe(left);
 }
 
 [Trait("Category", "UI")]
@@ -93,9 +87,9 @@ public class GrabBarWindowTests
             Holds(new Point(grab.Left + 4, grab.Top + grab.Height / 2)).ShouldBeTrue("its hit area's end");
             Holds(new Point(grab.Left - 6, grab.Top + grab.Height / 2)).ShouldBeFalse("beside it, the desktop");
             grab.Bottom.ShouldBeLessThanOrEqualTo(Bounds(window, (FrameworkElement)window.FindName("TopBar")).Top + 0.5, "above the top bar row (the mockup's, 6 to 28 down)");
-            var buttons = Bounds(window, (FrameworkElement)window.FindName("CaptionButtons"));
-            grab.IntersectsWith(buttons).ShouldBeFalse("never over the caption's buttons");
-            if (width >= 1100) (grab.Left + grab.Width / 2).ShouldBe(window.ActualWidth / 2, 1, "centred over the stage");
+            var buttons = Bounds(window, (FrameworkElement)window.FindName("WindowButtons"));
+            grab.IntersectsWith(buttons).ShouldBeFalse("never over the window's buttons, which are on the top bar");
+            (grab.Left + grab.Width / 2).ShouldBe(window.ActualWidth / 2, 1, "centred over the stage");
             AutomationProperties(window.GrabBar).ShouldBe("Move window");
             window.GrabBar.Cursor.ShouldBe(Cursors.SizeAll);
         }, width);

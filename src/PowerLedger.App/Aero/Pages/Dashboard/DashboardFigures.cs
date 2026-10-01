@@ -16,6 +16,26 @@ internal static class DashboardFigures
         return (Format.WholeWatts(watts, culture), "W");
     }
 
+    /// <summary>The line under Power now's watts (the mockup's "Measured by the CPU and GPU sensors"): what the reading
+    /// comes from, out of the live line's source ("Live · battery discharge · 14:32:07"); "Waiting for the service"
+    /// before a reading.</summary>
+    public static string MeasuredBy(LivePanel live)
+    {
+        var parts = live.Eyebrow.Split(" · ");
+        if (!double.IsFinite(live.Watts) || parts.Length < 3) return "Waiting for the service";
+        return parts[1] switch
+        {
+            "battery discharge" => "Measured by the battery",
+            "UPS output" => "Measured by the UPS",
+            "power supply reading" => "Measured by the power supply",
+            "platform meter" => "Measured by the processor's own meter",
+            "power meter reading" => "Measured by the PC's power meter",
+            "management controller" => "Measured by the management controller",
+            "calibrated model" => "From the sensors, calibrated on battery",
+            _ => "Estimated from the CPU and GPU sensors",
+        };
+    }
+
     /// <summary>Today against yesterday to the same time, as a signed whole percentage: "+42%", "-8%"; "N/A" without yesterday.</summary>
     public static string Change(double? change, CultureInfo culture)
     {

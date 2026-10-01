@@ -157,22 +157,18 @@ public class AeroShellTests
         });
     }
 
+    /// <summary>0.10.9: the mockup's sidebar has no Switch look; Settings' Look row chooses, and a look that doesn't open
+    /// says why on the banner.</summary>
     [Fact]
-    public void Switch_look_offers_midnight_and_classic_and_says_why_one_didnt_open()
+    public void A_look_chosen_that_didnt_open_says_why()
     {
         using var saver = new FakeSaver();
         var ui = AeroFixtures.Moved(introduced: true);
         var shell = AeroFixtures.Shell(saver, ui);
         OnWindow(shell, window =>
         {
-            Press(UiHarness.Find<Button>(window, b => b.Name == "SwitchLookButton")!);
-            UiHarness.Pump(TimeSpan.FromMilliseconds(100));
-            var menu = window.OpenMenu!;
-            menu.IsOpen.ShouldBeTrue();
-            var choices = menu.Items.OfType<MenuItem>().Where(i => i.IsHitTestVisible).ToList();
-            choices.Select(AutomationProperties.GetName).ShouldBe(["Midnight", "Classic"]);
-
-            choices[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            UiHarness.Find<Button>(window, b => b.Name == "SwitchLookButton").ShouldBeNull("the mockup's sidebar has none");
+            window.SwitchTo(Look.Midnight);
             ui.Changes.ShouldBe(["look Midnight"]);
 
             ui.LookProblem = "Classic couldn't open: its window failed to show.";
@@ -205,7 +201,7 @@ public class AeroShellTests
     }
 
     [Fact]
-    public void Restart_opens_a_dialog_from_the_pulse_which_esc_closes_and_restart_goes_ahead()
+    public void Restart_opens_a_dialog_from_the_sidebars_foot_which_esc_closes_and_restart_goes_ahead()
     {
         using var saver = new FakeSaver();
         var shell = AeroFixtures.Shell(saver);
@@ -259,13 +255,15 @@ public class AeroShellTests
                 element.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
                 names.Add(AutomationProperties.GetName((DependencyObject)Keyboard.FocusedElement));
             }
-            names.Take(9).ShouldBe(["This PC", "Laptop-2", "Switch look", "Search history", "Approvals and alerts", "Watts overlay", "Service", "Household", "Show cost per hour"],
-                "a group of pages is one stop, as a radio group is; then the PCs, Switch look, the top bar and the page");
+            names.Take(11).ShouldBe(["This PC", "Laptop-2", "Service", "Search history", "Approvals and alerts", "Watts overlay", "Household", "Minimize", "Maximize", "Close", "Open report"],
+                "a group of pages is one stop, as a radio group is; then the PCs, the service, the top bar with the window's buttons, and the page");
         });
     }
 
+    /// <summary>0.10.9: the Dashboard has no history table (History keeps its own page), so the top bar's Search history
+    /// searches the History page and brings it up.</summary>
     [Fact]
-    public void Ctrl_k_finds_the_search_and_a_search_narrows_the_dashboards_table()
+    public void Ctrl_k_finds_the_search_and_a_search_searches_the_history_page()
     {
         using var saver = new FakeSaver();
         var shell = AeroFixtures.Shell(saver);
@@ -275,15 +273,15 @@ public class AeroShellTests
             Keyboard.Modifiers.ShouldBe(ModifierKeys.None);
             var search = UiHarness.Find<TextBox>(window, t => t.Name == "Search")!;
             search.Focus();
-            search.Text = "yester";
+            search.Text = "cpu";
             UiHarness.Pump(TimeSpan.FromMilliseconds(300));
-            shell.Page.ShouldBe(Page.Dashboard, "the search is of the Dashboard's history");
-            shell.Dashboard!.HistoryShown.Select(r => r.Period).ShouldBe(["Yesterday"]);
+            shell.Page.ShouldBe(Page.Breakdown, "the search is of the History page");
+            shell.Breakdown.Search.ShouldBe("cpu");
             UiHarness.HasFocus(search).ShouldBeTrue("the search keeps the focus as the page changes");
             search.Focus();   // back from wherever another process's foreground took it; Esc clears only a focused search
             Key(window, System.Windows.Input.Key.Escape);
             search.Text.ShouldBeEmpty();
-            shell.Dashboard.HistoryShown.Count.ShouldBe(7);
+            shell.Breakdown.Search.ShouldBeEmpty();
         });
     }
 
@@ -298,11 +296,12 @@ public class AeroShellTests
             view.OneColumn.ShouldBeFalse();
             UiHarness.Find<TextBlock>(view, t => t.Name == "TodayKwh")!.Text.ShouldBe("0.284");
             UiHarness.Find<TextBlock>(view, t => t.Name == "ChangeText")!.Text.ShouldNotBe("N/A");
-            UiHarness.Find<TextBlock>(view, t => t.Name == "DayOfText")!.Text.ShouldBe("Day 8 of 30");
-            UiHarness.Find<ItemsControl>(view, i => i.Name == "HistRows")!.Items.Count.ShouldBe(7);
-            UiHarness.Find<PieChart3D>(view)!.Slices.Count.ShouldBe(4);
+            AutomationProperties.GetName(UiHarness.Find<Grid>(view, g => g.Name == "MonthBar")!).ShouldBe("Day 8 of 30");
+            UiHarness.Find<ItemsControl>(view, i => i.Name == "HistRows").ShouldBeNull("History keeps its own page");
+            UiHarness.Find<DonutChart>(view)!.Arcs.Count.ShouldBe(4);
             UiHarness.Find<LiveChart>(view)!.Samples!.Count.ShouldBeGreaterThan(30);
-            UiHarness.Find<DailyChart>(view)!.Days!.Count.ShouldBe(8);
+            UiHarness.Find<EnergyBarChart>(view)!.BarPieces.Count.ShouldBe(14, "the mockup's fourteen bars");
+            UiHarness.Find<TextBlock>(view, t => t.Name == "NowSource")!.Text.ShouldNotBeNullOrWhiteSpace();
             UiHarness.Find<ItemsControl>(view, i => i.Name == "MonthSplit")!.Items.Count.ShouldBe(2, "this desktop and the laptop");
             window.Width = 960;
             window.UpdateLayout();
@@ -319,7 +318,7 @@ public class AeroShellTests
         OnWindow(shell, window =>
         {
             var view = (AeroDashboard)window.PageHost.Showing!;
-            Press(UiHarness.Find<Button>(view, b => b.Name == "FocusDaily")!);
+            view.FocusPane((GlassPanel)view.FindName("PDaily"));   // the tour's step; the mockup's panes have no expand button
             // The fades land with the frames, which come late under load: seen still at full opacity 311 ms into a 200 ms fade.
             UiHarness.PumpUntil(() => view.Panes.Where(p => p.Name != "PDaily").All(p => p.Opacity < 0.5), TimeSpan.FromSeconds(10), "the others to dim");
             view.Focused!.Name.ShouldBe("PDaily");
@@ -327,20 +326,6 @@ public class AeroShellTests
             view.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window)!, 0, System.Windows.Input.Key.Escape) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
             UiHarness.PumpUntil(() => view.Panes.All(p => p.Opacity > 0.95), TimeSpan.FromSeconds(10), "every pane back in full");
             view.Focused.ShouldBeNull();
-        });
-    }
-
-    [Fact]
-    public void Save_csv_says_where_it_saved_in_a_toast()
-    {
-        using var saver = new FakeSaver();
-        var shell = AeroFixtures.Shell(saver);
-        OnWindow(shell, window =>
-        {
-            Press(UiHarness.Find<Button>(window, b => b.Name == "SaveCsv")!);
-            UiHarness.Pump(TimeSpan.FromMilliseconds(200));
-            File.Exists(saver.Chosen).ShouldBeTrue();
-            window.ToastText.ShouldBe("Saved PowerLedger history by day.csv");
         });
     }
 

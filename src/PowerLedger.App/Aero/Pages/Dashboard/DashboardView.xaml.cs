@@ -3,27 +3,34 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using PowerLedger.Contracts;
 
 namespace PowerLedger.App.Aero;
 
+/// <summary>A part's row beside the ring (the mockup's): its colour's glow, its name as the mockup words it, its model
+/// and its share.</summary>
+internal sealed record PartRow(Part Part, string Name, string? Model, string Share, Effect Glow);
+
 /// <summary>
-/// Aero's Dashboard (Aero look design §1, Plan S D3) over <see cref="DashboardViewModel"/>. It asks the ViewModel for
-/// Aero's figures (<see cref="DashboardViewModel.Detailed"/>) and reads the shell's Insights for the forecast and its
-/// household for the split by PC. It carries on the window's intro (its panes rise after the sidebar's, their content
-/// glides in, then the charts draw), and pushes the camera in on a pane whose expand button is pressed; Esc or a click
-/// outside it comes back. Under reduced motion nothing travels: the panes are there, and a focused pane only dims the
-/// others.
+/// Aero's Dashboard (0.10.9, the liquid glass mockup's Main board) over <see cref="DashboardViewModel"/>. It asks the
+/// ViewModel for Aero's figures (<see cref="DashboardViewModel.Detailed"/>) and reads the shell's household for the split
+/// by PC. It carries on the window's intro (its panes rise after the sidebar's, their content glides in, then the charts
+/// draw), and the tour (Settings' Play tour) pushes the camera in on each pane in turn; Esc or a click outside it comes
+/// back. Under reduced motion nothing travels: the panes are there, and a focused pane only dims the others.
 /// </summary>
 public partial class DashboardView : UserControl
 {
     /// <summary>Under this width the page is one column: the panes one under another.</summary>
     internal const double OneColumnBelow = 860;
+
+    /// <summary>The mockup's rows at 1440 by 900: the top 280 high, the bottom the rest of its 790, 494; never less than
+    /// <see cref="LeastBottom"/>, where the page scrolls instead.</summary>
+    internal const double TopRow = 280;
+    internal const double LeastBottom = 420;
 
     /// <summary>How far the intro's count-up has gone, 0 to 1 (the demo's <c>countUp</c>): Power now's watts, today's kWh
     /// and This month's figure show this much of their value while it runs, and all of it at 1, where it rests.</summary>
@@ -32,7 +39,6 @@ public partial class DashboardView : UserControl
 
     private DashboardViewModel? _model;
     private ShellViewModel? _shell;
-    private bool _costMode;
     private bool _narrow;
     private GlassPanel? _focused;
     private double _monthFill;
@@ -46,6 +52,7 @@ public partial class DashboardView : UserControl
         Loaded += OnLoaded;
         Unloaded += (_, _) => Detach();
         SizeChanged += (_, _) => Reflow();
+        Scroller.SizeChanged += (_, _) => Reflow();
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape || _focused is null && !Touring) return;
@@ -63,7 +70,7 @@ public partial class DashboardView : UserControl
     }
 
     /// <summary>The panes, in the order they rise.</summary>
-    internal GlassPanel[] Panes => [PNow, PMonth, PDaily, PParts, PHist];
+    internal GlassPanel[] Panes => [PNow, PMonth, PDaily, PParts];
 
     /// <summary>The pane the camera is on, for a test; null at rest.</summary>
     internal GlassPanel? Focused => _focused;
@@ -74,7 +81,7 @@ public partial class DashboardView : UserControl
     /// <summary>The intro's count-up, 0 to 1; 1 at rest.</summary>
     internal double Count { get => (double)GetValue(CountProperty); set => SetValue(CountProperty, value); }
 
-    /// <summary>Whether the tour (the demo's Play tour) is under way.</summary>
+    /// <summary>Whether the tour is under way.</summary>
     internal bool Touring => _tour.Count > 0;
 
     private void Attach(DashboardViewModel? model)
@@ -94,7 +101,6 @@ public partial class DashboardView : UserControl
         if (_shell is not null)
         {
             _shell.Household.PropertyChanged -= OnHouseholdChanged;
-            if (_shell.Insights is { } insights) insights.PropertyChanged -= OnInsightsChanged;
             _shell = null;
         }
     }
@@ -111,7 +117,6 @@ public partial class DashboardView : UserControl
         {
             _shell = shell;
             shell.Household.PropertyChanged += OnHouseholdChanged;
-            if (shell.Insights is { } insights) insights.PropertyChanged += OnInsightsChanged;
         }
         Reflow();
         ShowAll();
@@ -143,14 +148,7 @@ public partial class DashboardView : UserControl
             case nameof(DashboardViewModel.Detail):
                 ShowNow();
                 ShowMonth();
-                ShowDaily();
-                ShowHistory();
-                break;
-            case nameof(DashboardViewModel.HistoryShown):
-                ShowHistory();
-                break;
-            case nameof(DashboardViewModel.Saved):
-                if (_model?.Saved is { } saved) (Window.GetWindow(this) as AeroWindow)?.Toast(saved);
+                Dispatcher.BeginInvoke(() => MoveSeg(animate: true), DispatcherPriority.Loaded);
                 break;
         }
     }
@@ -160,68 +158,71 @@ public partial class DashboardView : UserControl
         if (e.PropertyName == nameof(HouseholdViewModel.Members)) ShowMonth();
     }
 
-    private void OnInsightsChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(InsightsViewModel.Report)) ShowMonth();
-    }
-
     private void ShowAll()
     {
         ShowParts();
         ShowNow();
         ShowMonth();
-        ShowDaily();
-        ShowHistory();
     }
 
-    /// <summary>Power now and today's kWh with the change against yesterday.</summary>
+    /// <summary>Power now, what measures it, and today's kWh with the change against yesterday.</summary>
     private void ShowNow()
     {
         if (_model is not { } model) return;
         var culture = CultureInfo.CurrentCulture;
         var detail = model.Detail;
-        var (value, unit) = DashboardFigures.PowerNow(model.Live.Watts, _costMode, detail?.PricePerKwh, detail?.Currency, culture);
-        var rolls = !_costMode || detail?.PricePerKwh is null;
-        rolls &= double.IsFinite(model.Live.Watts);
+        var (value, unit) = DashboardFigures.PowerNow(model.Live.Watts, false, null, null, culture);
+        var rolls = double.IsFinite(model.Live.Watts);
         if (rolls) NowRoll.Value = (int)Math.Round(Math.Max(0, model.Live.Watts) * Count);
         NowRoll.Visibility = rolls ? Visibility.Visible : Visibility.Collapsed;
         NowValue.Visibility = rolls ? Visibility.Collapsed : Visibility.Visible;
-        NowValue.Text = DashboardFigures.Counted(value, Count, culture);
+        NowValue.Text = value;
         NowUnit.Text = unit;
         AutomationProperties.SetName(NowFigure, unit.Length == 0 ? value : $"{value} {unit}");
-        UnitButton.IsEnabled = detail?.PricePerKwh is not null;
+        NowSource.Text = DashboardFigures.MeasuredBy(model.Live);
+        NowSource.ToolTip = model.Live.QualityNote is { Length: > 0 } note ? note : null;
         TodayKwh.Text = detail is null ? Format.Missing : DashboardFigures.Counted(Format.Kwh(detail.TodayKwh, culture), Count, culture);
         ChangeText.Text = DashboardFigures.Change(detail?.ChangeVsYesterday, culture);
     }
 
-    /// <summary>The parts beside the pie, given again only when what the list shows (the parts, their models and their
+    /// <summary>The parts beside the ring, given again only when what the list shows (the parts, their models and their
     /// shares as whole percents) has changed: the parts come new with every reading, and a list given them each second
     /// built its rows again each second, a layout pass and a redraw of the whole pane (Plan U).</summary>
     private void ShowParts()
     {
         var parts = _model?.Parts ?? [];
-        var shown = string.Join("\n", parts.Select(p => $"{p.Part}|{p.Name}|{p.Model}|{p.Share.ToString("0%", CultureInfo.CurrentCulture)}"));
+        var culture = CultureInfo.CurrentCulture;
+        var shown = string.Join("\n", parts.Select(p => $"{p.Part}|{p.Name}|{p.Model}|{p.Share.ToString("0%", culture)}"));
         if (shown == _partsShown && PartsList.ItemsSource is not null) return;
         _partsShown = shown;
-        PartsList.ItemsSource = parts;
+        PartsList.ItemsSource = parts.Select(p => new PartRow(p.Part, Named(p), p.Model, p.Share.ToString("0%", culture), Glow(p.Part))).ToList();
     }
 
-    /// <summary>This month: cost or energy, the day of the month and its bar, the forecast, and the split by PC.</summary>
+    /// <summary>The mockup's words for a part: Graphics for the GPU.</summary>
+    private static string Named(DashboardPart part) => part.Part == Part.Gpu ? "Graphics" : part.Name;
+
+    /// <summary>A part's dot glows in its own colour (the mockup's 0 0 8px).</summary>
+    private Effect Glow(Part part)
+    {
+        var key = part switch { Part.Cpu => "M.PartCpu", Part.Gpu => "M.PartGpu", Part.Display => "M.PartDisplay", _ => "M.PartRest" };
+        var colour = TryFindResource(key) is SolidColorBrush brush ? brush.Color : Colors.White;
+        var glow = new DropShadowEffect { ShadowDepth = 0, BlurRadius = 8, Opacity = 1, Color = colour, RenderingBias = RenderingBias.Performance };
+        glow.Freeze();
+        return glow;
+    }
+
+    /// <summary>This month: the cost so far, the energy and where it is heading, the month's bar, and each PC's share.</summary>
     private void ShowMonth()
     {
         if (_model is not { } model) return;
-        var energy = MonthEnergy.IsChecked == true;
         ShowMonthBig();
-        MonthSub.Text = DashboardFigures.MonthSub(model.Month, energy);
+        MonthSub.Text = DashboardFigures.MonthSub(model.Month, energy: false);
         if (model.Detail is { } detail)
         {
-            DayOfText.Text = DashboardFigures.DayOf(detail.MonthDay, detail.MonthDays);
             _monthFill = DashboardMaths.Fill(detail.MonthDay, detail.MonthDays);
             MonthFill.Width = MonthBar.ActualWidth * _monthFill;
+            AutomationProperties.SetName(MonthBar, DashboardFigures.DayOf(detail.MonthDay, detail.MonthDays));
         }
-        var forecast = DashboardFigures.Forecast(_shell?.Insights?.Report?.Forecast, CultureInfo.CurrentCulture);
-        ForecastText.Text = forecast ?? "";
-        ForecastText.Visibility = forecast is null ? Visibility.Collapsed : Visibility.Visible;
         var rows = YourPcs.Rows(_shell?.Household.Members ?? [], model.Live.Watts, CultureInfo.CurrentCulture);
         MonthSplit.ItemsSource = rows.Take(3).ToList();
     }
@@ -230,7 +231,7 @@ public partial class DashboardView : UserControl
     private void ShowMonthBig()
     {
         if (_model is { } model)
-            MonthBig.Text = DashboardFigures.Counted(DashboardFigures.MonthBig(model.Month, MonthEnergy.IsChecked == true), Count, CultureInfo.CurrentCulture);
+            MonthBig.Text = DashboardFigures.Counted(DashboardFigures.MonthBig(model.Month, false), Count, CultureInfo.CurrentCulture);
     }
 
     /// <summary>A frame of the count-up: the counted figures again, nothing else.</summary>
@@ -240,93 +241,24 @@ public partial class DashboardView : UserControl
         ShowMonthBig();
     }
 
-    /// <summary>Energy each day's month button and legend.</summary>
-    private void ShowDaily()
-    {
-        if (_model?.Detail is not { } detail) return;
-        var culture = CultureInfo.CurrentCulture;
-        var month = detail.DailyMonth;
-        var before = month.AddMonths(-1);
-        MonthLabel.Text = month.ToString("MMMM", culture);
-        LegendName.Text = month.ToString("MMMM", culture);
-        LegendKwh.Text = Format.Kwh(detail.DailyKwh, culture) + " kWh";
-        LegendPrevious.Text = before.ToString("MMMM", culture);
-        LegendPreviousKwh.Text = Format.Kwh(detail.DailyPreviousKwh, culture) + " kWh";
-        AutomationProperties.SetName(MonthButton, "Month, " + month.ToString("MMMM yyyy", culture));
-    }
-
-    /// <summary>The table's head names the span; an empty search says so.</summary>
-    private void ShowHistory()
-    {
-        if (_model is not { } model) return;
-        SpanHead.Text = (model.Detail?.Span ?? model.HistorySpan).ToString();
-        var empty = model.HistoryShown.Count == 0 && model.Detail is not null;
-        HistEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
-        HistEmpty.Text = string.IsNullOrWhiteSpace(model.HistoryQuery)
-            ? "No history yet."
-            : $"Nothing in {SpanHead.Text.ToLowerInvariant()} history matches \"{model.HistoryQuery.Trim()}\". Try a day name or a month.";
-        Dispatcher.BeginInvoke(() => MoveSeg(animate: true), DispatcherPriority.Loaded);
-    }
-
     // ---------------------------------------------------------------- the controls
-
-    /// <summary>The unit button: watts, or what an hour costs at this rate.</summary>
-    private void UnitClick(object sender, RoutedEventArgs e)
-    {
-        _costMode = !_costMode;
-        var name = _costMode ? "Show watts" : "Show cost per hour";
-        AutomationProperties.SetName(UnitButton, name);
-        UnitButton.ToolTip = name;
-        ShowNow();
-    }
-
-    private void MonthUnitChecked(object sender, RoutedEventArgs e) => ShowMonth();
 
     private void OpenReportClick(object sender, RoutedEventArgs e)
     {
         if (_shell is not null) _shell.Page = Page.Report;
     }
 
-    /// <summary>The month picker: every month the history has, newest first, as a glass menu under the button.</summary>
-    private void MonthPickerClick(object sender, RoutedEventArgs e)
-    {
-        if (_model is not { } model) return;
-        var menu = new ContextMenu { PlacementTarget = MonthButton, Placement = PlacementMode.Bottom };
-        menu.SetResourceReference(StyleProperty, "A.Menu");
-        menu.SetResourceReference(ItemsControl.ItemContainerStyleProperty, "A.MenuItem");
-        foreach (var month in model.DailyMonths)
-        {
-            var item = new MenuItem
-            {
-                Header = month.ToString(month.Year == DateTime.Now.Year ? "MMMM" : "MMMM yyyy", CultureInfo.CurrentCulture),
-                IsCheckable = true, IsChecked = month == model.DailyMonth,
-            };
-            item.Click += (_, _) =>
-            {
-                model.DailyMonth = month;
-                AeroMotion.Move(Daily, DailyChart.RevealProperty, 1, AeroMotion.DailyWipe, AeroMotion.Glide, from: 0);
-            };
-            menu.Items.Add(item);
-        }
-        menu.Closed += (_, _) => MonthButton.ContextMenu = null;
-        MonthButton.ContextMenu = menu;
-        menu.IsOpen = true;
-    }
-
+    /// <summary>Day, Week or Month: the bars read again for the span, and the bubble slides to the word.</summary>
     private void SpanChecked(object sender, RoutedEventArgs e)
     {
         if (sender is not RadioButton { Content: string name } || _model is not { } model) return;
         var span = Enum.Parse<HistorySpan>(name);
-        if (model.HistorySpan == span) return;
-        AeroMotion.Fade(HistRows, OpacityProperty, 0, AeroMotion.TableFade, null, done: () =>
-        {
-            model.HistorySpan = span;
-            AeroMotion.Fade(HistRows, OpacityProperty, 1, AeroMotion.TableFade);
-        });
         MoveSeg(animate: true);
+        if (model.HistorySpan == span) return;
+        model.HistorySpan = span;
     }
 
-    /// <summary>The white pill slides and stretches to the chosen span on the spring.</summary>
+    /// <summary>The glass bubble slides and stretches to the chosen span on the spring.</summary>
     private void MoveSeg(bool animate)
     {
         if (!IsLoaded) return;
@@ -341,41 +273,42 @@ public partial class DashboardView : UserControl
 
     private void PartEnter(object sender, MouseEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: DashboardPart part } row)
+        if (sender is FrameworkElement { DataContext: PartRow part } row)
         {
-            Pie.Hovered = part.Part;
+            Ring.Hovered = part.Part;
             row.SetResourceReference(Border.BackgroundProperty, "A.B.Well");
         }
     }
 
     private void PartLeave(object sender, MouseEventArgs e)
     {
-        Pie.Hovered = null;
+        Ring.Hovered = null;
         if (sender is Border row) row.Background = Brushes.Transparent;
     }
 
     // ---------------------------------------------------------------- one column or two
 
     /// <summary>Two columns as the mockup lays them (Power now and This month 280 high, Energy each day and Where the power
-    /// goes 494, the right column 384 wide), or the panes one under another under <see cref="OneColumnBelow"/>.</summary>
+    /// goes the rest of the page, 494 at 1440 by 900, the right column 384 wide), or the panes one under another under
+    /// <see cref="OneColumnBelow"/>.</summary>
     private void Reflow()
     {
         var narrow = ActualWidth > 0 && ActualWidth < OneColumnBelow;
-        if (narrow == _narrow && Layout.RowDefinitions.Count > 0 && IsLoaded) return;
+        var bottom = Math.Max(LeastBottom, Scroller.ViewportHeight > 0 ? Scroller.ViewportHeight - TopRow - 16 : 494);
         _narrow = narrow;
         Layout.RowDefinitions.Clear();
         Layout.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 16);
         Layout.ColumnDefinitions[2].Width = new GridLength(narrow ? 0 : 384);
         (GlassPanel Pane, double Height)[] order = narrow
-            ? [(PNow, 280), (PMonth, double.NaN), (PDaily, 320), (PParts, 320), (PHist, double.NaN)]
-            : [(PNow, 280), (PDaily, 494), (PHist, double.NaN)];
+            ? [(PNow, TopRow), (PMonth, TopRow), (PDaily, LeastBottom), (PParts, 494)]
+            : [(PNow, TopRow), (PDaily, bottom)];
         for (var i = 0; i < order.Length; i++)
         {
             if (i > 0) Layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(16) });
-            Layout.RowDefinitions.Add(new RowDefinition { Height = double.IsNaN(order[i].Height) ? GridLength.Auto : new GridLength(order[i].Height) });
+            Layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(order[i].Height) });
             Grid.SetRow(order[i].Pane, i * 2);
             Grid.SetColumn(order[i].Pane, 0);
-            Grid.SetColumnSpan(order[i].Pane, narrow || order[i].Pane == PHist ? 3 : 1);
+            Grid.SetColumnSpan(order[i].Pane, narrow ? 3 : 1);
         }
         if (!narrow)
         {
@@ -391,7 +324,7 @@ public partial class DashboardView : UserControl
     // ---------------------------------------------------------------- the intro and the charts
 
     /// <summary>What glides in inside the panes.</summary>
-    private FrameworkElement[] Contents => [NowContent, MonthContent, DailyContent, PartsContent, HistContent];
+    private FrameworkElement[] Contents => [NowContent, MonthContent, DailyContent, PartsContent];
 
     /// <summary>The panes held at the reveal's start (clear, down, smaller), the charts undrawn and the figures at
     /// nothing, until the window has painted and plays it (0.10.6).</summary>
@@ -406,11 +339,10 @@ public partial class DashboardView : UserControl
     private void Undraw()
     {
         Live.BeginAnimation(LiveChart.RevealProperty, null);
-        Daily.BeginAnimation(DailyChart.RevealProperty, null);
-        Pie.BeginAnimation(PieChart3D.RiseProperty, null);
+        Ring.BeginAnimation(DonutChart.SweepProperty, null);
         Live.Reveal = 0;
-        Daily.Reveal = 0;
-        Pie.Rise = 0;
+        Ring.Sweep = 0;
+        Bars.Hold();
         if (AeroMotion.Reduced) return;
         BeginAnimation(CountProperty, null);
         Count = 0;   // the figures wait at nothing while the panes rise
@@ -444,13 +376,18 @@ public partial class DashboardView : UserControl
             BeginAnimation(CountProperty, null);
         });
 
-    /// <summary>The charts draw in: Last minute's line from the left, the month wiped in, the pie's slices rising in turn,
-    /// the month's bar growing. Under reduced motion they are simply there.</summary>
+    /// <summary>The charts draw in: Last minute's line from the left, the bars growing from their feet in turn, the ring
+    /// sweeping round, the month's bar growing. Under reduced motion they are simply there.</summary>
     private void DrawCharts()
     {
         AeroMotion.Move(Live, LiveChart.RevealProperty, 1, AeroMotion.LineDraw, AeroMotion.Glide, from: 0);
-        AeroMotion.Move(Daily, DailyChart.RevealProperty, 1, AeroMotion.DailyWipe, AeroMotion.Glide, from: 0);
-        Pie.PlayRise();
+        Bars.Grow(AeroMotion.BarGrow, AeroMotion.Stagger / 2);
+        AeroMotion.Move(Ring, DonutChart.SweepProperty, 1, AeroMotion.PieRise, AeroMotion.Glide, from: 0,
+            done: () =>
+            {
+                Ring.SetValue(DonutChart.SweepProperty, 1.0);
+                Ring.BeginAnimation(DonutChart.SweepProperty, null);
+            });
         // The bar grows on a scale from its left end, not its width: a width asks for a layout pass every frame (Plan U).
         MonthFill.Width = MonthBar.ActualWidth * _monthFill;
         var grow = new ScaleTransform(0, 1);
@@ -458,43 +395,9 @@ public partial class DashboardView : UserControl
         MonthFill.RenderTransform = grow;
         AeroMotion.Move(grow, ScaleTransform.ScaleXProperty, 1, AeroMotion.BarGrow, AeroMotion.Glide, from: 0,
             done: () => MonthFill.RenderTransform = Transform.Identity);
-        // So do the split's bars, as the demo's (every [data-w] bar grows with the count).
-        foreach (var fill in SplitFills())
-        {
-            var bar = new ScaleTransform(0, 1);
-            fill.RenderTransformOrigin = new Point(0, .5);
-            fill.RenderTransform = bar;
-            AeroMotion.Move(bar, ScaleTransform.ScaleXProperty, 1, AeroMotion.BarGrow, AeroMotion.Glide, from: 0,
-                done: () => fill.RenderTransform = Transform.Identity);
-        }
-    }
-
-    /// <summary>The split's bar fills, each PC's.</summary>
-    private List<Border> SplitFills()
-    {
-        var fills = new List<Border>();
-        void Walk(DependencyObject node)
-        {
-            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
-            {
-                var child = VisualTreeHelper.GetChild(node, i);
-                if (child is Border { Name: "SplitFill" } fill) fills.Add(fill);
-                else Walk(child);
-            }
-        }
-        Walk(MonthSplit);
-        return fills;
     }
 
     // ---------------------------------------------------------------- the camera
-
-    private void FocusClick(object sender, RoutedEventArgs e)
-    {
-        StopTour();
-        if (sender is not FrameworkElement { Tag: string name } || FindName(name) is not GlassPanel pane) return;
-        if (_focused == pane) Unfocus();
-        else FocusPane(pane);
-    }
 
     /// <summary>
     /// The camera push-in (design §1): the page scales and slides so <paramref name="pane"/> fills about three quarters
@@ -541,14 +444,14 @@ public partial class DashboardView : UserControl
     }
 
     /// <summary>
-    /// The demo's Play tour: the camera pushes in on Power now, Energy each day, Where the power goes and History in turn,
-    /// <see cref="AeroMotion.TourStep"/> apart, then comes back to the whole page. A click outside the pane in focus, an
-    /// expand button, Esc, the page changing or the intro replaying ends it.
+    /// The tour (Settings' Play tour): the camera pushes in on Power now, This month, Energy each day and Where the power
+    /// goes in turn, <see cref="AeroMotion.TourStep"/> apart, then comes back to the whole page. A click outside the pane
+    /// in focus, Esc, the page changing or the intro replaying ends it.
     /// </summary>
     internal void PlayTour()
     {
         StopTour();
-        GlassPanel[] stops = [PNow, PDaily, PParts, PHist];
+        GlassPanel[] stops = [PNow, PMonth, PDaily, PParts];
         for (var i = 0; i < stops.Length; i++)
         {
             var pane = stops[i];
@@ -590,17 +493,4 @@ public partial class DashboardView : UserControl
         }
         return false;
     }
-}
-
-/// <summary>A share as a star column's width, or with the parameter "Rest" the rest of the whole: a bar's fill and its
-/// track side by side, so the fill needs no measuring.</summary>
-internal sealed class ShareColumn : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        var share = value is double d && double.IsFinite(d) ? Math.Clamp(d, 0, 1) : 0;
-        return new GridLength(parameter as string == "Rest" ? 1 - share : share, GridUnitType.Star);
-    }
-
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
 }

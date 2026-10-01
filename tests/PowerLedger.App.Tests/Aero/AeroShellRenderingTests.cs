@@ -70,7 +70,7 @@ public class AeroShellRenderingTests
         Draw("aero-dashboard-checked.png", () => AeroFixtures.Shell(saver), 1440, 900, Theme.Dark, window =>
         {
             var view = (Aero.DashboardView)window.PageHost.Showing!;
-            view.Panes.Length.ShouldBe(5);
+            view.Panes.Length.ShouldBe(4, "the mockup's four: no history table on the Dashboard");
             view.Panes.ShouldAllBe(p => p.Template != null && p.ActualWidth > 0);
             foreach (var text in MidnightHost.AllOf<TextBlock>(view).Where(t => t.IsVisible && t.ActualWidth > 0 && !string.IsNullOrEmpty(t.Text) && !Equals(t.ToolTip, t.Text)))
             {
@@ -94,8 +94,8 @@ public class AeroShellRenderingTests
             var view = (Aero.DashboardView)window.PageHost.Showing!;
             view.Panes.ShouldAllBe(p => p.Opacity > 0.99, "the intro ends with every pane in place");
             UiHarness.Find<LiveChart>(view)!.Reveal.ShouldBe(1, 0.01);
-            UiHarness.Find<DailyChart>(view)!.Reveal.ShouldBe(1, 0.01);
-            UiHarness.Find<PieChart3D>(view)!.Rise.ShouldBe(1, 0.01);
+            UiHarness.Find<DonutChart>(view)!.Sweep.ShouldBe(1, 0.01);
+            UiHarness.Find<EnergyBarChart>(view)!.BarPieces.ShouldAllBe(b => b.RenderTransform == System.Windows.Media.Transform.Identity, "every bar grown");
             var bar = (FrameworkElement)view.FindName("MonthBar");
             ((FrameworkElement)view.FindName("MonthFill")).ActualWidth.ShouldBe(bar.ActualWidth * 8 / 30, 1, "the month's bar grown to the 8th of 30");
         }, reduced: false);

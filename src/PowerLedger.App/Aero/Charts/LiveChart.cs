@@ -7,14 +7,14 @@ using System.Windows.Media;
 namespace PowerLedger.App.Aero;
 
 /// <summary>
-/// Last minute's scale (Aero look design §1), pure, on the prototype's 400 × 190 drawing: the readings of the last 60 s
-/// from a minute ago at the left to now at the right, and watts on round steps that hold every reading and the day's
-/// average with room above and below.
+/// Last minute's scale (Aero look design §1; 0.10.9, the liquid glass mockup's 400 by 180 drawing), pure: the readings of
+/// the last 60 s from a minute ago at the chart's left edge to now at its right, and watts on round steps that hold every
+/// reading and the day's average with room above and below, the line in the drawing's middle band as the mockup's.
 /// </summary>
 /// <param name="Grid">The gridlines' watts, bottom up, the top one at <see cref="Hi"/>.</param>
 internal sealed record LiveScale(double Lo, double Hi, double Step, IReadOnlyList<double> Grid)
 {
-    public const double X0 = 34, X1 = 392, Y0 = 18, Y1 = 166, Width = 400, Height = 190, Span = 60;
+    public const double X0 = 0, X1 = 400, Y0 = 36, Y1 = 140, Width = 400, Height = 180, Span = 60;
 
     /// <summary>A scale for <paramref name="watts"/> and the <paramref name="average"/> the ghost line marks; 0 to 100 W
     /// with nothing to hold, and never below nothing.</summary>
@@ -45,9 +45,10 @@ internal sealed record LiveScale(double Lo, double Hi, double Step, IReadOnlyLis
 }
 
 /// <summary>
-/// Last minute (Aero look design §1, the prototype's LiveChart on real readings): the last 60 s of <see
-/// cref="LivePanel.Spark"/> as the accent line with its glow, the day's average as a faint ghost, a marker and a value pill
-/// on the newest reading with the time under it, and a crosshair that reads any second under the pointer. A new reading
+/// Last minute (Aero look design §1; 0.10.9, the liquid glass mockup's): the last 60 s of <see cref="LivePanel.Spark"/> as
+/// the accent line with its glow (drop-shadow 0 0 5px at 70 %) over its fill (the accent at 38 % fading to nothing), and
+/// its end dot on the newest reading (5.5 across, the navy inside, the accent's ring); no axis, as the mockup has none.
+/// The pointer reads any second: a dot and its watts on a pill. A new reading
 /// redraws the line once, in place: no slide, so a reading costs the compositor one frame, not a second of them (Plan U:
 /// the 1 s slide on every 1 s reading kept the render thread drawing at 60 fps, a third to a half of a core).
 /// </summary>
@@ -69,7 +70,6 @@ internal sealed class LiveChart : FrameworkElement
     private bool _hoverDrawn;
     private LiveScale _scale = LiveScale.For([], double.NaN);
     private double? _hoverAge;
-    private DateTimeOffset _newestAt = DateTimeOffset.Now;
 
     public LiveChart()
     {
@@ -83,7 +83,7 @@ internal sealed class LiveChart : FrameworkElement
     /// <summary>The last minute's readings, each with its age, as the live panel has them.</summary>
     public IReadOnlyList<SparkSample>? Samples { get => (IReadOnlyList<SparkSample>?)GetValue(SamplesProperty); set => SetValue(SamplesProperty, value); }
 
-    /// <summary>The day's average watts, drawn as the ghost line; NaN for none.</summary>
+    /// <summary>The day's average watts, which the scale holds so the line keeps its place; NaN for none.</summary>
     public double Average { get => (double)GetValue(AverageProperty); set => SetValue(AverageProperty, value); }
 
     /// <summary>How much of the line is drawn, 0 to 1: the intro draws it in from the left.</summary>
@@ -102,10 +102,9 @@ internal sealed class LiveChart : FrameworkElement
 
     private IReadOnlyList<SparkSample> Readings => Samples ?? [];
 
-    /// <summary>A new reading: the time of the newest moves on, and the line is redrawn where it now is.</summary>
+    /// <summary>A new reading: the line is redrawn where it now is.</summary>
     private void OnSamples()
     {
-        _newestAt = DateTimeOffset.Now;
         Redraw();
         UpdateAutomation();
     }
@@ -125,27 +124,25 @@ internal sealed class LiveChart : FrameworkElement
         double sx = Sx, sy = Sy;
         var accent = ChartInk.Colour(this, "A.C.Accent", Color.FromRgb(0xD3, 0xF0, 0x3F));
         var axis = ChartInk.Brush(this, "A.C.Text3", Color.FromArgb(0x70, 0xF3, 0xF4, 0xF6));
-        var gridBrush = ChartInk.Brush(this, "A.C.Grid", Color.FromArgb(0x0F, 255, 255, 255));
-        var grid = ChartInk.Pen(gridBrush, 1);
-        // The scale, its labels and the ghost line are drawn again only when they change: most readings move the line
-        // alone, and redrawing the labels' text each second was about a third of what a reading cost (Plan U).
-        var ghostY = double.IsFinite(Average) && readings.Count > 0 ? Math.Round(_scale.Y(Average) * sy * 4) / 4 : double.NaN;
-        var key = (RenderSize, _scale.Lo, _scale.Hi, _scale.Step, ghostY, readings.Count == 0, axis.Color, gridBrush.Color,
-            ChartInk.Colour(this, "A.C.Ghost", Color.FromArgb(0x33, 255, 255, 255)), CultureInfo.CurrentCulture.Name);
+        // What stays is drawn again only when it changes: a reading moves the line alone (Plan U).
+        var key = (RenderSize, readings.Count == 0, axis.Color, CultureInfo.CurrentCulture.Name);
         if (!key.Equals(_staticKey))
         {
             _staticKey = key;
-            DrawStatic(readings, axis, grid, sx, sy);
+            DrawStatic(readings, axis);
         }
         var points = readings.OrderByDescending(s => s.AgeSeconds).Select(s => new Point(LiveScale.X(s.AgeSeconds) * sx, _scale.Y(s.Watts) * sy)).ToList();
         using (var dc = _line.RenderOpen())
         {
             if (points.Count > 1)
             {
-                var curve = ChartInk.Smooth(points);
-                foreach (var (alpha, width) in new[] { (14, 18.0), (24, 11.0), (38, 6.5) })
-                    dc.DrawGeometry(null, ChartInk.Pen(ChartInk.Brush(Color.FromArgb((byte)alpha, accent.R, accent.G, accent.B)), width, round: true), curve);
-                dc.DrawGeometry(null, ChartInk.Pen(ChartInk.Brush(accent), 3, round: true), curve);
+                var line = Polyline(points, close: false);
+                var fill = new LinearGradientBrush(Color.FromArgb(0x61, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B), 90);
+                fill.Freeze();
+                dc.DrawGeometry(fill, null, Polyline([.. points, new Point(points[^1].X, ActualHeight), new Point(points[0].X, ActualHeight)], close: true));
+                foreach (var (alpha, width) in new[] { (0x1C, 12.0), (0x40, 7.0) })
+                    dc.DrawGeometry(null, ChartInk.Pen(ChartInk.Brush(Color.FromArgb((byte)alpha, accent.R, accent.G, accent.B)), width, round: true), line);
+                dc.DrawGeometry(null, ChartInk.Pen(ChartInk.Brush(accent), 2.4, round: true), line);
             }
         }
         using (var dc = _marker.RenderOpen())
@@ -153,59 +150,44 @@ internal sealed class LiveChart : FrameworkElement
             if (readings.Count > 0 && _hoverAge is null)
             {
                 var newest = readings.OrderBy(s => s.AgeSeconds).First();
-                Marker(dc, LiveScale.X(0) * sx, _scale.Y(newest.Watts) * sy, newest.Watts, _newestAt, accent);
+                Marker(dc, LiveScale.X(0) * sx, _scale.Y(newest.Watts) * sy, newest.Watts, accent, pill: false);
             }
         }
         if (_hoverAge is not null || _hoverDrawn) DrawHover(accent);
         UpdateReveal();
     }
 
-    /// <summary>The gridlines and their watts, the day's average as the ghost line, or "No reading".</summary>
-    private void DrawStatic(IReadOnlyList<SparkSample> readings, Brush axis, Pen grid, double sx, double sy)
+    /// <summary>"No reading" while there is none; the mockup's chart has no axis, gridlines or ghost line.</summary>
+    private void DrawStatic(IReadOnlyList<SparkSample> readings, Brush axis)
     {
-        using (var dc = _static.RenderOpen())
-        {
-            dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
-            foreach (var w in _scale.Grid)
-            {
-                var y = _scale.Y(w) * sy;
-                dc.DrawLine(grid, new Point(LiveScale.X0 * sx, y), new Point(LiveScale.X1 * sx, y));
-                ChartInk.At(dc, ChartInk.Text(this, Format.Scale(w, _scale.Step, CultureInfo.CurrentCulture), 11, axis), 0, y + 4);
-            }
-            if (double.IsFinite(Average) && readings.Count > 0)
-            {
-                var ghost = ChartInk.Pen(ChartInk.Brush(this, "A.C.Ghost", Color.FromArgb(0x33, 255, 255, 255)), 1.5, [4, 4]);
-                var y = _scale.Y(Average) * sy;
-                dc.DrawLine(ghost, new Point(LiveScale.X0 * sx, y), new Point(LiveScale.X1 * sx, y));
-            }
-            if (readings.Count == 0)
-            {
-                ChartInk.At(dc, ChartInk.Text(this, Format.NoReading, 13, axis), ActualWidth / 2, ActualHeight / 2, 1);
-            }
-        }
+        using var dc = _static.RenderOpen();
+        dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
+        if (readings.Count == 0) ChartInk.At(dc, ChartInk.Text(this, Format.NoReading, 13, axis), ActualWidth / 2, ActualHeight / 2, 1);
     }
 
-    /// <summary>The marker, its value pill above and its time pill on the axis under it.</summary>
-    private void Marker(DrawingContext dc, double x, double y, double watts, DateTimeOffset at, Color accent)
+    /// <summary>The mockup's end dot (5.5 across, navy inside, the accent's ring 2.5 wide); under the pointer, its watts
+    /// on a pill above it too.</summary>
+    private void Marker(DrawingContext dc, double x, double y, double watts, Color accent, bool pill)
     {
-        double sx = Sx, sy = Sy;
-        var guide = ChartInk.Pen(ChartInk.Brush(this, "A.C.Guide", Color.FromArgb(0x47, 255, 255, 255)), 1, [3, 4]);
-        dc.DrawLine(guide, new Point(x, LiveScale.Y0 * sy), new Point(x, LiveScale.Y1 * sy));
-        dc.DrawEllipse(ChartInk.Brush(this, "A.C.MarkerFill", Color.FromRgb(0x1B, 0x1D, 0x20)), ChartInk.Pen(ChartInk.Brush(accent), 2.5), new Point(x, y), 5.5, 5.5);
+        double sx = Sx;
+        dc.DrawEllipse(ChartInk.Brush(this, "A.C.MarkerFill", Color.FromRgb(0x0C, 0x16, 0x40)), ChartInk.Pen(ChartInk.Brush(accent), 2.5), new Point(x, y), 5.5, 5.5);
+        if (!pill) return;
         var value = ChartInk.Text(this, Format.WholeWatts(watts, CultureInfo.CurrentCulture) + " W", 11.5,
             ChartInk.Brush(this, "A.C.Ink", Color.FromRgb(0x16, 0x18, 0x1C)), semi: true);
         var lw = Math.Max(50, value.Width + 16);
-        var px = Math.Min(x - lw / 2, LiveScale.X1 * sx - lw);
+        var px = Math.Clamp(x - lw / 2, 0, Math.Max(0, LiveScale.X1 * sx - lw));
         ChartInk.Pill(dc, new Rect(px, y - 33, lw, 22), ChartInk.Brush(this, "A.C.Pill", Color.FromRgb(0xF4, 0xF4, 0xF0)));
         ChartInk.At(dc, value, px + lw / 2, y - 18, 1);
-        var time = ChartInk.Text(this, at.ToLocalTime().ToString(CultureInfo.CurrentCulture.DateTimeFormat.LongTimePattern, CultureInfo.CurrentCulture), 10.5,
-            ChartInk.Brush(this, "A.C.Text", Color.FromRgb(0xF3, 0xF4, 0xF6)));
-        var tw = Math.Max(68, time.Width + 14);
-        var tx = Math.Min(x - tw / 2, LiveScale.X1 * sx - tw);
-        // The demo's time pill: a solid hairline at 30 % white round it, not the guide's dashes.
-        var rim = ChartInk.Pen(ChartInk.Brush(Color.FromArgb(0x4D, 255, 255, 255)), 1);
-        ChartInk.Pill(dc, new Rect(tx, LiveScale.Y1 * sy + 4, tw, 19), ChartInk.Brush(this, "A.C.TimePill", Color.FromArgb(0x40, 0, 0, 0)), rim);
-        ChartInk.At(dc, time, tx + tw / 2, LiveScale.Y1 * sy + 17, 1);
+    }
+
+    /// <summary>The readings joined straight, as the mockup's path, closed under them for its fill.</summary>
+    private static PathGeometry Polyline(IReadOnlyList<Point> points, bool close)
+    {
+        var figure = new PathFigure { StartPoint = points[0], IsClosed = close, IsFilled = close };
+        figure.Segments.Add(new PolyLineSegment(points.Skip(1), true) { IsSmoothJoin = true });
+        var geometry = new PathGeometry([figure]);
+        geometry.Freeze();
+        return geometry;
     }
 
     private void DrawHover(Color accent)
@@ -215,7 +197,7 @@ internal sealed class LiveChart : FrameworkElement
         if (_hoverAge is not { } age || Readings.Count == 0) return;
         _hoverDrawn = true;
         var nearest = Readings.MinBy(s => Math.Abs(s.AgeSeconds - age));
-        Marker(dc, LiveScale.X(nearest.AgeSeconds) * Sx, _scale.Y(nearest.Watts) * Sy, nearest.Watts, _newestAt.AddSeconds(-nearest.AgeSeconds), accent);
+        Marker(dc, LiveScale.X(nearest.AgeSeconds) * Sx, _scale.Y(nearest.Watts) * Sy, nearest.Watts, accent, pill: true);
     }
 
     private void UpdateReveal()
