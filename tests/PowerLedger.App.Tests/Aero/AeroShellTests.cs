@@ -310,6 +310,25 @@ public class AeroShellTests
         });
     }
 
+    /// <summary>0.10.9: the bottom row is the rest of the page (494 at 1440 by 900), so it follows the window's height at
+    /// once; it once kept its old height, measured from the scroller's viewport, which catches up a layout pass late.</summary>
+    [Fact]
+    public void The_bottom_row_follows_the_windows_height_at_once()
+    {
+        using var saver = new FakeSaver();
+        var shell = AeroFixtures.Shell(saver);
+        OnWindow(shell, window =>
+        {
+            var view = (AeroDashboard)window.PageHost.Showing!;
+            var daily = (GlassPanel)view.FindName("PDaily");
+            var before = daily.ActualHeight;
+            window.Height -= 40;
+            window.UpdateLayout();
+            UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+            daily.ActualHeight.ShouldBe(before - 40, 1, "the bottom row is the page's rest");
+        });
+    }
+
     [Fact]
     public void The_camera_pushes_in_on_a_pane_and_esc_comes_back()
     {

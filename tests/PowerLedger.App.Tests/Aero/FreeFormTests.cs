@@ -307,7 +307,9 @@ public class FreeFormWindowTests
             window.Show();
             try
             {
-                UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+                // The reveal begins after the show's queued work and two painted frames (0.10.6): measured, 106 ms after Show
+                // with the process warm and 151 to 184 ms cold, so a fixed 100 ms sample raced it when the test ran alone.
+                UiHarness.PumpUntil(() => window.Reveals > 0, TimeSpan.FromSeconds(10), "the reveal to begin");
                 AeroWindow.ShapeHooks.ShouldBe(1, "the panes rise on transforms, which no layout pass reports");
                 UiHarness.PumpUntil(() => AeroWindow.ShapeHooks == 0, TimeSpan.FromSeconds(5), "the intro to settle");
                 window.Shape.ShouldNotBeEmpty();

@@ -21,8 +21,8 @@
             </ResourceDictionary.MergedDictionaries>
             <!-- A pixel of room round the capsule, so its anti-aliased edge is never cut by the window's own. -->
             <Thickness x:Key="Overlay.Room">1</Thickness>
-            <!-- The capsule: the kit's watts pill, 56 high, the recipe's 28 corner. -->
-            <sys:Double x:Key="Overlay.Height">56</sys:Double>
+            <!-- The capsule: the kit's watts pill, 58 high, a capsule's corners. -->
+            <sys:Double x:Key="Overlay.Height">58</sys:Double>
             <!-- The menu's section heads: quiet, and not a choice. -->
             <Style x:Key="Overlay.MenuHead" TargetType="MenuItem">
                 <Setter Property="IsEnabled" Value="False" />

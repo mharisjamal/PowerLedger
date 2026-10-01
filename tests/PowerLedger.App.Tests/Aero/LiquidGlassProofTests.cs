@@ -210,6 +210,7 @@ public class LiquidGlassProofTests
                     try
                     {
                         UiHarness.Pump(TimeSpan.FromMilliseconds(600));
+                        ClientOf(window, 1440, 900);
                         window.Page = page;
                         UiHarness.Pump(TimeSpan.FromMilliseconds(1500));
                         window.UpdateLayout();
@@ -225,6 +226,38 @@ public class LiquidGlassProofTests
                 });
             }
         }
+    }
+
+    /// <summary>Sizes <paramref name="window"/> so its client is exactly <paramref name="width"/> by <paramref name="height"/>,
+    /// the board's: Windows caps a window at the screen's height and frame (WM_GETMINMAXINFO's largest tracking size, which
+    /// WPF's window takes as its own limit), and on an 864 DIP high screen that kept the client at 881.6, the bottom row 18
+    /// short of the board's 494; the cap is lifted for this window first.</summary>
+    internal static void ClientOf(Window window, double width, double height)
+    {
+        var source = HwndSource.FromHwnd(new WindowInteropHelper(window).EnsureHandle())!;
+        source.AddHook((IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) =>
+        {
+            const int GetMinMaxInfo = 0x0024;
+            if (msg == GetMinMaxInfo)
+            {
+                // MINMAXINFO: ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize, each two ints.
+                System.Runtime.InteropServices.Marshal.WriteInt32(lParam, 32, 1 << 15);
+                System.Runtime.InteropServices.Marshal.WriteInt32(lParam, 36, 1 << 15);   // unhandled: WPF's window reads its cap from it
+            }
+            return IntPtr.Zero;
+        });
+        var content = (FrameworkElement)window.Content;
+        for (var i = 0; i < 3; i++)
+        {
+            window.UpdateLayout();
+            var (dw, dh) = (width - content.ActualWidth, height - content.ActualHeight);
+            if (Math.Abs(dw) < .1 && Math.Abs(dh) < .1) break;
+            window.Width += dw;
+            window.Height += dh;
+            UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+        }
+        content.ActualWidth.ShouldBe(width, .5, "the board's width");
+        content.ActualHeight.ShouldBe(height, .5, "the board's height");
     }
 
     /// <summary>Where the pieces the mockup's boards have lie in <paramref name="window"/>, as JSON (name, x, y, width,

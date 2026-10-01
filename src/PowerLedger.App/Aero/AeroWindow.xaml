@@ -76,7 +76,7 @@
                             <Ellipse>
                                 <Ellipse.Style>
                                     <Style TargetType="Ellipse">
-                                        <Setter Property="Fill" Value="{DynamicResource A.B.Violet}" />
+                                        <Setter Property="Fill" Value="{DynamicResource A.B.OtherPc}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsThisPc}" Value="True">
                                                 <Setter Property="Fill" Value="{DynamicResource A.B.Accent}" />

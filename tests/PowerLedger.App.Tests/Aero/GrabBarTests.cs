@@ -89,12 +89,22 @@ public class GrabBarWindowTests
             grab.Bottom.ShouldBeLessThanOrEqualTo(Bounds(window, (FrameworkElement)window.FindName("TopBar")).Top + 0.5, "above the top bar row (the mockup's, 6 to 28 down)");
             var buttons = Bounds(window, (FrameworkElement)window.FindName("WindowButtons"));
             grab.IntersectsWith(buttons).ShouldBeFalse("never over the window's buttons, which are on the top bar");
-            (grab.Left + grab.Width / 2).ShouldBe(window.ActualWidth / 2, 1, "centred over the stage");
+            if (width >= 1100) (grab.Left + grab.Width / 2).ShouldBe(window.ActualWidth * 748 / 1440, 1, "the mockup's place: 748 of 1440, at the same share of any width");
+            grab.IntersectsWith(Bounds(window, (FrameworkElement)window.FindName("Side"))).ShouldBeFalse("never over the sidebar");
             AutomationProperties(window.GrabBar).ShouldBe("Move window");
             window.GrabBar.Cursor.ShouldBe(Cursors.SizeAll);
         }, width);
 
     private static string AutomationProperties(DependencyObject d) => System.Windows.Automation.AutomationProperties.GetName(d);
+
+    /// <summary>0.10.9: the mockup's grab bar, its centre 748 of 1440; held clear of the sidebar and on the strip at any width.</summary>
+    [Theory]
+    [InlineData(1440, 14, 1412, 76 + 14, 688 - 14)]   // the mockup's own place
+    [InlineData(720, 14, 692, 90, 314 - 14)]          // a narrow window: 374 centre, at its share
+    [InlineData(800, 14, 772, 380, 392 - 14)]         // never nearer the sidebar than 12
+    [InlineData(300, 14, 272, 290, 302 - 14)]         // no room: the sidebar wins, the bar is never over a control
+    public void The_bar_sits_at_the_mockups_share_clear_of_the_sidebar(double window, double captionLeft, double captionWidth, double sideRight, double left)
+        => AeroWindow.GrabLeft(window, captionLeft, captionWidth, GrabBar.HitWidth, sideRight).ShouldBe(left, 1e-9);
 
     [Fact]
     public void Idle_near_and_over_light_the_bar_to_a_quarter_half_and_whole()
@@ -169,9 +179,11 @@ public class GrabBarWindowTests
                 var grab = window.GrabBar;
                 grab.Track(new Point(60, 60));
                 grab.Track(new Point(60, 11));
-                UiHarness.Pump(TimeSpan.FromMilliseconds(AeroMotion.Grab + 250));
-                Bar(grab).Opacity.ShouldBe(GrabBar.OverOpacity, 0.001, "eased to whole");
-                FrameClock.ActiveSince(before).Select(FrameClock.Describe).ShouldBeEmpty("the fade has ended");
+                // An animated value and its clock move only on a rendered frame, and under the full suite's load the frames
+                // came late: 0.944 of the way at a fixed 450 ms into the 200 ms fade. So the test waits for the frames, a few
+                // seconds at the most: a clock that never ends still fails it.
+                UiHarness.PumpUntil(() => Math.Abs(Bar(grab).Opacity - GrabBar.OverOpacity) < 0.001 && FrameClock.ActiveSince(before).Count == 0,
+                    TimeSpan.FromSeconds(5), "the fade to end, eased to whole");
                 FrameClock.RenderingHandlers.ShouldBe(handlers, "nothing asks for every frame");
                 for (var x = 0; x < 50; x++) grab.Track(new Point(20 + x, 11));   // a stream of moves on the bar
                 FrameClock.ActiveSince(before).ShouldBeEmpty("moves that keep the glow start nothing");

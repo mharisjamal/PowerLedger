@@ -190,7 +190,7 @@ public class GlassSectionTests
     public void Each_accent_has_the_demos_swatch()
         => GlassSection.Accents.Select(a => (a.Accent, a.Hex)).ShouldBe(
         [
-            (GlassAccent.Lime, "#D3F03F"), (GlassAccent.Ice, "#7FD4FF"), (GlassAccent.Indigo, "#9AA2FF"), (GlassAccent.Amber, "#FFC857"),
+            (GlassAccent.Lime, "#D9F25A"), (GlassAccent.Ice, "#7FD4FF"), (GlassAccent.Indigo, "#9AA2FF"), (GlassAccent.Amber, "#FFC857"),
             (GlassAccent.Rose, "#FF8FB1"),
         ]);
 }

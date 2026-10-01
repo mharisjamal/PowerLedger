@@ -17,13 +17,13 @@
     <SolidColorBrush x:Key="Brush.Ink" Color="#16181C" />
     <SolidColorBrush x:Key="Brush.Ink2" Color="#4E525B" />
     <SolidColorBrush x:Key="Brush.Ink3" Color="#60646D" />
-    <SolidColorBrush x:Key="Brush.Amber" Color="#768C0B" />
-    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#29768C0B" />
+    <SolidColorBrush x:Key="Brush.Amber" Color="#778C0B" />
+    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#29778C0B" />
     <SolidColorBrush x:Key="Brush.OnAmber" Color="#0F1402" />
     <SolidColorBrush x:Key="Brush.Measured" Color="#4F6400" />
     <SolidColorBrush x:Key="Brush.Calibrated" Color="#7A5A08" />
     <SolidColorBrush x:Key="Brush.Estimated" Color="#0E5A85" />
-    <SolidColorBrush x:Key="Brush.PartCpu" Color="#768C0B" />
+    <SolidColorBrush x:Key="Brush.PartCpu" Color="#778C0B" />
     <SolidColorBrush x:Key="Brush.PartGpu" Color="#2F7552" />
     <SolidColorBrush x:Key="Brush.PartDisplay" Color="#7466D8" />
     <SolidColorBrush x:Key="Brush.PartRest" Color="#4E93B5" />
@@ -37,8 +37,8 @@
     <SolidColorBrush x:Key="M.Ink" Color="#16181C" />
     <SolidColorBrush x:Key="M.Ink2" Color="#4E525B" />
     <SolidColorBrush x:Key="M.Ink3" Color="#60646D" />
-    <SolidColorBrush x:Key="M.Accent" Color="#768C0B" />
-    <SolidColorBrush x:Key="M.AccentSoft" Color="#29768C0B" />
+    <SolidColorBrush x:Key="M.Accent" Color="#778C0B" />
+    <SolidColorBrush x:Key="M.AccentSoft" Color="#29778C0B" />
     <SolidColorBrush x:Key="M.OnAccent" Color="#0F1402" />
     <SolidColorBrush x:Key="M.AccentText" Color="#4F6400" />
     <!-- The violet the demo pairs with the lime (the second PC), deepened: never alone and never text. -->
@@ -47,7 +47,7 @@
     <SolidColorBrush x:Key="M.Bad" Color="#CC3B3B" />
     <SolidColorBrush x:Key="M.Warn" Color="#A86F00" />
     <!-- The demo's pie: the deepened accent, the green, the violet and the blue. GlassMaterial moves PartCpu with the accent. -->
-    <SolidColorBrush x:Key="M.PartCpu" Color="#768C0B" />
+    <SolidColorBrush x:Key="M.PartCpu" Color="#778C0B" />
     <SolidColorBrush x:Key="M.PartGpu" Color="#2F7552" />
     <SolidColorBrush x:Key="M.PartDisplay" Color="#7466D8" />
     <SolidColorBrush x:Key="M.PartRest" Color="#4E93B5" />
@@ -65,12 +65,12 @@
     <SolidColorBrush x:Key="M.Shadow" Color="#29000000" />
     <SolidColorBrush x:Key="M.Hatch" Color="#1A16181C" />
     <!-- The charts in the deepened lime. -->
-    <SolidColorBrush x:Key="M.ChartLine" Color="#768C0B" />
-    <SolidColorBrush x:Key="M.BarTop" Color="#768C0B" />
-    <SolidColorBrush x:Key="M.BarBottom" Color="#586908" />
-    <SolidColorBrush x:Key="M.ChartFillTop" Color="#40768C0B" />
-    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#00768C0B" />
-    <SolidColorBrush x:Key="M.Focus" Color="#768C0B" />
+    <SolidColorBrush x:Key="M.ChartLine" Color="#778C0B" />
+    <SolidColorBrush x:Key="M.BarTop" Color="#778C0B" />
+    <SolidColorBrush x:Key="M.BarBottom" Color="#596908" />
+    <SolidColorBrush x:Key="M.ChartFillTop" Color="#40778C0B" />
+    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#00778C0B" />
+    <SolidColorBrush x:Key="M.Focus" Color="#778C0B" />
 
     <!-- Aero's own tokens. -->
 
@@ -81,7 +81,7 @@
     <Color x:Key="A.C.Text2">#BF16181C</Color>
     <Color x:Key="A.C.Text3">#A316181C</Color>
     <Color x:Key="A.C.Ink">#16181C</Color>
-    <Color x:Key="A.C.Accent">#768C0B</Color>
+    <Color x:Key="A.C.Accent">#778C0B</Color>
     <Color x:Key="A.C.AccentInk">#0F1402</Color>
     <Color x:Key="A.C.Pill">#FFFFFF</Color>
     <Color x:Key="A.C.Violet">#7466D8</Color>
@@ -90,7 +90,7 @@
     <Color x:Key="A.C.MarkerFill">#FFFFFF</Color>
 
     <!-- The accents the Glass settings offer (the demo's tuner), each with an ink that reads on it at 4.5:1. -->
-    <Color x:Key="A.C.Accent.Lime">#768C0B</Color>
+    <Color x:Key="A.C.Accent.Lime">#778C0B</Color>
     <Color x:Key="A.C.AccentInk.Lime">#0F1402</Color>
     <Color x:Key="A.C.Accent.Ice">#0089CF</Color>
     <Color x:Key="A.C.AccentInk.Ice">#001A2B</Color>
@@ -130,7 +130,7 @@
     <sys:Boolean x:Key="A.Glass.Live">True</sys:Boolean>
     <Color x:Key="A.C.TextShadow">#47000A28</Color>
     <x:Null x:Key="A.Glass.TextShadow" />
-    <Color x:Key="A.C.AccentGlass">#DB768C0B</Color>
+    <Color x:Key="A.C.AccentGlass">#DB778C0B</Color>
     <SolidColorBrush x:Key="A.B.AccentGlass" Color="{StaticResource A.C.AccentGlass}" />
     <!-- The mockup's other text steps: the sidebar's pages at 88 %, a segmented control's words at 85 %; the white wash a
          glass control takes under the pointer (the kit's .hov, 14 % over its glass); and the white glass pill of a chosen
@@ -237,6 +237,8 @@
     <SolidColorBrush x:Key="A.B.AccentInk" Color="{StaticResource A.C.AccentInk}" />
     <SolidColorBrush x:Key="A.B.Pill" Color="{StaticResource A.C.Pill}" />
     <SolidColorBrush x:Key="A.B.Violet" Color="{StaticResource A.C.Violet}" />
+    <!-- Another PC's disc in Your PCs, the mockup's "SP" (0.10.9), deepened on light glass. -->
+    <SolidColorBrush x:Key="A.B.OtherPc" Color="#7466D8" />
     <SolidColorBrush x:Key="A.B.Well" Color="{StaticResource A.C.Well}" />
     <SolidColorBrush x:Key="A.B.Well2" Color="{StaticResource A.C.Well2}" />
     <SolidColorBrush x:Key="A.B.Well3" Color="{StaticResource A.C.Well3}" />

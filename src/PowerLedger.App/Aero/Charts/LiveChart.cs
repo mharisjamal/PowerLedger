@@ -122,7 +122,7 @@ internal sealed class LiveChart : FrameworkElement
         var readings = Readings;
         _scale = LiveScale.For([.. readings.Select(s => s.Watts)], Average);
         double sx = Sx, sy = Sy;
-        var accent = ChartInk.Colour(this, "A.C.Accent", Color.FromRgb(0xD3, 0xF0, 0x3F));
+        var accent = ChartInk.Colour(this, "A.C.Accent", Color.FromRgb(0xD9, 0xF2, 0x5A));
         var axis = ChartInk.Brush(this, "A.C.Text3", Color.FromArgb(0x70, 0xF3, 0xF4, 0xF6));
         // What stays is drawn again only when it changes: a reading moves the line alone (Plan U).
         var key = (RenderSize, readings.Count == 0, axis.Color, CultureInfo.CurrentCulture.Name);
@@ -213,7 +213,7 @@ internal sealed class LiveChart : FrameworkElement
         var x = e.GetPosition(this).X / Math.Max(Sx, 1e-6);
         _hoverAge = Math.Clamp((LiveScale.X1 - x) / (LiveScale.X1 - LiveScale.X0) * LiveScale.Span, 0, LiveScale.Span);
         _marker.Opacity = 0;
-        DrawHover(ChartInk.Colour(this, "A.C.Accent", Color.FromRgb(0xD3, 0xF0, 0x3F)));
+        DrawHover(ChartInk.Colour(this, "A.C.Accent", Color.FromRgb(0xD9, 0xF2, 0x5A)));
     }
 
     protected override void OnMouseLeave(MouseEventArgs e)

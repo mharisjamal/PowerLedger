@@ -48,7 +48,7 @@ internal sealed class GlassSection : ObservableObject
     /// <summary>The accents, with the demo's swatches (its "Try the look" panel).</summary>
     public static IReadOnlyList<AccentSwatch> Accents { get; } =
     [
-        new(GlassAccent.Lime, "Lime", "#D3F03F"),
+        new(GlassAccent.Lime, "Lime", "#D9F25A"),
         new(GlassAccent.Ice, "Ice", "#7FD4FF"),
         new(GlassAccent.Indigo, "Indigo", "#9AA2FF"),
         new(GlassAccent.Amber, "Amber", "#FFC857"),

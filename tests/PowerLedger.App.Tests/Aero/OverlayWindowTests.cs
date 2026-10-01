@@ -73,8 +73,8 @@ public class OverlayWindowTests
                 spark.Visibility.ShouldBe(sparkline ? Visibility.Visible : Visibility.Collapsed);
                 var room = (FrameworkElement)window.Content;
                 room.ActualWidth.ShouldBeGreaterThan(80);
-                room.ActualHeight.ShouldBe(56, 0.5, "the kit's watts pill, the recipe's 28 corner");
-                window.ActualHeight.ShouldBe(58, 0.5, "a pixel of room each side for the edge, no more: nothing is painted outside the capsule");
+                room.ActualHeight.ShouldBe(58, 0.5, "the kit's watts pill, 58 high");
+                window.ActualHeight.ShouldBe(60, 1, "a pixel of room each side for the edge, no more: nothing is painted outside the capsule (to the device pixel: 58 at 125 % is 72.5 px, laid on 72)");
 
                 Directory.CreateDirectory(UiHarness.Folder);
                 foreach (var (desk, backdrop) in new[] { ("dark", Colors.Black), ("bright", Color.FromRgb(0xE8, 0xEC, 0xF2)) })

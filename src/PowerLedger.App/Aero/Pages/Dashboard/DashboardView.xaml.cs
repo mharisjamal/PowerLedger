@@ -294,7 +294,9 @@ public partial class DashboardView : UserControl
     private void Reflow()
     {
         var narrow = ActualWidth > 0 && ActualWidth < OneColumnBelow;
-        var bottom = Math.Max(LeastBottom, Scroller.ViewportHeight > 0 ? Scroller.ViewportHeight - TopRow - 16 : 494);
+        // The scroller's own height, not its ViewportHeight, which it brings up to date only a layout pass later: a window
+        // grown by 18 kept the bottom row at its old height.
+        var bottom = Math.Max(LeastBottom, Scroller.ActualHeight > 0 ? Scroller.ActualHeight - TopRow - 16 : 494);
         _narrow = narrow;
         Layout.RowDefinitions.Clear();
         Layout.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 16);

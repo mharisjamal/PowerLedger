@@ -132,7 +132,7 @@ public class AeroStylesTests
             Size(new RadioButton(), "A.OptItem").Height.ShouldBe(32);
             Size(new Button(), "A.AccentBtn").Height.ShouldBe(36);   // the mockup's Open report
             var (_, accent) = Dressed(new Button(), "A.AccentBtn", Theme.Dark);
-            ((SolidColorBrush)accent.Background).Color.ShouldBe(Color.FromArgb(0xDB, 0xD3, 0xF0, 0x3F), "the mockup's lime glass: the lime at 86 % over the recipe's glass");
+            ((SolidColorBrush)accent.Background).Color.ShouldBe(Color.FromArgb(0xDB, 0xD9, 0xF2, 0x5A), "the mockup's lime glass: the lime at 86 % over the recipe's glass");
             ((SolidColorBrush)accent.Foreground).Color.ShouldBe(Color.FromRgb(0x1B, 0x20, 0x04), "the lime's ink");
             Press.ScaleOf(accent).ShouldNotBeNull("a button compresses when pressed");
             var (_, row) = Dressed(new Button(), "A.RowBtn", Theme.Dark);

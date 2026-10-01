@@ -305,7 +305,7 @@ public class GlassMaterialTests
             using var material = new GlassMaterial(host, () => settings.Glass, () => Theme.Dark, settings);
             var heard = new List<GlassSettings>();
             material.Changed += heard.Add;
-            ((SolidColorBrush)accent.Background).Color.ShouldBe(Color.FromRgb(0xD3, 0xF0, 0x3F));
+            ((SolidColorBrush)accent.Background).Color.ShouldBe(Color.FromRgb(0xD9, 0xF2, 0x5A));
 
             settings.Glass = new GlassSettings { Accent = GlassAccent.Rose, IncreaseContrast = true };
             UiHarness.Pump(TimeSpan.FromMilliseconds(50));
@@ -316,7 +316,7 @@ public class GlassMaterialTests
             Application.Current.Resources.Contains("A.B.Accent").ShouldBeFalse();
             material.Dispose();
             host.Resources.MergedDictionaries.Count.ShouldBe(2, "disposed, the material takes its tokens off again");
-            ((SolidColorBrush)accent.Background).Color.ShouldBe(Color.FromRgb(0xD3, 0xF0, 0x3F));
+            ((SolidColorBrush)accent.Background).Color.ShouldBe(Color.FromRgb(0xD9, 0xF2, 0x5A));
         });
 
     /// <summary>The sample drawn for each style and switch, in both themes, for the eye.</summary>

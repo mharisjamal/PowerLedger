@@ -17,13 +17,13 @@
     <SolidColorBrush x:Key="Brush.Ink" Color="#F3F4F6" />
     <SolidColorBrush x:Key="Brush.Ink2" Color="#B8BABF" />
     <SolidColorBrush x:Key="Brush.Ink3" Color="#9A9CA2" />
-    <SolidColorBrush x:Key="Brush.Amber" Color="#D3F03F" />
-    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#33D3F03F" />
+    <SolidColorBrush x:Key="Brush.Amber" Color="#D9F25A" />
+    <SolidColorBrush x:Key="Brush.AmberSoft" Color="#33D9F25A" />
     <SolidColorBrush x:Key="Brush.OnAmber" Color="#1B2004" />
-    <SolidColorBrush x:Key="Brush.Measured" Color="#D3F03F" />
+    <SolidColorBrush x:Key="Brush.Measured" Color="#D9F25A" />
     <SolidColorBrush x:Key="Brush.Calibrated" Color="#F1D57A" />
     <SolidColorBrush x:Key="Brush.Estimated" Color="#7FD4FF" />
-    <SolidColorBrush x:Key="Brush.PartCpu" Color="#D3F03F" />
+    <SolidColorBrush x:Key="Brush.PartCpu" Color="#D9F25A" />
     <SolidColorBrush x:Key="Brush.PartGpu" Color="#35C08A" />
     <SolidColorBrush x:Key="Brush.PartDisplay" Color="#9D8CFF" />
     <SolidColorBrush x:Key="Brush.PartRest" Color="#4AB3E8" />
@@ -37,23 +37,23 @@
     <SolidColorBrush x:Key="M.Ink" Color="#F3F4F6" />
     <SolidColorBrush x:Key="M.Ink2" Color="#B8BABF" />
     <SolidColorBrush x:Key="M.Ink3" Color="#9A9CA2" />
-    <SolidColorBrush x:Key="M.Accent" Color="#D3F03F" />
-    <SolidColorBrush x:Key="M.AccentSoft" Color="#33D3F03F" />
+    <SolidColorBrush x:Key="M.Accent" Color="#D9F25A" />
+    <SolidColorBrush x:Key="M.AccentSoft" Color="#33D9F25A" />
     <SolidColorBrush x:Key="M.OnAccent" Color="#1B2004" />
-    <SolidColorBrush x:Key="M.AccentText" Color="#D3F03F" />
+    <SolidColorBrush x:Key="M.AccentText" Color="#D9F25A" />
     <!-- The violet the demo pairs with the lime (the second PC): never alone and never text. -->
     <SolidColorBrush x:Key="M.Accent2" Color="#7466D8" />
     <SolidColorBrush x:Key="M.Good" Color="#34D399" />
     <SolidColorBrush x:Key="M.Bad" Color="#F87171" />
     <SolidColorBrush x:Key="M.Warn" Color="#F5B942" />
     <!-- The liquid glass mockup's ring, exactly (0.10.9): the accent, the green, the violet and the blue. GlassMaterial moves PartCpu with the accent. -->
-    <SolidColorBrush x:Key="M.PartCpu" Color="#D3F03F" />
+    <SolidColorBrush x:Key="M.PartCpu" Color="#D9F25A" />
     <SolidColorBrush x:Key="M.PartGpu" Color="#35C08A" />
     <SolidColorBrush x:Key="M.PartDisplay" Color="#9D8CFF" />
     <SolidColorBrush x:Key="M.PartRest" Color="#4AB3E8" />
     <!-- The quality chips: the ground, and the text on it. -->
     <SolidColorBrush x:Key="M.ChipMeasured" Color="#2A3310" />
-    <SolidColorBrush x:Key="M.ChipMeasuredText" Color="#D3F03F" />
+    <SolidColorBrush x:Key="M.ChipMeasuredText" Color="#D9F25A" />
     <SolidColorBrush x:Key="M.ChipCalibrated" Color="#3A3418" />
     <SolidColorBrush x:Key="M.ChipCalibratedText" Color="#F1D57A" />
     <SolidColorBrush x:Key="M.ChipEstimated" Color="#13303F" />
@@ -65,12 +65,12 @@
     <SolidColorBrush x:Key="M.Shadow" Color="#73000000" />
     <SolidColorBrush x:Key="M.Hatch" Color="#1AFFFFFF" />
     <!-- The charts in the lime, as the demo's line and bars. -->
-    <SolidColorBrush x:Key="M.ChartLine" Color="#D3F03F" />
-    <SolidColorBrush x:Key="M.BarTop" Color="#D3F03F" />
-    <SolidColorBrush x:Key="M.BarBottom" Color="#9EB42F" />
-    <SolidColorBrush x:Key="M.ChartFillTop" Color="#66D3F03F" />
-    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#00D3F03F" />
-    <SolidColorBrush x:Key="M.Focus" Color="#D3F03F" />
+    <SolidColorBrush x:Key="M.ChartLine" Color="#D9F25A" />
+    <SolidColorBrush x:Key="M.BarTop" Color="#D9F25A" />
+    <SolidColorBrush x:Key="M.BarBottom" Color="#A3B644" />
+    <SolidColorBrush x:Key="M.ChartFillTop" Color="#66D9F25A" />
+    <SolidColorBrush x:Key="M.ChartFillBottom" Color="#00D9F25A" />
+    <SolidColorBrush x:Key="M.Focus" Color="#D9F25A" />
 
     <!-- Aero's own tokens. -->
 
@@ -81,7 +81,7 @@
     <Color x:Key="A.C.Text2">#C7F3F4F6</Color>
     <Color x:Key="A.C.Text3">#99F3F4F6</Color>
     <Color x:Key="A.C.Ink">#16181C</Color>
-    <Color x:Key="A.C.Accent">#D3F03F</Color>
+    <Color x:Key="A.C.Accent">#D9F25A</Color>
     <Color x:Key="A.C.AccentInk">#1B2004</Color>
     <Color x:Key="A.C.Pill">#F4F4F0</Color>
     <Color x:Key="A.C.Violet">#7466D8</Color>
@@ -90,7 +90,7 @@
     <Color x:Key="A.C.MarkerFill">#1B1D20</Color>
 
     <!-- The accents the Glass settings offer (the demo's tuner), each with an ink that reads on it at 4.5:1. -->
-    <Color x:Key="A.C.Accent.Lime">#D3F03F</Color>
+    <Color x:Key="A.C.Accent.Lime">#D9F25A</Color>
     <Color x:Key="A.C.AccentInk.Lime">#1B2004</Color>
     <Color x:Key="A.C.Accent.Ice">#7FD4FF</Color>
     <Color x:Key="A.C.AccentInk.Ice">#04202E</Color>
@@ -131,7 +131,7 @@
     <sys:Boolean x:Key="A.Glass.Live">True</sys:Boolean>
     <Color x:Key="A.C.TextShadow">#47000A28</Color>
     <x:Null x:Key="A.Glass.TextShadow" />
-    <Color x:Key="A.C.AccentGlass">#DBD3F03F</Color>
+    <Color x:Key="A.C.AccentGlass">#DBD9F25A</Color>
     <SolidColorBrush x:Key="A.B.AccentGlass" Color="{StaticResource A.C.AccentGlass}" />
     <!-- The mockup's other text steps: the sidebar's pages at 88 %, a segmented control's words at 85 %; the white wash a
          glass control takes under the pointer (the kit's .hov, 14 % over its glass); and the white glass pill of a chosen
@@ -238,6 +238,8 @@
     <SolidColorBrush x:Key="A.B.AccentInk" Color="{StaticResource A.C.AccentInk}" />
     <SolidColorBrush x:Key="A.B.Pill" Color="{StaticResource A.C.Pill}" />
     <SolidColorBrush x:Key="A.B.Violet" Color="{StaticResource A.C.Violet}" />
+    <!-- Another PC's disc in Your PCs, the mockup's "SP" (0.10.9). -->
+    <SolidColorBrush x:Key="A.B.OtherPc" Color="#9D8CFF" />
     <SolidColorBrush x:Key="A.B.Well" Color="{StaticResource A.C.Well}" />
     <SolidColorBrush x:Key="A.B.Well2" Color="{StaticResource A.C.Well2}" />
     <SolidColorBrush x:Key="A.B.Well3" Color="{StaticResource A.C.Well3}" />
