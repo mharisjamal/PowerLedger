@@ -1,55 +1,49 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using Microsoft.Win32;
 
 namespace PowerLedger.App.Aero;
 
 /// <summary>
-/// Turns the Glass settings into the glass (Aero look design §3, Plan S G3): the A.* tokens a window's panes, text and
-/// controls draw with, put on that window's resources (never Application's) in a dictionary of their own, so every
-/// DynamicResource repaints at once and nothing is rebuilt. It listens to <see cref="SettingsViewModel"/>'s one live
-/// channel, <c>PropertyChanged</c> for Glass (and Theme), and to Windows' colour settings.
+/// Turns the Glass settings into the glass (Aero look design §3; 0.10.9, the owner's liquid glass recipe): the A.* tokens
+/// a window's pieces, text and controls draw with, put on that window's resources (never Application's) in a dictionary
+/// of their own, so every DynamicResource repaints at once and nothing is rebuilt. It listens to
+/// <see cref="SettingsViewModel"/>'s one live channel, <c>PropertyChanged</c> for Glass (and Theme), and to Windows'
+/// colour settings.
 /// <list type="bullet">
-/// <item>Style: what is laid over what is really behind the window (0.10.6: the desktop and its windows, live, under
-/// every style). Clear a light dim; Tinted the demo's tint over a dim; Dark black at 55 %; Colour the user's hue. Tint
-/// strength scales each around its default (0.5 is the demo).</item>
-/// <item>Frost scales the frost blur (<c>A.Glass.Frost</c>, 26 at 0.6, which WallpaperFrost reads where a window frosts
-/// a picture of its own); Edge light the rim and sheens (0.6 is the demo's 75 %).</item>
-/// <item>Reduce transparency: a denser tint for panes, menus and dialogs. Increase contrast: solid rims, every text step
-/// at full strength, and a tint as dense as text needs at 4.5:1.</item>
+/// <item>Style: the recipe has no tint, so Clear and Tinted lay none at the default strength (Tint strength above it
+/// lays white up to the mockup's own, 2 % for Clear and 10 % for Tinted); Dark lays the mockup's smoked navy
+/// (rgba(12,16,28,.55)), Colour the user's hue at the mockup's 36 %, each scaled by Tint strength around its default.</item>
+/// <item>Edge light: the glowing edge's opacity (<see cref="Glow"/>): the owner's 10 % default is the recipe's 70 %, 0
+/// is none and 100 % is fully white.</item>
+/// <item>Reduce transparency: the engine's live backdrop off (<c>A.Glass.Live</c>) and the style's tint laid dense (86 %)
+/// over the tone a desktop averages to, still glass; with Increase contrast, the least dim under the tint that holds
+/// every text step at 4.5:1 over a black and a white window, and every step at the ink's full strength. Menus and
+/// dialogs are dense enough for their text at 4.5:1 whatever the glass.</item>
 /// <item>Accent: the lime or one of four, each with its ink, carried to the shared keys (Midnight's accent, focus, the CPU
-/// part and the charts) so the dialogs and the pie follow it.</item>
+/// part and the charts) so the dialogs and the pie follow it, and to the lime glass of an accent action.</item>
 /// <item>Reduce motion: AeroMotion's override (null follows Windows).</item>
 /// </list>
-/// Whatever the style, anything may be behind the glass, a black window or a white one, so each tint is laid over a dim
-/// (or, for dark ink, a lift) just dense enough that the ink reads at 3:1 on the glass and in a well on it over both:
-/// no setting leaves the main text unreadable. The ink family (light text on dark glass or dark on light) is the
-/// theme's own unless the style's tint suits the other far better (Dark on the light theme).
+/// Every piece's content carries the mockup's text shadow (<c>A.Glass.TextShadow</c>).
 /// </summary>
 internal sealed class GlassMaterial : IDisposable
 {
-    /// <summary>The demo's defaults, where each slider sits for the look as approved.</summary>
+    /// <summary>Where each slider sits by default.</summary>
     public const double DemoTintStrength = 0.5;
-    public const double DemoEdgeLight = 0.6;
+    public const double DemoEdgeLight = GlassSettings.DefaultEdgeLight;
     public const double DemoFrost = 0.6;
 
-    /// <summary>The faintest a rim stop is drawn while Edge light is on at all: a hairline, not nothing.</summary>
-    public const double RimFloor = 0.06;
+    /// <summary>The mockup's tints for its four styles (Styles board): Clear white at 2 %, Tinted white at 10 %, Dark
+    /// navy at 55 % and Colour the hue at 36 %. Clear and Tinted reach theirs only at full strength.</summary>
+    public const double ClearWhite = 0.02;
+    public const double TintedWhite = 0.10;
+    public static readonly Color DarkTint = Color.FromArgb(0x8C, 12, 16, 28);
+    public const double ColourAlpha = 0.36;
 
-    private static readonly string[] RimStops = ["A.C.RimA", "A.C.RimB", "A.C.RimC", "A.C.RimD"];
-
-    /// <summary>The Dark style's black, at the tint's top and its foot (the HTML's 55 %).</summary>
-    public const double DarkTop = 0.55;
-    public const double DarkBottom = 0.45;
-
-    /// <summary>The Clear style's tint (0.10.4), over the live desktop: a light dim, black at its top and its foot, so
-    /// the windows behind read through; the dim the ink needs over a white window (0.10.6) is its floor.</summary>
-    public const double ClearTop = 0.28;
-    public const double ClearBottom = 0.22;
-
-    /// <summary>The Colour style's tint at the default strength: the hue at 30 % over the scene.</summary>
-    public const double ColourAlpha = 0.3;
+    /// <summary>The lime glass of an accent action: the accent at the mockup's 86 %.</summary>
+    public const double AccentGlassAlpha = 0.86;
 
     [ThreadStatic]
     private static Dictionary<Theme, ResourceDictionary>? _palettes;
@@ -57,21 +51,20 @@ internal sealed class GlassMaterial : IDisposable
     /// <summary>The colour keys that follow the ink family rather than the theme: light-on-dark or dark-on-light.</summary>
     private static readonly string[] Family =
     [
-        "A.C.Text", "A.C.Text2", "A.C.Text3", "A.C.Well", "A.C.Well2", "A.C.Well3", "A.C.WellHover", "A.C.WellEdge", "A.C.WellTop", "A.C.WellLit", "A.C.SoftEdge", "A.C.SoftTop", "A.C.Line",
-        "A.C.ChartWell", "A.C.ChartWellTop", "A.C.ChartWellLit", "A.C.GhostTop", "A.C.InnerShade", "A.C.Grid", "A.C.Track", "A.C.TrackSoft", "A.C.Muted", "A.C.Ghost", "A.C.PrevLine", "A.C.Guide",
+        "A.C.Text", "A.C.Text2", "A.C.Text3", "A.C.NavText", "A.C.SegText", "A.C.Well", "A.C.Well2", "A.C.Well3", "A.C.WellHover", "A.C.WellEdge", "A.C.WellTop", "A.C.WellLit", "A.C.SoftEdge", "A.C.SoftTop", "A.C.Line",
+        "A.C.ChartWell", "A.C.ChartWellTop", "A.C.ChartWellLit", "A.C.GhostTop", "A.C.Grid", "A.C.Track", "A.C.TrackSoft", "A.C.Muted", "A.C.Ghost", "A.C.PrevLine", "A.C.Guide",
         "A.C.GuideStrong", "A.C.BtnFill", "A.C.BtnFillHover", "A.C.BtnEdge", "A.C.BtnTop", "A.C.OutlineHover", "A.C.NavFillA", "A.C.NavFillB",
-        "A.C.NavHover", "A.C.NavIcon", "A.C.NavIndicator", "A.C.NavIndicatorTop", "A.C.SwitchOff", "A.C.MenuHover", "A.C.RimA", "A.C.RimB",
-        "A.C.RimC", "A.C.RimD", "A.C.RimInner", "A.C.RimDark", "A.C.TopSheen", "A.C.PointerSheen", "A.C.Ink", "A.C.Pill", "A.C.MenuFill",
-        "A.C.MenuEdge", "A.C.ModalTop", "A.C.ModalBottom", "A.C.Halo",
+        "A.C.NavHover", "A.C.NavIcon", "A.C.NavIndicator", "A.C.NavIndicatorTop", "A.C.SwitchOff", "A.C.MenuHover", "A.C.Ink", "A.C.Pill", "A.C.MenuFill",
+        "A.C.MenuEdge", "A.C.ModalTop", "A.C.ModalBottom",
     ];
 
     /// <summary>The single-colour brushes the palette builds from a token, rebuilt here when their token changes.</summary>
     private static readonly string[] Brushed =
     [
-        "Text", "Text2", "Text3", "Ink", "Accent", "AccentInk", "Pill", "Well", "Well2", "Well3", "WellHover", "WellEdge", "WellTop", "WellLit", "SoftEdge", "SoftTop", "Line",
+        "Text", "Text2", "Text3", "NavText", "SegText", "GlassHover", "Ink", "Accent", "AccentInk", "Pill", "Well", "Well2", "Well3", "WellHover", "WellEdge", "WellTop", "WellLit", "SoftEdge", "SoftTop", "Line",
         "ChartWell", "ChartWellTop", "ChartWellLit", "GhostTop", "Track", "TrackSoft", "Muted", "BtnFill", "BtnFillHover", "BtnEdge", "BtnTop", "OutlineHover", "AccentTop",
         "AccentHover", "NavHover", "NavIcon", "NavIndicator", "NavIndicatorTop", "SwitchOff", "MenuFill", "MenuEdge", "MenuHover", "Scrim",
-        "RimInner", "RimDark", "SeeThroughWash",
+        "SeeThroughWash", "AccentGlass",
     ];
 
     private readonly FrameworkElement _target;
@@ -97,7 +90,7 @@ internal sealed class GlassMaterial : IDisposable
         Refresh();
     }
 
-    /// <summary>Raised after the glass was repainted from new settings, for the backdrop and the parallax.</summary>
+    /// <summary>Raised after the glass was repainted from new settings, for the backdrop.</summary>
     public event Action<GlassSettings>? Changed;
 
     public GlassSettings Current { get; private set; } = GlassSettings.Default;
@@ -113,14 +106,11 @@ internal sealed class GlassMaterial : IDisposable
         Current = _read();
         AeroMotion.SetOverride(Current.ReduceMotion);
         LiquidGlassSources.AllowScreenshots = Current.ShowInScreenshots;
-        var theme = _theme();
-        var map = Map(Current, theme);
+        var map = Map(Current, _theme());
         foreach (var (key, value) in map)
         {
             if (!_applied.Contains(key) || !Same(_applied[key], value)) _applied[key] = value;
         }
-        var halo = map[HaloOnKey] is true ? Halo(Current, theme, (Color)map["A.C.Halo"]) : null;
-        if (!_applied.Contains(HaloKey) || !Same(_applied[HaloKey], halo)) _applied[HaloKey] = halo;
         Changed?.Invoke(Current);
     }
 
@@ -133,9 +123,19 @@ internal sealed class GlassMaterial : IDisposable
         _target.Resources.MergedDictionaries.Remove(_applied);
     }
 
+    /// <summary>The key of the text shadow every piece's content carries (the mockup's <c>.t</c>).</summary>
+    public const string TextShadowKey = "A.Glass.TextShadow";
+
+    /// <summary>The key of the glowing edge's opacity.</summary>
+    public const string GlowKey = "A.Glass.Glow";
+
+    /// <summary>The key of whether the engine's live backdrop draws.</summary>
+    public const string LiveKey = "A.Glass.Live";
+
     /// <summary>
     /// The tokens <paramref name="settings"/> give in <paramref name="theme"/>: every A.* colour, brush and number the
-    /// glass draws with, and the shared keys the accent reaches. At the demo's settings each equals the palette's own.
+    /// glass draws with, and the shared keys the accent reaches. At the default settings each equals the palette's own but
+    /// the text steps, the menus and dialogs, and the text shadow.
     /// </summary>
     public static IReadOnlyDictionary<string, object> Map(GlassSettings settings, Theme theme)
     {
@@ -148,17 +148,10 @@ internal sealed class GlassMaterial : IDisposable
         }
         var darkest = colours["A.C.BackdropDarkest"];
         var brightest = colours["A.C.BackdropBrightest"];
+        var strict = Strict(settings);
 
-        // Every style sits over what is really behind the window (0.10.6, the owner's choice): the desktop and whatever is
-        // open on it, live, so the ground may be anything from black to white. The style's tint is laid over a dim (black
-        // under light ink, white under dark) just dense enough that the ink reads on the glass, and in a well on it, over
-        // both: at 3:1, or 4.5:1 under Increase contrast, the strict dense glass. Reduce transparency makes the tint
-        // denser first, still glass.
-        var contrast = settings.IncreaseContrast;
-        var target = contrast ? StrictContrast : GlassContrast;
-
-        // The tint.
-        var (top, bottom) = Tint(settings, colours);
+        // The tint, and on the strict glass its dim.
+        var (top, bottom) = Tint(settings);
         if (settings.ReduceTransparency)
         {
             // Denser: the tint laid over the tone a dark or light scene averages to, at ReducedAlpha, so what is behind
@@ -167,62 +160,46 @@ internal sealed class GlassMaterial : IDisposable
             top = WithAlpha(Contrast.Over(top, frosted), ReducedAlpha);
             bottom = WithAlpha(Contrast.Over(bottom, frosted), ReducedAlpha);
         }
-        // Which ink. Clear and Dark are black by their nature, so light text reads on them in either theme. Tinted and
-        // Colour keep the theme's own ink while some dim under the tint makes it read; a hue too bright for light text, or
-        // too dark for dark, takes the other.
+        // Which ink: the theme's own, but light on the smoked Dark style, and on a Colour hue whichever reads on it better.
         var light = Palette(Theme.Dark);
         var dark = Palette(Theme.Light);
-        var other = ReferenceEquals(palette, light) ? dark : light;
-        (Color Ink, Color Pole, Color Well) Of(ResourceDictionary inks)
-            => ((Color)inks["A.C.Text"], ReferenceEquals(inks, light) ? Colors.Black : Colors.White, (Color)inks["A.C.Well"]);
-        bool Reads(ResourceDictionary inks)
+        var family = settings.Style switch
         {
-            var (ink, pole, well) = Of(inks);
-            return Dim(top, pole, ink, well, target) is not null && Dim(bottom, pole, ink, well, target) is not null;
-        }
-        var family = settings.Style is GlassStyle.Clear or GlassStyle.Dark ? light : Reads(palette) || !Reads(other) ? palette : other;
-        var (reads, under, inWell) = Of(family);
-        top = Held(top, under, reads, inWell, target);
-        bottom = Held(bottom, under, reads, inWell, target);
-        // A pill floats on its own with no pane under it: the same dim under its button's own light fill, lit under the pointer.
-        var button = Layered((Color)family["A.C.OutlineHover"], (Color)family["A.C.BtnFill"]);
-        colours["A.C.PillDim"] = WithAlpha(under, Dim(button, under, reads, Colors.Transparent, target) ?? MaxDim);
-        colours["A.C.GlassTintTop"] = top;
-        colours["A.C.GlassTintBottom"] = bottom;
+            GlassStyle.Dark => light,
+            GlassStyle.Colour => Better(Opaque(Hue(settings.TintColor)), light, dark, palette),
+            _ => palette,
+        };
         if (!ReferenceEquals(family, palette))
         {
             foreach (var key in Family) colours[key] = (Color)family[key];
         }
-
-        // The rim and sheens: Edge light scales them around the demo's; Increase contrast makes the rim solid.
-        // Low but on (0.10.8's default is 10 %), each rim stop keeps at least a faint hairline, RimFloor, never more than
-        // its own at the demo's.
-        var edge = settings.EdgeLight / DemoEdgeLight;
-        foreach (var key in new[] { "A.C.RimA", "A.C.RimB", "A.C.RimC", "A.C.RimD", "A.C.RimInner", "A.C.RimDark", "A.C.TopSheen", "A.C.PointerSheen" })
+        if (strict)
         {
-            var own = colours[key];
-            colours[key] = Scaled(own, edge);
-            if (settings.EdgeLight > 0 && RimStops.Contains(key))
-                colours[key] = WithAlpha(own, Math.Max(colours[key].A / 255.0, Math.Min(own.A / 255.0, RimFloor)));
+            var reads = (Color)family["A.C.Text"];
+            var pole = ReferenceEquals(family, light) ? Colors.Black : Colors.White;
+            var inWell = (Color)family["A.C.Well"];
+            // Held for a well on it and then for a control's hover wash on it, the lighter of what words sit on.
+            var hover = colours["A.C.GlassHover"];
+            top = Held(Held(top, pole, reads, inWell, StrictContrast), pole, reads, hover, StrictContrast);
+            bottom = Held(Held(bottom, pole, reads, inWell, StrictContrast), pole, reads, hover, StrictContrast);
         }
-        if (settings.IncreaseContrast)
-        {
-            var solid = WithAlpha(colours["A.C.RimA"], Math.Max(colours["A.C.RimA"].A / 255.0, 0.8));
-            foreach (var key in new[] { "A.C.RimA", "A.C.RimB", "A.C.RimC", "A.C.RimD" }) colours[key] = solid;
-            colours["A.C.SeeThroughWash"] = Scaled(colours["A.C.SeeThroughWash"], 2);
-        }
+        colours["A.C.GlassTintTop"] = top;
+        colours["A.C.GlassTintBottom"] = bottom;
 
-        // Text: full strength under Increase contrast; otherwise the video's own steps of the ink.
+        // Text: every step at the ink's full strength on the strict glass; otherwise the mockup's steps (.sub at 80 %).
         var text = colours["A.C.Text"];
-        if (contrast)
+        if (strict)
         {
-            colours["A.C.Text2"] = colours["A.C.Text3"] = text;
+            colours["A.C.Text2"] = colours["A.C.Text3"] = colours["A.C.NavText"] = colours["A.C.SegText"] = text;
         }
         else
         {
             colours["A.C.Text2"] = WithAlpha(text, VideoText2);
             colours["A.C.Text3"] = WithAlpha(text, VideoText3);
+            colours["A.C.NavText"] = WithAlpha(text, NavText);
+            colours["A.C.SegText"] = WithAlpha(text, SegText);
         }
+        if (settings.IncreaseContrast) colours["A.C.SeeThroughWash"] = Scaled(colours["A.C.SeeThroughWash"], 2);
 
         // Menus and dialogs: as dense as their text needs over either backdrop; denser still under Reduce transparency,
         // and glass even then.
@@ -232,27 +209,24 @@ internal sealed class GlassMaterial : IDisposable
             colours[key] = settings.ReduceTransparency ? WithAlpha(fill, Math.Max(fill.A / 255.0, ReducedMenuAlpha)) : fill;
         }
 
-        // The accent.
+        // The accent, and its glass.
         var accentName = settings.Accent.ToString();
         var accent = colours["A.C.Accent." + accentName];
         var ink = colours["A.C.AccentInk." + accentName];
         colours["A.C.Accent"] = accent;
         colours["A.C.AccentInk"] = ink;
+        colours["A.C.AccentGlass"] = WithAlpha(accent, AccentGlassAlpha);
 
         var result = new Dictionary<string, object>();
         foreach (var (key, colour) in colours) result[key] = colour;
         foreach (var name in Brushed) result["A.B." + name] = Solid(colours["A.C." + name]);
         result["A.B.GlassTint"] = Vertical(top, bottom);
-        result["A.B.Rim"] = Rim(colours);
-        result["A.B.TopSheen"] = TopSheen(colours["A.C.TopSheen"]);
         result["A.B.NavFill"] = Frozen(new LinearGradientBrush(colours["A.C.NavFillA"], colours["A.C.NavFillB"], new Point(0, 0), new Point(1, 0)));
         result["A.B.ModalFill"] = Vertical(colours["A.C.ModalTop"], colours["A.C.ModalBottom"]);
-        // A top-bar pill: the dim the ink needs under its button's own light fill, as the demo's pill over what is behind it
-        // (denser on the strict glass, where the ink reads at 4.5:1).
-        result["A.B.PillFill"] = Solid(colours["A.C.PillDim"]);
-
         result["A.Glass.Frost"] = (double)palette["A.Glass.Frost"] * settings.Frost / DemoFrost;
-        result[HaloOnKey] = false;
+        result[GlowKey] = Glow(settings.EdgeLight);
+        result[LiveKey] = !settings.ReduceTransparency;
+        result[TextShadowKey] = TextShadow(colours["A.C.TextShadow"]);
 
         // The shared keys the accent reaches: Midnight's and Classic's accent, focus, CPU part and charts, so the dialogs
         // and the pie follow the chosen accent.
@@ -268,6 +242,31 @@ internal sealed class GlassMaterial : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// The glowing edge's opacity for an Edge light: the owner's default (10 %) is the recipe's 70 %, below it the glow
+    /// fades to none at 0, above it it rises to fully white at 100 %.
+    /// </summary>
+    public static double Glow(double edgeLight)
+    {
+        var edge = GlassSettings.Fraction(edgeLight, GlassSettings.DefaultEdgeLight);
+        var recipe = LiquidGlassRecipe.HighlightOpacity;
+        var glow = edge <= GlassSettings.DefaultEdgeLight
+            ? recipe * edge / GlassSettings.DefaultEdgeLight
+            : recipe + (1 - recipe) * (edge - GlassSettings.DefaultEdgeLight) / (1 - GlassSettings.DefaultEdgeLight);
+        return Math.Round(glow, 6);
+    }
+
+    /// <summary>The mockup's text shadow, <c>0 1px 2px</c> in <paramref name="colour"/>: a Gaussian of deviation 1 (half the
+    /// blur) one unit down, which WPF's blur radius of three deviations draws.</summary>
+    public static DropShadowEffect TextShadow(Color colour) => Frozen(new DropShadowEffect
+    {
+        Color = Color.FromRgb(colour.R, colour.G, colour.B), Opacity = colour.A / 255.0, ShadowDepth = 1, Direction = 270, BlurRadius = TextShadowBlur,
+        RenderingBias = RenderingBias.Performance,
+    });
+
+    /// <summary>WPF's BlurRadius for the text shadow's deviation of 1.</summary>
+    public const double TextShadowBlur = 3;
+
     /// <summary>A palette by theme, loaded once on this thread.</summary>
     internal static ResourceDictionary Palette(Theme theme)
     {
@@ -276,71 +275,58 @@ internal sealed class GlassMaterial : IDisposable
         return palette;
     }
 
-    /// <summary>The tint's top and foot for the style, scaled by strength around the demo's.</summary>
-    private static (Color Top, Color Bottom) Tint(GlassSettings settings, Dictionary<string, Color> colours)
+    /// <summary>The tint's top and foot for the style (the mockup's, the same top to foot), scaled by strength.</summary>
+    internal static (Color Top, Color Bottom) Tint(GlassSettings settings)
     {
-        var strength = Strength(settings.TintStrength);
-        var top = colours["A.C.GlassTintTop"];
-        var bottom = colours["A.C.GlassTintBottom"];
-        return settings.Style switch
+        var strength = settings.TintStrength;
+        var above = Math.Max(0, (strength - DemoTintStrength) / (1 - DemoTintStrength));
+        Color tint = settings.Style switch
         {
-            GlassStyle.Clear => (WithAlpha(Colors.Black, Math.Min(0.8, ClearTop * strength)), WithAlpha(Colors.Black, Math.Min(0.75, ClearBottom * strength))),
-            GlassStyle.Dark => (WithAlpha(Colors.Black, Math.Min(0.85, DarkTop * strength)), WithAlpha(Colors.Black, Math.Min(0.8, DarkBottom * strength))),
-            GlassStyle.Colour => Hue(settings.TintColor, settings.TintStrength),
-            // Never solid (0.10.4): at full strength the light theme's tint would be.
-            _ => (WithAlpha(top, Math.Min(MaxDim, top.A / 255.0 * strength)), WithAlpha(bottom, Math.Min(MaxDim, bottom.A / 255.0 * strength))),
+            GlassStyle.Clear => WithAlpha(Colors.White, ClearWhite * above),
+            GlassStyle.Tinted => WithAlpha(Colors.White, TintedWhite * above),
+            GlassStyle.Dark => WithAlpha(DarkTint, Math.Min(MaxDim, DarkTint.A / 255.0 * Strength(strength))),
+            _ => WithAlpha(Hue(settings.TintColor), Math.Min(MaxDim, ColourAlpha * Strength(strength))),
         };
+        return (tint, tint);
     }
 
-    private static (Color, Color) Hue(string hex, double strength)
+    private static Color Hue(string hex) => (Color)ColorConverter.ConvertFromString(hex);
+
+    private static Color Opaque(Color colour) => Color.FromRgb(colour.R, colour.G, colour.B);
+
+    /// <summary>Of <paramref name="one"/>'s and <paramref name="other"/>'s ink, the family whose ink reads better on
+    /// <paramref name="ground"/>; <paramref name="own"/> when they read alike.</summary>
+    private static ResourceDictionary Better(Color ground, ResourceDictionary one, ResourceDictionary other, ResourceDictionary own)
     {
-        var colour = (Color)ColorConverter.ConvertFromString(hex);
-        var alpha = ColourAlpha * strength / DemoTintStrength;
-        return (WithAlpha(colour, Math.Min(0.9, alpha)), WithAlpha(colour, Math.Min(0.85, alpha * 0.7)));
+        double On(ResourceDictionary inks) => Contrast.Ratio((Color)inks["A.C.Text"], ground);
+        var (a, b) = (On(one), On(other));
+        if (Math.Abs(a - b) < 0.5) return own;
+        return a > b ? one : other;
     }
 
-    /// <summary>How much of the style's own tint a strength gives: 0.4 of it at 0, all of it at the demo's 0.5, 2.2 times
-    /// at 1 (the demo's tuner ran from about a quarter to two and a half times its default).</summary>
+    /// <summary>How much of the style's own tint a strength gives: 0.4 of it at 0, all of it at the default 0.5, 2.2 times
+    /// at 1.</summary>
     internal static double Strength(double tintStrength)
         => tintStrength <= DemoTintStrength
             ? 0.4 + 0.6 * tintStrength / DemoTintStrength
             : 1 + 1.2 * (tintStrength - DemoTintStrength) / (1 - DemoTintStrength);
 
-    /// <summary>Where the halo is: the GlassPanel template's content takes it as its Effect.</summary>
-    public const string HaloKey = "A.Glass.Halo";
+    /// <summary>The mockup's quieter text steps, as shares of the ink: its .sub at 80 %, and a quieter one at 60 %.</summary>
+    public const double VideoText2 = 0.8;
+    public const double VideoText3 = 0.6;
 
-    /// <summary>Whether this glass has the halo: not on the strict glass, nor on Aero bloom where text reads at 3:1 without it.</summary>
-    public const string HaloOnKey = "A.Glass.HaloOn";
-
-    /// <summary>The halo behind the glass's content (0.10.1): a soft shadow in <paramref name="colour"/>, the ink's
-    /// opposite, which GlassMaterial counts as that colour at A.Glass.HaloShare under the text; null (none) on the strict
-    /// glass.</summary>
-    public static System.Windows.Media.Effects.DropShadowEffect? Halo(GlassSettings settings, Theme theme, Color colour)
-    {
-        if (Strict(settings.Sanitised())) return null;
-        var palette = Palette(theme);
-        return Frozen(new System.Windows.Media.Effects.DropShadowEffect
-        {
-            Color = colour, ShadowDepth = 0, BlurRadius = (double)palette["A.Glass.HaloBlur"], Opacity = (double)palette["A.Glass.HaloOpacity"],
-            RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance,
-        });
-    }
-
-    /// <summary>The video's quieter text steps, as shares of the ink (the HTML's --text-2 and --text-3).</summary>
-    public const double VideoText2 = 0.7;
-    public const double VideoText3 = 0.44;
+    /// <summary>The mockup's sidebar pages (88 %) and a segmented control's words (85 %).</summary>
+    public const double NavText = 0.88;
+    public const double SegText = 0.85;
 
     /// <summary>How dense Reduce transparency makes the tint, and at least the menus and dialogs: still glass.</summary>
     public const double ReducedAlpha = 0.86;
     public const double ReducedMenuAlpha = 0.94;
 
-    /// <summary>Text under Increase contrast: WCAG AA.</summary>
+    /// <summary>Text on the strict glass (Increase contrast, Reduce transparency): WCAG AA.</summary>
     public const double StrictContrast = 4.5;
 
-    /// <summary>Text on the bright glass, over the frost at its brightest with the halo behind it (the owner's choice).</summary>
-    public const double GlassContrast = 3.0;
-
-    /// <summary>Whether the glass is the strict one: the frost held within the backdrop bounds, no halo, 4.5:1.</summary>
+    /// <summary>Whether the glass is the strict one: a tint as dense as the text needs at 4.5:1, every text step whole.</summary>
     public static bool Strict(GlassSettings settings) => settings.IncreaseContrast || settings.ReduceTransparency;
 
     /// <summary>The densest dim laid under a tint.</summary>
@@ -424,16 +410,6 @@ internal sealed class GlassMaterial : IDisposable
 
     private static LinearGradientBrush Vertical(Color top, Color bottom) => Frozen(new LinearGradientBrush(top, bottom, new Point(0, 0), new Point(0, 1)));
 
-    /// <summary>The HTML's 140 degree rim, as the palette's A.B.Rim.</summary>
-    private static LinearGradientBrush Rim(Dictionary<string, Color> colours) => Frozen(new LinearGradientBrush(
-        new GradientStopCollection
-        {
-            new(colours["A.C.RimA"], 0), new(colours["A.C.RimB"], 0.3), new(colours["A.C.RimC"], 0.65), new(colours["A.C.RimD"], 1),
-        }, new Point(0.18, 0), new Point(0.82, 1)));
-
-    private static LinearGradientBrush TopSheen(Color sheen) => Frozen(new LinearGradientBrush(
-        new GradientStopCollection { new(sheen, 0), new(WithAlpha(sheen, 0), 1) }, new Point(0, 0), new Point(0, 22)) { MappingMode = BrushMappingMode.Absolute });
-
     private static T Frozen<T>(T freezable)
         where T : Freezable
     {
@@ -445,10 +421,11 @@ internal sealed class GlassMaterial : IDisposable
     private static bool Same(object? old, object? value) => (old, value) switch
     {
         (null, null) => true,
-        (System.Windows.Media.Effects.DropShadowEffect a, System.Windows.Media.Effects.DropShadowEffect b)
-            => a.Color == b.Color && a.BlurRadius == b.BlurRadius && a.Opacity == b.Opacity && a.ShadowDepth == b.ShadowDepth,
+        (DropShadowEffect a, DropShadowEffect b)
+            => a.Color == b.Color && a.BlurRadius == b.BlurRadius && a.Opacity == b.Opacity && a.ShadowDepth == b.ShadowDepth && a.Direction == b.Direction,
         (Color a, Color b) => a == b,
         (double a, double b) => a == b,
+        (bool a, bool b) => a == b,
         (SolidColorBrush a, SolidColorBrush b) => a.Color == b.Color && a.Opacity == b.Opacity,
         (LinearGradientBrush a, LinearGradientBrush b) => a.StartPoint == b.StartPoint && a.EndPoint == b.EndPoint && a.MappingMode == b.MappingMode
             && a.GradientStops.Count == b.GradientStops.Count

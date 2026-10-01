@@ -86,6 +86,11 @@ internal static class UiHarness
     /// dispatcher, so a palette put here while one draws would come out in another's renders.</summary>
     public static void UseTheme(Theme theme) => UsePalette(ThemeManager.Palette(Look.Classic, theme));
 
+    /// <summary>Hands every window's liquid glass (0.10.9) a source with no picture, unless a test has handed it one of its
+    /// own: a test never captures the real screen.</summary>
+    public static void NoCapture()
+        => PowerLedger.App.Aero.LiquidGlassSources.Override ??= _ => new FakeGlassSource(null, Rect.Empty, PowerLedger.App.Aero.LiquidGlassSourceKind.None);
+
     /// <summary>Draws <paramref name="visual"/> at <paramref name="width"/> × <paramref name="height"/> to <paramref name="name"/> under <see cref="Folder"/>.</summary>
     public static void Render(Visual visual, int width, int height, string name)
     {
@@ -174,6 +179,7 @@ internal static class UiHarness
                 {
                     Source = new Uri("pack://application:,,,/PowerLedger;component/Theme/Styles.xaml", UriKind.Absolute),
                 });
+                NoCapture();
                 application.DispatcherUnhandledException += (_, e) =>
                 {
                     if (_working) return;

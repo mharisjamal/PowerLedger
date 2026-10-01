@@ -107,9 +107,6 @@
     <Color x:Key="A.C.BackdropDarkest">#000000</Color>
     <Color x:Key="A.C.BackdropBrightest">#222222</Color>
     <Color x:Key="A.C.SeeThroughWash">#40000000</Color>
-    <!-- The dim under a pill that floats on its own (0.10.6): GlassMaterial works out how much its words need over
-         whatever window is behind; the palette alone lays none. -->
-    <Color x:Key="A.C.PillDim">#00000000</Color>
     <Color x:Key="A.C.Plain">#101114</Color>
     <!-- The bright glass (0.10.1, the owner's choice, as the demo): how far the frost may let the desktop through
          before the glass holds it, and the halo behind the glass's content that keeps text at 3:1 there (counted as its
@@ -122,40 +119,61 @@
          shows it (AeroBloom; measured from Windows' img19 through the frost). -->
     <Color x:Key="A.C.BloomDarkest">#000117</Color>
     <Color x:Key="A.C.BloomBrightest">#00A4FF</Color>
-    <!-- Whether the glass has its halo (GlassMaterial works it out: none on the strict glass, nor on Aero bloom where text
-         reads at 3:1 without it). -->
-    <sys:Boolean x:Key="A.Glass.HaloOn">False</sys:Boolean>
-    <Color x:Key="A.C.Halo">#000000</Color>
-    <sys:Double x:Key="A.Glass.HaloShare">0.3</sys:Double>
-    <sys:Double x:Key="A.Glass.HaloBlur">6</sys:Double>
-    <sys:Double x:Key="A.Glass.HaloOpacity">1</sys:Double>
-    <!-- The halo itself: GlassMaterial lays one on the bright glass; the palette alone draws none, so the strict
-         glass, which GlassMaterial gives none, finds none here either. -->
-    <x:Null x:Key="A.Glass.Halo" />
 
-    <!-- Glass: tint 13 %, edge light 75 % (the demo's defaults) -->
-    <Color x:Key="A.C.GlassTintTop">#21FFFFFF</Color>
-    <Color x:Key="A.C.GlassTintBottom">#11CDD0DA</Color>
-    <Color x:Key="A.C.RimA">#77FFFFFF</Color>
-    <Color x:Key="A.C.RimB">#39FFFFFF</Color>
-    <Color x:Key="A.C.RimC">#2AFFFFFF</Color>
-    <Color x:Key="A.C.RimD">#58FFFFFF</Color>
-    <Color x:Key="A.C.RimInner">#41FFFFFF</Color>
-    <Color x:Key="A.C.RimDark">#0E000000</Color>
-    <Color x:Key="A.C.TopSheen">#1FFFFFFF</Color>
-    <Color x:Key="A.C.PointerSheen">#1AFFFFFF</Color>
-    <!-- The soft shade toward a pane's edges: the demo's inset 0 0 26px, at its full strength (half of it shows at the edge). -->
-    <Color x:Key="A.C.InnerShade">#1A000000</Color>
+    <!-- Liquid glass (0.10.9, the owner's recipe): no tint by default, both themes (the Dark and Colour styles and the
+         strict glass lay theirs through GlassMaterial); the glowing edge's opacity, the recipe's white at 70 % at the default
+         Edge light; whether the engine's live backdrop draws (off under Reduce transparency); the mockup's text shadow
+         (.t: 0 1px 2px, navy at 28 %), laid by GlassMaterial on each piece's content; and the lime glass of an accent
+         action (Open report, the mockup's rgba(217,242,90,.86)): the accent at 86 %. -->
+    <Color x:Key="A.C.GlassTintTop">#00FFFFFF</Color>
+    <Color x:Key="A.C.GlassTintBottom">#00FFFFFF</Color>
+    <sys:Double x:Key="A.Glass.Glow">0.7</sys:Double>
+    <sys:Boolean x:Key="A.Glass.Live">True</sys:Boolean>
+    <Color x:Key="A.C.TextShadow">#47000A28</Color>
+    <x:Null x:Key="A.Glass.TextShadow" />
+    <Color x:Key="A.C.AccentGlass">#DBD3F03F</Color>
+    <SolidColorBrush x:Key="A.B.AccentGlass" Color="{StaticResource A.C.AccentGlass}" />
+    <!-- The mockup's other text steps: the sidebar's pages at 88 %, a segmented control's words at 85 %; the white wash a
+         glass control takes under the pointer (the kit's .hov, 14 % over its glass); and the white glass pill of a chosen
+         option (the Styles board's Style row). -->
+    <Color x:Key="A.C.NavText">#E0F3F4F6</Color>
+    <Color x:Key="A.C.SegText">#D9F3F4F6</Color>
+    <Color x:Key="A.C.GlassHover">#24FFFFFF</Color>
+    <SolidColorBrush x:Key="A.B.NavText" Color="{StaticResource A.C.NavText}" />
+    <SolidColorBrush x:Key="A.B.SegText" Color="{StaticResource A.C.SegText}" />
+    <SolidColorBrush x:Key="A.B.GlassHover" Color="{StaticResource A.C.GlassHover}" />
+    <!-- The Styles board's knob (a switch's and a slider's): white shading to #E6E9F2 from its upper left; and the slider's
+         light top line (inset 0 1px 0, white at 70 %). -->
+    <RadialGradientBrush x:Key="A.B.Knob" GradientOrigin="0.35,0.3" Center="0.35,0.3" RadiusX="0.75" RadiusY="0.75">
+        <GradientStop Offset="0" Color="#FFFFFF" />
+        <GradientStop Offset="1" Color="#E6E9F2" />
+    </RadialGradientBrush>
+    <SolidColorBrush x:Key="A.B.SliderTop" Color="#B3FFFFFF" />
+    <!-- The mockup's shadow navy, under a knob and a menu (rgba(0,5,30)). -->
+    <Color x:Key="A.C.Navy">#00051E</Color>
+    <!-- The hairline between the buttons of a glass group (the mockup's .sep, white at 22 %). -->
+    <SolidColorBrush x:Key="A.B.GroupSep" Color="#38FFFFFF" />
+    <LinearGradientBrush x:Key="A.B.PillGlass" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Offset="0" Color="#FFFFFF" />
+        <GradientStop Offset="1" Color="#DFE4EE" />
+    </LinearGradientBrush>
+    <!-- A well, the mockup's .inset: navy at 14 %, a soft inner shade along its top (inset 0 1px 3px, navy at 28 %) and a
+         hairline of light along its foot (inset 0 -.6px 0, white at 20 %), drawn as its fill and a one-pixel edge that
+         runs from the shade at the top to the light at the foot. -->
+    <Color x:Key="A.C.InsetFill">#24000A28</Color>
+    <Color x:Key="A.C.InsetTop">#2E00051E</Color>
+    <Color x:Key="A.C.InsetSide">#1A00051E</Color>
+    <Color x:Key="A.C.InsetFoot">#1FFFFFFF</Color>
+    <SolidColorBrush x:Key="A.B.InsetFill" Color="{StaticResource A.C.InsetFill}" />
+    <LinearGradientBrush x:Key="A.B.InsetEdge" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Offset="0" Color="{StaticResource A.C.InsetTop}" />
+        <GradientStop Offset="0.12" Color="{StaticResource A.C.InsetSide}" />
+        <GradientStop Offset="0.88" Color="{StaticResource A.C.InsetSide}" />
+        <GradientStop Offset="1" Color="{StaticResource A.C.InsetFoot}" />
+    </LinearGradientBrush>
     <Color x:Key="A.C.Shadow">#000000</Color>
-    <sys:Double x:Key="A.Glass.ShadowFarBlur">60</sys:Double>
-    <sys:Double x:Key="A.Glass.ShadowFarDepth">30</sys:Double>
-    <sys:Double x:Key="A.Glass.ShadowFarOpacity">0.34</sys:Double>
-    <sys:Double x:Key="A.Glass.ShadowNearBlur">16</sys:Double>
-    <sys:Double x:Key="A.Glass.ShadowNearDepth">6</sys:Double>
-    <sys:Double x:Key="A.Glass.ShadowNearOpacity">0.18</sys:Double>
     <sys:Double x:Key="A.Glass.Frost">26</sys:Double>
     <sys:Double x:Key="A.Glass.Saturate">1.55</sys:Double>
-    <sys:Double x:Key="A.Glass.SheenRadius">420</sys:Double>
     <sys:Double x:Key="A.Glass.DimmedOpacity">0.22</sys:Double>
 
     <!-- Wells and lines -->
@@ -203,7 +221,7 @@
     <Color x:Key="A.C.NavIcon">#29FFFFFF</Color>
     <Color x:Key="A.C.NavIndicator">#1AFFFFFF</Color>
     <Color x:Key="A.C.NavIndicatorTop">#38FFFFFF</Color>
-    <Color x:Key="A.C.SwitchOff">#2EFFFFFF</Color>
+    <Color x:Key="A.C.SwitchOff">#24FFFFFF</Color>
     <Color x:Key="A.C.MenuFill">#B017181C</Color>
     <Color x:Key="A.C.MenuEdge">#29FFFFFF</Color>
     <Color x:Key="A.C.MenuHover">#1AFFFFFF</Color>
@@ -256,27 +274,13 @@
     <SolidColorBrush x:Key="A.B.MenuEdge" Color="{StaticResource A.C.MenuEdge}" />
     <SolidColorBrush x:Key="A.B.MenuHover" Color="{StaticResource A.C.MenuHover}" />
     <SolidColorBrush x:Key="A.B.Scrim" Color="{StaticResource A.C.Scrim}" />
-    <SolidColorBrush x:Key="A.B.RimInner" Color="{StaticResource A.C.RimInner}" />
-    <SolidColorBrush x:Key="A.B.RimDark" Color="{StaticResource A.C.RimDark}" />
     <SolidColorBrush x:Key="A.B.White" Color="#FFFFFF" />
     <SolidColorBrush x:Key="A.B.Plain" Color="{StaticResource A.C.Plain}" />
     <SolidColorBrush x:Key="A.B.SeeThroughWash" Color="{StaticResource A.C.SeeThroughWash}" />
-    <SolidColorBrush x:Key="A.B.PillFill" Color="Transparent" />
 
     <LinearGradientBrush x:Key="A.B.GlassTint" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Offset="0" Color="{StaticResource A.C.GlassTintTop}" />
         <GradientStop Offset="1" Color="{StaticResource A.C.GlassTintBottom}" />
-    </LinearGradientBrush>
-    <!-- The rim: a crisp light edge, brightest top left and bottom right, as the HTML's 140 degree gradient. -->
-    <LinearGradientBrush x:Key="A.B.Rim" StartPoint="0.18,0" EndPoint="0.82,1">
-        <GradientStop Offset="0" Color="{StaticResource A.C.RimA}" />
-        <GradientStop Offset="0.3" Color="{StaticResource A.C.RimB}" />
-        <GradientStop Offset="0.65" Color="{StaticResource A.C.RimC}" />
-        <GradientStop Offset="1" Color="{StaticResource A.C.RimD}" />
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="A.B.TopSheen" StartPoint="0,0" EndPoint="0,22" MappingMode="Absolute">
-        <GradientStop Offset="0" Color="{StaticResource A.C.TopSheen}" />
-        <GradientStop Offset="1" Color="#00FFFFFF" />
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="A.B.NavFill" StartPoint="0,0" EndPoint="1,0">
         <GradientStop Offset="0" Color="{StaticResource A.C.NavFillA}" />
@@ -288,24 +292,27 @@
     </LinearGradientBrush>
 
     <!-- Radii -->
-    <CornerRadius x:Key="A.R.Panel">26</CornerRadius>
-    <CornerRadius x:Key="A.R.Well">20</CornerRadius>
+    <CornerRadius x:Key="A.R.Panel">28</CornerRadius>
+    <CornerRadius x:Key="A.R.Well">22</CornerRadius>
     <CornerRadius x:Key="A.R.Pill">999</CornerRadius>
     <CornerRadius x:Key="A.R.Search">16</CornerRadius>
     <CornerRadius x:Key="A.R.Button">10</CornerRadius>
-    <CornerRadius x:Key="A.R.Menu">18</CornerRadius>
+    <CornerRadius x:Key="A.R.Menu">22</CornerRadius>
     <CornerRadius x:Key="A.R.MenuItem">12</CornerRadius>
     <CornerRadius x:Key="A.R.Modal">28</CornerRadius>
     <CornerRadius x:Key="A.R.Icon">9</CornerRadius>
-    <sys:Double x:Key="A.Radius.Panel">26</sys:Double>
+    <sys:Double x:Key="A.Radius.Panel">28</sys:Double>
 
     <!-- Type -->
     <!-- Geist, the demo's face, bundled (Fonts/Geist, SIL OFL); Segoe UI Variable where a glyph is missing. -->
     <FontFamily x:Key="A.F.Ui">pack://application:,,,/PowerLedger;component/Fonts/Geist/#Geist, Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI</FontFamily>
+    <!-- The mockup's figures in Geist Mono; JetBrains Mono, bundled, stands in for it (Geist Mono is not bundled). -->
+    <FontFamily x:Key="A.F.Mono">pack://application:,,,/PowerLedger;component/Fonts/JetBrainsMono/#JetBrains Mono, Cascadia Mono, Consolas</FontFamily>
     <sys:Double x:Key="A.T.Big">40</sys:Double>
     <sys:Double x:Key="A.T.BigMonth">34</sys:Double>
     <sys:Double x:Key="A.T.Mid">22</sys:Double>
     <sys:Double x:Key="A.T.Title">16</sys:Double>
+    <sys:Double x:Key="A.T.Nav">15</sys:Double>
     <sys:Double x:Key="A.T.Brand">18</sys:Double>
     <sys:Double x:Key="A.T.Body">14</sys:Double>
     <sys:Double x:Key="A.T.Control">13.5</sys:Double>

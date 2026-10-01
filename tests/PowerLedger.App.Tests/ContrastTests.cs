@@ -165,14 +165,15 @@ public class ContrastTests
         => Keys(Look.Aero, Theme.Dark).OrderBy(k => k.Key).ShouldBe(Keys(Look.Aero, Theme.Light).OrderBy(k => k.Key));
 
     /// <summary>Plan S G2: Aero's text reads at 4.5:1 on the glass wherever a pane can sit, over the darkest and the
-    /// brightest backdrop the look allows (WallpaperFrost and the see-through wash keep the scene between them), at the
-    /// tint's top and its foot, and in the wells, menus and dialogs laid on it.</summary>
+    /// brightest backdrop the look allows, at the tint's top and its foot, and in the wells, menus and dialogs laid on it.
+    /// 0.10.9: the recipe's glass has no tint (the owner's choice), so the palette alone promises nothing on bare glass
+    /// over a light backdrop; the promise is the strict glass's (Increase contrast), which lays the tint the text needs.</summary>
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
-    public void Aeros_text_reads_on_the_glass_over_every_backdrop_at_four_and_a_half_to_one(string theme)
+    public void Aeros_text_reads_on_the_strict_glass_over_every_backdrop_at_four_and_a_half_to_one(string theme)
     {
-        var aero = Aero(Enum.Parse<Theme>(theme));
+        var aero = Mapped(GlassSettings.Default with { IncreaseContrast = true }, Enum.Parse<Theme>(theme));
         foreach (var (where, ground, tiers) in AeroGrounds(aero))
         {
             foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
@@ -182,20 +183,20 @@ public class ContrastTests
         }
     }
 
-    /// <summary>The marks a user must see stand off the glass at 3:1: the accent (bars, the chart's line, the chosen
-    /// page's disc) and the focus ring, which is the accent; each accent the Glass settings offer; and the rim at its
-    /// brightest, which draws the pane's edge.</summary>
+    /// <summary>The marks a user must see stand off the glass at 3:1: the accent (bars, the chart's line, the brand's disc)
+    /// and the focus ring, which is the accent; and each accent the Glass settings offer. (0.10.9: the pane's edge is the
+    /// recipe's white glow, not a rim of the palette's, so it has no palette colour to hold here.)</summary>
     [Theory]
     [InlineData("Dark")]
     [InlineData("Light")]
-    public void Aeros_accents_rim_and_focus_ring_stand_off_the_glass_at_three_to_one(string theme)
+    public void Aeros_accents_and_focus_ring_stand_off_the_glass_at_three_to_one(string theme)
     {
-        var aero = Aero(Enum.Parse<Theme>(theme));
+        // On the strict glass, as the text above: untinted, the glass is whatever is behind it.
+        var aero = Mapped(GlassSettings.Default with { IncreaseContrast = true }, Enum.Parse<Theme>(theme));
         foreach (var (where, glass) in AeroGlass(aero))
         {
             Contrast.Ratio(aero["A.C.Accent"], glass).ShouldBeGreaterThanOrEqualTo(3, $"the accent on {where}, {theme}");
             foreach (var accent in AeroAccents) Contrast.Ratio(aero["A.C.Accent." + accent], glass).ShouldBeGreaterThanOrEqualTo(3, $"{accent} on {where}, {theme}");
-            Contrast.Ratio(Contrast.Over(aero["A.C.RimA"], glass), glass).ShouldBeGreaterThanOrEqualTo(3, $"the rim on {where}, {theme}");
         }
     }
 
@@ -238,10 +239,10 @@ public class ContrastTests
 
     private static readonly string[] AeroAccents = ["Lime", "Ice", "Indigo", "Amber", "Rose"];
 
-    /// <summary>The bright glass (0.10.1, the owner's choice, as the demo): with GlassMaterial's default settings in each
-    /// style, every text tier reads at 3:1 on the glass, its chart well and its wells, over the frost at its darkest and
-    /// its brightest (the busiest a wallpaper may get once frosted), with the halo behind the text counted as its colour
-    /// at A.Glass.HaloShare (HaloTests measure what it really lays down).</summary>
+    /// <summary>The recipe's glass (0.10.9, the owner's choice): with GlassMaterial's default settings in each style, the
+    /// text takes the mockup's steps (its .sub at 80 %, a quieter 60 % of the ink) and the mockup's text shadow under it;
+    /// the glass has no tint, so no contrast is promised over whatever is behind it (Increase contrast is the strict
+    /// glass, below).</summary>
     [Theory]
     [InlineData("Dark", "Tinted")]
     [InlineData("Dark", "Clear")]
@@ -250,24 +251,21 @@ public class ContrastTests
     [InlineData("Light", "Tinted")]
     [InlineData("Light", "Clear")]
     [InlineData("Light", "Colour")]
-    public void Aeros_default_glass_takes_the_videos_text_steps_with_no_halo(string theme, string style)
+    public void Aeros_default_glass_takes_the_mockups_text_steps_and_text_shadow(string theme, string style)
     {
-        // 0.10.4, the owner's choice: parity with the approved video over WCAG. Whatever is behind it, the default glass has
-        // no halo and the HTML's text steps (--text-2 70 %, --text-3 44 % of the ink); Increase contrast is the strict glass.
         foreach (var backdrop in new[] { GlassBackdrop.Wallpaper, GlassBackdrop.Bloom })
         {
             var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), Backdrop = backdrop };
-            UiHarness.OnUi(() => GlassMaterial.Map(settings, Enum.Parse<Theme>(theme))[GlassMaterial.HaloOnKey]).ShouldBe(false);
+            UiHarness.OnUi(() => GlassMaterial.Map(settings, Enum.Parse<Theme>(theme))[GlassMaterial.TextShadowKey]).ShouldBeOfType<System.Windows.Media.Effects.DropShadowEffect>();
             var map = Mapped(settings, Enum.Parse<Theme>(theme));
             var ink = map["A.C.Text"];
-            map["A.C.Text2"].ShouldBe(Color.FromArgb(0xB2, ink.R, ink.G, ink.B), $"{style}, {theme}, {backdrop}");
-            map["A.C.Text3"].ShouldBe(Color.FromArgb(0x70, ink.R, ink.G, ink.B), $"{style}, {theme}, {backdrop}");
+            map["A.C.Text2"].ShouldBe(Color.FromArgb(0xCC, ink.R, ink.G, ink.B), $"{style}, {theme}, {backdrop}");
+            map["A.C.Text3"].ShouldBe(Color.FromArgb(0x99, ink.R, ink.G, ink.B), $"{style}, {theme}, {backdrop}");
         }
     }
 
-    /// <summary>Increase contrast keeps the strict glass exactly (0.10.4: it alone): the frost held within the backdrop
-    /// bounds, no halo, and every tier at 4.5:1 on the glass, its wells, menus and dialogs, with or without Reduce
-    /// transparency.</summary>
+    /// <summary>Increase contrast keeps the strict glass exactly: every tier at 4.5:1 on the glass, its wells, menus and
+    /// dialogs, with or without Reduce transparency.</summary>
     [Theory]
     [InlineData("Dark", true, false)]
     [InlineData("Dark", true, true)]
@@ -277,9 +275,8 @@ public class ContrastTests
     {
         var settings = GlassSettings.Default with { IncreaseContrast = increase, ReduceTransparency = reduce };
         GlassMaterial.Strict(settings).ShouldBeTrue();
-        UiHarness.OnUi(() => GlassMaterial.Halo(settings, Enum.Parse<Theme>(theme), Colors.Black)).ShouldBeNull("no halo on the strict glass");
         var map = Mapped(settings, Enum.Parse<Theme>(theme));
-        foreach (var (where, ground, tiers) in GlassGrounds(map, ["A.C.BackdropDarkest", "A.C.BackdropBrightest"], 0))
+        foreach (var (where, ground, tiers) in GlassGrounds(map, ["A.C.BackdropDarkest", "A.C.BackdropBrightest"]))
         {
             foreach (var text in new[] { "A.C.Text", "A.C.Text2", "A.C.Text3" }.Take(tiers))
                 Contrast.Ratio(Contrast.Over(map[text], ground), ground).ShouldBeGreaterThanOrEqualTo(GlassMaterial.StrictContrast, $"{text} on {where}, {theme}");
@@ -299,16 +296,14 @@ public class ContrastTests
         => GlassMaterial.Map(settings, theme).Where(p => p.Value is Color).ToDictionary(p => p.Key, p => (Color)p.Value));
 
     /// <summary>Where text sits on GlassMaterial's glass over each of <paramref name="backdrops"/>: the tint's top and foot,
-    /// the halo at <paramref name="share"/> over that, then the chart well (three tiers), the quiet wells (two) and the
-    /// brighter wells (the ink), which lie over the halo as the content they are.</summary>
-    private static IEnumerable<(string Where, Color Ground, int Tiers)> GlassGrounds(Dictionary<string, Color> map, string[] backdrops, double share)
+    /// then the chart well (three tiers), the quiet wells (two) and the brighter wells (the ink).</summary>
+    private static IEnumerable<(string Where, Color Ground, int Tiers)> GlassGrounds(Dictionary<string, Color> map, string[] backdrops)
     {
-        var halo = map["A.C.Halo"];
         foreach (var backdrop in backdrops)
         {
             foreach (var tint in new[] { "A.C.GlassTintTop", "A.C.GlassTintBottom" })
             {
-                var glass = Contrast.Over(Color.FromArgb((byte)Math.Round(255 * share), halo.R, halo.G, halo.B), Contrast.Over(map[tint], map[backdrop]));
+                var glass = Contrast.Over(map[tint], map[backdrop]);
                 var where = $"{tint} over {backdrop}";
                 yield return (where, glass, 3);
                 yield return ($"A.C.ChartWell in {where}", Contrast.Over(map["A.C.ChartWell"], glass), 3);
@@ -416,6 +411,6 @@ public class ContrastTests
     private static Dictionary<string, Type> Keys(Look look, Theme theme) => UiHarness.OnUi(() =>
     {
         var dictionary = new ResourceDictionary { Source = LookRules.PaletteFor(look, theme) };
-        return dictionary.Keys.Cast<string>().ToDictionary(key => key, key => dictionary[key]?.GetType() ?? typeof(void));   // null: A.Glass.Halo, none
+        return dictionary.Keys.Cast<string>().ToDictionary(key => key, key => dictionary[key]?.GetType() ?? typeof(void));   // null: A.Glass.TextShadow, which GlassMaterial lays
     });
 }

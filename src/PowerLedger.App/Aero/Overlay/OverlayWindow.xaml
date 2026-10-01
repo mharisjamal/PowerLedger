@@ -8,24 +8,21 @@
         Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" SizeToContent="WidthAndHeight"
         FontFamily="{DynamicResource A.F.Ui}" Foreground="{DynamicResource A.B.Text}" TextOptions.TextFormattingMode="Ideal"
         Typography.NumeralAlignment="Tabular" UseLayoutRounding="True">
+    <!-- The watts overlay (0.10.9): the recipe's glass capsule and nothing else. The window is drawn with its alpha
+         (AllowsTransparency), so outside the capsule it is clear, its edge anti-aliased straight onto whatever is behind,
+         and a clear pixel takes no click. No room is kept round the capsule for the recipe's drop shadow: an untinted
+         capsule casts at most 0.7 % (under 2 of 255, measured in Edge), and every pixel it tinted would take the pointer
+         from the windows under it. -->
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <!-- Aero's styles on the window, as on Aero's main window (Aero look design §3), never at Application level. -->
                 <app:SharedDictionary Source="pack://application:,,,/PowerLedger;component/Aero/Styles.Aero.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            <!-- The room around the pill its shadow is drawn in; OverlayWindow.Margin in code. -->
-            <Thickness x:Key="Overlay.Room">18</Thickness>
-            <!-- The pill: the prototype's, a capsule 44 high. -->
-            <sys:Double x:Key="Overlay.Height">44</sys:Double>
-            <CornerRadius x:Key="Overlay.Radius">22</CornerRadius>
-            <!-- A pill's shadow, closer and softer than a pane's, to fit the small window. -->
-            <sys:Double x:Key="Overlay.ShadowFarBlur">16</sys:Double>
-            <sys:Double x:Key="Overlay.ShadowFarDepth">5</sys:Double>
-            <sys:Double x:Key="Overlay.ShadowFarOpacity">0.34</sys:Double>
-            <sys:Double x:Key="Overlay.ShadowNearBlur">5</sys:Double>
-            <sys:Double x:Key="Overlay.ShadowNearDepth">1.5</sys:Double>
-            <sys:Double x:Key="Overlay.ShadowNearOpacity">0.22</sys:Double>
+            <!-- A pixel of room round the capsule, so its anti-aliased edge is never cut by the window's own. -->
+            <Thickness x:Key="Overlay.Room">1</Thickness>
+            <!-- The capsule: the kit's watts pill, 56 high, the recipe's 28 corner. -->
+            <sys:Double x:Key="Overlay.Height">56</sys:Double>
             <!-- The menu's section heads: quiet, and not a choice. -->
             <Style x:Key="Overlay.MenuHead" TargetType="MenuItem">
                 <Setter Property="IsEnabled" Value="False" />
@@ -47,32 +44,17 @@
             <Grid.RenderTransform>
                 <ScaleTransform x:Name="PillScale" />
             </Grid.RenderTransform>
-            <!-- The shadow, clipped to outside the pill in code, so the glass shows what is behind it rather than the
-                 shadow's own body. -->
-            <Grid x:Name="Shadow" Margin="-18" IsHitTestVisible="False">
-                <Border Margin="{StaticResource Overlay.Room}" CornerRadius="{StaticResource Overlay.Radius}" Background="{DynamicResource A.B.Shadow}" IsHitTestVisible="False">
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="{StaticResource Overlay.ShadowFarBlur}" ShadowDepth="{StaticResource Overlay.ShadowFarDepth}"
-                                          Opacity="{StaticResource Overlay.ShadowFarOpacity}" Color="{DynamicResource A.C.Shadow}" Direction="270" RenderingBias="Performance" />
-                    </Border.Effect>
-                </Border>
-                <Border Margin="{StaticResource Overlay.Room}" CornerRadius="{StaticResource Overlay.Radius}" Background="{DynamicResource A.B.Shadow}" IsHitTestVisible="False">
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="{StaticResource Overlay.ShadowNearBlur}" ShadowDepth="{StaticResource Overlay.ShadowNearDepth}"
-                                          Opacity="{StaticResource Overlay.ShadowNearOpacity}" Color="{DynamicResource A.C.Shadow}" Direction="270" RenderingBias="Performance" />
-                    </Border.Effect>
-                </Border>
-            </Grid>
-            <aero:GlassPanel x:Name="Glass" CornerRadius="{StaticResource Overlay.Radius}" Padding="16,0,18,0" SheenEnabled="True" HasShadow="False"
+            <!-- The kit's .pill: the live dot, the watts in 26 semibold, the unit at 80 %, the 30 s line 90 by 26, 14 apart. -->
+            <aero:GlassPanel x:Name="Glass" Style="{StaticResource A.Glass.Capsule}" Padding="18,0,22,0" HasShadow="False"
                              AutomationProperties.Name="No reading">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <!-- The live dot, still: a breathing ring would redraw the window all the time. -->
-                    <aero:PulseDot Size="7" Breathes="False" VerticalAlignment="Center" Margin="0,0,11,0" />
-                    <aero:RollingNumber x:Name="Number" DigitSize="21" DigitWeight="SemiBold" VerticalAlignment="Center" />
-                    <TextBlock x:Name="Unit" Text="W" FontSize="{DynamicResource A.T.Body}" Foreground="{DynamicResource A.B.Text2}" Margin="5,0,0,0" VerticalAlignment="Center" />
+                    <aero:PulseDot Size="10" Breathes="False" VerticalAlignment="Center" Margin="0,0,14,0" />
+                    <aero:RollingNumber x:Name="Number" DigitSize="26" DigitWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock x:Name="Unit" Text="W" FontSize="16" FontWeight="Medium" Foreground="{DynamicResource A.B.Text2}" Margin="6,0,0,0" VerticalAlignment="Center" />
                     <TextBlock x:Name="NoReading" Text="No reading" FontSize="{DynamicResource A.T.Body}" Foreground="{DynamicResource A.B.Text2}" VerticalAlignment="Center"
                                Visibility="Collapsed" />
-                    <aero:Sparkline x:Name="Spark" Width="46" Height="18" Margin="13,0,0,0" VerticalAlignment="Center" Stroke="{DynamicResource A.B.Accent}" />
+                    <aero:Sparkline x:Name="Spark" Width="90" Height="26" Margin="14,0,0,0" VerticalAlignment="Center" Stroke="{DynamicResource A.B.Accent}" />
                 </StackPanel>
             </aero:GlassPanel>
         </Grid>

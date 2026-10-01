@@ -127,12 +127,12 @@ public class AeroStylesTests
             Size(new Button(), "A.RoundGlassBtn").ShouldBe(new Size(42, 42));
             Size(new Button(), "A.WhiteRoundBtn").ShouldBe(new Size(40, 40));
             Size(new Button(), "A.ExpandBtn").ShouldBe(new Size(30, 30));
-            Size(new RadioButton(), "A.NavItem").Height.ShouldBe(48);
-            Size(new RadioButton(), "A.SegItem").Height.ShouldBe(32);
-            Size(new RadioButton(), "A.OptItem").Height.ShouldBe(30);
-            Size(new Button(), "A.AccentBtn").Height.ShouldBe(34);
+            Size(new RadioButton(), "A.NavItem").Height.ShouldBe(46);   // the mockup's .nav
+            Size(new RadioButton(), "A.SegItem").Height.ShouldBe(34);   // the mockup's Day bubble
+            Size(new RadioButton(), "A.OptItem").Height.ShouldBe(32);
+            Size(new Button(), "A.AccentBtn").Height.ShouldBe(36);   // the mockup's Open report
             var (_, accent) = Dressed(new Button(), "A.AccentBtn", Theme.Dark);
-            ((SolidColorBrush)accent.Background).Color.ShouldBe(Color.FromRgb(0xD3, 0xF0, 0x3F), "the demo's lime");
+            ((SolidColorBrush)accent.Background).Color.ShouldBe(Color.FromArgb(0xDB, 0xD3, 0xF0, 0x3F), "the mockup's lime glass: the lime at 86 % over the recipe's glass");
             ((SolidColorBrush)accent.Foreground).Color.ShouldBe(Color.FromRgb(0x1B, 0x20, 0x04), "the lime's ink");
             Press.ScaleOf(accent).ShouldNotBeNull("a button compresses when pressed");
             var (_, row) = Dressed(new Button(), "A.RowBtn", Theme.Dark);
@@ -143,11 +143,11 @@ public class AeroStylesTests
     public void The_panes_take_the_demos_radii()
         => UiHarness.OnUi(() =>
         {
-            Dressed(new GlassPanel(), null, Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(26));
+            Dressed(new GlassPanel(), null, Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(28));   // the recipe's
             Dressed(new GlassPanel(), "A.Modal", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(28));
             Dressed(new GlassPanel(), "A.Toast", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(22));
-            Dressed(new GlassPanel(), "A.Banner", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(20));
-            Dressed(new Border(), "A.Well", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(20));
+            Dressed(new GlassPanel(), "A.Banner", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(22));
+            Dressed(new Border(), "A.Well", Theme.Dark).Element.CornerRadius.ShouldBe(new CornerRadius(22));   // the mockup's .inset
             var pane = Dressed(new GlassPanel(), null, Theme.Dark).Element;
             pane.HorizontalContentAlignment.ShouldBe(HorizontalAlignment.Stretch, "a pane's content fills it");
             pane.VerticalContentAlignment.ShouldBe(VerticalAlignment.Stretch);

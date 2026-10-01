@@ -272,4 +272,38 @@ public class AeroSettingsViewTests
                 window.Close();
             }
         });
+
+    /// <summary>0.10.9, the owner's decision: Show PowerLedger in screenshots, a glass switch, off by default; on, it sets
+    /// the saved Glass settings and, through GlassMaterial, the engine's flag at once, and off again the same way.</summary>
+    [Fact]
+    public void The_screenshots_switch_is_off_by_default_and_reaches_the_engine()
+        => UiHarness.OnUi(() =>
+        {
+            var settings = Screen(GlassSettings.Default);
+            var (window, view) = Page(settings, Theme.Dark, 1440);
+            try
+            {
+                var toggle = (GlassSwitch)view.FindName("ScreenshotsSwitch");
+                toggle.IsChecked.ShouldBe(false, "off by default");
+                LiquidGlassSources.AllowScreenshots.ShouldBeFalse();
+                System.Windows.Automation.AutomationProperties.GetName(toggle).ShouldBe("Show PowerLedger in screenshots");
+                UiHarness.Find<TextBlock>(view, t => t.Text.StartsWith("Off: the glass shows the windows behind it live", StringComparison.Ordinal)).ShouldNotBeNull();
+                UiHarness.Render(WholePage(window, view, 1440), 1440, WholeHeight(view), "aero-settings-screenshots-off-Dark.png");
+
+                toggle.IsChecked = true;
+                UiHarness.Pump(TimeSpan.FromMilliseconds(150));
+                settings.Glass.ShowInScreenshots.ShouldBeTrue();
+                LiquidGlassSources.AllowScreenshots.ShouldBeTrue("GlassMaterial hands the switch to the engine");
+                UiHarness.Render(WholePage(window, view, 1440), 1440, WholeHeight(view), "aero-settings-screenshots-on-Dark.png");
+
+                toggle.IsChecked = false;
+                UiHarness.Pump(TimeSpan.FromMilliseconds(150));
+                LiquidGlassSources.AllowScreenshots.ShouldBeFalse();
+            }
+            finally
+            {
+                window.Close();
+                LiquidGlassSources.AllowScreenshots = false;
+            }
+        });
 }

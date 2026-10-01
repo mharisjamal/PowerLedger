@@ -104,6 +104,10 @@ internal sealed class GlassSection : ObservableObject
 
     public bool IncreaseContrast { get => Glass.IncreaseContrast; set => Change(Glass with { IncreaseContrast = value }); }
 
+    /// <summary>Whether PowerLedger shows in screenshots and screen shares (0.10.9, off by default): on, the glass shows the
+    /// wallpaper rather than the live screen, which a capture could otherwise see through.</summary>
+    public bool ShowInScreenshots { get => Glass.ShowInScreenshots; set => Change(Glass with { ShowInScreenshots = value }); }
+
     /// <summary>Whether motion is reduced: as chosen here, or Windows' setting until then. Choosing here, even what
     /// Windows has, stops following Windows (Aero look design §3).</summary>
     public bool ReduceMotion
@@ -155,7 +159,7 @@ internal sealed class GlassSection : ObservableObject
     private static readonly string[] Shown =
     [
         nameof(Style), nameof(IsColour), nameof(TintColor), nameof(ChosenTint), nameof(Tint), nameof(TintStrength), nameof(Frost), nameof(EdgeLight),
-        nameof(Accent), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ReduceMotion),
+        nameof(Accent), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ShowInScreenshots), nameof(ReduceMotion),
         nameof(FollowsWindows), nameof(ReduceMotionNote), nameof(Parallax), nameof(ParallaxAvailable),
     ];
 }

@@ -118,6 +118,8 @@ internal partial class AeroWindow
         foreach (var pane in GlassPanel.Live.ToList())
         {
             if (!pane.IsVisible || pane.ActualWidth <= 0) continue;
+            // A menu's or a popup's glass (0.10.9: they are glass pieces too) is in a window of its own, not this one's shape.
+            if (!ReferenceEquals(PresentationSource.FromVisual(pane), _hwnd)) continue;
             var clip = new Rect(0, 0, ActualWidth, ActualHeight);
             var nested = false;
             var reached = false;

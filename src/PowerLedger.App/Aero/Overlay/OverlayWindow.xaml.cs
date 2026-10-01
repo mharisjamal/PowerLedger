@@ -15,9 +15,10 @@ namespace PowerLedger.App.Aero;
 /// accent line; "No reading" while there is none. Right-click for its corner or Free (drag it anywhere), its opacity, the
 /// sparkline and Close, each saved through <see cref="SettingsViewModel.Overlay"/>, the one channel it follows
 /// (<see cref="OverlayHost"/> shows and closes it). It is placed in pixels by <see cref="OverlayPlacement"/>, again when
-/// the displays, a work area or its DPI change, so it is never stranded off screen. What is behind the pill is blurred
-/// when Windows' transparency effects are on and Reduce transparency is off; otherwise the pill is a deeper, opaque glass,
-/// so the watts read over anything.
+/// the displays, a work area or its DPI change, so it is never stranded off screen. The pill is the recipe's liquid glass
+/// (0.10.9), the same piece as every other: the engine's live backdrop bent and blurred, the glowing edge, no tint; the
+/// window is drawn with its alpha, so nothing is painted outside the capsule. Reduce transparency and Increase contrast
+/// lay the strict glass's tint, as on the main window.
 /// </summary>
 internal sealed partial class OverlayWindow : Window, IOverlay
 {
@@ -25,7 +26,6 @@ internal sealed partial class OverlayWindow : Window, IOverlay
     private readonly SettingsViewModel _settings;
     private OverlaySettings _shown = OverlaySettings.Default;
     private IntPtr _handle;
-    private bool _blurred;
     private bool _closing;
 
     /// <param name="theme">Paints the pill in Aero's glass as Settings has it (accent, contrast, transparency), live, as the
@@ -45,19 +45,9 @@ internal sealed partial class OverlayWindow : Window, IOverlay
         Spark.Seconds = 30;
         ShowLive();
         now.PropertyChanged += OnNowChanged;
-        settings.PropertyChanged += OnSettingsChanged;
-        Closed += (_, _) =>
-        {
-            now.PropertyChanged -= OnNowChanged;
-            settings.PropertyChanged -= OnSettingsChanged;
-        };
+        Closed += (_, _) => now.PropertyChanged -= OnNowChanged;
         SourceInitialized += (_, _) => OnSource();
-        Pill.SizeChanged += (_, _) =>
-        {
-            ClipShadow();
-            Shape();
-            Place();
-        };
+        Pill.SizeChanged += (_, _) => Place();
         MouseLeftButtonDown += OnDrag;
         ContextMenu = new ContextMenu { Style = (Style)FindResource("A.Menu") };
         ContextMenuOpening += (_, _) => FillMenu(ContextMenu);
@@ -122,42 +112,19 @@ internal sealed partial class OverlayWindow : Window, IOverlay
         _handle = new WindowInteropHelper(this).Handle;
         OverlayNative.MakeToolWindow(_handle);
         HwndSource.FromHwnd(_handle)?.AddHook(OnMessage);
-        ApplyGlass();
     }
 
-    /// <summary>A display added, removed or rescaled, a work area changed (the taskbar moved), or Windows' transparency
-    /// switched: placed and glazed again once WPF has taken the change in.</summary>
+    /// <summary>A display added, removed or rescaled, or a work area changed (the taskbar moved): placed again once WPF has
+    /// taken the change in.</summary>
     private IntPtr OnMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        switch (message)
-        {
-            case OverlayNative.WM_DISPLAYCHANGE:
-            case OverlayNative.WM_DPICHANGED:
-                Dispatcher.BeginInvoke(() =>
-                {
-                    Shape();
-                    Place();
-                });
-                break;
-            case OverlayNative.WM_SETTINGCHANGE:
-                Dispatcher.BeginInvoke(() =>
-                {
-                    ApplyGlass();
-                    Place();
-                });
-                break;
-        }
+        if (message is OverlayNative.WM_DISPLAYCHANGE or OverlayNative.WM_DPICHANGED or OverlayNative.WM_SETTINGCHANGE) Dispatcher.BeginInvoke(Place);
         return IntPtr.Zero;
     }
 
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(NowViewModel.Live)) ShowLive();
-    }
-
-    private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(SettingsViewModel.Glass)) ApplyGlass();
     }
 
     private void ShowLive()
@@ -169,50 +136,6 @@ internal sealed partial class OverlayWindow : Window, IOverlay
         if (reading) Number.Set((int)Math.Round(Math.Max(0, live.Watts)), animate: false);
         Spark.Samples = live.Spark;
         AutomationProperties.SetName(Glass, reading ? $"{Math.Round(Math.Max(0, live.Watts)):0} watts now" : "No reading");
-    }
-
-    /// <summary>The blur of what is behind the pill where Windows allows it; otherwise, or with Reduce transparency, a
-    /// deeper glass of the palette's ink, so the watts stay readable over anything.</summary>
-    private void ApplyGlass()
-    {
-        var ink = TryFindResource("A.C.Ink") is Color c ? c : Colors.Black;
-        _blurred = false;
-        if (_handle != IntPtr.Zero)
-        {
-            var wanted = OverlayNative.TransparencyOn && !_settings.Glass.ReduceTransparency;
-            _blurred = wanted && OverlayNative.Blur(_handle, true, (uint)(0x10 << 24 | ink.B << 16 | ink.G << 8 | ink.R));
-            if (!_blurred) OverlayNative.Blur(_handle, false, 0);
-        }
-        Glass.Frost = new LinearGradientBrush(
-            Color.FromArgb(_blurred ? (byte)0x55 : (byte)0xE8, ink.R, ink.G, ink.B),
-            Color.FromArgb(_blurred ? (byte)0x66 : (byte)0xEE, ink.R, ink.G, ink.B), 90);
-        Shape();
-    }
-
-    /// <summary>With the blur on, Windows blurs the whole window; the region trims it to the pill.</summary>
-    private void Shape()
-    {
-        if (_handle == IntPtr.Zero || Pill.ActualWidth <= 0) return;
-        if (!_blurred)
-        {
-            OverlayNative.Shape(_handle, null, 0);
-            return;
-        }
-        var scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        var room = Room.Margin.Left;
-        OverlayNative.Shape(_handle, new Rect(room * scale, room * scale, Pill.ActualWidth * scale, Pill.ActualHeight * scale), Pill.ActualHeight / 2 * scale);
-    }
-
-    /// <summary>The shadow only outside the pill.</summary>
-    private void ClipShadow()
-    {
-        if (Pill.ActualWidth <= 0) return;
-        var room = -Shadow.Margin.Left;
-        var outside = new RectangleGeometry(new Rect(0, 0, Pill.ActualWidth + (2 * room), Pill.ActualHeight + (2 * room)));
-        var pill = new RectangleGeometry(new Rect(room, room, Pill.ActualWidth, Pill.ActualHeight), Pill.ActualHeight / 2, Pill.ActualHeight / 2);
-        var clip = new CombinedGeometry(GeometryCombineMode.Exclude, outside, pill);
-        clip.Freeze();
-        Shadow.Clip = clip;
     }
 
     private void Place()

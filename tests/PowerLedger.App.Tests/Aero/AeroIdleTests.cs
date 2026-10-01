@@ -106,26 +106,32 @@ public class AeroIdleTests
             dot.Sleep();
         });
 
+    /// <summary>0.10.9: a piece's shadows and its glowing edge are worked out once into small images and drawn as they are:
+    /// no effect runs on them, so a live reading inside a pane re-blurs nothing; a piece of the same shape draws the same
+    /// images again.</summary>
     [Fact]
-    public void A_panes_shadow_is_cached_blurred_and_clipped()
+    public void A_panes_shadow_and_edge_are_worked_out_once_with_no_effect()
         => UiHarness.OnUi(() =>
         {
             var window = AeroHost.Dressed(new Window { Width = 400, Height = 300, Left = -20000, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None }, Theme.Dark);
-            var pane = new GlassPanel { Width = 200, Height = 120, Content = new TextBlock { Text = "Power now" } };
+            window.Resources[GlassMaterial.GlowKey] = 0.7;
+            var pane = new GlassPanel { Width = 200, Height = 120, Content = new TextBlock { Text = "Power now" }, Background = Brushes.Black };
             window.Content = new Grid { Children = { pane } };
             try
             {
                 window.Show();
                 UiHarness.Pump(TimeSpan.FromMilliseconds(50));
-                var shadow = (Grid)pane.Template.FindName("PART_Shadow", pane);
-                var clipped = (Grid)pane.Template.FindName("PART_ShadowClip", pane);
-                // Effect and Clip on a cached element are applied after its cache, on every frame; inside it, only once.
-                shadow.CacheMode.ShouldBeOfType<BitmapCache>();
+                var shadow = (GlassShadow)pane.Template.FindName("PART_Shadow", pane);
+                var glow = (GlassGlow)pane.Template.FindName("PART_Glow", pane);
                 shadow.Effect.ShouldBeNull();
-                shadow.Clip.ShouldBeNull();
-                clipped.Clip.ShouldNotBeNull("the pane's own area is cut out of the shadow inside the cache");
-                clipped.Children.OfType<Border>().Select(b => b.Effect).ShouldAllBe(e => e is DropShadowEffect);
-                clipped.Children.OfType<Border>().Select(b => b.CacheMode).ShouldAllBe(c => c == null, "one cache, round the finished shadow");
+                glow.Effect.ShouldBeNull();
+                var map = shadow.DropMap.ShouldNotBeNull("a tinted pane casts the recipe's shadow");
+                (map.PixelWidth * map.PixelHeight).ShouldBeLessThan(200 * 120, "a small image, drawn stretched");
+                ((TextBlock)pane.Content).Text = "146 W";
+                UiHarness.Pump(TimeSpan.FromMilliseconds(50));
+                shadow.DropMap.ShouldBeSameAs(map, "a new reading draws the same shadow");
+                var scale = VisualTreeHelper.GetDpi(glow).DpiScaleX;
+                GlassGlow.For(200, 120, 28, 0.7, scale).ShouldBeSameAs(GlassGlow.For(200, 120, 28, 0.7, scale), "one image for a shape");
             }
             finally
             {

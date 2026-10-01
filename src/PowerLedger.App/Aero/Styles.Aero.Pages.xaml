@@ -16,7 +16,7 @@
     <!-- The page: room under the last panel for its shadow; the page host sets the sides. -->
     <Thickness x:Key="A.Page.Margin">0,0,0,28</Thickness>
     <Thickness x:Key="A.Page.Gap">0,16,0,0</Thickness>
-    <Thickness x:Key="A.Page.Panel">20,18</Thickness>
+    <Thickness x:Key="A.Page.Panel">24,22</Thickness>
     <!-- Prose and forms keep to a readable measure inside a panel. -->
     <sys:Double x:Key="A.Page.Measure">560</sys:Double>
     <sys:Double x:Key="A.Page.Share">120</sys:Double>
@@ -28,7 +28,8 @@
         <Setter Property="Padding" Value="{StaticResource A.Page.Panel}" />
     </Style>
 
-    <!-- A panel's head: the icon well, the title, and the panel's own controls docked at the right. -->
+    <!-- A panel's head: the title, and the panel's own controls docked at the right. The mockup's titles stand alone, so
+         the icon well a head used to lead with (0.10.8) is not drawn. -->
     <Style x:Key="A.Page.Head" TargetType="DockPanel">
         <Setter Property="Margin" Value="0,0,0,12" />
         <Setter Property="LastChildFill" Value="True" />
@@ -40,9 +41,11 @@
         <Setter Property="Background" Value="{DynamicResource A.B.Well2}" />
         <Setter Property="Margin" Value="0,0,10,0" />
         <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Visibility" Value="Collapsed" />
     </Style>
 
-    <!-- The segmented pills' track: a hairline capsule, the white pill that slides between them drawn by SegTrack. -->
+    <!-- The segmented pills' track, the mockup's: a glass capsule group, the chosen word on a glass bubble that slides
+         between them (SegTrack moves it). -->
     <Style x:Key="A.Page.SegTrack" TargetType="aero:SegTrack">
         <Setter Property="Height" Value="42" />
         <Setter Property="Padding" Value="4" />
@@ -54,18 +57,12 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="aero:SegTrack">
-                    <Border CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                    <aero:GlassPanel Style="{StaticResource A.Glass.Capsule}" Padding="{TemplateBinding Padding}">
                         <Grid x:Name="PART_Host">
-                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" Width="0" Height="32" CornerRadius="16"
-                                    Background="{TemplateBinding IndicatorBrush}" Visibility="Hidden" IsHitTestVisible="False">
-                                <Border.Effect>
-                                    <DropShadowEffect BlurRadius="10" ShadowDepth="2" Direction="270" Opacity="0.18" RenderingBias="Performance" />
-                                </Border.Effect>
-                            </Border>
+                            <aero:GlassPanel x:Name="PART_Indicator" Style="{StaticResource A.Glass.Bubble}" HorizontalAlignment="Left" Width="0" Height="34" Visibility="Hidden" />
                             <ContentPresenter VerticalAlignment="Center" />
                         </Grid>
-                    </Border>
+                    </aero:GlassPanel>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -168,11 +165,9 @@
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
-    <!-- A well of figures, as the demo's kv-wrap: a faint top light, the rows inside. -->
+    <!-- A well of figures, the mockup's .inset with the rows inside. -->
     <Style x:Key="A.Page.Figures" TargetType="Border" BasedOn="{StaticResource A.Well}">
-        <Setter Property="BorderBrush" Value="{DynamicResource A.B.WellLit}" />
-        <Setter Property="BorderThickness" Value="0,1,0,0" />
-        <Setter Property="Padding" Value="0,2" />
+        <Setter Property="Padding" Value="0,1" />
     </Style>
 
     <Style TargetType="aero:KeyValue">

@@ -74,9 +74,8 @@
                     </DockPanel>
                     <TextBlock Style="{StaticResource A.Page.Note}" Text="{Binding Message}" Visibility="{Binding HasMessage, Converter={StaticResource VisibleWhen}}" />
 
-                    <!-- The chart in the demo's chart well: darker than the glass, so the parts read against it. -->
-                    <Border Margin="0,12,0,0" Padding="12,12,12,8" CornerRadius="{DynamicResource A.R.Well}" Background="{DynamicResource A.B.ChartWell}"
-                            BorderBrush="{DynamicResource A.B.ChartWellLit}" BorderThickness="0,1,0,0">
+                    <!-- The chart in the mockup's .inset well, so the parts read against it. -->
+                    <Border Margin="0,12,0,0" Padding="12,12,12,8" Style="{StaticResource A.Well}">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,6">
                                 <TextBlock DockPanel.Dock="Right" Style="{StaticResource A.Label}" Text="{Binding UnitLabel}" VerticalAlignment="Center" />

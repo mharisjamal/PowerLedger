@@ -18,15 +18,15 @@ public enum GrabGlow
 /// rests at a quarter so it can be found, lights to half with the pointer near and fully, a touch brighter, with the pointer
 /// on it; pressed and held it moves the window through Windows' own move loop (DragMove), so snapping works; a double
 /// click toggles the spread and centred layouts; focused, the arrow keys move the window 10 px at a time. The visible bar
-/// is 56 by 6; the piece of the window's shape it stands in, and takes the pointer in, is 120 by 22. It is a
-/// <see cref="GlassPanel"/> so it is a piece of the free-form window's shape; its style (A.GrabBar) draws only the bar, as
-/// the demo's .gbtn. Nothing here runs at rest: the window hands it the pointer from its own mouse moves, and each change
-/// of glow starts one short fade that ends.
+/// is the mockup's glass capsule, 66 by 7; the piece of the window's shape it stands in, and takes the pointer in, is 120
+/// by 22. It is a <see cref="GlassPanel"/> so it is a piece of the free-form window's shape; its style (A.GrabBar) draws
+/// only the bar. Nothing here runs at rest: the window hands it the pointer from its own mouse moves, and each change of
+/// glow starts one short fade that ends.
 /// </summary>
 public sealed class GrabBar : GlassPanel
 {
-    public const double BarWidth = 56;
-    public const double BarHeight = 6;
+    public const double BarWidth = 66;
+    public const double BarHeight = 7;
     public const double HitWidth = 120;
     public const double HitHeight = 22;
 

@@ -281,12 +281,21 @@
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Reduce transparency" />
                                 <aero:GlassSwitch IsChecked="{Binding ReduceTransparency}" AutomationProperties.Name="Reduce transparency" />
-                                <TextBlock Style="{StaticResource SwitchText}" Text="Denser glass that shows less of what is behind it" />
+                                <TextBlock Style="{StaticResource SwitchText}" Text="Denser glass, still glass" />
                             </StackPanel>
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Increase contrast" />
                                 <aero:GlassSwitch IsChecked="{Binding IncreaseContrast}" AutomationProperties.Name="Increase contrast" />
-                                <TextBlock Style="{StaticResource SwitchText}" Text="Solid edges and stronger text" />
+                                <TextBlock Style="{StaticResource SwitchText}" Text="Stronger text on a denser tint" />
+                            </StackPanel>
+                            <!-- The live glass keeps PowerLedger's windows out of screenshots and screen shares (0.10.9, the owner's
+                                 choice): on, they appear in them, and the glass shows the wallpaper instead. -->
+                            <StackPanel Style="{StaticResource Row}">
+                                <TextBlock Style="{StaticResource Label}" Text="Show PowerLedger in screenshots" TextWrapping="Wrap" />
+                                <aero:GlassSwitch x:Name="ScreenshotsSwitch" IsChecked="{Binding ShowInScreenshots}" AutomationProperties.Name="Show PowerLedger in screenshots"
+                                                  AutomationProperties.HelpText="Off: the glass shows the windows behind it live, and PowerLedger stays out of screenshots and screen shares. On: it appears in them, and the glass uses your wallpaper." />
+                                <TextBlock Style="{StaticResource SwitchText}" TextWrapping="Wrap" MaxWidth="420"
+                                           Text="Off: the glass shows the windows behind it live, and PowerLedger stays out of screenshots and screen shares. On: it appears in them, and the glass uses your wallpaper." />
                             </StackPanel>
                             <StackPanel Style="{StaticResource Row}">
                                 <TextBlock Style="{StaticResource Label}" Text="Reduce motion" />
@@ -318,7 +327,7 @@
                                 </Rectangle>
                                 <Ellipse Width="120" Height="120" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-20,-30,0,0" Fill="{DynamicResource A.B.Accent}" Opacity="0.85" />
                                 <Ellipse Width="90" Height="90" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-18,-22" Fill="{DynamicResource A.B.Pill}" Opacity="0.7" />
-                                <aero:GlassPanel CornerRadius="{DynamicResource A.R.Well}" Margin="26,36" Padding="18,14" SheenEnabled="False" HasShadow="False">
+                                <aero:GlassPanel CornerRadius="{DynamicResource A.R.Well}" Margin="26,36" Padding="18,14">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
                                             <Ellipse Width="7" Height="7" Fill="{DynamicResource A.B.Accent}" VerticalAlignment="Center" Margin="0,0,8,0" />

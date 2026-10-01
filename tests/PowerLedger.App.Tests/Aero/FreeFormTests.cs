@@ -223,15 +223,15 @@ public class FreeFormWindowTests
 
             Holds(Middle(window, "Side")).ShouldBeTrue("the sidebar");
             Holds(Middle(window, "SearchGlass")).ShouldBeTrue("the search pill");
-            Holds(Middle(window, "BellPill")).ShouldBeTrue("the bell's own pill");
-            Holds(Middle(window, "MaximizeButton")).ShouldBeTrue("a caption button's pill");
+            Holds(Middle(window, "BellPill")).ShouldBeTrue("the bell, on the top bar's glass group");
+            Holds(Middle(window, "MaximizeButton")).ShouldBeTrue("a caption button, on the window buttons' group");
             Holds(new Point(5, 5)).ShouldBeFalse("the window's corner, outside every surface");
             var side = (FrameworkElement)window.FindName("Side");
             var sideRight = side.TranslatePoint(new Point(side.ActualWidth, 0), window).X;
             Holds(new Point(sideRight + 9, 400)).ShouldBeFalse("the gap between the sidebar and the page");
-            var bell = (FrameworkElement)window.FindName("BellPill");
-            var bellLeft = bell.TranslatePoint(new Point(0, 0), window);
-            Holds(new Point(bellLeft.X - 5, bellLeft.Y + bell.ActualHeight / 2)).ShouldBeFalse("the gap between two pills");
+            var group = (FrameworkElement)window.FindName("TopGroup");
+            var groupLeft = group.TranslatePoint(new Point(0, 0), window);
+            Holds(new Point(groupLeft.X - 5, groupLeft.Y + group.ActualHeight / 2)).ShouldBeFalse("the gap between the search and the group");
         });
 
     /// <summary>WindowChrome takes a window's region off as it extends the glass frame (0.10.4, the window drawn with its
@@ -319,9 +319,9 @@ public class FreeFormWindowTests
             AeroWindow.ShapeHooks.ShouldBe(0);
         });
 
-    /// <summary>Each top-bar pill floats over the desktop on its own, over whatever window is behind it (0.10.6). Under its
-    /// button's own light fill it lays only the dim its words need: at 3:1 over a white window and a black one, 4.5:1 on
-    /// the strict glass; and nothing where the button's fill is enough (the light theme's).</summary>
+    /// <summary>0.10.9, the owner's recipe: every glass piece, the top bar's groups among them, is untinted glass by default
+    /// in either theme, whatever is behind it. On the strict glass (Increase contrast, Reduce transparency) the tint is as
+    /// dense as the words need at 4.5:1 over a white window and a black one.</summary>
     [Theory]
     [InlineData("Dark", "Tinted", false)]
     [InlineData("Dark", "Clear", false)]
@@ -329,61 +329,63 @@ public class FreeFormWindowTests
     [InlineData("Light", "Tinted", false)]
     [InlineData("Light", "Tinted", true)]
     [InlineData("Dark", "Dark", true)]
-    [InlineData("Light", "Dark", false)]
-    public void A_top_bar_pill_reads_over_a_white_window_and_a_black_one(string themeName, string style, bool increaseContrast)
+    [InlineData("Light", "Dark", true)]
+    public void A_top_bar_group_is_the_recipes_glass_and_reads_on_the_strict_glass(string themeName, string style, bool increaseContrast)
         => UiHarness.OnUi(() =>
         {
             var theme = Enum.Parse<Theme>(themeName);
             var settings = GlassSettings.Default with { Style = Enum.Parse<GlassStyle>(style), IncreaseContrast = increaseContrast };
             var map = GlassMaterial.Map(settings, theme);
             Color C(string key) => (Color)map[key];
-            var dim = ((SolidColorBrush)map["A.B.PillFill"]).Color;
-            dim.ShouldBe(C("A.C.PillDim"));
-            map[GlassMaterial.HaloOnKey].ShouldBe(false);
+            if (!increaseContrast)
+            {
+                if (settings.Style is GlassStyle.Clear or GlassStyle.Tinted) C("A.C.GlassTintTop").A.ShouldBe((byte)0, "the recipe has no tint");
+                return;
+            }
             foreach (var behind in new[] { Colors.White, Colors.Black })
             {
-                var glass = Contrast.Over(dim, behind);
-                foreach (var fill in new[] { Contrast.Over(C("A.C.BtnFill"), glass), Contrast.Over(C("A.C.OutlineHover"), Contrast.Over(C("A.C.BtnFill"), glass)) })
+                var glass = Contrast.Over(C("A.C.GlassTintTop"), behind);
+                foreach (var fill in new[] { glass, Contrast.Over(C("A.C.GlassHover"), glass) })
                 {
-                    Contrast.Ratio(Contrast.Over(C("A.C.Text"), fill), fill).ShouldBeGreaterThanOrEqualTo(
-                        increaseContrast ? GlassMaterial.StrictContrast : GlassMaterial.GlassContrast, $"a pill's words over {behind}, {style}, {theme}");
+                    Contrast.Ratio(Contrast.Over(C("A.C.Text"), fill), fill).ShouldBeGreaterThanOrEqualTo(GlassMaterial.StrictContrast, $"a group's words over {behind}, {style}, {theme}");
                 }
             }
         });
 
-    /// <summary>The pill is the demo's button over what is behind it: over a dark desktop its fill is the demo's white at
-    /// 12 % exactly (the dim under it is black), and the light theme's button needs no dim at all.</summary>
+    /// <summary>The default glass is the recipe's, untinted, in both themes.</summary>
     [Fact]
-    public void The_default_top_bar_pill_is_the_videos_button_over_the_dim_its_words_need()
+    public void The_default_glass_has_no_tint()
         => UiHarness.OnUi(() =>
         {
-            var dark = GlassMaterial.Map(GlassSettings.Default, Theme.Dark);
-            var dim = ((SolidColorBrush)dark["A.B.PillFill"]).Color;
-            (dim.R, dim.G, dim.B).ShouldBe(((byte)0, (byte)0, (byte)0), "black under the light ink");
-            dim.A.ShouldBeInRange((byte)110, (byte)150, "about half: the least that keeps the words at 3:1 over a white window");
-            Contrast.Over((Color)dark["A.C.BtnFill"], Contrast.Over(dim, Colors.Black)).ShouldBe(Contrast.Over((Color)dark["A.C.BtnFill"], Colors.Black));
-            ((SolidColorBrush)GlassMaterial.Map(GlassSettings.Default, Theme.Light)["A.B.PillFill"]).Color.A.ShouldBe((byte)0, "the light button's fill is enough");
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                var tint = (LinearGradientBrush)GlassMaterial.Map(GlassSettings.Default, theme)["A.B.GlassTint"];
+                tint.GradientStops.ShouldAllBe(stop => stop.Color.A == 0, theme.ToString());
+            }
         });
 
-    /// <summary>No halo behind the glass's content (0.10.4): the approved video has none, on any glass.</summary>
+    /// <summary>The mockup's text shadow (.t: 0 1px 2px, navy at 28 %) lies once under a piece's content: a piece on another's
+    /// glass takes none of its own, which the outer one's already reaches.</summary>
     [Fact]
-    public void The_glass_lays_no_halo_behind_its_content()
+    public void The_content_carries_the_mockups_text_shadow_once()
         => UiHarness.OnUi(() =>
         {
             var window = AeroHost.Dressed(new Window { Width = 420, Height = 140, WindowStyle = WindowStyle.None, Left = -20000, ShowInTaskbar = false, ShowActivated = false }, Theme.Dark);
             var settings = GlassSettings.Default;
             using var material = new GlassMaterial(window, () => settings, () => Theme.Dark);
-            var pane = new GlassPanel { Content = new System.Windows.Controls.TextBlock { Text = "Wednesday 24" }, HasShadow = false, SheenEnabled = false };
+            var inner = new GlassPanel { Content = new System.Windows.Controls.TextBlock { Text = "+12%" }, Margin = new Thickness(20) };
+            var pane = new GlassPanel { Content = inner, HasShadow = false };
             window.Content = pane;
             try
             {
                 window.Show();
                 window.UpdateLayout();
-                pane.Template.FindName("PART_Halo", pane).ShouldBeOfType<System.Windows.Controls.Border>().Effect.ShouldBeNull();
-                settings = settings with { IncreaseContrast = true };
-                material.Refresh();
-                window.UpdateLayout();
-                pane.Template.FindName("PART_Halo", pane).ShouldBeOfType<System.Windows.Controls.Border>().Effect.ShouldBeNull();
+                UiHarness.Pump(TimeSpan.FromMilliseconds(50));
+                var shadow = pane.Template.FindName("PART_Content", pane).ShouldBeOfType<System.Windows.Controls.ContentPresenter>().Effect
+                    .ShouldBeOfType<System.Windows.Media.Effects.DropShadowEffect>();
+                (shadow.ShadowDepth, Math.Round(shadow.Opacity, 2)).ShouldBe((1d, 0.28));
+                inner.IsNested.ShouldBeTrue();
+                inner.Template.FindName("PART_Content", inner).ShouldBeOfType<System.Windows.Controls.ContentPresenter>().Effect.ShouldBeNull();
             }
             finally
             {
