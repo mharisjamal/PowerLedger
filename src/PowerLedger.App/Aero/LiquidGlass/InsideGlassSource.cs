@@ -15,8 +15,11 @@ namespace PowerLedger.App.Aero;
 /// the inner piece: each visual's own drawing (VisualTreeHelper.GetDrawing) with its offset, transform, clip and opacity;
 /// backdrops and the parts the look marks out (<see cref="LiquidGlassBackdrop.InBackdropProperty"/>: a piece's drop shadow
 /// and its highlights, which CSS paints apart from the content) left out. It is drawn again only when what it would draw
-/// changed: after a layout pass, or each frame while AeroMotion animates, the drawings are walked and hashed, and only a
-/// new hash or a new box rasterises them. Nothing runs at rest, and the window's own WPF drawing is never touched.</para>
+/// changed: once after a burst of layout passes, or each frame while AeroMotion animates, the drawings of the visuals that
+/// can reach the box (an element's laid out size and a few units more) are walked and hashed, and only a new hash or a
+/// new size rasterises them. The picture always lies at the piece, so a moved window draws nothing again. Nothing runs at
+/// rest, and the window's own WPF drawing is never touched. A colour changed without a layout pass shows at the next
+/// one.</para>
 /// <para>A visual's Effect (a text shadow) is not drawn: a DrawingGroup has no effects.</para>
 /// </summary>
 internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
@@ -24,7 +27,6 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
     private readonly LiquidGlassBackdrop _piece;
     private readonly Visual _outer;
     private int? _hash;
-    private Rect _bounds;
     private bool _hooked;
     private DateTime _followUntil;
     private bool _disposed;
@@ -48,18 +50,25 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
     /// <summary>How many times the content was walked and hashed, for the measurements.</summary>
     internal static long Checked;
 
+    /// <summary>The time spent walking, hashing and drawing, in stopwatch ticks, for the measurements.</summary>
+    internal static long Ticks;
+
     public LiquidGlassSourceKind Kind => LiquidGlassSourceKind.Inside;
 
     public ImageSource? Image { get; private set; }
 
-    public Rect ScreenBounds => _bounds;
+    /// <summary>The piece's own box: the picture is always the piece's, wherever its window is.</summary>
+    public Rect ScreenBounds => _piece.ScreenBox() ?? Rect.Empty;
 
     public event Action? Changed;
 
     /// <summary>Draws the picture now if what it shows changed; true when it did.</summary>
     public bool Refresh()
     {
-        if (_disposed || _piece.ScreenBox() is not { } box || box.Width <= 0 || box.Height <= 0) return false;
+        if (_disposed) return false;
+        var dpi = VisualTreeHelper.GetDpi(_piece);
+        var size = new Size(Math.Round(_piece.ActualWidth * dpi.DpiScaleX), Math.Round(_piece.ActualHeight * dpi.DpiScaleY));
+        if (size.Width <= 0 || size.Height <= 0) return false;
         Rect inOuter;
         try
         {
@@ -70,9 +79,22 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
             return false;
         }
         Interlocked.Increment(ref Checked);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            return Draw(size, dpi, inOuter);
+        }
+        finally
+        {
+            Interlocked.Add(ref Ticks, System.Diagnostics.Stopwatch.GetTimestamp() - started);
+        }
+    }
+
+    private bool Draw(Size size, DpiScale dpi, Rect inOuter)
+    {
         var drawing = new DrawingGroup();
         var hash = new HashCode();
-        hash.Add(box.Size);
+        hash.Add(size);
         hash.Add(inOuter);
         var done = false;
         using (var context = drawing.Open())
@@ -80,24 +102,15 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
             Walk(_outer, Matrix.Identity, context, ref hash, inOuter, ref done, top: true);
         }
         var value = hash.ToHashCode();
-        if (value == _hash && Image != null)
-        {
-            // The same picture, moved with its window: only where it lies changes.
-            if (_bounds == box) return false;
-            _bounds = box;
-            Changed?.Invoke();
-            return true;
-        }
+        if (value == _hash && Image != null) return false;
         _hash = value;
-        _bounds = box;
-        var dpi = VisualTreeHelper.GetDpi(_piece);
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
             context.PushTransform(new TranslateTransform(-inOuter.X, -inOuter.Y));
             context.DrawDrawing(drawing);
         }
-        var bitmap = new RenderTargetBitmap((int)box.Width, (int)box.Height, 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
+        var bitmap = new RenderTargetBitmap((int)size.Width, (int)size.Height, 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
         bitmap.Render(visual);
         bitmap.Freeze();
         Image = bitmap;
@@ -136,11 +149,11 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
             if (VisualTreeHelper.GetTransform(visual) is { } transform) local = transform.Value * local;
         }
         var here = local * above;
-        // Nothing of it reaches the box: left out (unless the inner piece is inside it).
-        var bounds = VisualTreeHelper.GetDescendantBounds(visual);
-        bounds.Union(VisualTreeHelper.GetContentBounds(visual));
-        var reaches = !bounds.IsEmpty && Transform(bounds, here).IntersectsWith(box);
-        if (!reaches && !_piece.IsDescendantOf(visual)) return;
+        // Its own drawing is taken only where it can reach the box: an element's laid out size and a margin for what
+        // spills past it (a glyph's overhang, antialiasing). WPF's own drawing bounds would cost a walk of every drawing.
+        var reach = visual is UIElement element ? new Rect(element.RenderSize) : VisualTreeHelper.GetContentBounds(visual);
+        if (!reach.IsEmpty) reach.Inflate(Spill, Spill);
+        var reaches = !reach.IsEmpty && Transform(reach, here).IntersectsWith(box);
         var opacity = VisualTreeHelper.GetOpacity(visual);
         var clip = VisualTreeHelper.GetClip(visual);
         var mask = VisualTreeHelper.GetOpacityMask(visual);
@@ -150,7 +163,7 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         if (mask != null) context.PushOpacityMask(mask);
         hash.Add(local);
         hash.Add(opacity);
-        if (clip != null) hash.Add(clip.ToString(CultureInfo.InvariantCulture));
+        if (clip != null) hash.Add(Token(clip));
         if (mask != null) hash.Add(Token(mask));
         if (reaches && VisualTreeHelper.GetDrawing(visual) is { } own)
         {
@@ -162,6 +175,49 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         if (opacity < 1) context.Pop();
         if (clip != null) context.Pop();
         context.Pop();
+    }
+
+    /// <summary>How far past an element's laid out size its own drawing is taken to reach.</summary>
+    private const double Spill = 4;
+
+    /// <summary>A geometry's shape, as a value, cheaply: a rectangle's or an ellipse's numbers, a path's figures, a
+    /// combination's parts.</summary>
+    private static int Token(System.Windows.Media.Geometry? geometry)
+    {
+        var hash = new HashCode();
+        switch (geometry)
+        {
+            case null:
+                break;
+            case RectangleGeometry r:
+                hash.Add(r.Rect);
+                hash.Add(r.RadiusX);
+                hash.Add(r.RadiusY);
+                break;
+            case EllipseGeometry e:
+                hash.Add(e.Center);
+                hash.Add(e.RadiusX);
+                hash.Add(e.RadiusY);
+                break;
+            case LineGeometry l:
+                hash.Add(l.StartPoint);
+                hash.Add(l.EndPoint);
+                break;
+            case CombinedGeometry c:
+                hash.Add(c.GeometryCombineMode);
+                hash.Add(Token(c.Geometry1));
+                hash.Add(Token(c.Geometry2));
+                break;
+            case GeometryGroup g:
+                hash.Add(g.FillRule);
+                foreach (var child in g.Children) hash.Add(Token(child));
+                break;
+            default:
+                hash.Add(geometry.ToString(CultureInfo.InvariantCulture));
+                break;
+        }
+        if (geometry != null) hash.Add(geometry.Transform?.Value ?? Matrix.Identity);
+        return hash.ToHashCode();
     }
 
     private static Rect Transform(Rect r, Matrix m)
@@ -178,13 +234,12 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
             case DrawingGroup group:
                 hash.Add(group.Transform?.Value ?? Matrix.Identity);
                 hash.Add(group.Opacity);
-                if (group.ClipGeometry != null) hash.Add(group.ClipGeometry.ToString(CultureInfo.InvariantCulture));
+                if (group.ClipGeometry != null) hash.Add(Token(group.ClipGeometry));
                 if (group.OpacityMask != null) hash.Add(Token(group.OpacityMask));
                 foreach (var child in group.Children) Add(child, ref hash);
                 break;
             case GeometryDrawing shape:
-                hash.Add(shape.Geometry?.ToString(CultureInfo.InvariantCulture));
-                hash.Add(shape.Geometry?.Transform?.Value ?? Matrix.Identity);
+                hash.Add(Token(shape.Geometry));
                 hash.Add(Token(shape.Brush));
                 if (shape.Pen != null)
                 {
@@ -254,7 +309,19 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         return hash.ToHashCode();
     }
 
-    private void OnLayoutUpdated(object? sender, EventArgs e) => Refresh();
+    /// <summary>After a layout pass (a reading makes a few in a row), one look once the dispatcher is idle.</summary>
+    private void OnLayoutUpdated(object? sender, EventArgs e)
+    {
+        if (_queued) return;
+        _queued = true;
+        _piece.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+        {
+            _queued = false;
+            Refresh();
+        });
+    }
+
+    private bool _queued;
 
     private void OnAnimating(TimeSpan length)
     {

@@ -110,6 +110,10 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         public double Scale;
         public GpuGlassShape Shape;
         public (int W, int H, double Dpi, double Scale)? MapFor;
+
+        /// <summary>The maps made for the piece's last few sizes, the one in use among them: the watts overlay's pill
+        /// changes width with its reading, and goes back to a width it had moments ago.</summary>
+        public readonly List<((int W, int H, double Dpi, double Scale) For, IntPtr Map, IntPtr View)> Maps = [];
         public IntPtr Map, MapView;
         public int MapGeneration;
         public (int W, int H, double Dpi, double Scale)? MapMaking;
@@ -142,6 +146,9 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     public long Frames => Interlocked.Read(ref _frames);
 
     public MonitorCapture Session => _session;
+
+    /// <summary>How many sizes' maps a piece keeps.</summary>
+    private const int KeptMaps = 6;
 
     /// <summary>How many source maps have been made, for the measurements.</summary>
     internal static long MapsMade;
@@ -262,12 +269,19 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         Arrange();
         // The capture thread reads the published pieces under the GPU lock: once the piece is off them, its map can go.
         Publish();
-        lock (_gpu)
+        lock (_gpu) ReleaseMaps(p);
+    }
+
+    /// <summary>Lets go of every map a piece holds. Under the GPU lock, once no published job names them.</summary>
+    private static void ReleaseMaps(Piece p)
+    {
+        foreach (var (_, map, view) in p.Maps)
         {
-            CaptureNative.Release(p.MapView);
-            CaptureNative.Release(p.Map);
-            (p.Map, p.MapView) = (IntPtr.Zero, IntPtr.Zero);
+            CaptureNative.Release(view);
+            CaptureNative.Release(map);
         }
+        p.Maps.Clear();
+        (p.Map, p.MapView, p.MapFor) = (IntPtr.Zero, IntPtr.Zero, null);
     }
 
     public void Dispose()
@@ -284,11 +298,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         Volatile.Write(ref _areas, []);
         lock (_gpu)
         {
-            foreach (var p in _pieces.Values)
-            {
-                CaptureNative.Release(p.MapView);
-                CaptureNative.Release(p.Map);
-            }
+            foreach (var p in _pieces.Values) ReleaseMaps(p);
             _pieces.Clear();
             DropPicture();
             DropLayer();
@@ -390,12 +400,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             {
                 DropPicture();
                 DropLayer();
-                foreach (var p in _pieces.Values)
-                {
-                    CaptureNative.Release(p.MapView);
-                    CaptureNative.Release(p.Map);
-                    (p.Map, p.MapView, p.MapFor) = (IntPtr.Zero, IntPtr.Zero, null);
-                }
+                foreach (var p in _pieces.Values) ReleaseMaps(p);
             }
             foreach (var p in _pieces.Values)
             {
@@ -797,6 +802,19 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     {
         var wanted = (p.Box.Width, p.Box.Height, p.Dpi, p.Scale);
         if (p.MapFor == wanted || p.Box.Width <= 0 || p.Box.Height <= 0) return;
+        // A size the piece had moments ago: its map is still here.
+        var kept = p.Maps.FindIndex(m => m.For == wanted);
+        if (kept >= 0)
+        {
+            var (_, keptMap, keptView) = p.Maps[kept];
+            p.Maps.RemoveAt(kept);
+            p.Maps.Add((wanted, keptMap, keptView));
+            (p.Map, p.MapView, p.MapFor) = (keptMap, keptView, wanted);
+            p.MapGeneration++;
+            p.Version++;
+            Publish();
+            return;
+        }
         // One map in the making a piece at a time: a piece resized on every frame of a spring makes the map for the size
         // it ends at, not one for every frame (each a pass over every pixel).
         if (p.MapMaking != null)
@@ -856,11 +874,15 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
                 CaptureNative.Release(map);
                 return;
             }
-            // The new map onto the published pieces first; the old one goes once the capture thread can't be using it.
-            var (oldMap, oldView) = (p.Map, p.MapView);
+            // The new map onto the published pieces first; a map past the last few sizes goes once the capture thread
+            // can't be using it.
             (p.Map, p.MapView, p.MapFor) = (map, view, wanted);
+            p.Maps.Add((wanted, map, view));
             p.Version++;
             Publish();
+            if (p.Maps.Count <= KeptMaps) return;
+            var (_, oldMap, oldView) = p.Maps[0];
+            p.Maps.RemoveAt(0);
             lock (_gpu)
             {
                 CaptureNative.Release(oldView);

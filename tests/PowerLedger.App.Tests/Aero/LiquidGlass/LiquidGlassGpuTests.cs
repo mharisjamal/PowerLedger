@@ -154,10 +154,12 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             Canvas.SetTop(under, 494 - 60 - 40);
             content.Children.Insert(0, under);
             UiHarness.PumpUntil(() => InsideGlassSource.Drawn > rested, TimeSpan.FromSeconds(5), "the bar over the new content drawn again");
+            UiHarness.Pump(TimeSpan.FromMilliseconds(500));
             var again = InsideGlassSource.Drawn;
             under.Background = Brushes.SteelBlue;   // no layout: a new colour alone
             UiHarness.Pump(TimeSpan.FromMilliseconds(500));
             output.WriteLine($"a colour changed without a layout pass: drawn again {InsideGlassSource.Drawn - again} times");
+            (InsideGlassSource.Drawn - again).ShouldBeLessThanOrEqualTo(2);   // the two bars its margin reaches, once each
             var read = Gpu(scene).ReadAsync(scene.Glass);
             UiHarness.PumpUntil(() => read.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
             var drawn = read.Result;
@@ -287,6 +289,28 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             atRest.ShouldBe(0);
             ownRepaints.ShouldBe(0);
             hidden.ShouldBe(0);
+            return 0;
+        }));
+
+    /// <summary>The watts overlay's pill changes width with its reading and goes back to widths it had: a piece keeps the
+    /// source maps of its last few sizes, so going back makes none.</summary>
+    [Fact]
+    public void A_piece_back_at_a_size_it_had_makes_no_new_map()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            var picture = FakeGlassSource.Picture(400, 300, (x, y) => ((byte)x, (byte)y, 90));
+            using var scene = Show(picture, 300, 200, 300, 200);
+            UiHarness.PumpUntil(() => scene.Glass.OnGpu && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
+            var wide = scene.Glass.Width;
+            var made = GpuGlassWindow.MapsMade;
+            scene.Glass.Width = wide - 20;
+            UiHarness.PumpUntil(() => GpuGlassWindow.MapsMade == made + 1 && Gpu(scene).State.Contains("with maps 1"), TimeSpan.FromSeconds(10), "the narrower map");
+            UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+            scene.Glass.Width = wide;
+            UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+            scene.Glass.Width = wide - 20;
+            UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+            GpuGlassWindow.MapsMade.ShouldBe(made + 1);
             return 0;
         }));
 }
