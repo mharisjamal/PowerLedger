@@ -50,6 +50,31 @@ internal static class LiquidGlassSources
     /// capture there would show the glass to itself.</summary>
     public static bool CaptureAllowed { get; set; } = Environment.OSVersion.Version >= new Version(10, 0, 19041);
 
+    /// <summary>False keeps every window off the GPU path (the tests, to try the CPU path); true, the default, lets a
+    /// window take it where it can.</summary>
+    public static bool GpuAllowed
+    {
+        get => _gpuAllowed;
+        set
+        {
+            if (_gpuAllowed == value) return;
+            _gpuAllowed = value;
+            ApplyAll();
+        }
+    }
+
+    private static bool _gpuAllowed = true;
+
+    /// <summary>Raised on the UI thread when something starts animating for the given time (AeroMotion): composed glass
+    /// follows its piece on every frame until then, as a spring, a slide or a fade moves it without a layout pass.</summary>
+    internal static event Action<TimeSpan>? Animating;
+
+    /// <summary>Something animates for <paramref name="ms"/>: AeroMotion calls this for each animation it starts.</summary>
+    public static void Animate(double ms)
+    {
+        if (ms > 0) Animating?.Invoke(TimeSpan.FromMilliseconds(ms));
+    }
+
     /// <summary>The windows with glass now, for the tests.</summary>
     internal static IReadOnlyList<ILiquidGlassSource> Live
     {

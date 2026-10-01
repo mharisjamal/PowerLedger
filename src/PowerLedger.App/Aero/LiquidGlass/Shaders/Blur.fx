@@ -1,7 +1,7 @@
 // Liquid glass passes 2 and 3 of 4: one direction of CSS blur(), a Gaussian of deviation sigma device pixels over
 // ceil(3 sigma) pixels each side, as Skia's separable GPU blur (its linear kernel: pairs of texels read through one
 // bilinear tap at the pair's weighted centre). The weights and offsets come from LiquidGlassEffects.BlurKernel. Pixels
-// past the piece's box are the box mirrored (the element's brush tiles FlipXY), as Chromium's backdrop blur mirrors.
+// past the piece's box are the box mirrored (by the brightness pass), as Chromium's backdrop blur mirrors.
 // Compiled by scripts/liquid-glass/compile-shaders.ps1 to Blur.ps (ps_2_0).
 sampler2D input : register(s0);
 float4 ddxDdy : register(c0);     // WPF's DdxUvDdyUv: one texel across (xy) and down (zw), where the renderer gives it

@@ -8,12 +8,19 @@ using static PowerLedger.App.Aero.CaptureNative;
 namespace PowerLedger.App.Aero;
 
 /// <summary>
-/// The picture behind one top-level window of ours (<see cref="LiquidGlassSources"/> makes one per window with glass).
-/// Live, it is the window's share of its monitor's capture (<see cref="MonitorCapture"/>, shared with our other windows on
-/// that monitor): its rectangle and a margin round it, so a window being dragged keeps a picture under it until the next
-/// frame lands. The window is left out of capture (WDA_EXCLUDEFROMCAPTURE) so its glass never shows itself. Hidden or
-/// minimised, it takes nothing. Where capture is unavailable (older Windows, policy, a rotated monitor) or screenshots are
-/// allowed (<see cref="LiquidGlassSources.AllowScreenshots"/>), it is the wallpaper where Windows draws it.
+/// The picture behind one top-level window of ours (<see cref="LiquidGlassSources"/> makes one per window with glass),
+/// from its monitor's capture (<see cref="MonitorCapture"/>, shared with our other windows on that monitor). The window is
+/// left out of capture (WDA_EXCLUDEFROMCAPTURE) so its glass never shows itself. Hidden or minimised, it takes nothing.
+/// <list type="bullet">
+/// <item>Live on the GPU (<see cref="Gpu"/>, the usual way): the pieces are drawn on the GPU straight from the
+/// duplicated desktop into one picture the window shows through a D3DImage (GpuGlassWindow). No pixel reaches the CPU.</item>
+/// <item>Live on the CPU (<see cref="Image"/> a WriteableBitmap), the fallback where the GPU path can't run (a remote
+/// session, WPF drawing in software, Direct3D 11 under feature level 11_0, a device lost three times in a minute): the
+/// window's rectangle and a margin round it read back, which the pieces' WPF effects draw from.</item>
+/// <item>The wallpaper where Windows draws it, through the pieces' WPF effects, where capture is unavailable (older
+/// Windows, policy, a rotated monitor, an HDR desktop off the GPU path) or screenshots are allowed
+/// (<see cref="LiquidGlassSources.AllowScreenshots"/>).</item>
+/// </list>
 /// </summary>
 internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
 {
@@ -32,8 +39,10 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
     private readonly IntPtr _hwnd;
     private readonly Dispatcher _dispatcher;
     private MonitorCapture.Subscriber? _subscriber;
+    private GpuGlassWindow? _gpu;
     private IntPtr _monitor;
     private WriteableBitmap? _bitmap;
+    private RECT _placed;
     private int _posted;
     private bool _disposed;
 
@@ -54,20 +63,53 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
 
     public event Action? Changed;
 
-    /// <summary>The live capture this window reads, or null (wallpaper, hidden, disposed), for the tests.</summary>
+    /// <summary>The CPU path's share of the capture, or null (the GPU path, the wallpaper, disposed), for the tests.</summary>
     internal MonitorCapture.Subscriber? Subscriber => _subscriber;
 
-    /// <summary>Picks live or wallpaper from the switches and the capture's health, and sets the window's affinity.</summary>
+    /// <summary>The GPU path, or null (the CPU path, the wallpaper, disposed). The pieces draw through it when it's here.</summary>
+    public GpuGlassWindow? Gpu => _gpu;
+
+    /// <summary>The monitor's capture this window reads, on either path.</summary>
+    internal MonitorCapture? Session => _gpu?.Session ?? _subscriber?.Session;
+
+    /// <summary>Whether the GPU path can run for this window: the switch allows it (tests turn it off to try the CPU path),
+    /// WPF draws it in hardware (not a remote session, not software), and its GPU path hasn't given out.</summary>
+    private bool GpuPossible
+    {
+        get
+        {
+            if (!LiquidGlassSources.GpuAllowed || _gpuGaveOut) return false;
+            if (SystemParameters.IsRemoteSession || (RenderCapability.Tier >> 16) < 2) return false;
+            if (RenderOptions.ProcessRenderMode == RenderMode.SoftwareOnly) return false;
+            return _window.CompositionTarget?.RenderMode != RenderMode.SoftwareOnly;
+        }
+    }
+
+    private bool _gpuGaveOut;
+
+    /// <summary>Picks the GPU path, the CPU path or the wallpaper from the switches and the capture's health, and sets the
+    /// window's affinity.</summary>
     public void Apply()
     {
         if (_disposed) return;
+        _paused = false;
         var exclude = LiquidGlassSources.ExcludeFromCapture && !LiquidGlassSources.AllowScreenshots;
         SetWindowDisplayAffinity(_hwnd, exclude ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE);
+        _gpu?.Exclude(exclude);
+        Session?.RefreshAll();
         var live = !LiquidGlassSources.AllowScreenshots && LiquidGlassSources.CaptureAllowed;
-        if (live && _subscriber == null) StartLive();
-        if (live && _subscriber is { Session.Failed: true }) live = false;
+        var gpu = live && GpuPossible;
+        if (!gpu) StopGpu();
+        if (gpu && _gpu == null)
+        {
+            StopLive();
+            StartGpu();
+        }
+        if (!gpu && live && _subscriber == null) StartLive();
+        if (Session is { Failed: true } || (_subscriber?.Session.Hdr ?? false)) live = false;
         if (!live)
         {
+            StopGpu();
             StopLive();
             ShowWallpaper();
         }
@@ -82,6 +124,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         if (_disposed) return;
         _disposed = true;
         _window.RemoveHook(Hook);
+        StopGpu();
         StopLive();
         if (!_window.IsDisposed) SetWindowDisplayAffinity(_hwnd, WDA_NONE);
     }
@@ -92,6 +135,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         var session = MonitorCapture.For(_monitor);
         if (session.Failed) return;
         _subscriber = session.Subscribe(OnDelivered);
+        session.RefreshAll();
         session.FailedChanged += OnCaptureFailed;
         Follow();
     }
@@ -105,14 +149,71 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         _bitmap = null;
     }
 
+    private void StartGpu()
+    {
+        _monitor = MonitorFromWindow(_hwnd, MONITOR_DEFAULTTONEAREST);
+        var session = MonitorCapture.For(_monitor);
+        if (session.Failed) return;
+        _gpu = new GpuGlassWindow(_hwnd, _dispatcher, session);
+        session.RefreshAll();
+        session.FailedChanged += OnCaptureFailed;
+        _gpu.Changed += OnGpuChanged;
+        _bitmap = null;
+        Set(LiquidGlassSourceKind.Live, null, Rect.Empty);
+        Follow();
+        Changed?.Invoke();
+    }
+
+    private void StopGpu()
+    {
+        if (_gpu == null) return;
+        _gpu.Session.FailedChanged -= OnCaptureFailed;
+        _gpu.Changed -= OnGpuChanged;
+        _gpu.Dispose();
+        _gpu = null;
+        Changed?.Invoke();
+    }
+
+    /// <summary>The GPU path gave out: the CPU path from now on, for this window.</summary>
+    private void OnGpuChanged()
+    {
+        if (_gpu is not { Failed: true }) return;
+        _gpuGaveOut = true;
+        StopGpu();
+        Apply();
+    }
+
     private void OnCaptureFailed() => _dispatcher.BeginInvoke(Apply);
 
     /// <summary>Keeps the live region on the window and its margin, on the window's monitor, and reading only while the
     /// window shows.</summary>
+    /// <summary>Stops the window taking frames, whatever shows, until <see cref="Apply"/>: a test's grab of the window
+    /// with its glass still, let back into capture.</summary>
+    internal void Pause()
+    {
+        _paused = true;
+        Follow();
+    }
+
+    private bool _paused;
+
     private void Follow()
     {
-        if (_subscriber == null) return;
+        var shown = IsWindowVisible(_hwnd) && !IsIconic(_hwnd) && !_paused;
         var monitor = MonitorFromWindow(_hwnd, MONITOR_DEFAULTTONEAREST);
+        if (_gpu != null)
+        {
+            if (monitor != _monitor)
+            {
+                StopGpu();   // moved to another monitor: that monitor's session, and the pieces place themselves again
+                StartGpu();
+                return;
+            }
+            _gpu.Active = shown;
+            _gpu.Track();
+            return;
+        }
+        if (_subscriber == null) return;
         if (monitor != _monitor)
         {
             StopLive();   // moved to another monitor: that monitor's session
@@ -125,7 +226,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         int left = Math.Max(r.Left - Margin, info.Monitor.Left), top = Math.Max(r.Top - Margin, info.Monitor.Top);
         int right = Math.Min(r.Right + Margin, info.Monitor.Right), bottom = Math.Min(r.Bottom + Margin, info.Monitor.Bottom);
         _subscriber.Region = right > left && bottom > top ? new Int32Rect(left, top, right - left, bottom - top) : Int32Rect.Empty;
-        _subscriber.Active = IsWindowVisible(_hwnd) && !IsIconic(_hwnd);
+        _subscriber.Active = shown;
     }
 
     /// <summary>On the capture thread: new pixels. One post to the UI thread at a time; it takes whatever is newest.</summary>
@@ -190,12 +291,21 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         switch (msg)
         {
             case WM_WINDOWPOSCHANGED or WM_SHOWWINDOW or WM_SIZE or WM_DPICHANGED:
-                if (_subscriber != null) Follow();
+                if (_subscriber != null || _gpu != null) Follow();
                 else if (Kind == LiquidGlassSourceKind.Wallpaper && msg == WM_WINDOWPOSCHANGED) ShowWallpaper();   // another monitor
+                // Moved (a drag, a corner): the pieces place themselves on the picture at once, where the margin still
+                // holds what is under them, rather than a frame later when the new region's picture lands.
+                GetWindowRect(_hwnd, out var r);
+                if (r.Left != _placed.Left || r.Top != _placed.Top || r.Right != _placed.Right || r.Bottom != _placed.Bottom)
+                {
+                    _placed = r;
+                    if (Image != null || _gpu != null) Changed?.Invoke();
+                }
                 break;
             case WM_DISPLAYCHANGE:
                 _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
                 {
+                    StopGpu();
                     StopLive();
                     Apply();
                 });

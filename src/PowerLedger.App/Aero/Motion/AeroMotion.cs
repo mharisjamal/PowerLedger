@@ -206,6 +206,8 @@ public static class AeroMotion
             done?.Invoke();
             return;
         }
+        // Composed liquid glass follows what moves or fades over the next while (LiquidGlassSources.Animate).
+        LiquidGlassSources.Animate(delayMs + ms);
         var animation = new DoubleAnimation
         {
             To = to,

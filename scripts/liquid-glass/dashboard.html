@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8">
+<!-- The mockup's Energy pane (274, 392, 752 by 494) over the mockup's background (bg.png beside this page: the Dashboard
+     mockup's background board, Main-bg.html, shot at 1440 by 900), the recipe's backdrop-filter only. Hash: #alone the pane,
+     #nested the pane with the mockup's fourteen glass bars inside it, #bars the bars alone on the page, #none the
+     background. Shot with headless Edge as reference.ps1 does, at 1 and 1.25; #nested and #alone come out byte for byte the
+     same (a backdrop-filter element is a backdrop root). The tests' dash-*-bg and dash-*-full are the pane's device box,
+     snapped as Chromium snaps (half a pixel up), of #none and #alone. --><style>
+body{margin:0;background:#000}
+#stage{position:absolute;left:0;top:0;width:1440px;height:900px;background:url(bg.png) 0 0/1440px 900px no-repeat}
+.lg{position:absolute;border-radius:28px;backdrop-filter:brightness(1.1) blur(2px) url(#t)}
+.bar{border-radius:14px}
+</style></head><body><div id="stage">
+<svg width="0" height="0" style="position:absolute"><defs><filter id="t"><feTurbulence type="turbulence" baseFrequency="0.01" numOctaves="2" result="turbulence"/><feDisplacementMap in="SourceGraphic" in2="turbulence" scale="200" xChannelSelector="R" yChannelSelector="G"/></filter></defs></svg>
+<section class="lg" id="pane" style="left:274px;top:392px;width:752px;height:494px"></section>
+</div>
+<script>
+// #nested: the bars inside the pane (as the mockup); #alone: the pane only; #bars: the bars alone, on the page (no pane)
+var mode = location.hash.slice(1) || 'nested';
+var heights = [96,136,115,186,149,215,170,126,200,232,180,255,224,300];
+var pane = document.getElementById('pane'), stage = document.getElementById('stage');
+if (mode !== "alone" && mode !== "none") heights.forEach(function (h, i) {
+  var b = document.createElement('div'); b.className = 'lg bar';
+  var x = 42 + i * 49, y = 494 - 60 - h;
+  if (mode === 'nested') { b.style.left = x + 'px'; b.style.top = y + 'px'; pane.appendChild(b); }
+  else { b.style.left = (274 + x) + 'px'; b.style.top = (392 + y) + 'px'; stage.appendChild(b); }
+  b.style.width = '40px'; b.style.height = h + 'px';
+});
+if (mode === "bars" || mode === "none") pane.remove();
+</script></body></html>

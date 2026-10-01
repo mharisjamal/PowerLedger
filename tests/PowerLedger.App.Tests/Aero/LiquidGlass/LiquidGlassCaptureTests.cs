@@ -11,7 +11,7 @@ using Xunit.Abstractions;
 namespace PowerLedger.App.Tests;
 
 /// <summary>
-/// The live backdrop on the real screen: a plain window of one colour (the "desk", captured like any other window) with
+/// The live backdrop on the CPU path, on the real screen: a plain window of one colour (the "desk", captured like any other window) with
 /// a window of ours in front of it, of another colour, holding a liquid glass piece. The glass's picture must show the
 /// desk and never our window, stop when our window hides, and take no frames while nothing behind changes.
 /// </summary>
@@ -41,6 +41,7 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
             window.Close();
             desk.Close();
             LiquidGlassSources.AllowScreenshots = false;
+            LiquidGlassSources.GpuAllowed = true;
         }
     }
 
@@ -50,6 +51,7 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
         LiquidGlassSources.Override = null;
         LiquidGlassSources.ExcludeFromCapture = true;
         LiquidGlassSources.AllowScreenshots = false;
+        LiquidGlassSources.GpuAllowed = false;   // the CPU path: LiquidGlassGpuTests try the GPU one
         var desk = ScreenCapture.Show(new Border { Background = new SolidColorBrush(Desk) }, 100, 100, 800, 600);
         var glass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(0) };
         var window = ScreenCapture.Show(new Grid { Background = new SolidColorBrush(Ours), Children = { glass } }, 350, 300, 300, 200);
@@ -154,6 +156,48 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
             UiHarness.PumpUntil(() => scene.Source.ScreenBounds.Contains(new Rect(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top)) && scene.Source.ScreenBounds != first,
                 TimeSpan.FromSeconds(5), "the picture to follow");
             output.WriteLine($"before {first}, after {scene.Source.ScreenBounds}, window {r.Left},{r.Top}");
+            return 0;
+        }));
+
+    [Fact]
+    public void A_layered_topmost_pill_shares_the_monitors_capture_and_is_left_out_of_it_too()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            using var scene = Show();
+            // The watts overlay's kind of window: layered (AllowsTransparency), topmost, a capsule over the main window.
+            var pillGlass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(22) };
+            var pill = new Window
+            {
+                WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, Topmost = true, ShowActivated = false,
+                ShowInTaskbar = false, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.Manual, Left = 420, Top = 360,
+                Width = 160, Height = 44, UseLayoutRounding = true,
+                Content = new Border { CornerRadius = new CornerRadius(22), Background = new SolidColorBrush(Ours), Child = pillGlass },
+            };
+            pill.Show();
+            try
+            {
+                UiHarness.PumpUntil(() => scene.Glass.Kind == LiquidGlassSourceKind.Live && pillGlass.Kind == LiquidGlassSourceKind.Live, TimeSpan.FromSeconds(10), "both live");
+                UiHarness.Pump(TimeSpan.FromMilliseconds(400));
+                var handle = new WindowInteropHelper(pill).Handle;
+                GetWindowDisplayAffinity(handle, out var affinity).ShouldBeTrue();
+                affinity.ShouldBe(CaptureNative.WDA_EXCLUDEFROMCAPTURE);
+                var sources = LiquidGlassSources.Live.OfType<WindowGlassSource>().ToList();
+                sources.Count.ShouldBe(2);
+                sources[0].Subscriber!.Session.ShouldBeSameAs(sources[1].Subscriber!.Session, "one capture per monitor feeds both windows");
+                GetWindowRect(handle, out var r);
+                foreach (var source in sources)
+                {
+                    var under = new CroppedBitmap((BitmapSource)source.Image!, new Int32Rect(r.Left - (int)source.ScreenBounds.X, r.Top - (int)source.ScreenBounds.Y, r.Right - r.Left, r.Bottom - r.Top));
+                    var (desk, ours, other) = Count(under);
+                    output.WriteLine($"under the pill, in a picture at {source.ScreenBounds}: desk {desk}, ours {ours}, other {other}");
+                    ours.ShouldBe(0);
+                    desk.ShouldBe((r.Right - r.Left) * (r.Bottom - r.Top));
+                }
+            }
+            finally
+            {
+                pill.Close();
+            }
             return 0;
         }));
 

@@ -65,7 +65,7 @@ internal static class LiquidGlassEffects
     }
 }
 
-/// <summary>Pass 1: brightness(k).</summary>
+/// <summary>Pass 1: brightness(k), the margin mirrored.</summary>
 internal sealed class GlassBrightnessEffect : ShaderEffect
 {
     public static readonly DependencyProperty InputProperty = RegisterPixelShaderSamplerProperty("Input", typeof(GlassBrightnessEffect), 0);
@@ -73,12 +73,19 @@ internal sealed class GlassBrightnessEffect : ShaderEffect
     public static readonly DependencyProperty BrightnessProperty = DependencyProperty.Register(nameof(Brightness), typeof(double),
         typeof(GlassBrightnessEffect), new UIPropertyMetadata(LiquidGlassRecipe.Brightness, PixelShaderConstantCallback(0)));
 
+    public static readonly DependencyProperty BoxProperty = DependencyProperty.Register(nameof(Box), typeof(Point4D),
+        typeof(GlassBrightnessEffect), new UIPropertyMetadata(new Point4D(0, 0, 1, 1), PixelShaderConstantCallback(1)));
+
     public GlassBrightnessEffect()
     {
         PixelShader = LiquidGlassEffects.Shader("Brightness");
         UpdateShaderValue(InputProperty);
         UpdateShaderValue(BrightnessProperty);
+        UpdateShaderValue(BoxProperty);
     }
+
+    /// <summary>The box inside the margin, in uv: left, top, right, bottom. A pixel outside reads the box mirrored.</summary>
+    public Point4D Box { get => (Point4D)GetValue(BoxProperty); set => SetValue(BoxProperty, value); }
 
     public Brush Input { get => (Brush)GetValue(InputProperty); set => SetValue(InputProperty, value); }
 

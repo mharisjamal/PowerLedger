@@ -40,8 +40,4 @@ internal static class LiquidGlassRecipe
 
     /// <summary>The ::before highlights: <c>inset 6px 6px 0 -6px</c> and <c>inset 0 0 8px 1px</c>, both white at this alpha.</summary>
     public const double HighlightOpacity = 0.7;
-
-    /// <summary>How far outside a piece the backdrop is read: the largest displacement (half the scale) plus the blur's
-    /// reach (three deviations) and a pixel for the sampling.</summary>
-    public const double Reach = Scale / 2 + 3 * BlurDeviation + 1;
 }

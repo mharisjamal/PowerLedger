@@ -41,8 +41,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The liquid glass passes, compiled from Aero\LiquidGlass\Shaders\*.fx by scripts\liquid-glass\compile-shaders.ps1. -->
+    <!-- The liquid glass shaders, compiled from Aero\LiquidGlass\Shaders\*.fx (WPF effects) and GpuGlass.hlsl (Direct3D 11) by scripts\liquid-glass\compile-shaders.ps1. -->
     <EmbeddedResource Include="Aero\LiquidGlass\Shaders\*.ps" LogicalName="PowerLedger.App.Aero.LiquidGlass.Shaders.%(Filename).ps" />
+    <EmbeddedResource Include="Aero\LiquidGlass\Shaders\*.cso" LogicalName="PowerLedger.App.Aero.LiquidGlass.Shaders.%(Filename).cso" />
+    <None Include="Aero\LiquidGlass\Shaders\*.hlsl" />
     <None Include="Aero\LiquidGlass\Shaders\*.fx" />
   </ItemGroup>
 

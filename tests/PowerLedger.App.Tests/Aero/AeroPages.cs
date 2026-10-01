@@ -82,6 +82,8 @@ internal static class AeroPages
         foreach (var element in MidnightHost.AllOf<FrameworkElement>((DependencyObject)scroller.Content).Where(e => e.IsVisible && e is TextBlock or ButtonBase or Border))
         {
             if (element.TemplatedParent is TextBox) continue;
+            // The glass's own passes reach past the piece by the blur's margin, clipped to it: not content.
+            if (Ancestor<LiquidGlassBackdrop>(element) is not null) continue;
             var right = element.TranslatePoint(new Point(element.ActualWidth, 0), scroller).X;
             if (right > scroller.ViewportWidth + 0.5) problems.Add($"{Describe(element)} runs past the side");
             if (Ancestor<GlassPanel>(element) is { } panel
