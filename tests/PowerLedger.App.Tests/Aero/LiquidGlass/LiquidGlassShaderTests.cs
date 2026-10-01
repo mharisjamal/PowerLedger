@@ -250,6 +250,66 @@ public class LiquidGlassShaderTests(ITestOutputHelper output)
             return 0;
         });
 
+    /// <summary>
+    /// 0.10.9 (the merge of the mockup's layout with the engine): the intro glides and fades each pane's content, its glass
+    /// bubbles, bars and ring hole with it. What lies beneath a piece inside another moves and fades with it, so its picture
+    /// is the same and nothing is drawn again; drawn per frame for every nested piece (22 on the Dashboard), the intro ran at
+    /// 700 ms a frame. A fade over both is the piece's to take once, as an opacity group's is in the browser, never twice.
+    /// </summary>
+    [Fact]
+    public void Glass_inside_glass_draws_nothing_again_when_its_content_moves_and_fades_with_it()
+        => UiHarness.OnUi(() =>
+        {
+            var piece = new LiquidGlassBackdrop { Width = 60, Height = 40, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(30, 20, 0, 0) };
+            var well = new Border { Background = new SolidColorBrush(Color.FromRgb(200, 40, 90)), Width = 80, Height = 50, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(20, 10, 0, 0) };
+            var glide = new TranslateTransform();
+            var content = new Grid { RenderTransform = glide, Children = { well, new Grid { Children = { piece } } } };
+            var outer = new Grid { Width = 200, Height = 100, Children = { content } };
+            outer.Measure(new Size(200, 100));
+            outer.Arrange(new Rect(0, 0, 200, 100));
+            byte[] Pixels(ImageSource image)
+            {
+                var bitmap = (BitmapSource)image;
+                var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+                bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+                return pixels;
+            }
+            using var source = new InsideGlassSource(piece, outer);
+            source.Refresh().ShouldBeTrue("the first picture");
+            var rest = Pixels(source.Image!);
+
+            glide.X = 24;
+            glide.Y = -9;
+            content.Opacity = 0.4;
+            source.Refresh().ShouldBeFalse("the content beneath moved and faded with the piece: the same picture");
+            using var again = new InsideGlassSource(piece, outer);
+            again.Refresh().ShouldBeTrue();
+            Pixels(again.Image!).ShouldBe(rest, "the fade is the piece's to take, not its picture's");
+
+            well.Margin = new Thickness(26, 10, 0, 0);
+            outer.UpdateLayout();
+            source.Refresh().ShouldBeTrue("the well moved beneath the piece");
+            return 0;
+        });
+
+    /// <summary>While something animates, the nested pieces share a few milliseconds of each frame: the first is always
+    /// looked at, then the rest only while the frame's share lasts; a new frame starts afresh.</summary>
+    [Fact]
+    public void Nested_pieces_share_a_budget_of_each_frame()
+    {
+        var ms = System.Diagnostics.Stopwatch.Frequency / 1000;
+        var frame = TimeSpan.FromMilliseconds(123_456);
+        InsideGlassBudget.May(frame).ShouldBeTrue("the frame's first piece");
+        InsideGlassBudget.Spend(frame, 30 * ms);
+        InsideGlassBudget.May(frame).ShouldBeFalse("one piece took the whole share");
+        var next = frame + TimeSpan.FromMilliseconds(16);
+        InsideGlassBudget.May(next).ShouldBeTrue("a new frame");
+        InsideGlassBudget.Spend(next, 2 * ms);
+        InsideGlassBudget.May(next).ShouldBeTrue("2 of 5 ms spent");
+        InsideGlassBudget.Spend(next, 4 * ms);
+        InsideGlassBudget.May(next).ShouldBeFalse("6 of 5 ms spent");
+    }
+
     private static List<int> Compare(byte[] drawn, byte[] edge, int w, int h, double scale)
     {
         // Away from the corners, where the clip's antialiasing is each renderer's own.

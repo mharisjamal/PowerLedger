@@ -71,21 +71,24 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         var dpi = VisualTreeHelper.GetDpi(_piece);
         var size = new Size(Math.Round(_piece.ActualWidth * dpi.DpiScaleX), Math.Round(_piece.ActualHeight * dpi.DpiScaleY));
         if (size.Width <= 0 || size.Height <= 0) return false;
-        Rect inOuter;
+        // The frame everything is drawn and compared in is the piece's own: what moves, scales or fades the piece and what
+        // lies beneath it alike (the intro gliding a pane's content, a fade over both) changes nothing in its picture.
+        Matrix toPiece;
         try
         {
-            inOuter = new Rect(_piece.RenderSize);
-            inOuter.Transform(LiquidGlassBackdrop.Chain(_piece, _outer) ?? throw new InvalidOperationException());
+            toPiece = LiquidGlassBackdrop.Chain(_piece, _outer) ?? throw new InvalidOperationException();
         }
         catch (InvalidOperationException)
         {
             return false;
         }
+        if (!toPiece.HasInverse) return false;   // squashed to nothing (a bar grown from its foot): nothing shows
+        toPiece.Invert();
         Interlocked.Increment(ref Checked);
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
-            return Draw(size, dpi, inOuter);
+            return Draw(size, dpi, toPiece);
         }
         finally
         {
@@ -93,12 +96,11 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         }
     }
 
-    private bool Draw(Size size, DpiScale dpi, Rect inOuter)
+    private bool Draw(Size size, DpiScale dpi, Matrix toPiece)
     {
         var drawing = new DrawingGroup();
         var hash = new HashCode();
         hash.Add(size);
-        hash.Add(inOuter);
         hash.Add(_piece.Brightness);
         hash.Add(_piece.BlurDeviation);
         hash.Add(_piece.Scale);
@@ -106,7 +108,7 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         var done = false;
         using (var context = drawing.Open())
         {
-            Walk(_outer, Matrix.Identity, 0, context, ref hash, inOuter, ref done, top: true);
+            Walk(_outer, Matrix.Identity, 0, context, ref hash, toPiece, Shared(), ref done, top: true);
         }
         var value = hash.ToHashCode();
         if (value == _hash && Image != null) return false;
@@ -114,7 +116,7 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
-            context.PushTransform(new TranslateTransform(-inOuter.X, -inOuter.Y));
+            context.PushTransform(new MatrixTransform(toPiece));
             context.DrawDrawing(drawing);
         }
         int w = (int)size.Width, h = (int)size.Height;
@@ -142,11 +144,26 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         Hook(false);
     }
 
+    /// <summary>The outer element and the piece's ancestors inside it: whatever they do to the piece they do to what lies
+    /// beneath it too.</summary>
+    private HashSet<DependencyObject> Shared()
+    {
+        var shared = new HashSet<DependencyObject>(ReferenceEqualityComparer.Instance);
+        for (var node = VisualTreeHelper.GetParent(_piece); node != null; node = VisualTreeHelper.GetParent(node))
+        {
+            shared.Add(node);
+            if (ReferenceEquals(node, _outer)) break;
+        }
+        return shared;
+    }
+
     /// <summary>Adds <paramref name="node"/> and what it holds, in WPF's painting order, until the inner piece. Only what
-    /// reaches the box goes into the hash: its drawing, where it lands (<paramref name="above"/> and its own transform) and
-    /// the opacity, clips and masks over it (<paramref name="path"/>), so a digit rolling elsewhere in the pane draws
-    /// nothing again.</summary>
-    private void Walk(DependencyObject node, Matrix above, int path, DrawingContext context, ref HashCode hash, Rect box, ref bool done, bool top)
+    /// reaches the piece goes into the hash: its drawing, where it lands in the piece's own frame (<paramref name="above"/>
+    /// and its own transform, through <paramref name="toPiece"/>) and the opacity, clips and masks over it
+    /// (<paramref name="path"/>), so a digit rolling elsewhere in the pane draws nothing again. An opacity or a mask on
+    /// the piece's own ancestors (<paramref name="shared"/>) is the piece's to take once, over its finished glass, as an
+    /// opacity group is in the browser: it is neither drawn into the picture nor compared.</summary>
+    private void Walk(DependencyObject node, Matrix above, int path, DrawingContext context, ref HashCode hash, Matrix toPiece, HashSet<DependencyObject> shared, ref bool done, bool top)
     {
         if (done) return;
         if (ReferenceEquals(node, _piece))
@@ -169,10 +186,12 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         // spills past it (a glyph's overhang, antialiasing). WPF's own drawing bounds would cost a walk of every drawing.
         var reach = visual is UIElement element ? new Rect(element.RenderSize) : VisualTreeHelper.GetContentBounds(visual);
         if (!reach.IsEmpty) reach.Inflate(Spill, Spill);
-        var reaches = !reach.IsEmpty && Transform(reach, here).IntersectsWith(box);
-        var opacity = VisualTreeHelper.GetOpacity(visual);
+        var inPiece = here * toPiece;
+        var reaches = !reach.IsEmpty && Transform(reach, inPiece).IntersectsWith(new Rect(_piece.RenderSize));
+        var mine = shared.Contains(node);
+        var opacity = mine ? 1 : VisualTreeHelper.GetOpacity(visual);
         var clip = VisualTreeHelper.GetClip(visual);
-        var mask = VisualTreeHelper.GetOpacityMask(visual);
+        var mask = mine ? null : VisualTreeHelper.GetOpacityMask(visual);
         context.PushTransform(new MatrixTransform(local));
         if (clip != null) context.PushClip(clip);
         if (opacity < 1) context.PushOpacity(opacity);
@@ -186,11 +205,11 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         if (reaches && VisualTreeHelper.GetDrawing(visual) is { } own)
         {
             context.DrawDrawing(own);
-            hash.Add(here);
+            hash.Add(inPiece);
             hash.Add(path);
             Add(own, ref hash);
         }
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(visual) && !done; i++) Walk(VisualTreeHelper.GetChild(visual, i), here, path, context, ref hash, box, ref done, top: false);
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(visual) && !done; i++) Walk(VisualTreeHelper.GetChild(visual, i), here, path, context, ref hash, toPiece, shared, ref done, top: false);
         if (mask != null) context.Pop();
         if (opacity < 1) context.Pop();
         if (clip != null) context.Pop();
@@ -358,9 +377,57 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         else CompositionTarget.Rendering -= OnFrame;
     }
 
+    /// <summary>Whether this piece is still to be looked at for the animation that ended: the frame's share ran out first.</summary>
+    private bool _behind;
+
     private void OnFrame(object? sender, EventArgs e)
     {
-        Refresh();
-        if (DateTime.UtcNow > _followUntil) Hook(false);
+        var frame = (e as RenderingEventArgs)?.RenderingTime ?? TimeSpan.Zero;
+        if (InsideGlassBudget.May(frame))
+        {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            Refresh();
+            InsideGlassBudget.Spend(frame, System.Diagnostics.Stopwatch.GetTimestamp() - started);
+            _behind = false;
+        }
+        else _behind = true;
+        if (DateTime.UtcNow > _followUntil && !_behind) Hook(false);
+    }
+}
+
+/// <summary>
+/// The share of a frame the pieces inside other pieces may take while something animates (the intro gliding the panes'
+/// content in, the bars growing from their feet, the ring sweeping round under its glass hole): once the frame's pieces
+/// have spent <see cref="Budget"/>, the rest wait for a later frame (their pictures meanwhile move with them), and a piece behind when the
+/// animation ends is looked at once more. One piece is always looked at, so each frame moves on. Without it every nested
+/// piece drew on every frame, 15 of them at once as the bars grew, and the Dashboard's intro ran at 150 to 580 ms a frame.
+/// </summary>
+internal static class InsideGlassBudget
+{
+    /// <summary>What the nested pieces may spend of a frame: a third of one at 60 a second.</summary>
+    public static readonly TimeSpan Budget = TimeSpan.FromMilliseconds(5);
+
+    [ThreadStatic] private static TimeSpan _frame;
+    [ThreadStatic] private static long _spent;
+    [ThreadStatic] private static bool _any;
+
+    /// <summary>Whether a piece may look at its picture in the frame rendered at <paramref name="frame"/>.</summary>
+    public static bool May(TimeSpan frame)
+    {
+        if (frame != _frame)
+        {
+            _frame = frame;
+            _spent = 0;
+            _any = false;
+        }
+        return !_any || _spent < Budget.TotalSeconds * System.Diagnostics.Stopwatch.Frequency;
+    }
+
+    /// <summary>A piece spent <paramref name="ticks"/> (stopwatch ticks) of the frame at <paramref name="frame"/>.</summary>
+    public static void Spend(TimeSpan frame, long ticks)
+    {
+        if (frame != _frame) May(frame);
+        _spent += ticks;
+        _any = true;
     }
 }

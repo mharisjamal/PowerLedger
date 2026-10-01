@@ -20,8 +20,9 @@ internal interface IGpuGlassConsumer
     IntPtr Window { get; }
 
     /// <summary>Draws the pieces that <paramref name="changed"/> (physical pixels on the virtual screen, compared: something
-    /// behind really changed) touches, and any that want drawing. Null: nothing changed behind.</summary>
-    void Frame(GpuGlassRenderer renderer, IReadOnlyList<Int32Rect>? changed);
+    /// behind really changed) touches, and any that want drawing. Null: nothing changed behind. <paramref name="foreign"/>:
+    /// the change reached past every window of ours, so it is another window's and was not compared.</summary>
+    void Frame(GpuGlassRenderer renderer, IReadOnlyList<Int32Rect>? changed, bool foreign);
 
     /// <summary>The device went (removed, reset): drop what was made on it, and make it again on the next one.</summary>
     void DeviceLost();
@@ -359,6 +360,7 @@ internal sealed class MonitorCapture : IDisposable
             return;
         }
         var touched = new List<Int32Rect>?[consumers.Count];
+        var foreign = false;
         if (changed)
         {
             var areas = new List<(int Consumer, RECT Rect)>();
@@ -381,7 +383,8 @@ internal sealed class MonitorCapture : IDisposable
             // A change that reaches past every window of ours is something else's (a video playing behind): it is real,
             // with no compare and no wait for one. Only a change wholly inside a window of ours may be that window
             // repainting itself, which the compare tells from a change behind it.
-            var differs = areas.Count == 0 ? 0u : Ours(consumers, areas) ? _renderer.Differs(areas) : Touched(areas);
+            foreign = areas.Count > 0 && !Ours(consumers, areas);
+            var differs = areas.Count == 0 ? 0u : foreign ? Touched(areas) : _renderer.Differs(areas);
             _quiet = differs == 0;
             _renderer.Remember(_changed);
             for (var c = 0; c < consumers.Count; c++)
@@ -394,7 +397,7 @@ internal sealed class MonitorCapture : IDisposable
         for (var c = 0; c < consumers.Count; c++)
         {
             if (touched[c] == null && !consumers[c].WantsFrame) continue;
-            consumers[c].Frame(_renderer, touched[c]);
+            consumers[c].Frame(_renderer, touched[c], foreign && touched[c] != null);
         }
     }
 

@@ -145,6 +145,12 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     /// <summary>How many frames were shown, for the tests and the measurements.</summary>
     public long Frames => Interlocked.Read(ref _frames);
 
+    /// <summary>How many of <see cref="Frames"/> another window's change asked for (one reaching past every window of ours,
+    /// drawn with no compare), for the tests: the rest are a change behind found by the compare, or a piece new or moved.</summary>
+    public long ForeignFrames => Interlocked.Read(ref _foreignFrames);
+
+    private long _foreignFrames;
+
     public MonitorCapture Session => _session;
 
     /// <summary>How many sizes' maps a piece keeps.</summary>
@@ -323,7 +329,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     /// <summary>On the capture thread: draws the pieces a change touched (and any new, moved or resized), then shows the
     /// frame: composed pieces at once (the swap chain), imaged ones through the UI thread. Imaged pieces wait while the
     /// UI hasn't the picture locked.</summary>
-    public void Frame(GpuGlassRenderer renderer, IReadOnlyList<Int32Rect>? changed)
+    public void Frame(GpuGlassRenderer renderer, IReadOnlyList<Int32Rect>? changed, bool foreign)
     {
         lock (_gpu)
         {
@@ -372,6 +378,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             }
             if (composed.Count == 0 && imaged.Count == 0) return;
             Interlocked.Increment(ref _frames);
+            if (foreign) Interlocked.Increment(ref _foreignFrames);
             LiquidGlassGovernor.Delivered();
         }
     }

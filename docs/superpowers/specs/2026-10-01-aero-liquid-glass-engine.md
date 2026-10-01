@@ -213,6 +213,20 @@ are walked from each visual's offset and transform: WPF's TransformToAncestor wo
 under an Effect. A visual's Effect (a text shadow) is not drawn: a
 `DrawingGroup` has none. A colour changed without a layout pass shows at the next one.
 
+Since the merge with the mockup's layout (0.10.9, 22 nested pieces on the Dashboard), three things keep it off the
+frame's critical path:
+- **The piece's own frame.** Everything is drawn and hashed in the piece's coordinates (the chain to the outer element,
+  inverted), and an opacity or mask on the outer element or the piece's own ancestors is left to the piece, as an
+  opacity group's is in the browser. A pane's content gliding and fading in with its bubbles draws nothing again, and the
+  fade is taken once, not twice.
+- **A share of each frame.** While something animates, the nested pieces share 5 ms of a frame (`InsideGlassBudget`):
+  the first is always looked at, the rest wait for a later frame, and a piece still behind when the animation ends is
+  looked at once more before it lets go of the frame. Before: 150 to 580 ms frames as the bars grew; after: under 50 ms
+  in a Debug build.
+- **Tables.** Brightness and the linearRGB trip are functions of a channel's value and alpha alone, so each is one look up
+  in a 64 KB table; the bytes are the sums they table. The recipe runs 2.2 to 2.8 times faster (a 50 by 375 bar: 32.5 to
+  11.7 ms, Debug).
+
 ### Shaders
 
 `scripts/liquid-glass/compile-shaders.ps1` compiles every shader with Windows' own `d3dcompiler_47.dll`, so no SDK or

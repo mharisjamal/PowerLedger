@@ -251,6 +251,13 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
     private static extern bool GetWindowDisplayAffinity(IntPtr hwnd, out uint affinity);
 
+    /// <summary>
+    /// Nothing is drawn at rest or for our own window's repainting, and a change behind is. Any other window repainting
+    /// across the glass's box (on a working desktop: a terminal, a chat app) is drawn without a compare by design, as a
+    /// video behind is: Windows' dirty rectangles include what our windows cover, and the 2026-10-01 runs saw them reach
+    /// 23 to 1334 by 37 to 811 on every frame here. So the count that must stay at nothing is the frames no change
+    /// outside our windows asked for (<see cref="GpuGlassWindow.ForeignFrames"/>).
+    /// </summary>
     [Fact]
     public void On_the_gpu_nothing_is_drawn_at_rest_or_while_hidden_and_a_change_behind_is()
         => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
@@ -260,14 +267,27 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             UiHarness.PumpUntil(() => scene.Glass.OnGpu && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
             UiHarness.Pump(TimeSpan.FromMilliseconds(500));
             var gpu = Gpu(scene);
-            var before = gpu.Frames;
+            long Own() => gpu.Frames - gpu.ForeignFrames;
+            var (before, foreignBefore) = (Own(), gpu.ForeignFrames);
             UiHarness.Pump(TimeSpan.FromSeconds(2));
-            var atRest = gpu.Frames - before;
-            // Something behind changes: drawn.
+            var atRest = Own() - before;
+            var foreign = gpu.ForeignFrames - foreignBefore;
+            // Something behind changes (the desk, wholly under our window): drawn, as the glass read back shows (a frame
+            // another window's change asked for draws it too, so the count alone can't tell).
             ((Border)scene.Desk.Content).Child = new Border { Background = Brushes.OrangeRed };
-            UiHarness.PumpUntil(() => gpu.Frames > before + atRest, TimeSpan.FromSeconds(5), "the change behind to be drawn");
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var orange = false;
+            while (!orange && watch.Elapsed < TimeSpan.FromSeconds(5))
+            {
+                var read = gpu.ReadAsync(scene.Glass);
+                UiHarness.PumpUntil(() => read.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
+                var middle = read.Result.Length / 2 / 4 * 4;
+                orange = read.Result[middle + 2] > 200 && read.Result[middle + 1] < 120 && read.Result[middle] < 60;   // BGRA: OrangeRed, brightened
+                if (!orange) UiHarness.Pump(TimeSpan.FromMilliseconds(100));
+            }
+            orange.ShouldBeTrue("the change behind drawn");
             // Our own window repainting over the glass: compared away, not drawn.
-            var settled = gpu.Frames;
+            var settled = Own();
             var grid = (Grid)scene.Window.Content;
             var flicker = new Border { Background = Brushes.Lime, Width = 40, Height = 40, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
             grid.Children.Add(flicker);
@@ -276,7 +296,7 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
                 flicker.Background = i % 2 == 0 ? Brushes.Lime : Brushes.Blue;
                 UiHarness.Pump(TimeSpan.FromMilliseconds(100));
             }
-            var ownRepaints = gpu.Frames - settled;
+            var ownRepaints = Own() - settled;
             // Hidden: the duplication is let go, and nothing is drawn.
             var session = gpu.Session;
             scene.Window.Hide();
@@ -285,7 +305,7 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             ((Border)scene.Desk.Content).Child = new Border { Background = Brushes.Navy };
             UiHarness.Pump(TimeSpan.FromSeconds(1));
             var hidden = session.FramesAcquired - frames;
-            output.WriteLine($"frames at rest over 2 s: {atRest}; while our window repainted 10 times: {ownRepaints}; taken while hidden over 1 s: {hidden}");
+            output.WriteLine($"frames at rest over 2 s: {atRest} (and {foreign} for other windows' changes); while our window repainted 10 times: {ownRepaints}; taken while hidden over 1 s: {hidden}");
             atRest.ShouldBe(0);
             ownRepaints.ShouldBe(0);
             hidden.ShouldBe(0);

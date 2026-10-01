@@ -181,9 +181,12 @@ public class GrabBarWindowTests
                 grab.Track(new Point(60, 11));
                 // An animated value and its clock move only on a rendered frame, and under the full suite's load the frames
                 // came late: 0.944 of the way at a fixed 450 ms into the 200 ms fade. So the test waits for the frames, a few
-                // seconds at the most: a clock that never ends still fails it.
-                UiHarness.PumpUntil(() => Math.Abs(Bar(grab).Opacity - GrabBar.OverOpacity) < 0.001 && FrameClock.ActiveSince(before).Count == 0,
-                    TimeSpan.FromSeconds(5), "the fade to end, eased to whole");
+                // seconds at the most: a clock that never ends still fails it. The liquid glass inside other glass (the
+                // Dashboard's bubbles, bars and ring hole) follows every animation for its length and 50 ms more, then lets
+                // go of the frame (0.10.9's merge: 21 handlers were still there the moment the fade ended); a handler that
+                // never lets go still fails it.
+                UiHarness.PumpUntil(() => Math.Abs(Bar(grab).Opacity - GrabBar.OverOpacity) < 0.001 && FrameClock.ActiveSince(before).Count == 0
+                    && FrameClock.RenderingHandlers == handlers, TimeSpan.FromSeconds(5), "the fade to end, eased to whole, and the glass to let go of the frame");
                 FrameClock.RenderingHandlers.ShouldBe(handlers, "nothing asks for every frame");
                 for (var x = 0; x < 50; x++) grab.Track(new Point(20 + x, 11));   // a stream of moves on the bar
                 FrameClock.ActiveSince(before).ShouldBeEmpty("moves that keep the glow start nothing");
