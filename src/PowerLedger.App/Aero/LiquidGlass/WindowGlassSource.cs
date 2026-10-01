@@ -150,7 +150,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         _monitor = MonitorFromWindow(_hwnd, MONITOR_DEFAULTTONEAREST);
         var session = MonitorCapture.For(_monitor);
         if (session.Failed) return;
-        _gpu = new GpuGlassWindow(_dispatcher, session);
+        _gpu = new GpuGlassWindow(_hwnd, _dispatcher, session);
         session.FailedChanged += OnCaptureFailed;
         _gpu.Changed += OnGpuChanged;
         _bitmap = null;

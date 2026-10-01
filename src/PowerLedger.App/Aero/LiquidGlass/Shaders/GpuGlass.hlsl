@@ -31,6 +31,8 @@ cbuffer Glass : register(b0)
     float2 SourceSize; // the size of the texture Source is, in texels
     float Centre;      // the centre texel's weight
     float Pad;
+    float4 Radii;      // Down: the piece's corners in pixels (top left, top right, bottom right, bottom left), drawn
+                       // antialiased into alpha where the piece itself is the clip (DirectComposition); zero for none
     float4 Taps[16];   // (offset, weight, offset, weight): the pairs' centres in texels, one side
 };
 
@@ -97,12 +99,26 @@ float4 Across(float4 position : SV_Position) : SV_Target
     return float4(Blur(float2(p.x + Margin, p.y) + 0.5, float2(1, 0)), 1);
 }
 
+// How much of the pixel at centre q lies inside the box's rounded corners: 1 away from them, falling to 0 over a pixel
+// across each corner's arc.
+float Cover(float2 q)
+{
+    float2 size = float2(Size);
+    float r = q.x < size.x / 2 ? (q.y < size.y / 2 ? Radii.x : Radii.w) : (q.y < size.y / 2 ? Radii.y : Radii.z);
+    if (r <= 0) return 1;
+    float2 corner = float2(q.x < size.x / 2 ? r : size.x - r, q.y < size.y / 2 ? r : size.y - r);
+    float2 d = (q - corner) * float2(q.x < size.x / 2 ? -1 : 1, q.y < size.y / 2 ? -1 : 1);
+    if (d.x <= 0 || d.y <= 0) return 1;
+    return saturate(r - length(d) + 0.5);
+}
+
 float4 Down(float4 position : SV_Position) : SV_Target
 {
     int2 p = int2(position.xy) - Out;
     int2 s = int2(Map.Load(int3(p, 0)));
     float3 c = Round8(Blur(float2(s.x, s.y + Margin) + 0.5, float2(0, 1)));
-    return float4(ToSrgb(Round8(ToLinear(c))), 1);
+    float a = Cover(float2(p) + 0.5);
+    return float4(ToSrgb(Round8(ToLinear(c))) * a, a);
 }
 
 Texture2D<float4> Now : register(t0);

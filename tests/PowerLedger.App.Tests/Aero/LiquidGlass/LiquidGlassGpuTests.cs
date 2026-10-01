@@ -25,7 +25,7 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
 
         public LiquidGlassBackdrop Glass => glass;
 
-        public WindowGlassSource Source => LiquidGlassSources.Live.OfType<WindowGlassSource>().Single();
+        public WindowGlassSource Source => LiquidGlassSources.Live.OfType<WindowGlassSource>().First(s => s.Gpu?.Composes(glass) ?? false || s.Gpu?.TargetOf(glass) != null || s.Subscriber != null || s.Gpu != null);
 
         public void Dispose()
         {
@@ -77,6 +77,7 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             using var scene = Show(picture, 300, 200, box.Width, box.Height);
             UiHarness.PumpUntil(() => scene.Glass.OnGpu && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
             UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+            scene.Glass.Composed.ShouldBeTrue("a plain window's piece is composed beneath its content (DirectComposition)");
             var read = Gpu(scene).ReadAsync(scene.Glass);
             UiHarness.PumpUntil(() => read.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
             var drawn = read.Result;
@@ -100,6 +101,37 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
         result.Item2.ShouldBeGreaterThan(0.98);
         result.Item3.ShouldBeGreaterThan(0.995);
     }
+
+    [Fact]
+    public void A_layered_window_and_a_piece_over_another_are_imaged_through_a_d3dimage()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            var picture = FakeGlassSource.Picture(400, 300, (x, y) => ((byte)x, (byte)y, 90));
+            using var scene = Show(picture, 300, 200, 300, 200);
+            // A dialog's glass over the page's: imaged, so it shows above what the page draws.
+            var over = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(0), Width = 60, Height = 40, Margin = new Thickness(20), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+            ((Grid)scene.Window.Content).Children.Add(over);
+            // The watts overlay's kind of window: layered.
+            var pillGlass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(22) };
+            var pill = new Window
+            {
+                WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, Topmost = true, ShowActivated = false,
+                ShowInTaskbar = false, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.Manual, Left = 200, Top = 400, Width = 160, Height = 44,
+                Content = pillGlass,
+            };
+            pill.Show();
+            try
+            {
+                UiHarness.PumpUntil(() => scene.Glass.Composed && over.ShowsGpu && pillGlass.ShowsGpu, TimeSpan.FromSeconds(20), "the page composed, the dialog and the pill imaged");
+                var pillSource = LiquidGlassSources.Live.OfType<WindowGlassSource>().Single(s => s.Gpu != null && s.Gpu != scene.Source.Gpu);
+                UiHarness.PumpUntil(() => pillSource.Gpu!.Frames > 0, TimeSpan.FromSeconds(10), "the pill's first frame");
+            }
+            finally
+            {
+                pill.Close();
+            }
+            return 0;
+        }));
 
     [Fact]
     public void On_the_gpu_nothing_is_drawn_at_rest_or_while_hidden_and_a_change_behind_is()

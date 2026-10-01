@@ -18,8 +18,10 @@ namespace PowerLedger.App.Aero;
 /// displacement mirror at its edges (DisplacementField). Two ways to draw it, the window's source choosing:</para>
 /// <list type="bullet">
 /// <item>The GPU path (<see cref="WindowGlassSource.Gpu"/>): the piece tells its window's GpuGlassWindow where its box is,
-/// and shows its own rectangle of the window's picture, drawn on the GPU from the duplicated desktop. Nothing of the
-/// recipe runs in WPF.</item>
+/// and the glass is drawn on the GPU from the duplicated desktop. Composed (the usual way), it lies beneath the window's
+/// WPF content and the piece draws nothing: whatever the look draws over the piece must leave it visible. Imaged (a
+/// layered window, a piece over another), the piece shows its own rectangle of the window's shared picture. Nothing of
+/// the recipe runs in WPF.</item>
 /// <item>The CPU path and the wallpaper: four nested elements carry one WPF effect each (LiquidGlassEffects), over the
 /// box plus a margin the blur reaches into, where the first pass reads the box mirrored. The picture is the window's one
 /// source image, laid where it lies on the screen and clipped to the box and margin: no brush viewbox, which WPF would
@@ -132,8 +134,11 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
     /// <summary>Whether the piece draws through its window's GPU path now.</summary>
     internal bool OnGpu => _gpu != null;
 
-    /// <summary>Whether the piece shows its rectangle of the GPU path's picture now.</summary>
+    /// <summary>Whether the piece shows its rectangle of the GPU path's shared picture now (imaged).</summary>
     internal bool ShowsGpu => _gpu != null && _gpuHost.Visibility == Visibility.Visible;
+
+    /// <summary>Whether the piece's glass is composed beneath its window's content (DirectComposition).</summary>
+    internal bool Composed => _gpu?.Composes(this) ?? false;
 
     protected override int VisualChildrenCount => 2;
 
@@ -310,12 +315,16 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         => PresentationSource.FromVisual(this) is HwndSource { CompositionTarget.RenderMode: not RenderMode.SoftwareOnly } && (RenderCapability.Tier >> 16) >= 2
            && !SystemParameters.IsRemoteSession && RenderOptions.ProcessRenderMode != RenderMode.SoftwareOnly;
 
-    /// <summary>Tells the GPU path where the piece is, and shows its rectangle of the window's picture.</summary>
+    /// <summary>Tells the GPU path where the piece is. A composed piece draws nothing (its glass lies beneath the
+    /// window's WPF content); an imaged one shows its rectangle of the window's shared picture.</summary>
     private void PlaceOnGpu()
     {
         if (_gpu == null || ScreenBox() is not { } box) return;
-        _gpu.Update(this, new Int32Rect((int)box.X, (int)box.Y, (int)box.Width, (int)box.Height), _dpi, Brightness, BlurDeviation * _dpi, Scale);
-        if (_gpu.TargetOf(this) is not { } target || _gpu.Image.PixelWidth <= 0)
+        var r = CornerRadius;
+        double most = Math.Min(box.Width, box.Height) / 2;
+        var radii = new CornerRadius(Math.Min(most, r.TopLeft * _dpi), Math.Min(most, r.TopRight * _dpi), Math.Min(most, r.BottomRight * _dpi), Math.Min(most, r.BottomLeft * _dpi));
+        _gpu.Update(this, new Int32Rect((int)box.X, (int)box.Y, (int)box.Width, (int)box.Height), radii, _dpi, Brightness, BlurDeviation * _dpi, Scale);
+        if (_gpu.Composes(this) || _gpu.TargetOf(this) is not { } target || _gpu.Image.PixelWidth <= 0)
         {
             if (_gpuHost.Visibility == Visibility.Visible) _gpuHost.Visibility = Visibility.Hidden;
             return;

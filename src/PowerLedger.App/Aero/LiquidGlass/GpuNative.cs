@@ -100,6 +100,87 @@ internal static unsafe class GpuNative
         public uint Flags, FullScreenRefreshRateInHz, PresentationInterval;
     }
 
+    public static readonly Guid IID_IDCompositionDevice = new("c37ea93a-e7aa-450d-b16f-9746cb0407f3");
+    public static readonly Guid IID_IDXGIFactory2 = new("50c83a1c-e072-4c48-87b0-3630fa36a6d0");
+    public const int DXGI_USAGE_RENDER_TARGET_OUTPUT = 0x20;
+    public const int DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL = 3;
+    public const int DXGI_ALPHA_MODE_PREMULTIPLIED = 1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DXGI_SWAP_CHAIN_DESC1
+    {
+        public uint Width, Height;
+        public int Format, Stereo;
+        public uint SampleCount, SampleQuality;
+        public uint BufferUsage, BufferCount;
+        public int Scaling, SwapEffect, AlphaMode;
+        public uint Flags;
+    }
+
+    [DllImport("dcomp.dll")]
+    public static extern int DCompositionCreateDevice(IntPtr dxgiDevice, in Guid iid, out IntPtr device);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ClientToScreen(IntPtr hwnd, ref System.Drawing.Point point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetClientRect(IntPtr hwnd, out CaptureNative.RECT rect);
+
+    [DllImport("user32.dll")]
+    public static extern long GetWindowLongPtrW(IntPtr hwnd, int index);
+
+    // IDXGIObject: 6 GetParent. IDXGIFactory2: 24 CreateSwapChainForComposition. IDXGISwapChain: 8 Present, 9 GetBuffer,
+    // 13 ResizeBuffers.
+    public static int GetParent(IntPtr dxgiObject, in Guid iid, out IntPtr parent)
+    {
+        fixed (Guid* i = &iid)
+        fixed (IntPtr* p = &parent)
+        {
+            return ((delegate* unmanaged[Stdcall]<IntPtr, Guid*, IntPtr*, int>)V(dxgiObject)[6])(dxgiObject, i, p);
+        }
+    }
+
+    public static int CreateSwapChainForComposition(IntPtr factory2, IntPtr device, in DXGI_SWAP_CHAIN_DESC1 desc, out IntPtr swapChain)
+    {
+        fixed (DXGI_SWAP_CHAIN_DESC1* d = &desc)
+        fixed (IntPtr* s = &swapChain)
+        {
+            return ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, DXGI_SWAP_CHAIN_DESC1*, IntPtr, IntPtr*, int>)V(factory2)[24])(factory2, device, d, IntPtr.Zero, s);
+        }
+    }
+
+    public static int Present(IntPtr swapChain) => ((delegate* unmanaged[Stdcall]<IntPtr, uint, uint, int>)V(swapChain)[8])(swapChain, 0, 0);
+
+    public static int GetBuffer(IntPtr swapChain, out IntPtr texture)
+    {
+        var iid = CaptureNative.IID_ID3D11Texture2D;
+        fixed (IntPtr* t = &texture) return ((delegate* unmanaged[Stdcall]<IntPtr, uint, Guid*, IntPtr*, int>)V(swapChain)[9])(swapChain, 0, &iid, t);
+    }
+
+    public static int ResizeBuffers(IntPtr swapChain, uint width, uint height)
+        => ((delegate* unmanaged[Stdcall]<IntPtr, uint, uint, uint, int, uint, int>)V(swapChain)[13])(swapChain, 2, width, height, CaptureNative.DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+
+    // IDCompositionDevice: 3 Commit, 6 CreateTargetForHwnd, 7 CreateVisual. IDCompositionTarget: 3 SetRoot.
+    // IDCompositionVisual: 15 SetContent (after SetOffsetX, SetOffsetY, SetTransform and SetClip, two slots each, and
+    // SetTransformParent, SetEffect, SetBitmapInterpolationMode and SetBorderMode, one each).
+    public static int Commit(IntPtr dcomp) => ((delegate* unmanaged[Stdcall]<IntPtr, int>)V(dcomp)[3])(dcomp);
+
+    public static int CreateTargetForHwnd(IntPtr dcomp, IntPtr hwnd, bool topmost, out IntPtr target)
+    {
+        fixed (IntPtr* t = &target) return ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int, IntPtr*, int>)V(dcomp)[6])(dcomp, hwnd, topmost ? 1 : 0, t);
+    }
+
+    public static int CreateVisual(IntPtr dcomp, out IntPtr visual)
+    {
+        fixed (IntPtr* v = &visual) return ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr*, int>)V(dcomp)[7])(dcomp, v);
+    }
+
+    public static int SetRoot(IntPtr target, IntPtr visual) => ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)V(target)[3])(target, visual);
+
+    public static int SetContent(IntPtr visual, IntPtr content) => ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)V(visual)[15])(visual, content);
+
     [DllImport("d3d9.dll")]
     public static extern int Direct3DCreate9Ex(uint sdkVersion, out IntPtr d3d9ex);
 

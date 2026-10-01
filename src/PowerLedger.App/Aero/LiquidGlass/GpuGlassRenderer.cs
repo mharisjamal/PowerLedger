@@ -7,7 +7,7 @@ namespace PowerLedger.App.Aero;
 
 /// <summary>One piece to draw on the GPU path: where its box lies on the virtual screen (physical pixels), its source map,
 /// where it goes on its window's picture, and the recipe's numbers at its display scale.</summary>
-internal sealed record GpuGlassJob(int Id, Int32Rect Box, IntPtr MapView, Int32Rect Target, float Brightness, double Sigma, int Version);
+internal sealed record GpuGlassJob(int Id, Int32Rect Box, IntPtr MapView, Int32Rect Target, float Brightness, double Sigma, CornerRadius Radii, bool Composed, int Version);
 
 /// <summary>
 /// The GPU path's drawing, on one Direct3D 11 device and only on its monitor's capture thread (the immediate context is
@@ -42,6 +42,7 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
     {
         public int BoxX, BoxY, SizeX, SizeY, OutX, OutY, Margin, Pairs, LimitX, LimitY;
         public float Brightness, SdrWhite, SourceWidth, SourceHeight, Centre, Pad;
+        public float RadiusTopLeft, RadiusTopRight, RadiusBottomRight, RadiusBottomLeft;
         public fixed float Taps[64];
     }
 
@@ -213,6 +214,7 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
         {
             BoxX = job.Box.X - _bounds.Left, BoxY = job.Box.Y - _bounds.Top, SizeX = w, SizeY = h, OutX = job.Target.X, OutY = job.Target.Y,
             Margin = margin, Pairs = pairs.Length, LimitX = _width, LimitY = _height, Brightness = job.Brightness, SdrWhite = _sdrWhite, Centre = (float)centre,
+            RadiusTopLeft = (float)job.Radii.TopLeft, RadiusTopRight = (float)job.Radii.TopRight, RadiusBottomRight = (float)job.Radii.BottomRight, RadiusBottomLeft = (float)job.Radii.BottomLeft,
         };
         for (var i = 0; i < pairs.Length; i++)
         {
@@ -254,6 +256,16 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
         Interlocked.Increment(ref PiecesDrawn);
         return true;
     }
+
+    /// <summary>Clears a render target to transparent.</summary>
+    public void Clear(IntPtr target)
+    {
+        var clear = stackalloc float[4];
+        ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, float*, void>)(*(void***)_context)[50])(_context, target, clear);   // ClearRenderTargetView
+    }
+
+    /// <summary>Copies one whole texture onto another of its size.</summary>
+    public void Copy(IntPtr destination, IntPtr source) => CopyResource(_context, destination, source);
 
     /// <summary>Waits until the GPU has finished everything asked of it so far (a texel of <paramref name="texture"/> read
     /// back after it), so another device (WPF's) reads finished pixels.</summary>
