@@ -71,6 +71,32 @@ public class LiquidGlassShaderTests(ITestOutputHelper output)
         Share(8).ShouldBeGreaterThan(0.995);
     }
 
+    /// <summary>The recipe on the CPU (what a piece inside another shows, drawn once) against Chromium's own pixels.</summary>
+    [Theory]
+    [InlineData("a")]
+    [InlineData("d")]
+    [InlineData("e")]
+    public void On_the_cpu_the_recipe_draws_as_chromium_does(string name)
+    {
+        var scale = ChromiumReference.Cases.Single(c => c.Name == name).Scale;
+        var box = ChromiumReference.DeviceBox(name);
+        var (chromium, w, h) = ChromiumReference.Load(name, "full");
+        var pixels = new byte[w * h * 4];
+        for (var y = 0; y < h; y++)
+        {
+            for (var x = 0; x < w; x++)
+            {
+                var (r, g, b) = ChromiumReference.Picture(box.X + x, box.Y + y, scale);
+                (pixels[(y * w + x) * 4], pixels[(y * w + x) * 4 + 1], pixels[(y * w + x) * 4 + 2], pixels[(y * w + x) * 4 + 3]) = (b, g, r, 255);
+            }
+        }
+        var drawn = GlassRecipeCpu.Draw(pixels, w, h, scale, LiquidGlassRecipe.Brightness, LiquidGlassRecipe.BlurDeviation * scale, LiquidGlassRecipe.Scale);
+        var errors = Compare(drawn, chromium, w, h, scale);
+        output.WriteLine($"{name}: {w}x{h} at {scale} on the CPU: {Report(errors)}");
+        Share(errors, 1).ShouldBeGreaterThan(0.98);
+        Share(errors, 8).ShouldBeGreaterThan(0.995);
+    }
+
     /// <summary>
     /// The mockup's Energy pane over the mockup's own background, which holds a white window: Edge bends that window into
     /// white blotches inside the pane, and so must the engine, no more and no less (scripts/liquid-glass/dashboard.html,

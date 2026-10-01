@@ -16,6 +16,9 @@ internal interface IGpuGlassConsumer
     /// <summary>A piece is new, moved or resized, or the window's picture is new: draw even with nothing changed.</summary>
     bool WantsFrame { get; }
 
+    /// <summary>The top-level window the pieces are in: a change wholly inside it may be its own repainting.</summary>
+    IntPtr Window { get; }
+
     /// <summary>Draws the pieces that <paramref name="changed"/> (physical pixels on the virtual screen, compared: something
     /// behind really changed) touches, and any that want drawing. Null: nothing changed behind.</summary>
     void Frame(GpuGlassRenderer renderer, IReadOnlyList<Int32Rect>? changed);
@@ -217,6 +220,12 @@ internal sealed class MonitorCapture : IDisposable
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     private static extern int GetCurrentThreadId();
 
+    /// <summary>The pace while frames draw nothing: Windows reports our own window's repainting (a reading rolling in)
+    /// as a change under the glass, which a compare then finds is none.</summary>
+    internal static readonly TimeSpan Quiet = TimeSpan.FromMilliseconds(100);
+
+    private bool _quiet;
+
     private void Run()
     {
         ThreadIds.Add(GetCurrentThreadId());
@@ -238,7 +247,10 @@ internal sealed class MonitorCapture : IDisposable
                     _wake.WaitOne(TimeSpan.FromSeconds(1));   // the secure desktop, a mode change: try again shortly
                     continue;
                 }
-                var wait = last + LiquidGlassGovernor.Interval - clock.Elapsed;
+                // A frame that drew nothing (our own window repainting, a change away from the glass) slows the next
+                // look to a tenth of a second; the first frame that draws brings back the governor's pace.
+                var interval = _quiet && LiquidGlassGovernor.Interval < Quiet ? Quiet : LiquidGlassGovernor.Interval;
+                var wait = last + interval - clock.Elapsed;
                 if (wait > TimeSpan.Zero)
                 {
                     _wake.WaitOne(wait);
@@ -366,7 +378,11 @@ internal sealed class MonitorCapture : IDisposable
                     }
                 }
             }
-            var differs = areas.Count == 0 ? 0u : _renderer.Differs(areas);
+            // A change that reaches past every window of ours is something else's (a video playing behind): it is real,
+            // with no compare and no wait for one. Only a change wholly inside a window of ours may be that window
+            // repainting itself, which the compare tells from a change behind it.
+            var differs = areas.Count == 0 ? 0u : Ours(consumers, areas) ? _renderer.Differs(areas) : Touched(areas);
+            _quiet = differs == 0;
             _renderer.Remember(_changed);
             for (var c = 0; c < consumers.Count; c++)
             {
@@ -380,6 +396,45 @@ internal sealed class MonitorCapture : IDisposable
             if (touched[c] == null && !consumers[c].WantsFrame) continue;
             consumers[c].Frame(_renderer, touched[c]);
         }
+    }
+
+    /// <summary>Whether every changed rectangle under the glass lies wholly inside one of our windows (desktop pixels).</summary>
+    private bool Ours(List<IGpuGlassConsumer> consumers, List<(int Consumer, RECT Rect)> areas)
+    {
+        _windows.Clear();
+        foreach (var consumer in consumers)
+        {
+            if (CaptureNative.GetWindowRect(consumer.Window, out var w))
+            {
+                _windows.Add(new RECT { Left = w.Left - _desktopBounds.Left, Top = w.Top - _desktopBounds.Top, Right = w.Right - _desktopBounds.Left, Bottom = w.Bottom - _desktopBounds.Top });
+            }
+        }
+        foreach (var dirty in _changed)
+        {
+            var under = false;
+            foreach (var (_, area) in areas)
+            {
+                if (area.Left < dirty.Right && dirty.Left < area.Right && area.Top < dirty.Bottom && dirty.Top < area.Bottom) under = true;
+            }
+            if (!under) continue;
+            var inside = false;
+            foreach (var w in _windows)
+            {
+                if (dirty.Left >= w.Left && dirty.Top >= w.Top && dirty.Right <= w.Right && dirty.Bottom <= w.Bottom) inside = true;
+            }
+            if (!inside) return false;
+        }
+        return true;
+    }
+
+    private readonly List<RECT> _windows = [];
+
+    /// <summary>Every consumer a changed rectangle reached, as the compare's bits.</summary>
+    private static uint Touched(List<(int Consumer, RECT Rect)> areas)
+    {
+        uint bits = 0;
+        foreach (var (consumer, _) in areas) bits |= 1u << Math.Min(consumer, 31);
+        return bits;
     }
 
     /// <summary>The CPU path: reads back what each subscriber needs, the changed part of its region, or all of it after it

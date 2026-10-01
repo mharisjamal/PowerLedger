@@ -228,6 +228,8 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
 
     public bool WantsFrame => _wants;
 
+    public IntPtr Window => _hwnd;
+
     /// <summary>Whether <paramref name="piece"/> is composed (DirectComposition beneath the window: the piece draws
     /// nothing) rather than imaged.</summary>
     public bool Composes(LiquidGlassBackdrop piece) => _pieces.TryGetValue(piece, out var p) && p.Composed;

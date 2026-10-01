@@ -64,6 +64,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
     private readonly GlassBrightnessEffect _bright = new();
     private readonly ImageBrush _map = new() { Stretch = Stretch.Fill };
     private readonly Border _gpuHost = new() { Visibility = Visibility.Hidden };
+    private readonly Image _finished = new() { Stretch = Stretch.Fill, Visibility = Visibility.Hidden };
     private readonly ImageBrush _gpuPicture = new() { Stretch = Stretch.Fill, ViewboxUnits = BrushMappingMode.Absolute };
     private readonly BitmapCache _cache = new() { SnapsToDevicePixels = true };
     private GpuGlassWindow? _gpu;
@@ -99,6 +100,8 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         // and WPF would draw everything over every piece again on each frame).
         _gpuHost.Background = _gpuPicture;
         AddVisualChild(_gpuHost);
+        RenderOptions.SetBitmapScalingMode(_finished, BitmapScalingMode.NearestNeighbor);
+        AddVisualChild(_finished);
         Loaded += (_, _) => Attach();
         Unloaded += (_, _) => Detach();
         IsVisibleChanged += (_, _) => PlaceOnGpu();
@@ -170,7 +173,9 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
     }
 
     /// <summary>The source map in use is ready, for a test.</summary>
-    internal bool IsReady => _mapFor != null && _mapFor == _mapWanted && _displaceHost.Visibility == Visibility.Visible;
+    internal bool IsReady => _source is InsideGlassSource
+        ? _finished.Visibility == Visibility.Visible && _finished.Source != null
+        : _mapFor != null && _mapFor == _mapWanted && _displaceHost.Visibility == Visibility.Visible;
 
     /// <summary>Why the last source map couldn't be made, for a test; null when it was.</summary>
     internal Exception? MapError { get; private set; }
@@ -187,12 +192,13 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
     /// <summary>Whether the piece's glass is composed beneath its window's content (DirectComposition).</summary>
     internal bool Composed => _gpu?.Composes(this) ?? false;
 
-    protected override int VisualChildrenCount => 2;
+    protected override int VisualChildrenCount => 3;
 
     protected override Visual GetVisualChild(int index) => index switch
     {
         0 => _displaceHost,
         1 => _gpuHost,
+        2 => _finished,
         _ => throw new ArgumentOutOfRangeException(nameof(index)),
     };
 
@@ -200,6 +206,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
     {
         _displaceHost.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         _gpuHost.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        _finished.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         return default;
     }
 
@@ -212,6 +219,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         var m = _margin / _dpi;
         _displaceHost.Arrange(new Rect(-m, -m, finalSize.Width + 2 * m, finalSize.Height + 2 * m));
         _gpuHost.Arrange(new Rect(finalSize));
+        _finished.Arrange(new Rect(0, 0, Math.Round(finalSize.Width * _dpi) / _dpi, Math.Round(finalSize.Height * _dpi) / _dpi));
         _across.Sigma = sigma;
         _down.Sigma = sigma;
         var texel = new Point4D(1 / Math.Round(finalSize.Width * _dpi + 2 * _margin), 1 / Math.Round(finalSize.Height * _dpi + 2 * _margin), 0, 0);
@@ -221,7 +229,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         double w = Math.Round(finalSize.Width * _dpi), h = Math.Round(finalSize.Height * _dpi);
         _bright.Box = new Point4D(_margin * texel.X, _margin * texel.Y, (_margin + w) * texel.X, (_margin + h) * texel.Y);
         UpdateClip(finalSize);
-        UpdateMap(finalSize);
+        if (_source is not InsideGlassSource) UpdateMap(finalSize);
         Place();
         return finalSize;
     }
@@ -290,6 +298,8 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         _window = null;
         _picture.Source = null;
         _displaceHost.Visibility = Visibility.Hidden;
+        _finished.Source = null;
+        _finished.Visibility = Visibility.Hidden;
         SetValue(KindKey, LiquidGlassSourceKind.None);
     }
 
@@ -298,7 +308,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         if (_source == null) return;
         UseGpu((_source as WindowGlassSource)?.Gpu);
         SetValue(KindKey, _gpu != null ? _source.Kind : _source.Image == null ? LiquidGlassSourceKind.None : _source.Kind);
-        if (!ReferenceEquals(_picture.Source, _source.Image))
+        if (_source is not InsideGlassSource && !ReferenceEquals(_picture.Source, _source.Image))
         {
             _picture.Source = _source.Image;
             // The live picture and the content inside a piece lie pixel on pixel; the wallpaper is scaled to the screen.
@@ -317,6 +327,15 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
             PlaceOnGpu();
             return;
         }
+        if (_source is InsideGlassSource inside)
+        {
+            // Inside another piece the glass comes finished, for the piece's own box: one bitmap, no effects.
+            if (!ReferenceEquals(_finished.Source, inside.Image)) _finished.Source = inside.Image;
+            var shown = inside.Image != null ? Visibility.Visible : Visibility.Hidden;
+            if (_finished.Visibility != shown) _finished.Visibility = shown;
+            if (_displaceHost.Visibility == Visibility.Visible) _displaceHost.Visibility = Visibility.Hidden;
+            return;
+        }
         if (_source?.Image is not { } image || ScreenBox() is not { } box)
         {
             if (_displaceHost.Visibility == Visibility.Visible) _displaceHost.Visibility = Visibility.Hidden;
@@ -325,11 +344,15 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         var bounds = _source.ScreenBounds;
         if (bounds.Width <= 0 || bounds.Height <= 0) return;
         var m = _margin / _dpi;
-        double left = m + (bounds.X - box.X) / _dpi, top = m + (bounds.Y - box.Y) / _dpi;
+        PlacePicture(m + (bounds.X - box.X) / _dpi, m + (bounds.Y - box.Y) / _dpi, bounds.Width / _dpi, bounds.Height / _dpi);
+    }
+
+    private void PlacePicture(double left, double top, double width, double height)
+    {
         if (Canvas.GetLeft(_picture) != left) Canvas.SetLeft(_picture, left);
         if (Canvas.GetTop(_picture) != top) Canvas.SetTop(_picture, top);
-        if (_picture.Width != bounds.Width / _dpi) _picture.Width = bounds.Width / _dpi;
-        if (_picture.Height != bounds.Height / _dpi) _picture.Height = bounds.Height / _dpi;
+        if (_picture.Width != width) _picture.Width = width;
+        if (_picture.Height != height) _picture.Height = height;
         // A map made for another size would move the wrong pixels: the piece waits for its own.
         var ready = _mapFor != null && _mapFor == _mapWanted;
         var visibility = ready ? Visibility.Visible : Visibility.Hidden;
@@ -342,7 +365,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
     {
         if (ReferenceEquals(gpu, _gpu))
         {
-            if (gpu == null) CacheMode = Hardware() ? _cache : null;
+            if (gpu == null) CacheMode = Hardware() && _source is not InsideGlassSource ? _cache : null;
             return;
         }
         if (_gpu != null)
@@ -367,7 +390,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
             // The passes run again only when the picture under the piece changes: content drawn over the piece (a
             // reading, a hover) is composed over this cache rather than making the four passes run again. Only where WPF
             // draws in hardware: its software renderer draws a cached chain of effects out of place.
-            CacheMode = Hardware() ? _cache : null;
+            CacheMode = Hardware() && _source is not InsideGlassSource ? _cache : null;
         }
     }
 
@@ -384,7 +407,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         Matrix where;
         try
         {
-            where = TransformToAncestor(root) is MatrixTransform m ? m.Matrix : TransformToAncestor(root).Transform(new Point(0, 0)) is var at ? new Matrix(1, 0, 0, 1, at.X, at.Y) : default;
+            where = Chain(this, root) ?? throw new InvalidOperationException();
         }
         catch (InvalidOperationException)
         {
@@ -448,7 +471,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         Rect shown;
         try
         {
-            shown = ToScreen(TransformToAncestor(root).TransformBounds(new Rect(RenderSize)));
+            shown = ToScreen(Bounds(new Rect(RenderSize), Chain(this, root) ?? throw new InvalidOperationException()));
         }
         catch (InvalidOperationException)
         {
@@ -463,13 +486,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
             if (node is UIElement element) opacity *= element.Opacity;
             if (VisualTreeHelper.GetClip(node) is { } clip)
             {
-                try
-                {
-                    visible.Intersect(ToScreen(node.TransformToAncestor(root).TransformBounds(clip.Bounds)));
-                }
-                catch (InvalidOperationException)
-                {
-                }
+                if (Chain(node, root) is { } toRoot) visible.Intersect(ToScreen(Bounds(clip.Bounds, toRoot)));
             }
             if (visible.IsEmpty) break;
         }
@@ -480,6 +497,33 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         var radii = new CornerRadius(Math.Min(most, r.TopLeft * k), Math.Min(most, r.TopRight * k), Math.Min(most, r.BottomRight * k), Math.Min(most, r.BottomLeft * k));
         Rect Local(Rect s) => s.IsEmpty ? Rect.Empty : new Rect(Math.Round(s.X - box.X, 3), Math.Round(s.Y - box.Y, 3), Math.Round(s.Width, 3), Math.Round(s.Height, 3));
         return (box, new GpuGlassShape(Local(shown), radii, Local(visible), Math.Round(opacity, 3)));
+    }
+
+    /// <summary>
+    /// The transform from <paramref name="from"/> to its ancestor <paramref name="ancestor"/>, from each visual's offset
+    /// and transform, or null when it isn't an ancestor. WPF's TransformToAncestor works out every ancestor's drawing
+    /// bounds when one of them has an Effect (the look's text shadow sits over most pieces): half the UI thread's time with
+    /// glass on. An effect here moves nothing, so it is left out.
+    /// </summary>
+    internal static Matrix? Chain(Visual from, Visual ancestor)
+    {
+        var total = Matrix.Identity;
+        for (Visual? node = from; node != null; node = VisualTreeHelper.GetParent(node) as Visual)
+        {
+            if (ReferenceEquals(node, ancestor)) return total;
+            var local = Matrix.Identity;
+            if (VisualTreeHelper.GetTransform(node) is { } transform) local = transform.Value;
+            var offset = VisualTreeHelper.GetOffset(node);
+            local.Translate(offset.X, offset.Y);
+            total *= local;
+        }
+        return null;
+    }
+
+    private static Rect Bounds(Rect r, Matrix m)
+    {
+        r.Transform(m);
+        return r;
     }
 
     private void UpdateClip(Size size)

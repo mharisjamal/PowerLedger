@@ -20,6 +20,8 @@ namespace PowerLedger.App.Aero;
 /// new size rasterises them. The picture always lies at the piece, so a moved window draws nothing again. Nothing runs at
 /// rest, and the window's own WPF drawing is never touched. A colour changed without a layout pass shows at the next
 /// one.</para>
+/// <para>The picture it hands over is the finished glass: the recipe run on the CPU (<see cref="GlassRecipeCpu"/>), at the
+/// effects' precision, so WPF draws one bitmap for the piece and no effects.</para>
 /// <para>A visual's Effect (a text shadow) is not drawn: a DrawingGroup has no effects.</para>
 /// </summary>
 internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
@@ -72,7 +74,8 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         Rect inOuter;
         try
         {
-            inOuter = _piece.TransformToAncestor(_outer).TransformBounds(new Rect(_piece.RenderSize));
+            inOuter = new Rect(_piece.RenderSize);
+            inOuter.Transform(LiquidGlassBackdrop.Chain(_piece, _outer) ?? throw new InvalidOperationException());
         }
         catch (InvalidOperationException)
         {
@@ -96,10 +99,14 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         var hash = new HashCode();
         hash.Add(size);
         hash.Add(inOuter);
+        hash.Add(_piece.Brightness);
+        hash.Add(_piece.BlurDeviation);
+        hash.Add(_piece.Scale);
+        hash.Add(dpi.DpiScaleX);
         var done = false;
         using (var context = drawing.Open())
         {
-            Walk(_outer, Matrix.Identity, context, ref hash, inOuter, ref done, top: true);
+            Walk(_outer, Matrix.Identity, 0, context, ref hash, inOuter, ref done, top: true);
         }
         var value = hash.ToHashCode();
         if (value == _hash && Image != null) return false;
@@ -110,8 +117,14 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
             context.PushTransform(new TranslateTransform(-inOuter.X, -inOuter.Y));
             context.DrawDrawing(drawing);
         }
-        var bitmap = new RenderTargetBitmap((int)size.Width, (int)size.Height, 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
+        int w = (int)size.Width, h = (int)size.Height;
+        var content = new RenderTargetBitmap(w, h, 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
+        content.Render(visual);
+        var pixels = new byte[w * h * 4];
+        content.CopyPixels(pixels, w * 4, 0);
+        // The finished glass, drawn here once rather than by four WPF effects on every frame WPF draws the piece.
+        var glass = GlassRecipeCpu.Draw(pixels, w, h, dpi.DpiScaleX, _piece.Brightness, _piece.BlurDeviation * dpi.DpiScaleX, _piece.Scale);
+        var bitmap = BitmapSource.Create(w, h, 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32, null, glass, w * 4);
         bitmap.Freeze();
         Image = bitmap;
         Interlocked.Increment(ref Drawn);
@@ -129,8 +142,11 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         Hook(false);
     }
 
-    /// <summary>Adds <paramref name="node"/> and what it holds, in WPF's painting order, until the inner piece.</summary>
-    private void Walk(DependencyObject node, Matrix above, DrawingContext context, ref HashCode hash, Rect box, ref bool done, bool top)
+    /// <summary>Adds <paramref name="node"/> and what it holds, in WPF's painting order, until the inner piece. Only what
+    /// reaches the box goes into the hash: its drawing, where it lands (<paramref name="above"/> and its own transform) and
+    /// the opacity, clips and masks over it (<paramref name="path"/>), so a digit rolling elsewhere in the pane draws
+    /// nothing again.</summary>
+    private void Walk(DependencyObject node, Matrix above, int path, DrawingContext context, ref HashCode hash, Rect box, ref bool done, bool top)
     {
         if (done) return;
         if (ReferenceEquals(node, _piece))
@@ -161,16 +177,20 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         if (clip != null) context.PushClip(clip);
         if (opacity < 1) context.PushOpacity(opacity);
         if (mask != null) context.PushOpacityMask(mask);
-        hash.Add(local);
-        hash.Add(opacity);
-        if (clip != null) hash.Add(Token(clip));
-        if (mask != null) hash.Add(Token(mask));
+        var over = new HashCode();
+        over.Add(path);
+        over.Add(opacity);
+        if (clip != null) over.Add(Token(clip));
+        if (mask != null) over.Add(Token(mask));
+        path = over.ToHashCode();
         if (reaches && VisualTreeHelper.GetDrawing(visual) is { } own)
         {
             context.DrawDrawing(own);
+            hash.Add(here);
+            hash.Add(path);
             Add(own, ref hash);
         }
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(visual) && !done; i++) Walk(VisualTreeHelper.GetChild(visual, i), here, context, ref hash, box, ref done, top: false);
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(visual) && !done; i++) Walk(VisualTreeHelper.GetChild(visual, i), here, path, context, ref hash, box, ref done, top: false);
         if (mask != null) context.Pop();
         if (opacity < 1) context.Pop();
         if (clip != null) context.Pop();
