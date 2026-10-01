@@ -57,7 +57,7 @@ internal sealed class MonitorCapture : IDisposable
     private int _desktopFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
     private float _sdrWhite;
     private RECT _desktopBounds;
-    private bool _needFull;
+    private volatile int _needFull;
     private int _failures;
     private int _deviceResets;
     private RECT[] _dirty = new RECT[64];
@@ -152,6 +152,19 @@ internal sealed class MonitorCapture : IDisposable
 
     internal void Wake() => _wake.Set();
 
+    /// <summary>Copies the whole desktop again on the next two frames: a window was just left out of capture, and
+    /// Windows may hand over a frame or two drawn before that took hold, the window in it, which no dirty rectangle
+    /// would ever take out of the copy.</summary>
+    public void RefreshAll()
+    {
+        _needFull = 2;
+        Interlocked.Exchange(ref _fullUntil, Stopwatch.GetTimestamp() + Stopwatch.Frequency / 2);
+        _wake.Set();
+    }
+
+    /// <summary>Until then, every frame copies the whole desktop (half a second after <see cref="RefreshAll"/>).</summary>
+    private long _fullUntil;
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -176,16 +189,37 @@ internal sealed class MonitorCapture : IDisposable
         Dispose();
     }
 
-    private (Subscriber[] Subscribers, IGpuGlassConsumer[] Consumers) Active()
+    private readonly List<Subscriber> _activeSubscribers = [];
+    private readonly List<IGpuGlassConsumer> _activeConsumers = [];
+
+    /// <summary>The visible subscribers and consumers now, in lists the capture thread reuses.</summary>
+    private (List<Subscriber> Subscribers, List<IGpuGlassConsumer> Consumers) Active()
     {
+        _activeSubscribers.Clear();
+        _activeConsumers.Clear();
         lock (_subscribers)
         {
-            return (_subscribers.Where(s => s.Active && s.Region.Width > 0 && s.Region.Height > 0).ToArray(), _consumers.Where(c => c.Active).ToArray());
+            foreach (var s in _subscribers)
+            {
+                if (s.Active && s.Region.Width > 0 && s.Region.Height > 0) _activeSubscribers.Add(s);
+            }
+            foreach (var c in _consumers)
+            {
+                if (c.Active) _activeConsumers.Add(c);
+            }
         }
+        return (_activeSubscribers, _activeConsumers);
     }
+
+    /// <summary>The capture threads' Windows ids, for the measurements.</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentBag<int> ThreadIds = [];
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern int GetCurrentThreadId();
 
     private void Run()
     {
+        ThreadIds.Add(GetCurrentThreadId());
         var clock = Stopwatch.StartNew();
         var last = TimeSpan.Zero - LiquidGlassGovernor.Fastest;
         try
@@ -193,7 +227,7 @@ internal sealed class MonitorCapture : IDisposable
             while (!_disposed)
             {
                 var (subscribers, consumers) = Active();
-                if ((subscribers.Length == 0 && consumers.Length == 0) || Failed)
+                if ((subscribers.Count == 0 && consumers.Count == 0) || Failed)
                 {
                     CloseDuplication();
                     _wake.WaitOne();
@@ -252,14 +286,15 @@ internal sealed class MonitorCapture : IDisposable
     private RECT? Take(DXGI_OUTDUPL_FRAME_INFO info, IntPtr resource)
     {
         _changed.Clear();
-        if (info.LastPresentTime == 0 && !_needFull) return null;   // only the pointer moved
+        if (_needFull == 0 && Stopwatch.GetTimestamp() < Interlocked.Read(ref _fullUntil)) _needFull = 1;
+        if (info.LastPresentTime == 0 && _needFull == 0) return null;   // only the pointer moved
         if (QueryInterface(resource, IID_ID3D11Texture2D, out var texture) < 0) return null;
         try
         {
             int width = _desktopBounds.Right - _desktopBounds.Left, height = _desktopBounds.Bottom - _desktopBounds.Top;
-            if (_needFull)
+            if (_needFull > 0)
             {
-                _needFull = false;
+                _needFull--;
                 CopySubresourceRegion(_context, _desktop, 0, 0, texture, new D3D11_BOX { Right = (uint)width, Bottom = (uint)height, Back = 1 });
                 var all = new RECT { Right = width, Bottom = height };
                 _changed.Add(all);
@@ -297,25 +332,25 @@ internal sealed class MonitorCapture : IDisposable
         bounds.Bottom = Math.Max(bounds.Bottom, r.Bottom);
     }
 
-    private void Service(Subscriber[] subscribers, IGpuGlassConsumer[] consumers, RECT? changed)
+    private void Service(List<Subscriber> subscribers, List<IGpuGlassConsumer> consumers, RECT? changed)
     {
         if (!Hdr) ServiceCpu(subscribers, changed);
         ServiceGpu(consumers, changed != null);
     }
 
     /// <summary>The GPU path: which consumers' pieces lie under a real change (compared on the GPU), then each draws.</summary>
-    private void ServiceGpu(IGpuGlassConsumer[] consumers, bool changed)
+    private void ServiceGpu(List<IGpuGlassConsumer> consumers, bool changed)
     {
-        if (consumers.Length == 0 || _renderer == null)
+        if (consumers.Count == 0 || _renderer == null)
         {
             if (changed) _renderer?.Remember(_changed);
             return;
         }
-        var touched = new List<Int32Rect>?[consumers.Length];
+        var touched = new List<Int32Rect>?[consumers.Count];
         if (changed)
         {
             var areas = new List<(int Consumer, RECT Rect)>();
-            for (var c = 0; c < consumers.Length; c++)
+            for (var c = 0; c < consumers.Count; c++)
             {
                 foreach (var area in consumers[c].Areas)
                 {
@@ -333,14 +368,14 @@ internal sealed class MonitorCapture : IDisposable
             }
             var differs = areas.Count == 0 ? 0u : _renderer.Differs(areas);
             _renderer.Remember(_changed);
-            for (var c = 0; c < consumers.Length; c++)
+            for (var c = 0; c < consumers.Count; c++)
             {
                 if ((differs & (1u << Math.Min(c, 31))) == 0) continue;
                 touched[c] = areas.Where(a => a.Consumer == c)
                     .Select(a => new Int32Rect(a.Rect.Left + _desktopBounds.Left, a.Rect.Top + _desktopBounds.Top, a.Rect.Right - a.Rect.Left, a.Rect.Bottom - a.Rect.Top)).ToList();
             }
         }
-        for (var c = 0; c < consumers.Length; c++)
+        for (var c = 0; c < consumers.Count; c++)
         {
             if (touched[c] == null && !consumers[c].WantsFrame) continue;
             consumers[c].Frame(_renderer, touched[c]);
@@ -349,7 +384,7 @@ internal sealed class MonitorCapture : IDisposable
 
     /// <summary>The CPU path: reads back what each subscriber needs, the changed part of its region, or all of it after it
     /// moved.</summary>
-    private void ServiceCpu(Subscriber[] active, RECT? changed)
+    private void ServiceCpu(List<Subscriber> active, RECT? changed)
     {
         foreach (var subscriber in active)
         {
@@ -458,7 +493,8 @@ internal sealed class MonitorCapture : IDisposable
                 _renderer?.Dispose();
                 _renderer = GpuGlassRenderer.Make(_device, _context, _desktop, (int)texture.Width, (int)texture.Height, format, _sdrWhite, _desktopBounds);
             }
-            _needFull = true;
+            // The whole desktop on the first two frames: a window just left out of capture can still be in the first.
+            _needFull = 2;
             _failures = 0;
             lock (_subscribers)
             {

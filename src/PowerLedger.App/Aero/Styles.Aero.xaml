@@ -92,17 +92,19 @@
          37 %, and a bubble's own soft one under it), worked out once into small bitmaps; the tint (none by default); the
          glowing edge (GlassGlow: the recipe's two inset highlights in white at 70 %); then the content, above the glow so
          its text reads, with the mockup's text shadow (none again on a piece that sits on another's glass, whose content's
-         shadow reaches it already). Nothing here runs per frame. -->
+         shadow reaches it already). Nothing here runs per frame. A piece inside another reads the outer piece's tint and
+         content beneath it, as the browser's backdrop root has it; the shadow and the glow are left out of that, as CSS
+         paints them apart from the content. -->
     <ControlTemplate x:Key="A.Glass.Template" TargetType="aero:GlassPanel">
         <Grid>
             <aero:LiquidGlassBackdrop x:Name="PART_Backdrop" CornerRadius="{TemplateBinding CornerRadius}" IsLive="{DynamicResource A.Glass.Live}" />
             <!-- Empty but for a dialog or a toast, which float over the window's own panes: the window lays the stage under
                  it here (AeroWindow.Frost), as the browser's backdrop filter would read the page beneath. -->
             <Border x:Name="PART_Frost" IsHitTestVisible="False" />
-            <aero:GlassShadow x:Name="PART_Shadow" CornerRadius="{TemplateBinding CornerRadius}" Tint="{TemplateBinding Background}"
+            <aero:GlassShadow x:Name="PART_Shadow" aero:LiquidGlassBackdrop.InBackdrop="False" CornerRadius="{TemplateBinding CornerRadius}" Tint="{TemplateBinding Background}"
                               Glow="{DynamicResource A.Glass.Glow}" Casts="{TemplateBinding HasShadow}" Bubble="{TemplateBinding Bubble}" />
             <Border x:Name="PART_Tint" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Background}" IsHitTestVisible="False" />
-            <aero:GlassGlow x:Name="PART_Glow" CornerRadius="{TemplateBinding CornerRadius}" Strength="{DynamicResource A.Glass.Glow}" />
+            <aero:GlassGlow x:Name="PART_Glow" aero:LiquidGlassBackdrop.InBackdrop="False" CornerRadius="{TemplateBinding CornerRadius}" Strength="{DynamicResource A.Glass.Glow}" />
             <ContentPresenter x:Name="PART_Content" Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Effect="{DynamicResource A.Glass.TextShadow}" />
         </Grid>

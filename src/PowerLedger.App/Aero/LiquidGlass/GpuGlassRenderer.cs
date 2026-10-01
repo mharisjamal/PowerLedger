@@ -7,7 +7,15 @@ namespace PowerLedger.App.Aero;
 
 /// <summary>One piece to draw on the GPU path: where its box lies on the virtual screen (physical pixels), its source map,
 /// where it goes on its window's picture, and the recipe's numbers at its display scale.</summary>
-internal sealed record GpuGlassJob(int Id, Int32Rect Box, IntPtr MapView, Int32Rect Target, float Brightness, double Sigma, CornerRadius Radii, bool Composed, int Version);
+/// <summary>How a piece shows: <see cref="Shape"/> its rectangle as WPF shows it (a spring's scale), in the box's pixels,
+/// its corners <see cref="Radii"/>; <see cref="Visible"/> what its ancestors' clips leave of it; <see cref="Opacity"/>
+/// theirs. A whole, square, opaque piece is <see cref="Whole"/>.</summary>
+internal readonly record struct GpuGlassShape(Rect Shape, CornerRadius Radii, Rect Visible, double Opacity)
+{
+    public static GpuGlassShape Whole(int width, int height) => new(new Rect(0, 0, width, height), default, new Rect(0, 0, width, height), 1);
+}
+
+internal sealed record GpuGlassJob(int Id, Int32Rect Box, IntPtr MapView, Int32Rect Target, float Brightness, double Sigma, GpuGlassShape Shape, bool Composed, int Version);
 
 /// <summary>
 /// The GPU path's drawing, on one Direct3D 11 device and only on its monitor's capture thread (the immediate context is
@@ -43,6 +51,9 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
         public int BoxX, BoxY, SizeX, SizeY, OutX, OutY, Margin, Pairs, LimitX, LimitY;
         public float Brightness, SdrWhite, SourceWidth, SourceHeight, Centre, Pad;
         public float RadiusTopLeft, RadiusTopRight, RadiusBottomRight, RadiusBottomLeft;
+        public float ShapeLeft, ShapeTop, ShapeRight, ShapeBottom;
+        public float VisibleLeft, VisibleTop, VisibleRight, VisibleBottom;
+        public float Opacity, Pad2, Pad3, Pad4;
         public fixed float Taps[64];
     }
 
@@ -214,7 +225,11 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
         {
             BoxX = job.Box.X - _bounds.Left, BoxY = job.Box.Y - _bounds.Top, SizeX = w, SizeY = h, OutX = job.Target.X, OutY = job.Target.Y,
             Margin = margin, Pairs = pairs.Length, LimitX = _width, LimitY = _height, Brightness = job.Brightness, SdrWhite = _sdrWhite, Centre = (float)centre,
-            RadiusTopLeft = (float)job.Radii.TopLeft, RadiusTopRight = (float)job.Radii.TopRight, RadiusBottomRight = (float)job.Radii.BottomRight, RadiusBottomLeft = (float)job.Radii.BottomLeft,
+            RadiusTopLeft = (float)job.Shape.Radii.TopLeft, RadiusTopRight = (float)job.Shape.Radii.TopRight,
+            RadiusBottomRight = (float)job.Shape.Radii.BottomRight, RadiusBottomLeft = (float)job.Shape.Radii.BottomLeft,
+            ShapeLeft = (float)job.Shape.Shape.Left, ShapeTop = (float)job.Shape.Shape.Top, ShapeRight = (float)job.Shape.Shape.Right, ShapeBottom = (float)job.Shape.Shape.Bottom,
+            VisibleLeft = (float)job.Shape.Visible.Left, VisibleTop = (float)job.Shape.Visible.Top, VisibleRight = (float)job.Shape.Visible.Right,
+            VisibleBottom = (float)job.Shape.Visible.Bottom, Opacity = (float)job.Shape.Opacity,
         };
         for (var i = 0; i < pairs.Length; i++)
         {

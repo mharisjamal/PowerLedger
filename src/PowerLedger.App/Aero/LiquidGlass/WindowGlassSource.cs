@@ -92,8 +92,11 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
     public void Apply()
     {
         if (_disposed) return;
+        _paused = false;
         var exclude = LiquidGlassSources.ExcludeFromCapture && !LiquidGlassSources.AllowScreenshots;
         SetWindowDisplayAffinity(_hwnd, exclude ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE);
+        _gpu?.Exclude(exclude);
+        Session?.RefreshAll();
         var live = !LiquidGlassSources.AllowScreenshots && LiquidGlassSources.CaptureAllowed;
         var gpu = live && GpuPossible;
         if (!gpu) StopGpu();
@@ -132,6 +135,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         var session = MonitorCapture.For(_monitor);
         if (session.Failed) return;
         _subscriber = session.Subscribe(OnDelivered);
+        session.RefreshAll();
         session.FailedChanged += OnCaptureFailed;
         Follow();
     }
@@ -151,6 +155,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         var session = MonitorCapture.For(_monitor);
         if (session.Failed) return;
         _gpu = new GpuGlassWindow(_hwnd, _dispatcher, session);
+        session.RefreshAll();
         session.FailedChanged += OnCaptureFailed;
         _gpu.Changed += OnGpuChanged;
         _bitmap = null;
@@ -182,9 +187,19 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
 
     /// <summary>Keeps the live region on the window and its margin, on the window's monitor, and reading only while the
     /// window shows.</summary>
+    /// <summary>Stops the window taking frames, whatever shows, until <see cref="Apply"/>: a test's grab of the window
+    /// with its glass still, let back into capture.</summary>
+    internal void Pause()
+    {
+        _paused = true;
+        Follow();
+    }
+
+    private bool _paused;
+
     private void Follow()
     {
-        var shown = IsWindowVisible(_hwnd) && !IsIconic(_hwnd);
+        var shown = IsWindowVisible(_hwnd) && !IsIconic(_hwnd) && !_paused;
         var monitor = MonitorFromWindow(_hwnd, MONITOR_DEFAULTTONEAREST);
         if (_gpu != null)
         {
@@ -195,6 +210,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
                 return;
             }
             _gpu.Active = shown;
+            _gpu.Track();
             return;
         }
         if (_subscriber == null) return;

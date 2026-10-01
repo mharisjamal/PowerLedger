@@ -65,6 +65,16 @@ internal static class LiquidGlassSources
 
     private static bool _gpuAllowed = true;
 
+    /// <summary>Raised on the UI thread when something starts animating for the given time (AeroMotion): composed glass
+    /// follows its piece on every frame until then, as a spring, a slide or a fade moves it without a layout pass.</summary>
+    internal static event Action<TimeSpan>? Animating;
+
+    /// <summary>Something animates for <paramref name="ms"/>: AeroMotion calls this for each animation it starts.</summary>
+    public static void Animate(double ms)
+    {
+        if (ms > 0) Animating?.Invoke(TimeSpan.FromMilliseconds(ms));
+    }
+
     /// <summary>The windows with glass now, for the tests.</summary>
     internal static IReadOnlyList<ILiquidGlassSource> Live
     {

@@ -31,8 +31,13 @@ cbuffer Glass : register(b0)
     float2 SourceSize; // the size of the texture Source is, in texels
     float Centre;      // the centre texel's weight
     float Pad;
-    float4 Radii;      // Down: the piece's corners in pixels (top left, top right, bottom right, bottom left), drawn
-                       // antialiased into alpha where the piece itself is the clip (DirectComposition); zero for none
+    float4 Radii;      // Down, composed: the shape's corners in pixels (top left, top right, bottom right, bottom left)
+    float4 Shape;      // Down, composed: the piece as WPF shows it (scaled by a spring), left, top, right, bottom, in the
+                       // box's pixels; its corners rounded by Radii, antialiased into alpha
+    float4 Visible;    // Down, composed: what its ancestors' clips leave of it (a scrolled page's viewport), in the box's
+                       // pixels; outside it, nothing
+    float Opacity;     // Down, composed: its ancestors' opacity, a fade
+    float3 Pad2;
     float4 Taps[16];   // (offset, weight, offset, weight): the pairs' centres in texels, one side
 };
 
@@ -99,17 +104,17 @@ float4 Across(float4 position : SV_Position) : SV_Target
     return float4(Blur(float2(p.x + Margin, p.y) + 0.5, float2(1, 0)), 1);
 }
 
-// How much of the pixel at centre q lies inside the box's rounded corners: 1 away from them, falling to 0 over a pixel
-// across each corner's arc.
+// How much of the pixel at centre q lies inside the shape: its rounded rectangle, antialiased over a pixel across each
+// edge and each corner's arc, and within the visible rectangle.
 float Cover(float2 q)
 {
-    float2 size = float2(Size);
-    float r = q.x < size.x / 2 ? (q.y < size.y / 2 ? Radii.x : Radii.w) : (q.y < size.y / 2 ? Radii.y : Radii.z);
-    if (r <= 0) return 1;
-    float2 corner = float2(q.x < size.x / 2 ? r : size.x - r, q.y < size.y / 2 ? r : size.y - r);
-    float2 d = (q - corner) * float2(q.x < size.x / 2 ? -1 : 1, q.y < size.y / 2 ? -1 : 1);
-    if (d.x <= 0 || d.y <= 0) return 1;
-    return saturate(r - length(d) + 0.5);
+    if (q.x < Visible.x || q.y < Visible.y || q.x > Visible.z || q.y > Visible.w) return 0;
+    float2 lo = Shape.xy, hi = Shape.zw, mid = (lo + hi) / 2;
+    float r = q.x < mid.x ? (q.y < mid.y ? Radii.x : Radii.w) : (q.y < mid.y ? Radii.y : Radii.z);
+    float2 inner = float2(q.x < mid.x ? lo.x + r : hi.x - r, q.y < mid.y ? lo.y + r : hi.y - r);
+    float2 d = max(abs(q - mid) - (abs(inner - mid)), 0);
+    float edge = saturate(min(min(q.x - lo.x, hi.x - q.x), min(q.y - lo.y, hi.y - q.y)) + 0.5);
+    return r > 0 && d.x > 0 && d.y > 0 ? saturate(r - length(d) + 0.5) * edge : edge;
 }
 
 float4 Down(float4 position : SV_Position) : SV_Target
@@ -117,7 +122,7 @@ float4 Down(float4 position : SV_Position) : SV_Target
     int2 p = int2(position.xy) - Out;
     int2 s = int2(Map.Load(int3(p, 0)));
     float3 c = Round8(Blur(float2(s.x, s.y + Margin) + 0.5, float2(0, 1)));
-    float a = Cover(float2(p) + 0.5);
+    float a = Cover(float2(p) + 0.5) * Opacity;
     return float4(ToSrgb(Round8(ToLinear(c))) * a, a);
 }
 

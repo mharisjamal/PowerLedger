@@ -15,6 +15,10 @@ internal enum LiquidGlassSourceKind
     /// <summary>The wallpaper where Windows draws it on the screen: capture is unavailable (older Windows, policy, a
     /// remote session) or failed.</summary>
     Wallpaper,
+
+    /// <summary>A piece inside another piece: the outer piece's own content beneath it (InsideGlassSource), as a
+    /// backdrop-filter inside a backdrop root reads it.</summary>
+    Inside,
 }
 
 /// <summary>

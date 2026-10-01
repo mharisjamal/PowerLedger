@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8">
+<!-- Glass inside glass, over the mockup's background (bg.png): a pane (272, 96, 752 by 400) holding the mockup's ring
+     (ring-<scale>.png, the conic disc as device pixels) with its glass hole, a well with a bubble on it, a bubble on the
+     pane alone, and a segmented capsule with its Day bubble. Only the recipe's backdrop-filter, no shadows or highlights.
+     Hash: #nested everything, #content the pane and its content without the inner glass, #none the background. -->
+<style>
+body{margin:0;background:#000}
+#stage{position:absolute;left:0;top:0;width:1440px;height:900px;background:url(bg.png) 0 0/1440px 900px no-repeat}
+.lg{position:absolute;backdrop-filter:brightness(1.1) blur(2px) url(#t)}
+</style></head><body><div id="stage">
+<svg width="0" height="0" style="position:absolute"><defs><filter id="t"><feTurbulence type="turbulence" baseFrequency="0.01" numOctaves="2" result="turbulence"/><feDisplacementMap in="SourceGraphic" in2="turbulence" scale="200" xChannelSelector="R" yChannelSelector="G"/></filter></defs></svg>
+<section class="lg" id="pane" style="left:272px;top:96px;width:752px;height:400px;border-radius:28px">
+  <img id="ring" style="position:absolute;left:60px;top:60px;width:180px;height:180px">
+  <div class="lg inner" style="left:100px;top:100px;width:100px;height:100px;border-radius:50%"></div>
+  <div style="position:absolute;left:320px;top:60px;width:272px;height:120px;border-radius:22px;background:rgba(0,10,40,.14)">
+    <div class="lg inner" style="left:16px;top:30px;width:131px;height:60px;border-radius:20px"></div>
+  </div>
+  <div class="lg inner" style="left:320px;top:220px;width:131px;height:60px;border-radius:20px"></div>
+  <div class="lg inner" style="left:480px;top:220px;width:232px;height:42px;border-radius:21px">
+    <div class="lg inner" style="left:4px;top:4px;width:72px;height:34px;border-radius:17px"></div>
+  </div>
+</section>
+</div>
+<script>
+var mode = location.hash.slice(1) || 'nested';
+document.getElementById('ring').src = 'ring-' + (window.devicePixelRatio === 1 ? '1' : String(window.devicePixelRatio)) + '.png';
+if (mode === 'content' || mode === 'none') document.querySelectorAll('.inner').forEach(function (e) { e.style.backdropFilter = 'none'; });
+if (mode === 'none') document.getElementById('pane').style.visibility = 'hidden';
+</script></body></html>

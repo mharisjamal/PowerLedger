@@ -45,15 +45,14 @@ internal static class D3D9Bridge
 /// in the window is drawn by <see cref="GpuGlassRenderer"/> on its monitor's capture thread straight from the duplicated
 /// desktop. No pixel crosses to the CPU. Two ways to show a piece:
 /// <list type="bullet">
-/// <item><b>Composed</b> (DirectComposition), the usual way: the window gets a DirectComposition visual beneath WPF's own
-/// content (a target with topmost false), showing a swap chain the size of the window's client area. Each piece is drawn
-/// at its own place in it, its corners rounded in its alpha, and DWM puts it under the WPF content wherever that is
-/// clear. A frame of glass never makes WPF draw anything, and the glass moves with the window by itself. The piece
-/// itself (LiquidGlassBackdrop) draws nothing there.</item>
-/// <item><b>Imaged</b> (D3DImage), where DirectComposition can't serve: a layered window (the watts overlay, which WPF
-/// shows through UpdateLayeredWindow), or a piece over another piece in the same window (a dialog over a page: the glass
-/// beneath WPF's content would show the page's content through it). Those pieces are drawn into one shared picture,
-/// each in a rectangle of its own, which the window shows through one D3DImage, each piece its own rectangle.</item>
+/// <item><b>Composed</b> (DirectComposition), the usual way: a companion window laid beneath the window
+/// (GlassCompanion) shows a swap chain the size of the window's client area. Each piece is drawn at its own place in
+/// it, as WPF shows it (scaled, clipped, faded), its corners rounded in its alpha, and DWM puts it under every pixel
+/// WPF draws in the window. A frame of glass never makes WPF draw anything. The piece itself (LiquidGlassBackdrop)
+/// draws nothing there.</item>
+/// <item><b>Imaged</b> (D3DImage), where DirectComposition can't serve (Windows refused the companion window or a
+/// composition device): the pieces are drawn into one shared picture, each in a rectangle of its own, which the window
+/// shows through one D3DImage, each piece its own rectangle.</item>
 /// </list>
 /// <para>The D3DImage is kept locked while the capture thread may draw, so WPF never copies a half drawn picture: a frame
 /// drawn, the UI thread marks the pieces' rectangles dirty and unlocks. WPF sends the copy as it commits its next frame
@@ -84,6 +83,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     private volatile bool _canDraw;
 
     // Composed: DirectComposition and the layer its swap chain shows.
+    private GlassCompanion? _companion;
     private IntPtr _dcomp, _target, _visual, _swapChain, _layer, _layerTarget;
     private int _layerWidth, _layerHeight;
     private (int Width, int Height)? _resizeTo;
@@ -102,15 +102,17 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     {
         public LiquidGlassBackdrop Element = null!;
         public int Id;
+        public int Order;
         public Int32Rect Box;
         public double Dpi;
         public float Brightness;
         public double Sigma;
         public double Scale;
-        public CornerRadius Radii;
+        public GpuGlassShape Shape;
         public (int W, int H, double Dpi, double Scale)? MapFor;
         public IntPtr Map, MapView;
         public int MapGeneration;
+        public (int W, int H, double Dpi, double Scale)? MapMaking;
         public bool Composed;
         public Int32Rect Target;
         public int Version;
@@ -122,9 +124,6 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         _dispatcher = dispatcher;
         _session = session;
         _image.IsFrontBufferAvailableChanged += OnFrontBuffer;
-        // A layered window (WS_EX_LAYERED: AllowsTransparency) is shown through UpdateLayeredWindow, which
-        // DirectComposition can't sit beneath: its pieces are imaged.
-        _composedFailed = (GetWindowLongPtrW(hwnd, -20) & 0x80000) != 0;
         _session.AddConsumer(this);
     }
 
@@ -144,11 +143,67 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
 
     public MonitorCapture Session => _session;
 
+    /// <summary>How many source maps have been made, for the measurements.</summary>
+    internal static long MapsMade;
+
+    private readonly List<LiquidGlassBackdrop> _following = [];
+    private DateTime _followUntil;
+    private bool _followHooked;
+
+    /// <summary>Places <paramref name="piece"/> again on every frame while something animates (LiquidGlassSources.Animate:
+    /// a spring, a slide, a fade, which no layout pass reports), and only then.</summary>
+    public void Follow(LiquidGlassBackdrop piece)
+    {
+        if (_following.Count == 0) LiquidGlassSources.Animating += OnAnimating;
+        _following.Add(piece);
+    }
+
+    public void Unfollow(LiquidGlassBackdrop piece)
+    {
+        _following.Remove(piece);
+        if (_following.Count > 0) return;
+        LiquidGlassSources.Animating -= OnAnimating;
+        Hook(false);
+    }
+
+    private void OnAnimating(TimeSpan length)
+    {
+        var until = DateTime.UtcNow + length + TimeSpan.FromMilliseconds(50);
+        if (until > _followUntil) _followUntil = until;
+        Hook(true);
+    }
+
+    private void Hook(bool on)
+    {
+        if (on == _followHooked) return;
+        _followHooked = on;
+        if (on) CompositionTarget.Rendering += OnFollowFrame;
+        else CompositionTarget.Rendering -= OnFollowFrame;
+    }
+
+    private void OnFollowFrame(object? sender, EventArgs e)
+    {
+        foreach (var piece in _following.ToArray()) piece.FollowFrame();
+        if (DateTime.UtcNow > _followUntil) Hook(false);
+    }
+
     /// <summary>The path's state in a line, for the tests and the measurements.</summary>
     internal string State => $"pieces {_pieces.Count} ({_pieces.Values.Count(p => p.Composed)} composed), with maps {_pieces.Values.Count(p => p.MapView != IntPtr.Zero)}, " +
         $"jobs {Volatile.Read(ref _jobs).Length}, layer {_layerWidth}x{_layerHeight}, picture {_pictureWidth}x{_pictureHeight}, locked {_locked}, relock attempts {_attempts}, " +
-        $"can draw {_canDraw}, wants {_wants}, active {_active}, frames {Frames}; imaged " + string.Join(" ", _pieces.Values.Where(p => !p.Composed).Select(p => $"{p.Box.X},{p.Box.Y},{p.Box.Width}x{p.Box.Height}")) +
-        "; composed " + string.Join(" ", _pieces.Values.Where(p => p.Composed).Select(p => $"{p.Box.X},{p.Box.Y},{p.Box.Width}x{p.Box.Height}"));
+        $"can draw {_canDraw}, wants {_wants}, active {_active}, frames {Frames}; imaged " + string.Join(" ", _pieces.Values.Where(p => !p.Composed).Select(p => $"{p.Box.X},{p.Box.Y},{p.Box.Width}x{p.Box.Height}[{Who(p)}]")) +
+        "; composed " + string.Join(" ", _pieces.Values.Where(p => p.Composed).Select(p => $"{p.Box.X},{p.Box.Y},{p.Box.Width}x{p.Box.Height}[{Who(p)}]"));
+
+    private static string Who(Piece p)
+    {
+        var owner = p.Element.TemplatedParent as FrameworkElement;
+        var chain = new List<string>();
+        for (DependencyObject? n = owner; n != null && chain.Count < 6; n = VisualTreeHelper.GetParent(n))
+        {
+            if (n is FrameworkElement { Name.Length: > 0 } f) chain.Add(f.Name);
+            else if (n is FrameworkElement { TemplatedParent: FrameworkElement { Name.Length: > 0 } tp }) chain.Add("t:" + tp.Name);
+        }
+        return $"{owner?.GetType().Name}:{string.Join("/", chain.Distinct())}";
+    }
 
     /// <summary>Shown (neither hidden nor minimised): the capture thread draws for it.</summary>
     public bool Active
@@ -170,13 +225,20 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     /// nothing) rather than imaged.</summary>
     public bool Composes(LiquidGlassBackdrop piece) => _pieces.TryGetValue(piece, out var p) && p.Composed;
 
+    /// <summary>Where <paramref name="piece"/> is drawn among the window's pieces (later over earlier), or null.</summary>
+    internal int? OrderOf(LiquidGlassBackdrop piece) => _pieces.TryGetValue(piece, out var p) ? p.Order : null;
+
+    /// <summary>The window the composed glass is shown in, or zero while there is none.</summary>
+    internal IntPtr CompanionHwnd => _companion?.Hwnd ?? IntPtr.Zero;
+
     /// <summary>The rectangle of the window's shared picture an imaged piece shows, or null while it has none.</summary>
     public Int32Rect? TargetOf(LiquidGlassBackdrop piece)
         => _pieces.TryGetValue(piece, out var p) && !p.Composed && p.Target.Width > 0 && p.MapView != IntPtr.Zero && _picture != IntPtr.Zero ? p.Target : null;
 
-    /// <summary>Adds or updates <paramref name="piece"/>: its box on the screen (physical pixels), its corners (physical
-    /// pixels), its display scale and the recipe's numbers. On the UI thread.</summary>
-    public void Update(LiquidGlassBackdrop piece, Int32Rect box, CornerRadius radii, double dpi, double brightness, double sigma, double scale)
+    /// <summary>Adds or updates <paramref name="piece"/>: its box on the screen (physical pixels: what it reads and where
+    /// it is drawn), how it shows there (<paramref name="shape"/>, in the box's pixels), its display scale and the recipe's
+    /// numbers. On the UI thread.</summary>
+    public void Update(LiquidGlassBackdrop piece, Int32Rect box, GpuGlassShape shape, double dpi, double brightness, double sigma, double scale)
     {
         if (_disposed) return;
         if (!_pieces.TryGetValue(piece, out var p))
@@ -184,10 +246,11 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             p = new Piece { Id = ++_nextId, Element = piece };
             _pieces[piece] = p;
         }
-        if (p.Box == box && p.Radii == radii && p.Dpi == dpi && p.Brightness == (float)brightness && p.Sigma == sigma && p.Scale == scale) return;
-        (p.Box, p.Radii, p.Dpi, p.Brightness, p.Sigma, p.Scale) = (box, radii, dpi, (float)brightness, sigma, scale);
+        if (p.Box == box && p.Shape == shape && p.Dpi == dpi && p.Brightness == (float)brightness && p.Sigma == sigma && p.Scale == scale) return;
+        var moved = p.Box != box || p.Dpi != dpi || p.Brightness != (float)brightness || p.Sigma != sigma || p.Scale != scale;
+        (p.Box, p.Shape, p.Dpi, p.Brightness, p.Sigma, p.Scale) = (box, shape, dpi, (float)brightness, sigma, scale);
         p.Version++;
-        MakeMap(p);
+        if (moved) MakeMap(p);
         Arrange();
         Publish();
     }
@@ -195,14 +258,16 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     public void Remove(LiquidGlassBackdrop piece)
     {
         if (!_pieces.Remove(piece, out var p)) return;
+        _clearLayer = true;
+        Arrange();
+        // The capture thread reads the published pieces under the GPU lock: once the piece is off them, its map can go.
+        Publish();
         lock (_gpu)
         {
             CaptureNative.Release(p.MapView);
             CaptureNative.Release(p.Map);
-            _clearLayer = true;
+            (p.Map, p.MapView) = (IntPtr.Zero, IntPtr.Zero);
         }
-        Arrange();
-        Publish();
     }
 
     public void Dispose()
@@ -210,8 +275,13 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         if (_disposed) return;
         _disposed = true;
         Wait(false);
+        Hook(false);
+        if (_following.Count > 0) LiquidGlassSources.Animating -= OnAnimating;
+        _following.Clear();
         _session.RemoveConsumer(this);
         _image.IsFrontBufferAvailableChanged -= OnFrontBuffer;
+        Volatile.Write(ref _jobs, []);
+        Volatile.Write(ref _areas, []);
         lock (_gpu)
         {
             foreach (var p in _pieces.Values)
@@ -223,12 +293,20 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             DropPicture();
             DropLayer();
         }
+        _companion?.Dispose();
+        _companion = null;
         if (_locked)
         {
             _image.Unlock();
             _locked = false;
         }
     }
+
+    /// <summary>Keeps the composed glass's window over the owner's client area, beneath it, shown with it.</summary>
+    public void Track() => _companion?.Track();
+
+    /// <summary>Leaves the composed glass's window out of capture, as its owner, or lets it in.</summary>
+    public void Exclude(bool exclude) => _companion?.Exclude(exclude);
 
     /// <summary>On the capture thread: draws the pieces a change touched (and any new, moved or resized), then shows the
     /// frame: composed pieces at once (the swap chain), imaged ones through the UI thread. Imaged pieces wait while the
@@ -306,6 +384,8 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
                 Changed?.Invoke();
                 return;
             }
+            Volatile.Write(ref _jobs, []);
+            Volatile.Write(ref _areas, []);
             lock (_gpu)
             {
                 DropPicture();
@@ -359,19 +439,26 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
 
     // ---- Composed ----
 
-    /// <summary>On the UI thread: DirectComposition for the window, beneath its WPF content, showing a swap chain the size
-    /// of its client area; false where it can't (the window is layered, or DirectComposition refused).</summary>
+    /// <summary>On the UI thread: DirectComposition for the window, in its companion window beneath it (GlassCompanion),
+    /// showing a swap chain the size of its client area; false where it can't (Windows refused a window or
+    /// DirectComposition).</summary>
     private bool MakeComposition()
     {
         if (_composedFailed) return false;
         if (_dcomp != IntPtr.Zero) return true;
         var (device, _) = _session.Device();
         if (device == IntPtr.Zero) return false;
+        _companion ??= GlassCompanion.For(_hwnd);
+        if (_companion == null)
+        {
+            _composedFailed = true;
+            return false;
+        }
         IntPtr dxgi = IntPtr.Zero, adapter = IntPtr.Zero, factory = IntPtr.Zero;
         try
         {
             if (CaptureNative.QueryInterface(device, IID_IDXGIDevice, out dxgi) < 0 || DCompositionCreateDevice(dxgi, IID_IDCompositionDevice, out _dcomp) < 0
-                || CreateTargetForHwnd(_dcomp, _hwnd, topmost: false, out _target) < 0 || CreateVisual(_dcomp, out _visual) < 0
+                || CreateTargetForHwnd(_dcomp, _companion.Hwnd, topmost: true, out _target) < 0 || CreateVisual(_dcomp, out _visual) < 0
                 || GetAdapter(dxgi, out adapter) < 0 || GetParent(adapter, IID_IDXGIFactory2, out factory) < 0)
             {
                 lock (_gpu) DropLayer();
@@ -594,27 +681,31 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         _session.Wake();
     }
 
-    /// <summary>Decides how each piece shows and where it is drawn. Every piece of a window DirectComposition can't serve
-    /// is imaged, as is a piece over an earlier one it doesn't sit inside (a dialog over a page: composed, it would lie
-    /// beneath the page's content). A piece inside another's pane (a card on a page) is composed after it, over its
-    /// glass. The rest are composed, each at its place in the window's client area. Imaged pieces are laid out on the
-    /// shared picture in rows, tallest first; the picture is made again if it has grown too small.</summary>
+    /// <summary>
+    /// Decides how each piece shows and where it is drawn. In a window DirectComposition serves, every piece is composed,
+    /// at its place in the client area, in the order WPF draws them (the visual tree's), so a piece over another (a card
+    /// on a page, the grip by a pane, a dialog) is drawn over its glass. What WPF draws of the lower piece over that spot
+    /// (a scrolled pane's content under the grip) then shows over the upper glass rather than under it: the browser's
+    /// backdrop filter reads everything painted before the piece, the lower piece's content too, so the upper glass
+    /// showing it is as near as a layer beneath WPF can come. A dialog or a toast lays its own frosted copy of the stage
+    /// over its glass (AeroWindow.Frost), which hides it there anyway. Imaged pieces (a window DirectComposition can't
+    /// serve) are laid out on the shared picture in rows, tallest first; the picture is made again if it has grown too
+    /// small.
+    /// </summary>
     private void Arrange()
     {
         var composable = MakeComposition();
         var client = new System.Drawing.Point();
         ClientToScreen(_hwnd, ref client);
-        var placed = new List<Piece>();
         var imaged = new List<Piece>();
-        foreach (var p in _pieces.Values.OrderBy(p => p.Id))
+        var order = 0;
+        foreach (var p in _pieces.Values.OrderBy(TreeOrder, Comparer<IReadOnlyList<int>>.Create(Compare)))
         {
+            p.Order = order++;
             if (p.Box.Width <= 0 || p.Box.Height <= 0) continue;
-            var composed = composable && !placed.Any(q => Touches(q.Box, p.Box) && !Inside(p, q));
-            placed.Add(p);
-            if (!composed)
+            if (!composable)
             {
                 imaged.Add(p);
-                if (p.Composed) _clearLayer = true;
                 p.Composed = false;
                 continue;
             }
@@ -633,6 +724,13 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             {
                 if (size != (_layerWidth, _layerHeight)) _resizeTo = size;
             }
+            _companion?.Track();
+            _companion?.Shape(_pieces.Values.Where(p => p.Composed && p.Shape.Opacity > 0).Select(p =>
+            {
+                var visible = Rect.Intersect(p.Shape.Shape, p.Shape.Visible);
+                if (!visible.IsEmpty) visible.Offset(p.Target.X, p.Target.Y);
+                return (visible, p.Shape.Radii);
+            }));
         }
         if (imaged.Count == 0) return;
         var width = Math.Clamp(NextPowerOfTwo(imaged.Max(p => p.Box.Width)), 1024, 8192);
@@ -653,24 +751,39 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         if (_picture == IntPtr.Zero || width > _pictureWidth || height > _pictureHeight) MakePicture(width, Math.Clamp(NextPowerOfTwo(height), 256, 8192));
     }
 
-    /// <summary>Whether <paramref name="inner"/> sits in <paramref name="outer"/>'s pane: inside the control whose template
-    /// holds the outer piece (a GlassPanel). A piece in no template is no pane: nothing sits inside it.</summary>
-    private static bool Inside(Piece inner, Piece outer)
+    /// <summary>A piece's place in the order WPF draws: the child indices down the visual tree to it.</summary>
+    private static IReadOnlyList<int> TreeOrder(Piece p)
     {
-        // The piece itself in the template, or the template part it was put in.
-        var pane = outer.Element.TemplatedParent as Visual ?? (VisualTreeHelper.GetParent(outer.Element) as FrameworkElement)?.TemplatedParent as Visual;
-        return pane is not null and not Window && inner.Element.IsDescendantOf(pane);
+        var path = new List<int>();
+        for (DependencyObject node = p.Element; VisualTreeHelper.GetParent(node) is { } parent; node = parent)
+        {
+            var count = VisualTreeHelper.GetChildrenCount(parent);
+            var index = 0;
+            while (index < count && !ReferenceEquals(VisualTreeHelper.GetChild(parent, index), node)) index++;
+            path.Add(index);
+        }
+        path.Reverse();
+        return path;
+    }
+
+    private static int Compare(IReadOnlyList<int> a, IReadOnlyList<int> b)
+    {
+        for (var i = 0; i < Math.Min(a.Count, b.Count); i++)
+        {
+            if (a[i] != b[i]) return a[i].CompareTo(b[i]);
+        }
+        return a.Count.CompareTo(b.Count);   // a parent's own drawing comes before its children's
     }
 
     /// <summary>Publishes the pieces to the capture thread, as an array it reads without a lock.</summary>
     private void Publish()
     {
         var jobs = new List<GpuGlassJob>();
-        foreach (var p in _pieces.Values.OrderBy(p => p.Id))
+        foreach (var p in _pieces.Values.OrderBy(p => p.Order))
         {
             if (p.MapView == IntPtr.Zero || p.Target.Width <= 0) continue;
-            // Composed pieces round their own corners; an imaged piece's corners are WPF's clip.
-            jobs.Add(new GpuGlassJob(p.Id, p.Box, p.MapView, p.Target, p.Brightness, p.Sigma, p.Composed ? p.Radii : default, p.Composed, p.Version));
+            // Composed pieces take their own shape, clip and fade; an imaged piece's are WPF's.
+            jobs.Add(new GpuGlassJob(p.Id, p.Box, p.MapView, p.Target, p.Brightness, p.Sigma, p.Composed ? p.Shape : GpuGlassShape.Whole(p.Box.Width, p.Box.Height), p.Composed, p.Version));
         }
         Volatile.Write(ref _jobs, jobs.ToArray());
         Volatile.Write(ref _areas, jobs.Select(j => j.Box).ToArray());
@@ -684,7 +797,16 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     {
         var wanted = (p.Box.Width, p.Box.Height, p.Dpi, p.Scale);
         if (p.MapFor == wanted || p.Box.Width <= 0 || p.Box.Height <= 0) return;
+        // One map in the making a piece at a time: a piece resized on every frame of a spring makes the map for the size
+        // it ends at, not one for every frame (each a pass over every pixel).
+        if (p.MapMaking != null)
+        {
+            p.MapMaking = wanted;
+            return;
+        }
+        p.MapMaking = wanted;
         var generation = ++p.MapGeneration;
+        Interlocked.Increment(ref MapsMade);
         Task.Run(() =>
         {
             var (w, h, dpi, scale) = wanted;
@@ -702,7 +824,16 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             return sources;
         }).ContinueWith(done =>
         {
-            if (_disposed || generation != p.MapGeneration || done.Status != TaskStatus.RanToCompletion || !_pieces.ContainsValue(p)) return;
+            var next = p.MapMaking;
+            p.MapMaking = null;
+            if (next is { } later && later != wanted)
+            {
+                // Resized again while this one was made: make the map for where it is now.
+                MakeMap(p);
+                if (done.Status != TaskStatus.RanToCompletion) return;
+            }
+            if (_disposed || generation != p.MapGeneration && p.MapMaking == null || done.Status != TaskStatus.RanToCompletion || !_pieces.ContainsValue(p)) return;
+            if (p.Box.Width != wanted.Item1 || p.Box.Height != wanted.Item2) return;
             var (device, _) = _session.Device();
             if (device == IntPtr.Zero) return;
             var (w, h, _, _) = wanted;
@@ -725,14 +856,16 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
                 CaptureNative.Release(map);
                 return;
             }
-            lock (_gpu)
-            {
-                CaptureNative.Release(p.MapView);
-                CaptureNative.Release(p.Map);
-                (p.Map, p.MapView, p.MapFor) = (map, view, wanted);
-            }
+            // The new map onto the published pieces first; the old one goes once the capture thread can't be using it.
+            var (oldMap, oldView) = (p.Map, p.MapView);
+            (p.Map, p.MapView, p.MapFor) = (map, view, wanted);
             p.Version++;
             Publish();
+            lock (_gpu)
+            {
+                CaptureNative.Release(oldView);
+                CaptureNative.Release(oldMap);
+            }
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 

@@ -25,14 +25,28 @@ internal static class ChromiumReference
     public static (int X, int Y, int Width, int Height) DeviceBox(string name)
     {
         var c = Cases.Single(c => c.Name == name);
-        int x = (int)Math.Round(c.Left * c.Scale), y = (int)Math.Round(c.Top * c.Scale);
-        return (x, y, (int)Math.Round((c.Left + c.Width) * c.Scale) - x, (int)Math.Round((c.Top + c.Height) * c.Scale) - y);
+        // Half a pixel snaps up, as Chromium snaps (Math.Round alone would round it to even).
+        static int Snap(double v) => (int)Math.Floor(v + 0.5);
+        int x = Snap(c.Left * c.Scale), y = Snap(c.Top * c.Scale);
+        return (x, y, Snap((c.Left + c.Width) * c.Scale) - x, Snap((c.Top + c.Height) * c.Scale) - y);
     }
 
     /// <summary>The shot's pixels as BGRA rows.</summary>
-    public static (byte[] Pixels, int Width, int Height) Load(string name, string mode) => Sta.Run(() =>
+    public static (byte[] Pixels, int Width, int Height) Load(string name, string mode) => LoadFile($"{name}-{mode}");
+
+    /// <summary>A frozen BGRA picture of shot pixels, at <paramref name="dpi"/> (96: a pixel a unit).</summary>
+    public static BitmapSource Bitmap(byte[] bgra, int width, int height, double dpi = 96)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "Aero", "LiquidGlass", "Reference", $"{name}-{mode}.png");
+        var bitmap = BitmapSource.Create(width, height, dpi, dpi, PixelFormats.Bgra32, null, bgra, width * 4);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    /// <summary>A reference file's pixels as BGRA rows (dash-1-bg: the Dashboard mockup's background under the Energy pane
+    /// at display scale 1; dash-1-full: Edge's pane over it, from scripts/liquid-glass/dashboard.html).</summary>
+    public static (byte[] Pixels, int Width, int Height) LoadFile(string file) => Sta.Run(() =>
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Aero", "LiquidGlass", "Reference", $"{file}.png");
         var frame = BitmapDecoder.Create(new Uri(path), BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.OnLoad).Frames[0];
         var bgra = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
         var pixels = new byte[bgra.PixelWidth * bgra.PixelHeight * 4];
