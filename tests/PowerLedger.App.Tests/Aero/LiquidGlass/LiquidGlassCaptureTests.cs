@@ -11,7 +11,7 @@ using Xunit.Abstractions;
 namespace PowerLedger.App.Tests;
 
 /// <summary>
-/// The live backdrop on the real screen: a plain window of one colour (the "desk", captured like any other window) with
+/// The live backdrop on the CPU path, on the real screen: a plain window of one colour (the "desk", captured like any other window) with
 /// a window of ours in front of it, of another colour, holding a liquid glass piece. The glass's picture must show the
 /// desk and never our window, stop when our window hides, and take no frames while nothing behind changes.
 /// </summary>
@@ -41,6 +41,7 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
             window.Close();
             desk.Close();
             LiquidGlassSources.AllowScreenshots = false;
+            LiquidGlassSources.GpuAllowed = true;
         }
     }
 
@@ -50,6 +51,7 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
         LiquidGlassSources.Override = null;
         LiquidGlassSources.ExcludeFromCapture = true;
         LiquidGlassSources.AllowScreenshots = false;
+        LiquidGlassSources.GpuAllowed = false;   // the CPU path: LiquidGlassGpuTests try the GPU one
         var desk = ScreenCapture.Show(new Border { Background = new SolidColorBrush(Desk) }, 100, 100, 800, 600);
         var glass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(0) };
         var window = ScreenCapture.Show(new Grid { Background = new SolidColorBrush(Ours), Children = { glass } }, 350, 300, 300, 200);

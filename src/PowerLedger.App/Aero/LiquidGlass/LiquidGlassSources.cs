@@ -50,6 +50,21 @@ internal static class LiquidGlassSources
     /// capture there would show the glass to itself.</summary>
     public static bool CaptureAllowed { get; set; } = Environment.OSVersion.Version >= new Version(10, 0, 19041);
 
+    /// <summary>False keeps every window off the GPU path (the tests, to try the CPU path); true, the default, lets a
+    /// window take it where it can.</summary>
+    public static bool GpuAllowed
+    {
+        get => _gpuAllowed;
+        set
+        {
+            if (_gpuAllowed == value) return;
+            _gpuAllowed = value;
+            ApplyAll();
+        }
+    }
+
+    private static bool _gpuAllowed = true;
+
     /// <summary>The windows with glass now, for the tests.</summary>
     internal static IReadOnlyList<ILiquidGlassSource> Live
     {

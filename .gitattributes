@@ -6,3 +6,4 @@ assets/monitors/*.csv -text
 *.jpg binary
 *.ps binary
 *.png binary
+*.cso binary
