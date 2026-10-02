@@ -109,14 +109,16 @@ public class AeroStylesTests
             }
         });
 
+    /// <summary>0.10.9's audit: the mockup sets its figures in Geist's own proportional digits ("+12%" 3 px and "$5.73"
+    /// 2 px narrower than tabular ones), so Aero's text styles leave the font's default.</summary>
     [Fact]
-    public void Numbers_are_set_in_tabular_figures()
+    public void Numbers_are_set_in_geists_proportional_figures_as_the_mockups()
         => UiHarness.OnUi(() =>
         {
             foreach (var key in new[] { "A.Text.Number", "A.Text.Big", "A.Text.Body" })
             {
                 var (_, text) = Dressed(new TextBlock(), key, Theme.Dark);
-                System.Windows.Documents.Typography.GetNumeralAlignment(text).ShouldBe(FontNumeralAlignment.Tabular, key);
+                System.Windows.Documents.Typography.GetNumeralAlignment(text).ShouldBe(FontNumeralAlignment.Normal, key);
             }
         });
 

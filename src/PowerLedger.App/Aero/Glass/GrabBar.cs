@@ -30,9 +30,13 @@ public sealed class GrabBar : GlassPanel
     public const double HitWidth = 120;
     public const double HitHeight = 22;
 
-    public const double IdleOpacity = .25;
-    public const double NearOpacity = .5;
+    public const double IdleOpacity = .3;
+    public const double NearOpacity = .6;
     public const double OverOpacity = 1;
+
+    /// <summary>The kit's .hov bar: a little longer and thicker under the pointer (72 by 8).</summary>
+    public const double OverWidth = 72;
+    public const double OverHeight = 8;
 
     /// <summary>How near the bar the pointer lights it to half, in DIP from the bar's edge.</summary>
     public const double NearWithin = 80;
@@ -104,7 +108,13 @@ public sealed class GrabBar : GlassPanel
         if (glow == Glow && !force) return;
         Glow = glow;
         var ms = animate ? AeroMotion.Grab : 0;
-        if (_bar is not null) AeroMotion.Move(_bar, OpacityProperty, OpacityOf(glow), ms, AeroMotion.Ease);
+        if (_bar is not null)
+        {
+            AeroMotion.Move(_bar, OpacityProperty, OpacityOf(glow), ms, AeroMotion.Ease);
+            var over = glow == GrabGlow.Over;
+            AeroMotion.Move(_bar, WidthProperty, over ? OverWidth : BarWidth, ms, AeroMotion.Ease);
+            AeroMotion.Move(_bar, HeightProperty, over ? OverHeight : BarHeight, ms, AeroMotion.Ease);
+        }
         if (_bright is not null) AeroMotion.Move(_bright, OpacityProperty, glow == GrabGlow.Over ? 1 : 0, ms, AeroMotion.Ease);
     }
 

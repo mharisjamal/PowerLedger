@@ -4,10 +4,10 @@ using System.Windows.Media;
 namespace PowerLedger.App.Aero;
 
 /// <summary>
-/// The overlay's last 30 seconds (Aero look design §5): a thin accent line under the watts, from
-/// <see cref="NowViewModel.Live"/>'s samples, with a soft fill under it and its oldest seconds fading in from the left
-/// rather than meeting a hard edge. Each reading is placed by its age, so a gap in the readings shows as one. It draws
-/// into one retained visual when the samples change, once a second, and costs nothing between readings.
+/// The overlay's last 30 seconds (Aero look design §5; 0.10.9, the kit's watts pill): a line 2 wide in the accent's lit
+/// head (the kit's #EAFF7A), from <see cref="NowViewModel.Live"/>'s samples, with nothing under it. Each reading is placed
+/// by its age, so a gap in the readings shows as one. It draws into one retained visual when the samples change, once a
+/// second, and costs nothing between readings.
 /// </summary>
 internal sealed class Sparkline : FrameworkElement
 {
@@ -17,17 +17,14 @@ internal sealed class Sparkline : FrameworkElement
     public static readonly DependencyProperty SecondsProperty = DependencyProperty.Register(nameof(Seconds), typeof(double),
         typeof(Sparkline), new FrameworkPropertyMetadata(30.0, FrameworkPropertyMetadataOptions.AffectsRender));
 
-    /// <summary>The line's colour, the accent (<c>A.B.Accent</c>) as the overlay sets it.</summary>
+    /// <summary>The line's colour, the accent's lit head (<c>A.B.AccentHigh</c>) as the overlay sets it.</summary>
     public static readonly DependencyProperty StrokeProperty = DependencyProperty.Register(nameof(Stroke), typeof(Brush),
         typeof(Sparkline), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
-
-    private static readonly Brush FadeIn = Fade();
 
     public Sparkline()
     {
         IsHitTestVisible = false;
         ClipToBounds = true;
-        OpacityMask = FadeIn;
     }
 
     public IReadOnlyList<SparkSample>? Samples { get => (IReadOnlyList<SparkSample>?)GetValue(SamplesProperty); set => SetValue(SamplesProperty, value); }
@@ -57,37 +54,15 @@ internal sealed class Sparkline : FrameworkElement
         var points = Points(samples, Seconds, RenderSize);
         if (points.Count < 2) return;
         var line = new StreamGeometry();
-        var area = new StreamGeometry();
         using (var path = line.Open())
         {
             path.BeginFigure(points[0], isFilled: false, isClosed: false);
             path.PolyLineTo(points.Skip(1).ToList(), isStroked: true, isSmoothJoin: true);
         }
-        using (var path = area.Open())
-        {
-            path.BeginFigure(new Point(points[0].X, RenderSize.Height), isFilled: true, isClosed: true);
-            path.PolyLineTo([.. points, new Point(points[^1].X, RenderSize.Height)], isStroked: false, isSmoothJoin: false);
-        }
         line.Freeze();
-        area.Freeze();
-        var fill = new LinearGradientBrush(Color.FromArgb(70, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B), 90);
-        fill.Freeze();
-        var pen = new Pen(new SolidColorBrush(Color.FromArgb(235, accent.R, accent.G, accent.B)), 1.5)
-        {
-            StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round,
-        };
+        // The kit's path: stroke-width 2, SVG's butt ends and mitred joins.
+        var pen = new Pen(new SolidColorBrush(accent), 2) { LineJoin = PenLineJoin.Miter };
         pen.Freeze();
-        drawing.DrawGeometry(fill, null, area);
         drawing.DrawGeometry(null, pen, line);
-    }
-
-    /// <summary>Clear at the left, whole from a third of the way in.</summary>
-    private static Brush Fade()
-    {
-        var mask = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
-        mask.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0, 0, 0), 0));
-        mask.GradientStops.Add(new GradientStop(Colors.Black, .35));
-        mask.Freeze();
-        return mask;
     }
 }

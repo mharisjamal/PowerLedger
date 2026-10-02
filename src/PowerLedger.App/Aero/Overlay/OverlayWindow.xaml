@@ -7,7 +7,7 @@
         Title="PowerLedger watts overlay" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" SizeToContent="WidthAndHeight"
         FontFamily="{DynamicResource A.F.Ui}" Foreground="{DynamicResource A.B.Text}" TextOptions.TextFormattingMode="Ideal"
-        Typography.NumeralAlignment="Tabular" UseLayoutRounding="True">
+        UseLayoutRounding="True">
     <!-- The watts overlay (0.10.9): the recipe's glass capsule and nothing else. The window is drawn with its alpha
          (AllowsTransparency), so outside the capsule it is clear, its edge anti-aliased straight onto whatever is behind,
          and a clear pixel takes no click. No room is kept round the capsule for the recipe's drop shadow: an untinted
@@ -44,17 +44,18 @@
             <Grid.RenderTransform>
                 <ScaleTransform x:Name="PillScale" />
             </Grid.RenderTransform>
-            <!-- The kit's .pill: the live dot, the watts in 26 semibold, the unit at 80 %, the 30 s line 90 by 26, 14 apart. -->
+            <!-- The kit's .pill: the live dot, the watts in 26 semibold, the unit at 80 %, the 30 s line 90 by 26, each 14
+                 apart (the pill's gap, the watts and the unit included). -->
             <aero:GlassPanel x:Name="Glass" Style="{StaticResource A.Glass.Capsule}" Padding="18,0,22,0" HasShadow="False"
                              AutomationProperties.Name="No reading">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <!-- The live dot, still: a breathing ring would redraw the window all the time. -->
                     <aero:PulseDot Size="10" Breathes="False" VerticalAlignment="Center" Margin="0,0,14,0" />
                     <aero:RollingNumber x:Name="Number" DigitSize="26" DigitWeight="SemiBold" VerticalAlignment="Center" />
-                    <TextBlock x:Name="Unit" Text="W" FontSize="16" FontWeight="Medium" Foreground="{DynamicResource A.B.Text2}" Margin="6,0,0,0" VerticalAlignment="Center" />
+                    <TextBlock x:Name="Unit" Text="W" FontSize="16" FontWeight="Medium" Foreground="{DynamicResource A.B.Text2}" Margin="14,0,0,0" VerticalAlignment="Center" />
                     <TextBlock x:Name="NoReading" Text="No reading" FontSize="{DynamicResource A.T.Body}" Foreground="{DynamicResource A.B.Text2}" VerticalAlignment="Center"
                                Visibility="Collapsed" />
-                    <aero:Sparkline x:Name="Spark" Width="90" Height="26" Margin="14,0,0,0" VerticalAlignment="Center" Stroke="{DynamicResource A.B.Accent}" />
+                    <aero:Sparkline x:Name="Spark" Width="90" Height="26" Margin="14,0,0,0" VerticalAlignment="Center" Stroke="{DynamicResource A.B.AccentHigh}" />
                 </StackPanel>
             </aero:GlassPanel>
         </Grid>

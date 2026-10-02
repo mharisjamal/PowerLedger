@@ -77,8 +77,9 @@
                 <!-- The mockup's: 18 in, a column 272 wide beside Last minute, 16 apart. In the column the Power now well (its
                      .inset, 20 in), and under it, 14 apart and 60 high, today's kWh in a well and the change against yesterday
                      on a glass bubble, 10 apart. -->
+                <!-- The mockup's grid row is 252 high: its column's wells (171, 14 and 67) run 8 past the pane's padding. -->
                 <aero:GlassPanel x:Name="PNow" Padding="18" AutomationProperties.Name="Power now">
-                    <Grid x:Name="NowContent">
+                    <Grid x:Name="NowContent" Margin="0,0,0,-8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="272" />
                             <ColumnDefinition Width="16" />
@@ -88,7 +89,7 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="14" />
-                                <RowDefinition Height="60" />
+                                <RowDefinition Height="67" />
                             </Grid.RowDefinitions>
                             <Border Style="{StaticResource A.Well}" Padding="19">
                                 <StackPanel>
@@ -101,8 +102,8 @@
                                     </StackPanel>
                                     <!-- The watts roll digit by digit (G6's RollingNumber); no reading is plain text. The mockup's
                                          figure: 48 semibold, the unit 22 at 80 %, 6 after it, 14 under the head. -->
-                                    <StackPanel x:Name="NowFigure" Orientation="Horizontal" Margin="0,14,0,0" Focusable="False">
-                                        <aero:RollingNumber x:Name="NowRoll" DigitSize="48" DigitWeight="SemiBold" VerticalAlignment="Bottom" />
+                                    <StackPanel x:Name="NowFigure" Orientation="Horizontal" Margin="0,17,0,0" Focusable="False">
+                                        <aero:RollingNumber x:Name="NowRoll" DigitSize="48" DigitWeight="SemiBold" Tracking="-0.035" VerticalAlignment="Bottom" />
                                         <TextBlock x:Name="NowValue" Style="{StaticResource A.Text.Big}" FontSize="48" FontWeight="SemiBold" LineHeight="56" TextTrimming="None" VerticalAlignment="Bottom" Visibility="Collapsed" />
                                         <TextBlock x:Name="NowUnit" Style="{StaticResource A.Text.Secondary}" FontSize="22" FontWeight="Medium" Margin="6,0,0,7" VerticalAlignment="Bottom" Text="W" />
                                     </StackPanel>
@@ -117,16 +118,16 @@
                                 </Grid.ColumnDefinitions>
                                 <!-- Today's kWh: 20 semibold, its label under it, 12 by 14 in. -->
                                 <Border Style="{StaticResource A.Well}" Padding="13,11">
-                                    <StackPanel VerticalAlignment="Center">
+                                    <StackPanel VerticalAlignment="Top">
                                         <TextBlock x:Name="TodayKwh" Style="{StaticResource A.Text.Number}" FontSize="20" FontWeight="SemiBold" Text="0" />
                                         <TextBlock Text="kWh today" Style="{StaticResource Sub}" />
                                     </StackPanel>
                                 </Border>
                                 <!-- The change against yesterday: the mockup's glass bubble, 20 corner, its figure 18 semibold. -->
-                                <aero:GlassPanel Grid.Column="2" CornerRadius="20" Bubble="True" Padding="10">
+                                <aero:GlassPanel Grid.Column="2" CornerRadius="20" Bubble="True" Padding="10" Height="60" VerticalAlignment="Top">
                                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                                         <TextBlock x:Name="ChangeText" Style="{StaticResource A.Text.Number}" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" Text="N/A" />
-                                        <TextBlock Text="vs yesterday" Style="{StaticResource Sub}" HorizontalAlignment="Center" />
+                                        <TextBlock Text="vs yesterday" Style="{StaticResource Sub}" HorizontalAlignment="Center" Margin="0,2,0,0" />
                                     </StackPanel>
                                 </aero:GlassPanel>
                             </Grid>
@@ -142,7 +143,7 @@
                                     <TextBlock DockPanel.Dock="Right" Text="Live" Style="{StaticResource Sub}" VerticalAlignment="Center" />
                                     <TextBlock Text="Last minute" Style="{StaticResource A.PanelTitle}" FontSize="15" />
                                 </DockPanel>
-                                <aero:LiveChart x:Name="Live" Grid.Row="1" Margin="0,10,0,0" Samples="{Binding Live.Spark}" Average="{Binding Live.AverageW}" />
+                                <aero:LiveChart x:Name="Live" Grid.Row="1" Margin="0,10,0,0" Height="186" VerticalAlignment="Top" Samples="{Binding Live.Spark}" Average="{Binding Live.AverageW}" />
                             </Grid>
                         </Border>
                     </Grid>
@@ -154,32 +155,32 @@
                 <aero:GlassPanel x:Name="PMonth" Grid.Column="2" Padding="24" AutomationProperties.Name="This month">
                     <StackPanel x:Name="MonthContent">
                         <DockPanel>
-                            <Button x:Name="OpenReport" DockPanel.Dock="Right" Style="{StaticResource A.AccentBtn}" Content="Open report" Click="OpenReportClick" AutomationProperties.Name="Open report" />
+                            <Button x:Name="OpenReport" DockPanel.Dock="Right" Style="{StaticResource A.AccentBtn}" Width="124" Padding="0" HorizontalContentAlignment="Center" Content="Open report" Click="OpenReportClick" AutomationProperties.Name="Open report" />
                             <TextBlock Text="This month" Style="{StaticResource Head}" />
                         </DockPanel>
-                        <TextBlock x:Name="MonthBig" Style="{StaticResource A.Text.Number}" FontSize="42" FontWeight="SemiBold" Margin="0,14,0,0" Text="N/A" />
-                        <TextBlock x:Name="MonthSub" Style="{StaticResource Sub}" />
-                        <!-- The bar: an inset 12 high, the accent filling it to where the month is, brightening to its end, with its
-                             soft glow (0 0 12px at 55 %). -->
+                        <!-- The mockup's .num at 42, tracked in by .035 em as the browser draws it. -->
+                        <aero:TrackedText x:Name="MonthBig" FontFamily="{DynamicResource A.F.Ui}" Foreground="{DynamicResource A.B.Text}" Effect="{DynamicResource A.Glass.TextShadow}"
+                                          FontSize="42" FontWeight="SemiBold" Tracking="-0.035" HorizontalAlignment="Left" Margin="0,19,0,0" Text="N/A" />
+                        <TextBlock x:Name="MonthSub" Style="{StaticResource Sub}" Margin="0,-2,0,0" />
+                        <!-- The bar: an inset 12 high, the accent filling it to where the month is, the mockup's gradient from its
+                             foot to its head (#C9E63E to #EAFF7A for the lime), with its soft glow (0 0 12px at 55 %). -->
                         <Grid x:Name="MonthBar" Height="12" Margin="0,18,0,0">
                             <Border CornerRadius="6" Background="{DynamicResource A.B.InsetFill}" BorderBrush="{DynamicResource A.B.InsetEdge}" BorderThickness="1" />
                             <Grid x:Name="MonthFill" HorizontalAlignment="Left" Width="0">
-                                <Border CornerRadius="6" Background="{DynamicResource A.B.Accent}">
+                                <Border CornerRadius="6">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Offset="0" Color="{DynamicResource A.C.AccentLow}" />
+                                            <GradientStop Offset="1" Color="{DynamicResource A.C.AccentHigh}" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
                                     <Border.Effect>
                                         <DropShadowEffect ShadowDepth="0" BlurRadius="12" Opacity="0.55" Color="{DynamicResource A.C.Accent}" RenderingBias="Performance" />
                                     </Border.Effect>
                                 </Border>
-                                <Border CornerRadius="6">
-                                    <Border.Background>
-                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                            <GradientStop Offset="0" Color="#00FFFFFF" />
-                                            <GradientStop Offset="1" Color="#45FFFFFF" />
-                                        </LinearGradientBrush>
-                                    </Border.Background>
-                                </Border>
                             </Grid>
                         </Grid>
-                        <ItemsControl x:Name="MonthSplit" Margin="0,22,0,0" Focusable="False" AutomationProperties.Name="This month by PC">
+                        <ItemsControl x:Name="MonthSplit" Margin="0,24,0,0" Focusable="False" AutomationProperties.Name="This month by PC">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type local:PcRow}">
                                     <DockPanel Margin="0,0,0,8" AutomationProperties.Name="{Binding Name}">
@@ -204,8 +205,9 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <DockPanel>
-                            <aero:GlassPanel DockPanel.Dock="Right" Style="{StaticResource A.SegTrack}" Height="42">
-                                <Grid x:Name="Seg">
+                            <!-- The mockup's track: 232 by 42, its buttons centred in it 2 apart, Day 72 wide. -->
+                            <aero:GlassPanel DockPanel.Dock="Right" Style="{StaticResource A.SegTrack}" Width="232" Height="42">
+                                <Grid x:Name="Seg" HorizontalAlignment="Center">
                                     <aero:GlassPanel x:Name="SegIndicator" Style="{StaticResource A.Glass.Bubble}" Height="34" Width="40" HorizontalAlignment="Left" Opacity="0">
                                         <aero:GlassPanel.RenderTransform>
                                             <TranslateTransform x:Name="SegX" />
@@ -213,11 +215,11 @@
                                     </aero:GlassPanel>
                                     <StackPanel x:Name="SegItems" Orientation="Horizontal" KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Once"
                                                 AutomationProperties.Name="Energy each day by">
-                                        <RadioButton Style="{StaticResource A.SegItem}" Content="Day" Checked="SpanChecked"
+                                        <RadioButton Style="{StaticResource A.SegItem}" Content="Day" Width="72" Padding="0" Checked="SpanChecked"
                                                      IsChecked="{Binding HistorySpan, Mode=OneWay, Converter={StaticResource Is}, ConverterParameter={x:Static local:HistorySpan.Day}}" />
-                                        <RadioButton Style="{StaticResource A.SegItem}" Content="Week" Checked="SpanChecked"
+                                        <RadioButton Style="{StaticResource A.SegItem}" Content="Week" Margin="2,0,0,0" Checked="SpanChecked"
                                                      IsChecked="{Binding HistorySpan, Mode=OneWay, Converter={StaticResource Is}, ConverterParameter={x:Static local:HistorySpan.Week}}" />
-                                        <RadioButton Style="{StaticResource A.SegItem}" Content="Month" Checked="SpanChecked"
+                                        <RadioButton Style="{StaticResource A.SegItem}" Content="Month" Margin="2,0,0,0" Checked="SpanChecked"
                                                      IsChecked="{Binding HistorySpan, Mode=OneWay, Converter={StaticResource Is}, ConverterParameter={x:Static local:HistorySpan.Month}}" />
                                     </StackPanel>
                                 </Grid>

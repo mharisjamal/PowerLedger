@@ -214,8 +214,13 @@ public class LiquidGlassProofTests
                         window.Page = page;
                         UiHarness.Pump(TimeSpan.FromMilliseconds(1500));
                         window.UpdateLayout();
+                        // The mockup's own figures and words (the audit's), so each one's ink is measured against the board's.
+                        MockupData.Apply(window);
+                        UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+                        window.UpdateLayout();
                         Write(Over(ground, window, 1440, 900), Path.Combine(pages, $"{page}-{theme}.png"));
                         File.WriteAllText(Path.Combine(pages, $"{page}-{theme}.json"), Regions(window));
+                        if (page is Page.Dashboard or Page.Settings) ProofInk.Write(ground, window, window, 1440, 900, Path.Combine(pages, $"{page}-{theme}"));
                     }
                     finally
                     {

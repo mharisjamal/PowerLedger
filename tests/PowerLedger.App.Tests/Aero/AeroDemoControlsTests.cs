@@ -48,7 +48,7 @@ public class AeroDemoControlsTests
                 UiHarness.PumpUntil(() => !window.IntroPending, TimeSpan.FromSeconds(10), "the intro to begin");
                 var view = (AeroDashboard)window.PageHost.Showing!;
                 var roll = UiHarness.Find<RollingNumber>(view, r => r.Name == "NowRoll")!;
-                var month = (TextBlock)view.FindName("MonthBig");
+                var month = (TrackedText)view.FindName("MonthBig");
                 view.Count.ShouldBe(0, "the figures wait at nothing while the panes rise");
                 roll.Text.ShouldBe("0");
                 month.Text.ShouldBe("$0.00");
@@ -81,7 +81,7 @@ public class AeroDemoControlsTests
                 UiHarness.PumpUntil(() => !window.IntroPending, TimeSpan.FromSeconds(10), "the intro to begin");
                 var view = (AeroDashboard)window.PageHost.Showing!;
                 view.Count.ShouldBe(1);
-                ((TextBlock)view.FindName("MonthBig")).Text.ShouldBe("$0.47");
+                ((TrackedText)view.FindName("MonthBig")).Text.ShouldBe("$0.47");
             }
             finally
             {
@@ -220,15 +220,4 @@ public class AeroDemoControlsTests
                 motion.Dispose();
             }
         });
-
-    [Theory]
-    [InlineData("Day", 13.5, 20.6075)]
-    [InlineData("Month", 13.5, 21.0125)]
-    [InlineData("", 13.5, 20)]
-    public void The_segs_buttons_keep_the_demos_letter_spacing_in_their_width(string label, double size, double side)
-    {
-        var padding = Tracking.SegPadding.For(label.Length, size);
-        padding.Left.ShouldBe(side, 1e-9);
-        padding.Right.ShouldBe(side, 1e-9);
-    }
 }

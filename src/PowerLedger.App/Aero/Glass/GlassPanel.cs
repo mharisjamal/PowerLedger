@@ -36,6 +36,9 @@ public class GlassPanel : ContentControl
     public static readonly DependencyProperty BubbleProperty = DependencyProperty.Register(nameof(Bubble),
         typeof(bool), typeof(GlassPanel), new PropertyMetadata(false));
 
+    public static readonly DependencyProperty LiftProperty = DependencyProperty.Register(nameof(Lift),
+        typeof(GlassLift?), typeof(GlassPanel), new PropertyMetadata(null));
+
     private static readonly DependencyPropertyKey IsNestedKey = DependencyProperty.RegisterReadOnly(nameof(IsNested),
         typeof(bool), typeof(GlassPanel), new PropertyMetadata(false));
 
@@ -70,6 +73,9 @@ public class GlassPanel : ContentControl
     /// <summary>A bubble floating on glass (the chosen page, a segmented control's choice, a figure): the mockup's
     /// <c>.bubble</c>, a soft shadow under it as well.</summary>
     public bool Bubble { get => (bool)GetValue(BubbleProperty); set => SetValue(BubbleProperty, value); }
+
+    /// <summary>The piece's own box-shadow when it isn't a bubble's (<see cref="GlassLift.Pill"/>, <see cref="GlassLift.Bar"/>).</summary>
+    public GlassLift? Lift { get => (GlassLift?)GetValue(LiftProperty); set => SetValue(LiftProperty, value); }
 
     /// <summary>Whether the piece sits on another piece's glass, whose content's text shadow already reaches it.</summary>
     public bool IsNested => (bool)GetValue(IsNestedProperty);

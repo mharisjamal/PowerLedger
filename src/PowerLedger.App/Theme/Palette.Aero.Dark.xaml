@@ -74,12 +74,13 @@
 
     <!-- Aero's own tokens. -->
 
-    <!-- Ink: the demo's #F3F4F6 at 100 %, then 78 and 60 % where the demo has 70 and 44 %, which read under WCAG AA's
-         4.5:1 over the brighter backdrops (44 % does even over black). Where each may sit (ContrastTests): the ink
-         anywhere; Text2 on the glass, the quiet wells, menus and dialogs; Text3 on the glass and the chart well only. -->
-    <Color x:Key="A.C.Text">#F3F4F6</Color>
-    <Color x:Key="A.C.Text2">#C7F3F4F6</Color>
-    <Color x:Key="A.C.Text3">#99F3F4F6</Color>
+    <!-- Ink: the liquid glass mockup's white (0.10.9's audit: #fff, not the older demo's #F3F4F6), then its .sub at 80 %
+         and 60 % (the demo's 44 % read under WCAG AA's 4.5:1 over the brighter backdrops). Where each may sit
+         (ContrastTests): the ink anywhere; Text2 on the glass, the quiet wells, menus and dialogs; Text3 on the glass and
+         the chart well only. -->
+    <Color x:Key="A.C.Text">#FFFFFF</Color>
+    <Color x:Key="A.C.Text2">#CCFFFFFF</Color>
+    <Color x:Key="A.C.Text3">#99FFFFFF</Color>
     <Color x:Key="A.C.Ink">#16181C</Color>
     <Color x:Key="A.C.Accent">#D9F25A</Color>
     <Color x:Key="A.C.AccentInk">#1B2004</Color>
@@ -87,7 +88,17 @@
     <Color x:Key="A.C.Violet">#7466D8</Color>
     <Color x:Key="A.C.Green">#2F7552</Color>
     <Color x:Key="A.C.Blue">#4E93B5</Color>
-    <Color x:Key="A.C.MarkerFill">#1B1D20</Color>
+    <!-- Last minute's end dot: the mockup's navy inside the accent's ring. -->
+    <Color x:Key="A.C.MarkerFill">#0C1640</Color>
+    <!-- The lime's lit shades, as the mockup has them (GlassMaterial.AccentShades steps any accent the same way). -->
+    <Color x:Key="A.C.AccentLow">#C9E63E</Color>
+    <Color x:Key="A.C.AccentHigh">#EAFF7A</Color>
+    <Color x:Key="A.C.AccentLine">#E8FF78</Color>
+    <Color x:Key="A.C.AccentLineFill">#E2FB66</Color>
+    <SolidColorBrush x:Key="A.B.AccentLow" Color="{StaticResource A.C.AccentLow}" />
+    <SolidColorBrush x:Key="A.B.AccentHigh" Color="{StaticResource A.C.AccentHigh}" />
+    <SolidColorBrush x:Key="A.B.AccentLine" Color="{StaticResource A.C.AccentLine}" />
+    <SolidColorBrush x:Key="A.B.AccentLineFill" Color="{StaticResource A.C.AccentLineFill}" />
 
     <!-- The accents the Glass settings offer (the demo's tuner), each with an ink that reads on it at 4.5:1. -->
     <Color x:Key="A.C.Accent.Lime">#D9F25A</Color>
@@ -136,10 +147,24 @@
     <!-- The mockup's other text steps: the sidebar's pages at 88 %, a segmented control's words at 85 %; the white wash a
          glass control takes under the pointer (the kit's .hov, 14 % over its glass); and the white glass pill of a chosen
          option (the Styles board's Style row). -->
-    <Color x:Key="A.C.NavText">#E0F3F4F6</Color>
-    <Color x:Key="A.C.SegText">#D9F3F4F6</Color>
+    <Color x:Key="A.C.NavText">#E0FFFFFF</Color>
+    <Color x:Key="A.C.SegText">#D9FFFFFF</Color>
     <Color x:Key="A.C.GlassHover">#24FFFFFF</Color>
     <SolidColorBrush x:Key="A.B.NavText" Color="{StaticResource A.C.NavText}" />
+    <!-- The Styles board's row words (.lab, 90 %) and captions (.cap, 75 %), Settings' Glass pane. -->
+    <Color x:Key="A.C.LabText">#E6FFFFFF</Color>
+    <Color x:Key="A.C.CapText">#BFFFFFFF</Color>
+    <SolidColorBrush x:Key="A.B.LabText" Color="{StaticResource A.C.LabText}" />
+    <!-- The kit's glass pill at rest (white at 12 %), and a highlighted menu item's top light (white at 35 %). -->
+    <SolidColorBrush x:Key="A.B.PillTint" Color="#1FFFFFFF" />
+    <!-- The top bar's "2 PCs" (white at 82 %). -->
+    <Color x:Key="A.C.HomeSub">#D1FFFFFF</Color>
+    <SolidColorBrush x:Key="A.B.HomeSub" Color="{StaticResource A.C.HomeSub}" />
+    <!-- The boards' .well: navy from 22 % at its top to 10 % at its foot. -->
+    <Color x:Key="A.C.BoardWellTop">#38000A28</Color>
+    <Color x:Key="A.C.BoardWellFoot">#1A000A28</Color>
+    <SolidColorBrush x:Key="A.B.MenuShine" Color="#59FFFFFF" />
+    <SolidColorBrush x:Key="A.B.CapText" Color="{StaticResource A.C.CapText}" />
     <SolidColorBrush x:Key="A.B.SegText" Color="{StaticResource A.C.SegText}" />
     <SolidColorBrush x:Key="A.B.GlassHover" Color="{StaticResource A.C.GlassHover}" />
     <!-- The Styles board's knob (a switch's and a slider's): white shading to #E6E9F2 from its upper left; and the slider's
@@ -317,7 +342,7 @@
     <sys:Double x:Key="A.T.Nav">15</sys:Double>
     <sys:Double x:Key="A.T.Brand">18</sys:Double>
     <sys:Double x:Key="A.T.Body">14</sys:Double>
-    <sys:Double x:Key="A.T.Control">13.5</sys:Double>
+    <sys:Double x:Key="A.T.Control">14</sys:Double>
     <sys:Double x:Key="A.T.Label">13</sys:Double>
     <sys:Double x:Key="A.T.Small">12.5</sys:Double>
     <sys:Double x:Key="A.T.Tiny">12</sys:Double>

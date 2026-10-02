@@ -96,9 +96,15 @@ internal sealed class LiveChart : FrameworkElement
 
     protected override Visual GetVisualChild(int index) => _kids[index];
 
-    private double Sx => ActualWidth / LiveScale.Width;
+    /// <summary>The drawing's 400 by 180 laid in the element as the mockup's SVG lays its view box (0.10.9's audit): one
+    /// scale, the smaller of the two, and centred (preserveAspectRatio's xMidYMid meet).</summary>
+    private double S => Math.Min(ActualWidth / LiveScale.Width, ActualHeight / LiveScale.Height);
 
-    private double Sy => ActualHeight / LiveScale.Height;
+    private double Ox => (ActualWidth - LiveScale.Width * S) / 2;
+
+    private double Oy => (ActualHeight - LiveScale.Height * S) / 2;
+
+    private Point Map(double x, double y) => new(Ox + x * S, Oy + y * S);
 
     private IReadOnlyList<SparkSample> Readings => Samples ?? [];
 
@@ -121,8 +127,9 @@ internal sealed class LiveChart : FrameworkElement
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
         var readings = Readings;
         _scale = LiveScale.For([.. readings.Select(s => s.Watts)], Average);
-        double sx = Sx, sy = Sy;
-        var accent = ChartInk.Colour(this, "A.C.Accent", Color.FromRgb(0xD9, 0xF2, 0x5A));
+        // The mockup's lit lime: the line #E8FF78, its fill and glow #E2FB66 (GlassMaterial.AccentShades for any accent).
+        var accent = ChartInk.Colour(this, "A.C.AccentLine", Color.FromRgb(0xE8, 0xFF, 0x78));
+        var lit = ChartInk.Colour(this, "A.C.AccentLineFill", Color.FromRgb(0xE2, 0xFB, 0x66));
         var axis = ChartInk.Brush(this, "A.C.Text3", Color.FromArgb(0x70, 0xF3, 0xF4, 0xF6));
         // What stays is drawn again only when it changes: a reading moves the line alone (Plan U).
         var key = (RenderSize, readings.Count == 0, axis.Color, CultureInfo.CurrentCulture.Name);
@@ -131,17 +138,18 @@ internal sealed class LiveChart : FrameworkElement
             _staticKey = key;
             DrawStatic(readings, axis);
         }
-        var points = readings.OrderByDescending(s => s.AgeSeconds).Select(s => new Point(LiveScale.X(s.AgeSeconds) * sx, _scale.Y(s.Watts) * sy)).ToList();
+        var points = readings.OrderByDescending(s => s.AgeSeconds).Select(s => Map(LiveScale.X(s.AgeSeconds), _scale.Y(s.Watts))).ToList();
+        var foot = Map(0, LiveScale.Height).Y;
         using (var dc = _line.RenderOpen())
         {
             if (points.Count > 1)
             {
                 var line = Polyline(points, close: false);
-                var fill = new LinearGradientBrush(Color.FromArgb(0x61, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B), 90);
+                var fill = new LinearGradientBrush(Color.FromArgb(0x61, lit.R, lit.G, lit.B), Color.FromArgb(0, lit.R, lit.G, lit.B), 90);
                 fill.Freeze();
-                dc.DrawGeometry(fill, null, Polyline([.. points, new Point(points[^1].X, ActualHeight), new Point(points[0].X, ActualHeight)], close: true));
+                dc.DrawGeometry(fill, null, Polyline([.. points, new Point(points[^1].X, foot), new Point(points[0].X, foot)], close: true));
                 foreach (var (alpha, width) in new[] { (0x1C, 12.0), (0x40, 7.0) })
-                    dc.DrawGeometry(null, ChartInk.Pen(ChartInk.Brush(Color.FromArgb((byte)alpha, accent.R, accent.G, accent.B)), width, round: true), line);
+                    dc.DrawGeometry(null, ChartInk.Pen(ChartInk.Brush(Color.FromArgb((byte)alpha, lit.R, lit.G, lit.B)), width, round: true), line);
                 dc.DrawGeometry(null, ChartInk.Pen(ChartInk.Brush(accent), 2.4, round: true), line);
             }
         }
@@ -150,7 +158,8 @@ internal sealed class LiveChart : FrameworkElement
             if (readings.Count > 0 && _hoverAge is null)
             {
                 var newest = readings.OrderBy(s => s.AgeSeconds).First();
-                Marker(dc, LiveScale.X(0) * sx, _scale.Y(newest.Watts) * sy, newest.Watts, accent, pill: false);
+                var at = Map(LiveScale.X(0), _scale.Y(newest.Watts));
+                Marker(dc, at.X, at.Y, newest.Watts, accent, pill: false);
             }
         }
         if (_hoverAge is not null || _hoverDrawn) DrawHover(accent);
@@ -169,13 +178,12 @@ internal sealed class LiveChart : FrameworkElement
     /// on a pill above it too.</summary>
     private void Marker(DrawingContext dc, double x, double y, double watts, Color accent, bool pill)
     {
-        double sx = Sx;
         dc.DrawEllipse(ChartInk.Brush(this, "A.C.MarkerFill", Color.FromRgb(0x0C, 0x16, 0x40)), ChartInk.Pen(ChartInk.Brush(accent), 2.5), new Point(x, y), 5.5, 5.5);
         if (!pill) return;
         var value = ChartInk.Text(this, Format.WholeWatts(watts, CultureInfo.CurrentCulture) + " W", 11.5,
             ChartInk.Brush(this, "A.C.Ink", Color.FromRgb(0x16, 0x18, 0x1C)), semi: true);
         var lw = Math.Max(50, value.Width + 16);
-        var px = Math.Clamp(x - lw / 2, 0, Math.Max(0, LiveScale.X1 * sx - lw));
+        var px = Math.Clamp(x - lw / 2, 0, Math.Max(0, Ox + LiveScale.X1 * S - lw));
         ChartInk.Pill(dc, new Rect(px, y - 33, lw, 22), ChartInk.Brush(this, "A.C.Pill", Color.FromRgb(0xF4, 0xF4, 0xF0)));
         ChartInk.At(dc, value, px + lw / 2, y - 18, 1);
     }
@@ -197,20 +205,21 @@ internal sealed class LiveChart : FrameworkElement
         if (_hoverAge is not { } age || Readings.Count == 0) return;
         _hoverDrawn = true;
         var nearest = Readings.MinBy(s => Math.Abs(s.AgeSeconds - age));
-        Marker(dc, LiveScale.X(nearest.AgeSeconds) * Sx, _scale.Y(nearest.Watts) * Sy, nearest.Watts, accent, pill: true);
+        var at = Map(LiveScale.X(nearest.AgeSeconds), _scale.Y(nearest.Watts));
+        Marker(dc, at.X, at.Y, nearest.Watts, accent, pill: true);
     }
 
     private void UpdateReveal()
     {
         if (ActualWidth <= 0) return;
-        var shown = new Rect(-20, -40, Math.Max(0, (LiveScale.X0 + Reveal * (LiveScale.X1 + 12 - LiveScale.X0)) * Sx + 20), ActualHeight + 80);
+        var shown = new Rect(-20, -40, Math.Max(0, Ox + (LiveScale.X0 + Reveal * (LiveScale.X1 + 12 - LiveScale.X0)) * S + 20), ActualHeight + 80);
         if (_clip.Clip is not RectangleGeometry { Rect: var was } || was != shown) _clip.Clip = new RectangleGeometry(shown);
         _marker.Opacity = Reveal < .98 || _hoverAge is not null ? 0 : 1;
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        var x = e.GetPosition(this).X / Math.Max(Sx, 1e-6);
+        var x = (e.GetPosition(this).X - Ox) / Math.Max(S, 1e-6);
         _hoverAge = Math.Clamp((LiveScale.X1 - x) / (LiveScale.X1 - LiveScale.X0) * LiveScale.Span, 0, LiveScale.Span);
         _marker.Opacity = 0;
         DrawHover(ChartInk.Colour(this, "A.C.Accent", Color.FromRgb(0xD9, 0xF2, 0x5A)));

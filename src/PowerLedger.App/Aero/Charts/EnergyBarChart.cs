@@ -39,6 +39,7 @@ internal sealed class EnergyBarChart : Grid
     private const double Gap = 10;
     private const double LabelGap = 8;
     private readonly List<GlassPanel> _bars = [];
+    private readonly List<TextBlock> _labels = [];
     private readonly TextBlock _empty;
 
     public EnergyBarChart()
@@ -87,6 +88,7 @@ internal sealed class EnergyBarChart : Grid
         ColumnDefinitions.Clear();
         RowDefinitions.Clear();
         _bars.Clear();
+        _labels.Clear();
         var bars = Bars ?? [];
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(LabelGap) });
@@ -102,7 +104,7 @@ internal sealed class EnergyBarChart : Grid
             var cell = new Grid();
             cell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1 - share, GridUnitType.Star) });
             cell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(share, GridUnitType.Star) });
-            var bar = new GlassPanel { CornerRadius = new CornerRadius(14), Bubble = true, ToolTip = bars[i].Tip, Focusable = false };
+            var bar = new GlassPanel { CornerRadius = new CornerRadius(14), Lift = GlassLift.Bar, ToolTip = bars[i].Tip, Focusable = false };
             AutomationProperties.SetName(bar, bars[i].Tip);
             SetRow(bar, 1);
             cell.Children.Add(bar);
@@ -114,6 +116,7 @@ internal sealed class EnergyBarChart : Grid
             SetRow(label, 2);
             SetColumn(label, column);
             Children.Add(label);
+            _labels.Add(label);
         }
         _empty.Visibility = bars.Count == 0 || busiest <= 0 ? Visibility.Visible : Visibility.Collapsed;
         SetColumnSpan(_empty, Math.Max(1, ColumnDefinitions.Count));
@@ -121,6 +124,31 @@ internal sealed class EnergyBarChart : Grid
         AutomationProperties.SetHelpText(this, bars.Count == 0 ? Format.NoReading
             : $"{Format.Kwh(bars.Sum(b => b.Kwh), culture)} kWh over {bars.Count} periods, the most {Format.Kwh(busiest, culture)} kWh");
         Tint();
+    }
+
+    /// <summary>
+    /// Each period's column as the mockup's flex row lays it (0.10.9's audit): a column is its label's width and an equal
+    /// share of what the labels and the 10 px gaps leave, so a two digit day's bar is wider than a one digit day's, as in
+    /// the browser (the mockup's 1 to 9 are 37.3 wide, its 10 to 14 41.7).
+    /// </summary>
+    protected override Size MeasureOverride(Size constraint)
+    {
+        if (double.IsFinite(constraint.Width) && _labels.Count > 0 && ColumnDefinitions.Count == 2 * _labels.Count - 1)
+        {
+            var widths = new double[_labels.Count];
+            for (var i = 0; i < _labels.Count; i++)
+            {
+                _labels[i].Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                widths[i] = _labels[i].DesiredSize.Width;
+            }
+            var share = (constraint.Width - Gap * (_labels.Count - 1) - widths.Sum()) / _labels.Count;
+            for (var i = 0; i < _labels.Count; i++)
+            {
+                var width = Math.Max(0, widths[i] + share);
+                if (ColumnDefinitions[2 * i].Width.Value != width || !ColumnDefinitions[2 * i].Width.IsAbsolute) ColumnDefinitions[2 * i].Width = new GridLength(width);
+            }
+        }
+        return base.MeasureOverride(constraint);
     }
 
     /// <summary>The latest bar in the accent's glass; the rest clear.</summary>

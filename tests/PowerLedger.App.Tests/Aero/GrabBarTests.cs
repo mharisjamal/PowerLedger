@@ -28,8 +28,9 @@ public class GrabBarTests
         GrabBar.GlowAt(Hit, new Point(60, 14 + 81)).ShouldBe(GrabGlow.Idle, "81 DIP under it");
         GrabBar.GlowAt(Hit, new Point(88 + 50, 14 + 50)).ShouldBe(GrabGlow.Near, "71 DIP off its corner");
         GrabBar.GlowAt(Hit, new Point(88 + 60, 14 + 60)).ShouldBe(GrabGlow.Idle, "85 DIP off its corner");
-        GrabBar.OpacityOf(GrabGlow.Idle).ShouldBe(.25);
-        GrabBar.OpacityOf(GrabGlow.Near).ShouldBe(.5);
+        // The kit's move pill (0.10.9's audit): 30 % at rest, 60 % with the pointer near, whole on it.
+        GrabBar.OpacityOf(GrabGlow.Idle).ShouldBe(.3);
+        GrabBar.OpacityOf(GrabGlow.Near).ShouldBe(.6);
         GrabBar.OpacityOf(GrabGlow.Over).ShouldBe(1);
     }
 

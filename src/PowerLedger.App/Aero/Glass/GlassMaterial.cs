@@ -51,7 +51,7 @@ internal sealed class GlassMaterial : IDisposable
     /// <summary>The colour keys that follow the ink family rather than the theme: light-on-dark or dark-on-light.</summary>
     private static readonly string[] Family =
     [
-        "A.C.Text", "A.C.Text2", "A.C.Text3", "A.C.NavText", "A.C.SegText", "A.C.Well", "A.C.Well2", "A.C.Well3", "A.C.WellHover", "A.C.WellEdge", "A.C.WellTop", "A.C.WellLit", "A.C.SoftEdge", "A.C.SoftTop", "A.C.Line",
+        "A.C.Text", "A.C.Text2", "A.C.Text3", "A.C.NavText", "A.C.SegText", "A.C.LabText", "A.C.CapText", "A.C.HomeSub", "A.C.Well", "A.C.Well2", "A.C.Well3", "A.C.WellHover", "A.C.WellEdge", "A.C.WellTop", "A.C.WellLit", "A.C.SoftEdge", "A.C.SoftTop", "A.C.Line",
         "A.C.ChartWell", "A.C.ChartWellTop", "A.C.ChartWellLit", "A.C.GhostTop", "A.C.Grid", "A.C.Track", "A.C.TrackSoft", "A.C.Muted", "A.C.Ghost", "A.C.PrevLine", "A.C.Guide",
         "A.C.GuideStrong", "A.C.BtnFill", "A.C.BtnFillHover", "A.C.BtnEdge", "A.C.BtnTop", "A.C.OutlineHover", "A.C.NavFillA", "A.C.NavFillB",
         "A.C.NavHover", "A.C.NavIcon", "A.C.NavIndicator", "A.C.NavIndicatorTop", "A.C.SwitchOff", "A.C.MenuHover", "A.C.Ink", "A.C.Pill", "A.C.MenuFill",
@@ -61,10 +61,10 @@ internal sealed class GlassMaterial : IDisposable
     /// <summary>The single-colour brushes the palette builds from a token, rebuilt here when their token changes.</summary>
     private static readonly string[] Brushed =
     [
-        "Text", "Text2", "Text3", "NavText", "SegText", "GlassHover", "Ink", "Accent", "AccentInk", "Pill", "Well", "Well2", "Well3", "WellHover", "WellEdge", "WellTop", "WellLit", "SoftEdge", "SoftTop", "Line",
+        "Text", "Text2", "Text3", "NavText", "SegText", "LabText", "CapText", "HomeSub", "GlassHover", "Ink", "Accent", "AccentInk", "Pill", "Well", "Well2", "Well3", "WellHover", "WellEdge", "WellTop", "WellLit", "SoftEdge", "SoftTop", "Line",
         "ChartWell", "ChartWellTop", "ChartWellLit", "GhostTop", "Track", "TrackSoft", "Muted", "BtnFill", "BtnFillHover", "BtnEdge", "BtnTop", "OutlineHover", "AccentTop",
         "AccentHover", "NavHover", "NavIcon", "NavIndicator", "NavIndicatorTop", "SwitchOff", "MenuFill", "MenuEdge", "MenuHover", "Scrim",
-        "SeeThroughWash", "AccentGlass",
+        "SeeThroughWash", "AccentGlass", "AccentLow", "AccentHigh", "AccentLine", "AccentLineFill",
     ];
 
     private readonly FrameworkElement _target;
@@ -190,7 +190,7 @@ internal sealed class GlassMaterial : IDisposable
         var text = colours["A.C.Text"];
         if (strict)
         {
-            colours["A.C.Text2"] = colours["A.C.Text3"] = colours["A.C.NavText"] = colours["A.C.SegText"] = text;
+            colours["A.C.Text2"] = colours["A.C.Text3"] = colours["A.C.NavText"] = colours["A.C.SegText"] = colours["A.C.LabText"] = colours["A.C.CapText"] = colours["A.C.HomeSub"] = text;
         }
         else
         {
@@ -198,6 +198,9 @@ internal sealed class GlassMaterial : IDisposable
             colours["A.C.Text3"] = WithAlpha(text, VideoText3);
             colours["A.C.NavText"] = WithAlpha(text, NavText);
             colours["A.C.SegText"] = WithAlpha(text, SegText);
+            colours["A.C.LabText"] = WithAlpha(text, LabText);
+            colours["A.C.CapText"] = WithAlpha(text, CapText);
+            colours["A.C.HomeSub"] = WithAlpha(text, HomeSub);
         }
         if (settings.IncreaseContrast) colours["A.C.SeeThroughWash"] = Scaled(colours["A.C.SeeThroughWash"], 2);
 
@@ -216,6 +219,7 @@ internal sealed class GlassMaterial : IDisposable
         colours["A.C.Accent"] = accent;
         colours["A.C.AccentInk"] = ink;
         colours["A.C.AccentGlass"] = WithAlpha(accent, AccentGlassAlpha);
+        foreach (var (key, shift) in AccentShades) colours[key] = Shifted(accent, shift);
 
         var result = new Dictionary<string, object>();
         foreach (var (key, colour) in colours) result[key] = colour;
@@ -319,6 +323,13 @@ internal sealed class GlassMaterial : IDisposable
     public const double NavText = 0.88;
     public const double SegText = 0.85;
 
+    /// <summary>The Styles board's steps (Settings' Glass pane): a row's words (.lab) at 90 %, its caption (.cap) at 75 %.</summary>
+    public const double LabText = 0.9;
+    public const double CapText = 0.75;
+
+    /// <summary>The top bar's "2 PCs" under Home, at 82 %.</summary>
+    public const double HomeSub = 0.82;
+
     /// <summary>How dense Reduce transparency makes the tint, and at least the menus and dialogs: still glass.</summary>
     public const double ReducedAlpha = 0.86;
     public const double ReducedMenuAlpha = 0.94;
@@ -397,6 +408,19 @@ internal sealed class GlassMaterial : IDisposable
     private static double Worst(Color ink, IEnumerable<Color> grounds) => grounds.Min(g => Contrast.Ratio(Contrast.Over(ink, g), g));
 
     private static Color Scaled(Color colour, double factor) => WithAlpha(colour, Math.Clamp(colour.A / 255.0 * factor, 0, 1));
+
+    /// <summary>
+    /// The mockup's lit shades of the lime (0.10.9's audit), each as its step from #D9F25A, so every accent takes the same
+    /// steps: a bar's or slider's foot (#C9E63E) and head (#EAFF7A), Last minute's line (#E8FF78) and the fill under it
+    /// (#E2FB66).
+    /// </summary>
+    internal static readonly (string Key, (int R, int G, int B) Shift)[] AccentShades =
+    [
+        ("A.C.AccentLow", (-16, -12, -28)), ("A.C.AccentHigh", (17, 13, 32)), ("A.C.AccentLine", (15, 13, 30)), ("A.C.AccentLineFill", (9, 9, 12)),
+    ];
+
+    internal static Color Shifted(Color colour, (int R, int G, int B) shift)
+        => Color.FromArgb(colour.A, (byte)Math.Clamp(colour.R + shift.R, 0, 255), (byte)Math.Clamp(colour.G + shift.G, 0, 255), (byte)Math.Clamp(colour.B + shift.B, 0, 255));
 
     private static Color WithAlpha(Color colour, double alpha) => Color.FromArgb((byte)Math.Round(Math.Clamp(alpha, 0, 1) * 255), colour.R, colour.G, colour.B);
 

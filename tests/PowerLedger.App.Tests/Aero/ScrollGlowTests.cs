@@ -28,7 +28,7 @@ public class ScrollGlowTests
         ScrollGlow.ShineAt(Bar, null, scrolling: true, dragging: false).ShouldBe(ScrollShine.Near, "scrolling");
         ScrollGlow.ShineAt(Bar, new Point(10, 10), false, dragging: true).ShouldBe(ScrollShine.Over, "dragging, wherever the pointer");
         ScrollGlow.OpacityOf(ScrollShine.Hidden).ShouldBe(0);
-        ScrollGlow.OpacityOf(ScrollShine.Near).ShouldBe(.5);
+        ScrollGlow.OpacityOf(ScrollShine.Near).ShouldBe(.55);   // the kit's "Near or scrolling" bar (0.10.9's audit)
         ScrollGlow.OpacityOf(ScrollShine.Over).ShouldBe(1);
     }
 }

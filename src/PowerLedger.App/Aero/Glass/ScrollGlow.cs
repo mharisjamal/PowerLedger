@@ -35,7 +35,7 @@ public sealed class ScrollGlow
     public const double Inset = 4;
 
     public const double HiddenOpacity = 0;
-    public const double NearOpacity = .5;
+    public const double NearOpacity = .55;
     public const double OverOpacity = 1;
 
     /// <summary>How near the bar the pointer lights it to half, in DIP from the bar's edge.</summary>

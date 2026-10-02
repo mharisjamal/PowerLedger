@@ -69,7 +69,7 @@
             <!-- A disc with letters: a PC in "Your PCs", this one in the accent and the others in violet, as the mockup's .nav row
                  40 high: the 26 px disc, the name 12 after it and the watts in the mono face at the right. -->
             <DataTemplate x:Key="PcRow" DataType="{x:Type local:PcRow}">
-                <Button Style="{StaticResource A.RowBtn}" Height="40" Padding="14,0" Margin="0" Click="PcClick" AutomationProperties.Name="{Binding Name}"
+                <Button Style="{StaticResource A.RowBtn}" Height="40" Padding="14,0" Margin="0,4,0,0" Click="PcClick" AutomationProperties.Name="{Binding Name}"
                         AutomationProperties.HelpText="{Binding Figure}" ToolTip="{Binding Name}" Foreground="{DynamicResource A.B.NavText}">
                     <DockPanel>
                         <Grid Width="26" Height="26">
@@ -88,10 +88,14 @@
                             <TextBlock Text="{Binding Initials}" FontSize="10.5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="{DynamicResource A.B.White}" />
+                                        <!-- Another PC's initials take the row's words and their shadow, as the mockup's; This PC's
+                                             are the accent's ink, unshadowed. -->
+                                        <Setter Property="Foreground" Value="{DynamicResource A.B.NavText}" />
+                                        <Setter Property="Effect" Value="{DynamicResource A.Glass.TextShadow}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsThisPc}" Value="True">
                                                 <Setter Property="Foreground" Value="{DynamicResource A.B.AccentInk}" />
+                                                <Setter Property="Effect" Value="{x:Null}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -180,7 +184,8 @@
                                                  IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Settings}}" />
                                 </StackPanel>
                             </Grid>
-                            <TextBlock Text="Your PCs" Style="{StaticResource WideText}" FontSize="{DynamicResource A.T.Small}" FontWeight="Medium" Foreground="{DynamicResource A.B.Text2}" Margin="14,26,14,8" />
+                            <!-- The mockup's .sub, 26 over and 8 under it, and its column's 4 px gap before it and each PC. -->
+                            <TextBlock Text="Your PCs" Style="{StaticResource WideText}" FontSize="{DynamicResource A.T.Small}" FontWeight="Medium" Foreground="{DynamicResource A.B.Text2}" Margin="14,30,14,8" />
                             <Border Height="1" Margin="10,16,10,12" Background="{DynamicResource A.B.WellTop}" Style="{StaticResource Narrow}" />
                             <ItemsControl x:Name="Pcs" Focusable="False" ItemTemplate="{StaticResource PcRow}" AutomationProperties.Name="Your PCs" />
                         </StackPanel>
@@ -207,7 +212,7 @@
                                         Command="{Binding ShowWhatsNew}" Visibility="{Binding HasNotes, Converter={StaticResource VisibleWhen}}" />
                             </StackPanel>
                         </Border>
-                        <Button x:Name="ServiceButton" Style="{StaticResource A.RowBtn}" Padding="14,4" Margin="0" Click="ServiceClick"
+                        <Button x:Name="ServiceButton" Style="{StaticResource A.RowBtn}" Padding="14,4,14,1" Margin="0" Click="ServiceClick"
                                 AutomationProperties.Name="Service" ToolTip="{Binding Now.Status.State}">
                             <DockPanel>
                                 <TextBlock x:Name="VersionLine" DockPanel.Dock="Right" Style="{StaticResource WideText}" Foreground="{DynamicResource A.B.Text2}" FontSize="{DynamicResource A.T.Small}" FontWeight="Medium"
@@ -286,8 +291,9 @@
                             <TextBox x:Name="Search" Grid.Column="1" Margin="6,0,6,0" Style="{StaticResource A.SearchBox}" AutomationProperties.Name="Search history"
                                      TextChanged="SearchChanged" />
                             <Grid Grid.Column="2" Style="{StaticResource Wide}" IsHitTestVisible="False">
-                                <aero:GlassPanel Width="60" Height="32" CornerRadius="12" Padding="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Ctrl K" FontFamily="{DynamicResource A.F.Mono}" FontSize="12" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <!-- The mockup's key: 60 wide and 10 each side (80), 32 high, 12 corners; its words without a text shadow. -->
+                                <aero:GlassPanel Width="80" Height="32" CornerRadius="12" Padding="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Ctrl K" FontFamily="{DynamicResource A.F.Mono}" FontSize="12" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center" Effect="{x:Null}" />
                                 </aero:GlassPanel>
                             </Grid>
                         </Grid>
@@ -318,7 +324,7 @@
                                     <StackPanel Margin="8,0,0,0" VerticalAlignment="Center" Style="{StaticResource Wide}">
                                         <!-- The mockup's two lines at 1.15. -->
                                         <TextBlock Text="Home" FontSize="{DynamicResource A.T.Body}" FontWeight="SemiBold" LineHeight="16.1" LineStackingStrategy="BlockLineHeight" />
-                                        <TextBlock x:Name="HouseholdLine" FontSize="11.5" Foreground="{DynamicResource A.B.Text2}" LineHeight="13.2" LineStackingStrategy="BlockLineHeight" />
+                                        <TextBlock x:Name="HouseholdLine" FontSize="11.5" Foreground="{DynamicResource A.B.HomeSub}" LineHeight="13.2" LineStackingStrategy="BlockLineHeight" />
                                     </StackPanel>
                                 </StackPanel>
                             </Button>

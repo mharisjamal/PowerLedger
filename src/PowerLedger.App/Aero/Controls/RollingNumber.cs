@@ -24,7 +24,12 @@ public sealed class RollingNumber : StackPanel
     public static readonly DependencyProperty DigitWeightProperty = DependencyProperty.Register(nameof(DigitWeight), typeof(FontWeight),
         typeof(RollingNumber), new PropertyMetadata(FontWeights.Medium, (d, _) => ((RollingNumber)d).Rebuild()));
 
+    public static readonly DependencyProperty TrackingProperty = DependencyProperty.Register(nameof(Tracking), typeof(double),
+        typeof(RollingNumber), new PropertyMetadata(0.0, (d, _) => ((RollingNumber)d).Rebuild()));
+
     private readonly List<(Canvas Window, StackPanel Strip, TranslateTransform Shift)> _digits = [];
+    private double[] _advance = new double[10];
+    private double _strip;
     private string _shown = "";
     private double _lineHeight;
 
@@ -32,7 +37,8 @@ public sealed class RollingNumber : StackPanel
     {
         Orientation = Orientation.Horizontal;
         Focusable = false;
-        System.Windows.Documents.Typography.SetNumeralAlignment(this, FontNumeralAlignment.Tabular);
+        // No inheritable value of its own (0.10.9): one set here kept the text colour the number had when it was built off
+        // the tree, and Power now's watts drew black.
         Set(0, animate: false);
         // In the tree its font is known: the digits' width is measured again in it.
         Loaded += (_, _) => Rebuild();
@@ -44,6 +50,9 @@ public sealed class RollingNumber : StackPanel
     public double DigitSize { get => (double)GetValue(DigitSizeProperty); set => SetValue(DigitSizeProperty, value); }
 
     public FontWeight DigitWeight { get => (FontWeight)GetValue(DigitWeightProperty); set => SetValue(DigitWeightProperty, value); }
+
+    /// <summary>The space after each digit, in ems, as CSS's letter-spacing (the mockup's .num is -.035).</summary>
+    public double Tracking { get => (double)GetValue(TrackingProperty); set => SetValue(TrackingProperty, value); }
 
     /// <summary>The number as a screen reader and a test read it.</summary>
     public string Text => _shown;
@@ -63,9 +72,19 @@ public sealed class RollingNumber : StackPanel
         for (var i = 0; i < text.Length; i++)
         {
             var digit = text[i] - '0';
+            Place(i, digit);
             AeroMotion.Move(_digits[i].Shift, TranslateTransform.YProperty, -digit * _lineHeight, animate ? AeroMotion.NumberRoll : 0, AeroMotion.Spring);
         }
         _shown = text;
+    }
+
+    /// <summary>The digit's own width, as the browser sets Geist's proportional figures: its advance and the tracking, the
+    /// digit's left edge at the window's (the strip centres each digit in the widest's width).</summary>
+    private void Place(int index, int digit)
+    {
+        var (window, _, shift) = _digits[index];
+        window.Width = Math.Max(0, _advance[digit] + Tracking * DigitSize);
+        shift.X = -(_strip - _advance[digit]) / 2;
     }
 
     protected override AutomationPeer OnCreateAutomationPeer() => new Peer(this);
@@ -84,9 +103,14 @@ public sealed class RollingNumber : StackPanel
         Children.Clear();
         _digits.Clear();
         _lineHeight = Math.Ceiling(DigitSize * 1.25);
-        var probe = new TextBlock { Text = "0", FontSize = DigitSize, FontWeight = DigitWeight, FontFamily = FontFamilyOf() };
-        probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var width = Math.Ceiling(probe.DesiredSize.Width);
+        var face = new Typeface(FontFamilyOf(), FontStyles.Normal, DigitWeight, FontStretches.Normal);
+        for (var d = 0; d <= 9; d++)
+        {
+            _advance[d] = new FormattedText(d.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture, FlowDirection.LeftToRight, face, DigitSize,
+                Brushes.White, 1).WidthIncludingTrailingWhitespace;
+        }
+        _strip = Math.Ceiling(_advance.Max());
+        var width = _strip;
         for (var i = 0; i < count; i++)
         {
             var strip = new StackPanel { Width = width };
@@ -101,7 +125,8 @@ public sealed class RollingNumber : StackPanel
             }
             var shift = new TranslateTransform();
             strip.RenderTransform = shift;
-            var window = new Canvas { Width = width, Height = _lineHeight, ClipToBounds = true };
+            // Clipped above and below only: a tracked-in digit's ink may reach past its window, as text past its advance.
+            var window = new Canvas { Width = width, Height = _lineHeight, Clip = new RectangleGeometry(new Rect(-width, 0, 3 * width, _lineHeight)) };
             window.Children.Add(strip);
             Children.Add(window);
             _digits.Add((window, strip, shift));

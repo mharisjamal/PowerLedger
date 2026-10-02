@@ -38,6 +38,57 @@ public class AeroControlsTests
             number.Text.ShouldBe("0", "no negative watts");
         });
 
+    /// <summary>0.10.9's audit: Power now's watts drew black in the dark theme. The number set its own numeral alignment,
+    /// a local inheritable value, so WPF kept the text colour it had when it was built off the tree (the page host builds
+    /// the Dashboard first, its colour from a style reached later). Now its digits take the colour round them wherever
+    /// and whenever they join.</summary>
+    [Fact]
+    public void A_rolling_number_takes_the_text_colour_round_it_when_it_joins_later()
+        => UiHarness.OnUi(() =>
+        {
+            using var saver = new FakeSaver();
+            var window = AeroHost.Window(AeroFixtures.Shell(saver));
+            using var motion = AeroMotion.Force(true);
+            window.Show();
+            try
+            {
+                UiHarness.PumpUntil(() => window.PageHost.Showing is PowerLedger.App.Aero.DashboardView { IsLoaded: true }, TimeSpan.FromSeconds(10), "the Dashboard");
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                var roll = (RollingNumber)((PowerLedger.App.Aero.DashboardView)window.PageHost.Showing!).FindName("NowRoll");
+                var text = ((SolidColorBrush)window.FindResource("A.B.Text")).Color;
+                var digits = MidnightHost.AllOf<TextBlock>(roll).ToList();
+                digits.ShouldNotBeEmpty();
+                digits.ShouldAllBe(d => ((SolidColorBrush)d.Foreground).Color == text, "Power now's watts in the text colour");
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
+    /// <summary>The mockup's figures are Geist's own proportional digits, and Power now's 146 is tracked in by .035 em
+    /// (the .num letter-spacing): each digit's window is its digit's advance plus the tracking, so "1" is narrower than
+    /// "4", and the number is as wide as the browser's "146".</summary>
+    [Fact]
+    public void A_rolling_numbers_digits_are_proportional_and_tracked_as_the_mockups()
+        => UiHarness.OnUi(() =>
+        {
+            var number = new RollingNumber { DigitSize = 48, DigitWeight = FontWeights.SemiBold, Tracking = -0.035, HorizontalAlignment = HorizontalAlignment.Left };
+            var host = new Border { Child = number };
+            host.SetResourceReference(System.Windows.Documents.TextElement.FontFamilyProperty, "A.F.Ui");
+            host.Resources["A.F.Ui"] = new FontFamily(new Uri("pack://application:,,,/PowerLedger;component/"), "./Fonts/Geist/#Geist");
+            number.Set(146, animate: false);
+            host.Measure(new Size(400, 200));
+            host.Arrange(new Rect(0, 0, 400, 200));
+            double Advance(string digit) => new FormattedText(digit, System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                new Typeface(System.Windows.Documents.TextElement.GetFontFamily(number), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal), 48, Brushes.White, 1).WidthIncludingTrailingWhitespace;
+            var windows = number.Children.OfType<FrameworkElement>().ToList();
+            windows[0].ActualWidth.ShouldBe(Advance("1") - 0.035 * 48, 0.01);
+            windows[1].ActualWidth.ShouldBe(Advance("4") - 0.035 * 48, 0.01);
+            windows[0].ActualWidth.ShouldBeLessThan(windows[1].ActualWidth, "proportional: the 1 is narrow");
+            number.ActualWidth.ShouldBe(Advance("1") + Advance("4") + Advance("6") - 3 * 0.035 * 48, 0.05);
+        });
+
     [Fact]
     public void A_rolling_number_rolls_on_the_spring_when_motion_is_full()
         => UiHarness.OnUi(() =>

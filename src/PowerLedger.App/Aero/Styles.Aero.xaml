@@ -44,7 +44,6 @@
         <Setter Property="FontFamily" Value="{DynamicResource A.F.Ui}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Body}" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.Text}" />
-        <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
         <Setter Property="TextTrimming" Value="CharacterEllipsis" />
     </Style>
     <Style x:Key="A.Text.Secondary" TargetType="TextBlock" BasedOn="{StaticResource A.Text.Body}">
@@ -109,7 +108,7 @@
                  it here (AeroWindow.Frost), as the browser's backdrop filter would read the page beneath. -->
             <Border x:Name="PART_Frost" IsHitTestVisible="False" />
             <aero:GlassShadow x:Name="PART_Shadow" aero:LiquidGlassBackdrop.InBackdrop="False" CornerRadius="{TemplateBinding CornerRadius}" Tint="{TemplateBinding Background}"
-                              Glow="{DynamicResource A.Glass.Glow}" Casts="{TemplateBinding HasShadow}" Bubble="{TemplateBinding Bubble}" />
+                              Glow="{DynamicResource A.Glass.Glow}" Casts="{TemplateBinding HasShadow}" Bubble="{TemplateBinding Bubble}" Lift="{TemplateBinding Lift}" />
             <Border x:Name="PART_Tint" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Background}" IsHitTestVisible="False" />
             <aero:GlassGlow x:Name="PART_Glow" aero:LiquidGlassBackdrop.InBackdrop="False" CornerRadius="{TemplateBinding CornerRadius}" Strength="{DynamicResource A.Glass.Glow}" />
             <ContentPresenter x:Name="PART_Content" Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
@@ -175,12 +174,14 @@
         <!-- The mockup's .cap words: 14, medium. -->
         <Setter Property="FontSize" Value="{DynamicResource A.T.Body}" />
         <Setter Property="FontWeight" Value="Medium" />
-        <Setter Property="Background" Value="#1FFFFFFF" />
+        <Setter Property="Background" Value="{DynamicResource A.B.PillTint}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ButtonBase">
                     <Grid>
-                        <aero:GlassPanel x:Name="Glass" Style="{StaticResource A.Glass.Capsule}" Background="{TemplateBinding Background}" />
+                        <aero:GlassPanel x:Name="Glass" Style="{StaticResource A.Glass.Capsule}" Background="{TemplateBinding Background}"
+                                         HasShadow="{Binding (aero:GlassButton.Casts), RelativeSource={RelativeSource TemplatedParent}}"
+                                         Lift="{Binding (aero:GlassButton.Lift), RelativeSource={RelativeSource TemplatedParent}}" />
                         <Border x:Name="Hover" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
                                 Background="{DynamicResource A.B.GlassHover}" Opacity="0" IsHitTestVisible="False" />
                         <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
@@ -349,7 +350,11 @@
 
     <!-- btn: the accent action (Open report): the recipe's glass under the accent at 86 % (the mockup's lime glass), the
          accent's ink on it, semibold. -->
+    <!-- The lime action: the Dashboard's Open report, the mockup's .lg.cap: the recipe's drop shadow of its lime, no pill
+         box-shadow. -->
     <Style x:Key="A.AccentBtn" TargetType="ButtonBase" BasedOn="{StaticResource A.GlassBtn}">
+        <Setter Property="aero:GlassButton.Casts" Value="True" />
+        <Setter Property="aero:GlassButton.Lift" Value="{x:Null}" />
         <Setter Property="Height" Value="36" />
         <Setter Property="Padding" Value="18,0" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.AccentInk}" />
@@ -493,25 +498,20 @@
     </Style>
 
     <!-- seg: a segmented choice (the Dashboard's and History's spans), the mockup's: bare words at 85 % in a glass capsule
-         group, the chosen one whole on the glass bubble behind it, which is the view's indicator and slides. -->
+         group, the chosen one whole on the glass bubble behind it, which is the view's indicator and slides. The mockup's
+         button.cap: 14 medium, 16 each side, no text shadow (it has no .t). -->
     <Style x:Key="A.SegItem" TargetType="RadioButton" BasedOn="{StaticResource A.Hoverable}">
         <Setter Property="Height" Value="34" />
-        <!-- 16 px each side, and the demo's .03em letter-spacing, which WPF text can't draw, kept in the button's width so
-             the bubble has the mockup's size. -->
-        <Setter Property="Padding">
-            <Setter.Value>
-                <MultiBinding Converter="{x:Static aero:Tracking.SegPadding}">
-                    <Binding Path="Content" RelativeSource="{RelativeSource Self}" />
-                    <Binding Path="FontSize" RelativeSource="{RelativeSource Self}" />
-                </MultiBinding>
-            </Setter.Value>
-        </Setter>
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="Foreground" Value="{DynamicResource A.B.SegText}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid Background="Transparent">
-                        <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center" RecognizesAccessKey="True" Effect="{DynamicResource A.Glass.TextShadow}" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True" />
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -598,16 +598,27 @@
         <Setter Property="Height" Value="42" />
         <Setter Property="Padding" Value="3" />
         <Setter Property="CornerRadius" Value="21" />
-        <Setter Property="Background" Value="{DynamicResource A.B.InsetFill}" />
+        <!-- The boards' .well: navy from 22 % at its top to 10 % at its foot. -->
+        <Setter Property="Background">
+            <Setter.Value>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Offset="0" Color="{DynamicResource A.C.BoardWellTop}" />
+                    <GradientStop Offset="1" Color="{DynamicResource A.C.BoardWellFoot}" />
+                </LinearGradientBrush>
+            </Setter.Value>
+        </Setter>
         <Setter Property="BorderBrush" Value="{DynamicResource A.B.InsetEdge}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="HorizontalAlignment" Value="Left" />
     </Style>
+    <!-- The Styles board's Style choice: 34 high, 16 each side, 14 medium in white, 2 apart; the chosen one the white pill. -->
     <Style x:Key="A.SegOpt" TargetType="RadioButton" BasedOn="{StaticResource A.OptItem}">
         <Setter Property="Height" Value="34" />
         <Setter Property="Padding" Value="16,0" />
         <Setter Property="Margin" Value="0" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Control}" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Foreground" Value="{DynamicResource A.B.Text}" />
     </Style>
 
     <!-- ============ inputs ============ -->
@@ -624,7 +635,14 @@
                 <ControlTemplate TargetType="aero:GlassSwitch">
                     <Grid Background="Transparent">
                         <Border CornerRadius="15" Background="{DynamicResource A.B.SwitchOff}" />
-                        <Border x:Name="PART_On" CornerRadius="15" Background="{DynamicResource A.B.Accent}" Opacity="0" />
+                        <Border x:Name="PART_On" CornerRadius="15" Opacity="0">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Offset="0" Color="{DynamicResource A.C.AccentHigh}" />
+                                    <GradientStop Offset="1" Color="{DynamicResource A.C.AccentLow}" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
                         <Border CornerRadius="15" BorderBrush="{DynamicResource A.B.InsetEdge}" BorderThickness="1" />
                         <Ellipse x:Name="PART_Knob" Width="24" Height="24" HorizontalAlignment="Left" Margin="3,0,0,0" Fill="{DynamicResource A.B.Knob}">
                             <Ellipse.RenderTransform><TranslateTransform /></Ellipse.RenderTransform>
@@ -954,8 +972,9 @@
                                 HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False" />
                         <Grid x:Name="PART_Bar" Width="{x:Static aero:GrabBar.BarWidth}" Height="{x:Static aero:GrabBar.BarHeight}" Opacity="0.25"
                               HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
-                            <aero:GlassPanel Style="{StaticResource A.Glass.Capsule}" />
-                            <Border x:Name="PART_Bright" CornerRadius="3.5" Background="{DynamicResource A.B.GlassHover}" Opacity="0" />
+                            <aero:GlassPanel Style="{StaticResource A.Glass.Capsule}" Background="{DynamicResource A.B.PillTint}" HasShadow="False" Lift="{x:Static aero:GlassLift.Pill}" />
+                            <Border x:Name="PART_Bright" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
+                                    Background="{DynamicResource A.B.GlassHover}" Opacity="0" />
                         </Grid>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -1029,7 +1048,7 @@
          gesture or figure (.mi em) quieter at the right. -->
     <Style x:Key="A.MenuItem" TargetType="MenuItem">
         <Setter Property="OverridesDefaultStyle" Value="True" />
-        <Setter Property="Foreground" Value="{DynamicResource A.B.Text}" />
+        <Setter Property="Foreground" Value="{DynamicResource A.B.NavText}" />
         <Setter Property="FontFamily" Value="{DynamicResource A.F.Ui}" />
         <Setter Property="FontSize" Value="{DynamicResource A.T.Control}" />
         <Setter Property="Cursor" Value="Hand" />
@@ -1037,8 +1056,8 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="MenuItem">
-                    <Border x:Name="Face" Background="Transparent" CornerRadius="14" Padding="14,10">
-                        <DockPanel>
+                    <Border x:Name="Face" Background="Transparent" CornerRadius="14" Padding="14,10" BorderBrush="Transparent" BorderThickness="0,1,0,0">
+                        <DockPanel Margin="0,-1,0,0">
                             <aero:Icon x:Name="Check" DockPanel.Dock="Left" Data="{StaticResource A.I.Check}" Size="14" StrokeWidth="2.4" Margin="0,0,10,0"
                                        Foreground="{DynamicResource A.B.Accent}" Visibility="Collapsed" />
                             <TextBlock DockPanel.Dock="Right" Margin="16,0,0,0" Text="{TemplateBinding InputGestureText}" FontSize="{DynamicResource A.T.Small}"
@@ -1055,6 +1074,8 @@
                         </Trigger>
                         <Trigger Property="IsHighlighted" Value="True">
                             <Setter TargetName="Face" Property="Background" Value="{DynamicResource A.B.GlassHover}" />
+                            <Setter TargetName="Face" Property="BorderBrush" Value="{DynamicResource A.B.MenuShine}" />
+                            <Setter Property="Foreground" Value="{DynamicResource A.B.Text}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="{DynamicResource A.Opacity.Disabled}" />
@@ -1141,7 +1162,8 @@
                 <ControlTemplate TargetType="Thumb">
                     <Grid Background="Transparent">
                         <Grid x:Name="PART_Capsule" Width="{x:Static aero:ScrollGlow.Thin}" HorizontalAlignment="Right" Margin="0,0,4,0">
-                            <aero:GlassPanel CornerRadius="{Binding ActualWidth, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" Padding="0" />
+                            <aero:GlassPanel CornerRadius="{Binding ActualWidth, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}" Padding="0"
+                                             Background="{DynamicResource A.B.PillTint}" HasShadow="False" Lift="{x:Static aero:GlassLift.Pill}" />
                             <Border x:Name="PART_Bright" Opacity="0" CornerRadius="{Binding ActualWidth, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
                                     Background="{DynamicResource A.B.GlassHover}" />
                         </Grid>
@@ -1156,7 +1178,7 @@
                 <ControlTemplate TargetType="Thumb">
                     <Grid Background="Transparent">
                         <Grid x:Name="PART_Capsule" Height="{x:Static aero:ScrollGlow.Thin}" VerticalAlignment="Bottom" Margin="0,0,0,4">
-                            <aero:GlassPanel Style="{StaticResource A.Glass.Capsule}" />
+                            <aero:GlassPanel Style="{StaticResource A.Glass.Capsule}" Background="{DynamicResource A.B.PillTint}" HasShadow="False" Lift="{x:Static aero:GlassLift.Pill}" />
                             <Border x:Name="PART_Bright" Opacity="0" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={x:Static aero:Capsule.Instance}}"
                                     Background="{DynamicResource A.B.GlassHover}" />
                         </Grid>
