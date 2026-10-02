@@ -19,6 +19,7 @@ internal static unsafe class GpuNative
     public const int D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST = 4;
     public const int DXGI_FORMAT_R16G16B16A16_FLOAT = 10;
     public const int DXGI_FORMAT_R16G16_UINT = 36;
+    public const int DXGI_FORMAT_R32G32_FLOAT = 16;
     public const int DXGI_FORMAT_R32_TYPELESS = 39;
     public const int DXGI_FORMAT_R32_UINT = 42;
     public const int D3D11_UAV_DIMENSION_BUFFER = 1;

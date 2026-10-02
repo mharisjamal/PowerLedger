@@ -156,6 +156,33 @@ internal sealed class MonitorCapture : IDisposable
 
     internal void Wake() => _wake.Set();
 
+    /// <summary>The device's immediate context is this thread's and, for <see cref="DrawNow"/>, a window's UI thread's:
+    /// one at a time.</summary>
+    private readonly object _contextGate = new();
+
+    /// <summary>How many <see cref="DrawNow"/> calls found nothing to draw from, for the tests.</summary>
+    internal static long Refused;
+
+    /// <summary>
+    /// Draws <paramref name="consumer"/>'s pieces that are due (moved, resized, new) now, on the calling thread, from the
+    /// desktop copy: its window just moved, and what lies behind it is already in the copy (our windows are left out of
+    /// it), so there is nothing to wait for. A drag or a snap then shows the glass at the window's new place in the frame
+    /// Windows shows the window there. False when there is nothing to draw from yet.
+    /// </summary>
+    public bool DrawNow(IGpuGlassConsumer consumer)
+    {
+        lock (_contextGate)
+        {
+            if (_renderer == null || _duplication == IntPtr.Zero || _disposed)
+            {
+                Interlocked.Increment(ref Refused);
+                return false;
+            }
+            consumer.Frame(_renderer, null, foreign: false);
+            return true;
+        }
+    }
+
     /// <summary>Copies the whole desktop again on the next two frames: a window was just left out of capture, and
     /// Windows may hand over a frame or two drawn before that took hold, the window in it, which no dirty rectangle
     /// would ever take out of the copy.</summary>
@@ -222,8 +249,9 @@ internal sealed class MonitorCapture : IDisposable
     private static extern int GetCurrentThreadId();
 
     /// <summary>The pace while frames draw nothing: Windows reports our own window's repainting (a reading rolling in)
-    /// as a change under the glass, which a compare then finds is none.</summary>
-    internal static readonly TimeSpan Quiet = TimeSpan.FromMilliseconds(100);
+    /// as a change under the glass, which a compare then finds is none. Three frames: a change behind that starts then
+    /// (a page scrolled, a video started) is late by at most that.</summary>
+    internal static readonly TimeSpan Quiet = LiquidGlassGovernor.Fastest * 3;
 
     private bool _quiet;
 
@@ -239,17 +267,19 @@ internal sealed class MonitorCapture : IDisposable
                 var (subscribers, consumers) = Active();
                 if ((subscribers.Count == 0 && consumers.Count == 0) || Failed)
                 {
-                    CloseDuplication();
+                    lock (_contextGate) CloseDuplication();
                     _wake.WaitOne();
                     continue;
                 }
-                if (_duplication == IntPtr.Zero && !Open())
+                bool opened;
+                lock (_contextGate) opened = _duplication != IntPtr.Zero || Open();
+                if (!opened)
                 {
                     _wake.WaitOne(TimeSpan.FromSeconds(1));   // the secure desktop, a mode change: try again shortly
                     continue;
                 }
                 // A frame that drew nothing (our own window repainting, a change away from the glass) slows the next
-                // look to a tenth of a second; the first frame that draws brings back the governor's pace.
+                // look to three frames; the first frame that draws brings back the governor's pace.
                 var interval = _quiet && LiquidGlassGovernor.Interval < Quiet ? Quiet : LiquidGlassGovernor.Interval;
                 var wait = last + interval - clock.Elapsed;
                 if (wait > TimeSpan.Zero)
@@ -257,39 +287,42 @@ internal sealed class MonitorCapture : IDisposable
                     _wake.WaitOne(wait);
                     continue;
                 }
-                var hr = AcquireNextFrame(_duplication, (uint)LiquidGlassGovernor.Fastest.TotalMilliseconds, out var info, out var resource);
+                var hr = AcquireNextFrame(_duplication, (uint)Math.Ceiling(LiquidGlassGovernor.Fastest.TotalMilliseconds), out var info, out var resource);
                 if (hr == DXGI_ERROR_WAIT_TIMEOUT)
                 {
-                    Service(subscribers, consumers, null);
+                    lock (_contextGate) Service(subscribers, consumers, null);
                     LiquidGlassGovernor.Tick();
                     continue;
                 }
                 if (hr < 0)
                 {
-                    Lost(hr);
+                    lock (_contextGate) Lost(hr);
                     continue;
                 }
                 Interlocked.Increment(ref _framesAcquired);
                 var busy = Stopwatch.GetTimestamp();
                 RECT? changed;
-                try
+                lock (_contextGate)
                 {
-                    changed = Take(info, resource);
+                    try
+                    {
+                        changed = Take(info, resource);
+                    }
+                    finally
+                    {
+                        Release(resource);
+                        ReleaseFrame(_duplication);
+                    }
+                    if (changed != null) last = clock.Elapsed;
+                    Service(subscribers, consumers, changed);
                 }
-                finally
-                {
-                    Release(resource);
-                    ReleaseFrame(_duplication);
-                }
-                if (changed != null) last = clock.Elapsed;
-                Service(subscribers, consumers, changed);
                 LiquidGlassGovernor.Tick();
                 Interlocked.Add(ref BusyTicks, Stopwatch.GetTimestamp() - busy);
             }
         }
         finally
         {
-            CloseDevice();
+            lock (_contextGate) CloseDevice();
             _wake.Dispose();
         }
     }
@@ -300,8 +333,19 @@ internal sealed class MonitorCapture : IDisposable
     {
         _changed.Clear();
         if (_needFull == 0 && Stopwatch.GetTimestamp() < Interlocked.Read(ref _fullUntil)) _needFull = 1;
-        if (info.LastPresentTime == 0 && _needFull == 0) return null;   // only the pointer moved
+        // A frame with no present has no new picture: the pointer moved. The first frame after the duplication opens is
+        // one, and its picture is empty (all zeros, measured): copied whole, it could leave the glass clear over a still
+        // desktop (a bare wallpaper), where nothing would change to copy it again. The whole copy waits for a frame with
+        // a picture, which Windows hands over at once after the first.
+        if (info.LastPresentTime == 0) return null;
         if (QueryInterface(resource, IID_ID3D11Texture2D, out var texture) < 0) return null;
+        if (_still != IntPtr.Zero)
+        {
+            // The tests' still picture stands for the desktop: Windows' frames say when and where, the picture what.
+            CaptureNative.Release(texture);
+            texture = _still;
+            AddRef(texture);
+        }
         try
         {
             int width = _desktopBounds.Right - _desktopBounds.Left, height = _desktopBounds.Bottom - _desktopBounds.Top;
@@ -551,6 +595,7 @@ internal sealed class MonitorCapture : IDisposable
                 _renderer?.Dispose();
                 _renderer = GpuGlassRenderer.Make(_device, _context, _desktop, (int)texture.Width, (int)texture.Height, format, _sdrWhite, _desktopBounds);
             }
+            MakeStill();
             // The whole desktop on the first two frames: a window just left out of capture can still be in the first.
             _needFull = 2;
             _failures = 0;
@@ -564,6 +609,42 @@ internal sealed class MonitorCapture : IDisposable
         {
             CaptureNative.Release(output);
             CaptureNative.Release(adapter);
+        }
+    }
+
+    /// <summary>For the tests: a picture that stands for the desktop (its top left at the monitor's), so a test can capture
+    /// the screen, our windows included, while the glass still reads what lies behind them. Null: the real desktop.</summary>
+    internal static System.Windows.Media.Imaging.BitmapSource? StillPicture { get; set; }
+
+    private IntPtr _still;
+
+    private unsafe void MakeStill()
+    {
+        CaptureNative.Release(_still);
+        _still = IntPtr.Zero;
+        if (StillPicture is not { } picture) return;
+        int width = _desktopBounds.Right - _desktopBounds.Left, height = _desktopBounds.Bottom - _desktopBounds.Top;
+        var pixels = new byte[width * height * 4];
+        var bgra = new System.Windows.Media.Imaging.FormatConvertedBitmap(picture, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+        int w = Math.Min(width, bgra.PixelWidth), h = Math.Min(height, bgra.PixelHeight);
+        bgra.CopyPixels(new System.Windows.Int32Rect(0, 0, w, h), pixels, width * 4, 0);
+        fixed (byte* data = pixels)
+        {
+            var init = new GpuNative.D3D11_SUBRESOURCE_DATA { SysMem = (IntPtr)data, SysMemPitch = (uint)(width * 4) };
+            var desc = new D3D11_TEXTURE2D_DESC
+            {
+                Width = (uint)width, Height = (uint)height, MipLevels = 1, ArraySize = 1, Format = DXGI_FORMAT_B8G8R8A8_UNORM, SampleCount = 1,
+                Usage = D3D11_USAGE_DEFAULT, BindFlags = GpuNative.D3D11_BIND_SHADER_RESOURCE,
+            };
+            GpuNative.CreateTexture2D(_device, desc, &init, out _still);
+        }
+    }
+
+    private static uint AddRef(IntPtr self)
+    {
+        unsafe
+        {
+            return ((delegate* unmanaged[Stdcall]<IntPtr, uint>)(*(void***)self)[1])(self);
         }
     }
 
@@ -668,6 +749,8 @@ internal sealed class MonitorCapture : IDisposable
         {
             _renderer?.Dispose();
             _renderer = null;
+            CaptureNative.Release(_still);
+            _still = IntPtr.Zero;
             CaptureNative.Release(_desktop);
             CaptureNative.Release(_context);
             CaptureNative.Release(_device);

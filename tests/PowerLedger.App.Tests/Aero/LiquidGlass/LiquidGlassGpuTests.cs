@@ -188,6 +188,152 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
         result.Item3.ShouldBeGreaterThan(0.995);
     }
 
+    /// <summary>
+    /// The owner's bare desktop: nothing behind the glass changes, and the window shows again while the pointer moves.
+    /// Desktop duplication's first frame after it opens is the pointer's alone, its picture empty (all zeros); a frame
+    /// that only moves the pointer has no picture either. The glass must show the still desktop all the same, at once.
+    /// </summary>
+    [Fact]
+    public void On_the_gpu_a_still_desktop_shows_when_the_window_shows_again_with_the_pointer_moving()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            LiquidGlassSources.Override = null;
+            LiquidGlassSources.ExcludeFromCapture = true;
+            LiquidGlassSources.AllowScreenshots = false;
+            LiquidGlassSources.GpuAllowed = true;
+            // The desktop, perfectly still: one colour over the whole monitor, over everything else on it.
+            var desk = ScreenCapture.Show(new Border { Background = new SolidColorBrush(Color.FromRgb(46, 139, 87)) }, 0, 0, 10, 10);
+            desk.Topmost = true;
+            (desk.Left, desk.Top, desk.Width, desk.Height) = (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+            var glass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(0), Width = 240, Height = 160, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+            var window = ScreenCapture.Show(new Grid { Background = Brushes.Magenta, Children = { glass } }, 300, 200, 240, 160);
+            window.Topmost = true;
+            try
+            {
+                UiHarness.PumpUntil(() => glass.Composed && Gpu(glass).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
+                var session = Gpu(glass).Session;
+                window.Hide();
+                UiHarness.PumpUntil(() => !session.Running, TimeSpan.FromSeconds(5), "the duplication let go");
+                // The desktop changes while the glass is away (the wallpaper changed, the windows went down), then stays still.
+                ((Border)desk.Content).Background = new SolidColorBrush(Color.FromRgb(70, 130, 180));
+                UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+                window.Show();
+                // The pointer moving as the window comes back: frames with the pointer and no picture.
+                GetCursorPos(out var at);
+                for (var i = 0; i < 30; i++)
+                {
+                    SetCursorPos(900 + (i % 2) * 40, 700);
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(10));
+                }
+                SetCursorPos(at.X, at.Y);
+                UiHarness.Pump(TimeSpan.FromMilliseconds(800));
+                var read = Gpu(glass).ReadAsync(glass);
+                UiHarness.PumpUntil(() => read.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
+                var pixels = read.Result;
+                var shown = 0;
+                for (var i = 0; i < pixels.Length; i += 4)
+                {
+                    // The new colour brightened by 1.1: (77, 143, 198), within the 8 bit linearRGB trip's steps.
+                    if (pixels[i + 3] == 255 && Math.Abs(pixels[i + 2] - 77) <= 3 && Math.Abs(pixels[i + 1] - 143) <= 3 && Math.Abs(pixels[i] - 198) <= 3) shown++;
+                }
+                output.WriteLine($"pixels showing the still desktop: {shown} of {pixels.Length / 4}");
+                (shown / (double)(pixels.Length / 4)).ShouldBeGreaterThan(0.99);
+            }
+            finally
+            {
+                window.Close();
+                desk.Close();
+            }
+            return 0;
+        }));
+
+    /// <summary>The owner's bare desktop as the app starts: nothing behind the glass changes, and the pointer moves as
+    /// the window comes up (the glass's first half second copies the whole desktop on every frame).</summary>
+    [Fact]
+    public void On_the_gpu_a_still_desktop_shows_when_the_window_first_shows_with_the_pointer_moving()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            LiquidGlassSources.Override = null;
+            LiquidGlassSources.ExcludeFromCapture = true;
+            LiquidGlassSources.AllowScreenshots = false;
+            LiquidGlassSources.GpuAllowed = true;
+            var desk = ScreenCapture.Show(new Border { Background = new SolidColorBrush(Color.FromRgb(70, 130, 180)) }, 0, 0, 10, 10);
+            desk.Topmost = true;
+            (desk.Left, desk.Top, desk.Width, desk.Height) = (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+            UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+            GetCursorPos(out var at);
+            var glass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(0), Width = 240, Height = 160, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+            var window = ScreenCapture.Show(new Grid { Background = Brushes.Magenta, Children = { glass } }, 300, 200, 240, 160);
+            window.Topmost = true;
+            try
+            {
+                for (var i = 0; i < 80; i++)
+                {
+                    SetCursorPos(900 + (i % 2) * 40, 700);
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(10));
+                }
+                SetCursorPos(at.X, at.Y);
+                UiHarness.Pump(TimeSpan.FromMilliseconds(800));
+                var read = Gpu(glass).ReadAsync(glass);
+                UiHarness.PumpUntil(() => read.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
+                var pixels = read.Result;
+                var shown = 0;
+                for (var i = 0; i < pixels.Length; i += 4)
+                {
+                    if (pixels[i + 3] == 255 && Math.Abs(pixels[i + 2] - 77) <= 3 && Math.Abs(pixels[i + 1] - 143) <= 3 && Math.Abs(pixels[i] - 198) <= 3) shown++;
+                }
+                output.WriteLine($"pixels showing the still desktop: {shown} of {pixels.Length / 4}");
+                (shown / (double)(pixels.Length / 4)).ShouldBeGreaterThan(0.99);
+            }
+            finally
+            {
+                window.Close();
+                desk.Close();
+            }
+            return 0;
+        }));
+
+    /// <summary>
+    /// Another window put between a window and its glass (Win+D raises the desktop over windows it can't minimise, as the
+    /// glass's own window is; the shell, a launcher, a stray SetWindowPos) while the window itself doesn't move: the glass
+    /// goes straight back directly beneath its window, or it would stay hidden behind the other.
+    /// </summary>
+    [Fact]
+    public void The_glass_goes_back_beneath_its_window_when_another_slips_between_them()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            var picture = FakeGlassSource.Picture(400, 300, (x, y) => ((byte)x, (byte)y, 90));
+            using var scene = Show(picture, 300, 200, 300, 200);
+            UiHarness.PumpUntil(() => scene.Glass.Composed && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
+            var owner = new WindowInteropHelper(scene.Window).Handle;
+            var companion = Gpu(scene).CompanionHwnd;
+            GetWindow(companion, 3).ShouldBe(owner);
+            var between = ScreenCapture.Show(new Border { Background = Brushes.Navy }, 0, 0, 10, 10);
+            try
+            {
+                var hwnd = new WindowInteropHelper(between).Handle;
+                SetWindowPos(hwnd, owner, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // just under the window: over its glass
+                UiHarness.PumpUntil(() => GetWindow(companion, 3) == owner, TimeSpan.FromSeconds(2), "the glass back beneath its window");
+            }
+            finally
+            {
+                between.Close();
+            }
+            return 0;
+        }));
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
+
+    private static GpuGlassWindow Gpu(LiquidGlassBackdrop glass)
+        => LiquidGlassSources.Live.OfType<WindowGlassSource>().Select(s => s.Gpu).First(g => g != null && g.Composes(glass))!;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out System.Drawing.Point point);
+
     [Fact]
     public void Every_piece_is_composed_beneath_its_window_in_tree_order_a_layered_window_too()
         => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
@@ -312,25 +458,48 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             return 0;
         }));
 
-    /// <summary>The watts overlay's pill changes width with its reading and goes back to widths it had: a piece keeps the
-    /// source maps of its last few sizes, so going back makes none.</summary>
+    /// <summary>A pane resized with its window, the overlay's pill following its reading, a snap: one move map serves a
+    /// piece at every size (the mirror into the box is the shader's), so a new size makes no map and is drawn as soon as
+    /// the layout pass that gave it is done.</summary>
     [Fact]
-    public void A_piece_back_at_a_size_it_had_makes_no_new_map()
+    public void A_resized_piece_makes_no_map_and_is_drawn_after_its_layout_pass()
         => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
         {
             var picture = FakeGlassSource.Picture(400, 300, (x, y) => ((byte)x, (byte)y, 90));
             using var scene = Show(picture, 300, 200, 300, 200);
             UiHarness.PumpUntil(() => scene.Glass.OnGpu && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
-            var wide = scene.Glass.Width;
+            UiHarness.Pump(TimeSpan.FromMilliseconds(300));
             var made = GpuGlassWindow.MapsMade;
-            scene.Glass.Width = wide - 20;
-            UiHarness.PumpUntil(() => GpuGlassWindow.MapsMade == made + 1 && Gpu(scene).State.Contains("with maps 1"), TimeSpan.FromSeconds(10), "the narrower map");
+            var wide = scene.Glass.Width;
+            foreach (var width in new[] { wide - 20, wide - 47, wide - 3, wide })
+            {
+                var frames = Gpu(scene).Frames;
+                scene.Glass.Width = width;
+                scene.Window.UpdateLayout();
+                // The layout pass done, the dispatcher's next turn draws it.
+                UiHarness.Pump(TimeSpan.FromMilliseconds(1));
+                Gpu(scene).Frames.ShouldBeGreaterThan(frames, $"drawn at {width}");
+            }
+            GpuGlassWindow.MapsMade.ShouldBe(made);
+            return 0;
+        }));
+
+    /// <summary>A window moved (a drag, a snap) has its glass drawn at the new place before the move returns: from the
+    /// desktop copy, with no wait for the capture's next frame, and before the glass's window follows it.</summary>
+    [Fact]
+    public void A_moved_window_s_glass_is_drawn_before_the_move_returns()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            var picture = FakeGlassSource.Picture(400, 300, (x, y) => ((byte)x, (byte)y, 90));
+            using var scene = Show(picture, 300, 200, 300, 200);
+            UiHarness.PumpUntil(() => scene.Glass.Composed && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
             UiHarness.Pump(TimeSpan.FromMilliseconds(300));
-            scene.Glass.Width = wide;
-            UiHarness.Pump(TimeSpan.FromMilliseconds(300));
-            scene.Glass.Width = wide - 20;
-            UiHarness.Pump(TimeSpan.FromMilliseconds(300));
-            GpuGlassWindow.MapsMade.ShouldBe(made + 1);
+            for (var i = 1; i <= 5; i++)
+            {
+                var frames = Gpu(scene).Frames;
+                scene.Window.Left += 7 / VisualTreeHelper.GetDpi(scene.Window).DpiScaleX;   // SetWindowPos, handled within
+                Gpu(scene).Frames.ShouldBeGreaterThan(frames, $"move {i}");
+            }
             return 0;
         }));
 }

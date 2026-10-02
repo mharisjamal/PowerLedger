@@ -7,12 +7,14 @@ namespace PowerLedger.App.Aero;
 /// the owner's ceiling for the main window over a playing video. Every frame the glass shows makes WPF compose what lies
 /// over it again, which for a window of many panes over a video can cost more than the glass itself. Once a second, while
 /// the glass is taking frames, the governor reads this process's CPU: over the budget, the next frame waits half as long
-/// again (down to one a second); under seven tenths of it, it comes a quarter sooner again (up to 30 a second). A window
-/// at rest takes no frames and is never slowed.
+/// again (down to one a second); under seven tenths of it, it comes a quarter sooner again (up to the display's refresh
+/// rate, 60 a second on most). A window at rest takes no frames and is never slowed.
 /// </summary>
 internal static class LiquidGlassGovernor
 {
-    public static readonly TimeSpan Fastest = TimeSpan.FromSeconds(1.0 / 30);
+    /// <summary>The display's refresh period (DWM's composition rate): the glass is never drawn more often than Windows
+    /// composes; 60 a second where DWM doesn't say.</summary>
+    public static readonly TimeSpan Fastest = RefreshPeriod();
     public static readonly TimeSpan Slowest = TimeSpan.FromSeconds(1);
 
     private static readonly object Gate = new();
@@ -72,6 +74,49 @@ internal static class LiquidGlassGovernor
             _started = false;
         }
     }
+
+    private static TimeSpan RefreshPeriod()
+    {
+        var info = new DwmTimingInfo { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<DwmTimingInfo>() };
+        try
+        {
+            if (DwmGetCompositionTimingInfo(IntPtr.Zero, ref info) >= 0 && info.RateRefreshNumerator > 0 && info.RateRefreshDenominator > 0)
+            {
+                var hz = (double)info.RateRefreshNumerator / info.RateRefreshDenominator;
+                if (hz is >= 24 and <= 500) return TimeSpan.FromSeconds(1 / hz);
+            }
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        return TimeSpan.FromSeconds(1.0 / 60);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 4)]
+    private struct DwmTimingInfo
+    {
+        public uint Size;
+        public uint RateRefreshNumerator, RateRefreshDenominator;
+        public uint RateCompositionNumerator, RateCompositionDenominator;
+        public ulong QpcRefreshPeriod, QpcVBlank, CRefresh;
+        public uint CDxRefresh;
+        public ulong QpcCompose, CFrame;
+        public uint CDxPresent;
+        public ulong CRefreshFrame, CFrameSubmitted;
+        public uint CDxPresentSubmitted;
+        public ulong CFrameConfirmed;
+        public uint CDxPresentConfirmed;
+        public ulong CRefreshConfirmed;
+        public uint CDxRefreshConfirmed;
+        public ulong CFramesLate;
+        public uint CFramesOutstanding;
+        public ulong CFrameDisplayed, QpcFrameDisplayed, CRefreshFrameDisplayed, CFrameComplete, QpcFrameComplete, CFramePending, QpcFramePending;
+        public ulong CFramesDisplayed, CFramesComplete, CFramesPending, CFramesAvailable, CFramesDropped, CFramesMissed, CRefreshNextDisplayed, CRefreshNextPresented;
+        public ulong CRefreshesDisplayed, CRefreshesPresented, CRefreshStarted, CPixelsReceived, CPixelsDrawn, CBuffersEmpty;
+    }
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmGetCompositionTimingInfo(IntPtr hwnd, ref DwmTimingInfo info);
 
     private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
 

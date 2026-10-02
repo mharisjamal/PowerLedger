@@ -6,16 +6,17 @@
 //            one bilinear tap at the pair's weighted centre (its linear kernel).
 // Bright and Across leave the rounding to the 8 bit render target, as Chromium's passes do (a value half way between two
 // steps, as brightness(1.1) makes of every tenth input, rounds as the hardware rounds it, not as floor(x + 0.5) would).
-//   Down     the Gaussian down, the same way, at the texel the source map names (DisplacementField: the move and the
-//            mirror as Chromium makes them), rounded, then through 8 bit linearRGB and back (feDisplacementMap works in
-//            linearRGB).
+//   Down     the Gaussian down, the same way, at the texel the move map's move points to, mirrored into the box
+//            (DisplacementField.Move and Mirror: as Chromium moves and mirrors), rounded, then through 8 bit linearRGB and
+//            back (feDisplacementMap works in linearRGB). The moves are anchored at the box's top left and the mirror is
+//            done here, so one map serves a piece at any size.
 //   Compare  whether any texel of a rectangle differs between two textures: a frame whose change is only our own window
 //            repainting (left out of capture, so the pixels are the same) is dropped without drawing.
 // Compiled by scripts/liquid-glass/compile-shaders.ps1 to GpuGlass.<entry>.cso (vs_4_0, ps_4_0, cs_5_0).
 
 Texture2D<float4> Desktop : register(t0);   // Bright: the desktop (8 bit sRGB, or scRGB half floats on an HDR monitor)
 Texture2D<float4> Source : register(t1);    // Across: Bright's output; Down: Across's output
-Texture2D<uint2> Map : register(t2);        // Down: each texel's source in the box
+Texture2D<float2> Moves : register(t2);     // Down: each texel's move, from the box's top left
 SamplerState Linear : register(s0);         // bilinear, clamped
 
 cbuffer Glass : register(b0)
@@ -117,10 +118,20 @@ float Cover(float2 q)
     return r > 0 && d.x > 0 && d.y > 0 ? saturate(r - length(d) + 0.5) * edge : edge;
 }
 
+// Skia's mirror tiling of a point into 0 to n, then the texel it falls in (DisplacementField.Mirror).
+int MirrorPoint(float v, int n)
+{
+    float period = 2.0 * n;
+    v -= period * floor(v / period);
+    if (v >= n) v = period - v;
+    return clamp(int(floor(v)), 0, n - 1);
+}
+
 float4 Down(float4 position : SV_Position) : SV_Target
 {
     int2 p = int2(position.xy) - Out;
-    int2 s = int2(Map.Load(int3(p, 0)));
+    float2 m = Moves.Load(int3(p, 0));
+    int2 s = int2(MirrorPoint(p.x + 0.5 + m.x, Size.x), MirrorPoint(p.y + 0.5 + m.y, Size.y));
     float3 c = Round8(Blur(float2(s.x, s.y + Margin) + 0.5, float2(0, 1)));
     float a = Cover(float2(p) + 0.5) * Opacity;
     return float4(ToSrgb(Round8(ToLinear(c))) * a, a);

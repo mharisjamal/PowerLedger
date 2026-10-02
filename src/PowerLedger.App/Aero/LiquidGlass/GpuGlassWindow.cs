@@ -109,14 +109,9 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         public double Sigma;
         public double Scale;
         public GpuGlassShape Shape;
-        public (int W, int H, double Dpi, double Scale)? MapFor;
+        public (double Dpi, double Scale)? MapFor;
 
-        /// <summary>The maps made for the piece's last few sizes, the one in use among them: the watts overlay's pill
-        /// changes width with its reading, and goes back to a width it had moments ago.</summary>
-        public readonly List<((int W, int H, double Dpi, double Scale) For, IntPtr Map, IntPtr View)> Maps = [];
-        public IntPtr Map, MapView;
-        public int MapGeneration;
-        public (int W, int H, double Dpi, double Scale)? MapMaking;
+        public IntPtr MapView;   // the window's shared move map for the piece's display and displacement scales
         public bool Composed;
         public Int32Rect Target;
         public int Version;
@@ -152,9 +147,6 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     private long _foreignFrames;
 
     public MonitorCapture Session => _session;
-
-    /// <summary>How many sizes' maps a piece keeps.</summary>
-    private const int KeptMaps = 6;
 
     /// <summary>How many source maps have been made, for the measurements.</summary>
     internal static long MapsMade;
@@ -268,6 +260,31 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         if (moved) MakeMap(p);
         Arrange();
         Publish();
+        // Composed: drawn once the layout pass that moved it is done, not when the capture next looks.
+        if (p.Composed) DrawSoon();
+    }
+
+    /// <summary>
+    /// Draws the pieces that moved, resized or changed now, on the UI thread, from the capture's desktop copy (what lies
+    /// behind the window is in it already): the window's own move (WindowGlassSource draws before it moves the glass's
+    /// window), so the glass shows at the window's new place in the frame Windows first shows it there.
+    /// </summary>
+    public void DrawNow()
+    {
+        _drawQueued = false;
+        if (_disposed || !_active) return;
+        _session.DrawNow(this);
+    }
+
+    private bool _drawQueued;
+
+    /// <summary>One <see cref="DrawNow"/> after the pieces placed in this pass of the dispatcher (a layout pass places
+    /// each piece in turn).</summary>
+    private void DrawSoon()
+    {
+        if (_drawQueued) return;
+        _drawQueued = true;
+        _dispatcher.BeginInvoke(DispatcherPriority.Loaded, DrawNow);
     }
 
     public void Remove(LiquidGlassBackdrop piece)
@@ -277,19 +294,23 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         Arrange();
         // The capture thread reads the published pieces under the GPU lock: once the piece is off them, its map can go.
         Publish();
-        lock (_gpu) ReleaseMaps(p);
+        ReleaseMaps(p);
     }
 
     /// <summary>Lets go of every map a piece holds. Under the GPU lock, once no published job names them.</summary>
-    private static void ReleaseMaps(Piece p)
+    private static void ReleaseMaps(Piece p) => (p.MapView, p.MapFor) = (IntPtr.Zero, null);
+
+    /// <summary>Lets go of the window's move maps. Under the GPU lock, once no published job names them.</summary>
+    private void ReleaseAllMaps()
     {
-        foreach (var (_, map, view) in p.Maps)
+        foreach (var map in _maps.Values)
         {
-            CaptureNative.Release(view);
-            CaptureNative.Release(map);
+            CaptureNative.Release(map.View);
+            CaptureNative.Release(map.Texture);
         }
-        p.Maps.Clear();
-        (p.Map, p.MapView, p.MapFor) = (IntPtr.Zero, IntPtr.Zero, null);
+        _maps.Clear();
+        _mapsMaking.Clear();
+        _mapGeneration++;
     }
 
     public void Dispose()
@@ -307,6 +328,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         lock (_gpu)
         {
             foreach (var p in _pieces.Values) ReleaseMaps(p);
+            ReleaseAllMaps();
             _pieces.Clear();
             DropPicture();
             DropLayer();
@@ -410,6 +432,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
                 DropPicture();
                 DropLayer();
                 foreach (var p in _pieces.Values) ReleaseMaps(p);
+                ReleaseAllMaps();
             }
             foreach (var p in _pieces.Values)
             {
@@ -805,100 +828,115 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         Changed?.Invoke();
     }
 
-    /// <summary>Makes the piece's source map for its size, display scale and displacement scale off the UI thread (the
-    /// turbulence is shared: after the first piece this is a mirror and a pack), then its texture on the device.</summary>
+    /// <summary>A window's move map for one display scale and displacement scale: each device pixel's move (feDisplacementMap's
+    /// <c>scale * s * (channel - 0.5)</c>, DisplacementField.Move) in float pairs, from a box's top left, over an area at
+    /// least as large as any piece. The mirror into the box is the shader's, so one map serves every piece at every size:
+    /// a pane resized with its window, a pill whose width follows its reading, a snap, draw at once with no map to make.</summary>
+    private sealed class MoveMap
+    {
+        public int W, H;
+        public IntPtr Texture, View;
+    }
+
+    private readonly Dictionary<(double Dpi, double Scale), MoveMap> _maps = [];
+    private readonly HashSet<(double Dpi, double Scale)> _mapsMaking = [];
+    private int _mapGeneration;
+
+    /// <summary>Points the piece at its scales' move map, or makes (or grows) that map off the UI thread first.</summary>
     private void MakeMap(Piece p)
     {
-        var wanted = (p.Box.Width, p.Box.Height, p.Dpi, p.Scale);
-        if (p.MapFor == wanted || p.Box.Width <= 0 || p.Box.Height <= 0) return;
-        // A size the piece had moments ago: its map is still here.
-        var kept = p.Maps.FindIndex(m => m.For == wanted);
-        if (kept >= 0)
+        if (p.Box.Width <= 0 || p.Box.Height <= 0) return;
+        var key = (p.Dpi, p.Scale);
+        if (_maps.TryGetValue(key, out var map) && map.W >= p.Box.Width && map.H >= p.Box.Height)
         {
-            var (_, keptMap, keptView) = p.Maps[kept];
-            p.Maps.RemoveAt(kept);
-            p.Maps.Add((wanted, keptMap, keptView));
-            (p.Map, p.MapView, p.MapFor) = (keptMap, keptView, wanted);
-            p.MapGeneration++;
-            p.Version++;
-            Publish();
+            if (p.MapView != map.View)
+            {
+                (p.MapView, p.MapFor) = (map.View, key);
+                p.Version++;
+            }
             return;
         }
-        // One map in the making a piece at a time: a piece resized on every frame of a spring makes the map for the size
-        // it ends at, not one for every frame (each a pass over every pixel).
-        if (p.MapMaking != null)
+        if (!_mapsMaking.Add(key)) return;   // one in the making: the piece takes it when it lands
+        var generation = _mapGeneration;
+        // Room for the largest piece now and more (a window grows): whole steps of 256 pixels, at least 1280 by 800.
+        int w = Step(Math.Max(Math.Max(p.Box.Width, map?.W ?? 0), 1280)), h = Step(Math.Max(Math.Max(p.Box.Height, map?.H ?? 0), 800));
+        foreach (var other in _pieces.Values)
         {
-            p.MapMaking = wanted;
-            return;
+            if ((other.Dpi, other.Scale) != key) continue;
+            w = Math.Max(w, Step(other.Box.Width));
+            h = Math.Max(h, Step(other.Box.Height));
         }
-        p.MapMaking = wanted;
-        var generation = ++p.MapGeneration;
         Interlocked.Increment(ref MapsMade);
+        var (dpi, scale) = key;
         Task.Run(() =>
         {
-            var (w, h, dpi, scale) = wanted;
             var field = DisplacementField.Shared(w, h, dpi);
-            var sources = new ushort[w * h * 2];
+            var moves = new float[w * h * 2];
             Parallel.For(0, h, y =>
             {
                 for (var x = 0; x < w; x++)
                 {
-                    var (sx, sy) = field.Source(x, y, w, h, scale);
-                    sources[(y * w + x) * 2] = (ushort)sx;
-                    sources[(y * w + x) * 2 + 1] = (ushort)sy;
+                    var (mx, my) = field.Move(x, y, scale);
+                    moves[(y * w + x) * 2] = (float)mx;
+                    moves[(y * w + x) * 2 + 1] = (float)my;
                 }
             });
-            return sources;
+            return moves;
         }).ContinueWith(done =>
         {
-            var next = p.MapMaking;
-            p.MapMaking = null;
-            if (next is { } later && later != wanted)
-            {
-                // Resized again while this one was made: make the map for where it is now.
-                MakeMap(p);
-                if (done.Status != TaskStatus.RanToCompletion) return;
-            }
-            if (_disposed || generation != p.MapGeneration && p.MapMaking == null || done.Status != TaskStatus.RanToCompletion || !_pieces.ContainsValue(p)) return;
-            if (p.Box.Width != wanted.Item1 || p.Box.Height != wanted.Item2) return;
+            _mapsMaking.Remove(key);
+            if (_disposed || generation != _mapGeneration || done.Status != TaskStatus.RanToCompletion) return;
             var (device, _) = _session.Device();
             if (device == IntPtr.Zero) return;
-            var (w, h, _, _) = wanted;
-            IntPtr map, view;
+            var made = new MoveMap { W = w, H = h };
             unsafe
             {
-                fixed (ushort* data = done.Result)
+                fixed (float* data = done.Result)
                 {
-                    var init = new D3D11_SUBRESOURCE_DATA { SysMem = (IntPtr)data, SysMemPitch = (uint)(w * 4) };
+                    var init = new D3D11_SUBRESOURCE_DATA { SysMem = (IntPtr)data, SysMemPitch = (uint)(w * 8) };
                     var desc = new CaptureNative.D3D11_TEXTURE2D_DESC
                     {
-                        Width = (uint)w, Height = (uint)h, MipLevels = 1, ArraySize = 1, Format = DXGI_FORMAT_R16G16_UINT, SampleCount = 1,
+                        Width = (uint)w, Height = (uint)h, MipLevels = 1, ArraySize = 1, Format = DXGI_FORMAT_R32G32_FLOAT, SampleCount = 1,
                         Usage = CaptureNative.D3D11_USAGE_DEFAULT, BindFlags = D3D11_BIND_SHADER_RESOURCE,
                     };
-                    if (GpuNative.CreateTexture2D(device, desc, &init, out map) < 0) return;
+                    if (GpuNative.CreateTexture2D(device, desc, &init, out made.Texture) < 0) return;
                 }
             }
-            if (CreateShaderResourceView(device, map, out view) < 0)
+            if (CreateShaderResourceView(device, made.Texture, out made.View) < 0)
             {
-                CaptureNative.Release(map);
+                CaptureNative.Release(made.Texture);
                 return;
             }
-            // The new map onto the published pieces first; a map past the last few sizes goes once the capture thread
-            // can't be using it.
-            (p.Map, p.MapView, p.MapFor) = (map, view, wanted);
-            p.Maps.Add((wanted, map, view));
-            p.Version++;
-            Publish();
-            if (p.Maps.Count <= KeptMaps) return;
-            var (_, oldMap, oldView) = p.Maps[0];
-            p.Maps.RemoveAt(0);
-            lock (_gpu)
+            _maps.TryGetValue(key, out var old);
+            _maps[key] = made;
+            // Every piece at these scales onto the new map first; the old one goes once the capture thread can't be using it.
+            var larger = false;
+            foreach (var piece in _pieces.Values)
             {
-                CaptureNative.Release(oldView);
-                CaptureNative.Release(oldMap);
+                if ((piece.Dpi, piece.Scale) != key) continue;
+                if (piece.Box.Width > w || piece.Box.Height > h)
+                {
+                    larger = true;
+                    continue;
+                }
+                (piece.MapView, piece.MapFor) = (made.View, key);
+                piece.Version++;
             }
+            Publish();
+            if (_pieces.Values.Any(q => q.Composed)) DrawSoon();
+            if (old != null)
+            {
+                lock (_gpu)
+                {
+                    CaptureNative.Release(old.View);
+                    CaptureNative.Release(old.Texture);
+                }
+            }
+            if (larger) MakeMap(_pieces.Values.First(q => (q.Dpi, q.Scale) == key && (q.Box.Width > w || q.Box.Height > h)));
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }
+
+    private static int Step(int v) => (v + 255) / 256 * 256;
 
     private static int NextPowerOfTwo(int v)
     {

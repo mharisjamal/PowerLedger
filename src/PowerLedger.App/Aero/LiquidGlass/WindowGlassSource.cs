@@ -209,6 +209,9 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
                 StartGpu();
                 return;
             }
+            // Shown again (restored, back from the tray): the whole desktop on the first frame with a picture, as anything
+            // behind may have changed while the capture was let go.
+            if (shown && !_gpu.Active) _gpu.Session.RefreshAll();
             _gpu.Active = shown;
             _gpu.Track();
             return;
@@ -286,10 +289,26 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         Changed?.Invoke();
     }
 
+    /// <summary>Whether the window's rectangle changed since the last look (and keeps the new one).</summary>
+    private bool Moved()
+    {
+        GetWindowRect(_hwnd, out var r);
+        if (r.Left == _placed.Left && r.Top == _placed.Top && r.Right == _placed.Right && r.Bottom == _placed.Bottom) return false;
+        _placed = r;
+        return true;
+    }
+
     private IntPtr Hook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         switch (msg)
         {
+            case WM_WINDOWPOSCHANGED when _gpu != null && Moved():
+                // A drag, a snap, a resize: the pieces take their new places, the glass is drawn there at once from the
+                // desktop copy, and only then does the glass's window follow, so both show in the same frame.
+                Changed?.Invoke();
+                _gpu.DrawNow();
+                Follow();
+                break;
             case WM_WINDOWPOSCHANGED or WM_SHOWWINDOW or WM_SIZE or WM_DPICHANGED:
                 if (_subscriber != null || _gpu != null) Follow();
                 else if (Kind == LiquidGlassSourceKind.Wallpaper && msg == WM_WINDOWPOSCHANGED) ShowWallpaper();   // another monitor

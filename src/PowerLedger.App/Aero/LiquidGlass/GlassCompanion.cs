@@ -79,6 +79,8 @@ internal sealed class GlassCompanion : IDisposable
         var companion = new GlassCompanion(owner, hwnd);
         companion.Exclude(LiquidGlassSources.ExcludeFromCapture && !LiquidGlassSources.AllowScreenshots);
         companion.Track();
+        Live.Add(companion);
+        WatchOrder();
         return companion;
     }
 
@@ -130,8 +132,45 @@ internal sealed class GlassCompanion : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        Live.Remove(this);
         DestroyWindow(Hwnd);
     }
+
+    /// <summary>Every companion on this thread, to put back beneath its owner when the z-order changes.</summary>
+    [ThreadStatic]
+    private static List<GlassCompanion>? _live;
+
+    private static List<GlassCompanion> Live => _live ??= [];
+
+    [ThreadStatic]
+    private static IntPtr _orderHook;
+
+    private static readonly WinEventProc OrderChanged = OnOrderChanged;
+
+    /// <summary>
+    /// Watches the order of the desktop's windows (EVENT_OBJECT_REORDER, on this thread). A window can come between a
+    /// window and its glass while the window itself stays put, and then nothing of ours is told: Win+D raises the
+    /// desktop over the windows it can't minimise (the glass's own window is one), the shell or another app raises a
+    /// window just there. The glass would stay behind it, out of sight, until the window next moved.
+    /// </summary>
+    private static void WatchOrder()
+    {
+        if (_orderHook != IntPtr.Zero) return;
+        _orderHook = SetWinEventHook(EVENT_OBJECT_REORDER, EVENT_OBJECT_REORDER, IntPtr.Zero, OrderChanged, 0, 0, WINEVENT_OUTOFCONTEXT);
+    }
+
+    private static void OnOrderChanged(IntPtr hook, uint @event, IntPtr hwnd, int objectId, int childId, uint thread, uint time)
+    {
+        foreach (var companion in Live.ToArray()) companion.Track();
+    }
+
+    private delegate void WinEventProc(IntPtr hook, uint @event, IntPtr hwnd, int objectId, int childId, uint thread, uint time);
+
+    private const uint EVENT_OBJECT_REORDER = 0x8004;
+    private const uint WINEVENT_OUTOFCONTEXT = 0;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc proc, uint process, uint thread, uint flags);
 
     private static IntPtr Handle(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam) => msg switch
     {
