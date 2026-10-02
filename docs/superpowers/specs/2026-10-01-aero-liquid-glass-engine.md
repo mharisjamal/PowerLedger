@@ -237,6 +237,26 @@ fxc is needed:
 
 The binaries are committed and embedded. To change a shader, edit it, run the script and commit what it writes.
 
+### Motion (2026-10-02)
+
+- **A move draws at once.** WindowGlassSource handles WM_WINDOWPOSCHANGED: the pieces take their new places, the GPU
+  window draws them on the UI thread from the capture's desktop copy (`MonitorCapture.DrawNow`; the device context is
+  shared under one lock with the capture thread), and only then does the companion window follow. What lies behind the
+  window is in the copy already, as our windows are left out of it, so nothing waits for a capture frame. A layout pass
+  that moves or resizes pieces draws them once it is done (`DrawSoon`, at Loaded priority).
+- **One move map per scale.** Each pixel's move (DisplacementField.Move) from the box's top left, float pairs, over an
+  area larger than any piece (whole steps of 256, at least 1280 by 800); the shader mirrors the moved point into the
+  box (DisplacementField.Mirror). A new size makes no map.
+- **The display's rate.** The governor's fastest pace is DWM's refresh period (60 a second here); a quiet frame slows
+  the capture for three frames.
+- **Measured** (LiquidGlassMotionProofTests: a separate recorder process duplicates the screen with our windows let
+  in, while the engine reads a still picture, `MonitorCapture.StillPicture`): content lag 0 frames moving (worst 1, the
+  first step) and resizing, the glass's window 0 frames off its owner. Before: up to 3 frames moving, 16 resizing.
+- **The z-order.** The companion goes back directly beneath its owner whenever the desktop's z-order changes
+  (EVENT_OBJECT_REORDER), as a window can slip between them while the owner stays put.
+- **First frames.** A duplicated frame with no present has no picture (the first after opening is all zeros): the
+  whole copy waits for one with a picture, and a window shown again copies the whole desktop.
+
 ### The governor
 
 `LiquidGlassGovernor` is the safety net on both paths. Once a second while the glass takes frames, it reads the
