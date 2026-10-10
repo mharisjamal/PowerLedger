@@ -87,7 +87,8 @@ public partial class App : Application
         _dataFolder = options.DataFolder;
         var version = Version();
         AppLog.Write(options.AfterUpdate ? $"PowerLedger {version} starting, opened by the service after its update." : $"PowerLedger {version} starting.");
-        new CrashCatcher(CrashFolder, version, ScrubNames.Here()).Hook(this);   // data-sharing design §5: as early as the App can catch itself
+        new CrashCatcher(CrashFolder, version, ScrubNames.Here()).Hook(this);
+        Aero.LiquidGlassSources.Log = line => AppLog.Write(line);   // a glass that doesn't come back says why   // data-sharing design §5: as early as the App can catch itself
         _theme = new ThemeManager(this, preferences.Theme, preferences.Look);
         _database = new SqliteDatabase(options.DatabasePath, readOnly: true);
         IServerCheck check = options.PipeName == PipeProtocol.PipeName ? InstalledServiceCheck.FromServiceManager() : new TrustAnyServer();

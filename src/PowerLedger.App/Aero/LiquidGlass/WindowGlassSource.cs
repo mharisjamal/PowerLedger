@@ -211,7 +211,11 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
             }
             // Shown again (restored, back from the tray): the whole desktop on the first frame with a picture, as anything
             // behind may have changed while the capture was let go.
-            if (shown && !_gpu.Active) _gpu.Session.RefreshAll();
+            if (shown && !_gpu.Active)
+            {
+                _gpu.Session.RefreshAll();
+                Report();
+            }
             _gpu.Active = shown;
             _gpu.Track();
             return;
@@ -288,6 +292,29 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         ScreenBounds = bounds;
         Changed?.Invoke();
     }
+
+    /// <summary>A second after the window shows again: one line on the glass's state for the App's log.</summary>
+    private void Report()
+    {
+        if (LiquidGlassSources.Log is not { } log || _gpu is not { } gpu) return;
+        var frames = gpu.Frames;
+        var acquired = gpu.Session.FramesAcquired;
+        var timer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromSeconds(1) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (_disposed || !ReferenceEquals(gpu, _gpu)) return;
+            var companion = gpu.CompanionHwnd;
+            log($"Liquid glass: shown again; {gpu.State.Split(';')[0]}; drawn {gpu.Frames - frames} times in a second, the capture "
+                + $"{(gpu.Session.Running ? "open" : "closed")}{(gpu.Session.Failed ? ", failed" : "")} with {gpu.Session.FramesAcquired - acquired} frames"
+                + $"{(gpu.Session.WholeCopyPending ? ", the whole desktop still to copy" : "")}; the glass's window "
+                + (companion == IntPtr.Zero ? "none" : $"{(CaptureNative.IsWindowVisible(companion) ? "shown" : "hidden")}, {(GetWindow(companion, 3) == _hwnd ? "beneath" : "not beneath")} its window"));
+        };
+        timer.Start();
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
 
     /// <summary>Whether the window's rectangle changed since the last look (and keeps the new one).</summary>
     private bool Moved()

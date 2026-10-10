@@ -21,6 +21,10 @@ internal static class LiquidGlassSources
     /// screen sharing see our windows (WDA_NONE on each), stops the live capture and shows the wallpaper through the
     /// same recipe; false, the default, leaves the windows out of capture and shows the live screen. Applies at once.
     /// </summary>
+    /// <summary>Where the glass writes a line about itself when a window shows again (the App's log; null in the tests),
+    /// so a glass that doesn't come back says why in a feedback report.</summary>
+    public static Action<string>? Log { get; set; }
+
     public static bool AllowScreenshots
     {
         get => _allowScreenshots;

@@ -95,6 +95,9 @@ internal sealed class MonitorCapture : IDisposable
     /// <summary>Whether the duplication is open now (false while every window is hidden).</summary>
     public bool Running => _duplication != IntPtr.Zero;
 
+    /// <summary>Whether a whole copy of the desktop is still waited for (a frame with a picture), for the log.</summary>
+    internal bool WholeCopyPending => _needFull > 0;
+
     /// <summary>The desktop comes as scRGB half floats (an HDR monitor): the CPU path can't read it.</summary>
     public bool Hdr => _desktopFormat != DXGI_FORMAT_B8G8R8A8_UNORM;
 

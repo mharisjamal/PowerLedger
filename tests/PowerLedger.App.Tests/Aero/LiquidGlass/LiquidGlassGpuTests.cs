@@ -322,6 +322,169 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             return 0;
         }));
 
+    /// <summary>
+    /// The owner's Win+M: every window minimised, then the app restored as the taskbar restores it (or shown again from
+    /// the tray), the other windows left down, so only the still desktop is behind it. The glass's window must come back
+    /// with it, shown, directly beneath it, and the glass must show the desktop as it is now, not the window that was
+    /// behind before; all with nothing moving.
+    /// </summary>
+    [Theory]
+    [InlineData("taskbar")]
+    [InlineData("tray")]
+    public void After_minimise_all_the_glass_comes_back_with_its_window_over_the_still_desktop(string path)
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            LiquidGlassSources.Override = null;
+            LiquidGlassSources.ExcludeFromCapture = true;
+            LiquidGlassSources.AllowScreenshots = false;
+            LiquidGlassSources.GpuAllowed = true;
+            // The desktop (still, steel blue), another app's window over it (orange), and ours over both.
+            var desk = ScreenCapture.Show(new Border { Background = new SolidColorBrush(Color.FromRgb(70, 130, 180)) }, 0, 0, 10, 10);
+            (desk.Left, desk.Top, desk.Width, desk.Height) = (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+            var other = ScreenCapture.Show(new Border { Background = Brushes.DarkOrange }, 200 / 1.0, 150 / 1.0, 600, 400);
+            var glass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(0), Width = 240, Height = 160, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+            var window = ScreenCapture.Show(new Grid { Background = Brushes.Magenta, Children = { glass } }, 300, 200, 240, 160);
+            try
+            {
+                UiHarness.PumpUntil(() => glass.Composed && Gpu(glass).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
+                UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+                var owner = new WindowInteropHelper(window).Handle;
+                var companion = Gpu(glass).CompanionHwnd;
+                // Win+M: everything down. (Or the app to the tray, the other window down.)
+                if (path == "taskbar") ShowWindow(owner, 6);   // SW_MINIMIZE
+                else window.Hide();
+                ShowWindow(new WindowInteropHelper(other).Handle, 6);
+                UiHarness.Pump(TimeSpan.FromMilliseconds(800));
+                IsWindowVisible(companion).ShouldBeFalse("the glass goes away with its window");
+                var log = new List<string>();
+                LiquidGlassSources.Log = log.Add;
+                // Back: the taskbar's restore (or the tray's show), the other window left down.
+                if (path == "taskbar")
+                {
+                    ShowWindow(owner, 9);   // SW_RESTORE
+                    SetForegroundWindow(owner);
+                }
+                else
+                {
+                    window.Show();
+                }
+                UiHarness.Pump(TimeSpan.FromMilliseconds(1000));
+                companion = Gpu(glass).CompanionHwnd;
+                IsWindowVisible(companion).ShouldBeTrue("the glass back with its window");
+                GetWindow(companion, 3).ShouldBe(owner, "directly beneath its window");
+                var read = Gpu(glass).ReadAsync(glass);
+                UiHarness.PumpUntil(() => read.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
+                var pixels = read.Result;
+                var shown = 0;
+                for (var i = 0; i < pixels.Length; i += 4)
+                {
+                    // The still desktop brightened by 1.1: (77, 143, 198), not the orange window that was there before.
+                    if (pixels[i + 3] == 255 && Math.Abs(pixels[i + 2] - 77) <= 3 && Math.Abs(pixels[i + 1] - 143) <= 3 && Math.Abs(pixels[i] - 198) <= 3) shown++;
+                }
+                output.WriteLine($"{path}: pixels showing the still desktop {shown} of {pixels.Length / 4}");
+                (shown / (double)(pixels.Length / 4)).ShouldBeGreaterThan(0.99);
+                // A line for the App's log on what the glass did as its window came back.
+                UiHarness.PumpUntil(() => log.Count > 0, TimeSpan.FromSeconds(3), "the glass's line");
+                output.WriteLine(log[0]);
+                log[0].ShouldContain("shown, beneath its window");
+            }
+            finally
+            {
+                LiquidGlassSources.Log = null;
+                window.Close();
+                other.Close();
+                desk.Close();
+            }
+            return 0;
+        }));
+
+    /// <summary>
+    /// The owner's Win+M with the app itself: the Aero window and another window minimised, the Aero window restored
+    /// as the taskbar restores it (or hidden to the tray and shown again, its reveal and all), only the still desktop
+    /// behind it. Every composed piece must show the desktop as it is now, and the glass's window must be back beneath it.
+    /// </summary>
+    [Theory]
+    [InlineData("taskbar")]
+    [InlineData("tray")]
+    public void After_minimise_all_the_aero_window_s_glass_shows_the_still_desktop(string path)
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            LiquidGlassSources.ExcludeFromCapture = true;
+            LiquidGlassSources.AllowScreenshots = false;
+            LiquidGlassSources.GpuAllowed = true;
+            var desk = ScreenCapture.Show(new Border { Background = new SolidColorBrush(Color.FromRgb(70, 130, 180)) }, 0, 0, 10, 10);
+            (desk.Left, desk.Top, desk.Width, desk.Height) = (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+            var other = ScreenCapture.Show(new Border { Background = Brushes.DarkOrange }, 20, 20, 1200, 760);
+            using var saver = new FakeSaver();
+            var window = AeroHost.Window(AeroFixtures.Shell(saver), Theme.Dark);
+            LiquidGlassSources.Override = null;
+            (window.Left, window.Top, window.Width, window.Height, window.Topmost) = (60, 40, 1100, 700, true);
+            window.Show();
+            try
+            {
+                UiHarness.Pump(TimeSpan.FromSeconds(4));   // the reveal, and the glass over the other window
+                var owner = new WindowInteropHelper(window).Handle;
+                if (path == "taskbar") ShowWindow(owner, 6);   // SW_MINIMIZE
+                else window.Hide();
+                ShowWindow(new WindowInteropHelper(other).Handle, 6);
+                UiHarness.Pump(TimeSpan.FromMilliseconds(800));
+                if (path == "taskbar")
+                {
+                    ShowWindow(owner, 9);   // SW_RESTORE
+                    SetForegroundWindow(owner);
+                }
+                else
+                {
+                    window.Show();
+                }
+                UiHarness.Pump(TimeSpan.FromSeconds(3));   // the reveal again (from the tray), and the glass's frames
+                var gpu = LiquidGlassSources.Live.OfType<WindowGlassSource>().Select(s => s.Gpu).Single(g => g != null)!;
+                IsWindowVisible(gpu.CompanionHwnd).ShouldBeTrue("the glass back with its window");
+                GetWindow(gpu.CompanionHwnd, 3).ShouldBe(owner, "directly beneath its window");
+                var pieces = new List<LiquidGlassBackdrop>();
+                void Walk(DependencyObject node)
+                {
+                    if (node is LiquidGlassBackdrop { Composed: true } piece) pieces.Add(piece);
+                    for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) Walk(VisualTreeHelper.GetChild(node, i));
+                }
+                Walk(window);
+                pieces.ShouldNotBeEmpty();
+                var stale = new List<string>();
+                foreach (var piece in pieces)
+                {
+                    var read = gpu.ReadAsync(piece);
+                    UiHarness.PumpUntil(() => read.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
+                    var pixels = read.Result;
+                    int inside = 0, shown = 0;
+                    for (var i = 0; i < pixels.Length; i += 4)
+                    {
+                        if (pixels[i + 3] != 255) continue;   // the corners and what clips leave
+                        inside++;
+                        if (Math.Abs(pixels[i + 2] - 77) <= 3 && Math.Abs(pixels[i + 1] - 143) <= 3 && Math.Abs(pixels[i] - 198) <= 3) shown++;
+                    }
+                    if (inside > 0 && shown < inside * 0.99) stale.Add($"{piece.ActualWidth:0}x{piece.ActualHeight:0}: {shown} of {inside}");
+                }
+                output.WriteLine($"{path}: {pieces.Count} composed pieces, not showing the still desktop: {(stale.Count == 0 ? "none" : string.Join(", ", stale))}");
+                stale.ShouldBeEmpty();
+            }
+            finally
+            {
+                window.CloseForSwitch();
+                other.Close();
+                desk.Close();
+            }
+            return 0;
+        }));
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hwnd, int command);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 
