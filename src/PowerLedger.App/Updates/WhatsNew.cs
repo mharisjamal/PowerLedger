@@ -8,6 +8,11 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.10.10",
+        [
+            "Aero's glass keeps up with the window: drag or resize it and the glass moves in the same frame, at your display's refresh rate.",
+            "The glass shows your desktop right away when you bring PowerLedger back after minimising everything.",
+        ]),
         ("0.10.9",
         [
             "Aero is real liquid glass: the background ripples and bends through every panel, with a soft glowing edge.",
