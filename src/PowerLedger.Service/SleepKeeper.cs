@@ -6,8 +6,9 @@ namespace PowerLedger.Service;
 
 /// <summary>
 /// What the machine draws asleep (accuracy A10). It reads the battery's charge as the machine goes to sleep and again a
-/// minute after it wakes, with what that minute awake drew added back, learns from the two what the battery loses asleep (<see cref="SleepDrain"/>, which leaves out whatever says
-/// nothing of the sleep), and keeps that in the settings table, where the App reads it too. The loop books each sleep at
+/// minute after it wakes, with what that minute awake drew added back, learns from the two what the battery loses asleep
+/// (<see cref="SleepDrain"/>, which leaves out whatever says nothing of the sleep), and keeps that in the settings table,
+/// where the App reads it too. The loop books each sleep at
 /// <see cref="Watts"/>. A suspend that is no sleep (Plan AC review, <see cref="SleepKinds"/>) books nothing and teaches
 /// nothing: one with nobody signed in, as a Fast Startup shutdown is, and a hibernate, from when it hibernated. Runs on the
 /// loop's thread alone.
