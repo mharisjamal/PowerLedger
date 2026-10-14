@@ -214,6 +214,7 @@ internal partial class AeroWindow : Window, IShellWindow
         ShowOwnPage();
         AnnounceIntro();
         if (!IsVisible) return;
+        ShowPcs();   // this PC's watts, which a reading leaves alone while the window is hidden
         if (_shell.Dashboard is { } dashboard) dashboard.Detailed = true;
         // Shown again, from the tray: the reveal plays every time the window opens (0.10.6), not only the first.
         if (_shown && IsLoaded) QueueReveal();
@@ -478,9 +479,11 @@ internal partial class AeroWindow : Window, IShellWindow
         }
     }
 
+    /// <summary>A reading redraws this PC's watts in "Your PCs" while the window shows; hidden, nothing (perf review P1),
+    /// and showing again draws them as they are then.</summary>
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(NowViewModel.Live)) ShowPcs();
+        if (e.PropertyName == nameof(NowViewModel.Live) && IsVisible) ShowPcs();
     }
 
     private void OnInsightsChanged(object? sender, PropertyChangedEventArgs e)

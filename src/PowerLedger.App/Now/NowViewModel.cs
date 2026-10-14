@@ -49,6 +49,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     private ReadingFrame? _last;
     private double _livePeak;
     private DateOnly _liveDay;
+    private bool _isWatched = true;
 
     private LivePanel _live = LivePanel.Waiting;
     private TodayLedger _today = TodayLedger.Empty;
@@ -114,6 +115,20 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     public bool IsSensorless { get => _isSensorless; private set => SetProperty(ref _isSensorless, value); }
 
     public bool IsCollecting { get => _isCollecting; private set => SetProperty(ref _isCollecting, value); }
+
+    /// <summary>Whether a window of the App's shows, the overlay among them (perf review P1). Unwatched, a reading keeps
+    /// only the newest frame, the last minute's samples, the day's peak and the tray's text: the live panel, which no
+    /// window would draw, is built again once, from all that, when one shows.</summary>
+    public bool IsWatched
+    {
+        get => _isWatched;
+        set
+        {
+            if (_isWatched == value) return;
+            _isWatched = value;
+            if (value) RebuildLive();
+        }
+    }
 
     /// <summary>Each status the service answered a poll with, on the UI thread: the updater reads how updates stand from it
     /// (Plan Q §3, §4), whether or not a window shows.</summary>
@@ -213,8 +228,15 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         _livePeak = Math.Max(_livePeak, double.IsFinite(frame.TotalW) ? frame.TotalW : 0);
         _window.Add(frame.Timestamp, frame.TotalW);
         _last = frame;
-        RebuildLive();
+        ShowLive();
         OnPropertyChanged(nameof(Last));
+    }
+
+    /// <summary>The live panel while a window shows; unwatched, only the tray's text.</summary>
+    private void ShowLive()
+    {
+        if (_isWatched) RebuildLive();
+        else OnPropertyChanged(nameof(TrayTooltip));
     }
 
     private void RebuildLive()
@@ -260,7 +282,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
             Chart = Charts.Build(snapshot.TodayRange, snapshot.TodaySeries, ChartUnit.Watts, _zone, _culture);
             Legend = new ChartLegend(Wh(snapshot.Today.CpuKwh), Wh(snapshot.Today.GpuKwh), Wh(snapshot.Today.DisplayKwh), Wh(snapshot.Today.RestKwh));
         }
-        RebuildLive();
+        ShowLive();
     }
 
     /// <summary>A desktop's readings never come from a battery: the one Windows shows there is a UPS, which powers more

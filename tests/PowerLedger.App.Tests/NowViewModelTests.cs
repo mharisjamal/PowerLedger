@@ -538,4 +538,48 @@ public class NowViewModelTests
         model.Today.Co2.ShouldBe("0.23");
         model.Today.Co2Factor.ShouldBe("0.80 kg / kWh grid");
     }
+
+    [Fact]
+    public void Unwatched_a_reading_keeps_the_newest_frame_and_the_tray_but_builds_no_live_panel()
+    {
+        // Perf review P1: with every window hidden, a reading a second rebuilt a panel nothing drew.
+        var model = Model();
+        _link.Push(Frames.At(Now, totalW: 20.0));
+        var live = model.Live;
+        model.IsWatched = false;
+        var changed = new List<string?>();
+        model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        _link.Push(Frames.At(Now.AddSeconds(1), totalW: 34.2));
+
+        model.Live.ShouldBeSameAs(live);
+        changed.ShouldNotContain(nameof(NowViewModel.Live));
+        model.Last.ShouldNotBeNull().TotalW.ShouldBe(34.2);
+        changed.ShouldContain(nameof(NowViewModel.Last));
+        changed.ShouldContain(nameof(NowViewModel.TrayTooltip));
+        model.TrayTooltip.ShouldStartWith("34.2 W · Measured");
+    }
+
+    [Fact]
+    public void Watched_again_the_live_panel_is_built_once_from_the_readings_that_came_meanwhile()
+    {
+        var model = Model();
+        model.IsWatched = false;
+        _link.Push(Frames.At(Now, totalW: 20.0));
+        _link.Push(Frames.At(Now.AddSeconds(1), totalW: 48.0));
+        _link.Push(Frames.At(Now.AddSeconds(2), totalW: 34.2));
+        var lives = 0;
+        model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(NowViewModel.Live)) lives++;
+        };
+
+        model.IsWatched = true;
+
+        lives.ShouldBe(1);
+        model.Live.Watts.ShouldBe(34.2);
+        model.Live.Spark.Select(sample => sample.Watts).ShouldBe(new[] { 20.0, 48.0, 34.2 });
+        model.Live.PeakW.ShouldBe(48.0);
+        model.Live.Eyebrow.ShouldBe("Live · battery discharge · 14:32:09");
+    }
 }

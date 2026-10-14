@@ -65,6 +65,8 @@ public partial class App : Application
     private UsageCounter? _usage;
     private bool _exiting;
     private AeroAccess? _aero;
+    private WindowWatch? _watch;
+    private bool? _reportedVisible;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -182,6 +184,10 @@ public partial class App : Application
         _brightnessReader = new DdcBrightness();
         _brightness = new BrightnessReporter(_link, _brightnessReader, new DisplayConfigReader(), _preferences, TimeProvider.System);
         _now.PropertyChanged += OnNowChanged;
+        // Perf review P1: with no window of the App's on screen, a reading builds nothing that none would draw.
+        _watch = WindowWatch.EveryWindow();
+        _watch.Changed += OnWindowsChanged;
+        OnWindowsChanged();
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
         // The installer asks this before it replaces or removes the App (installer\PowerLedger.iss).
         _instance.OnExitRequested(() => Dispatcher.InvokeAsync(ExitUi));
@@ -201,6 +207,17 @@ public partial class App : Application
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(NowViewModel.TrayTooltip)) _tray?.Show(_now?.Last?.TotalW, _now?.TrayTooltip ?? "PowerLedger");
+    }
+
+    /// <summary>A window of the App's showed or went: the live panel is built only while one shows (perf review P1), and the
+    /// service hears whether one is visible, the overlay among them (Plan Q §4).</summary>
+    private void OnWindowsChanged()
+    {
+        if (_watch is not { } watch) return;
+        if (_now is not null) _now.IsWatched = watch.Shows;
+        if (_reportedVisible == watch.Visible) return;
+        _reportedVisible = watch.Visible;
+        _link?.ReportWindow(watch.Visible);
     }
 
     /// <summary>The tray menu offers the update the card offers.</summary>
@@ -300,11 +317,13 @@ public partial class App : Application
             args.Cancel = true;
             window.Window.Hide();
         };
+        // Watched first, so the live panel is current before the pages shown read it; and Plan Q §4: the service installs
+        // while nobody is looking (OnWindowsChanged).
+        _watch?.Watch(window.Window);
         window.Window.IsVisibleChanged += (_, _) =>
         {
             if (!IsCurrent(window)) return;
             if (_shell is not null) _shell.IsShown = window.Window.IsVisible;
-            _link?.ReportWindow(window.Window.IsVisible);   // Plan Q §4: the service installs while nobody is looking
         };
         return window;
     }
