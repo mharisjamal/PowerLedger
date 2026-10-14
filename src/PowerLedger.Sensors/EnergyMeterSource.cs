@@ -10,31 +10,46 @@ namespace PowerLedger.Sensors;
 /// </summary>
 public sealed class EnergyMeterSource : ISensorSource
 {
+    /// <summary>1 once this process has logged the meter's rails, which it does once, however often the sensors are rebuilt.</summary>
+    private static int s_railsNoted;
+
     private readonly Func<EnergyMeterReading> _read;
     private readonly EnergyMeter? _meter;
+    private readonly PlatformRailCheck? _check;
+    private readonly string? _unavailable;
 
     /// <summary>Opens the machine's energy meter.</summary>
-    public EnergyMeterSource()
+    /// <param name="check">The check of its platform rail against the battery, whose verdict the status screen shows.</param>
+    /// <param name="note">Told, once in the life of the process, the meter's rails and what each is taken for, when any is
+    /// not one of Intel's or AMD's usual ones.</param>
+    public EnergyMeterSource(PlatformRailCheck? check = null, Action<string>? note = null)
     {
         _meter = new EnergyMeter();
         _read = _meter.Read;
+        _check = check;
         Supported = _meter.Available;
-        Unavailable = _meter.Unavailable;
+        _unavailable = _meter.Unavailable;
+        if (note is not null && EnergyMeter.RailsWorthNoting(_meter.Instances) is { } rails && Interlocked.Exchange(ref s_railsNoted, 1) == 0)
+        {
+            note($"Energy meter rails: {rails}");
+        }
     }
 
     /// <summary>Test seam: any source of readings.</summary>
-    internal EnergyMeterSource(Func<EnergyMeterReading> read, bool available, string? unavailable)
+    internal EnergyMeterSource(Func<EnergyMeterReading> read, bool available, string? unavailable, PlatformRailCheck? check = null)
     {
         _read = read;
+        _check = check;
         Supported = available;
-        Unavailable = unavailable;
+        _unavailable = unavailable;
     }
 
     public string Name => "energy-meter";
 
     public bool Supported { get; }
 
-    public string? Unavailable { get; }
+    /// <summary>Why the meter can't be read; or, while it is read, why its platform rail is set aside.</summary>
+    public string? Unavailable => _unavailable ?? _check?.Status;
 
     public void Contribute(SampleDraft draft)
     {

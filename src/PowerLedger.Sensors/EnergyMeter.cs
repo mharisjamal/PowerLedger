@@ -18,8 +18,23 @@ public enum RailKind
     Memory,
     /// <summary>A neural processor, inside the package figure (Snapdragon X's <c>npu</c>).</summary>
     Npu,
-    /// <summary>The whole platform, display included, on the machines that meter it (Snapdragon X's <c>system</c>).</summary>
+    /// <summary>The whole platform, display included, on the machines that meter it (Snapdragon X's <c>SYS</c>, Intel's
+    /// optional <c>PSYS</c>).</summary>
     Platform,
+    /// <summary>A display (Microsoft's <c>DISPLAY</c> rails), inside the platform figure; not read into the model yet.</summary>
+    Display,
+    /// <summary>Storage (Microsoft's <c>STORAGE</c> rails), inside the platform figure; not read into the model.</summary>
+    Storage,
+    /// <summary>Wi-Fi and Bluetooth (Microsoft's <c>WIFI</c> rails), inside the platform figure; not read into the model.</summary>
+    Network,
+    /// <summary>Mobile broadband (Microsoft's <c>MBB</c> rails), inside the platform figure; not read into the model.</summary>
+    MobileBroadband,
+    /// <summary>What the charger delivers (Snapdragon X's <c>PSU_USB</c>): battery charging and the charger's own losses are
+    /// in it, so it is never the PC's draw.</summary>
+    ChargerInput,
+    /// <summary>A rail known by name whose place among the others is unknown (Snapdragon X's <c>USBC_TOTAL</c>, <c>ROP</c>,
+    /// <c>INFRA</c>, <c>MULTIMEDIA</c>): listed, never read or summed.</summary>
+    Unplaced,
 }
 
 /// <param name="Name">Counter instance name, e.g. "RAPL_Package0_PKG".</param>
@@ -32,8 +47,11 @@ public readonly record struct Rail(string Name, ulong PowerMilliwatts, ulong Ene
 /// <param name="IntegratedGpuW">Integrated graphics watts, already inside PackageW.</param>
 /// <param name="MemoryW">Memory watts, outside PackageW.</param>
 /// <param name="PlatformW">The whole platform's watts, every other rail and the display inside it, or null where no rail
-/// meters the platform (every Intel and AMD machine so far).</param>
-public readonly record struct EnergyMeterReading(double? PackageW, double? CoresW, double? IntegratedGpuW, double? MemoryW, double? PlatformW = null);
+/// meters the platform (most Intel and AMD machines).</param>
+/// <param name="ChargerInputW">What the charger delivers, battery charging included (Snapdragon X's <c>PSU_USB</c>); never the
+/// PC's draw, and null where no rail meters it.</param>
+public readonly record struct EnergyMeterReading(
+    double? PackageW, double? CoresW, double? IntegratedGpuW, double? MemoryW, double? PlatformW = null, double? ChargerInputW = null);
 
 /// <summary>
 /// The processor's power rails as Windows publishes them (spec §4). No kernel driver and no elevation: Windows 11's
@@ -80,10 +98,12 @@ public sealed class EnergyMeter : IDisposable
             }
 
             var instances = new PerformanceCounterCategory(Category).GetInstanceNames();
+            Instances = instances;
             Unavailable = WhyUnavailable(instances);
             if (Unavailable is not null) return;
 
-            string[] rails = [.. instances.Where(instance => Classify(instance) != RailKind.Ignored)];
+            // A rail whose place is unknown is listed, never read.
+            string[] rails = [.. instances.Where(instance => Classify(instance) is not (RailKind.Ignored or RailKind.Unplaced))];
             Open(rails, new PdhRailCounters(Category, rails), static () => Environment.TickCount64);
             Available = true;
         }
@@ -109,6 +129,9 @@ public sealed class EnergyMeter : IDisposable
 
     /// <summary>Why there is nothing to read, for the status screen; null when the meter works.</summary>
     public string? Unavailable { get; }
+
+    /// <summary>Every counter instance the meter publishes, read or not; none where Windows has no meter.</summary>
+    public IReadOnlyList<string> Instances { get; } = [];
 
     /// <summary>Average watts per kind of rail over the meter's last interval. A rail whose counter or clock went backwards
     /// reports nothing and starts again from there; one Windows gave nothing for this tick reports nothing this tick.</summary>
@@ -195,11 +218,13 @@ public sealed class EnergyMeter : IDisposable
 
     /// <summary>
     /// Groups rails by kind and sums each kind, so a two-socket machine reports one package figure. Intel's and AMD's rails
-    /// are known by name, and their package figure is the package rails alone. Snapdragon rails are looked up in
-    /// <paramref name="table"/>: the package figure is every processor rail (soc, clusters, graphics, NPU) that no other
-    /// processor rail present holds, so the soc rail alone where it exists, and its parts once each where it does not; and
-    /// the platform figure is the outermost platform rail. Without the soc rail or a CPU cluster there is no processor
-    /// figure, since graphics or NPU watts alone are not the processor's.
+    /// are known by name, and their package figure is the package rails alone. Snapdragon rails and Microsoft's named rails
+    /// are looked up in <paramref name="table"/>: the package figure is every processor rail (soc, CPU, clusters, graphics,
+    /// NPU) that no other processor rail present holds, so the soc rail alone where it exists, and its parts once each where
+    /// it does not; each part's figure, and the platform's and the charger's, is every rail of that kind that no other rail
+    /// of its kind present holds, so an exact name wins over its parts and SYS over SYSTEM. Without the soc rail or a CPU
+    /// rail there is no processor figure, since graphics or NPU watts alone are not the processor's. A figure Intel's or
+    /// AMD's rails give wins over the table's beside it, so a machine with both never counts the processor twice.
     /// </summary>
     public static EnergyMeterReading Summarise(IReadOnlyList<Rail> rails, IReadOnlyList<PlatformRail> table)
     {
@@ -208,43 +233,76 @@ public sealed class EnergyMeter : IDisposable
         foreach (var rail in rails)
         {
             var watts = rail.PowerMilliwatts / 1000.0;
-            var vendor = VendorKind(rail.Name);
-            if (vendor != RailKind.Ignored) Add(vendor, watts);
-            else if (QualcommRails.Find(rail.Name, table) is { } row) tabled.Add((row, watts));
+            switch (VendorKind(rail.Name))
+            {
+                case RailKind.Package: Add(ref package, watts); break;
+                case RailKind.Cores: Add(ref cores, watts); break;
+                case RailKind.IntegratedGpu: Add(ref igpu, watts); break;
+                case RailKind.Memory: Add(ref memory, watts); break;
+                case RailKind.Platform: Add(ref platform, watts); break;
+                default:
+                    if (QualcommRails.Find(rail.Name, table) is { } row) tabled.Add((row, watts));
+                    break;
+            }
         }
-        if (tabled.Count == 0) return new EnergyMeterReading(package, cores, igpu, memory);
+        if (tabled.Count == 0) return new EnergyMeterReading(package, cores, igpu, memory, platform);
 
         var present = tabled.Select(entry => entry.Row.Key).ToHashSet(StringComparer.Ordinal);
         var anchored = tabled.Exists(entry => entry.Row.Kind is RailKind.Package or RailKind.Cores);
-        double? processor = null;
+        double? processor = null, tableCores = null, tableGpu = null, tableMemory = null, tablePlatform = null, charger = null;
         foreach (var (row, watts) in tabled)
         {
-            // The parts are reported as they are; the package figure is made below, from the outermost processor rails.
-            if (row.Kind is RailKind.Cores or RailKind.IntegratedGpu or RailKind.Memory) Add(row.Kind, watts);
-            if (anchored && IsProcessor(row.Kind) && !QualcommRails.InsideAnother(row, present, table, IsProcessor))
+            // A rail inside another of its own kind that is present is already counted there.
+            var kind = row.Kind;
+            if (!QualcommRails.InsideAnother(row, present, table, other => other == kind))
             {
-                processor = (processor ?? 0) + watts;
+                switch (kind)
+                {
+                    case RailKind.Cores: Add(ref tableCores, watts); break;
+                    case RailKind.IntegratedGpu: Add(ref tableGpu, watts); break;
+                    case RailKind.Memory: Add(ref tableMemory, watts); break;
+                    case RailKind.Platform: Add(ref tablePlatform, watts); break;
+                    case RailKind.ChargerInput: Add(ref charger, watts); break;
+                }
             }
-            if (row.Kind == RailKind.Platform && !QualcommRails.InsideAnother(row, present, table, static kind => kind == RailKind.Platform))
-            {
-                platform = (platform ?? 0) + watts;
-            }
+            // The package figure is made from the outermost processor rails.
+            if (anchored && IsProcessor(kind) && !QualcommRails.InsideAnother(row, present, table, IsProcessor)) Add(ref processor, watts);
         }
-        if (processor is { } fromTable) package = (package ?? 0) + fromTable;
-        return new EnergyMeterReading(package, cores, igpu, memory, platform);
+        return new EnergyMeterReading(
+            package ?? processor, cores ?? tableCores, igpu ?? tableGpu, memory ?? tableMemory, platform ?? tablePlatform, charger);
 
-        void Add(RailKind kind, double watts)
-        {
-            switch (kind)
-            {
-                case RailKind.Package: package = (package ?? 0) + watts; break;
-                case RailKind.Cores: cores = (cores ?? 0) + watts; break;
-                case RailKind.IntegratedGpu: igpu = (igpu ?? 0) + watts; break;
-                case RailKind.Memory: memory = (memory ?? 0) + watts; break;
-            }
-        }
+        static void Add(ref double? total, double watts) => total = (total ?? 0) + watts;
 
         static bool IsProcessor(RailKind kind) => kind is RailKind.Package or RailKind.Cores or RailKind.IntegratedGpu or RailKind.Npu;
+    }
+
+    /// <summary>
+    /// The meter's rails, each with what it is taken for, for one line in the log, so a machine whose meter has rails this
+    /// table does not know (a Snapdragon X2, an NVIDIA N1X, an OEM's own rails) can be mapped from what its owner reports.
+    /// Null when there is nothing to note: every rail is one of Intel's or AMD's usual ones.
+    /// </summary>
+    public static string? RailsWorthNoting(IEnumerable<string> instances)
+    {
+        var named = instances.Where(name => !name.Equals("_Total", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (named.TrueForAll(name => VendorKind(name) is not (RailKind.Ignored or RailKind.Platform))) return null;
+        return string.Join(", ", named.Select(name => $"{name} ({Describe(Classify(name))})"));
+
+        static string Describe(RailKind kind) => kind switch
+        {
+            RailKind.Package => "package",
+            RailKind.Cores => "cores",
+            RailKind.IntegratedGpu => "graphics",
+            RailKind.Memory => "memory",
+            RailKind.Npu => "NPU",
+            RailKind.Platform => "platform",
+            RailKind.Display => "display",
+            RailKind.Storage => "storage",
+            RailKind.Network => "network",
+            RailKind.MobileBroadband => "mobile broadband",
+            RailKind.ChargerInput => "charger input",
+            RailKind.Unplaced => "not summed",
+            _ => "unknown",
+        };
     }
 
     /// <summary>Why a meter with these counter instances can't give the processor's own watts or the whole platform's, or
@@ -270,6 +328,8 @@ public sealed class EnergyMeter : IDisposable
     private static RailKind VendorKind(string name)
     {
         if (name.EndsWith("_PKG", StringComparison.OrdinalIgnoreCase)) return RailKind.Package;
+        // Intel's platform rail: optional, enabled by the machine's maker, and without the battery's charging.
+        if (name.EndsWith("_PSYS", StringComparison.OrdinalIgnoreCase)) return RailKind.Platform;
         if (name.EndsWith("_PP0", StringComparison.OrdinalIgnoreCase)) return RailKind.Cores;
         if (name.EndsWith("_PP1", StringComparison.OrdinalIgnoreCase)) return RailKind.IntegratedGpu;
         if (name.EndsWith("_DRAM", StringComparison.OrdinalIgnoreCase)) return RailKind.Memory;
