@@ -78,6 +78,33 @@ public class InsightsTests
         report.Forecast.ShouldBe(new BillForecast(27.30m, 27.30m, 27.30m, "GBP", 56, true, 72, 72, 72));
     }
 
+    /// <summary>Plan AC review: the days the forecast and its band are worked from count as the month so far does, energy
+    /// from the battery at the wall equivalent and the energy drawn asleep included; at the pack they forecast a laptop's
+    /// days left about a fifth low against a month so far counted in full.</summary>
+    [Fact]
+    public void The_days_count_as_the_month_so_far_does()
+    {
+        var perDay = (Aggregate.Empty(Now) with { EnergyWh = 100, BatteryWh = 100, AsleepWh = 5 }).CountedWh * 24 / 1000;
+        var hours = Hours(Today.AddDays(-56), 57, Utc, _ => 0.1);
+        _history.First = Today.AddDays(-56);
+        _history.Answer = range =>
+        {
+            var rows = Rows(hours.Where(h => h.Start >= range.From && h.Start < range.To))
+                .Select(r => r with { BatteryWh = r.EnergyWh, AsleepWh = 5 }).ToList();
+            var kwh = rows.Sum(r => r.CountedWh) / 1000;
+            var days = rows.GroupBy(r => DateOnly.FromDateTime(r.Start.UtcDateTime)).Select(day => new DayTotals(
+                day.Key, day.Sum(r => r.CountedWh) / 1000, (decimal)(day.Sum(r => r.CountedWh) / 1000) * 0.25m, "GBP", false, 24, 100, 0, 0)).ToList();
+            var series = range.Bucket == TimeSpan.FromHours(1) ? rows : [];
+            return new RangeReport(range, Reports.Totals(range, kwh) with { Cost = (decimal)kwh * 0.25m, Currency = "GBP" }, days, series, null);
+        };
+
+        var forecast = Make().Read(Now, Utc).Forecast;
+
+        // 14 and a half days so far, then the other half of today and 15 more days, each at the same counted energy.
+        forecast.ProjectedKwh.ShouldBe(30 * perDay, 1e-3);
+        (forecast.LowKwh, forecast.HighKwh).ShouldBe((forecast.ProjectedKwh, forecast.ProjectedKwh));
+    }
+
     [Fact]
     public void A_history_that_cannot_be_read_says_nothing_yet_and_does_not_throw()
     {

@@ -65,6 +65,9 @@ internal sealed class Insights(IRangeHistory history, Func<double> co2KgPerKwh, 
 /// <summary>One hour row as the Insights maths reads it.</summary>
 /// <param name="Start">The hour's start, an absolute instant.</param>
 /// <param name="Local">The same instant on the local clock, for its weekday, hour and day.</param>
+/// <param name="Kwh">The hour's energy as the totals count it (<see cref="Aggregate.CountedWh"/>): what came from the battery
+/// at the wall equivalent, and what the machine drew asleep, laid back over the hours it slept, so the days the forecast
+/// and its band are worked from add up as the month so far does.</param>
 /// <param name="IdleKwh">Energy used awake and idle, display on or off.</param>
 /// <param name="IdleSeconds">How long the PC was awake and idle in the hour.</param>
 /// <param name="Seen">Whether the history holds anything for the hour, even sleep; an hour before the first row, or lost,
@@ -72,7 +75,7 @@ internal sealed class Insights(IRangeHistory history, Func<double> co2KgPerKwh, 
 internal readonly record struct HourUse(DateTimeOffset Start, DateTime Local, double Kwh, double IdleKwh, double IdleSeconds, bool Seen)
 {
     public static HourUse From(Aggregate row, TimeZoneInfo zone) => new(
-        row.Start, TimeZoneInfo.ConvertTime(row.Start, zone).DateTime, row.EnergyWh / 1000, (row.IdleOnWh + row.IdleOffWh) / 1000,
+        row.Start, TimeZoneInfo.ConvertTime(row.Start, zone).DateTime, row.CountedWh / 1000, (row.IdleOnWh + row.IdleOffWh) / 1000,
         row.IdleOnSeconds + row.IdleOffSeconds, row.SampleCount > 0 || row.OnSeconds > 0 || row.GapSeconds > 0 || row.EnergyWh > 0);
 
     /// <summary>
