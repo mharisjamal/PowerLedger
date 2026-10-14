@@ -27,14 +27,17 @@ internal sealed class Insights(IRangeHistory history, Func<double> co2KgPerKwh, 
         var currency = report.Totals.Currency;
         var month = report.Days.Where(d => d.Day.Year == today.Year && d.Day.Month == today.Month).ToList();
         var monthKwh = month.Sum(d => d.EnergyKwh);
-        var price = currency is null ? 0m : Price(month.Sum(d => d.Cost), monthKwh) ?? Price(report.Totals.Cost, report.Totals.EnergyKwh) ?? 0m;
+        var monthCost = currency is null ? 0m : month.Sum(d => d.Cost);
+        var price = currency is null ? 0m : Price(monthCost, monthKwh) ?? Price(report.Totals.Cost, report.Totals.EnergyKwh) ?? 0m;
+        // The energy still to come is priced at today's tariff (report finding 4); the averages only stand in without one.
+        var todayPrice = report.Tariff is { } tariff && tariff.Currency == currency ? tariff.PricePerKwh : price;
 
         var hours = report.Series.Select(row => HourUse.From(row, zone)).ToList();
         var midnight = Ranges.Midnight(today, zone);
         var tomorrow = Ranges.Midnight(today.AddDays(1), zone);
         var todayLeft = (tomorrow - now) / (tomorrow - midnight);
 
-        var forecast = BillForecasts.From(HourUse.WholeDays(hours, today), today, todayLeft, monthKwh, price, currency);
+        var forecast = BillForecasts.From(HourUse.WholeDays(hours, today), today, todayLeft, monthKwh, monthCost, todayPrice, currency);
         var anomalies = UsageAnomalies.Find(hours, now, zone);
         var habits = HabitsFinder.From(hours, today, price, currency);
         var carbon = Carbon.Estimate(monthKwh, report.Totals.EnergyKwh + Before(Ranges.Midnight(from, zone), now, zone), kgPerKwh, region);
@@ -72,8 +75,9 @@ internal readonly record struct HourUse(DateTimeOffset Start, DateTime Local, do
     /// <summary>
     /// The whole local days before <paramref name="today"/> the history covers, oldest first: from the first day whose
     /// first hour is seen (a PC that joined at ten in the morning has its first day short, which would drag a median down),
-    /// and only days with any hour seen (a day the history lost says nothing, where a day asleep says 0). A clock change's
-    /// day is simply 23 or 25 hours long.
+    /// and every day after it, a day with no rows at all counting as a day that used nothing (report finding 4: a PC shut
+    /// down at weekends leaves no rows then, and skipping those days forecast its weekends at its weekdays' use). A clock
+    /// change's day is simply 23 or 25 hours long.
     /// </summary>
     public static List<DayUse> WholeDays(IReadOnlyList<HourUse> hours, DateOnly today)
     {
@@ -84,13 +88,12 @@ internal readonly record struct HourUse(DateTimeOffset Start, DateTime Local, do
 
         var start = DateOnly.FromDateTime(hours[first].Local);
         if (first > 0 && DateOnly.FromDateTime(hours[first - 1].Local) == start) start = start.AddDays(1);
-        return [.. hours
-            .Select(h => (Day: DateOnly.FromDateTime(h.Local), Hour: h))
-            .Where(x => x.Day >= start && x.Day < today)
-            .GroupBy(x => x.Day)
-            .Where(day => day.Any(x => x.Hour.Seen))
-            .Select(day => new DayUse(day.Key, day.Sum(x => x.Hour.Kwh)))
-            .OrderBy(d => d.Day)];
+        var used = hours
+            .GroupBy(h => DateOnly.FromDateTime(h.Local))
+            .ToDictionary(day => day.Key, day => day.Sum(h => h.Kwh));
+        var days = new List<DayUse>();
+        for (var day = start; day < today; day = day.AddDays(1)) days.Add(new DayUse(day, used.GetValueOrDefault(day)));
+        return days;
     }
 }
 

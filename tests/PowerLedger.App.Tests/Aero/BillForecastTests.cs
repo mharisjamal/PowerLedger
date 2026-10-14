@@ -3,8 +3,8 @@ using static PowerLedger.App.Tests.InsightsSeries;
 
 namespace PowerLedger.App.Tests;
 
-/// <summary>Aero look design §4, Bill forecast: the rest of the month as the median of the same weekday, priced at the
-/// month's average price, with a 10th to 90th percentile band from backtested errors.</summary>
+/// <summary>Aero look design §4, Bill forecast: the rest of the month as the median of the same weekday, priced at today's
+/// tariff on top of what the month has cost so far, with a 10th to 90th percentile band from backtested errors.</summary>
 public class BillForecastTests
 {
     private static readonly DateOnly Today = new(2026, 9, 15);   // a Tuesday; September has 30 days
@@ -14,10 +14,23 @@ public class BillForecastTests
     {
         var days = Days(Today.AddDays(-30), 30, _ => 2);
 
-        var forecast = BillForecasts.From(days, Today, todayLeft: 1, monthKwh: 28, price: 0.20m, currency: "GBP");
+        var forecast = BillForecasts.From(days, Today, todayLeft: 1, monthKwh: 28, monthCost: 5.60m, price: 0.20m, currency: "GBP");
 
         // 14 days used 28 kWh; today and the 15 after it at 2 kWh each: 60 kWh at 0.20.
         forecast.ShouldBe(new BillForecast(12.00m, 12.00m, 12.00m, "GBP", 30, true, 60, 60, 60));
+    }
+
+    /// <summary>Report finding 4: a tariff changed mid month. The month so far costs what it did; the days left cost today's
+    /// price, not the month's average of the two.</summary>
+    [Fact]
+    public void The_month_so_far_costs_what_it_did_and_the_days_left_today_s_price()
+    {
+        var days = Days(Today.AddDays(-30), 30, _ => 2);
+
+        var forecast = BillForecasts.From(days, Today, todayLeft: 1, monthKwh: 28, monthCost: 2.80m, price: 0.50m, currency: "GBP");
+
+        // 28 kWh so far cost 2.80; the 32 kWh left at 0.50 cost 16.00.
+        forecast.ShouldBe(new BillForecast(18.80m, 18.80m, 18.80m, "GBP", 30, true, 60, 60, 60));
     }
 
     [Fact]
@@ -25,7 +38,7 @@ public class BillForecastTests
     {
         var days = Days(Today.AddDays(-56), 56, d => Weekend(d.DayOfWeek) ? 1 : 3);
 
-        var forecast = BillForecasts.From(days, Today, 1, 14 * 2.4, 1m, "USD");
+        var forecast = BillForecasts.From(days, Today, 1, 14 * 2.4, 33.6m, 1m, "USD");
 
         // 15 Sep to 30 Sep: 12 weekdays and 4 weekend days.
         var rest = 12 * 3 + 4 * 1;
@@ -39,7 +52,7 @@ public class BillForecastTests
     {
         var days = Days(Today.AddDays(-84), 84, d => d < Today.AddDays(-56) ? 50 : 2);
 
-        var forecast = BillForecasts.From(days, Today, 1, 28, 1m, "USD");
+        var forecast = BillForecasts.From(days, Today, 1, 28, 28m, 1m, "USD");
 
         forecast.ProjectedCost.ShouldBe(60m);
         forecast.DaysOfData.ShouldBe(56);
@@ -50,7 +63,7 @@ public class BillForecastTests
     {
         var days = Days(Today.AddDays(-30), 30, _ => 2);
 
-        var forecast = BillForecasts.From(days, Today, todayLeft: 0.25, monthKwh: 29.5, price: 1m, currency: "USD");
+        var forecast = BillForecasts.From(days, Today, todayLeft: 0.25, monthKwh: 29.5, monthCost: 29.5m, price: 1m, currency: "USD");
 
         // 29.5 so far, a quarter of today's 2, then 15 more days of 2.
         forecast.ProjectedCost.ShouldBe(60m);
@@ -61,7 +74,7 @@ public class BillForecastTests
     {
         var days = Days(Today.AddDays(-56), 56, d => d == Today.AddDays(-9) ? 20 : 2);
 
-        var forecast = BillForecasts.From(days, Today, 1, 28, 1m, "USD");
+        var forecast = BillForecasts.From(days, Today, 1, 28, 28m, 1m, "USD");
 
         forecast.ProjectedCost.ShouldBe(60m);
         forecast.Low.ShouldBe(60m);
@@ -71,14 +84,14 @@ public class BillForecastTests
     [Fact]
     public void Fewer_than_seven_days_is_not_ready()
     {
-        var forecast = BillForecasts.From(Days(Today.AddDays(-6), 6, _ => 2), Today, 1, 12, 1m, "EUR");
+        var forecast = BillForecasts.From(Days(Today.AddDays(-6), 6, _ => 2), Today, 1, 12, 12m, 1m, "EUR");
 
         forecast.ShouldBe(BillForecast.NotReady(6, "EUR"));
     }
 
     [Fact]
     public void Seven_days_is_ready()
-        => BillForecasts.From(Days(Today.AddDays(-7), 7, _ => 2), Today, 1, 14, 1m, "EUR").Ready.ShouldBeTrue();
+        => BillForecasts.From(Days(Today.AddDays(-7), 7, _ => 2), Today, 1, 14, 14m, 1m, "EUR").Ready.ShouldBeTrue();
 
     [Fact]
     public void A_weekday_never_seen_takes_the_month_to_date_daily_mean()
@@ -87,7 +100,7 @@ public class BillForecastTests
         // weekday's median is 4 (6, 4, 4); a Sunday takes September's mean, 4, not the mean of all 18 days, 4.67.
         var days = Days(Today.AddDays(-21), 21, d => d.Month == Today.Month ? 4 : 6).Where(d => d.Day.DayOfWeek != DayOfWeek.Sunday).ToList();
 
-        var forecast = BillForecasts.From(days, Today, 1, 48, 1m, "USD");
+        var forecast = BillForecasts.From(days, Today, 1, 48, 48m, 1m, "USD");
 
         forecast.ProjectedCost.ShouldBe(48m + 16 * 4);
     }
@@ -95,7 +108,7 @@ public class BillForecastTests
     [Fact]
     public void With_no_tariff_the_costs_are_zero_and_the_energy_is_still_forecast()
     {
-        var forecast = BillForecasts.From(Days(Today.AddDays(-30), 30, _ => 2), Today, 1, 28, 0m, null);
+        var forecast = BillForecasts.From(Days(Today.AddDays(-30), 30, _ => 2), Today, 1, 28, 0m, 0m, null);
 
         forecast.ShouldBe(new BillForecast(0, 0, 0, null, 30, true, 60, 60, 60));
     }
@@ -106,7 +119,7 @@ public class BillForecastTests
         var random = new Random(3);
         var days = Days(Today.AddDays(-56), 56, _ => 2 + random.NextDouble());
 
-        BillForecasts.From(days, Today, 1, 30, 1m, "USD").ShouldBe(BillForecasts.From(days, Today, 1, 30, 1m, "USD"));
+        BillForecasts.From(days, Today, 1, 30, 30m, 1m, "USD").ShouldBe(BillForecasts.From(days, Today, 1, 30, 30m, 1m, "USD"));
     }
 
     [Fact]
@@ -115,7 +128,7 @@ public class BillForecastTests
         var random = new Random(5);
         var days = Days(Today.AddDays(-56), 56, _ => Math.Max(0, 2 + random.Gaussian()));
 
-        var forecast = BillForecasts.From(days, Today, 1, 30, 1m, "USD");
+        var forecast = BillForecasts.From(days, Today, 1, 30, 30m, 1m, "USD");
 
         forecast.Low.ShouldBeLessThanOrEqualTo(forecast.ProjectedCost);
         forecast.High.ShouldBeGreaterThanOrEqualTo(forecast.ProjectedCost);
@@ -146,7 +159,7 @@ public class BillForecastTests
             var monthSoFar = history.Where(d => d.Day >= month).Sum(d => d.Kwh);
             var actual = (decimal)all.Where(d => d.Day >= month).Sum(d => d.Kwh);
 
-            var forecast = BillForecasts.From(history, today, 1, monthSoFar, 1m, "USD");
+            var forecast = BillForecasts.From(history, today, 1, monthSoFar, (decimal)monthSoFar, 1m, "USD");
 
             if (actual >= forecast.Low - 0.005m && actual <= forecast.High + 0.005m) covered++;
         }

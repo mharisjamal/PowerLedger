@@ -382,7 +382,7 @@ public class NowViewModelTests
         model.Month.Summary.ShouldBe("8 days · 62% measured");
         model.Month.Energy.ShouldBe("2.74");
         model.Month.Cost.ShouldBe("$0.47");
-        model.Month.Projected.ShouldBe("$1.85");
+        model.Month.Projected.ShouldBe("$1.84");   // $0.47 so far, and the 8.07 kWh to come at today's $0.17
         model.Month.ProjectedEnergy.ShouldBe("10.8 kWh");
         model.Month.DailyAverage.ShouldBe("0.360 kWh");
         model.Month.IdleWaste.ShouldBe("0.210 kWh");

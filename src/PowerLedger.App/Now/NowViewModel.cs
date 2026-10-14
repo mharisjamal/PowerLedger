@@ -330,7 +330,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
 
     private MonthLedger MonthOf(HistorySnapshot snapshot, DateTimeOffset local)
     {
-        var o = MonthOutlook.From(snapshot.Month, snapshot.MonthDays, local);
+        var o = MonthOutlook.From(snapshot.Month, snapshot.MonthDays, local, snapshot.Tariff);
         string Cash(decimal? amount) => amount is { } value && o.Currency is { } currency ? Money.Format(value, currency, _culture) : Format.Missing;
         string DayEnergy(DayTotals? day) => day is null ? Format.Missing : Format.Kwh(day.EnergyKwh, _culture) + " kWh";
         string DayDate(DayTotals? day) => day is null ? "" : day.Day.ToString("ddd d MMM", _culture);

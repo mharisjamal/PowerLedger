@@ -18,8 +18,8 @@ public class InsightsTests
     private Insights Make(double kgPerKwh = 0.236, string? region = "GB") => new(_history, () => kgPerKwh, region);
 
     /// <summary>The history answering from <paramref name="hours"/>: hour buckets for the hour read, totals for the rest,
-    /// priced at <paramref name="price"/>.</summary>
-    private void Holds(IReadOnlyList<HourUse> hours, TimeZoneInfo zone, decimal price = 0.25m, string? currency = "GBP")
+    /// priced at <paramref name="price"/>, with <paramref name="tariff"/> as the one in force at the range's end.</summary>
+    private void Holds(IReadOnlyList<HourUse> hours, TimeZoneInfo zone, decimal price = 0.25m, string? currency = "GBP", Tariff? tariff = null)
     {
         _history.First = hours.FirstOrDefault(h => h.Seen) is { Seen: true } first ? DateOnly.FromDateTime(first.Local) : null;
         _history.Answer = range =>
@@ -35,8 +35,34 @@ public class InsightsTests
             }
             var days = inRange.Where(h => h.Seen).GroupBy(h => DateOnly.FromDateTime(h.Local)).Select(day => new DayTotals(
                 day.Key, day.Sum(h => h.Kwh), (decimal)day.Sum(h => h.Kwh) * price, currency, false, 24, 100, 0, 0)).ToList();
-            return new RangeReport(range, Reports.Totals(range, kwh) with { Cost = (decimal)kwh * price, Currency = currency }, days, series);
+            return new RangeReport(range, Reports.Totals(range, kwh) with { Cost = (decimal)kwh * price, Currency = currency }, days, series, tariff);
         };
+    }
+
+    /// <summary>Report finding 4: a PC shut down at weekends has no rows then, and those days used nothing; skipping them
+    /// forecast the month's weekends at the weekdays' use.</summary>
+    [Fact]
+    public void Days_after_the_first_with_no_rows_count_as_days_that_used_nothing()
+    {
+        Holds(Hours(Today.AddDays(-56), 57, Utc, local => Weekend(local.DayOfWeek) ? null : 0.1), Utc);
+
+        var report = Make().Read(Now, Utc);
+
+        // 1 to 14 September: 10 weekdays at 2.4 kWh, and 12 hours of today (25.2 kWh). Then half of today and the 11 weekdays
+        // left at 2.4 (27.6), and the 4 weekend days at nothing: 52.8 kWh at 0.25.
+        report.Forecast.ShouldBe(new BillForecast(13.20m, 13.20m, 13.20m, "GBP", 56, true, 52.8, 52.8, 52.8));
+    }
+
+    /// <summary>Report finding 4: after a tariff change the days left cost today's price, and the month so far what it did.</summary>
+    [Fact]
+    public void The_days_left_are_priced_at_today_s_tariff()
+    {
+        Holds(Hours(Today.AddDays(-56), 57, Utc, _ => 0.1), Utc, tariff: new Tariff(Now.AddDays(-2), 0.50m, "GBP"));
+
+        var report = Make().Read(Now, Utc);
+
+        // 34.8 kWh so far at 0.25 (8.70), then 37.2 kWh at 0.50 (18.60).
+        report.Forecast.ShouldBe(new BillForecast(27.30m, 27.30m, 27.30m, "GBP", 56, true, 72, 72, 72));
     }
 
     [Fact]

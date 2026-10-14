@@ -3,8 +3,9 @@ namespace PowerLedger.App;
 /// <summary>
 /// The Bill forecast's maths (Aero look design §4). Each day left in the month is forecast as the median energy of the same
 /// weekday over the last 8 weeks, which a single odd day hardly moves; a weekday not seen in that time takes the month's
-/// daily mean so far. The cost is at the month's average price, as <see cref="MonthOutlook"/> prices its projection, so a
-/// tariff change within the month is followed.
+/// daily mean so far. The cost is what the month has cost so far and the rest at today's tariff, as
+/// <see cref="MonthOutlook"/> prices its projection, so a tariff changed within the month prices the days left at the new
+/// rate and the days gone at the old one.
 /// <para>The band is honest about how good that rule has been on this PC: every day of the last 8 weeks is forecast from
 /// the days before it alone, the misses are kept, and 1000 months of misses are drawn from them (with a fixed seed, so the
 /// same history always gives the same band) and summed over the days left. The 10th and 90th percentiles of those sums
@@ -29,9 +30,11 @@ internal static class BillForecasts
     /// <param name="today">The local day under way.</param>
     /// <param name="todayLeft">The share of today still to come, 0 to 1.</param>
     /// <param name="monthKwh">What the month has used so far, today's part included.</param>
-    /// <param name="price">The month's average price per kWh; 0 with no tariff.</param>
+    /// <param name="monthCost">What <paramref name="monthKwh"/> cost at the tariffs in force as it was used; 0 with no tariff.</param>
+    /// <param name="price">Today's price per kWh, for the energy still to come; 0 with no tariff.</param>
     /// <param name="currency">The tariff's currency; null with no tariff.</param>
-    public static BillForecast From(IReadOnlyList<DayUse> days, DateOnly today, double todayLeft, double monthKwh, decimal price, string? currency)
+    public static BillForecast From(
+        IReadOnlyList<DayUse> days, DateOnly today, double todayLeft, double monthKwh, decimal monthCost, decimal price, string? currency)
     {
         var since = today.AddDays(-7 * Weeks);
         var recent = days.Where(d => d.Day >= since && d.Day < today).OrderBy(d => d.Day).ToList();
@@ -46,7 +49,8 @@ internal static class BillForecasts
         var (under, over) = Band(Misses(recent), weights.Select(w => w.Weight).ToList(), weights.Select(w => (int)w.Day.DayOfWeek).ToList(), shared);
         var low = Math.Min(projected, Math.Max(monthKwh, projected + under));
         var high = Math.Max(projected, projected + over);
-        return new BillForecast(Cost(projected, price), Cost(low, price), Cost(high, price), currency, recent.Count, true, Kwh(projected), Kwh(low), Kwh(high));
+        decimal Cost(double kwh) => decimal.Round(monthCost + (decimal)Math.Max(0, kwh - monthKwh) * price, 2);
+        return new BillForecast(Cost(projected), Cost(low), Cost(high), currency, recent.Count, true, Kwh(projected), Kwh(low), Kwh(high));
     }
 
     /// <summary>A day's energy from the days known before it: the median of its weekday; else the mean of its month's
@@ -117,8 +121,6 @@ internal static class BillForecasts
         Array.Sort(sums);
         return (Stats.Quantile(sums, LowQuantile), Stats.Quantile(sums, HighQuantile));
     }
-
-    private static decimal Cost(double kwh, decimal price) => decimal.Round((decimal)Math.Max(0, kwh) * price, 2);
 
     /// <summary>To the watt-hour: a sum of hour rows carries float noise the page would never show.</summary>
     private static double Kwh(double kwh) => Math.Round(Math.Max(0, kwh), 3);

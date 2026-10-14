@@ -1,4 +1,5 @@
 using PowerLedger.Contracts;
+using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
 
@@ -60,11 +61,11 @@ public class NowMathTests
     }
 
     [Fact]
-    public void The_month_projects_from_the_daily_average_and_prices_it_at_the_month_s_own_rate()
+    public void The_month_projects_from_the_daily_average_and_without_today_s_tariff_prices_it_at_the_month_s_own_rate()
     {
         var days = Enumerable.Range(1, 8).Select(d => Day(d, 0.3 + d * 0.01)).ToList();
         var month = Month(energyKwh: days.Sum(d => d.EnergyKwh), cost: 0.50m, idleOnKwh: 0.15, idleOffKwh: 0.06);
-        var outlook = MonthOutlook.From(month, days, new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero));
+        var outlook = MonthOutlook.From(month, days, new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero), tariff: null);
 
         outlook.DailyAverageKwh.ShouldNotBeNull().ShouldBe(month.EnergyKwh / 7.5, 1e-9);
         outlook.ProjectedKwh.ShouldNotBeNull().ShouldBe(month.EnergyKwh / 7.5 * 30, 1e-9);
@@ -77,10 +78,42 @@ public class NowMathTests
         outlook.DaysRecorded.ShouldBe(8);
     }
 
+    /// <summary>Report finding 4: the PC was off from the 1st to the 5th. The month is what it has used plus the daily
+    /// average for the days left, not the average over all 30 days; the days left cost today's tariff.</summary>
+    [Fact]
+    public void The_month_projects_what_it_has_used_plus_the_daily_average_for_the_days_left()
+    {
+        var days = Enumerable.Range(6, 3).Select(d => Day(d, 0.4)).ToList();
+        var month = Month(energyKwh: 1.2, cost: 0.30m);
+
+        var outlook = MonthOutlook.From(month, days, new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero), new Tariff(T0.AddDays(-1), 0.40m, "USD"));
+
+        // 1.2 kWh over the 2.5 days since the 6th is 0.48 a day; 22.5 days are left: 1.2 + 10.8 kWh.
+        outlook.DailyAverageKwh.ShouldNotBeNull().ShouldBe(0.48, 1e-9);
+        outlook.ProjectedKwh.ShouldNotBeNull().ShouldBe(12.0, 1e-9);
+        outlook.ProjectedCost.ShouldBe(0.30m + 4.32m);
+    }
+
+    /// <summary>Report finding 4: in a zone half an hour off UTC, the month's hour rows reach back into the last day of the
+    /// month before. That stub is not a day of this month, so it neither starts the average nor counts as a day.</summary>
+    [Fact]
+    public void A_stub_of_the_month_before_is_left_out()
+    {
+        var days = new[] { new DayTotals(new DateOnly(2026, 8, 31), 0.01, 0, "USD", false, OnHours: 0.5, PeakW: 60, IdleOnKwh: 0, IdleOffKwh: 0) }
+            .Concat(Enumerable.Range(1, 8).Select(d => Day(d, 0.3))).ToList();
+        var month = Month(energyKwh: 2.41, cost: 0.40m);
+
+        var outlook = MonthOutlook.From(month, days, new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero), tariff: null);
+
+        outlook.DailyAverageKwh.ShouldNotBeNull().ShouldBe(2.41 / 7.5, 1e-9);
+        outlook.DaysRecorded.ShouldBe(8);
+        outlook.Lowest!.Day.ShouldBe(new DateOnly(2026, 9, 1));
+    }
+
     [Fact]
     public void Before_a_full_day_is_recorded_there_is_no_projection()
     {
-        var outlook = MonthOutlook.From(Month(energyKwh: 0.2, cost: 0.03m), [Day(8, 0.2)], new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero));
+        var outlook = MonthOutlook.From(Month(energyKwh: 0.2, cost: 0.03m), [Day(8, 0.2)], new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero), tariff: null);
         outlook.DailyAverageKwh.ShouldBeNull();
         outlook.ProjectedKwh.ShouldBeNull();
         outlook.Lowest.ShouldBeNull();
