@@ -24,6 +24,11 @@ internal static class Program
         // Crashes go to a file whatever the user chose; the sharing worker records or deletes each (data-sharing design §5).
         var crashes = host.Services.GetRequiredService<ServicePaths>().Crashes;
         ServiceCrashes.Catch(crashes);
+        using (var self = Process.GetCurrentProcess())
+        {
+            // Perf review §3: the steady work runs at Windows' efficiency setting, which a service is never given otherwise.
+            if (!EcoQos.Enable(self.SafeHandle)) Log.Warning("Windows would not run the service at its efficiency setting (EcoQoS)");
+        }
         try
         {
             var loop = host.Services.GetRequiredService<SamplingLoop>();
