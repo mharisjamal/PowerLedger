@@ -13,7 +13,7 @@ namespace PowerLedger.Sensors.Tests;
 public class EveryGpuTests
 {
     private const ulong GiB = 1UL << 30;
-    private const double Idle = PowerModel.GpuIdleW;
+    private static readonly double Idle = Math.Max(PowerModel.GpuIdleW, PowerModel.DesktopGpuIdleShare * 204);   // the 204 W Quadro 6000's, a desktop card
 
     private static readonly GpuAdapter Quadro6000 = new("NVIDIA Quadro 6000", DiscreteGpu.NvidiaVendor, 6 * GiB, 0x1000, 0, false, DeviceId: 0x06D8);
     private static readonly GpuAdapter Gtx1080 = new("NVIDIA GeForce GTX 1080", DiscreteGpu.NvidiaVendor, 8 * GiB, 0x2000, 0, false, DeviceId: 0x1B80);

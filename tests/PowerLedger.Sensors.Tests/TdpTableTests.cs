@@ -84,7 +84,30 @@ public class TdpTableTests
     [InlineData("AMD Radeon RX 7600M", 90)]
     [InlineData("AMD Radeon RX 7600S", 75)]
     [InlineData("Intel(R) Arc(TM) A770M Graphics", 150)]
+    [InlineData("NVIDIA GeForce RTX 3050 Laptop GPU", 60)]          // not the desktop RTX 3050's 130 W
+    [InlineData("NVIDIA GeForce RTX 3050 Ti Laptop GPU", 60)]
+    [InlineData("NVIDIA GeForce RTX 3060 Laptop GPU", 90)]
+    [InlineData("NVIDIA GeForce RTX 3080 Ti Laptop GPU", 130)]
+    [InlineData("NVIDIA GeForce RTX 4060 Laptop GPU", 90)]
+    [InlineData("NVIDIA GeForce RTX 4090 Laptop GPU", 140)]          // not the desktop's 450 W
+    [InlineData("NVIDIA GeForce RTX 5090 Laptop GPU", 140)]          // nor 575 W
+    [InlineData("NVIDIA GeForce GTX 960M", 65)]                      // not the desktop GTX 960's 120 W
+    [InlineData("NVIDIA GeForce GTX 1660 Ti with Max-Q Design", 60)]
+    [InlineData("NVIDIA GeForce RTX 2080 with Max-Q Design", 90)]
     public void A_laptop_card_is_not_rated_as_the_desktop_card_its_name_begins_with(string name, double watts)
+        => TdpTable.Bundled.Gpu(name).ShouldBe(watts);
+
+    /// <summary>The Optimus parts NVML reports no power for, which the table once left to the 75 W memory guess.</summary>
+    [Theory]
+    [InlineData("NVIDIA GeForce MX130", 25)]
+    [InlineData("NVIDIA GeForce MX150", 25)]
+    [InlineData("NVIDIA GeForce MX250", 25)]
+    [InlineData("NVIDIA GeForce MX550", 25)]
+    [InlineData("NVIDIA GeForce MX570", 25)]
+    [InlineData("NVIDIA GeForce 940MX", 23)]
+    [InlineData("NVIDIA GeForce RTX 4050 Laptop GPU", 80)]
+    [InlineData("NVIDIA GeForce RTX 2050", 40)]
+    public void A_laptop_card_nvml_gives_no_watts_for_has_a_rating_of_its_own(string name, double watts)
         => TdpTable.Bundled.Gpu(name).ShouldBe(watts);
 
     [Theory]

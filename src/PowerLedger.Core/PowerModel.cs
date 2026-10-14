@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using PowerLedger.Contracts;
 
 namespace PowerLedger.Core;
@@ -18,7 +19,7 @@ namespace PowerLedger.Core;
 /// holds it. One running off the PC, as a portable monitor on a laptop's USB-C port does, draws through the PC's supply
 /// or battery, so it goes inside any division and is already in every reading.
 /// </summary>
-public sealed class PowerModel
+public sealed partial class PowerModel
 {
     /// <summary>Default laptop "rest of system" (board, RAM, SSD, radios) before calibration, at a CPU drawing nothing; it
     /// adds <see cref="LaptopRestPerCpuWatt"/> of each CPU watt. Extras are separate.</summary>
@@ -32,6 +33,7 @@ public sealed class PowerModel
     /// CPU band (Plan AC). The calibration learner starts from this share and learns the laptop's own.
     /// </summary>
     public const double LaptopRestPerCpuWatt = 0.5;
+
     public const double DesktopBoardW = 12;
     public const double FanW = 1;
     public const double Ddr4StickW = 2.5;
@@ -43,11 +45,23 @@ public sealed class PowerModel
     public const double GpuIdleW = 3;
 
     /// <summary>
+    /// What a desktop card nothing measures idles at, as a share of its rating (Plan AC): big cards idle well above 3 W.
+    /// TechPowerUp's card-only idle readings put an RTX 4090 at about 21 W of its 450 W and a GTX 1080 at about 7 W of
+    /// 180 W, and cards that keep their link awake (Fermi, an Arc A7xx without ASPM) idle higher still; 4% sits under
+    /// them, and a small card stays at <see cref="GpuIdleW"/>. A laptop's card idles switched off, so it keeps 3 W.
+    /// </summary>
+    public const double DesktopGpuIdleShare = 0.04;
+
+    /// <summary>
     /// What a discrete GPU's chip or package reading is multiplied by to count the whole card (spec §3). Such a reading
     /// leaves out the card's memory regulators, voltage regulator losses and fans, and measured cards drew 12–25% more than
     /// their chip figure: an RX 5700 XT reporting 180 W drew 202 W, and an RX 6800 XT reporting 255 W about 300 W.
     /// </summary>
     public const double RestOfCardFactor = 1.15;
+
+    /// <summary>The same for AMD's GCN cards, whose ASIC power leaves out their HBM or GDDR5 and its regulators too: board
+    /// measurements of GCN cards run about 40% over the chip figure (accuracy review, A16).</summary>
+    public const double GcnRestOfCardFactor = 1.4;
 
     private readonly MachineProfile _profile;
     private readonly HardwareFacts _facts;
@@ -269,25 +283,36 @@ public sealed class PowerModel
         if (s.Gpus is { Count: > 0 } cards)
         {
             var sum = 0.0;
-            foreach (var card in cards) sum += CardWatts(card.Watts, card.Scope, card.Load, card.RatedW, onlyCard: cards.Count == 1);
+            foreach (var card in cards) sum += CardWatts(card.Name, card.Watts, card.Scope, card.Load, card.RatedW, onlyCard: cards.Count == 1);
             return sum;
         }
-        return s.DGpuPresent ? CardWatts(s.DGpuW, s.DGpuScope, s.DGpuLoad, rated: null, onlyCard: true) : 0;
+        return s.DGpuPresent ? CardWatts(null, s.DGpuW, s.DGpuScope, s.DGpuLoad, rated: null, onlyCard: true) : 0;
     }
 
-    /// <summary>A card's watts: measured ones as they are, with the rest of the card added to a chip or package figure; the
-    /// others idle plus the load's share of the rating above idle. The user's figure rates the card when there is one; with
-    /// several it rates only those without a rating of their own, since one figure cannot be every card's.</summary>
-    private double CardWatts(double? watts, GpuPowerScope scope, double? load, double? rated, bool onlyCard)
+    /// <summary>A card's watts: measured ones as they are, with the rest of the card added to a chip or package figure (more
+    /// of it on a GCN card); the others idle plus the load's share of the rating above idle, a desktop card idling at
+    /// <see cref="DesktopGpuIdleShare"/> of its rating and never under <see cref="GpuIdleW"/>. The user's figure rates the
+    /// card when there is one; with several it rates only those without a rating of their own, since one figure cannot be
+    /// every card's.</summary>
+    private double CardWatts(string? name, double? watts, GpuPowerScope scope, double? load, double? rated, bool onlyCard)
     {
         if (Finite(watts) is { } w)
         {
-            return Math.Max(0, w) * (scope is GpuPowerScope.ChipOnly or GpuPowerScope.Package ? RestOfCardFactor : 1);
+            var restOfCard = IsGcn(name) ? GcnRestOfCardFactor : RestOfCardFactor;
+            return Math.Max(0, w) * (scope is GpuPowerScope.ChipOnly or GpuPowerScope.Package ? restOfCard : 1);
         }
         var rating = (onlyCard ? _profile.GpuTdpOverrideW : null) ?? Finite(rated) ?? _profile.GpuTdpOverrideW ?? _facts.GpuTdpW;
-        var tdp = Math.Max(GpuIdleW + 1, rating);
-        return GpuIdleW + (tdp - GpuIdleW) * Load(load ?? 0);
+        var idle = _profile.Chassis == ChassisKind.Laptop || !double.IsFinite(rating) ? GpuIdleW : Math.Max(GpuIdleW, DesktopGpuIdleShare * rating);
+        var tdp = Math.Max(idle + 1, rating);
+        return idle + ((tdp - idle) * Load(load ?? 0));
     }
+
+    /// <summary>Whether a card's name is one of AMD's GCN cards (Radeon HD 7000 and 8000, R5, R7 and R9, RX 400 and 500,
+    /// Vega, Radeon VII, FirePro and Radeon Pro WX), whose chip reading leaves out more of the card.</summary>
+    private static bool IsGcn(string? name) => !string.IsNullOrEmpty(name) && GcnName().IsMatch(name);
+
+    [GeneratedRegex(@"\b(HD\s*[78]\d{3}|R[579]\s*\d{3}X?2?|R9\s*(Fury|Nano)|RX\s*[45]\d{2}X?|Vega|Radeon\s*(Pro\s*)?VII|FirePro|WX\s*\d{4})\b", RegexOptions.IgnoreCase)]
+    private static partial Regex GcnName();
 
     private double RamWatts() => _profile.RamSticks * (_profile.RamIsDdr5 ? Ddr5StickW : Ddr4StickW);
 
