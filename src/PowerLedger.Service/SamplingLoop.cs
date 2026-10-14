@@ -27,9 +27,11 @@ internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationS
 /// <param name="DatabaseNotice">What start-up had to do to the database, for the status screen.</param>
 /// <param name="Watched">Whether anyone may be looking at the live figures (<see cref="ServiceSignals.Watched"/>), asked
 /// whenever the loop picks its interval; always, when left out.</param>
+/// <param name="Battery">The laptop battery's charge, read as the machine goes to sleep and as it wakes (see
+/// <see cref="SleepKeeper"/>); null when there is none or it reports no watt-hours. Left out, nothing is learned.</param>
 internal sealed record LoopEnvironment(
     Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice,
-    Func<bool>? Watched = null);
+    Func<bool>? Watched = null, Func<BatteryCharge?>? Battery = null);
 
 /// <summary>
 /// The service's heart (spec §3, §6, §7). Once a sample interval it reads the sensors, runs the model, feeds the
@@ -77,6 +79,7 @@ internal sealed class SamplingLoop : BackgroundService
     private readonly NutSecret _nutSecret;
     private readonly SessionTracker _sessions;
     private readonly CalibrationKeeper _calibration;
+    private readonly SleepKeeper _sleep;
     private readonly Rollups _rollups;
     private readonly RetentionRunner _retention;
     private readonly WriteBuffer _buffer;
@@ -122,6 +125,7 @@ internal sealed class SamplingLoop : BackgroundService
         _nutSecret = new NutSecret(new SettingsRepository(database));
         _sessions = new SessionTracker(new SessionRepository(database));
         _calibration = new CalibrationKeeper(new CalibrationRepository(database), _options.Calibration, _options.CalibrationSaveEvery);
+        _sleep = new SleepKeeper(new SettingsRepository(database), environment.Battery, log);
         _rollups = new Rollups(_raw, new AggregateRepository(database), new SessionRepository(database));
         _retention = new RetentionRunner(database, clock.LocalTimeZone);
         _buffer = new WriteBuffer(_raw.InsertBatch);
@@ -263,6 +267,7 @@ internal sealed class SamplingLoop : BackgroundService
             stored = null;
         }
         _settings = stored ?? ServiceSettings.Default;
+        _sleep.Load();
         _rollups.CatchUp(now, TimeSpan.FromHours(_settings.RawRetentionHours), GapThreshold);
         var reason = _sessions.Start(now, _environment.SystemUptime(), _raw.Latest());
         _log.LogInformation("PowerLedger {Version} started ({Reason})", Version, reason);
@@ -311,6 +316,8 @@ internal sealed class SamplingLoop : BackgroundService
             _tickClock.Commit(now);
             var reading = _model!.Evaluate(result.Sample, out var monitorWatts);
             reading = reading with { Measured = Frames.Measured(result.Sample, reading.TotalSource) };   // stored for data sharing
+            // The tick that reaches back across a sleep carries what the machine drew asleep, booked over the sleep (A10).
+            if (spansSleep) reading = reading with { AsleepW = _sleep.Watts(_settings.Profile.Chassis == ChassisKind.Laptop, reading.OnBattery) };
             var parts = reading.Components;
             // The battery delivers what the monitors running off the laptop draw, so they are taken out with the display, or
             // the learner would learn them into the rest of the laptop. The figure is the one the reading used. The first
@@ -474,6 +481,7 @@ internal sealed class SamplingLoop : BackgroundService
     private void Suspend(DateTimeOffset now)
     {
         if (_suspended) return;
+        _sleep.Suspending(now);                              // first, as close to the sleep as can be
         WriteAndFold(Rollups.Floor(now, Minute) + Minute);
         _calibration.Save(now);
         _sessions.End(now, SessionReason.Suspend);
@@ -488,6 +496,7 @@ internal sealed class SamplingLoop : BackgroundService
     /// </summary>
     private void Resume(DateTimeOffset now)
     {
+        if (_suspended) _sleep.Resumed(now);                 // first, as close to the wake as can be
         _worker.RefreshDisplay();
         _rebuildAt = now + RebuildAfterResume;
         _sessions.Resume(now);

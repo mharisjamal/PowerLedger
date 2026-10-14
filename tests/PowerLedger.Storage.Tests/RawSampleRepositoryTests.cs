@@ -30,6 +30,20 @@ public class RawSampleRepositoryTests
     }
 
     [Fact]
+    public void What_a_sleep_drew_comes_back_with_the_tick_that_reached_across_it_for_the_service()
+    {
+        using var t = new TestDatabase();
+        var repo = new RawSampleRepository(t.Db);
+        var awake = Fixtures.Reading(0);
+        var woke = Fixtures.Reading(7200, delta: 7199) with { AsleepW = 0.85 };
+        repo.InsertBatch([awake, woke]);
+
+        repo.ReadAll(Fixtures.T0, Fixtures.T0.AddHours(3)).ShouldBe(new[] { awake, woke });
+        repo.ReadRange(Fixtures.T0.ToUnixTimeMilliseconds(), Fixtures.T0.AddHours(3).ToUnixTimeMilliseconds()).ShouldBe(new[] { awake, woke });
+        repo.Read(Fixtures.T0, Fixtures.T0.AddHours(3)).Last().AsleepW.ShouldBeNull();   // the App's read, from any version
+    }
+
+    [Fact]
     public void A_batch_round_trips_every_field()
     {
         using var t = new TestDatabase();

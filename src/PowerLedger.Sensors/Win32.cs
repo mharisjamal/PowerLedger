@@ -14,11 +14,19 @@ internal static class Win32
     /// <summary>Windows reports this when it cannot tell how fast the battery is moving.</summary>
     public const int UnknownRate = unchecked((int)0x80000000);
 
+    /// <summary>BATTERY_UNKNOWN_CAPACITY: Windows reports this when it cannot tell a battery's capacity.</summary>
+    public const uint UnknownCapacity = 0xFFFFFFFF;
+
     /// <param name="AcOnLine">True when the machine is on mains power.</param>
     /// <param name="Present">True when Windows sees a battery.</param>
     /// <param name="RateMilliwatts">Negative while discharging, positive while charging, <see cref="UnknownRate"/> when unknown.</param>
     /// <param name="ShortTerm">True when Windows marks the batteries short-term, as it does for a UPS on USB.</param>
-    public readonly record struct BatteryState(bool AcOnLine, bool Present, bool Charging, bool Discharging, int RateMilliwatts, bool ShortTerm = false)
+    /// <param name="RemainingMilliwattHours">What is left in the batteries (SYSTEM_BATTERY_STATE.RemainingCapacity),
+    /// <see cref="UnknownCapacity"/> when Windows can't tell; in arbitrary units on a battery that reports relative ones.</param>
+    /// <param name="FullMilliwattHours">What the batteries hold full (MaxCapacity), the same way.</param>
+    public readonly record struct BatteryState(
+        bool AcOnLine, bool Present, bool Charging, bool Discharging, int RateMilliwatts, bool ShortTerm = false,
+        uint RemainingMilliwattHours = UnknownCapacity, uint FullMilliwattHours = UnknownCapacity)
     {
         /// <summary>A battery that powers this machine alone. A UPS also powers whatever else is plugged into it, so
         /// neither its presence nor its drain says anything about this machine. Windows marks some UPS units short-term,
@@ -38,7 +46,8 @@ internal static class Win32
         var state = default(SystemBatteryStateInfo);
         var status = CallNtPowerInformation(SystemBatteryState, IntPtr.Zero, 0, ref state, (uint)Marshal.SizeOf<SystemBatteryStateInfo>());
         if (status != 0) return null;
-        return new BatteryState(state.AcOnLine != 0, state.BatteryPresent != 0, state.Charging != 0, state.Discharging != 0, state.Rate, shortTerm);
+        return new BatteryState(state.AcOnLine != 0, state.BatteryPresent != 0, state.Charging != 0, state.Discharging != 0, state.Rate, shortTerm,
+            state.RemainingCapacity, state.MaxCapacity);
     }
 
     /// <summary>False when Windows will not say, which keeps a real battery counted.</summary>

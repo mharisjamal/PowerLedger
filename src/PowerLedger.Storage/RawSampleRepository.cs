@@ -10,8 +10,9 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         "ts_ms, delta_s, total_w, quality, cpu_w, gpu_w, display_w, ram_w, storage_w, board_w, extras_w, monitors_w, psu_loss_w, unattributed_w, " +
         "on_battery, display_on, user_idle, locked, cpu_load, gpu_load, brightness, suspect";
 
-    /// <summary>What storage version 2 added: where the total came from, what the card's figure covered, what was measured.</summary>
-    private const string Provenance = "total_source, gpu_scope, measured_mask";
+    /// <summary>What storage versions 2 and 5 added: where the total came from, what the card's figure covered, what was
+    /// measured, and what the machine drew asleep on the tick that reached back across a sleep.</summary>
+    private const string Provenance = "total_source, gpu_scope, measured_mask, asleep_w";
 
     /// <summary>Writes all readings in one transaction. Same timestamp replaces the earlier row.</summary>
     public void InsertBatch(IReadOnlyList<Reading> readings)
@@ -22,8 +23,8 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         using var cmd = c.CreateCommand();
         cmd.CommandText = $"INSERT OR REPLACE INTO samples_raw ({Columns}, {Provenance}) VALUES " +
             "($ts, $delta, $total, $quality, $cpu, $gpu, $display, $ram, $storage, $board, $extras, $monitors, $psu, $rest, " +
-            "$onBattery, $displayOn, $userIdle, $locked, $cpuLoad, $gpuLoad, $brightness, $suspect, $totalSource, $gpuScope, $measured)";
-        var names = new[] { "$ts", "$delta", "$total", "$quality", "$cpu", "$gpu", "$display", "$ram", "$storage", "$board", "$extras", "$monitors", "$psu", "$rest", "$onBattery", "$displayOn", "$userIdle", "$locked", "$cpuLoad", "$gpuLoad", "$brightness", "$suspect", "$totalSource", "$gpuScope", "$measured" };
+            "$onBattery, $displayOn, $userIdle, $locked, $cpuLoad, $gpuLoad, $brightness, $suspect, $totalSource, $gpuScope, $measured, $asleep)";
+        var names = new[] { "$ts", "$delta", "$total", "$quality", "$cpu", "$gpu", "$display", "$ram", "$storage", "$board", "$extras", "$monitors", "$psu", "$rest", "$onBattery", "$displayOn", "$userIdle", "$locked", "$cpuLoad", "$gpuLoad", "$brightness", "$suspect", "$totalSource", "$gpuScope", "$measured", "$asleep" };
         foreach (var n in names) cmd.Parameters.Add(new SqliteParameter(n, null));
 
         foreach (var r in readings)
@@ -31,7 +32,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
             var p = r.Components;
             object?[] values = [Rows.Ms(r.Timestamp), r.DeltaSeconds, r.TotalW, (int)r.Quality, p.Cpu, p.Gpu, p.Display, p.Ram, p.Storage, p.Board, p.Extras, p.Monitors, p.PsuLoss, p.Unattributed,
                 r.OnBattery ? 1 : 0, r.DisplayOn ? 1 : 0, r.UserIdle ? 1 : 0, r.SessionLocked ? 1 : 0, r.CpuLoad, r.GpuLoad, r.Brightness, r.Suspect ? 1 : 0,
-                (int)r.TotalSource, (int)r.GpuScope, (int)r.Measured];
+                (int)r.TotalSource, (int)r.GpuScope, (int)r.Measured, r.AsleepW is { } asleep && double.IsFinite(asleep) ? asleep : null];
             for (var i = 0; i < values.Length; i++) cmd.Parameters[i].Value = values[i] ?? DBNull.Value;
             cmd.ExecuteNonQuery();
         }
@@ -49,6 +50,10 @@ public sealed class RawSampleRepository(SqliteDatabase db)
     /// column, for the data-sharing collector.</summary>
     public List<Reading> ReadRange(long fromMs, long toMs) => Select(fromMs, toMs, provenance: true);
 
+    /// <summary>Readings with from ≤ timestamp &lt; to, oldest first, with every column, for the service, whose database is
+    /// always at the latest version: the rollups need what each sleep drew.</summary>
+    public List<Reading> ReadAll(DateTimeOffset from, DateTimeOffset to) => Select(Rows.Ms(from), Rows.Ms(to), provenance: true);
+
     private List<Reading> Select(long fromMs, long toMs, bool provenance)
     {
         using var c = db.Open();
@@ -65,7 +70,11 @@ public sealed class RawSampleRepository(SqliteDatabase db)
                 r.GetInt32(14) == 1, r.GetInt32(15) == 1, r.GetInt32(16) == 1, r.GetInt32(17) == 1,
                 r.GetDouble(18), Rows.NullableDouble(r, 19), Rows.NullableDouble(r, 20), r.GetInt32(21) == 1);
             list.Add(provenance
-                ? reading with { TotalSource = (TotalSource)r.GetInt32(22), GpuScope = (GpuPowerScope)r.GetInt32(23), Measured = (MeasuredParts)r.GetInt32(24) }
+                ? reading with
+                {
+                    TotalSource = (TotalSource)r.GetInt32(22), GpuScope = (GpuPowerScope)r.GetInt32(23), Measured = (MeasuredParts)r.GetInt32(24),
+                    AsleepW = Rows.NullableDouble(r, 25),
+                }
                 : reading);
         }
         return list;

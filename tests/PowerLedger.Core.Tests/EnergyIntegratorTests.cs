@@ -95,6 +95,30 @@ public class EnergyIntegratorTests
     }
 
     [Fact]
+    public void A_sleep_s_estimated_draw_is_booked_over_its_gap_as_asleep_energy_and_nothing_else()
+    {
+        var e = EnergyIntegrator.Integrate(Reading(delta: 8 * 3600) with { AsleepW = 0.85 });
+        e.Gap.ShouldBeTrue();
+        e.AsleepWh.ShouldBe(0.85 * 8, 1e-9);
+        e.Wh.ShouldBe(0);
+        e.OnSeconds.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(-1.0)]
+    public void An_asleep_draw_that_is_no_number_books_nothing(double asleepW)
+        => EnergyIntegrator.Integrate(Reading(delta: 3600) with { AsleepW = asleepW }).AsleepWh.ShouldBe(0);
+
+    [Fact]
+    public void Only_a_gap_books_asleep_energy_and_a_gap_without_a_known_sleep_books_none()
+    {
+        EnergyIntegrator.Integrate(Reading(delta: 1) with { AsleepW = 2 }).AsleepWh.ShouldBe(0);
+        EnergyIntegrator.Integrate(Reading(delta: 3600)).AsleepWh.ShouldBe(0);
+    }
+
+    [Fact]
     public void Battery_seconds_are_counted_only_on_battery()
     {
         EnergyIntegrator.Integrate(Reading(onBattery: true)).BatterySeconds.ShouldBe(1.0);

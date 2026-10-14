@@ -47,13 +47,14 @@ internal sealed class HourRows(AggregateRepository aggregates, TariffRepository 
         return true;
     }
 
-    /// <summary>One hour's row, costed at <paramref name="tariff"/>, or with no cost when there is none.</summary>
+    /// <summary>One hour's row, costed at <paramref name="tariff"/>, or with no cost when there is none. Its energy and cost are
+    /// the hour's as the PC's own report counts them (<see cref="Aggregate.CountedWh"/>); its parts are the PC's awake.</summary>
     internal static HouseholdRow Of(string deviceId, Aggregate hour, Tariff? tariff, long changedMs) => new(
         deviceId, hour.Start.ToUnixTimeMilliseconds(),
-        hour.EnergyWh, hour.CpuWh, hour.GpuWh, hour.DisplayWh, hour.RestWh, hour.IdleOnWh, hour.IdleOffWh,
+        hour.CountedWh, hour.CpuWh, hour.GpuWh, hour.DisplayWh, hour.RestWh, hour.IdleOnWh, hour.IdleOffWh,
         hour.OnSeconds, hour.BatterySeconds, hour.IdleOnSeconds + hour.IdleOffSeconds,
         hour.MeasuredSeconds, hour.CalibratedSeconds, hour.EstimatedSeconds,
-        tariff is null ? null : CostMicro(hour.EnergyWh, tariff.PricePerKwh), tariff?.Currency, changedMs);
+        tariff is null ? null : CostMicro(hour.CountedWh, tariff.PricePerKwh), tariff?.Currency, changedMs);
 
     /// <summary>Watt-hours at a price per kWh, in millionths, halves rounded away from zero.</summary>
     internal static long CostMicro(double energyWh, decimal pricePerKwh) =>

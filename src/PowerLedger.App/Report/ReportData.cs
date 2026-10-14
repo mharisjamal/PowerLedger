@@ -56,6 +56,10 @@ internal sealed record HouseholdReportData(string Energy, IReadOnlyList<Househol
 /// Everything a report shows (spec §9 Report), written out. The Report screen, the PDF and the monthly job all read this,
 /// so they always agree.
 /// </summary>
+/// <param name="AsleepEnergy">The kWh the PC drew asleep, estimated (accuracy A10), which Energy and Cost count; empty
+/// when it drew none in the range, and its line is then not shown.</param>
+/// <param name="BatteryEnergy">The kWh the PC drew awake from its battery, at the wall equivalent it was charged at (accuracy
+/// A9), as Energy and Cost count it; empty when it drew none from the battery, and its line is then not shown.</param>
 internal sealed record ReportData(
     string Title, string Period, bool HasData,
     string Energy, string Cost, string CostNote, string Co2, string Co2Note,
@@ -63,7 +67,8 @@ internal sealed record ReportData(
     string On, string IdleOn, string IdleOff, string Asleep, string Unmonitored,
     string IdleWaste, string IdleWasteNote, string Advice,
     IReadOnlyList<PartRow> Parts, IReadOnlyList<ReportLine> Equivalents,
-    QualityMix Quality, string QualityText, IReadOnlyList<DayBar> Days, HouseholdReportData? Household = null)
+    QualityMix Quality, string QualityText, IReadOnlyList<DayBar> Days, HouseholdReportData? Household = null,
+    string AsleepEnergy = "", string BatteryEnergy = "")
 {
     /// <summary>What each quality means, under the quality bar on the Report screen and in the PDF. The external monitors'
     /// watts come from their own figures whatever the quality, but aren't always added to it: a monitor running off a laptop
@@ -116,7 +121,9 @@ internal sealed record ReportData(
                 ? $"{Format.Percent(t.MeasuredShare, culture)} measured · {Format.Percent(t.CalibratedShare, culture)} calibrated · {Format.Percent(t.EstimatedShare, culture)} estimated"
                 : "no readings",
             Bars(first, Ranges.LocalDay(report.Range.Through.AddTicks(-1), zone), report.Days),
-            household);
+            household,
+            t.AsleepKwh > 0 ? Format.Kwh(t.AsleepKwh, culture) : "",
+            t.BatteryKwh > 0 ? Format.Kwh(t.BatteryKwh, culture) : "");
     }
 
     /// <summary>The tariff in force at the range's end, and the day it started when that was inside the range, since

@@ -157,6 +157,8 @@ internal static class ReportDocument
                 Line(bill, "CO₂", data.Co2, data.Co2Note);
                 Line(bill, "Average", WithUnit(data.Average, "W"), data.Average == Format.Missing ? "" : "while on");
                 Line(bill, "Peak", WithUnit(data.Peak, "W"), data.PeakAt);
+                if (data.AsleepEnergy.Length > 0) Line(bill, "Asleep (estimated)", WithUnit(data.AsleepEnergy, "kWh"), "in the energy");
+                if (data.BatteryEnergy.Length > 0) Line(bill, "From the battery", WithUnit(data.BatteryEnergy, "kWh"), "wall equivalent");
             });
             row.RelativeItem().Column(time =>
             {

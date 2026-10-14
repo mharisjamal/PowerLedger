@@ -14,8 +14,11 @@ public sealed class MigrationTests : IDisposable
     {
         using var db = SqliteDatabase.OpenAndMigrate(_path);
         using var c = db.Open();
-        Migrator.LatestVersion.ShouldBe(4);
-        Migrator.CurrentVersion(c).ShouldBe(4);
+        Migrator.LatestVersion.ShouldBe(5);
+        Migrator.CurrentVersion(c).ShouldBe(5);
+        Columns(c, "samples_raw").ShouldContain("asleep_w");
+        Columns(c, "samples_1m").ShouldContain("asleep_wh");
+        Columns(c, "samples_1h").ShouldContain("asleep_wh");
         Columns(c, "samples_raw").ShouldContain("total_source");
         Columns(c, "samples_raw").ShouldContain("gpu_scope");
         Columns(c, "samples_raw").ShouldContain("measured_mask");
@@ -69,8 +72,32 @@ public sealed class MigrationTests : IDisposable
         }
 
         using var db = SqliteDatabase.OpenAndMigrate(_path);
-        using (var c = db.Open()) Migrator.CurrentVersion(c).ShouldBe(4);
+        using (var c = db.Open()) Migrator.CurrentVersion(c).ShouldBe(Migrator.LatestVersion);
         new CalibrationRepository(db).Load("abc").Buckets.ShouldBe([new Core.BucketState(6, 3.4, 6000)]);
+    }
+
+    /// <summary>Accuracy A9: a row from before version 5 takes as the battery's energy its energy's share of on-time spent on
+    /// battery; it has no asleep energy, which was never booked then.</summary>
+    [Fact]
+    public void A_version_4_database_gives_its_rows_the_battery_s_share_of_their_energy()
+    {
+        using (var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _path, Pooling = false }.ToString()))
+        {
+            c.Open();
+            Migrator.Exec(c, "CREATE TABLE schema_version (version INTEGER NOT NULL, applied_ms INTEGER NOT NULL)");
+            Migrator.Exec(c, Schema.V1 + Schema.V2 + Schema.V3 + Schema.V4);
+            Migrator.Exec(c, "INSERT INTO schema_version(version, applied_ms) VALUES (1, 0), (2, 0), (3, 0), (4, 0)");
+            Migrator.Exec(c, "INSERT INTO samples_1m VALUES (0, 30, 30, 0.5, 0.2, 0.05, 0.07, 0.18, 0, 0, 0, 0, 60, 30, 0, 60, 60, 0, 0)");
+            Migrator.Exec(c, "INSERT INTO samples_1m VALUES (60000, 30, 30, 0.5, 0.2, 0.05, 0.07, 0.18, 0, 0, 0, 0, 0, 0, 3600, 1, 0, 0, 0)");
+            Migrator.Exec(c, "INSERT INTO samples_1h VALUES (0, 30, 30, 30, 12, 3, 4, 11, 0, 0, 0, 0, 3600, 3600, 0, 3600, 3600, 0, 0)");
+        }
+
+        using var db = SqliteDatabase.OpenAndMigrate(_path);
+        var repo = new AggregateRepository(db);
+        var minutes = repo.ReadMinutes(DateTimeOffset.FromUnixTimeMilliseconds(0), DateTimeOffset.FromUnixTimeMilliseconds(120_000));
+        minutes.Select(m => m.BatteryWh).ShouldBe([0.25, 0]);
+        minutes.Select(m => m.AsleepWh).ShouldBe([0.0, 0]);
+        repo.ReadHours(DateTimeOffset.FromUnixTimeMilliseconds(0), DateTimeOffset.FromUnixTimeMilliseconds(1)).ShouldHaveSingleItem().BatteryWh.ShouldBe(30);
     }
 
     /// <summary>Each test disposes its own database, which closes only that database's pooled connections: clearing every

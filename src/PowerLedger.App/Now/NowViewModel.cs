@@ -359,7 +359,8 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
             $"{Format.WholeWatts((t.IdleOnKwh + t.IdleOffKwh) * 1000, _culture)} Wh wasted",
             Format.Duration(t.AsleepHours),
             Format.Kg(t.EnergyKwh * _co2KgPerKwh, _culture),
-            $"{_co2KgPerKwh.ToString("0.00", _culture)} kg / kWh grid");
+            $"{_co2KgPerKwh.ToString("0.00", _culture)} kg / kWh grid",
+            t.AsleepKwh > 0 ? $"{Format.Kwh(t.AsleepKwh, _culture)} kWh, estimated" : "");
     }
 
     private MonthLedger MonthOf(HistorySnapshot snapshot, DateTimeOffset local)

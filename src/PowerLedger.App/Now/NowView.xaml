@@ -103,7 +103,7 @@
                         <local:LedgerRow Key="Peak" Value="{Binding Today.Peak}" Note="{Binding Today.PeakAt}" />
                         <local:LedgerRow Key="On" Value="{Binding Today.On}" />
                         <local:LedgerRow Key="Idle" Value="{Binding Today.Idle}" Note="{Binding Today.IdleWasted}" />
-                        <local:LedgerRow Key="Asleep" Value="{Binding Today.Asleep}" />
+                        <local:LedgerRow Key="Asleep" Value="{Binding Today.Asleep}" Note="{Binding Today.AsleepEnergy}" />
                         <local:LedgerRow Key="CO₂" Value="{Binding Today.Co2}" Note="{Binding Today.Co2Factor}" />
                     </StackPanel>
                 </StackPanel>

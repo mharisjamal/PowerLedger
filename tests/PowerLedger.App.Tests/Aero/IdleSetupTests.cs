@@ -1,5 +1,6 @@
 using System.IO;
 using PowerLedger.Contracts;
+using PowerLedger.Core;
 using PowerLedger.Storage;
 using Shouldly;
 
@@ -29,11 +30,12 @@ public sealed class IdleSetupTests : IDisposable
     public void The_setup_comes_from_the_service_s_settings()
     {
         IdleSetup.Of(null).ShouldBe(IdleSetup.Default);
-        IdleSetup.Default.ShouldBe(new IdleSetup(TimeSpan.FromMinutes(5), IdleSetup.DesktopAsleepW));
+        IdleSetup.Default.ShouldBe(new IdleSetup(TimeSpan.FromMinutes(5), SleepPower.DesktopW));
+        // Accuracy A10: the same draw asleep the service books a sleep at; a laptop's on AC, through its adapter.
         IdleSetup.Of(new ServiceSettings { IdleThresholdSeconds = 600, Profile = MachineProfile.DefaultLaptop })
-            .ShouldBe(new IdleSetup(TimeSpan.FromMinutes(10), IdleSetup.LaptopAsleepW));
+            .ShouldBe(new IdleSetup(TimeSpan.FromMinutes(10), AdapterEfficiency.Wall(SleepPower.LaptopDrainW)));
         IdleSetup.Of(new ServiceSettings { IdleThresholdSeconds = 120, Profile = MachineProfile.DefaultDesktop })
-            .ShouldBe(new IdleSetup(TimeSpan.FromMinutes(2), IdleSetup.DesktopAsleepW));
+            .ShouldBe(new IdleSetup(TimeSpan.FromMinutes(2), SleepPower.DesktopW));
     }
 
     [Fact]
@@ -46,7 +48,10 @@ public sealed class IdleSetupTests : IDisposable
         read().ShouldBe(IdleSetup.Default, "nothing stored yet");
         var settings = new SettingsRepository(writer);
         settings.Set("service.settings", PipeProtocol.SerializeSettings(new ServiceSettings { IdleThresholdSeconds = 900, Profile = MachineProfile.DefaultLaptop }));
-        read().ShouldBe(new IdleSetup(TimeSpan.FromMinutes(15), IdleSetup.LaptopAsleepW));
+        read().ShouldBe(new IdleSetup(TimeSpan.FromMinutes(15), AdapterEfficiency.Wall(SleepPower.LaptopDrainW)));
+        var learned = SleepDrain.None.Learn(new BatteryCharge(false, 40, 50), new BatteryCharge(false, 37.6, 50), TimeSpan.FromHours(8));
+        settings.Set(SleepDrain.SettingsKey, learned.Save());                  // the service learned 0.3 W asleep
+        read().ShouldBe(new IdleSetup(TimeSpan.FromMinutes(15), AdapterEfficiency.Wall(learned.Watts!.Value)));
         settings.Set("service.settings", "not settings");
         read().ShouldBe(IdleSetup.Default);
     }

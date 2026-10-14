@@ -3,9 +3,10 @@ using PowerLedger.Contracts;
 namespace PowerLedger.Sensors;
 
 /// <summary>
-/// Asks Windows what this machine is made of (spec §5). Runs at service start and on resume, never per tick,
-/// because WMI is slow. Every query is individually guarded: a machine that will not answer one question
-/// still produces facts for the rest.
+/// Asks Windows what this machine is made of (spec §5). Runs at service start, and again once graphics adapters or
+/// batteries have come or gone and settled; never per tick, and not on resume, which keeps the facts it had (perf review
+/// §12), because WMI is slow. Every query is individually guarded: a machine that will not answer one question still
+/// produces facts for the rest.
 /// </summary>
 public static class HardwareInventory
 {

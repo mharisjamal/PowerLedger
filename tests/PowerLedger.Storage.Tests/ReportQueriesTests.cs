@@ -158,6 +158,81 @@ public class ReportQueriesTests
         totals.UnmonitoredHours.ShouldBe(7.5 - 7 - 1 / 60.0, 1e-9);
     }
 
+    /// <summary>Accuracy A10: what the PC drew asleep is in the total and its cost, apart from what it drew awake, and only
+    /// its part inside the range, laid back from the wake as the asleep hours are.</summary>
+    [Fact]
+    public void Asleep_energy_counts_in_the_total_and_the_cost_laid_back_and_clipped_like_the_asleep_hours()
+    {
+        using var t = new TestDatabase();
+        var woke = Fixtures.T0.AddHours(-5);                                   // 07:00, asleep since 22:00 at 0.85 W
+        new AggregateRepository(t.Db).UpsertMinute(Aggregate.Empty(woke) with
+        {
+            EnergyWh = 0.5, AvgW = 30, MaxW = 30, OnSeconds = 60, MeasuredSeconds = 60, SampleCount = 60, GapSeconds = 9 * 3600,
+            AsleepWh = 9 * 0.85,
+        });
+        new TariffRepository(t.Db).Add(new Tariff(woke.AddDays(-30), 0.20m, "USD"));
+
+        var totals = new ReportQueries(t.Db).Totals(woke.AddHours(-7), woke.AddMinutes(30));
+
+        totals.AsleepKwh.ShouldBe(7 * 0.85 / 1000, 1e-12);
+        totals.EnergyKwh.ShouldBe((0.5 + 7 * 0.85) / 1000, 1e-12);
+        totals.Cost.ShouldBe(decimal.Round((decimal)((0.5 + 7 * 0.85) / 1000) * 0.20m, 6));
+        totals.AvgW.ShouldBe(30, 1e-9);                                        // awake, as before
+        totals.CpuKwh.ShouldBe(0);
+    }
+
+    /// <summary>Accuracy A9: what the battery gave counts at the wall it was charged from, in the total, the cost and each
+    /// day, and apart as its wall equivalent; the average stays at the pack, as the live watts do.</summary>
+    [Fact]
+    public void Energy_from_the_battery_counts_at_its_wall_equivalent_and_the_average_stays_at_the_pack()
+    {
+        using var t = new TestDatabase();
+        var agg = new AggregateRepository(t.Db);
+        for (var i = 0; i < 60; i++)
+            agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), [.. Enumerable.Range(i * 60, 60).Select(s => Fixtures.Reading(s, 30, onBattery: true))]));
+        for (var i = 60; i < 120; i++)
+            agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), Fixtures.Minute(i * 60, 30)));
+        new TariffRepository(t.Db).Add(new Tariff(Fixtures.T0, 0.20m, "USD"));
+
+        var (totals, days) = new ReportQueries(t.Db).Report(Fixtures.T0, Fixtures.T0.AddHours(2), TimeZoneInfo.Utc);
+
+        var wall = (30 * BatteryRoundTrip.Factor + 30) / 1000;                  // 30 Wh from the battery, 30 Wh on AC
+        totals.EnergyKwh.ShouldBe(wall, 1e-12);
+        totals.BatteryKwh.ShouldBe(30 * BatteryRoundTrip.Factor / 1000, 1e-12);
+        totals.Cost.ShouldBe(decimal.Round((decimal)wall * 0.20m, 6), 0.000001m);
+        totals.AvgW.ShouldBe(30, 1e-9);
+        totals.CpuKwh.ShouldBe(0.024, 1e-12);                                   // the parts stay at the pack
+        days.ShouldHaveSingleItem().EnergyKwh.ShouldBe(wall, 1e-12);
+    }
+
+    [Fact]
+    public void A_night_asleep_is_split_between_the_days_it_spanned_and_the_days_add_up_to_the_total()
+    {
+        using var t = new TestDatabase();
+        var woke = Fixtures.T0.AddHours(-5);                                   // 8 Sep 07:00 UTC, asleep since 7 Sep 22:00
+        new AggregateRepository(t.Db).UpsertMinute(Aggregate.Empty(woke) with
+        {
+            EnergyWh = 0.5, AvgW = 30, MaxW = 30, OnSeconds = 60, MeasuredSeconds = 60, SampleCount = 60, GapSeconds = 9 * 3600,
+            AsleepWh = 9 * 0.85,
+        });
+        new TariffRepository(t.Db).Add(new Tariff(woke.AddDays(-30), 0.20m, "USD"));
+
+        var (totals, days) = new ReportQueries(t.Db).Report(woke.AddHours(-31), woke.AddMinutes(30), TimeZoneInfo.Utc);
+
+        days.Select(d => d.Day).ShouldBe([new DateOnly(2026, 9, 7), new DateOnly(2026, 9, 8)]);
+        days[0].AsleepKwh.ShouldBe(2 * 0.85 / 1000, 1e-12);
+        days[0].EnergyKwh.ShouldBe(2 * 0.85 / 1000, 1e-12);
+        days[0].OnHours.ShouldBe(0);
+        days[1].AsleepKwh.ShouldBe(7 * 0.85 / 1000, 1e-12);
+        days[1].EnergyKwh.ShouldBe((0.5 + 7 * 0.85) / 1000, 1e-12);
+        days.Sum(d => d.EnergyKwh).ShouldBe(totals.EnergyKwh, 1e-12);
+        days.Sum(d => d.Cost).ShouldBe(totals.Cost, 0.000002m);
+
+        var series = new ReportQueries(t.Db).Series(woke.AddHours(-31), woke.AddMinutes(30), TimeSpan.FromHours(1));
+        series.Sum(b => b.AsleepWh).ShouldBe(9 * 0.85, 1e-9);
+        series.Where(b => b.AsleepWh > 0).ShouldAllBe(b => Math.Abs(b.AsleepWh - 0.85) < 1e-9);
+    }
+
     /// <summary>Report finding 19: a long range reads hour rows, whose start is no time for a peak; while the hour's minutes
     /// are kept, the peak is the minute it was in.</summary>
     [Fact]

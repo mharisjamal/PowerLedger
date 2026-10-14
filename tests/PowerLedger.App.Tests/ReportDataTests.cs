@@ -114,4 +114,38 @@ public class ReportDataTests
         empty.Period.ShouldBe("1 Aug to 31 Aug 2026");
         empty.QualityText.ShouldBe("no readings");
     }
+
+    /// <summary>Accuracy A10: what the PC drew asleep is in the energy and the cost, and shown on a line of its own, labelled
+    /// as the estimate it is; the Breakdown table lists it above the total it is part of.</summary>
+    [Fact]
+    public void What_the_pc_drew_asleep_is_shown_apart_and_labelled_estimated()
+    {
+        Month().AsleepEnergy.ShouldBe("");
+        var report = Reports.Typical(Ranges.ThisMonth(Now, Utc, English));
+        var asleep = report with { Totals = report.Totals with { AsleepKwh = 0.123, EnergyKwh = report.Totals.EnergyKwh + 0.123 } };
+        ReportData.From(asleep, Timeouts, 0.38, Utc, English).AsleepEnergy.ShouldBe("0.123");
+
+        Bands.Rows(report.Totals, English, withTotal: true).Select(r => r.Name).ShouldBe(["CPU package", "GPU", "Display", "Rest of system", "Total"]);
+        var rows = Bands.Rows(asleep.Totals, English, withTotal: true);
+        rows.Select(r => r.Name).ShouldBe(["CPU package", "GPU", "Display", "Rest of system", "Asleep (estimated)", "Total"]);
+        rows[4].Energy.ShouldBe("0.123");
+        rows[4].Part.ShouldBeNull();
+        Bands.Rows(asleep.Totals, English, withTotal: false).Count.ShouldBe(4);
+    }
+
+    /// <summary>Accuracy A9: what the battery gave is shown at its wall equivalent, labelled so; the Breakdown table lists
+    /// what charging lost above the total it is part of.</summary>
+    [Fact]
+    public void What_the_battery_gave_is_shown_at_its_wall_equivalent()
+    {
+        Month().BatteryEnergy.ShouldBe("");
+        var report = Reports.Typical(Ranges.ThisMonth(Now, Utc, English));
+        var battery = report with { Totals = report.Totals with { BatteryKwh = 1.22 } };
+        ReportData.From(battery, Timeouts, 0.38, Utc, English).BatteryEnergy.ShouldBe("1.22");
+
+        var rows = Bands.Rows(battery.Totals, English, withTotal: true);
+        rows.Select(r => r.Name).ShouldBe(["CPU package", "GPU", "Display", "Rest of system", "Battery charging losses", "Total"]);
+        rows[4].Energy.ShouldBe(Format.Kwh(1.22 * (1 - (1 / BatteryRoundTrip.Factor)), English));
+        rows[4].Energy.ShouldBe("0.219");
+    }
 }

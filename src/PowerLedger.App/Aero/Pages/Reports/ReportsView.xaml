@@ -103,6 +103,10 @@
                                 <aero:KeyValue Key="CO₂" Value="{Binding Data.Co2}" Note="{Binding Data.Co2Note}" />
                                 <aero:KeyValue Key="Average" Value="{Binding Data.Average}" Note="W while on" />
                                 <aero:KeyValue Key="Peak" Value="{Binding Data.Peak}" Note="{Binding Data.PeakAt}" />
+                                <aero:KeyValue Key="Asleep (estimated)" Value="{Binding Data.AsleepEnergy}" Note="kWh, in the energy"
+                                               Visibility="{Binding Data.AsleepEnergy, Converter={StaticResource VisibleWhenText}}" />
+                                <aero:KeyValue Key="From the battery" Value="{Binding Data.BatteryEnergy}" Note="kWh, wall equivalent"
+                                               Visibility="{Binding Data.BatteryEnergy, Converter={StaticResource VisibleWhenText}}" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

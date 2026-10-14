@@ -20,7 +20,12 @@ public static class EnergyIntegrator
     public static EnergySlice Integrate(Reading r, double maxDeltaSeconds = MaxDeltaSeconds)
     {
         if (!double.IsFinite(r.DeltaSeconds) || !double.IsFinite(r.TotalW) || r.DeltaSeconds <= 0) return EnergySlice.Nothing;
-        if (r.DeltaSeconds > maxDeltaSeconds) return EnergySlice.GapOf(r.DeltaSeconds);
+        if (r.DeltaSeconds > maxDeltaSeconds)
+        {
+            // A sleep the service was told of carries what the machine drew asleep (accuracy A10); any other gap, none.
+            var asleepWh = r.AsleepW is { } asleepW && double.IsFinite(asleepW) && asleepW > 0 ? asleepW * r.DeltaSeconds / 3600.0 : 0;
+            return EnergySlice.GapOf(r.DeltaSeconds) with { AsleepWh = asleepWh };
+        }
 
         var hours = r.DeltaSeconds / 3600.0;
         var wh = r.TotalW * hours;
@@ -35,6 +40,7 @@ public static class EnergyIntegrator
             IdleOffSeconds: r.UserIdle && !r.DisplayOn ? r.DeltaSeconds : 0,
             OnSeconds: r.DeltaSeconds,
             BatterySeconds: r.OnBattery ? r.DeltaSeconds : 0,
-            GapSeconds: 0);
+            GapSeconds: 0,
+            BatteryWh: r.OnBattery ? wh : 0);
     }
 }
