@@ -49,14 +49,15 @@ public class SamplingLoopTests
             (SessionReason.Resume, SessionReason.ServiceStop, Start.AddMinutes(7), Start.AddMinutes(10)),
         });
 
-        loop.Sets.Count.ShouldBe(2);                                // a fresh sensor set after the resume
+        loop.Sets.Count.ShouldBe(2);                                // a fresh sensor set a minute after the resume
         await WaitFor.True(() => loop.Sets.All(s => s.Disposed));
+        loop.Detections.ShouldBe(1);                                // the hardware, at start only
 
         new SettingsRepository(t.Db).Get(RetentionRunner.LastPurgeKey)
             .ShouldBe(Start.AddMinutes(5).ToString("O", CultureInfo.InvariantCulture));   // the 03:00 local purge
         var learned = new CalibrationLearner();
         learned.Import(new CalibrationRepository(t.Db).Load(Facts.Laptop().Hash));
-        learned.TotalSamples.ShouldBe(480);
+        learned.TotalSamples.ShouldBe(479);                         // all but the first after the resume, which spans the sleep
 
         var status = loop.Board.Status.ShouldNotBeNull();
         status.Ticks.ShouldBe(480);
@@ -201,6 +202,57 @@ public class SamplingLoopTests
             gate.Set();
         }
         await WaitFor.True(() => loop.Sets.Single().Disposed);
+    }
+
+    [Fact]
+    public async Task A_resume_keeps_the_hardware_facts_and_the_sensor_set_refreshes_the_display_and_rebuilds_the_set_a_minute_later()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t);
+        await loop.StartAsync();
+        await loop.Ticks(2);
+        await loop.Send(new SuspendCommand());
+        loop.Clock.Advance(TimeSpan.FromMinutes(5));
+        await loop.Send(new ResumeCommand());
+        loop.Detections.ShouldBe(1);
+        loop.Sets.ShouldHaveSingleItem().DisplayRefreshes.ShouldBe(1);
+
+        await loop.Ticks(59);                                       // 01:00:03 to 01:01:01: the set from before the sleep
+        loop.Sets.ShouldHaveSingleItem().Reads.ShouldBe(61);
+        await loop.Ticks(1);                                        // a minute after the resume
+        loop.Sets.Count.ShouldBe(2);
+        loop.Sets[0].Disposed.ShouldBeTrue();
+        loop.Sets[1].Reads.ShouldBe(1);
+        loop.Detections.ShouldBe(1);
+
+        // A machine that goes back to sleep inside the minute rebuilds a minute after it next wakes.
+        await loop.Send(new SuspendCommand());
+        await loop.Send(new ResumeCommand());
+        await loop.Ticks(30);
+        await loop.Send(new SuspendCommand());
+        await loop.Send(new ResumeCommand());
+        await loop.Ticks(59);
+        loop.Sets.Count.ShouldBe(2);
+        await loop.Ticks(1);
+        loop.Sets.Count.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Devices_coming_and_going_have_the_hardware_detected_again_once_they_settle_and_the_set_rebuilt()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t);
+        await loop.StartAsync();
+        await loop.Ticks(1);
+        await loop.Send(new DevicesChangedCommand());
+        await loop.Ticks(20);
+        await loop.Send(new DevicesChangedCommand());               // a dock brings its devices one after another
+        await loop.Ticks(29);
+        (loop.Detections, loop.Sets.Count).ShouldBe((1, 1));
+        await loop.Ticks(1);                                        // half a minute after the last
+        (loop.Detections, loop.Sets.Count).ShouldBe((2, 2));
+        await loop.Ticks(60);
+        (loop.Detections, loop.Sets.Count).ShouldBe((2, 2));
     }
 
     [Fact]
@@ -558,6 +610,7 @@ public class SamplingLoopTests
     {
         private readonly SamplingLoop _loop;
         private readonly List<FakeSensorSet> _sets = [];
+        private int _detections;
 
         /// <param name="loopClock">What the loop sees of <see cref="Clock"/>, when that is not the fake clock itself.</param>
         /// <param name="watched">Whether anyone looks at the live figures; always, when left out.</param>
@@ -578,7 +631,11 @@ public class SamplingLoopTests
                         return set;
                     }
                 },
-                Inventory: () => Facts.Laptop(),
+                Inventory: () =>
+                {
+                    Interlocked.Increment(ref _detections);
+                    return Facts.Laptop();
+                },
                 SystemUptime: () => TimeSpan.FromHours(3),
                 SystemShuttingDown: () => false,
                 DatabaseNotice: null,
@@ -598,6 +655,9 @@ public class SamplingLoopTests
         public StatusBoard Board { get; } = new();
 
         public long TickCount => _loop.Ticks;
+
+        /// <summary>How many times the loop detected the hardware.</summary>
+        public int Detections => Volatile.Read(ref _detections);
 
         public List<FakeSensorSet> Sets
         {

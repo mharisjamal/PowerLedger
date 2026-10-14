@@ -128,6 +128,9 @@ internal sealed class SensorWorker : IDisposable
         lane.Tokens = new CancellationTokenSource();
     }
 
+    /// <summary>The machine woke: the set, if there is one yet, reads its displays afresh at the next read.</summary>
+    public void RefreshDisplay() => t_lane?.Set?.RefreshDisplay();
+
     /// <summary>From any thread, as the service stops: a read under way is abandoned now, without counting as a hang, and
     /// the loop goes on on a fresh thread; an idle loop is left alone.</summary>
     public void Interrupt()

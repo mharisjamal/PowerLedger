@@ -97,6 +97,7 @@ internal static class ServiceHost
         services.AddSingleton<IHouseholdRequests>(provider => provider.GetRequiredService<HouseholdWorker>());
         services.AddSingleton<PipeHandler>();
         services.AddHostedService<PowerNotifications>();
+        services.AddHostedService<DeviceNotifications>();
         services.AddSingleton<SamplingLoop>();                  // also resolved by Program and the lifetime, to see whether it failed
         services.AddHostedService(provider => provider.GetRequiredService<SamplingLoop>());
         services.AddHostedService(provider => new SharingWorker(
@@ -135,7 +136,7 @@ internal static class ServiceHost
     /// <summary>Each time someone starts or stops looking at the live figures, the loop is told, so it picks its interval
     /// again at once rather than at its next beat, which may be five seconds off.</summary>
     internal static void FollowWatchers(ServiceSignals signals, LoopCommands commands)
-        => signals.WatchersChanged += () => _ = commands.SendAsync(new WatchersChangedCommand());
+        => signals.WatchersChanged += () => commands.Post(new WatchersChangedCommand());
 
     private static LoopEnvironment LoopEnvironmentFor(IServiceProvider provider, bool asService)
     {

@@ -21,7 +21,7 @@ internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationS
 /// <summary>What the loop needs from the machine and the host, so tests can supply fakes.</summary>
 /// <param name="Sensors">Builds a sensor set, on the sensor thread; again after every resume or abandoned set. The token
 /// is cancelled once the set is abandoned or thrown away (see <see cref="SensorWorker"/>).</param>
-/// <param name="Inventory">Detects the hardware, at start and on every resume.</param>
+/// <param name="Inventory">Detects the hardware, at start and once graphics adapters or batteries have come or gone.</param>
 /// <param name="SystemUptime">How long Windows has been running, to tell a boot from a service restart.</param>
 /// <param name="SystemShuttingDown">True once the service control manager has announced a shutdown.</param>
 /// <param name="DatabaseNotice">What start-up had to do to the database, for the status screen.</param>
@@ -50,6 +50,13 @@ internal sealed class SamplingLoop : BackgroundService
     /// view and the raw rows grow coarser, and nobody is looking at the one.
     /// </summary>
     public static readonly TimeSpan UnwatchedInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long after a resume the sensor set is rebuilt (perf review §12). A machine in Modern Standby wakes
+    /// briefly many times an hour; one that sleeps again within the minute never pays for a rebuild.</summary>
+    public static readonly TimeSpan RebuildAfterResume = TimeSpan.FromMinutes(1);
+
+    /// <summary>How long after the last device came or went the hardware is detected again: a dock brings several.</summary>
+    public static readonly TimeSpan DevicesSettle = TimeSpan.FromSeconds(30);
 
     private static readonly TimeSpan Minute = TimeSpan.FromMinutes(1);
     private static readonly string Version =
@@ -87,6 +94,8 @@ internal sealed class SamplingLoop : BackgroundService
     private DateTimeOffset _startedAt;
     private DateTimeOffset _minute;
     private DateTimeOffset? _foldFrom;
+    private DateTimeOffset? _rebuildAt;
+    private DateTimeOffset? _devicesChangedAt;
     private TimeSpan _interval;
     private bool _suspended;
     private bool _carryOverMonitors;
@@ -295,14 +304,17 @@ internal sealed class SamplingLoop : BackgroundService
         var now = _clock.GetUtcNow();
         try
         {
+            CatchUpWithTheHardware(now);
+            var spansSleep = _tickClock.SpansSleep;
             var result = _worker.Read(now, _tickClock.Measure(now, _interval.TotalSeconds));
             _tickClock.Commit(now);
             var reading = _model!.Evaluate(result.Sample, out var monitorWatts);
             reading = reading with { Measured = Frames.Measured(result.Sample, reading.TotalSource) };   // stored for data sharing
             var parts = reading.Components;
             // The battery delivers what the monitors running off the laptop draw, so they are taken out with the display, or
-            // the learner would learn them into the rest of the laptop. The figure is the one the reading used.
-            _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
+            // the learner would learn them into the rest of the laptop. The figure is the one the reading used. The first
+            // tick after a sleep is not learned from: the meters' figures are averages over the sleep, the battery's is now.
+            if (!spansSleep) _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
             _buffer.Add(reading);
             var frame = Frames.From(reading, result.Sample);
             _feed.Publish(frame);
@@ -318,6 +330,26 @@ internal sealed class SamplingLoop : BackgroundService
         {
             _failures++;
             if ((_failures & (_failures - 1)) == 0) _log.LogError(error, "A tick failed ({Failures} in a row)", _failures);
+        }
+    }
+
+    /// <summary>
+    /// Before a read: once devices have settled, the hardware is detected again and the sensor set rebuilt for it; a minute
+    /// after a resume, the set is rebuilt, since across a sleep a card's library can lose its card and a counter reset.
+    /// </summary>
+    private void CatchUpWithTheHardware(DateTimeOffset now)
+    {
+        if (_devicesChangedAt is { } changed && now - changed >= DevicesSettle)
+        {
+            _devicesChangedAt = null;
+            Detect(now, _settings);
+            _worker.Rebuild();
+            _log.LogInformation("Hardware detected again after devices came or went");
+        }
+        if (_rebuildAt is { } due && now >= due)
+        {
+            _rebuildAt = null;
+            _worker.Rebuild();
         }
     }
 
@@ -419,6 +451,9 @@ internal sealed class SamplingLoop : BackgroundService
                     break;
                 case WatchersChangedCommand:
                     break;                                         // the interval is picked again after every command
+                case DevicesChangedCommand:
+                    _devicesChangedAt = now;
+                    break;
                 case ResetCalibrationCommand:
                     _calibration.Reset(now);
                     _log.LogInformation("Calibration reset for hardware {Hash}", _calibration.Hash);
@@ -444,10 +479,15 @@ internal sealed class SamplingLoop : BackgroundService
         _log.LogInformation("Suspended");
     }
 
+    /// <summary>
+    /// The machine woke (perf review §12). The hardware is the same, since a dock that changed while it slept is told
+    /// through device notifications, and the sensor set goes on; only the display, whose brightness and monitors a sleep
+    /// often changes, is read afresh, and the set is rebuilt a minute on, unless the machine sleeps again first.
+    /// </summary>
     private void Resume(DateTimeOffset now)
     {
-        _worker.Rebuild();
-        Detect(now, _settings);
+        _worker.RefreshDisplay();
+        _rebuildAt = now + RebuildAfterResume;
         _sessions.Resume(now);
         _tickClock.MarkResumed();
         _suspended = false;

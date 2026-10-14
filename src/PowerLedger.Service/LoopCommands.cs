@@ -20,7 +20,7 @@ internal sealed class SuspendCommand : LoopCommand
 {
 }
 
-/// <summary>The machine woke: rebuild the sensors, detect the hardware, open a session.</summary>
+/// <summary>The machine woke: open a session and refresh the display; the sensor set is rebuilt a minute later.</summary>
 internal sealed class ResumeCommand : LoopCommand
 {
 }
@@ -29,6 +29,11 @@ internal sealed class ResumeCommand : LoopCommand
 internal sealed class ApplySettingsCommand(ServiceSettings settings) : LoopCommand
 {
     public ServiceSettings Settings { get; } = settings;
+}
+
+/// <summary>A graphics adapter or a battery came or went: the loop detects the hardware again once they settle.</summary>
+internal sealed class DevicesChangedCommand : LoopCommand
+{
 }
 
 /// <summary>Whether anyone looks at the live figures changed: the loop picks its interval again (perf review §4).</summary>
@@ -59,6 +64,13 @@ internal sealed class LoopCommands
         else _arrived.Set();
         return command.Done;
     }
+
+    /// <summary>Queues a command nobody waits for. One refused because the service is stopping is looked at here: a failed
+    /// task left unlooked-at would be recorded as a service crash.</summary>
+    public void Post(LoopCommand command)
+        => SendAsync(command).ContinueWith(
+            static failed => _ = failed.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
     /// <summary>Closes the inbox and fails whatever is still queued, so no sender waits for ever.</summary>
     internal void Close()
