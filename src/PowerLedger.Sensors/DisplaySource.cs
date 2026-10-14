@@ -2,7 +2,9 @@ namespace PowerLedger.Sensors;
 
 /// <param name="Brightness">0..1 for the internal panel; null where the machine has no brightness control.</param>
 /// <param name="MonitorCount">How many displays Windows currently reports as active.</param>
-public readonly record struct DisplayState(double? Brightness, int MonitorCount);
+/// <param name="PanelActive">Whether the built-in panel is showing anything (see <see cref="MonitorInventory.InternalPanelActive"/>);
+/// null where Windows lists none.</param>
+public readonly record struct DisplayState(double? Brightness, int MonitorCount, bool? PanelActive = null);
 
 /// <summary>
 /// Panel brightness and monitor count, and the external monitors attached (spec §4). WMI is slow, so it is asked only when
@@ -101,6 +103,7 @@ public sealed class DisplaySource : ISensorSource
         TakeAnnouncedBrightness();
         draft.Brightness = _state.Brightness;
         draft.MonitorCount = _state.MonitorCount;
+        draft.PanelInactive = _state.PanelActive == false;
         draft.DisplayOn = displayOn;
 
         // Only on a refresh WMI answered: the monitors keep the display query's schedule, and are left alone while WMI fails.
@@ -153,14 +156,27 @@ public sealed class DisplaySource : ISensorSource
     {
         // Once no display is left, as when a desktop's only monitor is unplugged, WMI refuses the class rather than list none.
         // That is an answer, none active, and must not fail the query, since only a query that answers hands the monitors over.
-        var monitors = Wmi.ReadInstances(@"\\.\root\wmi", "SELECT Active FROM WmiMonitorBasicDisplayParams",
-            rows => rows.Count(row => row["Active"] is true));
+        var displays = Wmi.ReadInstances(@"\\.\root\wmi", "SELECT InstanceName, Active FROM WmiMonitorBasicDisplayParams",
+            rows => rows.Select(row => (Instance: row["InstanceName"] as string ?? "", Active: row["Active"] is true)).ToList());
+        var monitors = displays.Count(display => display.Active);
+
+        // Which display is the built-in panel, so a docked laptop's shut lid is seen; without an answer nothing is said of it.
+        var connections = Wmi.ReadOrNull<IReadOnlyDictionary<string, uint>>(@"\\.\root\wmi", "SELECT InstanceName, VideoOutputTechnology FROM WmiMonitorConnectionParams", rows =>
+        {
+            var byInstance = new Dictionary<string, uint>();
+            foreach (var row in rows)
+            {
+                if (row["InstanceName"] is string name && row["VideoOutputTechnology"] is uint connection) byInstance[name] = connection;
+            }
+            return byInstance;
+        });
+        var panel = connections is null ? null : MonitorInventory.InternalPanelActive(displays, connections);
 
         // A desktop: WMI refuses outright when no panel has a brightness Windows controls, which is no brightness.
         var brightness = Wmi.ReadInstances(@"\\.\root\wmi", "SELECT CurrentBrightness FROM WmiMonitorBrightness",
             rows => rows.Count > 0 ? Convert.ToDouble(rows[0]["CurrentBrightness"]) / 100.0 : (double?)null);
 
-        return new DisplayState(brightness, Math.Max(monitors, 1));
+        return new DisplayState(brightness, Math.Max(monitors, 1), panel);
     }
 
     public void Dispose() { }

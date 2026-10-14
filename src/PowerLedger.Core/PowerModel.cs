@@ -74,7 +74,7 @@ public sealed class PowerModel
     {
         var cpu = CpuWatts(s);
         var gpu = GpuWatts(s);
-        var display = DisplayModel.PanelWatts(_profile, s.Brightness, s.DisplayOn);
+        var display = DisplayModel.PanelWatts(_profile, s);
         monitors = _monitors.Watts(s.DisplayOn);
         var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds;
         var isLaptop = _profile.Chassis == ChassisKind.Laptop;

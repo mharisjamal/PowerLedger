@@ -297,6 +297,22 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task Nothing_is_learned_while_the_laptop_s_lid_is_shut()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t, makeSet: _ => new FakeSensorSet((ts, delta) => Samples.At(ts, delta, batteryW: 20) with { PanelInactive = true }));
+        await loop.StartAsync();
+        await loop.Ticks(3);
+        await loop.StopAsync();
+
+        // The panel draws nothing then, so the rest of the laptop would be learned with the panel's figure in it.
+        var learned = new CalibrationLearner();
+        learned.Import(new CalibrationRepository(t.Db).Load(Facts.Laptop().Hash));
+        learned.TotalSamples.ShouldBe(0);
+        loop.Board.Status.ShouldNotBeNull().Last.ShouldNotBeNull().Components.Display.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task The_users_monitor_choices_reach_the_board_from_the_stored_settings_and_from_new_ones()
     {
         using var t = new TestDatabase();
