@@ -226,6 +226,13 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
 
     public bool WantsFrame => _wants;
 
+    /// <summary>True while every piece is composed: a want is then drawn on the UI thread at once (<see cref="Want"/>), and
+    /// the capture thread needn't look for it. An imaged piece's wants come as WPF hands the picture back, for the capture
+    /// thread to draw.</summary>
+    public bool ServesItself => _servesItself;
+
+    private volatile bool _servesItself = true;
+
     public IntPtr Window => _hwnd;
 
     /// <summary>Whether <paramref name="piece"/> is composed (DirectComposition beneath the window: the piece draws
@@ -391,7 +398,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             }
             if (!waiting) _pending.Clear();
             _wants = waiting;
-            if (composed.Count > 0 || clear) PresentLayer(renderer);
+            if (composed.Count > 0 || clear) PresentLayer(renderer, composed, clear);
             if (imaged.Count > 0)
             {
                 renderer.Finish(_picture);
@@ -455,8 +462,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             return done.Task;
         }
         _readRequests.Enqueue((p.Id, done));
-        _wants = true;
-        _session.Wake();
+        Want();
         return done.Task;
     }
 
@@ -561,15 +567,114 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         }
         (_layerWidth, _layerHeight) = size;
         _clearLayer = true;
+        _wholeAhead = 2;
     }
 
-    /// <summary>On the capture thread: the layer onto the swap chain's back buffer, presented without waiting.</summary>
-    private void PresentLayer(GpuGlassRenderer renderer)
+    /// <summary>
+    /// Under the GPU lock (the capture thread, or the UI thread's DrawNow): the layer onto the swap chain's back buffer,
+    /// presented without waiting. The flip model's back buffer holds the frame before last (DXGI doesn't fill it in), so
+    /// only what this frame and the frame before drew (<paramref name="drawn"/>, in the layer's pixels) is copied onto it,
+    /// and DWM is told only what this frame drew (Present1's dirty rectangles): the copy and DWM's composing grow with the
+    /// glass drawn, not the window (perf review P11). A rectangle inside another is left out, and where the rectangles
+    /// add up to the layer or more (a video behind every piece) the whole layer is copied, or presented, at once. The whole
+    /// layer is copied and presented after a clear (<paramref name="cleared"/>), for the first two frames of new buffers,
+    /// and for two frames after a present that didn't plainly succeed.
+    /// </summary>
+    private void PresentLayer(GpuGlassRenderer renderer, List<Int32Rect> drawn, bool cleared)
     {
         if (_swapChain == IntPtr.Zero || _layer == IntPtr.Zero || GetBuffer(_swapChain, out var back) < 0) return;
-        renderer.Copy(back, _layer);
+        _dirty.Clear();
+        foreach (var r in drawn)
+        {
+            int left = Math.Max(0, r.X), top = Math.Max(0, r.Y), right = Math.Min(_layerWidth, r.X + r.Width), bottom = Math.Min(_layerHeight, r.Y + r.Height);
+            if (right > left && bottom > top) Add(_dirty, new CaptureNative.RECT { Left = left, Top = top, Right = right, Bottom = bottom });
+        }
+        var layer = (long)_layerWidth * _layerHeight;
+        // The whole layer changed: cleared, new buffers, a present that failed, or nothing named in it.
+        var changedWhole = cleared || _wholeAhead > 0 || _dirty.Count == 0;
+        var presentWhole = changedWhole || Area(_dirty) >= layer;
+        _copy.Clear();
+        if (!changedWhole && !_wholeBefore)
+        {
+            foreach (var r in _dirty) _copy.Add(r);
+            foreach (var r in _dirtyBefore) Add(_copy, r);
+        }
+        long copied;
+        if (_copy.Count == 0 || Area(_copy) >= layer)
+        {
+            renderer.Copy(back, _layer);
+            copied = layer;
+        }
+        else
+        {
+            foreach (var r in _copy) renderer.Copy(back, _layer, r);
+            copied = Area(_copy);
+        }
+        Interlocked.Add(ref PixelsCopied, copied);
+        Interlocked.Increment(ref Presents);
+        if (CheckPresents) Check(renderer, back);
         CaptureNative.Release(back);
-        GpuNative.Present(_swapChain);
+        var hr = presentWhole ? GpuNative.Present(_swapChain) : Present1(_swapChain, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_dirty));
+        if (!presentWhole && hr == 0) Interlocked.Increment(ref PartialPresents);
+        (_dirty, _dirtyBefore) = (_dirtyBefore, _dirty);
+        _wholeBefore = changedWhole;
+        if (_wholeAhead > 0) _wholeAhead--;
+        // Not presented, or not plainly (an occluded window): which buffer comes next is unknown, so the next two are whole.
+        if (hr != 0) _wholeAhead = 2;
+    }
+
+    /// <summary>Adds <paramref name="r"/> to <paramref name="rects"/> unless one there holds it, and drops any it holds.</summary>
+    private static void Add(List<CaptureNative.RECT> rects, CaptureNative.RECT r)
+    {
+        foreach (var o in rects)
+        {
+            if (Holds(o, r)) return;
+        }
+        for (var i = rects.Count - 1; i >= 0; i--)
+        {
+            if (Holds(r, rects[i])) rects.RemoveAt(i);
+        }
+        rects.Add(r);
+    }
+
+    private static bool Holds(CaptureNative.RECT a, CaptureNative.RECT b) => a.Left <= b.Left && a.Top <= b.Top && a.Right >= b.Right && a.Bottom >= b.Bottom;
+
+    private static long Area(List<CaptureNative.RECT> rects)
+    {
+        long sum = 0;
+        foreach (var r in rects) sum += (long)(r.Right - r.Left) * (r.Bottom - r.Top);
+        return sum;
+    }
+
+    /// <summary>The rectangles this present copies onto the back buffer; kept.</summary>
+    private readonly List<CaptureNative.RECT> _copy = [];
+
+    /// <summary>What the last present drew (its dirty rectangles), and this one's, in the layer's pixels; lists kept.</summary>
+    private List<CaptureNative.RECT> _dirtyBefore = [], _dirty = [];
+
+    /// <summary>The whole layer changed at the last present.</summary>
+    private bool _wholeBefore = true;
+
+    /// <summary>How many presents from now copy and present the whole layer: two after new buffers or a failed present.</summary>
+    private int _wholeAhead = 2;
+
+    /// <summary>How many presents named only what they drew, for the tests and the measurements.</summary>
+    internal static long PartialPresents;
+
+    /// <summary>How many presents there were, and the pixels they copied from the layer, for the measurements.</summary>
+    internal static long Presents, PixelsCopied;
+
+    /// <summary>For the tests: before each present, the back buffer and the layer are read back whole and compared, and a
+    /// present whose buffer isn't the layer is counted (<see cref="PresentsOff"/>). Off, the default, nothing is read.</summary>
+    internal static volatile bool CheckPresents;
+
+    internal static long PresentsChecked, PresentsOff;
+
+    private void Check(GpuGlassRenderer renderer, IntPtr back)
+    {
+        var whole = new Int32Rect(0, 0, _layerWidth, _layerHeight);
+        Interlocked.Increment(ref PresentsChecked);
+        if (!renderer.Read(back, whole).AsSpan().SequenceEqual(renderer.Read(_layer, whole))) Interlocked.Increment(ref PresentsOff);
     }
 
     /// <summary>Under the GPU lock.</summary>
@@ -712,10 +817,15 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
 
     // ---- Both ----
 
+    /// <summary>Something is to be drawn though nothing changed behind. Composed, it is drawn at the UI thread's next turn
+    /// (<see cref="DrawSoon"/>): the capture thread may be waiting a long while for Windows' next frame
+    /// (MonitorCapture.IdleLook), and a frame of its own couldn't end that wait. Either way the capture thread is told, for
+    /// when that draw can't be made (no duplication yet).</summary>
     private void Want()
     {
         _wants = true;
         _session.Wake();
+        if (_servesItself) DrawSoon();
     }
 
     /// <summary>
@@ -824,6 +934,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         }
         Volatile.Write(ref _jobs, jobs.ToArray());
         Volatile.Write(ref _areas, jobs.Select(j => j.Box).ToArray());
+        _servesItself = jobs.TrueForAll(j => j.Composed);
         Want();
         Changed?.Invoke();
     }

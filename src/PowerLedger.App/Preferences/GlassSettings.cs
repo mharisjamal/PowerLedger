@@ -107,6 +107,13 @@ internal sealed partial record GlassSettings
     [JsonConverter(typeof(TrueOnlyJsonConverter))]
     public bool ShowInScreenshots { get; set; }
 
+    /// <summary>Lighter glass on battery (perf review P10, off by default): on battery, the live glass refreshes what is
+    /// behind it at most 15 times a second within 2 % of a core, as it always does under Windows' Energy Saver
+    /// (GlassPower); a moved window's glass is still drawn at once, and the look is the same. Anything but JSON's true reads
+    /// as off.</summary>
+    [JsonConverter(typeof(TrueOnlyJsonConverter))]
+    public bool LighterOnBattery { get; set; }
+
     // No carbon factor here: the Carbon insight reads Settings' one CO₂ per kWh (UiPreferences.Co2KgPerKwh), which Now and
     // the Report use too; GridFactors only suggests a figure for Windows' region. A CarbonGramsPerKwh an earlier build
     // wrote is ignored as the file loads.

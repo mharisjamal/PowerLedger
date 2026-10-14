@@ -346,6 +346,29 @@ public sealed class UiPreferencesTests : IDisposable
         store.Load().Glass.ShowInScreenshots.ShouldBeTrue("chosen, it sticks");
     }
 
+    /// <summary>Lighter glass on battery (perf review P10) is off until chosen, like Show in screenshots: anything but JSON's
+    /// true reads as off.</summary>
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("\"LighterOnBattery\": true,", true)]
+    [InlineData("\"LighterOnBattery\": false,", false)]
+    [InlineData("\"LighterOnBattery\": \"yes\",", false)]
+    [InlineData("\"LighterOnBattery\": 1,", false)]
+    [InlineData("\"LighterOnBattery\": null,", false)]
+    public void Lighter_glass_on_battery_is_off_until_chosen_and_anything_but_true_reads_as_off(string field, bool expected)
+    {
+        Directory.CreateDirectory(_folder);
+        System.IO.File.WriteAllText(File, $$"""{ "Glass": { {{field}} "Style": "Dark" } }""");
+        var store = new UiPreferencesStore(File);
+
+        var read = store.Load();
+
+        read.Glass.LighterOnBattery.ShouldBe(expected);
+        read.Glass.Style.ShouldBe(GlassStyle.Dark, "the rest of the glass is kept");
+        store.Save(read with { Glass = read.Glass with { LighterOnBattery = true } });
+        store.Load().Glass.LighterOnBattery.ShouldBeTrue("chosen, it sticks");
+    }
+
     [Fact]
     public void A_new_install_needs_no_edge_light_reset()
     {

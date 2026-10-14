@@ -108,6 +108,10 @@ internal sealed class GlassSection : ObservableObject
     /// wallpaper rather than the live screen, which a capture could otherwise see through.</summary>
     public bool ShowInScreenshots { get => Glass.ShowInScreenshots; set => Change(Glass with { ShowInScreenshots = value }); }
 
+    /// <summary>Lighter glass on battery (perf review P10, off by default): on battery, the glass refreshes at most 15 times a
+    /// second, as it always does under Windows' Energy Saver.</summary>
+    public bool LighterOnBattery { get => Glass.LighterOnBattery; set => Change(Glass with { LighterOnBattery = value }); }
+
     /// <summary>Whether motion is reduced: as chosen here, or Windows' setting until then. Choosing here, even what
     /// Windows has, stops following Windows (Aero look design §3).</summary>
     public bool ReduceMotion
@@ -159,7 +163,7 @@ internal sealed class GlassSection : ObservableObject
     private static readonly string[] Shown =
     [
         nameof(Style), nameof(IsColour), nameof(TintColor), nameof(ChosenTint), nameof(Tint), nameof(TintStrength), nameof(Frost), nameof(EdgeLight),
-        nameof(Accent), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ShowInScreenshots), nameof(ReduceMotion),
+        nameof(Accent), nameof(ReduceTransparency), nameof(IncreaseContrast), nameof(ShowInScreenshots), nameof(LighterOnBattery), nameof(ReduceMotion),
         nameof(FollowsWindows), nameof(ReduceMotionNote), nameof(Parallax), nameof(ParallaxAvailable),
     ];
 }

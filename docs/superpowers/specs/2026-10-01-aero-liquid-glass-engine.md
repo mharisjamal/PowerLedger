@@ -74,6 +74,8 @@ region.
 | `LiquidGlassSources.GpuAllowed` | the tests' switch: false keeps every window on the WPF effects path |
 | `LiquidGlassSources.Override` | `Func<HwndSource, ILiquidGlassSource>`: hands every window a fake source, so nothing captures the screen |
 | `LiquidGlassGovernor.Budget` | the CPU safety net, 8 % of one core for the whole process by default |
+| `GlassSettings.LighterOnBattery` (Settings, "Lighter glass on battery", off by default, anything but JSON `true` reads as off) | copied by `GlassMaterial` into `GlassPower.LighterOnBattery`: the glass is lighter on battery too, not only under Energy Saver |
+| `GlassPower.EnergySaver`, `GlassPower.OnBattery` | what Windows says (GetSystemPowerStatus, then each glass window's power notifications); a test may set them |
 | `LiquidGlassSources.Animate(ms)` | AeroMotion calls it for each animation: composed glass follows its piece every frame until then |
 
 ### `ILiquidGlassSource`
@@ -144,6 +146,14 @@ display scales 1, 1.25 and 1.5. The tests read the committed crops in
   Only a change wholly inside one of our windows is compared, as it may be that window repainting.
 - **Quiet frames slow the pace.** After a frame that draws nothing, the next look waits a tenth of a second; the first
   frame that draws brings back the governor's pace.
+- **A still desktop costs four looks a second** (2026-10-14, perf review P8). While nothing is due but Windows' next
+  frame, one look waits a quarter of a second (`MonitorCapture.IdleLook`) rather than one display refresh, which woke
+  the thread at the display's rate for nothing. A frame ends the wait at once, so nothing behind is drawn later. What a
+  composed window asks of its glass meanwhile (a piece new, moved or resized, a read, the window shown) is drawn on its
+  UI thread at its next turn (`GpuGlassWindow.Want`, through `DrawNow`), as a move already was, so it never waits for that
+  look. The short look stays where the capture thread itself has work due: a want `DrawNow` couldn't serve (no
+  duplication yet), an imaged piece (its wants come as WPF hands the picture back), and the CPU path (its region read
+  after a move). The thread allocates nothing per look.
 - With every window hidden or minimised, the duplication is let go and the thread sleeps: no frames.
 - When a window is left out of capture or starts its glass, every frame copies the whole desktop for half a second.
   Windows can hand over a frame drawn before the exclusion took hold, and no dirty rectangle would ever take that out of
@@ -180,6 +190,16 @@ display scales 1, 1.25 and 1.5. The tests read the committed crops in
 - A DirectComposition target on the owner itself would be drawn over WPF's content whatever its topmost flag says,
   because that flag places it only against child windows. That was measured: the text vanished.
 - Pieces are drawn in WPF's drawing order (the visual tree's), so a card or a dialog is drawn over the glass beneath it.
+- **Only what was drawn is presented** (2026-10-14, perf review P11). Pieces are drawn into a layer the client area's
+  size; the swap chain (flip model, two buffers) is fed from it. Its back buffer holds the frame before last, so a frame
+  copies from the layer only the rectangles it drew and those the frame before drew, and tells DWM only its own
+  (`IDXGISwapChain1::Present1` with dirty rectangles), so the copy and DWM's composing grow with the glass drawn, not the
+  window. DXGI doesn't fill the back buffer in (measured: copying only this frame's leaves the frame before's changes
+  out of it). A rectangle inside another is left out, and where they add up to the layer (a video behind every piece)
+  the whole layer is copied, or presented, at once. The whole layer is copied and presented after a clear (a piece moved or gone), for the first two frames of new
+  buffers (the swap chain made or resized), and for two frames after a present that didn't plainly succeed, when which
+  buffer comes next is unknown. What shows is the layer either way, pixel for pixel
+  (`Each_frame_presents_only_what_it_drew_and_the_screen_still_shows_every_piece`).
 - Springs, slides and fades move pieces without a layout pass. AeroMotion tells the engine
   (`LiquidGlassSources.Animate`), and while anything animates each piece takes a quick look every frame: its transform
   to the root and its ancestors' opacity. It is placed again only when that look changed.
@@ -265,6 +285,15 @@ process's CPU:
 - under seven tenths of the budget, it comes a quarter sooner, up to 30 a second.
 A window at rest takes no frames and is never slowed.
 
+**Lighter glass** (2026-10-14, perf review P10). While Windows' Energy Saver is on, or on battery with Lighter glass on
+battery chosen (`GlassPower.Lighter`), the pace is never faster than 15 frames a second (`LighterFastest`) and the budget
+is 2 % of a core (`LighterBudget`). Only what is behind the glass refreshes less often: a moved or resized window still
+has its glass drawn at once (`DrawNow`, on the UI thread, outside the governor), and the look is the same. Energy Saver
+is read from `SYSTEM_POWER_STATUS.SystemStatusFlag` and kept by `GUID_POWER_SAVING_STATUS`; the power source by
+`ACLineStatus` and `GUID_ACDC_POWER_SOURCE` (a UPS counts as battery). Each glass window registers for both
+(`RegisterPowerSettingNotification`) and reads both again on `PBT_APMPOWERSTATUSCHANGE`. When the glass turns lighter or
+full again, the pace starts from the new fastest at once.
+
 ## Measurements (2026-10-01, commit 4bb857c)
 
 ### Parity with headless Edge
@@ -296,6 +325,44 @@ saw 320 to 570 desktop changes in 30 s.
 
 Per frame on the capture thread (thread cycle counters, overlay over a video): Present 0.72 M cycles, the layer copied
 to the back buffer 0.33 M, acquiring and releasing the frame 0.57 M, drawing the piece 0.07 M.
+
+### Rest, battery and presents (2026-10-14, perf review P8, P10, P11)
+
+The same method, now committed as `tests/PowerLedger.App.Tests/Aero/LiquidGlass/LiquidGlassCpu.cs` (opt in with
+`PL_CPU_DIR`; `PL_CPU_ENERGY_SAVER=1` as if Energy Saver were on): the main window (1100 by 700 at 125 %, 9 composed
+pieces, the Aero shell's fixture, so no reading rolls in) over the mockup's background on a window across the monitor
+(rest), or over the intro video looping in its own process (video); 10 s to settle, then 30 s. It adds the capture
+thread's wakeups (its context switches, NtQuerySystemInformation) and cycles (QueryThreadCycleTime), the process's cycles
+(QueryProcessCycleTime), and the pixels copied a present. Before is main at df3d5d4, after is plan-ac/glass; the rounds
+alternate. Five other agents built and tested on the same laptop throughout (the CPU at 50 to 100 %, 3 GB of 16 free),
+which spiked the test process by tens of points for seconds at a time, glass on or none; so the process's CPU is given
+as a median, and the capture thread's own counts carry the comparison.
+
+| Scene | Before | After |
+|---|---|---|
+| Rest, nothing changing (frames 0 a second): capture thread | 79 to 115 wakeups/s, 9.1 to 28.2 M cycles/s (3 runs) | 4.9 to 11.8 wakeups/s, 1.4 to 2.2 M cycles/s (4 runs) |
+| Rest, nothing changing: process | 1.82 % median (1.61 to 1.98), 37 to 60 M cycles/s | 0.89 % median (0.68 to 1.09; one run 11.3 %, a spike as glass none had too), 20 to 23 M cycles/s |
+| Rest, glass none: process | | 1.09 %, 26 M cycles/s (1 run) |
+| Video: capture thread per frame drawn | 3.4 to 6.4, median 4.0 M cycles (6 runs) | 3.3 to 4.3, median 3.9 M cycles (8 runs) |
+| Video: frames drawn, process | 1.8 to 10.8 a second, 2.19 to 10.93 % (median 4.7 %) | 3.9 to 18.1 a second, 3.90 to 11.30 % (median 4.04 %) |
+| Video: copied from the layer a present | the whole layer, 4.81 MB | 4.14 MB (the pieces cover 86 % of this window) |
+| Overlay over a video: copied a present | the whole layer | 0.17 MB |
+| Video under Energy Saver | | 0.4 to 14.4 frames drawn a second (4 runs; the 2 % budget held one at 0.4), 2.97 to 5.99 % |
+
+- **At rest** the capture thread wakes about a tenth as often and spends a tenth of the cycles; the process falls to what
+  the window costs with no glass. With other windows changing elsewhere on the screen (4 to 7 frames a second came in
+  during some rest runs), both builds wake per frame alike.
+- **Over a video** the governor slowed the before build harder (the spikes pushed the process over its 8 %), so the
+  frame rates differ; per frame drawn the capture thread costs the same. The dirty rectangles save GPU copying and DWM's
+  composing, not this process's CPU: on this window the glass covers most of the client area, so the saving is 14 % of
+  the copy here, more where a change behind touches fewer pieces.
+- **Energy Saver** holds the glass at 15 frames a second or fewer.
+- **The look**: the Aero window over a still picture with another window sliding behind part of it, grabbed on screen
+  (`LiquidGlassCpu.Grab`), 1375 by 875 at 125 %: before against after, 0 pixels differ in 2 of 4 pairs; in the others
+  only the search box's blinking caret (9 to 10 pixels) and up to 7 single pixels 1 to 4 levels apart (two runs of one
+  build: 2 such pixels).
+- **Jank**: LiquidGlassMotionProofTests, three runs each: after, content lag worst 1 frame moving and 0 resizing, the
+  glass's window worst 1 frame; before, the same in two runs and a 6 frame content lag in one, under the load.
 
 ### Which path, when
 

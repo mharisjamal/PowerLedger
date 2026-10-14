@@ -16,6 +16,10 @@ internal interface IGpuGlassConsumer
     /// <summary>A piece is new, moved or resized, or the window's picture is new: draw even with nothing changed.</summary>
     bool WantsFrame { get; }
 
+    /// <summary>Whether a want raised from now on is drawn at once on the window's own thread (MonitorCapture.DrawNow), so
+    /// the capture thread may wait long for Windows' next frame: true where every piece is composed.</summary>
+    bool ServesItself { get; }
+
     /// <summary>The top-level window the pieces are in: a change wholly inside it may be its own repainting.</summary>
     IntPtr Window { get; }
 
@@ -41,6 +45,9 @@ internal interface IGpuGlassConsumer
 /// one word. On the CPU path (<see cref="Subscriber"/>, the fallback) the part under a window is read back and compared on
 /// the CPU. With no visible window the duplication is let go and the thread sleeps: nothing runs while every window with
 /// glass is hidden or minimised. The device outlives a pause; it is made again only when Windows removes it.</para>
+/// <para>While nothing is due but Windows' next frame (composed windows draw their own wants at once, through
+/// <see cref="DrawNow"/>), one look for a frame waits <see cref="IdleLook"/>; otherwise one display refresh. A frame ends
+/// either wait at once.</para>
 /// </summary>
 internal sealed class MonitorCapture : IDisposable
 {
@@ -69,12 +76,21 @@ internal sealed class MonitorCapture : IDisposable
     private readonly List<RECT> _changed = [];
     private long _framesAcquired;
 
-    private MonitorCapture(IntPtr monitor)
+    private MonitorCapture(IntPtr monitor, Thread? before)
     {
         _monitor = monitor;
+        _before = before;
         _thread = new Thread(Run) { IsBackground = true, Name = "Liquid glass capture", Priority = ThreadPriority.BelowNormal };
         _thread.Start();
     }
+
+    /// <summary>The thread of the session this one follows on the monitor, still in its last look for a frame (up to
+    /// <see cref="IdleLook"/>) with its duplication: a process duplicates a monitor once at a time, so this one opens its
+    /// own after that thread is done.</summary>
+    private readonly Thread? _before;
+
+    /// <summary>Each monitor's last session's thread, from when it was let go.</summary>
+    private static readonly Dictionary<IntPtr, Thread> Ending = [];
 
     /// <summary>Bytes read back and compared on the CPU path, over every session, for the measurements.</summary>
     internal static long BytesCompared;
@@ -91,6 +107,12 @@ internal sealed class MonitorCapture : IDisposable
 
     /// <summary>How many frames the thread has taken from Windows, for the tests and the measurements.</summary>
     public long FramesAcquired => Interlocked.Read(ref _framesAcquired);
+
+    /// <summary>How many times the thread's look for a frame ended with none (Windows had nothing new in time), for the
+    /// tests and the measurements.</summary>
+    public long Timeouts => Interlocked.Read(ref _timeouts);
+
+    private long _timeouts;
 
     /// <summary>Whether the duplication is open now (false while every window is hidden).</summary>
     public bool Running => _duplication != IntPtr.Zero;
@@ -111,7 +133,8 @@ internal sealed class MonitorCapture : IDisposable
         {
             if (!Sessions.TryGetValue(monitor, out var session) || session._disposed)
             {
-                session = new MonitorCapture(monitor);
+                Ending.Remove(monitor, out var before);
+                session = new MonitorCapture(monitor, before);
                 Sessions[monitor] = session;
             }
             return session;
@@ -218,7 +241,11 @@ internal sealed class MonitorCapture : IDisposable
         }
         lock (Sessions)
         {
-            if (Sessions.TryGetValue(_monitor, out var session) && session == this) Sessions.Remove(_monitor);
+            if (Sessions.TryGetValue(_monitor, out var session) && session == this)
+            {
+                Sessions.Remove(_monitor);
+                Ending[_monitor] = _thread;
+            }
         }
         Dispose();
     }
@@ -256,11 +283,16 @@ internal sealed class MonitorCapture : IDisposable
     /// (a page scrolled, a video started) is late by at most that.</summary>
     internal static readonly TimeSpan Quiet = LiquidGlassGovernor.Fastest * 3;
 
+    /// <summary>How long one look for a frame waits while nothing is due but what Windows hands over (perf review P8): a
+    /// still desktop has the thread look four times a second rather than at the display's rate. A frame ends the wait at once.</summary>
+    internal static readonly TimeSpan IdleLook = TimeSpan.FromMilliseconds(250);
+
     private bool _quiet;
 
     private void Run()
     {
         ThreadIds.Add(GetCurrentThreadId());
+        _before?.Join(IdleLook * 4);
         var clock = Stopwatch.StartNew();
         var last = TimeSpan.Zero - LiquidGlassGovernor.Fastest;
         try
@@ -290,9 +322,14 @@ internal sealed class MonitorCapture : IDisposable
                     _wake.WaitOne(wait);
                     continue;
                 }
-                var hr = AcquireNextFrame(_duplication, (uint)Math.Ceiling(LiquidGlassGovernor.Fastest.TotalMilliseconds), out var info, out var resource);
+                // Nothing due but what Windows hands over (every window's wants are drawn on its own thread at once): a long
+                // look. Something due on this thread (a CPU path's region, an imaged piece, a want DrawNow couldn't serve):
+                // one display refresh, as before.
+                var look = Idle(subscribers, consumers) ? IdleLook : LiquidGlassGovernor.Fastest;
+                var hr = AcquireNextFrame(_duplication, (uint)Math.Ceiling(look.TotalMilliseconds), out var info, out var resource);
                 if (hr == DXGI_ERROR_WAIT_TIMEOUT)
                 {
+                    Interlocked.Increment(ref _timeouts);
                     lock (_contextGate) Service(subscribers, consumers, null);
                     LiquidGlassGovernor.Tick();
                     continue;
@@ -328,6 +365,19 @@ internal sealed class MonitorCapture : IDisposable
             lock (_contextGate) CloseDevice();
             _wake.Dispose();
         }
+    }
+
+    /// <summary>Whether nothing is due on this thread but Windows' next frame: no CPU path window (its region is read here
+    /// when it moves), and every GPU window serves its own wants (<see cref="IGpuGlassConsumer.ServesItself"/>) and has
+    /// none left over.</summary>
+    private static bool Idle(List<Subscriber> subscribers, List<IGpuGlassConsumer> consumers)
+    {
+        if (subscribers.Count > 0) return false;
+        foreach (var consumer in consumers)
+        {
+            if (consumer.WantsFrame || !consumer.ServesItself) return false;
+        }
+        return true;
     }
 
     /// <summary>Copies the frame's changes into the desktop copy, keeping them in <see cref="_changed"/>; returns their
@@ -406,47 +456,62 @@ internal sealed class MonitorCapture : IDisposable
             if (changed) _renderer?.Remember(_changed);
             return;
         }
-        var touched = new List<Int32Rect>?[consumers.Count];
-        var foreign = false;
-        if (changed)
+        if (!changed)
         {
-            var areas = new List<(int Consumer, RECT Rect)>();
-            for (var c = 0; c < consumers.Count; c++)
+            foreach (var consumer in consumers)
             {
-                foreach (var area in consumers[c].Areas)
-                {
-                    var box = new RECT
-                    {
-                        Left = area.X - _desktopBounds.Left, Top = area.Y - _desktopBounds.Top,
-                        Right = area.X + area.Width - _desktopBounds.Left, Bottom = area.Y + area.Height - _desktopBounds.Top,
-                    };
-                    foreach (var dirty in _changed)
-                    {
-                        var r = new RECT { Left = Math.Max(box.Left, dirty.Left), Top = Math.Max(box.Top, dirty.Top), Right = Math.Min(box.Right, dirty.Right), Bottom = Math.Min(box.Bottom, dirty.Bottom) };
-                        if (r.Right > r.Left && r.Bottom > r.Top) areas.Add((c, r));
-                    }
-                }
+                if (consumer.WantsFrame) consumer.Frame(_renderer, null, foreign: false);
             }
-            // A change that reaches past every window of ours is something else's (a video playing behind): it is real,
-            // with no compare and no wait for one. Only a change wholly inside a window of ours may be that window
-            // repainting itself, which the compare tells from a change behind it.
-            foreign = areas.Count > 0 && !Ours(consumers, areas);
-            var differs = areas.Count == 0 ? 0u : foreign ? Touched(areas) : _renderer.Differs(areas);
-            _quiet = differs == 0;
-            _renderer.Remember(_changed);
-            for (var c = 0; c < consumers.Count; c++)
-            {
-                if ((differs & (1u << Math.Min(c, 31))) == 0) continue;
-                touched[c] = areas.Where(a => a.Consumer == c)
-                    .Select(a => new Int32Rect(a.Rect.Left + _desktopBounds.Left, a.Rect.Top + _desktopBounds.Top, a.Rect.Right - a.Rect.Left, a.Rect.Bottom - a.Rect.Top)).ToList();
-            }
+            return;
         }
+        // The lists are this thread's, used again each frame: a consumer copies what it keeps (Frame).
+        var areas = _areas;
+        areas.Clear();
         for (var c = 0; c < consumers.Count; c++)
         {
-            if (touched[c] == null && !consumers[c].WantsFrame) continue;
-            consumers[c].Frame(_renderer, touched[c], foreign && touched[c] != null);
+            var boxes = consumers[c].Areas;
+            for (var a = 0; a < boxes.Count; a++)
+            {
+                var area = boxes[a];
+                var box = new RECT
+                {
+                    Left = area.X - _desktopBounds.Left, Top = area.Y - _desktopBounds.Top,
+                    Right = area.X + area.Width - _desktopBounds.Left, Bottom = area.Y + area.Height - _desktopBounds.Top,
+                };
+                foreach (var dirty in _changed)
+                {
+                    var r = new RECT { Left = Math.Max(box.Left, dirty.Left), Top = Math.Max(box.Top, dirty.Top), Right = Math.Min(box.Right, dirty.Right), Bottom = Math.Min(box.Bottom, dirty.Bottom) };
+                    if (r.Right > r.Left && r.Bottom > r.Top) areas.Add((c, r));
+                }
+            }
+        }
+        // A change that reaches past every window of ours is something else's (a video playing behind): it is real,
+        // with no compare and no wait for one. Only a change wholly inside a window of ours may be that window
+        // repainting itself, which the compare tells from a change behind it.
+        var foreign = areas.Count > 0 && !Ours(consumers, areas);
+        var differs = areas.Count == 0 ? 0u : foreign ? Touched(areas) : _renderer.Differs(areas);
+        _quiet = differs == 0;
+        _renderer.Remember(_changed);
+        while (_touched.Count < consumers.Count) _touched.Add([]);
+        for (var c = 0; c < consumers.Count; c++)
+        {
+            List<Int32Rect>? touched = null;
+            if ((differs & (1u << Math.Min(c, 31))) != 0)
+            {
+                touched = _touched[c];
+                touched.Clear();
+                foreach (var (consumer, r) in areas)
+                {
+                    if (consumer == c) touched.Add(new Int32Rect(r.Left + _desktopBounds.Left, r.Top + _desktopBounds.Top, r.Right - r.Left, r.Bottom - r.Top));
+                }
+            }
+            if (touched == null && !consumers[c].WantsFrame) continue;
+            consumers[c].Frame(_renderer, touched, foreign && touched != null);
         }
     }
+
+    private readonly List<(int Consumer, RECT Rect)> _areas = [];
+    private readonly List<List<Int32Rect>> _touched = [];
 
     /// <summary>Whether every changed rectangle under the glass lies wholly inside one of our windows (desktop pixels).</summary>
     private bool Ours(List<IGpuGlassConsumer> consumers, List<(int Consumer, RECT Rect)> areas)

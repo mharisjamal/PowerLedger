@@ -106,6 +106,7 @@ internal sealed class GlassMaterial : IDisposable
         Current = _read();
         AeroMotion.SetOverride(Current.ReduceMotion);
         LiquidGlassSources.AllowScreenshots = Current.ShowInScreenshots;
+        GlassPower.LighterOnBattery = Current.LighterOnBattery;
         var map = Map(Current, _theme());
         foreach (var (key, value) in map)
         {

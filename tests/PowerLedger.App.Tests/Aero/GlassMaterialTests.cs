@@ -287,6 +287,25 @@ public class GlassMaterialTests
             }
         });
 
+    [Fact]
+    public void Lighter_glass_on_battery_reaches_the_liquid_glass_at_once()
+        => UiHarness.OnUi(() =>
+        {
+            var settings = new GlassSettings { LighterOnBattery = true };
+            using var material = new GlassMaterial(new Border(), () => settings, () => Theme.Dark);
+            try
+            {
+                GlassPower.LighterOnBattery.ShouldBeTrue();
+                settings = new GlassSettings();
+                material.Refresh();
+                GlassPower.LighterOnBattery.ShouldBeFalse();
+            }
+            finally
+            {
+                GlassPower.LighterOnBattery = false;
+            }
+        });
+
     /// <summary>The one live channel (Plan S 0.4): Settings raises Glass, and the window's glass changes, on the window only.</summary>
     [Fact]
     public void Raising_glass_repaints_the_window_live_and_never_the_application()

@@ -307,4 +307,43 @@ public class AeroSettingsViewTests
                 LiquidGlassSources.AllowScreenshots = false;
             }
         });
+
+    /// <summary>Perf review P10: Lighter glass on battery, a glass switch beside Show in screenshots, off by default; on, it
+    /// sets the saved Glass settings and, through GlassMaterial, the engine's switch at once, and off again the same way.</summary>
+    [Fact]
+    public void The_lighter_glass_switch_is_off_by_default_and_reaches_the_engine()
+        => UiHarness.OnUi(() =>
+        {
+            var settings = Screen(GlassSettings.Default);
+            var (window, view) = Page(settings, Theme.Dark, 1440);
+            try
+            {
+                var toggle = (GlassSwitch)view.FindName("BatterySwitch");
+                toggle.IsChecked.ShouldBe(false, "off by default");
+                GlassPower.LighterOnBattery.ShouldBeFalse();
+                System.Windows.Automation.AutomationProperties.GetName(toggle).ShouldBe("Lighter glass on battery");
+                System.Windows.Automation.AutomationProperties.GetHelpText(toggle).ShouldStartWith("On: on battery, the glass behind PowerLedger refreshes at most 15 times a second");
+                UiHarness.Find<TextBlock>(view, t => t.Text == "Fewer glass frames when unplugged").ShouldNotBeNull("the board's short caption");
+                // Beside Show in screenshots, as the other switches pair up.
+                var screenshots = (GlassSwitch)view.FindName("ScreenshotsSwitch");
+                Grid.GetRow((UIElement)VisualTreeHelper.GetParent(toggle)).ShouldBe(Grid.GetRow((UIElement)VisualTreeHelper.GetParent(screenshots)));
+                Grid.GetColumn((UIElement)VisualTreeHelper.GetParent(toggle)).ShouldBe(2);
+                UiHarness.Render(WholePage(window, view, 1440), 1440, WholeHeight(view), "aero-settings-battery-off-Dark.png");
+
+                toggle.IsChecked = true;
+                UiHarness.Pump(TimeSpan.FromMilliseconds(150));
+                settings.Glass.LighterOnBattery.ShouldBeTrue();
+                GlassPower.LighterOnBattery.ShouldBeTrue("GlassMaterial hands the switch to the engine");
+                UiHarness.Render(WholePage(window, view, 1440), 1440, WholeHeight(view), "aero-settings-battery-on-Dark.png");
+
+                toggle.IsChecked = false;
+                UiHarness.Pump(TimeSpan.FromMilliseconds(150));
+                GlassPower.LighterOnBattery.ShouldBeFalse();
+            }
+            finally
+            {
+                window.Close();
+                GlassPower.LighterOnBattery = false;
+            }
+        });
 }

@@ -282,6 +282,10 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
     /// <summary>Copies one whole texture onto another of its size.</summary>
     public void Copy(IntPtr destination, IntPtr source) => CopyResource(_context, destination, source);
 
+    /// <summary>Copies a rectangle of one texture onto the same place on another of its size.</summary>
+    public void Copy(IntPtr destination, IntPtr source, CaptureNative.RECT r)
+        => CopySubresourceRegion(_context, destination, r.Left, r.Top, source, new D3D11_BOX { Left = (uint)r.Left, Top = (uint)r.Top, Right = (uint)r.Right, Bottom = (uint)r.Bottom, Back = 1 });
+
     /// <summary>Waits until the GPU has finished everything asked of it so far (a texel of <paramref name="texture"/> read
     /// back after it), so another device (WPF's) reads finished pixels.</summary>
     public void Finish(IntPtr texture)

@@ -60,6 +60,23 @@ public class GlassSectionTests
         _ui.Changes.Count(c => c.StartsWith("glass", StringComparison.Ordinal)).ShouldBe(8);
     }
 
+    /// <summary>Lighter glass on battery (perf review P10): off at first, saved as the one field changed, and shown back.</summary>
+    [Fact]
+    public void Lighter_glass_on_battery_is_saved_and_shown_back()
+    {
+        var settings = Settings();
+        var glass = settings.GlassSection;
+        var raised = new List<string?>();
+        ((INotifyPropertyChanged)glass).PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        glass.LighterOnBattery.ShouldBeFalse();
+        glass.LighterOnBattery = true;
+
+        settings.Glass.ShouldBe(GlassSettings.Default with { LighterOnBattery = true });
+        glass.LighterOnBattery.ShouldBeTrue();
+        raised.ShouldContain(nameof(GlassSection.LighterOnBattery));
+    }
+
     [Fact]
     public void The_same_choice_again_saves_nothing()
     {
