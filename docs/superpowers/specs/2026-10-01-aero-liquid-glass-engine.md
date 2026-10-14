@@ -74,6 +74,8 @@ region.
 | `LiquidGlassSources.GpuAllowed` | the tests' switch: false keeps every window on the WPF effects path |
 | `LiquidGlassSources.Override` | `Func<HwndSource, ILiquidGlassSource>`: hands every window a fake source, so nothing captures the screen |
 | `LiquidGlassGovernor.Budget` | the CPU safety net, 8 % of one core for the whole process by default |
+| `GlassSettings.LighterOnBattery` (Settings, "Lighter glass on battery", off by default, anything but JSON `true` reads as off) | copied by `GlassMaterial` into `GlassPower.LighterOnBattery`: the glass is lighter on battery too, not only under Energy Saver |
+| `GlassPower.EnergySaver`, `GlassPower.OnBattery` | what Windows says (GetSystemPowerStatus, then each glass window's power notifications); a test may set them |
 | `LiquidGlassSources.Animate(ms)` | AeroMotion calls it for each animation: composed glass follows its piece every frame until then |
 
 ### `ILiquidGlassSource`
@@ -272,6 +274,15 @@ process's CPU:
 - over the budget (8 %), the next frame waits half as long again, down to one a second;
 - under seven tenths of the budget, it comes a quarter sooner, up to 30 a second.
 A window at rest takes no frames and is never slowed.
+
+**Lighter glass** (2026-10-14, perf review P10). While Windows' Energy Saver is on, or on battery with Lighter glass on
+battery chosen (`GlassPower.Lighter`), the pace is never faster than 15 frames a second (`LighterFastest`) and the budget
+is 2 % of a core (`LighterBudget`). Only what is behind the glass refreshes less often: a moved or resized window still
+has its glass drawn at once (`DrawNow`, on the UI thread, outside the governor), and the look is the same. Energy Saver
+is read from `SYSTEM_POWER_STATUS.SystemStatusFlag` and kept by `GUID_POWER_SAVING_STATUS`; the power source by
+`ACLineStatus` and `GUID_ACDC_POWER_SOURCE` (a UPS counts as battery). Each glass window registers for both
+(`RegisterPowerSettingNotification`) and reads both again on `PBT_APMPOWERSTATUSCHANGE`. When the glass turns lighter or
+full again, the pace starts from the new fastest at once.
 
 ## Measurements (2026-10-01, commit 4bb857c)
 

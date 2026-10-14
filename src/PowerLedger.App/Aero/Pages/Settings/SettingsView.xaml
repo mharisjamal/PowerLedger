@@ -434,6 +434,17 @@
                                               AutomationProperties.HelpText="Off: the glass shows the windows behind it live, and PowerLedger stays out of screenshots and screen shares. On: it appears in them, and the glass uses your wallpaper."
                                               ToolTip="Off: the glass shows the windows behind it live, and PowerLedger stays out of screenshots and screen shares. On: it appears in them, and the glass uses your wallpaper." />
                         </DockPanel>
+                        <!-- Lighter glass on battery (perf review P10, off by default): on battery the live glass refreshes at most
+                             15 times a second, as it always does under Windows' Energy Saver; the look is the same. -->
+                        <DockPanel Grid.Row="8" Grid.Column="2" Style="{StaticResource GlassRow}">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Lab}" Text="Lighter glass on battery" />
+                                <TextBlock Style="{StaticResource Cap}" Text="Fewer glass frames when unplugged" />
+                            </StackPanel>
+                            <aero:GlassSwitch x:Name="BatterySwitch" DockPanel.Dock="Right" IsChecked="{Binding LighterOnBattery}" AutomationProperties.Name="Lighter glass on battery"
+                                              AutomationProperties.HelpText="On: on battery, the glass behind PowerLedger refreshes at most 15 times a second instead of at your display's rate. Windows' Energy Saver does this anyway. A moved window's glass still follows it at once."
+                                              ToolTip="On: on battery, the glass behind PowerLedger refreshes at most 15 times a second instead of at your display's rate. Windows' Energy Saver does this anyway. A moved window's glass still follows it at once." />
+                        </DockPanel>
                         <!-- No Tilt and parallax here (0.10.4): Aero's free-form window floats its glass over the real desktop,
                              which never tilts, so the switch would do nothing. -->
 

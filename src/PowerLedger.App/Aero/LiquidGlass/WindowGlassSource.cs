@@ -52,8 +52,12 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         _hwnd = window.Handle;
         _dispatcher = window.Dispatcher;
         _window.AddHook(Hook);
+        // Energy Saver and the power source, for lighter glass (GlassPower); one window's notice serves every window.
+        _power = GlassPower.Register(_hwnd);
         Apply();
     }
+
+    private readonly IntPtr[] _power;
 
     public LiquidGlassSourceKind Kind { get; private set; }
 
@@ -124,6 +128,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         if (_disposed) return;
         _disposed = true;
         _window.RemoveHook(Hook);
+        GlassPower.Unregister(_power);
         StopGpu();
         StopLive();
         if (!_window.IsDisposed) SetWindowDisplayAffinity(_hwnd, WDA_NONE);
@@ -327,6 +332,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
 
     private IntPtr Hook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (GlassPower.Notified(msg, wParam, lParam)) return IntPtr.Zero;
         switch (msg)
         {
             case WM_WINDOWPOSCHANGED when _gpu != null && Moved():
