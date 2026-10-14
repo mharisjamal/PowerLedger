@@ -144,6 +144,14 @@ display scales 1, 1.25 and 1.5. The tests read the committed crops in
   Only a change wholly inside one of our windows is compared, as it may be that window repainting.
 - **Quiet frames slow the pace.** After a frame that draws nothing, the next look waits a tenth of a second; the first
   frame that draws brings back the governor's pace.
+- **A still desktop costs four wakeups a second** (2026-10-14, perf review P8). While nothing is due but Windows' next
+  frame, one look waits a quarter of a second (`MonitorCapture.IdleLook`) rather than one display refresh, which woke
+  the thread at the display's rate for nothing. A frame ends the wait at once, so nothing behind is drawn later. What a
+  composed window asks of its glass meanwhile (a piece new, moved or resized, a read, the window shown) is drawn on its
+  UI thread at its next turn (`GpuGlassWindow.Want`, through `DrawNow`), as a move already was, so it never waits for that
+  look. The short look stays where the capture thread itself has work due: a want `DrawNow` couldn't serve (no
+  duplication yet), an imaged piece (its wants come as WPF hands the picture back), and the CPU path (its region read
+  after a move). The thread allocates nothing per look.
 - With every window hidden or minimised, the duplication is let go and the thread sleeps: no frames.
 - When a window is left out of capture or starts its glass, every frame copies the whole desktop for half a second.
   Windows can hand over a frame drawn before the exclusion took hold, and no dirty rectangle would ever take that out of

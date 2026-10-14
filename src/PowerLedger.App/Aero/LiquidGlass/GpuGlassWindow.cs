@@ -226,6 +226,13 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
 
     public bool WantsFrame => _wants;
 
+    /// <summary>True while every piece is composed: a want is then drawn on the UI thread at once (<see cref="Want"/>), and
+    /// the capture thread needn't look for it. An imaged piece's wants come as WPF hands the picture back, for the capture
+    /// thread to draw.</summary>
+    public bool ServesItself => _servesItself;
+
+    private volatile bool _servesItself = true;
+
     public IntPtr Window => _hwnd;
 
     /// <summary>Whether <paramref name="piece"/> is composed (DirectComposition beneath the window: the piece draws
@@ -455,8 +462,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             return done.Task;
         }
         _readRequests.Enqueue((p.Id, done));
-        _wants = true;
-        _session.Wake();
+        Want();
         return done.Task;
     }
 
@@ -712,10 +718,15 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
 
     // ---- Both ----
 
+    /// <summary>Something is to be drawn though nothing changed behind. Composed, it is drawn at the UI thread's next turn
+    /// (<see cref="DrawSoon"/>): the capture thread may be waiting a long while for Windows' next frame
+    /// (MonitorCapture.IdleLook), and a frame of its own couldn't end that wait. Either way the capture thread is told, for
+    /// when that draw can't be made (no duplication yet).</summary>
     private void Want()
     {
         _wants = true;
         _session.Wake();
+        if (_servesItself) DrawSoon();
     }
 
     /// <summary>
@@ -824,6 +835,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         }
         Volatile.Write(ref _jobs, jobs.ToArray());
         Volatile.Write(ref _areas, jobs.Select(j => j.Box).ToArray());
+        _servesItself = jobs.TrueForAll(j => j.Composed);
         Want();
         Changed?.Invoke();
     }

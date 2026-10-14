@@ -621,6 +621,34 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             return 0;
         }));
 
+    /// <summary>
+    /// A still desktop: the capture thread waits for Windows' next frame a quarter of a second at a time, not one display
+    /// refresh at a time (perf review P8: 60 wakeups a second for nothing), and what the window asks of its glass meanwhile
+    /// (here a read; a piece new, moved or changed) is served on the window's own thread at its next turn, not at the
+    /// capture's next look.
+    /// </summary>
+    [Fact]
+    public void At_rest_the_capture_waits_long_for_a_frame_and_a_want_is_served_at_once()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            var picture = FakeGlassSource.Picture(400, 300, (x, y) => ((byte)x, (byte)y, 90));
+            using var scene = Show(picture, 300, 200, 300, 200);
+            UiHarness.PumpUntil(() => scene.Glass.Composed && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
+            UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+            var session = Gpu(scene).Session;
+            var (timeouts, watch) = (session.Timeouts, System.Diagnostics.Stopwatch.StartNew());
+            UiHarness.Pump(TimeSpan.FromSeconds(2));
+            var empty = session.Timeouts - timeouts;
+            var seconds = watch.Elapsed.TotalSeconds;
+            var read = Gpu(scene).ReadAsync(scene.Glass);
+            UiHarness.Pump(TimeSpan.FromMilliseconds(1));
+            output.WriteLine($"looks that found nothing over {seconds:0.0} s: {empty}; the read answered at the window's next turn: {read.IsCompleted}");
+            empty.ShouldBeLessThanOrEqualTo((long)Math.Ceiling(seconds / MonitorCapture.IdleLook.TotalSeconds) + 1);
+            read.IsCompleted.ShouldBeTrue();
+            read.Result.Length.ShouldBe(300 * 200 * 4);
+            return 0;
+        }));
+
     /// <summary>A pane resized with its window, the overlay's pill following its reading, a snap: one move map serves a
     /// piece at every size (the mirror into the box is the shader's), so a new size makes no map and is drawn as soon as
     /// the layout pass that gave it is done.</summary>
