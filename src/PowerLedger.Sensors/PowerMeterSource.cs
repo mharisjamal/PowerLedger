@@ -61,18 +61,22 @@ public sealed partial class PowerMeterSource : ISensorSource
     public void Contribute(SampleDraft draft)
     {
         if (!Supported || draft.SystemMeterW is not null) return;
-        double? largest = null;
-        foreach (var instance in _read)
+        IReadOnlyList<long?> readings;
+        try
         {
-            try
-            {
-                var milliwatts = _meters.Milliwatts(instance);
-                if (milliwatts > 0 && milliwatts / 1000.0 > (largest ?? 0)) largest = milliwatts / 1000.0;
-            }
-            catch (Exception error) when (error is not OutOfMemoryException)
-            {
-                // One counter that went away costs its own reading; the others may still answer.
-            }
+            readings = _meters.Milliwatts(_read);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Counters that went away cost this tick's reading; the source carries on.
+            return;
+        }
+
+        double? largest = null;
+        foreach (var milliwatts in readings)
+        {
+            // One counter Windows gave nothing for costs its own reading; the others still answer.
+            if (milliwatts is > 0 && milliwatts.Value / 1000.0 > (largest ?? 0)) largest = milliwatts.Value / 1000.0;
         }
         if (largest is not { } watts) return;
         draft.SystemMeterW = watts;
@@ -130,16 +134,20 @@ internal interface IPowerMeters : IDisposable
     /// <summary>The device path of each power meter device, in WMI's order; null when WMI cannot answer.</summary>
     IReadOnlyList<string>? DeviceIds();
 
-    /// <summary>What the instance's Power counter reads now, in milliwatts.</summary>
-    long Milliwatts(string instance);
+    /// <summary>What each instance's Power counter reads now, in milliwatts, all read at once; null for an instance Windows
+    /// gave nothing for. Throws when Windows will not answer at all.</summary>
+    IReadOnlyList<long?> Milliwatts(IReadOnlyList<string> instances);
 }
 
-/// <summary>The real counters and WMI class. A counter is opened the first time it is read and kept.</summary>
+/// <summary>The real counters and WMI class. The counters are opened in one PDH query the first time they are read, and
+/// read together, one collection a tick.</summary>
 internal sealed class WindowsPowerMeters : IPowerMeters
 {
     private const string Category = "Power Meter";
-    private const string PowerCounter = "Power";
-    private readonly Dictionary<string, PerformanceCounter> _counters = new(StringComparer.Ordinal);
+    private PdhQuery? _query;
+    private IReadOnlyList<string> _opened = [];
+    private int?[] _counters = [];
+    private long?[] _readings = [];
 
     public IReadOnlyList<string> Instances()
     {
@@ -157,19 +165,29 @@ internal sealed class WindowsPowerMeters : IPowerMeters
         => Wmi.ReadOrNull<IReadOnlyList<string>>(@"root\cimv2\power", "SELECT DeviceID FROM Win32_PowerMeter",
             rows => [.. rows.Select(row => row["DeviceID"] as string ?? "")]);
 
-    public long Milliwatts(string instance)
+    public IReadOnlyList<long?> Milliwatts(IReadOnlyList<string> instances)
     {
-        if (!_counters.TryGetValue(instance, out var counter))
+        if (_query is null || !_opened.SequenceEqual(instances))
         {
-            counter = new PerformanceCounter(Category, PowerCounter, instance, readOnly: true);
-            _counters[instance] = counter;
+            Dispose();
+            var query = new PdhQuery();
+            _counters = [.. instances.Select(instance => query.TryAdd($@"\{Category}({instance})\Power"))];
+            _readings = new long?[instances.Count];
+            _opened = [.. instances];
+            _query = query;
         }
-        return counter.RawValue;
+
+        _query.Collect();
+        for (var meter = 0; meter < _counters.Length; meter++)
+        {
+            _readings[meter] = _counters[meter] is { } counter ? _query.Raw(counter) : null;
+        }
+        return _readings;
     }
 
     public void Dispose()
     {
-        foreach (var counter in _counters.Values) counter.Dispose();
-        _counters.Clear();
+        _query?.Dispose();
+        _query = null;
     }
 }

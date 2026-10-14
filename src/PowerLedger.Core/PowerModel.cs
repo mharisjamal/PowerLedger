@@ -81,7 +81,7 @@ public sealed class PowerModel
     {
         var cpu = CpuWatts(s);
         var gpu = GpuWatts(s);
-        var display = DisplayModel.PanelWatts(_profile, s.Brightness, s.DisplayOn);
+        var display = DisplayModel.PanelWatts(_profile, s);
         monitors = _monitors.Watts(s.DisplayOn);
         // Idle is the user away and the PC doing nothing; a load nobody could read counts as none, as its watts do. Idle time
         // nobody reported, with the App closed, comes in as 0, so the PC counts as in use.

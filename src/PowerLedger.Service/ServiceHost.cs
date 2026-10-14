@@ -146,6 +146,7 @@ internal static class ServiceHost
                 () => signals.DisplayOn, () => signals.SessionLocked, idle,
                 monitorsDetected: found => monitors.Detected(found, retired),
                 readPowerSupply: PowerSupplySwitch(board, retired),
+                note: message => provider.GetRequiredService<ILogger<MachineSensorSet>>().LogInformation("{Note}", message),
                 nut: new NutSwitch(board, nutSecret.Password, retired).Current)),
             Inventory: HardwareInventory.Detect,
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),

@@ -192,6 +192,26 @@ public static class MonitorInventory
         }
     }
 
+    /// <summary>Whether the built-in panel is showing anything, from WmiMonitorBasicDisplayParams' Active flag for each display
+    /// and WmiMonitorConnectionParams' connection, which says which display is built in (see
+    /// <see cref="HardwareInventory.BuiltInConnections"/>). A docked laptop with its lid shut, or one set to show on the second
+    /// screen only, lists its panel as inactive beside the monitor it shows on.</summary>
+    /// <returns>True when a built-in panel is active, false when every one listed is inactive, and null when Windows lists none
+    /// it can tell is built in, which says nothing about a panel.</returns>
+    internal static bool? InternalPanelActive(
+        IEnumerable<(string Instance, bool Active)> displays, IReadOnlyDictionary<string, uint> connections)
+    {
+        var connectionOf = ByInstance(connections.Select(pair => (pair.Key, pair.Value)));
+        bool? active = null;
+        foreach (var (instance, isActive) in displays)
+        {
+            if (!connectionOf.TryGetValue(MonitorKeys.FromInstanceName(instance), out var connection)
+                || !HardwareInventory.BuiltInConnections.Contains(connection)) continue;
+            active = active == true || isActive;
+        }
+        return active;
+    }
+
     /// <summary>The native resolution a read gives the monitor at <paramref name="instance"/>, which is remembered for
     /// it; or, when the read gives none, the one last read for that instance; or 0 by 0 when none ever was.</summary>
     /// <remarks>A monitor's native resolution doesn't change, but some drivers fail to answer for the modes now and then, or

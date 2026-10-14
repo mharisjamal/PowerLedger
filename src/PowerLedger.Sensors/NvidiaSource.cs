@@ -6,8 +6,15 @@ namespace PowerLedger.Sensors;
 /// <param name="Rating">The card's rating from the table, or from its memory when the table does not know it; null when
 /// neither is known, which leaves it to the machine's figure.</param>
 /// <param name="Read">Asks NVML for the card's power and load.</param>
-/// <param name="PoweredOff">Asks Windows, without waking the card, whether it has switched it off.</param>
-internal sealed record NvidiaCard(string Name, uint DeviceId, GpuRating? Rating, Func<GpuReading> Read, Func<bool> PoweredOff);
+/// <param name="Power">Asks Windows, without waking the card, whether it has switched it on or off, or can't say.</param>
+internal sealed record NvidiaCard(string Name, uint DeviceId, GpuRating? Rating, Func<GpuReading> Read, Func<DevicePower> Power)
+{
+    /// <summary>A card Windows always says is on or off.</summary>
+    public NvidiaCard(string name, uint deviceId, GpuRating? rating, Func<GpuReading> read, Func<bool> poweredOff)
+        : this(name, deviceId, rating, read, () => poweredOff() ? DevicePower.Off : DevicePower.On)
+    {
+    }
+}
 
 /// <summary>
 /// Every NVIDIA card's power, load and presence, through NVML. When Windows has switched a card off, as a switchable-graphics
@@ -15,20 +22,30 @@ internal sealed record NvidiaCard(string Name, uint DeviceId, GpuRating? Rating,
 /// null on the many cards with no measurement hardware, laptop GPUs and Fermi cards among them, and the power model works
 /// the card's watts out from its load and its own rating instead; a card that gives no load either, as Fermi GeForce cards
 /// do not, has it filled from Windows' GPU load counters by <see cref="GpuLoadSource"/>.
+/// Whether a card is switched off is asked of Windows as seldom as is safe (<see cref="DevicePowerWatch"/>). A card whose
+/// state Windows can't give, because its device can't be found, is read through NVML only every ten seconds, with the last
+/// reading carrying the ticks between, since asking NVML every tick would keep a switchable-graphics laptop's GeForce awake.
 /// </summary>
 public sealed class NvidiaSource : ISensorSource
 {
+    /// <summary>How often a card whose power state is unknown is read.</summary>
+    public const long UnknownReadMilliseconds = 10_000;
+
     private readonly IReadOnlyList<NvidiaCard> _cards;
     private readonly Nvml? _nvml;
+    private readonly Func<long> _clock;
+    private readonly (GpuReading Reading, long At)?[] _unknownReads;
 
     public NvidiaSource()
     {
         var nvml = new Nvml();
         _nvml = nvml;
+        _clock = static () => Environment.TickCount64;
         var devices = nvml.Devices;
         _cards = [.. devices.Select((device, index) => new NvidiaCard(
             device.Name, device.DeviceId, TdpTable.Bundled.GpuOrGuess(device.Name, device.MemoryBytes),
-            () => nvml.Read(index), PowerState(device, devices.Count)))];
+            () => nvml.Read(index), PowerState(device, devices.Count, _clock)))];
+        _unknownReads = new (GpuReading, long)?[_cards.Count];
         Supported = nvml.Available;
         Unavailable = nvml.Unavailable;
         LoadsEveryCard = !Supported || _cards.All(GivesLoad);
@@ -41,9 +58,12 @@ public sealed class NvidiaSource : ISensorSource
     }
 
     /// <summary>Test seam: any cards.</summary>
-    internal NvidiaSource(IReadOnlyList<NvidiaCard> cards, bool present, string? unavailable, bool loadsEveryCard)
+    /// <param name="clockMilliseconds">A monotonic clock, for the cards whose power state is unknown.</param>
+    internal NvidiaSource(IReadOnlyList<NvidiaCard> cards, bool present, string? unavailable, bool loadsEveryCard, Func<long>? clockMilliseconds = null)
     {
         _cards = cards;
+        _clock = clockMilliseconds ?? (static () => Environment.TickCount64);
+        _unknownReads = new (GpuReading, long)?[cards.Count];
         Supported = present;
         Unavailable = unavailable;
         LoadsEveryCard = loadsEveryCard;
@@ -64,9 +84,15 @@ public sealed class NvidiaSource : ISensorSource
     public void Contribute(SampleDraft draft)
     {
         var readings = new List<(NvidiaCard Card, GpuReading Reading)>(_cards.Count);
-        foreach (var card in _cards)
+        for (var index = 0; index < _cards.Count; index++)
         {
-            var reading = card.PoweredOff() ? new GpuReading(true, 0, 0) : card.Read();
+            var card = _cards[index];
+            var reading = card.Power() switch
+            {
+                DevicePower.Off => new GpuReading(true, 0, 0),
+                DevicePower.Unknown => ReadSeldom(index),
+                _ => card.Read(),
+            };
             if (reading.Present) readings.Add((card, reading));
         }
 
@@ -82,15 +108,25 @@ public sealed class NvidiaSource : ISensorSource
 
     public void Dispose() => _nvml?.Dispose();
 
-    /// <summary>Whether Windows has the card switched off, asked of the display adapter with the card's PCI ids. With
-    /// no device id only a machine's single NVIDIA card can be told apart; a card Windows cannot find counts as on,
-    /// which never hides real draw.</summary>
-    private static Func<bool> PowerState(NvmlDevice device, int cards)
+    /// <summary>A card whose power state is unknown, read through NVML once every ten seconds; the last reading between.</summary>
+    private GpuReading ReadSeldom(int index)
     {
-        var found = device.DeviceId != 0
-            ? DevicePowerState.FindDisplayAdapter(FormattableString.Invariant($@"PCI\VEN_10DE&DEV_{device.DeviceId:X4}"))
-            : cards == 1 ? DevicePowerState.FindNvidiaGpu() : null;
-        return found is null ? static () => false : () => DevicePowerState.IsPoweredOff(found);
+        var now = _clock();
+        if (_unknownReads[index] is { } last && now - last.At < UnknownReadMilliseconds) return last.Reading;
+        var reading = _cards[index].Read();
+        _unknownReads[index] = (reading, now);
+        return reading;
+    }
+
+    /// <summary>Whether Windows has the card switched off, asked of the display adapter with the card's PCI ids. With
+    /// no device id only a machine's single NVIDIA card can be told apart; any other is unknown, which never hides real
+    /// draw and never polls the card every tick.</summary>
+    private static Func<DevicePower> PowerState(NvmlDevice device, int cards, Func<long> clock)
+    {
+        Func<string?> find = device.DeviceId != 0
+            ? () => DevicePowerState.FindDisplayAdapter(FormattableString.Invariant($@"PCI\VEN_10DE&DEV_{device.DeviceId:X4}"))
+            : cards == 1 ? DevicePowerState.FindNvidiaGpu : static () => null;
+        return new DevicePowerWatch(find, DevicePowerState.Nodes, clock).State;
     }
 
     /// <summary>True when the card gives its utilisation, or is switched off and not to be woken to ask.</summary>
@@ -98,7 +134,7 @@ public sealed class NvidiaSource : ISensorSource
     {
         try
         {
-            return card.PoweredOff() || card.Read().LoadFraction is not null;
+            return card.Power() == DevicePower.Off || card.Read().LoadFraction is not null;
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {

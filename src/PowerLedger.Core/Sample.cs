@@ -33,6 +33,9 @@ namespace PowerLedger.Core;
 /// <paramref name="PsuWallW"/>: never divided by an efficiency.</param>
 /// <param name="SystemMeter">What gave <paramref name="SystemMeterW"/>.</param>
 /// <param name="SystemMeterName">What the meter is called, for the status screen.</param>
+/// <param name="PanelInactive">True when Windows lists the built-in panel as showing nothing while the console display is on
+/// elsewhere: a docked laptop with its lid shut, or one set to show on the second screen only. The panel then draws nothing.
+/// False when it shows, and when nothing says (a machine with no built-in panel, or one Windows lists no panel for).</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -61,7 +64,8 @@ public sealed record Sample(
     double? PlatformW = null,
     double? SystemMeterW = null,
     SystemMeterKind SystemMeter = SystemMeterKind.None,
-    string? SystemMeterName = null)
+    string? SystemMeterName = null,
+    bool PanelInactive = false)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>

@@ -8,11 +8,16 @@ namespace PowerLedger.Sensors;
 /// </summary>
 public sealed class MachineSensors : IDisposable
 {
-    private MachineSensors(Sampler sampler, SampleValidator validator, DisplaySource display)
+    private readonly PlatformRailCheck _railCheck;
+    private readonly Action<string>? _note;
+
+    private MachineSensors(Sampler sampler, SampleValidator validator, DisplaySource display, PlatformRailCheck railCheck, Action<string>? note)
     {
         Sampler = sampler;
         Validator = validator;
         Display = display;
+        _railCheck = railCheck;
+        _note = note;
     }
 
     /// <summary>The composed sources, for per-source health on the status screen.</summary>
@@ -30,22 +35,27 @@ public sealed class MachineSensors : IDisposable
     /// the Service, in session 0, must supply it.</param>
     /// <param name="validatorOptions">Overrides for the plausible ranges and windows.</param>
     /// <param name="monitorsDetected">Told which external monitors are attached, from the thread that reads the set: once WMI
-    /// first answers, and whenever they change (checked once a minute). Leave null to skip reading them.</param>
+    /// first answers, and whenever they change (checked when Windows announces a monitor, lid or display change, and every
+    /// quarter of an hour). Leave null to skip reading them.</param>
     /// <param name="readPowerSupply">The owner's tick for reading a power supply over USB, asked afresh before every read.
     /// Leave null where there is nobody to ask, which leaves any power supply alone altogether.</param>
     /// <param name="nut">The owner's UPS on another computer (Network UPS Tools), asked afresh every tick; null while none is set
     /// up. Leave out where there are no settings, which reads none.</param>
+    /// <param name="note">Told the few lines worth a log: the energy meter's rails where they are not Intel's or AMD's usual
+    /// ones, and the platform rail's verdict against the battery whenever it changes.</param>
     public static MachineSensors Create(
         Func<bool> displayOn, Func<bool> sessionLocked,
         Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null,
         Action<IReadOnlyList<MonitorFacts>>? monitorsDetected = null,
         Func<bool>? readPowerSupply = null,
-        Func<NutTarget?>? nut = null)
+        Func<NutTarget?>? nut = null,
+        Action<string>? note = null)
     {
         var display = new DisplaySource(displayOn, monitorsDetected);
+        var railCheck = PlatformRailCheck.Machine;
         List<ISensorSource> sources =
         [
-            new EnergyMeterSource(),
+            new EnergyMeterSource(railCheck, note),
             .. NvidiaAndTheRest(),
             new BatterySource(),
             new UpsSource(),
@@ -57,7 +67,7 @@ public sealed class MachineSensors : IDisposable
             new ActivitySource(sessionLocked, userIdleSeconds),
             display,
         ];
-        return new MachineSensors(new Sampler(sources), new SampleValidator(validatorOptions), display);
+        return new MachineSensors(new Sampler(sources), new SampleValidator(validatorOptions), display, railCheck, note);
     }
 
     /// <summary>The graphics sources for this machine, NVIDIA's built first, since what it reads decides what else is wanted.</summary>
@@ -122,9 +132,9 @@ public sealed class MachineSensors : IDisposable
         }
     }
 
-    /// <summary>One validated tick. Never throws.</summary>
+    /// <summary>One validated tick, without its platform figure while the battery says the platform rail is wrong. Never throws.</summary>
     public Sample Read(DateTimeOffset timestamp, double deltaSeconds)
-        => Validator.Validate(Sampler.Read(timestamp, deltaSeconds));
+        => _railCheck.Apply(Validator.Validate(Sampler.Read(timestamp, deltaSeconds)), _note);
 
     public void Dispose() => Sampler.Dispose();
 }

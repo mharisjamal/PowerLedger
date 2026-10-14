@@ -74,6 +74,23 @@ public class EnergyMeterSourceTests
     }
 
     [Fact]
+    public void While_the_battery_says_the_platform_rail_is_wrong_the_status_says_so()
+    {
+        var check = new PlatformRailCheck();
+        var source = new EnergyMeterSource(() => default, available: true, unavailable: null, check);
+        source.Unavailable.ShouldBeNull();
+
+        var at = DateTimeOffset.UnixEpoch;
+        for (var second = 0; second < 7 * 60; second++)
+        {
+            at = at.AddSeconds(1);
+            check.Apply(new SampleDraft { OnBattery = true, PlatformW = 6, BatteryRateW = 10 }.ToSample(at, 1), note: null);
+        }
+
+        source.Unavailable.ShouldNotBeNull().ShouldContain("0.60 times the battery's discharge");
+    }
+
+    [Fact]
     public void The_source_never_touches_fields_that_belong_to_others()
     {
         var draft = new SampleDraft { BatteryRateW = 34.2, CpuLoad = 0.5, Brightness = 0.6 };

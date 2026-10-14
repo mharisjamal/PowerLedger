@@ -18,8 +18,23 @@ public enum RailKind
     Memory,
     /// <summary>A neural processor, inside the package figure (Snapdragon X's <c>npu</c>).</summary>
     Npu,
-    /// <summary>The whole platform, display included, on the machines that meter it (Snapdragon X's <c>system</c>).</summary>
+    /// <summary>The whole platform, display included, on the machines that meter it (Snapdragon X's <c>SYS</c>, Intel's
+    /// optional <c>PSYS</c>).</summary>
     Platform,
+    /// <summary>A display (Microsoft's <c>DISPLAY</c> rails), inside the platform figure; not read into the model yet.</summary>
+    Display,
+    /// <summary>Storage (Microsoft's <c>STORAGE</c> rails), inside the platform figure; not read into the model.</summary>
+    Storage,
+    /// <summary>Wi-Fi and Bluetooth (Microsoft's <c>WIFI</c> rails), inside the platform figure; not read into the model.</summary>
+    Network,
+    /// <summary>Mobile broadband (Microsoft's <c>MBB</c> rails), inside the platform figure; not read into the model.</summary>
+    MobileBroadband,
+    /// <summary>What the charger delivers (Snapdragon X's <c>PSU_USB</c>): battery charging and the charger's own losses are
+    /// in it, so it is never the PC's draw.</summary>
+    ChargerInput,
+    /// <summary>A rail known by name whose place among the others is unknown (Snapdragon X's <c>USBC_TOTAL</c>, <c>ROP</c>,
+    /// <c>INFRA</c>, <c>MULTIMEDIA</c>): listed, never read or summed.</summary>
+    Unplaced,
 }
 
 /// <param name="Name">Counter instance name, e.g. "RAPL_Package0_PKG".</param>
@@ -32,15 +47,22 @@ public readonly record struct Rail(string Name, ulong PowerMilliwatts, ulong Ene
 /// <param name="IntegratedGpuW">Integrated graphics watts, already inside PackageW.</param>
 /// <param name="MemoryW">Memory watts, outside PackageW.</param>
 /// <param name="PlatformW">The whole platform's watts, every other rail and the display inside it, or null where no rail
-/// meters the platform (every Intel and AMD machine so far).</param>
-public readonly record struct EnergyMeterReading(double? PackageW, double? CoresW, double? IntegratedGpuW, double? MemoryW, double? PlatformW = null);
+/// meters the platform (most Intel and AMD machines).</param>
+/// <param name="ChargerInputW">What the charger delivers, battery charging included (Snapdragon X's <c>PSU_USB</c>); never the
+/// PC's draw, and null where no rail meters it.</param>
+public readonly record struct EnergyMeterReading(
+    double? PackageW, double? CoresW, double? IntegratedGpuW, double? MemoryW, double? PlatformW = null, double? ChargerInputW = null);
 
 /// <summary>
 /// The processor's power rails as Windows publishes them (spec §4). No kernel driver and no elevation: Windows 11's
 /// inbox power-management driver fills the "Energy Meter" performance counters from the processor's own meters.
-/// Each rail's energy counter, in picowatt-hours, is read directly through the performance-counter API in well
-/// under a millisecond, and watts are the energy used since the previous read over the time between reads, so every
-/// figure is exact over its tick rather than over some window of Windows' choosing.
+/// Every rail's energy counter, in picowatt-hours, and the meter's own clock beside it, in milliseconds, are read
+/// together through one Performance Data Helper query, one collection a tick. Watts are the energy used since the previous
+/// reading over the time the meter's clock says passed, so every figure is exact over the meter's own interval rather than
+/// over the service's. A meter that updates more slowly than the service reads, as Snapdragon's firmware does about once a
+/// second, would otherwise give alternating noughts and doubles; a tick on which its clock did not move, or no rail's energy
+/// did, holds the last figure, and the next one that moved spans the whole interval. Without a clock counter the service's
+/// own is used.
 /// A machine with no rails reports nothing, never zero, because a zero is indistinguishable from an idle chip, and so
 /// does one whose meter has no package rail: its other rails can't stand in for the processor's figure. A Snapdragon X
 /// meter is read through <see cref="QualcommRails"/>, whose table says which rails nest inside which, and whose system rail
@@ -50,17 +72,20 @@ public readonly record struct EnergyMeterReading(double? PackageW, double? Cores
 public sealed class EnergyMeter : IDisposable
 {
     private const string Category = "Energy Meter";
-    private const string EnergyCounter = "Energy";
     private const string NoRails = "this machine publishes no processor power rails";
     private const string NoPackageRail = "this machine's energy meter has no processor package rail";
 
     /// <summary>1 pWh = 1e-12 Wh = 3.6e-9 J. Confirmed on real hardware against Windows' own milliwatt figure.</summary>
     public const double JoulesPerPicowattHour = 3.6e-9;
 
-    private readonly List<(string Name, PerformanceCounter Energy)> _rails = [];
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
-    private Dictionary<string, long> _previousEnergy = [];
-    private TimeSpan _previousAt;
+    private readonly List<Rail> _rails = [];
+    private IRailCounters? _counters;
+    private Func<long> _clock = static () => Environment.TickCount64;
+    private string[] _names = [];
+    private bool[] _meterClock = [];
+    private RailCount?[] _now = [];
+    private (long Energy, long Milliseconds)?[] _before = [];
+    private double?[] _held = [];
 
     public EnergyMeter()
     {
@@ -73,18 +98,13 @@ public sealed class EnergyMeter : IDisposable
             }
 
             var instances = new PerformanceCounterCategory(Category).GetInstanceNames();
+            Instances = instances;
             Unavailable = WhyUnavailable(instances);
             if (Unavailable is not null) return;
 
-            foreach (var instance in instances)
-            {
-                if (Classify(instance) == RailKind.Ignored) continue;
-                _rails.Add((instance, new PerformanceCounter(Category, EnergyCounter, instance, readOnly: true)));
-            }
-
-            // Take the first reading now, so the first real tick already has an interval to measure.
-            _previousEnergy = Snapshot();
-            _previousAt = _clock.Elapsed;
+            // A rail whose place is unknown is listed, never read.
+            string[] rails = [.. instances.Where(instance => Classify(instance) is not (RailKind.Ignored or RailKind.Unplaced))];
+            Open(rails, new PdhRailCounters(Category, rails), static () => Environment.TickCount64);
             Available = true;
         }
         catch (Exception error) when (error is InvalidOperationException or UnauthorizedAccessException or Win32Exception)
@@ -95,6 +115,14 @@ public sealed class EnergyMeter : IDisposable
         }
     }
 
+    /// <summary>Test seam: these rails, read from any counters, with any clock for a meter that has none of its own.</summary>
+    /// <param name="clockMilliseconds">The service's own clock, in milliseconds.</param>
+    internal EnergyMeter(IReadOnlyList<string> rails, IRailCounters counters, Func<long> clockMilliseconds)
+    {
+        Open(rails, counters, clockMilliseconds);
+        Available = true;
+    }
+
     /// <summary>True when a package rail or a whole-platform rail exists, so the processor's own watts or the platform's
     /// can be read; the core, graphics and memory rails beside them are read too.</summary>
     public bool Available { get; }
@@ -102,39 +130,101 @@ public sealed class EnergyMeter : IDisposable
     /// <summary>Why there is nothing to read, for the status screen; null when the meter works.</summary>
     public string? Unavailable { get; }
 
-    /// <summary>Average watts per kind of rail since the previous call. A rail whose counter went backwards reports nothing.</summary>
+    /// <summary>Every counter instance the meter publishes, read or not; none where Windows has no meter.</summary>
+    public IReadOnlyList<string> Instances { get; } = [];
+
+    /// <summary>Average watts per kind of rail over the meter's last interval. A rail whose counter or clock went backwards
+    /// reports nothing and starts again from there; one Windows gave nothing for this tick reports nothing this tick.</summary>
     public EnergyMeterReading Read()
     {
-        if (!Available) return default;
+        if (!Available || _counters is null) return default;
 
-        var now = _clock.Elapsed;
-        var seconds = (now - _previousAt).TotalSeconds;
-        var energy = Snapshot();
-        var previous = _previousEnergy;
-        _previousEnergy = energy;
-        _previousAt = now;
-        if (seconds <= 0) return default;
-
-        var rails = new List<Rail>(energy.Count);
-        foreach (var (name, value) in energy)
+        var wall = Collect();
+        // Wattop's rule: a tick on which no rail's energy moved is one the meter has not updated, whatever its clock says.
+        var moved = false;
+        for (var rail = 0; rail < _names.Length; rail++)
         {
-            if (!previous.TryGetValue(name, out var before) || value < before) continue;
-            var watts = (value - before) * JoulesPerPicowattHour / seconds;
-            rails.Add(new Rail(name, (ulong)Math.Round(watts * 1000), (ulong)value));
+            if (_now[rail] is { } count && _before[rail] is { } before && count.Energy != before.Energy) moved = true;
         }
-        return Summarise(rails);
+
+        _rails.Clear();
+        for (var rail = 0; rail < _names.Length; rail++)
+        {
+            if (_now[rail] is not { } count || TimeOf(rail, count, wall) is not { } at) continue;
+            if (_before[rail] is not { } before)
+            {
+                _before[rail] = (count.Energy, at);
+                continue;
+            }
+
+            var energy = count.Energy - before.Energy;
+            var elapsed = at - before.Milliseconds;
+            if (energy < 0 || elapsed < 0)
+            {
+                _before[rail] = (count.Energy, at);
+                _held[rail] = null;
+                continue;
+            }
+            if (elapsed == 0 || !moved)
+            {
+                // Nothing new from the meter: the last figure holds, and the interval runs on to the next update.
+                if (_held[rail] is { } held) Add(rail, held, before.Energy);
+                continue;
+            }
+
+            var watts = energy * JoulesPerPicowattHour / (elapsed / 1000.0);
+            _before[rail] = (count.Energy, at);
+            _held[rail] = watts;
+            Add(rail, watts, count.Energy);
+        }
+        return Summarise(_rails);
     }
+
+    private void Open(IReadOnlyList<string> rails, IRailCounters counters, Func<long> clockMilliseconds)
+    {
+        // Kept first, so a first reading that throws still has the counters closed by Dispose.
+        _counters = counters;
+        _clock = clockMilliseconds;
+        _names = [.. rails];
+        _now = new RailCount?[_names.Length];
+        _before = new (long, long)?[_names.Length];
+        _held = new double?[_names.Length];
+
+        // Take the first reading now, so the first real tick already has an interval to measure. A rail whose meter gives
+        // its clock here is timed by that clock from now on.
+        var wall = Collect();
+        _meterClock = [.. _now.Select(count => count?.Milliseconds is not null)];
+        for (var rail = 0; rail < _names.Length; rail++)
+        {
+            if (_now[rail] is { } count && TimeOf(rail, count, wall) is { } at) _before[rail] = (count.Energy, at);
+        }
+    }
+
+    /// <summary>Reads every rail in one collection and gives the service's own clock as it was then.</summary>
+    private long Collect()
+    {
+        _counters!.Read(_now);
+        return _clock();
+    }
+
+    /// <summary>When the rail's count was taken, by the meter's clock where it has one; null when that clock gave nothing.</summary>
+    private long? TimeOf(int rail, RailCount count, long wall) => _meterClock[rail] ? count.Milliseconds : wall;
+
+    private void Add(int rail, double watts, long energy)
+        => _rails.Add(new Rail(_names[rail], (ulong)Math.Round(watts * 1000), (ulong)energy));
 
     /// <summary>Groups rails by kind and sums each kind, so a two-socket machine reports one package figure.</summary>
     public static EnergyMeterReading Summarise(IReadOnlyList<Rail> rails) => Summarise(rails, QualcommRails.Table);
 
     /// <summary>
     /// Groups rails by kind and sums each kind, so a two-socket machine reports one package figure. Intel's and AMD's rails
-    /// are known by name, and their package figure is the package rails alone. Snapdragon rails are looked up in
-    /// <paramref name="table"/>: the package figure is every processor rail (soc, clusters, graphics, NPU) that no other
-    /// processor rail present holds, so the soc rail alone where it exists, and its parts once each where it does not; and
-    /// the platform figure is the outermost platform rail. Without the soc rail or a CPU cluster there is no processor
-    /// figure, since graphics or NPU watts alone are not the processor's.
+    /// are known by name, and their package figure is the package rails alone. Snapdragon rails and Microsoft's named rails
+    /// are looked up in <paramref name="table"/>: the package figure is every processor rail (soc, CPU, clusters, graphics,
+    /// NPU) that no other processor rail present holds, so the soc rail alone where it exists, and its parts once each where
+    /// it does not; each part's figure, and the platform's and the charger's, is every rail of that kind that no other rail
+    /// of its kind present holds, so an exact name wins over its parts and SYS over SYSTEM. Without the soc rail or a CPU
+    /// rail there is no processor figure, since graphics or NPU watts alone are not the processor's. A figure Intel's or
+    /// AMD's rails give wins over the table's beside it, so a machine with both never counts the processor twice.
     /// </summary>
     public static EnergyMeterReading Summarise(IReadOnlyList<Rail> rails, IReadOnlyList<PlatformRail> table)
     {
@@ -143,43 +233,76 @@ public sealed class EnergyMeter : IDisposable
         foreach (var rail in rails)
         {
             var watts = rail.PowerMilliwatts / 1000.0;
-            var vendor = VendorKind(rail.Name);
-            if (vendor != RailKind.Ignored) Add(vendor, watts);
-            else if (QualcommRails.Find(rail.Name, table) is { } row) tabled.Add((row, watts));
+            switch (VendorKind(rail.Name))
+            {
+                case RailKind.Package: Add(ref package, watts); break;
+                case RailKind.Cores: Add(ref cores, watts); break;
+                case RailKind.IntegratedGpu: Add(ref igpu, watts); break;
+                case RailKind.Memory: Add(ref memory, watts); break;
+                case RailKind.Platform: Add(ref platform, watts); break;
+                default:
+                    if (QualcommRails.Find(rail.Name, table) is { } row) tabled.Add((row, watts));
+                    break;
+            }
         }
-        if (tabled.Count == 0) return new EnergyMeterReading(package, cores, igpu, memory);
+        if (tabled.Count == 0) return new EnergyMeterReading(package, cores, igpu, memory, platform);
 
         var present = tabled.Select(entry => entry.Row.Key).ToHashSet(StringComparer.Ordinal);
         var anchored = tabled.Exists(entry => entry.Row.Kind is RailKind.Package or RailKind.Cores);
-        double? processor = null;
+        double? processor = null, tableCores = null, tableGpu = null, tableMemory = null, tablePlatform = null, charger = null;
         foreach (var (row, watts) in tabled)
         {
-            // The parts are reported as they are; the package figure is made below, from the outermost processor rails.
-            if (row.Kind is RailKind.Cores or RailKind.IntegratedGpu or RailKind.Memory) Add(row.Kind, watts);
-            if (anchored && IsProcessor(row.Kind) && !QualcommRails.InsideAnother(row, present, table, IsProcessor))
+            // A rail inside another of its own kind that is present is already counted there.
+            var kind = row.Kind;
+            if (!QualcommRails.InsideAnother(row, present, table, other => other == kind))
             {
-                processor = (processor ?? 0) + watts;
+                switch (kind)
+                {
+                    case RailKind.Cores: Add(ref tableCores, watts); break;
+                    case RailKind.IntegratedGpu: Add(ref tableGpu, watts); break;
+                    case RailKind.Memory: Add(ref tableMemory, watts); break;
+                    case RailKind.Platform: Add(ref tablePlatform, watts); break;
+                    case RailKind.ChargerInput: Add(ref charger, watts); break;
+                }
             }
-            if (row.Kind == RailKind.Platform && !QualcommRails.InsideAnother(row, present, table, static kind => kind == RailKind.Platform))
-            {
-                platform = (platform ?? 0) + watts;
-            }
+            // The package figure is made from the outermost processor rails.
+            if (anchored && IsProcessor(kind) && !QualcommRails.InsideAnother(row, present, table, IsProcessor)) Add(ref processor, watts);
         }
-        if (processor is { } fromTable) package = (package ?? 0) + fromTable;
-        return new EnergyMeterReading(package, cores, igpu, memory, platform);
+        return new EnergyMeterReading(
+            package ?? processor, cores ?? tableCores, igpu ?? tableGpu, memory ?? tableMemory, platform ?? tablePlatform, charger);
 
-        void Add(RailKind kind, double watts)
-        {
-            switch (kind)
-            {
-                case RailKind.Package: package = (package ?? 0) + watts; break;
-                case RailKind.Cores: cores = (cores ?? 0) + watts; break;
-                case RailKind.IntegratedGpu: igpu = (igpu ?? 0) + watts; break;
-                case RailKind.Memory: memory = (memory ?? 0) + watts; break;
-            }
-        }
+        static void Add(ref double? total, double watts) => total = (total ?? 0) + watts;
 
         static bool IsProcessor(RailKind kind) => kind is RailKind.Package or RailKind.Cores or RailKind.IntegratedGpu or RailKind.Npu;
+    }
+
+    /// <summary>
+    /// The meter's rails, each with what it is taken for, for one line in the log, so a machine whose meter has rails this
+    /// table does not know (a Snapdragon X2, an NVIDIA N1X, an OEM's own rails) can be mapped from what its owner reports.
+    /// Null when there is nothing to note: every rail is one of Intel's or AMD's usual ones.
+    /// </summary>
+    public static string? RailsWorthNoting(IEnumerable<string> instances)
+    {
+        var named = instances.Where(name => !name.Equals("_Total", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (named.TrueForAll(name => VendorKind(name) is not (RailKind.Ignored or RailKind.Platform))) return null;
+        return string.Join(", ", named.Select(name => $"{name} ({Describe(Classify(name))})"));
+
+        static string Describe(RailKind kind) => kind switch
+        {
+            RailKind.Package => "package",
+            RailKind.Cores => "cores",
+            RailKind.IntegratedGpu => "graphics",
+            RailKind.Memory => "memory",
+            RailKind.Npu => "NPU",
+            RailKind.Platform => "platform",
+            RailKind.Display => "display",
+            RailKind.Storage => "storage",
+            RailKind.Network => "network",
+            RailKind.MobileBroadband => "mobile broadband",
+            RailKind.ChargerInput => "charger input",
+            RailKind.Unplaced => "not summed",
+            _ => "unknown",
+        };
     }
 
     /// <summary>Why a meter with these counter instances can't give the processor's own watts or the whole platform's, or
@@ -205,6 +328,8 @@ public sealed class EnergyMeter : IDisposable
     private static RailKind VendorKind(string name)
     {
         if (name.EndsWith("_PKG", StringComparison.OrdinalIgnoreCase)) return RailKind.Package;
+        // Intel's platform rail: optional, enabled by the machine's maker, and without the battery's charging.
+        if (name.EndsWith("_PSYS", StringComparison.OrdinalIgnoreCase)) return RailKind.Platform;
         if (name.EndsWith("_PP0", StringComparison.OrdinalIgnoreCase)) return RailKind.Cores;
         if (name.EndsWith("_PP1", StringComparison.OrdinalIgnoreCase)) return RailKind.IntegratedGpu;
         if (name.EndsWith("_DRAM", StringComparison.OrdinalIgnoreCase)) return RailKind.Memory;
@@ -214,16 +339,64 @@ public sealed class EnergyMeter : IDisposable
         return RailKind.Ignored;
     }
 
-    private Dictionary<string, long> Snapshot()
-    {
-        var snapshot = new Dictionary<string, long>(_rails.Count);
-        foreach (var (name, counter) in _rails) snapshot[name] = counter.RawValue;
-        return snapshot;
-    }
-
     public void Dispose()
     {
-        foreach (var (_, counter) in _rails) counter.Dispose();
-        _rails.Clear();
+        _counters?.Dispose();
+        _counters = null;
     }
+}
+
+/// <summary>One rail's counts as one collection found them.</summary>
+/// <param name="Energy">The rail's energy counter, in picowatt-hours.</param>
+/// <param name="Milliseconds">The meter's own clock when it took that count, in milliseconds since boot; null where the meter
+/// publishes no clock.</param>
+internal readonly record struct RailCount(long Energy, long? Milliseconds);
+
+/// <summary>A meter's rails, read together, so a test can stand in for Windows.</summary>
+internal interface IRailCounters : IDisposable
+{
+    /// <summary>Takes one reading of every rail at once, in the order they were opened, into <paramref name="counts"/>: null
+    /// for a rail Windows gave nothing for. Throws when Windows will not answer at all.</summary>
+    void Read(RailCount?[] counts);
+}
+
+/// <summary>The real counters: each rail's Energy and Time in one PDH query.</summary>
+internal sealed class PdhRailCounters : IRailCounters
+{
+    private readonly PdhQuery _query = new();
+    private readonly int[] _energy;
+    private readonly int?[] _time;
+
+    public PdhRailCounters(string category, IReadOnlyList<string> rails)
+    {
+        try
+        {
+            _energy = new int[rails.Count];
+            _time = new int?[rails.Count];
+            for (var rail = 0; rail < rails.Count; rail++)
+            {
+                _energy[rail] = _query.TryAdd($@"\{category}({rails[rail]})\Energy")
+                    ?? throw new InvalidOperationException($"Windows has no energy counter for the rail {rails[rail]}");
+                _time[rail] = _query.TryAdd($@"\{category}({rails[rail]})\Time");
+            }
+        }
+        catch
+        {
+            _query.Dispose();
+            throw;
+        }
+    }
+
+    public void Read(RailCount?[] counts)
+    {
+        _query.Collect();
+        for (var rail = 0; rail < _energy.Length; rail++)
+        {
+            counts[rail] = _query.Raw(_energy[rail]) is { } energy
+                ? new RailCount(energy, _time[rail] is { } time ? _query.Raw(time) : null)
+                : null;
+        }
+    }
+
+    public void Dispose() => _query.Dispose();
 }

@@ -240,7 +240,7 @@ internal sealed class SamplingLoop : BackgroundService
             var parts = reading.Components;
             // The battery delivers what the monitors running off the laptop draw, so they are taken out with the display, or
             // the learner would learn them into the rest of the laptop. The figure is the one the reading used.
-            _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
+            if (!result.Sample.PanelInactive) _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
             _buffer.Add(reading);
             var frame = Frames.From(reading, result.Sample);
             _feed.Publish(frame);

@@ -75,4 +75,27 @@ public class DisplayModelTests
     [Fact]
     public void Unknown_psu_tier_falls_back_to_bronze()
         => PsuEfficiency.For((PsuTier)99).ShouldBe(0.85);
+
+    [Fact]
+    public void A_panel_windows_says_is_showing_nothing_draws_nothing_and_one_it_does_not_counts_as_before()
+    {
+        // A docked laptop with its lid shut: the console display is on, on the monitor beside it, but the panel is dark.
+        var shut = TestData.Laptop(brightness: 0.6) with { PanelInactive = true };
+        DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, shut).ShouldBe(0);
+        DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, shut with { PanelInactive = false }).ShouldBe(4.2, 0.001);
+        DisplayModel.PanelWatts(MachineProfile.DefaultLaptop, shut with { PanelInactive = false, DisplayOn = false }).ShouldBe(0);
+    }
+
+    [Fact]
+    public void The_model_counts_no_panel_while_the_lid_is_shut()
+    {
+        var model = new PowerModel(MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, new PowerModelOptions(), new FixedBaseline(null));
+
+        var open = model.Evaluate(TestData.Laptop(brightness: 0.6));
+        var shut = model.Evaluate(TestData.Laptop(brightness: 0.6) with { PanelInactive = true });
+
+        open.Components.Display.ShouldBe(4.2, 0.001);
+        shut.Components.Display.ShouldBe(0);
+        shut.TotalW.ShouldBeLessThan(open.TotalW);
+    }
 }

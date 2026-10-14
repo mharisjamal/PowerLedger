@@ -111,7 +111,7 @@ public class EnergyMeterTests
         foreach (var name in new[] { "memory", "Memory" }) EnergyMeter.Classify(name).ShouldBe(RailKind.Memory);
         foreach (var name in new[] { "system", "System", "SYSTEM" }) EnergyMeter.Classify(name).ShouldBe(RailKind.Platform);
         EnergyMeter.Classify("systems").ShouldBe(RailKind.Ignored);
-        EnergyMeter.Classify("gpu_mem").ShouldBe(RailKind.Ignored);
+        EnergyMeter.Classify("gpumem").ShouldBe(RailKind.Ignored);
     }
 
     [Fact]
@@ -196,7 +196,9 @@ public class EnergyMeterTests
         {
             if (rail.Inside is { } inside) keys.ShouldContain(inside);
         }
-        QualcommRails.Table.Count(rail => rail.Inside is null).ShouldBe(1);
+        // One rail holds the whole platform; the charger's input and the rails whose place is unknown stand apart from it.
+        QualcommRails.Table.Where(rail => rail.Inside is null).Select(rail => rail.Kind)
+            .ShouldBe([RailKind.Platform, RailKind.ChargerInput, RailKind.Unplaced, RailKind.Unplaced, RailKind.Unplaced, RailKind.Unplaced]);
     }
 
     [Fact]

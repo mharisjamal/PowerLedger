@@ -19,6 +19,11 @@ public static class DisplayModel
         return (PanelBaseW + PanelRangeW * b) * SizeFactor(profile.DisplayDiagonalInches);
     }
 
+    /// <summary>Built-in panel watts for one tick: none while Windows lists the panel as showing nothing, as with a docked
+    /// laptop's lid shut, and otherwise as <see cref="PanelWatts(MachineProfile, double?, bool)"/> says.</summary>
+    public static double PanelWatts(MachineProfile profile, Sample s)
+        => s.PanelInactive ? 0 : PanelWatts(profile, s.Brightness, s.DisplayOn);
+
     /// <summary>Panel size class: up to 14" ×0.8, above 14" and below 17" ×1.0, 17" and below 20" ×1.3, and 20" and
     /// larger ×3.0, for an all-in-one's panel, which draws about 11 W at half brightness and 18 W at full. Unknown (0 or
     /// NaN) ×1.0.</summary>

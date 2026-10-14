@@ -36,6 +36,9 @@ public sealed class SampleDraft
     public bool DisplayOn { get; set; } = true;
 
     public int MonitorCount { get; set; }
+
+    /// <summary>True when Windows lists the built-in panel as showing nothing, as with a docked laptop's lid shut.</summary>
+    public bool PanelInactive { get; set; }
     public double UserIdleSeconds { get; set; }
     public bool SessionLocked { get; set; }
 
@@ -100,7 +103,7 @@ public sealed class SampleDraft
             UserIdleSeconds, SessionLocked, Suspect: false,
             totals.Scope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName, PsuWallW,
             cards.Count > 0 ? cards : null, PlatformOwnDraw(),
-            SystemMeterW, SystemMeter, SystemMeterName);
+            SystemMeterW, SystemMeter, SystemMeterName, PanelInactive);
     }
 
     /// <summary>The platform rail as the machine's own draw. Charging the battery is never the PC's consumption, so a rail
