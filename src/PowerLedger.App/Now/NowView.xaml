@@ -41,8 +41,9 @@
                 <StackPanel Grid.Column="2">
                     <TextBlock Style="{StaticResource Text.Eyebrow}" Text="POWER BUDGET · NOW" />
                     <local:BudgetBar Margin="0,12,0,10" Rows="{Binding Live.Budget}" Total="{Binding Live.BudgetTotalW}" />
-                    <ItemsControl ItemsSource="{Binding Live.Budget}" Focusable="False">
-                        <ItemsControl.ItemTemplate>
+                    <!-- The budget comes new with every reading: its rows change in place (perf review P14). -->
+                    <ItemsControl local:RowsInPlace.Items="{Binding Live.Budget}" Focusable="False">
+                        <local:RowsInPlace.Template>
                             <DataTemplate DataType="{x:Type local:BudgetRow}">
                                 <Border BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="0,8">
                                     <Grid>
@@ -74,7 +75,7 @@
                                     </Grid>
                                 </Border>
                             </DataTemplate>
-                        </ItemsControl.ItemTemplate>
+                        </local:RowsInPlace.Template>
                     </ItemsControl>
                 </StackPanel>
             </Grid>
