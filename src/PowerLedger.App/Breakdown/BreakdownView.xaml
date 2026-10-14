@@ -75,8 +75,11 @@
                             <DataTrigger Binding="{Binding Part}" Value="Cpu"><Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource Brush.PartCpu}" /></DataTrigger>
                             <DataTrigger Binding="{Binding Part}" Value="Gpu"><Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource Brush.PartGpu}" /></DataTrigger>
                             <DataTrigger Binding="{Binding Part}" Value="Display"><Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource Brush.PartDisplay}" /></DataTrigger>
+                            <!-- A line beside the bands, or the total: no swatch. Only the total stands out. -->
                             <DataTrigger Binding="{Binding Part}" Value="{x:Null}">
                                 <Setter TargetName="Swatch" Property="Visibility" Value="Hidden" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Kind}" Value="Total">
                                 <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
                                 <Setter TargetName="Energy" Property="FontWeight" Value="SemiBold" />
                                 <Setter TargetName="Line" Property="BorderThickness" Value="0" />

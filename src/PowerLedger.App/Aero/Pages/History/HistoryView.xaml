@@ -182,10 +182,12 @@
                                         <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource M.PartDisplay}" />
                                         <Setter TargetName="Share" Property="FillBrush" Value="{DynamicResource M.PartDisplay}" />
                                     </DataTrigger>
-                                    <!-- The total: no dot and no bar, in the medium weight. -->
+                                    <!-- A line beside the bands, or the total: no dot and no bar; the total in the medium weight. -->
                                     <DataTrigger Binding="{Binding Part}" Value="{x:Null}">
                                         <Setter TargetName="Swatch" Property="Visibility" Value="Hidden" />
                                         <Setter TargetName="Share" Property="Visibility" Value="Hidden" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Kind}" Value="Total">
                                         <Setter TargetName="Label" Property="FontWeight" Value="Medium" />
                                         <Setter TargetName="Energy" Property="FontWeight" Value="Medium" />
                                     </DataTrigger>

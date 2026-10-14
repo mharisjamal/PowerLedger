@@ -148,4 +148,28 @@ public class ReportDataTests
         rows[4].Energy.ShouldBe(Format.Kwh(1.22 * (1 - (1 / BatteryRoundTrip.Factor)), English));
         rows[4].Energy.ShouldBe("0.219");
     }
+
+    /// <summary>Plan AC review: the asleep and charging-loss lines are parts of the total, not totals, so they have a kind of
+    /// their own to be drawn as; and in the table every share is of the total they and the bands add up to, which is then
+    /// 100% of itself, while a chart's shares stay of the bands it draws.</summary>
+    [Fact]
+    public void The_lines_beside_the_bands_are_no_total_and_the_table_s_shares_are_of_its_total()
+    {
+        var losses = 0.25;
+        var report = Reports.Typical(Ranges.ThisMonth(Now, Utc, English));
+        var totals = report.Totals with
+        {
+            CpuKwh = 1, GpuKwh = 0.5, DisplayKwh = 0.25, RestKwh = 0.75, AsleepKwh = 0.25,
+            BatteryKwh = losses / (1 - (1 / BatteryRoundTrip.Factor)), EnergyKwh = 3,
+        };
+
+        var rows = Bands.Rows(totals, English, withTotal: true);
+        rows.Select(r => r.Kind).ShouldBe([PartRowKind.Band, PartRowKind.Band, PartRowKind.Band, PartRowKind.Band, PartRowKind.Beside, PartRowKind.Beside, PartRowKind.Total]);
+        rows.Select(r => r.Share).ShouldBe(["33%", "17%", "8%", "25%", "8%", "8%", "100%"]);
+        rows.Where(r => r.Kind != PartRowKind.Total).Sum(r => r.Fraction).ShouldBe(1, 1e-9);
+        Bands.Rows(totals, English, withTotal: false).Select(r => r.Share).ShouldBe(["40%", "20%", "10%", "30%"]);
+
+        var asleepOnly = Bands.Rows(Reports.Empty(Ranges.ThisMonth(Now, Utc, English)).Totals with { AsleepKwh = 0.2, EnergyKwh = 0.2 }, English, withTotal: true);
+        asleepOnly.Select(r => r.Share).ShouldBe(["0%", "0%", "0%", "0%", "100%", "100%"]);
+    }
 }
