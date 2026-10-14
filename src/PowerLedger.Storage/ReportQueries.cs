@@ -156,7 +156,7 @@ public sealed class ReportQueries(SqliteDatabase db)
             // What the battery gave counts at the wall it was charged from (accuracy A9); the average stays at the pack.
             energy += r.EnergyWh; counted += r.AwakeCountedWh; battery += r.BatteryWh;
             cpu += r.CpuWh; gpu += r.GpuWh; display += r.DisplayWh; rest += r.RestWh;
-            idleOn += r.IdleOnWh; idleOff += r.IdleOffWh;
+            idleOn += r.IdleOnWh * r.CountedPerWh; idleOff += r.IdleOffWh * r.CountedPerWh;   // on the total's scale
             onS += r.OnSeconds; idleOnS += r.IdleOnSeconds; idleOffS += r.IdleOffSeconds;
             measuredS += r.MeasuredSeconds; calibratedS += r.CalibratedSeconds; estimatedS += r.EstimatedSeconds;
             if (r.MaxW > peak) { peak = r.MaxW; peakAt = r.Start; peakRow = r; }
@@ -238,8 +238,8 @@ public sealed class ReportQueries(SqliteDatabase db)
                 CostIsPartial: cost.Partial,
                 OnHours: rows.Sum(r => r.OnSeconds) / 3600.0,
                 PeakW: rows.Count > 0 ? rows.Max(r => r.MaxW) : 0,
-                IdleOnKwh: rows.Sum(r => r.IdleOnWh) / 1000,
-                IdleOffKwh: rows.Sum(r => r.IdleOffWh) / 1000,
+                IdleOnKwh: rows.Sum(r => r.IdleOnWh * r.CountedPerWh) / 1000,
+                IdleOffKwh: rows.Sum(r => r.IdleOffWh * r.CountedPerWh) / 1000,
                 AsleepKwh: asleepWh / 1000);
         })];
     }

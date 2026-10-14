@@ -105,6 +105,17 @@ public class InsightsTests
         (forecast.LowKwh, forecast.HighKwh).ShouldBe((forecast.ProjectedKwh, forecast.ProjectedKwh));
     }
 
+    /// <summary>Plan AC review: an hour's idle energy is on the scale of its energy, idle on battery at its wall equivalent,
+    /// since the habits saving prices it at the same tariff.</summary>
+    [Fact]
+    public void An_hour_s_idle_energy_counts_as_its_energy_does()
+    {
+        var row = Aggregate.Empty(Now) with { EnergyWh = 100, BatteryWh = 100, IdleOnWh = 40, IdleOffWh = 10 };
+
+        HourUse.From(row, Utc).IdleKwh.ShouldBe(50 * BatteryRoundTrip.Factor / 1000, 1e-12);
+        HourUse.From(row with { BatteryWh = 0 }, Utc).IdleKwh.ShouldBe(0.05, 1e-12);
+    }
+
     [Fact]
     public void A_history_that_cannot_be_read_says_nothing_yet_and_does_not_throw()
     {

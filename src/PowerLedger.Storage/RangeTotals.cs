@@ -4,8 +4,8 @@ namespace PowerLedger.Storage;
 /// was running (gaps between ticks); UnmonitoredHours is range time that produced no rows at all, such as before install.
 /// EnergyKwh and Cost count what the machine drew asleep, estimated (accuracy A10), which AsleepKwh gives apart; the parts,
 /// the idle figures and AvgW are the machine's awake. They count what the battery gave awake at the wall it was charged from
-/// (accuracy A9), which BatteryKwh gives apart, as that wall equivalent; AvgW, the parts and the idle figures stay at the
-/// pack, as the live watts do.
+/// (accuracy A9), which BatteryKwh gives apart, as that wall equivalent, and so do the idle figures, which are priced at
+/// the total's average price (Plan AC review); AvgW and the parts stay at the pack, as the live watts do.
 /// CostIsPartial is true when some energy was priced under a different currency and left out of Cost.
 /// From and To are the window actually covered: the requested range widened to whole rows of the resolution used.</summary>
 public sealed record RangeTotals(

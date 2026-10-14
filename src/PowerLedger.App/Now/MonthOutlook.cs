@@ -9,7 +9,8 @@ namespace PowerLedger.App;
 /// that counts as a day that used nothing; there is none until a full day has passed. The projection is what the month
 /// has used so far plus that average for the days left (report finding 4), so days before the first one recorded add
 /// nothing; its cost is what the month has cost so far plus the days left at today's tariff. The idle waste is priced at
-/// the month's own average price, the energy having been used under whichever tariff was in force. Lowest and highest
+/// the month's own average price, the energy having been used under whichever tariff was in force; it is counted on the
+/// same scale as the energy that price is of, idle on battery at its wall equivalent (Plan AC review). Lowest and highest
 /// are complete days only. A day of the month before that the month's hour rows reach into, in a zone half an hour off
 /// UTC, is no day of this month.
 /// </summary>

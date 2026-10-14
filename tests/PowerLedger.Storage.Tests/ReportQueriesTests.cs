@@ -205,6 +205,25 @@ public class ReportQueriesTests
         days.ShouldHaveSingleItem().EnergyKwh.ShouldBe(wall, 1e-12);
     }
 
+    /// <summary>Plan AC review: idle energy is priced at the average price of the energy the totals count, so it is counted
+    /// on their scale too: idle on battery at its wall equivalent. At the pack, a laptop's idle waste cost too little, and
+    /// its share of the energy read low.</summary>
+    [Fact]
+    public void Idle_energy_on_battery_counts_at_its_wall_equivalent_as_the_total_does()
+    {
+        using var t = new TestDatabase();
+        var agg = new AggregateRepository(t.Db);
+        agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0, [.. Enumerable.Range(0, 60).Select(s => Fixtures.Reading(s, 30, idle: true, onBattery: true))]));
+        agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0.AddMinutes(1), [.. Enumerable.Range(60, 60).Select(s => Fixtures.Reading(s, 30, idle: true, displayOn: false))]));
+
+        var (totals, days) = new ReportQueries(t.Db).Report(Fixtures.T0, Fixtures.T0.AddMinutes(2), TimeZoneInfo.Utc);
+
+        totals.IdleOnKwh.ShouldBe(0.5 * BatteryRoundTrip.Factor / 1000, 1e-12);
+        totals.IdleOffKwh.ShouldBe(0.5 / 1000, 1e-12);
+        (totals.IdleOnKwh + totals.IdleOffKwh).ShouldBe(totals.EnergyKwh, 1e-12);   // all of it idle
+        days.ShouldHaveSingleItem().IdleOnKwh.ShouldBe(totals.IdleOnKwh, 1e-12);
+    }
+
     [Fact]
     public void A_night_asleep_is_split_between_the_days_it_spanned_and_the_days_add_up_to_the_total()
     {

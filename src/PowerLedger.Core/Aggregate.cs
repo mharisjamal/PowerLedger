@@ -35,6 +35,11 @@ public sealed record Aggregate(
     /// equivalent, and, estimated, asleep.</summary>
     public double CountedWh => AwakeCountedWh + AsleepWh;
 
+    /// <summary>What each watt-hour of this row's awake energy counts as in the totals: more than one on battery, whose energy
+    /// counts at the wall equivalent. Idle energy, at the pack like the rest, is put on the totals' scale with it (Plan AC
+    /// review), so it is priced as what it is part of.</summary>
+    public double CountedPerWh => EnergyWh > 0 ? AwakeCountedWh / EnergyWh : 1;
+
     public static Aggregate Empty(DateTimeOffset start) => new(start, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     /// <summary>This row plus another: sums every additive field, keeps the larger peak and this Start. AvgW is left for the caller to recompute.</summary>
