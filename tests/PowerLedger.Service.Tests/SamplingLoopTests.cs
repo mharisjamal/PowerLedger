@@ -175,13 +175,83 @@ public class SamplingLoopTests
     public Task A_sleep_books_what_the_laptop_draws_asleep_half_a_watt_before_it_has_learned_its_own()
         => SleepBooks(battery: null, expectedW: SleepPower.LaptopDrainW * BatteryRoundTrip.Factor, learned: null);
 
-    /// <summary>Accuracy A10: the battery's charge as the laptop went to sleep and as it woke, on battery throughout, teaches
-    /// what it loses asleep, which the sleep is then booked at and the service keeps for the App.</summary>
+    /// <summary>Accuracy A10: the battery's charge as the laptop went to sleep and a minute after it woke, with what that
+    /// minute awake drew from it added back, on battery throughout, teaches what it loses asleep, which the service keeps
+    /// for the App and the sleeps after it are booked at. The sleep itself was booked as it woke, at what was known then.</summary>
     [Fact]
-    public async Task A_sleep_on_battery_teaches_what_the_laptop_loses_asleep_and_books_the_sleep_at_it()
+    public async Task A_sleep_on_battery_teaches_what_the_laptop_loses_asleep()
     {
-        var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: false, 38.4, 50)]);   // 1.6 Wh in 2 h
-        await SleepBooks(() => charges.Count > 0 ? charges.Dequeue() : null, expectedW: 0.8 * BatteryRoundTrip.Factor, learned: 0.8);
+        // 1.6 Wh in 2 h, and 59 s awake at 20 W from the battery before it is read again.
+        var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: false, 38.4 - (20 * 59 / 3600.0), 50)]);
+        await SleepBooks(() => charges.Count > 0 ? charges.Dequeue() : null, expectedW: SleepPower.LaptopDrainW * BatteryRoundTrip.Factor, learned: 0.8);
+    }
+
+    /// <summary>Plan AC review: a battery read the moment the laptop wakes can still give its charge from before the sleep,
+    /// which taught a drain of nothing. It is read again a minute on, and what that minute awake drew is added back.</summary>
+    [Fact]
+    public async Task The_charge_is_read_again_a_minute_after_the_wake_not_the_moment_of_it()
+    {
+        using var t = new TestDatabase();
+        var woke = Start.AddSeconds(10).AddHours(2);
+        FakeTimeProvider? clock = null;
+        BatteryCharge? Battery() => clock!.GetUtcNow() < woke.AddSeconds(30)
+            ? new(OnAc: false, 40, 50)                                   // as the sleep began, and stale at the wake
+            : new(OnAc: false, 38.4 - (20 * 59 / 3600.0), 50);
+        await using var loop = new Harness(t, battery: Battery);
+        clock = loop.Clock;
+        await loop.StartAsync();
+        await loop.Ticks(10);                                       // 00:55:01 to 00:55:10
+        await loop.Send(new SuspendCommand());
+        loop.Clock.Advance(TimeSpan.FromHours(2));
+        await loop.Send(new ResumeCommand());
+        await loop.Ticks(59);
+        SleepDrain.Parse(new SettingsRepository(t.Db).Get(SleepDrain.SettingsKey)).ShouldBe(SleepDrain.None);   // not yet
+        await loop.Ticks(1);                                        // a minute after the wake
+        await loop.StopAsync();
+
+        SleepDrain.Parse(new SettingsRepository(t.Db).Get(SleepDrain.SettingsKey)).Watts.ShouldNotBeNull().ShouldBe(0.8, 1e-9);
+    }
+
+    /// <summary>Plan AC review: a laptop plugged in within the minute after it woke says nothing more of its sleep; one that
+    /// sleeps again within it is read as it goes, which is as fresh as a charge gets.</summary>
+    [Fact]
+    public async Task Plugged_in_before_the_minute_nothing_is_learned_and_asleep_again_the_charge_then_is_taken()
+    {
+        using (var t = new TestDatabase())
+        {
+            var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: true, 39, 50)]);
+            var onAc = false;
+            await using var loop = new Harness(
+                t, battery: () => charges.Count > 0 ? charges.Dequeue() : null,
+                makeSet: _ => new FakeSensorSet((ts, delta) => Volatile.Read(ref onAc) ? Samples.At(ts, delta) : Samples.At(ts, delta, batteryW: 20)));
+            await loop.StartAsync();
+            await loop.Ticks(10);
+            await loop.Send(new SuspendCommand());
+            loop.Clock.Advance(TimeSpan.FromHours(2));
+            await loop.Send(new ResumeCommand());
+            await loop.Ticks(10);
+            Volatile.Write(ref onAc, true);
+            await loop.Ticks(60);
+            await loop.StopAsync();
+            SleepDrain.Parse(new SettingsRepository(t.Db).Get(SleepDrain.SettingsKey)).ShouldBe(SleepDrain.None);
+            charges.Count.ShouldBe(1, "the battery was not read again once on AC");
+        }
+
+        using (var t = new TestDatabase())
+        {
+            // 1.6 Wh in 2 h, then 9 s awake at 20 W before the next sleep.
+            var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: false, 38.4 - (20 * 9 / 3600.0), 50)]);
+            await using var loop = new Harness(t, battery: () => charges.Count > 0 ? charges.Dequeue() : null);
+            await loop.StartAsync();
+            await loop.Ticks(10);
+            await loop.Send(new SuspendCommand());
+            loop.Clock.Advance(TimeSpan.FromHours(2));
+            await loop.Send(new ResumeCommand());
+            await loop.Ticks(10);
+            await loop.Send(new SuspendCommand());
+            await loop.StopAsync();
+            SleepDrain.Parse(new SettingsRepository(t.Db).Get(SleepDrain.SettingsKey)).Watts.ShouldNotBeNull().ShouldBe(0.8, 1e-9);
+        }
     }
 
     /// <summary>Plan AC review: a Fast Startup shutdown signs everyone out and then hibernates, which the service sees as a
@@ -222,7 +292,7 @@ public class SamplingLoopTests
         await loop.Send(new SuspendCommand());
         loop.Clock.Advance(TimeSpan.FromHours(2));
         await loop.Send(new ResumeCommand());
-        await loop.Ticks(5);
+        await loop.Ticks(60);                                       // to the battery's second read, a minute on
         await loop.StopAsync();
 
         var minutes = new AggregateRepository(t.Db).ReadMinutes(Start, Start.AddHours(3));

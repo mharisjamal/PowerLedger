@@ -329,6 +329,8 @@ internal sealed class SamplingLoop : BackgroundService
             // Nor is a tick with the lid shut, whose panel draws nothing.
             if (!spansSleep && !result.Sample.PanelInactive) _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
             _buffer.Add(reading);
+            // What the time awake since a wake drew from the battery, until the battery is read again to learn the sleep.
+            _sleep.Awake(now, reading.OnBattery, spansSleep ? 0 : EnergyIntegrator.Integrate(reading, GapThreshold).BatteryWh);
             var frame = Frames.From(reading, result.Sample);
             _feed.Publish(frame);
             OnMinute(now);
