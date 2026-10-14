@@ -19,7 +19,34 @@ public sealed class UiPreferencesTests : IDisposable
     {
         var preferences = new UiPreferencesStore(File).Load();
         preferences.Theme.ShouldBe(ThemeChoice.System);
-        preferences.Co2KgPerKwh.ShouldBe(0.40);
+        preferences.Co2KgPerKwh.ShouldBe(0.481);
+        preferences.Co2Seeded.ShouldBeFalse();
+    }
+
+    /// <summary>Plan AC: a new install, or a file still at 0.10's default of 0.40 (which it called the world average), takes
+    /// the grid of Windows' region once; a factor the user chose is kept, and once seeded a factor sticks.</summary>
+    [Theory]
+    [InlineData(null, 0.713)]
+    [InlineData("\"Co2KgPerKwh\": 0.4", 0.713)]
+    [InlineData("\"Co2KgPerKwh\": 0.481", 0.713)]
+    [InlineData("\"Co2KgPerKwh\": 0.23", 0.23)]
+    [InlineData("\"Co2KgPerKwh\": 0.4, \"Co2Seeded\": true", 0.40)]
+    public void The_co2_factor_is_seeded_from_the_region_once(string? saved, double expected)
+    {
+        if (saved is not null)
+        {
+            Directory.CreateDirectory(_folder);
+            System.IO.File.WriteAllText(File, $$"""{ "Theme": "Dark", {{saved}} }""");
+        }
+        var store = new UiPreferencesStore(File);
+
+        var read = store.Load().Co2Once(0.713);
+
+        read.Co2KgPerKwh.ShouldBe(expected);
+        read.Co2Seeded.ShouldBeTrue();
+        store.Save(read);
+        store.Load().Co2Once(0.236).Co2KgPerKwh.ShouldBe(expected, "seeded once, the factor sticks");
+        System.IO.File.ReadAllText(File).ShouldContain("\"Co2Seeded\": true");
     }
 
     [Fact]
@@ -52,7 +79,7 @@ public sealed class UiPreferencesTests : IDisposable
     {
         Directory.CreateDirectory(_folder);
         System.IO.File.WriteAllText(File, """{ "Theme": "Dark" }""");
-        new UiPreferencesStore(File).Load().Co2KgPerKwh.ShouldBe(0.40);
+        new UiPreferencesStore(File).Load().Co2KgPerKwh.ShouldBe(0.481);
     }
 
     [Fact]

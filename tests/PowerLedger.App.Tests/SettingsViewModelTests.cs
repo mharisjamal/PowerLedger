@@ -138,7 +138,7 @@ public class SettingsViewModelTests
     public void A_co2_factor_is_read_in_the_users_culture_and_applied()
     {
         var model = Model();
-        model.Co2.ShouldBe("0.40");
+        model.Co2.ShouldBe("0.48");   // the world's 481 g until the App seeds the region's
 
         model.Co2 = "0.23";
         model.SaveCo2.Execute(null);
