@@ -109,6 +109,32 @@ public class PowerMeterSourceTests
     }
 
     [Fact]
+    public void Every_meter_is_read_in_one_collection_a_tick()
+    {
+        var meters = new FakePowerMeters { Devices = [AcpiMeter, AcpiMeter] }
+            .With("Power Meter (0)", 350_000)
+            .With("Power Meter (1)", 120_000);
+        using var source = new PowerMeterSource(meters);
+
+        Tick(source);
+        Tick(source);
+
+        meters.Reads.ShouldBe(2);
+    }
+
+    [Fact]
+    public void A_meter_windows_gave_nothing_for_costs_its_own_reading_and_the_others_still_answer()
+    {
+        var meters = new FakePowerMeters { Devices = [AcpiMeter, AcpiMeter] }
+            .With("Power Meter (0)", 350_000)
+            .With("Power Meter (1)", 120_000);
+        meters.Silent.Add("Power Meter (0)");
+        using var source = new PowerMeterSource(meters);
+
+        Tick(source).SystemMeterW.ShouldNotBeNull().ShouldBe(120, 1e-9);
+    }
+
+    [Fact]
     public void The_validator_drops_a_meter_reading_past_the_ceiling()
     {
         var validator = new SampleValidator();
@@ -150,11 +176,14 @@ internal sealed class FakePowerMeters : IPowerMeters
 
     public IReadOnlyList<string>? DeviceIds() => Devices;
 
-    public long Milliwatts(string instance)
+    /// <summary>Instances Windows gives nothing for on a read, while the others still answer.</summary>
+    public HashSet<string> Silent { get; } = [];
+
+    public IReadOnlyList<long?> Milliwatts(IReadOnlyList<string> instances)
     {
         Reads++;
-        if (Fail) throw new InvalidOperationException("the counter went away");
-        return _instances.First(i => i.Name == instance).Milliwatts;
+        if (Fail) throw new InvalidOperationException("the counters went away");
+        return [.. instances.Select(name => Silent.Contains(name) ? (long?)null : _instances.First(i => i.Name == name).Milliwatts)];
     }
 
     public void Dispose()

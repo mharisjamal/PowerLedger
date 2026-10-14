@@ -38,9 +38,13 @@ public readonly record struct EnergyMeterReading(double? PackageW, double? Cores
 /// <summary>
 /// The processor's power rails as Windows publishes them (spec §4). No kernel driver and no elevation: Windows 11's
 /// inbox power-management driver fills the "Energy Meter" performance counters from the processor's own meters.
-/// Each rail's energy counter, in picowatt-hours, is read directly through the performance-counter API in well
-/// under a millisecond, and watts are the energy used since the previous read over the time between reads, so every
-/// figure is exact over its tick rather than over some window of Windows' choosing.
+/// Every rail's energy counter, in picowatt-hours, and the meter's own clock beside it, in milliseconds, are read
+/// together through one Performance Data Helper query, one collection a tick. Watts are the energy used since the previous
+/// reading over the time the meter's clock says passed, so every figure is exact over the meter's own interval rather than
+/// over the service's. A meter that updates more slowly than the service reads, as Snapdragon's firmware does about once a
+/// second, would otherwise give alternating noughts and doubles; a tick on which its clock did not move, or no rail's energy
+/// did, holds the last figure, and the next one that moved spans the whole interval. Without a clock counter the service's
+/// own is used.
 /// A machine with no rails reports nothing, never zero, because a zero is indistinguishable from an idle chip, and so
 /// does one whose meter has no package rail: its other rails can't stand in for the processor's figure. A Snapdragon X
 /// meter is read through <see cref="QualcommRails"/>, whose table says which rails nest inside which, and whose system rail
@@ -50,17 +54,20 @@ public readonly record struct EnergyMeterReading(double? PackageW, double? Cores
 public sealed class EnergyMeter : IDisposable
 {
     private const string Category = "Energy Meter";
-    private const string EnergyCounter = "Energy";
     private const string NoRails = "this machine publishes no processor power rails";
     private const string NoPackageRail = "this machine's energy meter has no processor package rail";
 
     /// <summary>1 pWh = 1e-12 Wh = 3.6e-9 J. Confirmed on real hardware against Windows' own milliwatt figure.</summary>
     public const double JoulesPerPicowattHour = 3.6e-9;
 
-    private readonly List<(string Name, PerformanceCounter Energy)> _rails = [];
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
-    private Dictionary<string, long> _previousEnergy = [];
-    private TimeSpan _previousAt;
+    private readonly List<Rail> _rails = [];
+    private IRailCounters? _counters;
+    private Func<long> _clock = static () => Environment.TickCount64;
+    private string[] _names = [];
+    private bool[] _meterClock = [];
+    private RailCount?[] _now = [];
+    private (long Energy, long Milliseconds)?[] _before = [];
+    private double?[] _held = [];
 
     public EnergyMeter()
     {
@@ -76,15 +83,8 @@ public sealed class EnergyMeter : IDisposable
             Unavailable = WhyUnavailable(instances);
             if (Unavailable is not null) return;
 
-            foreach (var instance in instances)
-            {
-                if (Classify(instance) == RailKind.Ignored) continue;
-                _rails.Add((instance, new PerformanceCounter(Category, EnergyCounter, instance, readOnly: true)));
-            }
-
-            // Take the first reading now, so the first real tick already has an interval to measure.
-            _previousEnergy = Snapshot();
-            _previousAt = _clock.Elapsed;
+            string[] rails = [.. instances.Where(instance => Classify(instance) != RailKind.Ignored)];
+            Open(rails, new PdhRailCounters(Category, rails), static () => Environment.TickCount64);
             Available = true;
         }
         catch (Exception error) when (error is InvalidOperationException or UnauthorizedAccessException or Win32Exception)
@@ -95,6 +95,14 @@ public sealed class EnergyMeter : IDisposable
         }
     }
 
+    /// <summary>Test seam: these rails, read from any counters, with any clock for a meter that has none of its own.</summary>
+    /// <param name="clockMilliseconds">The service's own clock, in milliseconds.</param>
+    internal EnergyMeter(IReadOnlyList<string> rails, IRailCounters counters, Func<long> clockMilliseconds)
+    {
+        Open(rails, counters, clockMilliseconds);
+        Available = true;
+    }
+
     /// <summary>True when a package rail or a whole-platform rail exists, so the processor's own watts or the platform's
     /// can be read; the core, graphics and memory rails beside them are read too.</summary>
     public bool Available { get; }
@@ -102,28 +110,85 @@ public sealed class EnergyMeter : IDisposable
     /// <summary>Why there is nothing to read, for the status screen; null when the meter works.</summary>
     public string? Unavailable { get; }
 
-    /// <summary>Average watts per kind of rail since the previous call. A rail whose counter went backwards reports nothing.</summary>
+    /// <summary>Average watts per kind of rail over the meter's last interval. A rail whose counter or clock went backwards
+    /// reports nothing and starts again from there; one Windows gave nothing for this tick reports nothing this tick.</summary>
     public EnergyMeterReading Read()
     {
-        if (!Available) return default;
+        if (!Available || _counters is null) return default;
 
-        var now = _clock.Elapsed;
-        var seconds = (now - _previousAt).TotalSeconds;
-        var energy = Snapshot();
-        var previous = _previousEnergy;
-        _previousEnergy = energy;
-        _previousAt = now;
-        if (seconds <= 0) return default;
-
-        var rails = new List<Rail>(energy.Count);
-        foreach (var (name, value) in energy)
+        var wall = Collect();
+        // Wattop's rule: a tick on which no rail's energy moved is one the meter has not updated, whatever its clock says.
+        var moved = false;
+        for (var rail = 0; rail < _names.Length; rail++)
         {
-            if (!previous.TryGetValue(name, out var before) || value < before) continue;
-            var watts = (value - before) * JoulesPerPicowattHour / seconds;
-            rails.Add(new Rail(name, (ulong)Math.Round(watts * 1000), (ulong)value));
+            if (_now[rail] is { } count && _before[rail] is { } before && count.Energy != before.Energy) moved = true;
         }
-        return Summarise(rails);
+
+        _rails.Clear();
+        for (var rail = 0; rail < _names.Length; rail++)
+        {
+            if (_now[rail] is not { } count || TimeOf(rail, count, wall) is not { } at) continue;
+            if (_before[rail] is not { } before)
+            {
+                _before[rail] = (count.Energy, at);
+                continue;
+            }
+
+            var energy = count.Energy - before.Energy;
+            var elapsed = at - before.Milliseconds;
+            if (energy < 0 || elapsed < 0)
+            {
+                _before[rail] = (count.Energy, at);
+                _held[rail] = null;
+                continue;
+            }
+            if (elapsed == 0 || !moved)
+            {
+                // Nothing new from the meter: the last figure holds, and the interval runs on to the next update.
+                if (_held[rail] is { } held) Add(rail, held, before.Energy);
+                continue;
+            }
+
+            var watts = energy * JoulesPerPicowattHour / (elapsed / 1000.0);
+            _before[rail] = (count.Energy, at);
+            _held[rail] = watts;
+            Add(rail, watts, count.Energy);
+        }
+        return Summarise(_rails);
     }
+
+    private void Open(IReadOnlyList<string> rails, IRailCounters counters, Func<long> clockMilliseconds)
+    {
+        // Kept first, so a first reading that throws still has the counters closed by Dispose.
+        _counters = counters;
+        _clock = clockMilliseconds;
+        _names = [.. rails];
+        _now = new RailCount?[_names.Length];
+        _before = new (long, long)?[_names.Length];
+        _held = new double?[_names.Length];
+
+        // Take the first reading now, so the first real tick already has an interval to measure. A rail whose meter gives
+        // its clock here is timed by that clock from now on.
+        var wall = Collect();
+        _meterClock = [.. _now.Select(count => count?.Milliseconds is not null)];
+        for (var rail = 0; rail < _names.Length; rail++)
+        {
+            if (_now[rail] is { } count && TimeOf(rail, count, wall) is { } at) _before[rail] = (count.Energy, at);
+        }
+    }
+
+    /// <summary>Reads every rail in one collection and gives the service's own clock as it was then.</summary>
+    private long Collect()
+    {
+        _counters!.Read(_now);
+        return _clock();
+    }
+
+    /// <summary>When the rail's count was taken, by the meter's clock where it has one; null when that clock gave nothing.</summary>
+    private long? TimeOf(int rail, RailCount count, long wall) => _meterClock[rail] ? count.Milliseconds : wall;
+
+    private void Add(int rail, double watts, long energy)
+        => _rails.Add(new Rail(_names[rail], (ulong)Math.Round(watts * 1000), (ulong)energy));
 
     /// <summary>Groups rails by kind and sums each kind, so a two-socket machine reports one package figure.</summary>
     public static EnergyMeterReading Summarise(IReadOnlyList<Rail> rails) => Summarise(rails, QualcommRails.Table);
@@ -214,16 +279,64 @@ public sealed class EnergyMeter : IDisposable
         return RailKind.Ignored;
     }
 
-    private Dictionary<string, long> Snapshot()
-    {
-        var snapshot = new Dictionary<string, long>(_rails.Count);
-        foreach (var (name, counter) in _rails) snapshot[name] = counter.RawValue;
-        return snapshot;
-    }
-
     public void Dispose()
     {
-        foreach (var (_, counter) in _rails) counter.Dispose();
-        _rails.Clear();
+        _counters?.Dispose();
+        _counters = null;
     }
+}
+
+/// <summary>One rail's counts as one collection found them.</summary>
+/// <param name="Energy">The rail's energy counter, in picowatt-hours.</param>
+/// <param name="Milliseconds">The meter's own clock when it took that count, in milliseconds since boot; null where the meter
+/// publishes no clock.</param>
+internal readonly record struct RailCount(long Energy, long? Milliseconds);
+
+/// <summary>A meter's rails, read together, so a test can stand in for Windows.</summary>
+internal interface IRailCounters : IDisposable
+{
+    /// <summary>Takes one reading of every rail at once, in the order they were opened, into <paramref name="counts"/>: null
+    /// for a rail Windows gave nothing for. Throws when Windows will not answer at all.</summary>
+    void Read(RailCount?[] counts);
+}
+
+/// <summary>The real counters: each rail's Energy and Time in one PDH query.</summary>
+internal sealed class PdhRailCounters : IRailCounters
+{
+    private readonly PdhQuery _query = new();
+    private readonly int[] _energy;
+    private readonly int?[] _time;
+
+    public PdhRailCounters(string category, IReadOnlyList<string> rails)
+    {
+        try
+        {
+            _energy = new int[rails.Count];
+            _time = new int?[rails.Count];
+            for (var rail = 0; rail < rails.Count; rail++)
+            {
+                _energy[rail] = _query.TryAdd($@"\{category}({rails[rail]})\Energy")
+                    ?? throw new InvalidOperationException($"Windows has no energy counter for the rail {rails[rail]}");
+                _time[rail] = _query.TryAdd($@"\{category}({rails[rail]})\Time");
+            }
+        }
+        catch
+        {
+            _query.Dispose();
+            throw;
+        }
+    }
+
+    public void Read(RailCount?[] counts)
+    {
+        _query.Collect();
+        for (var rail = 0; rail < _energy.Length; rail++)
+        {
+            counts[rail] = _query.Raw(_energy[rail]) is { } energy
+                ? new RailCount(energy, _time[rail] is { } time ? _query.Raw(time) : null)
+                : null;
+        }
+    }
+
+    public void Dispose() => _query.Dispose();
 }
