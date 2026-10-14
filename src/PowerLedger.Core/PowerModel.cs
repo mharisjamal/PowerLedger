@@ -131,9 +131,9 @@ public sealed partial class PowerModel
         // it, since a GPU worked out from its load can be far over what it draws.
         var least = Math.Max(LeastBelievableW, LeastBelievableShare * ((Finite(s.CpuPackageW) is { } package ? Math.Max(0, package) : 0) + MeasuredGpuWatts(s)));
 
-        // A rate on a suspect tick is no reading either: the validator flags the seconds after an AC change, when the rate
-        // Windows gives is from before it.
-        if (isLaptop && s.HasDischargeRate && !s.Suspect && s.BatteryRateW is { } measured && measured + monitors.OwnPlug >= least)
+        // A rate in the seconds after an AC change is no reading either: Windows gives one from before it. Any other doubt
+        // the validator had (a GPU spike replaced, a brightness clamped) says nothing of the battery's rate.
+        if (isLaptop && s.HasDischargeRate && !s.AcTransition && s.BatteryRateW is { } measured && measured + monitors.OwnPlug >= least)
         {
             // The battery delivers what the monitors running off the laptop draw, so the measured rate already holds them:
             // they come out of the remainder, and only the monitors with a plug of their own are added.

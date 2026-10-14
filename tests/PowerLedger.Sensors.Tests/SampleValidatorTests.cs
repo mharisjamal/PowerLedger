@@ -249,6 +249,20 @@ public class SampleValidatorTests
     }
 
     [Fact]
+    public void Only_the_seconds_after_an_ac_change_are_a_transition_and_other_doubts_are_not()
+    {
+        // The model drops the battery's rate in a transition alone: a brightness clamped on the same tick says nothing of it.
+        var validator = new SampleValidator();
+        validator.Validate(Raw(battery: 30, onBattery: true, second: 0)).AcTransition.ShouldBeFalse();
+        var unplugged = validator.Validate(Raw(onBattery: false, second: 1));
+        (unplugged.Suspect, unplugged.AcTransition).ShouldBe((true, true));
+        var back = validator.Validate(Raw(battery: 30, onBattery: true, second: 10));
+        (back.Suspect, back.AcTransition).ShouldBe((true, true));
+        var clamped = validator.Validate(Raw(battery: 30, onBattery: true, brightness: 1.5, second: 20));
+        (clamped.Suspect, clamped.AcTransition).ShouldBe((true, false));
+    }
+
+    [Fact]
     public void Coming_off_mains_starts_the_battery_median_afresh()
     {
         var validator = new SampleValidator();

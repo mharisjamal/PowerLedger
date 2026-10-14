@@ -53,7 +53,8 @@ public sealed class SampleValidator
             _battery.Reset();          // a discharge rate from before the last time on mains says nothing about now
         }
         _lastOnBattery = raw.OnBattery;
-        if ((raw.Timestamp - _transitionAt).TotalSeconds < _options.TransitionSeconds) suspect = true;
+        var transition = (raw.Timestamp - _transitionAt).TotalSeconds < _options.TransitionSeconds;
+        if (transition) suspect = true;
 
         var now = raw.Timestamp;
         var cpu = Check(raw.CpuPackageW, _options.CpuMaxW, _cpu, spikeFilter: false, now, ref suspect);
@@ -92,6 +93,7 @@ public sealed class SampleValidator
             PlatformW = platform,
             SystemMeterW = meter,
             Suspect = suspect,
+            AcTransition = transition,
         };
         if (cards is null) return checkedSample;
 

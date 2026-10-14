@@ -532,12 +532,21 @@ public class PowerModelTests
     }
 
     [Fact]
-    public void A_battery_rate_on_a_suspect_tick_is_no_reading_and_the_model_stands_in()
+    public void A_battery_rate_in_the_seconds_after_an_ac_change_is_no_reading_and_the_model_stands_in()
     {
         // The validator flags the seconds after an AC change, when the rate Windows gives is from before it.
-        var r = Laptop(baseline: 9).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true, suspect: true));
+        var r = Laptop(baseline: 9).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true, suspect: true) with { AcTransition = true });
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Calibrated));
         r.TotalW.ShouldBe(14.6 + 4.1 + 4.2 + 9, 1e-9);
+        r.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_battery_rate_on_a_tick_suspect_for_something_else_is_still_the_total()
+    {
+        // A GPU spike replaced, or a brightness out of range clamped, says nothing against the battery's rate.
+        var r = Laptop(baseline: 9).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true, suspect: true));
+        (r.TotalSource, r.Quality, r.TotalW).ShouldBe((TotalSource.Battery, Quality.Measured, 34.2));
         r.Suspect.ShouldBeTrue();
     }
 
