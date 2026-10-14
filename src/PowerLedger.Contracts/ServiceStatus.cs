@@ -50,4 +50,6 @@ public sealed record SourceStatus(string Name, bool Supported, string? Unavailab
 /// <param name="SamplesNeeded">Battery ticks needed before any baseline is trusted.</param>
 /// <param name="TrustedBuckets">Brightness buckets with a trusted baseline.</param>
 /// <param name="Buckets">All brightness buckets, display-off included.</param>
-public sealed record CalibrationStatus(int BatterySamples, int SamplesNeeded, int TrustedBuckets, int Buckets);
+/// <param name="RestPerCpuWatt">What the rest of the laptop adds for each watt its CPU package draws, as learned on
+/// battery; null until the CPU has been seen at more than one level there, and from a service before 0.11.</param>
+public sealed record CalibrationStatus(int BatterySamples, int SamplesNeeded, int TrustedBuckets, int Buckets, double? RestPerCpuWatt = null);

@@ -24,7 +24,7 @@ public sealed class HouseholdRepositoryTests : IDisposable
 
             using var db = SqliteDatabase.OpenAndMigrate(path);
             using var c = db.Open();
-            Migrator.CurrentVersion(c).ShouldBe(3);
+            Migrator.CurrentVersion(c).ShouldBe(Migrator.LatestVersion);
             Scalar(c, "SELECT COUNT(*) FROM samples_1h").ShouldBe(1);
             Scalar(c, "SELECT sample_count FROM samples_1h").ShouldBe(3600);
             Scalar(c, "SELECT COUNT(*) FROM outbox_events").ShouldBe(1);

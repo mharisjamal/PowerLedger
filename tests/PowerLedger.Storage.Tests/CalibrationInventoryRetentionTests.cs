@@ -28,6 +28,16 @@ public class CalibrationInventoryRetentionTests
     }
 
     [Fact]
+    public void A_bucket_keeps_its_cpu_mean_weight_and_spreads()
+    {
+        using var t = new TestDatabase();
+        var repo = new CalibrationRepository(t.Db);
+        var bucket = new BucketState(6, 2.5, 4000, CpuW: 7.25, Minutes: 66.5, CpuSpread: 812.5, CpuDrawSpread: -3.125);
+        repo.Save("abc", new CalibrationState([bucket, new BucketState(-1, 7.5, 320)]), Fixtures.T0);
+        repo.Load("abc").Buckets.ShouldBe([new BucketState(-1, 7.5, 320), bucket]);
+    }
+
+    [Fact]
     public void Inventory_keeps_the_first_detection_time_per_hash_and_reports_the_latest()
     {
         using var t = new TestDatabase();

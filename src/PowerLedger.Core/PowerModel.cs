@@ -20,8 +20,18 @@ namespace PowerLedger.Core;
 /// </summary>
 public sealed class PowerModel
 {
-    /// <summary>Default laptop "rest of system" (board, RAM, SSD, radios) before calibration. Extras are separate.</summary>
-    public const double LaptopBaselineW = 5;
+    /// <summary>Default laptop "rest of system" (board, RAM, SSD, radios) before calibration, at a CPU drawing nothing; it
+    /// adds <see cref="LaptopRestPerCpuWatt"/> of each CPU watt. Extras are separate.</summary>
+    public const double LaptopBaselineW = 1;
+
+    /// <summary>
+    /// What the rest of an uncalibrated laptop adds for each watt its CPU package draws: the platform's voltage regulators,
+    /// memory and fabric work harder with the processor. On the owner's i7-1165G7 each CPU watt showed up as 1.66 W at the
+    /// battery (1.2 to 2.2 run by run, minute by minute), where a flat 5 W rest read idle minutes 46 to 66% high and loaded
+    /// ones 14% low; 1 W plus half of each CPU watt read 13.6 h of its battery minutes within 1% overall and 8% in every
+    /// CPU band (Plan AC). The calibration learner starts from this share and learns the laptop's own.
+    /// </summary>
+    public const double LaptopRestPerCpuWatt = 0.5;
     public const double DesktopBoardW = 12;
     public const double FanW = 1;
     public const double Ddr4StickW = 2.5;
@@ -91,20 +101,20 @@ public sealed class PowerModel
 
         Components parts;
         Quality quality;
-        if (isLaptop && Finite(_baselines.GetBaseline(CalibrationBuckets.For(s.Brightness, s.DisplayOn))) is { } learned)
+        if (isLaptop && Learned(_baselines.GetRest(CalibrationBuckets.For(s.Brightness, s.DisplayOn))) is { } learned)
         {
-            // The learned baseline was observed on battery, so it already contains any extras drawing from the battery. It
+            // The learned rest was observed on battery, so it already contains any extras drawing from the battery. It
             // doesn't contain the monitors running off the laptop, which the learner is given with the display.
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: 0,
-                Monitors: monitors.Total, PsuLoss: 0, Unattributed: learned);
+                Monitors: monitors.Total, PsuLoss: 0, Unattributed: learned.At(cpu));
             quality = Quality.Calibrated;
         }
         else if (isLaptop)
         {
             parts = new Components(
                 Cpu: cpu, Gpu: gpu, Display: display, Ram: 0, Storage: 0, Board: 0, Extras: _profile.ExtrasWatts,
-                Monitors: monitors.Total, PsuLoss: 0, Unattributed: LaptopBaselineW);
+                Monitors: monitors.Total, PsuLoss: 0, Unattributed: LaptopBaselineW + (LaptopRestPerCpuWatt * cpu));
             quality = Quality.Estimated;
         }
         else
@@ -265,6 +275,10 @@ public sealed class PowerModel
     private double RamWatts() => _profile.RamSticks * (_profile.RamIsDdr5 ? Ddr5StickW : Ddr4StickW);
 
     private double StorageWatts() => _profile.SsdCount * SsdW + _profile.HddCount * HddW;
+
+    /// <summary>A learned rest whose figures are numbers; anything else counts as nothing learned.</summary>
+    private static RestOfSystem? Learned(RestOfSystem? rest)
+        => rest is { } r && double.IsFinite(r.InterceptW) && double.IsFinite(r.PerCpuWatt) ? r : null;
 
     /// <summary>NaN and infinity count as "no value", like null.</summary>
     private static double? Finite(double? value) => value is { } v && double.IsFinite(v) ? v : null;

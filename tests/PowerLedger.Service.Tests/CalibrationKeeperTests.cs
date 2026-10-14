@@ -6,7 +6,7 @@ namespace PowerLedger.Service.Tests;
 
 public class CalibrationKeeperTests
 {
-    private static readonly CalibrationOptions Quick = new(HalfLifeSamples: 10, MinBucketSamples: 1, MinTotalSamples: 2);
+    private static readonly CalibrationOptions Quick = new(MinBucketSamples: 1, MinTotalSamples: 2);
     private static readonly DateTimeOffset Now = Samples.T0;
 
     [Fact]
@@ -73,6 +73,20 @@ public class CalibrationKeeperTests
         keeper.Use("abc", Now);
         Feed(keeper.Learner, 3);   // every tick at 50 % brightness: one bucket
         keeper.Status().ShouldBe(new PowerLedger.Contracts.CalibrationStatus(3, 2, 1, CalibrationBuckets.Count));
+    }
+
+    [Fact]
+    public void Status_gives_the_share_of_each_cpu_watt_once_the_cpu_has_moved_on_battery()
+    {
+        using var t = new TestDatabase();
+        var keeper = new CalibrationKeeper(new CalibrationRepository(t.Db), Quick, TimeSpan.FromMinutes(10));
+        keeper.Use("abc", Now);
+        for (var i = 0; i < 240; i++)
+        {
+            var cpu = i / 60 % 2 == 0 ? 4.0 : 12.0;   // a minute at 4 W, a minute at 12 W, the rest 1 W plus 0.6 of each
+            keeper.Learner.Observe(Samples.At(Now.AddSeconds(i), batteryW: 3 + 1 + 1.6 * cpu), cpuW: cpu, gpuW: 0, displayW: 3);
+        }
+        keeper.Status().RestPerCpuWatt.ShouldNotBeNull().ShouldBe(0.6, 0.1);
     }
 
     private static void Feed(CalibrationLearner learner, int ticks)

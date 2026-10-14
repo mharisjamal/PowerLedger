@@ -6,6 +6,9 @@ namespace PowerLedger.Core.Tests;
 
 public class PowerModelTests
 {
+    /// <summary>An uncalibrated laptop's rest at the test laptop's 14.6 W CPU.</summary>
+    private const double Rest = PowerModel.LaptopBaselineW + (PowerModel.LaptopRestPerCpuWatt * 14.6);
+
     private static PowerModel Laptop(
         double? baseline = null, PowerModelOptions? options = null, MachineProfile? profile = null, IMonitorDraw? monitors = null)
         => new(profile ?? MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, options ?? new PowerModelOptions(), new FixedBaseline(baseline), monitors);
@@ -99,7 +102,7 @@ public class PowerModelTests
     {
         var monitors = new FixedDraw(new(OwnPlug: 25, FromPc: 6.2));
         var r = Laptop(monitors: monitors).Evaluate(TestData.Laptop());
-        var throughAdapter = 14.6 + 4.1 + 4.2 + 6.2 + 5.0;
+        var throughAdapter = 14.6 + 4.1 + 4.2 + 6.2 + Rest;
         r.Quality.ShouldBe(Quality.Estimated);
         r.Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
         r.Components.PsuLoss.ShouldBe(throughAdapter / 0.9 - throughAdapter, 1e-9);
@@ -121,7 +124,7 @@ public class PowerModelTests
         Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: true)).Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
         var off = Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: false));
         off.Components.Monitors.ShouldBe(0.4 + 0.2, 1e-9);
-        off.TotalW.ShouldBe((14.6 + 4.1 + 5.0 + 0.2) / 0.9 + 0.4, 1e-9);
+        off.TotalW.ShouldBe((14.6 + 4.1 + Rest + 0.2) / 0.9 + 0.4, 1e-9);
         off.Components.Sum.ShouldBe(off.TotalW, 1e-9);
         Laptop().Evaluate(TestData.Laptop()).Components.Monitors.ShouldBe(0);
         Desktop().Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null)).Components.Monitors.ShouldBe(0);
@@ -147,10 +150,10 @@ public class PowerModelTests
     public void On_ac_without_calibration_the_laptop_uses_the_default_baseline_and_adapter_efficiency()
     {
         var r = Laptop().Evaluate(TestData.Laptop());
-        var beforePsu = 14.6 + 4.1 + 4.2 + 5.0;
+        var beforePsu = 14.6 + 4.1 + 4.2 + Rest;
         r.Quality.ShouldBe(Quality.Estimated);
         r.TotalW.ShouldBe(beforePsu / 0.9, 0.001);
-        r.Components.Unattributed.ShouldBe(5.0);
+        r.Components.Unattributed.ShouldBe(Rest, 1e-9);
         r.Components.Board.ShouldBe(0);
         r.Components.PsuLoss.ShouldBe(beforePsu / 0.9 - beforePsu, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
@@ -172,7 +175,7 @@ public class PowerModelTests
     {
         var r = Laptop().Evaluate(TestData.Laptop(onBattery: true, battery: null));
         r.Quality.ShouldBe(Quality.Estimated);
-        r.TotalW.ShouldBe(14.6 + 4.1 + 4.2 + 5.0, 0.001);
+        r.TotalW.ShouldBe(14.6 + 4.1 + 4.2 + Rest, 0.001);
         r.OnBattery.ShouldBeTrue();
     }
 
@@ -462,7 +465,7 @@ public class PowerModelTests
         var profile = MachineProfile.DefaultLaptop with { UpsLoad = UpsLoad.ThisPc };
         var r = Laptop(profile: profile).Evaluate(WithWall(WithPsu(WithUps(TestData.Laptop(battery: null, onBattery: true), 3), 3), 3));
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
-        r.TotalW.ShouldBe(14.6 + 4.1 + 4.2 + 5.0, 1e-9);
+        r.TotalW.ShouldBe(14.6 + 4.1 + 4.2 + Rest, 1e-9);
     }
 
     [Fact]

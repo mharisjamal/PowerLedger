@@ -19,12 +19,17 @@ public sealed class CalibrationRepository(SqliteDatabase db)
         }
         using (var ins = c.CreateCommand())
         {
-            ins.CommandText = "INSERT INTO calibration(inventory_hash, bucket, baseline_w, samples, updated_ms) VALUES ($hash, $bucket, $baseline, $samples, $updated)";
+            ins.CommandText = "INSERT INTO calibration(inventory_hash, bucket, baseline_w, samples, updated_ms, cpu_w, minutes, cpu_spread, cpu_draw_spread) " +
+                              "VALUES ($hash, $bucket, $baseline, $samples, $updated, $cpu, $minutes, $spread, $together)";
             var hash = ins.Parameters.Add("$hash", SqliteType.Text);
             var bucket = ins.Parameters.Add("$bucket", SqliteType.Integer);
             var baseline = ins.Parameters.Add("$baseline", SqliteType.Real);
             var samples = ins.Parameters.Add("$samples", SqliteType.Integer);
             var updated = ins.Parameters.Add("$updated", SqliteType.Integer);
+            var cpu = ins.Parameters.Add("$cpu", SqliteType.Real);
+            var minutes = ins.Parameters.Add("$minutes", SqliteType.Real);
+            var spread = ins.Parameters.Add("$spread", SqliteType.Real);
+            var together = ins.Parameters.Add("$together", SqliteType.Real);
             hash.Value = inventoryHash;
             updated.Value = Rows.Ms(now);
             foreach (var b in state.Buckets)
@@ -32,6 +37,10 @@ public sealed class CalibrationRepository(SqliteDatabase db)
                 bucket.Value = b.Bucket;
                 baseline.Value = b.BaselineW;
                 samples.Value = b.Samples;
+                cpu.Value = b.CpuW is { } watts ? watts : DBNull.Value;
+                minutes.Value = b.Minutes;
+                spread.Value = b.CpuSpread;
+                together.Value = b.CpuDrawSpread;
                 ins.ExecuteNonQuery();
             }
         }
@@ -43,11 +52,15 @@ public sealed class CalibrationRepository(SqliteDatabase db)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT bucket, baseline_w, samples FROM calibration WHERE inventory_hash = $hash ORDER BY bucket";
+        cmd.CommandText = "SELECT bucket, baseline_w, samples, cpu_w, minutes, cpu_spread, cpu_draw_spread FROM calibration WHERE inventory_hash = $hash ORDER BY bucket";
         Rows.Add(cmd, "$hash", inventoryHash);
         using var r = cmd.ExecuteReader();
         var buckets = new List<BucketState>();
-        while (r.Read()) buckets.Add(new BucketState(r.GetInt32(0), r.GetDouble(1), r.GetInt32(2)));
+        while (r.Read())
+        {
+            buckets.Add(new BucketState(
+                r.GetInt32(0), r.GetDouble(1), r.GetInt32(2), r.IsDBNull(3) ? null : r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6)));
+        }
         return new CalibrationState(buckets);
     }
 

@@ -72,6 +72,20 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void A_calibrated_laptop_is_told_what_the_rest_of_it_adds_for_each_cpu_watt_once_that_is_learned()
+    {
+        _link.Status = Statuses.Running() with { Calibration = new CalibrationStatus(900, 1800, 5, 12) };
+        _link.Connect(true);
+        var model = Model();
+        model.Show();
+        model.Calibration.ShouldBe("Learned from 15m on battery; 5 of 12 brightness levels trusted.");
+
+        _link.Status = Statuses.Running() with { Calibration = new CalibrationStatus(900, 1800, 5, 12, RestPerCpuWatt: 0.583) };
+        _clock.Advance(SettingsViewModel.StatusEvery);
+        model.Calibration.ShouldBe("Learned from 15m on battery; 5 of 12 brightness levels trusted; the rest of the laptop adds 0.58 W for each CPU watt.");
+    }
+
+    [Fact]
     public void About_names_the_arc_gpu_ups_and_power_supply_sources_and_says_when_the_ups_has_found_nothing()
     {
         _link.Status = Statuses.Running() with

@@ -427,7 +427,8 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
                 ? "Not used on a desktop: a UPS or power supply measures its readings."
                 : "Not used on a desktop: it has no battery, so its readings are estimated."
             : c.TrustedBuckets > 0
-                ? $"Learned from {learned} on battery; {c.TrustedBuckets.ToString(_culture)} of {c.Buckets.ToString(_culture)} brightness levels trusted."
+                ? $"Learned from {learned} on battery; {c.TrustedBuckets.ToString(_culture)} of {c.Buckets.ToString(_culture)} brightness levels trusted"
+                  + (c.RestPerCpuWatt is { } share ? $"; the rest of the laptop adds {share.ToString("0.00", _culture)} W for each CPU watt." : ".")
                 : $"Learning on battery: {learned} of {Format.Duration(c.SamplesNeeded * _sampleSeconds / 3600.0)} needed.";
         ServiceState = $"Service {status.Version.Split('+')[0]} · {status.Ticks.ToString("N0", _culture)} readings since "
                        + TimeZoneInfo.ConvertTime(status.StartedAt, _zone).ToString("d MMM yyyy HH:mm", _culture);
