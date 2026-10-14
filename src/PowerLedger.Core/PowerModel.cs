@@ -55,6 +55,10 @@ public sealed class PowerModel
     private readonly IBaselineProvider _baselines;
     private readonly IMonitorDraw _monitors;
 
+    /// <summary>The name a power supply last gave, for its rating on a tick it gave none. The model is evaluated on the
+    /// sampling thread alone.</summary>
+    private string? _psuName;
+
     public PowerModel(MachineProfile profile, HardwareFacts facts, PowerModelOptions options, IBaselineProvider baselines, IMonitorDraw? monitors = null)
     {
         _profile = profile;
@@ -88,6 +92,7 @@ public sealed class PowerModel
         monitors = _monitors.Watts(s.DisplayOn);
         var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds;
         var isLaptop = _profile.Chassis == ChassisKind.Laptop;
+        if (!string.IsNullOrWhiteSpace(s.PsuName)) _psuName = s.PsuName;
 
         if (isLaptop && s.HasDischargeRate && s.BatteryRateW is { } measured)
         {
@@ -129,10 +134,7 @@ public sealed class PowerModel
         // A monitor with a plug of its own sits outside the PC's supply, so it is added after the efficiency division. One
         // running off the PC draws through the supply like any other part, so it is divided with them.
         var beforePsu = parts.Sum - monitors.OwnPlug;
-        var efficiency = isLaptop
-            ? (s.OnBattery ? 1.0 : _options.LaptopAdapterEfficiency)
-            : PsuEfficiency.For(_profile.PsuTier);
-        var psuLoss = beforePsu / efficiency - beforePsu;
+        var psuLoss = FromTheWall(beforePsu, isLaptop, s.OnBattery, _psuName) - beforePsu;
         parts = parts with { PsuLoss = psuLoss };
 
         // A laptop running on its battery draws through neither a UPS nor a power supply, whatever they read.
@@ -160,9 +162,9 @@ public sealed class PowerModel
             // It comes before a power supply's figures: it meters the whole machine, where a supply may feed only part of it.
             // The processor's own meter of the whole platform (Snapdragon X's system rail) measures the machine's DC draw,
             // the display and anything running off the PC included, behind the charger, so battery charging is not in it.
-            // On AC the wall figure is that over the adapter's efficiency, as a power supply's DC output is; on battery,
+            // On AC the wall figure is what the adapter draws to deliver it, as for a power supply's DC output; on battery,
             // with no rate to read (a battery reporting relative units), it is the draw itself.
-            var drawn = platform / efficiency;
+            var drawn = FromTheWall(platform, isLaptop, s.OnBattery, _psuName);
             var railTotal = AtLeastTheDischarge(s, isLaptop, drawn + monitors.OwnPlug, monitors.OwnPlug);
             return Build(s, railTotal, Quality.Measured, WithRest(parts with { PsuLoss = drawn - platform }, railTotal), userIdle, TotalSource.PlatformMeter);
         }
@@ -177,16 +179,31 @@ public sealed class PowerModel
         {
             // The power supply draws its DC output over its efficiency from the wall, and loses the difference. A desktop's
             // supply is read off its tier's curve at the load it is carrying, since one idling at a fraction of its rating
-            // is far below the figure its tier certifies; a laptop is fed by an adapter, whose efficiency this tick's own
-            // loss already used, and no supply tier describes it.
-            var supply = isLaptop ? efficiency : PsuEfficiency.For(_profile.PsuTier, output, s.PsuName);
-            var drawn = output / supply;
+            // is far below the figure its tier certifies; a laptop is fed by an adapter, which no supply tier describes.
+            var drawn = FromTheWall(output, isLaptop, onBattery: false, s.PsuName);
             var total = drawn + monitors.OwnPlug;
             return Build(s, total, Quality.Measured, WithRest(parts with { PsuLoss = drawn - output }, total), userIdle, TotalSource.PowerSupply);
         }
         var modelled = beforePsu + psuLoss + monitors.OwnPlug;
         var floored = AtLeastTheDischarge(s, isLaptop, modelled, monitors.OwnPlug);
         return Build(s, floored, quality, floored > modelled ? WithRest(parts, floored) : parts, userIdle, TotalSource.Model);
+    }
+
+    /// <summary>
+    /// What the machine draws from the wall for <paramref name="dcW"/> of DC (Plan AC). A laptop on battery draws it as it
+    /// is; on AC its adapter's curve is read at its load with its no-load draw (<see cref="AdapterEfficiency"/>), unless the
+    /// options fix one efficiency. A desktop's supply is read on its tier's curve at the load it carries, rated as its name
+    /// says or at <see cref="PsuEfficiency.DefaultRatedW"/>, and at the tier its series is when its name says (an NZXT E is
+    /// Gold whatever the profile's default).
+    /// </summary>
+    private double FromTheWall(double dcW, bool isLaptop, bool onBattery, string? psuName)
+    {
+        if (isLaptop)
+        {
+            if (onBattery) return dcW;
+            return _options.LaptopAdapterEfficiency is { } flat ? dcW / flat : AdapterEfficiency.Wall(dcW, _options.LaptopAdapterRatedW);
+        }
+        return dcW / PsuEfficiency.For(_profile.PsuTier, dcW, psuName);
     }
 
     /// <summary>

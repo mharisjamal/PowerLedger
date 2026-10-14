@@ -95,16 +95,40 @@ public class PsuEfficiencyTests
         => PsuEfficiency.RatedWatts(name).ShouldBeNull();
 
     [Fact]
-    public void A_named_supply_is_read_on_its_curve_and_an_unnamed_one_on_the_flat_number()
+    public void A_supply_is_read_on_its_curve_at_its_rating_from_its_name_or_else_650_W()
     {
         // Twenty watts out of a thousand-watt Gold unit is two percent of its rating.
         PsuEfficiency.For(PsuTier.Gold, 20, "Corsair RM1000i").ShouldBe(PsuEfficiency.At(PsuTier.Gold, 0.02));
         PsuEfficiency.For(PsuTier.Gold, 500, "Corsair RM1000i").ShouldBe(PsuEfficiency.For(PsuTier.Gold));
 
-        // Nothing is known about what this one is rated for, so the tier's flat number stands, as it always has.
-        PsuEfficiency.For(PsuTier.Gold, 20, "Thermaltake Toughpower DPS G").ShouldBe(PsuEfficiency.For(PsuTier.Gold));
-        PsuEfficiency.For(PsuTier.Gold, 20, null).ShouldBe(PsuEfficiency.For(PsuTier.Gold));
+        // Nothing says what this one is rated for, so it is taken for the 650 W most desktops ship with.
+        PsuEfficiency.DefaultRatedW.ShouldBe(650);
+        PsuEfficiency.For(PsuTier.Gold, 20, "Thermaltake Toughpower DPS G").ShouldBe(PsuEfficiency.At(PsuTier.Gold, 20 / 650.0));
+        PsuEfficiency.For(PsuTier.Bronze, 60, null).ShouldBe(PsuEfficiency.At(PsuTier.Bronze, 60 / 650.0));
         PsuEfficiency.For(PsuTier.Gold, double.NaN, "Corsair RM1000i").ShouldBe(PsuEfficiency.For(PsuTier.Gold));
+    }
+
+    [Theory]
+    [InlineData("NZXT E650", PsuTier.Gold)]              // Seasonic-built, 80 PLUS Gold, whatever the profile's default says
+    [InlineData("NZXT E850", PsuTier.Gold)]
+    [InlineData("Corsair RM850i", PsuTier.Gold)]
+    [InlineData("Corsair HX1000i", PsuTier.Platinum)]
+    [InlineData("HX750i", PsuTier.Platinum)]
+    public void A_supply_that_names_its_series_is_read_at_that_series_tier(string name, PsuTier tier)
+    {
+        PsuEfficiency.TierOf(name).ShouldBe(tier);
+        PsuEfficiency.For(PsuTier.Bronze, 100, name).ShouldBe(PsuEfficiency.At(tier, 100 / (double)PsuEfficiency.RatedWatts(name)!.Value));
+    }
+
+    [Theory]
+    [InlineData("Thermaltake Toughpower DPS G")]          // sold at Gold and at Titanium under the one name
+    [InlineData("CORSAIR RM850x 2021")]                   // not one PowerLedger reads, and its name isn't an RMi's
+    [InlineData("")]
+    [InlineData(null)]
+    public void A_name_that_does_not_say_its_tier_leaves_the_profiles(string? name)
+    {
+        PsuEfficiency.TierOf(name).ShouldBeNull();
+        PsuEfficiency.For(PsuTier.Silver, 100, name).ShouldBe(PsuEfficiency.At(PsuTier.Silver, 100 / (double)(PsuEfficiency.RatedWatts(name) ?? 650)));
     }
 
     [Fact]

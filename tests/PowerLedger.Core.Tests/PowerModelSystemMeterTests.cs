@@ -41,7 +41,7 @@ public class PowerModelSystemMeterTests
         var r = Desktop().Evaluate(WithMeter(DesktopTick(), watts));
 
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
-        r.TotalW.ShouldBe(192 / 0.85, 1e-9);
+        r.TotalW.ShouldBe(192 / PsuEfficiency.At(PsuTier.Bronze, 192 / PsuEfficiency.DefaultRatedW), 1e-9);
     }
 
     [Fact]

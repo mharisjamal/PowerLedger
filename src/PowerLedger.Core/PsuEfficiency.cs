@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using PowerLedger.Contracts;
 
 namespace PowerLedger.Core;
@@ -11,8 +12,12 @@ namespace PowerLedger.Core;
 /// says. <see cref="At"/> reads the tier's curve at the load the supply is really carrying, and the callers that know
 /// only the tier keep the flat number.
 /// </summary>
-public static class PsuEfficiency
+public static partial class PsuEfficiency
 {
+    /// <summary>What a desktop's supply is taken to be rated for when nothing says: 650 W, about what desktops ship with
+    /// (the accuracy review's wizard default, 650 to 750 W). An idle desktop's 60 W is then a tenth of it.</summary>
+    public const double DefaultRatedW = 650;
+
     /// <summary>
     /// The shape of the curve: the load, as a fraction of the supply's rating, and how much of the tier's best the
     /// supply makes there. The three certified 80 PLUS points are the 20%, 50% and 100% rows — one shape scaled by
@@ -90,10 +95,36 @@ public static class PsuEfficiency
     }
 
     /// <summary>The efficiency to read <paramref name="outputWatts"/> of DC at, for a supply named
-    /// <paramref name="name"/>: its tier's curve where the name says what it is rated for, and the tier's flat figure
-    /// where it does not.</summary>
+    /// <paramref name="name"/> (none for a modelled desktop): the curve of the tier its name says it is, else
+    /// <paramref name="tier"/>, at the load it carries of the rating its name says, else <see cref="DefaultRatedW"/>; the
+    /// tier's flat figure for output that is no number.</summary>
     public static double For(PsuTier tier, double outputWatts, string? name)
-        => RatedWatts(name) is { } rated && double.IsFinite(outputWatts) ? At(tier, outputWatts / rated) : For(tier);
+    {
+        var known = TierOf(name) ?? tier;
+        return double.IsFinite(outputWatts) ? At(known, outputWatts / (RatedWatts(name) ?? DefaultRatedW)) : For(known);
+    }
+
+    /// <summary>
+    /// The 80 PLUS tier a supply's model name says it is, for the series PowerLedger reads over USB: Corsair's HXi are
+    /// Platinum, its RMi Gold, and NZXT's E series, built by Seasonic, Gold. Null for any other name, Thermaltake's DPS G
+    /// among them, which is sold at Gold and at Titanium under the one name; the profile's tier stands for those.
+    /// </summary>
+    public static PsuTier? TierOf(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        if (CorsairHxi().IsMatch(name)) return PsuTier.Platinum;
+        if (CorsairRmi().IsMatch(name) || NzxtE().IsMatch(name)) return PsuTier.Gold;
+        return null;
+    }
+
+    [GeneratedRegex(@"\bHX\d{3,4}i\b", RegexOptions.IgnoreCase)]
+    private static partial Regex CorsairHxi();
+
+    [GeneratedRegex(@"\bRM\d{3,4}i\b", RegexOptions.IgnoreCase)]
+    private static partial Regex CorsairRmi();
+
+    [GeneratedRegex(@"\bNZXT E\d{3}\b", RegexOptions.IgnoreCase)]
+    private static partial Regex NzxtE();
 
     /// <summary>No supply PowerLedger knows of is rated outside these, so a number outside them is not a rating.</summary>
     private const int SmallestRating = 200, LargestRating = 2000;

@@ -92,8 +92,8 @@ public class PowerModelTests
         r.Quality.ShouldBe(Quality.Calibrated);
         r.Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
         r.Components.Unattributed.ShouldBe(9.0);
-        r.Components.PsuLoss.ShouldBe(throughAdapter / 0.9 - throughAdapter, 1e-9);
-        r.TotalW.ShouldBe(throughAdapter / 0.9 + 25, 1e-9);
+        r.Components.PsuLoss.ShouldBe(Adapter(throughAdapter) - throughAdapter, 1e-9);
+        r.TotalW.ShouldBe(Adapter(throughAdapter) + 25, 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
@@ -105,8 +105,8 @@ public class PowerModelTests
         var throughAdapter = 14.6 + 4.1 + 4.2 + 6.2 + Rest;
         r.Quality.ShouldBe(Quality.Estimated);
         r.Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
-        r.Components.PsuLoss.ShouldBe(throughAdapter / 0.9 - throughAdapter, 1e-9);
-        r.TotalW.ShouldBe(throughAdapter / 0.9 + 25, 1e-9);
+        r.Components.PsuLoss.ShouldBe(Adapter(throughAdapter) - throughAdapter, 1e-9);
+        r.TotalW.ShouldBe(Adapter(throughAdapter) + 25, 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
 
         // On battery with no rate to measure, nothing is lost in an adapter.
@@ -124,7 +124,7 @@ public class PowerModelTests
         Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: true)).Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
         var off = Laptop(monitors: monitors).Evaluate(TestData.Laptop(displayOn: false));
         off.Components.Monitors.ShouldBe(0.4 + 0.2, 1e-9);
-        off.TotalW.ShouldBe((14.6 + 4.1 + Rest + 0.2) / 0.9 + 0.4, 1e-9);
+        off.TotalW.ShouldBe(Adapter(14.6 + 4.1 + Rest + 0.2) + 0.4, 1e-9);
         off.Components.Sum.ShouldBe(off.TotalW, 1e-9);
         Laptop().Evaluate(TestData.Laptop()).Components.Monitors.ShouldBe(0);
         Desktop().Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null)).Components.Monitors.ShouldBe(0);
@@ -152,11 +152,46 @@ public class PowerModelTests
         var r = Laptop().Evaluate(TestData.Laptop());
         var beforePsu = 14.6 + 4.1 + 4.2 + Rest;
         r.Quality.ShouldBe(Quality.Estimated);
-        r.TotalW.ShouldBe(beforePsu / 0.9, 0.001);
+        r.TotalW.ShouldBe(Adapter(beforePsu), 0.001);
         r.Components.Unattributed.ShouldBe(Rest, 1e-9);
         r.Components.Board.ShouldBe(0);
-        r.Components.PsuLoss.ShouldBe(beforePsu / 0.9 - beforePsu, 0.001);
+        r.Components.PsuLoss.ShouldBe(Adapter(beforePsu) - beforePsu, 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
+    }
+
+    [Fact]
+    public void An_idle_laptops_adapter_loses_more_than_a_flat_ninety_percent_says()
+    {
+        // 4 W of DC is a sixteenth of a 65 W adapter, where it makes about 79%, and it draws 0.15 W besides.
+        var idle = Laptop().Evaluate(TestData.Laptop(cpu: 1, gpu: 0, gpuPresent: false, brightness: 0));
+        var dc = 1 + 1.5 + (PowerModel.LaptopBaselineW + (PowerModel.LaptopRestPerCpuWatt * 1));
+        idle.TotalW.ShouldBe(AdapterEfficiency.Wall(dc), 1e-9);
+        idle.TotalW.ShouldBeGreaterThan(dc / 0.9 * 1.08);
+        Laptop(options: new PowerModelOptions(LaptopAdapterEfficiency: 0.9)).Evaluate(TestData.Laptop(cpu: 1, gpu: 0, gpuPresent: false, brightness: 0))
+            .TotalW.ShouldBe(dc / 0.9, 1e-9);
+    }
+
+    [Fact]
+    public void An_idle_desktop_is_read_on_its_supply_s_curve_at_650_W_and_reads_more_than_the_flat_tier()
+    {
+        // The review's case: 60 W of DC on a 650 W Bronze unit is 3.7 W more at the wall than 85% says.
+        var idle = Desktop().Evaluate(TestData.Laptop(cpu: 20, gpu: 18, brightness: null));
+        const double dc = 20 + 18 + 5 + 2 + 15;
+        idle.TotalW.ShouldBe(Bronze650(dc), 1e-9);
+        (idle.TotalW - (dc / 0.85)).ShouldBeInRange(3, 4.5);
+    }
+
+    [Fact]
+    public void An_nzxt_e_supply_is_read_as_the_gold_unit_it_is_whatever_the_profile_says()
+    {
+        MachineProfile.DefaultDesktop.PsuTier.ShouldBe(PsuTier.Bronze);
+        var r = Desktop().Evaluate(WithPsu(DesktopTick(), 200, name: "NZXT E650"));
+        r.TotalW.ShouldBe(200 / PsuEfficiency.At(PsuTier.Gold, 200 / 650.0), 1e-9);
+
+        // A tick it gave nothing on is modelled through the same supply.
+        var later = Desktop();
+        later.Evaluate(WithPsu(DesktopTick(), 200, name: "NZXT E650"));
+        later.Evaluate(WithPsu(DesktopTick(), null, name: null)).TotalW.ShouldBe(192 / PsuEfficiency.At(PsuTier.Gold, 192 / 650.0), 1e-9);
     }
 
     [Fact]
@@ -166,7 +201,7 @@ public class PowerModelTests
         r.Quality.ShouldBe(Quality.Calibrated);
         r.Components.Unattributed.ShouldBe(9.0);
         r.Components.Board.ShouldBe(0);
-        r.TotalW.ShouldBe((14.6 + 4.1 + 4.2 + 9.0) / 0.9, 0.001);
+        r.TotalW.ShouldBe(Adapter(14.6 + 4.1 + 4.2 + 9.0), 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
 
@@ -196,7 +231,7 @@ public class PowerModelTests
         r.Components.Ram.ShouldBe(5.0);
         r.Components.Storage.ShouldBe(2.0);
         r.Components.Board.ShouldBe(15.0);
-        r.TotalW.ShouldBe(beforePsu / 0.85, 0.001);
+        r.TotalW.ShouldBe(Bronze650(beforePsu), 0.001);
     }
 
     [Fact]
@@ -207,7 +242,7 @@ public class PowerModelTests
         var beforePsu = 50 + 120 + 11.25 + 2 * 2.5 + 2 + (12 + 3 * 1);
         r.Quality.ShouldBe(Quality.Estimated);
         r.Components.Display.ShouldBe(11.25, 0.001);
-        r.TotalW.ShouldBe(beforePsu / 0.85, 0.001);
+        r.TotalW.ShouldBe(Bronze650(beforePsu), 0.001);
         r.Components.Sum.ShouldBe(r.TotalW, 0.001);
     }
 
@@ -217,8 +252,8 @@ public class PowerModelTests
         var r = Desktop(monitors: new FixedDraw(new(OwnPlug: 50, FromPc: 0))).Evaluate(TestData.Laptop(cpu: 50, gpu: 120, brightness: null));
         var pcParts = 50 + 120 + 2 * 2.5 + 2 + (12 + 3 * 1);
         r.Components.Monitors.ShouldBe(50);
-        r.Components.PsuLoss.ShouldBe(pcParts / 0.85 - pcParts, 1e-9);
-        r.TotalW.ShouldBe(pcParts / 0.85 + 50, 1e-9);
+        r.Components.PsuLoss.ShouldBe(Bronze650(pcParts) - pcParts, 1e-9);
+        r.TotalW.ShouldBe(Bronze650(pcParts) + 50, 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
@@ -229,8 +264,8 @@ public class PowerModelTests
         var throughSupply = 50 + 120 + 2 * 2.5 + 2 + (12 + 3 * 1) + 7;
         r.Quality.ShouldBe(Quality.Estimated);
         r.Components.Monitors.ShouldBe(50 + 7, 1e-9);
-        r.Components.PsuLoss.ShouldBe(throughSupply / 0.85 - throughSupply, 1e-9);
-        r.TotalW.ShouldBe(throughSupply / 0.85 + 50, 1e-9);
+        r.Components.PsuLoss.ShouldBe(Bronze650(throughSupply) - throughSupply, 1e-9);
+        r.TotalW.ShouldBe(Bronze650(throughSupply) + 50, 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
@@ -241,7 +276,7 @@ public class PowerModelTests
         r.Quality.ShouldBe(Quality.Estimated);
         r.Components.Unattributed.ShouldBe(0);
         r.Components.Board.ShouldBe(15.0);
-        r.TotalW.ShouldBe((50 + 120 + 5 + 2 + 15) / 0.85, 0.001);
+        r.TotalW.ShouldBe(Bronze650(50 + 120 + 5 + 2 + 15), 0.001);
     }
 
     [Fact]
@@ -347,7 +382,7 @@ public class PowerModelTests
         var chip = Desktop().Evaluate(DesktopTick() with { DGpuScope = GpuPowerScope.ChipOnly });
         chip.GpuScope.ShouldBe(GpuPowerScope.ChipOnly);
         chip.Components.Gpu.ShouldBe(120 * 1.15, 1e-9);
-        chip.TotalW.ShouldBe((50 + 138 + 5 + 2 + 15) / 0.85, 1e-9);
+        chip.TotalW.ShouldBe(Bronze650(50 + 138 + 5 + 2 + 15), 1e-9);
         chip.Components.Sum.ShouldBe(chip.TotalW, 1e-9);
     }
 
@@ -375,8 +410,8 @@ public class PowerModelTests
         r.TotalW.ShouldBe(250 + 25, 1e-9);
         (r.Components.Cpu, r.Components.Gpu, r.Components.Ram, r.Components.Storage, r.Components.Board).ShouldBe((50.0, 120.0, 5.0, 2.0, 15.0));
         r.Components.Monitors.ShouldBe(25 + 7, 1e-9);
-        r.Components.PsuLoss.ShouldBe(throughSupply / 0.85 - throughSupply, 1e-9);
-        r.Components.Unattributed.ShouldBe(250 - throughSupply / 0.85, 1e-9);
+        r.Components.PsuLoss.ShouldBe(Bronze650(throughSupply) - throughSupply, 1e-9);
+        r.Components.Unattributed.ShouldBe(250 - Bronze650(throughSupply), 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
@@ -389,7 +424,7 @@ public class PowerModelTests
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
         r.TotalW.ShouldBe(250, 1e-9);
         r.Components.Monitors.ShouldBe(25 + 7, 1e-9);
-        r.Components.Unattributed.ShouldBe(250 - throughSupply / 0.85 - 25, 1e-9);
+        r.Components.Unattributed.ShouldBe(250 - Bronze650(throughSupply) - 25, 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
@@ -398,7 +433,7 @@ public class PowerModelTests
     {
         var r = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc }).Evaluate(WithUps(DesktopTick(), 180));
         r.TotalW.ShouldBe(180, 1e-9);
-        r.Components.Unattributed.ShouldBe(180 - 192 / 0.85, 1e-9);
+        r.Components.Unattributed.ShouldBe(180 - Bronze650(192), 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
@@ -426,7 +461,7 @@ public class PowerModelTests
     {
         var r = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = load }).Evaluate(WithUps(DesktopTick(), watts, source));
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
-        r.TotalW.ShouldBe(192 / 0.85, 1e-9);
+        r.TotalW.ShouldBe(Bronze650(192), 1e-9);
     }
 
     [Fact]
@@ -438,7 +473,7 @@ public class PowerModelTests
         var profile = MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc };
         var zero = Desktop(profile: profile).Evaluate(WithUps(DesktopTick(), 0));
         (zero.TotalSource, zero.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
-        zero.TotalW.ShouldBe(192 / 0.85, 1e-9);
+        zero.TotalW.ShouldBe(Bronze650(192), 1e-9);
         zero.Components.Unattributed.ShouldBe(0);
         zero.Components.Sum.ShouldBe(zero.TotalW, 1e-9);
 
@@ -484,7 +519,7 @@ public class PowerModelTests
         var profile = MachineProfile.DefaultLaptop with { UpsLoad = UpsLoad.ThisPc };
         var r = Laptop(baseline: 9.0, profile: profile, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 6.2))).Evaluate(WithUps(TestData.Laptop(), 40));
         var throughAdapter = 14.6 + 4.1 + 4.2 + 6.2 + 9.0;
-        var adapterLoss = throughAdapter / 0.9 - throughAdapter;
+        var adapterLoss = Adapter(throughAdapter) - throughAdapter;
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
         r.TotalW.ShouldBe(40 + 25, 1e-9);
         r.Components.PsuLoss.ShouldBe(adapterLoss, 1e-9);
@@ -495,8 +530,9 @@ public class PowerModelTests
     [Fact]
     public void A_power_supply_gives_the_total_as_its_dc_output_over_its_efficiency_and_the_monitors_with_plugs_of_their_own_are_added()
     {
-        // 300 W of a Corsair HX1000i's thousand is three tenths of its rating, where a Gold unit makes 98% of its best.
-        var efficiency = 0.90 * 0.98;
+        // 300 W of a Corsair HX1000i's thousand is three tenths of its rating, where a unit makes 98% of its best; an HXi is
+        // Platinum, whatever tier the profile says.
+        var efficiency = 0.92 * 0.98;
         var profile = MachineProfile.DefaultDesktop with { PsuTier = PsuTier.Gold };
         var r = Desktop(profile: profile, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 7))).Evaluate(WithPsu(DesktopTick(), 300));
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
@@ -514,23 +550,24 @@ public class PowerModelTests
         // A tier is one number only at half load, which is what 80 PLUS certifies and where a supply is at its best. Below
         // that a real unit falls away steeply, so a big supply idling is understated by a fifth and more by the flat figure.
         var half = Desktop().Evaluate(WithPsu(DesktopTick(), 500));
-        half.TotalW.ShouldBe(500 / 0.85, 1e-9);
+        half.TotalW.ShouldBe(500 / 0.92, 1e-9);                      // an HXi is Platinum
         half.Components.Sum.ShouldBe(half.TotalW, 1e-9);
 
-        // Two percent of the rating: a Bronze unit makes three quarters of its best there, not all of it.
+        // Two percent of the rating: a unit makes three quarters of its best there, not all of it.
         var idle = Desktop().Evaluate(WithPsu(DesktopTick(), 20));
-        idle.TotalW.ShouldBe(20 / (0.85 * 0.75), 1e-9);
-        idle.TotalW.ShouldBeGreaterThan(20 / 0.85 * 1.3);
-        idle.Components.PsuLoss.ShouldBe(20 / (0.85 * 0.75) - 20, 1e-9);
+        idle.TotalW.ShouldBe(20 / (0.92 * 0.75), 1e-9);
+        idle.TotalW.ShouldBeGreaterThan(20 / 0.92 * 1.3);
+        idle.Components.PsuLoss.ShouldBe(20 / (0.92 * 0.75) - 20, 1e-9);
         idle.Components.Sum.ShouldBe(idle.TotalW, 1e-9);
     }
 
     [Fact]
-    public void A_supply_whose_name_says_no_rating_is_read_at_its_tier_s_flat_figure()
+    public void A_supply_whose_name_says_no_rating_is_read_on_its_tier_s_curve_at_650_W()
     {
-        // With no rating there is no load to read the curve at, so the certified half-load figure is all there is to go on.
+        // With no rating to read the load against, the supply is taken for the 650 W most desktops ship with.
         var r = Desktop().Evaluate(WithPsu(DesktopTick(), 20, name: "Corsair"));
-        r.TotalW.ShouldBe(20 / 0.85, 1e-9);
+        r.TotalW.ShouldBe(Bronze650(20), 1e-9);
+        r.TotalW.ShouldBeGreaterThan(20 / 0.85 * 1.2);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
 
@@ -568,7 +605,7 @@ public class PowerModelTests
     {
         var r = Desktop(profile: MachineProfile.DefaultDesktop with { ReadPowerSupply = read }).Evaluate(WithWall(DesktopTick(), watts));
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
-        r.TotalW.ShouldBe(192 / 0.85, 1e-9);
+        r.TotalW.ShouldBe(Hx1000i(192), 1e-9);                     // the supply's own name says what it is
     }
 
     [Fact]
@@ -597,7 +634,7 @@ public class PowerModelTests
     {
         var r = Desktop(profile: MachineProfile.DefaultDesktop with { ReadPowerSupply = read }).Evaluate(WithPsu(DesktopTick(), watts));
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
-        r.TotalW.ShouldBe(192 / 0.85, 1e-9);
+        r.TotalW.ShouldBe(Hx1000i(192), 1e-9);                     // the supply's own name says what it is
     }
 
     [Fact]
@@ -606,13 +643,13 @@ public class PowerModelTests
         // A running machine draws something, so nought watts is a sensor that has died rather than a reading of the rails.
         var zero = Desktop().Evaluate(WithPsu(DesktopTick(), 0));
         (zero.TotalSource, zero.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
-        zero.TotalW.ShouldBe(192 / 0.85, 1e-9);
+        zero.TotalW.ShouldBe(Hx1000i(192), 1e-9);
         zero.Components.Sum.ShouldBe(zero.TotalW, 1e-9);
 
-        // Half a watt of a thousand is the very bottom of the curve, where a Bronze unit makes under a third of its best.
+        // Half a watt of a thousand is the very bottom of the curve, where a unit makes under a third of its best.
         var barely = Desktop().Evaluate(WithPsu(DesktopTick(), 0.5));
         (barely.TotalSource, barely.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
-        barely.TotalW.ShouldBe(0.5 / (0.85 * 0.315), 1e-9);
+        barely.TotalW.ShouldBe(0.5 / (0.92 * 0.315), 1e-9);
         barely.Components.Sum.ShouldBe(barely.TotalW, 1e-9);
     }
 
@@ -620,13 +657,13 @@ public class PowerModelTests
     public void A_laptop_read_by_a_power_supply_divides_by_its_adapter_efficiency_rather_than_a_desktop_supply_tier()
     {
         // The 80 PLUS tier in the profile describes a desktop's supply, and so does its curve; a laptop is fed by an
-        // adapter, and the same tick's adapter loss is worked out with the adapter's efficiency, so the total uses it too.
-        // Read off the curve instead, 45 W of the name's thousand would come to 60.5 W.
+        // adapter, and the same tick's adapter loss is worked out on the adapter's curve, so the total uses it too.
+        // Read off the supply's curve instead, 45 W of the name's thousand would come to about 58 W.
         MachineProfile.DefaultLaptop.PsuTier.ShouldBe(PsuTier.Bronze);
         var r = Laptop().Evaluate(WithPsu(TestData.Laptop(), 45));
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
-        r.TotalW.ShouldBe(45 / 0.90, 1e-9);
-        r.Components.PsuLoss.ShouldBe(45 / 0.90 - 45, 1e-9);
+        r.TotalW.ShouldBe(Adapter(45), 1e-9);
+        r.Components.PsuLoss.ShouldBe(Adapter(45) - 45, 1e-9);
         r.Components.Unattributed.ShouldBe(45 - (14.6 + 4.1 + 4.2), 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
 
@@ -640,7 +677,8 @@ public class PowerModelTests
     {
         var efficiency = 0.94 * 0.98;                    // a Titanium unit at three tenths of its rating
         var titanium = MachineProfile.DefaultDesktop with { PsuTier = PsuTier.Titanium };
-        var r = Desktop(profile: titanium, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 0))).Evaluate(WithPsu(DesktopTick(), 300));
+        var named = WithPsu(DesktopTick(), 300, name: "Thermaltake Toughpower DPS G 1000W");   // its name gives no tier
+        var r = Desktop(profile: titanium, monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 0))).Evaluate(named);
         r.TotalW.ShouldBe(300 / efficiency + 25, 1e-9);
         r.Components.PsuLoss.ShouldBe(300 / efficiency - 300, 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
@@ -656,7 +694,7 @@ public class PowerModelTests
 
         var more = Desktop(profile: MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.More }).Evaluate(both);
         more.TotalSource.ShouldBe(TotalSource.PowerSupply);
-        more.TotalW.ShouldBe(200 / (0.85 * 0.97), 1e-9);     // a fifth of the rating, where a Bronze unit makes 97% of its best
+        more.TotalW.ShouldBe(200 / (0.92 * 0.97), 1e-9);     // a fifth of the rating, where a unit makes 97% of its best
     }
 
     [Fact]
@@ -664,8 +702,8 @@ public class PowerModelTests
     {
         var r = Laptop().Evaluate(TestData.Laptop() with { PlatformW = 27 });
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.PlatformMeter, Quality.Measured));
-        r.TotalW.ShouldBe(27 / 0.90, 1e-9);
-        r.Components.PsuLoss.ShouldBe(27 / 0.90 - 27, 1e-9);
+        r.TotalW.ShouldBe(Adapter(27), 1e-9);
+        r.Components.PsuLoss.ShouldBe(Adapter(27) - 27, 1e-9);
         r.Components.Cpu.ShouldBe(14.6);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
@@ -689,7 +727,7 @@ public class PowerModelTests
     public void A_platform_rail_holds_the_monitors_running_off_the_pc_and_only_one_with_its_own_plug_is_added()
     {
         var r = Laptop(monitors: new FixedDraw(new(OwnPlug: 25, FromPc: 6))).Evaluate(TestData.Laptop() with { PlatformW = 27 });
-        r.TotalW.ShouldBe(27 / 0.90 + 25, 1e-9);
+        r.TotalW.ShouldBe(Adapter(27) + 25, 1e-9);
         r.Components.Monitors.ShouldBe(31);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
     }
@@ -770,6 +808,15 @@ public class PowerModelTests
 
     /// <summary>A tick with what a supply says it draws from the wall on it, as a Corsair's own total is read.</summary>
     private static Sample WithWall(Sample s, double? watts) => s with { PsuWallW = watts, PsuName = "Corsair HX1000i" };
+
+    /// <summary>What the default desktop's Bronze supply, taken to be rated 650 W, draws from the wall for this much DC.</summary>
+    private static double Bronze650(double dc) => dc / PsuEfficiency.At(PsuTier.Bronze, dc / PsuEfficiency.DefaultRatedW);
+
+    /// <summary>What the test supply, a Corsair HX1000i (Platinum, 1000 W), draws from the wall for this much DC.</summary>
+    private static double Hx1000i(double dc) => dc / PsuEfficiency.At(PsuTier.Platinum, dc / 1000);
+
+    /// <summary>What the default laptop's 65 W adapter draws from the wall for this much DC.</summary>
+    private static double Adapter(double dc) => AdapterEfficiency.Wall(dc);
 
     private sealed class FixedDraw(MonitorWatts on, MonitorWatts off = default) : IMonitorDraw
     {
