@@ -295,10 +295,35 @@ public class PowerModelTests
     [Fact]
     public void User_is_idle_at_or_beyond_the_threshold()
     {
-        Laptop().Evaluate(TestData.Laptop(idleSeconds: 299)).UserIdle.ShouldBeFalse();
-        Laptop().Evaluate(TestData.Laptop(idleSeconds: 300)).UserIdle.ShouldBeTrue();
-        Laptop(options: new PowerModelOptions(IdleThresholdSeconds: 60)).Evaluate(TestData.Laptop(idleSeconds: 61)).UserIdle.ShouldBeTrue();
+        Laptop().Evaluate(TestData.Laptop(idleSeconds: 299, cpuLoad: 0.02, gpuLoad: 0)).UserIdle.ShouldBeFalse();
+        Laptop().Evaluate(TestData.Laptop(idleSeconds: 300, cpuLoad: 0.02, gpuLoad: 0)).UserIdle.ShouldBeTrue();
+        Laptop(options: new PowerModelOptions(IdleThresholdSeconds: 60)).Evaluate(TestData.Laptop(idleSeconds: 61, cpuLoad: 0.02, gpuLoad: 0)).UserIdle.ShouldBeTrue();
     }
+
+    /// <summary>Report finding 5: a PC nobody is using but that is busy (a build, an agent, a download) is in use, not idle
+    /// waste. Idle is the user away and the processor under 10% and the graphics card under 5%.</summary>
+    [Fact]
+    public void A_PC_left_alone_but_busy_is_not_idle()
+    {
+        Laptop().Evaluate(TestData.Laptop(idleSeconds: 600, cpuLoad: 0.10, gpuLoad: 0)).UserIdle.ShouldBeFalse();
+        Laptop().Evaluate(TestData.Laptop(idleSeconds: 600, cpuLoad: 0.02, gpuLoad: 0.05)).UserIdle.ShouldBeFalse();
+        Laptop().Evaluate(TestData.Laptop(idleSeconds: 600, cpuLoad: 0.099, gpuLoad: 0.049)).UserIdle.ShouldBeTrue();
+    }
+
+    /// <summary>A graphics load nobody could read counts as idle, as the model counts its watts; a processor load that is not
+    /// a number counts as none, as everywhere else in the model.</summary>
+    [Fact]
+    public void Loads_not_known_do_not_keep_a_PC_from_idling()
+    {
+        Laptop().Evaluate(TestData.Laptop(idleSeconds: 600, cpuLoad: 0.02, gpuLoad: null)).UserIdle.ShouldBeTrue();
+        Laptop().Evaluate(TestData.Laptop(idleSeconds: 600, cpuLoad: double.NaN, gpuLoad: 0)).UserIdle.ShouldBeTrue();
+    }
+
+    /// <summary>With the App closed nothing reports the user's idle time, which comes in as 0: the PC counts as in use, so
+    /// idle waste is never overstated.</summary>
+    [Fact]
+    public void Idle_time_nobody_reported_is_not_idle()
+        => Laptop().Evaluate(TestData.Laptop(idleSeconds: 0, cpuLoad: 0, gpuLoad: 0)).UserIdle.ShouldBeFalse();
 
     [Fact]
     public void Suspect_and_lock_flags_pass_through()

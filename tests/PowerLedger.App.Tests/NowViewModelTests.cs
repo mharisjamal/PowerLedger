@@ -371,6 +371,19 @@ public class NowViewModelTests
         model.IsCollecting.ShouldBeFalse();
     }
 
+    /// <summary>Report finding 5: today's idle counts the display off too, as the month's idle waste and the report's do.</summary>
+    [Fact]
+    public void Today_s_idle_counts_both_kinds_as_the_month_does()
+    {
+        var model = Model();
+        var snapshot = Snapshots.Typical(Now);
+        _history.Snapshot = snapshot with { Today = snapshot.Today with { IdleOffHours = 0.5, IdleOffKwh = 0.004 } };
+        model.RefreshHistory();
+
+        model.Today.Idle.ShouldBe("1h 15m");
+        model.Today.IdleWasted.ShouldBe("15 Wh wasted");
+    }
+
     [Fact]
     public void History_fills_the_month_s_ledger()
     {

@@ -148,7 +148,7 @@ public partial class App : Application
         // Aero look design §4: Insights over the PC's own history, with Settings' CO₂ per kWh as it stands at each read.
         var prefs = _preferences;
         var insights = new InsightsViewModel(
-            new Insights(history, () => prefs.Current.Co2KgPerKwh, GridFactors.WindowsRegion()), threads, TimeProvider.System, zone, culture);
+            new Insights(history, () => prefs.Current.Co2KgPerKwh, GridFactors.WindowsRegion(), IdleSetup.Reader(_database)), threads, TimeProvider.System, zone, culture);
         _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard, insights);
         _shell.FeedbackRequested += OpenFeedbackWindow;
         // Review 6: a saved look that won't open at start opens Classic instead, which is then saved, through Settings as

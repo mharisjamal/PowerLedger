@@ -321,8 +321,9 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
             Format.WholeWatts(t.PeakW, _culture),
             t.PeakAt is { } at ? "at " + TimeZoneInfo.ConvertTime(at, _zone).ToString("HH:mm", _culture) : "",
             Format.Duration(t.OnHours),
-            Format.Duration(t.IdleOnHours),
-            $"{Format.WholeWatts(t.IdleOnKwh * 1000, _culture)} Wh wasted",
+            // Idle with the display on or off, as the month's idle waste and the report count it (report finding 5).
+            Format.Duration(t.IdleOnHours + t.IdleOffHours),
+            $"{Format.WholeWatts((t.IdleOnKwh + t.IdleOffKwh) * 1000, _culture)} Wh wasted",
             Format.Duration(t.AsleepHours),
             Format.Kg(t.EnergyKwh * _co2KgPerKwh, _culture),
             $"{_co2KgPerKwh.ToString("0.00", _culture)} kg / kWh grid");

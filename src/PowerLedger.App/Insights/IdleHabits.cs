@@ -3,13 +3,16 @@ namespace PowerLedger.App;
 /// <summary>
 /// Habits' maths (Aero look design §4): when the PC sits awake and idle, from the last 4 weeks of hour rows.
 /// <list type="bullet">
-/// <item>The heatmap holds each weekday and hour's idle energy (display on or off: either way the PC is awake for nobody),
-/// averaged over the dates it was seen, so a PC with three weeks of history is not shown a quarter lighter.</item>
+/// <item>The heatmap holds each weekday and hour's idle energy (display on or off: either way the PC is awake for nobody,
+/// and doing nothing, since a PC left alone but working is in use), averaged over the dates it was seen, so a PC with
+/// three weeks of history is not shown a quarter lighter.</item>
 /// <item>The worst window is the 2 hours in a row, across all weekdays, that idle costs most; it may run past midnight.</item>
 /// <item>The saving is what sleeping after 10 idle minutes would have cut, scaled to an average month. Hour rows know
-/// how long the PC idled, not in how many spells, so an hour's idle time is taken as one spell, which the first 10
-/// minutes of are kept awake; unless the hour before idled for at least 50 minutes, when the spell began earlier and all
-/// of it would have been asleep.</item>
+/// how long the PC idled, not in how many spells, so an hour's idle time is taken as one spell. Idle time only starts
+/// counting once the user has been away the service's idle threshold (<see cref="IdleSetup.IdleAfter"/>), so only what
+/// is left of the 10 minutes after that is kept awake (report finding 5); unless the hour before idled for at least 50
+/// minutes, when the spell began earlier and all of it would have been asleep. Asleep the PC still draws
+/// <see cref="IdleSetup.AsleepW"/>, so the saving is the idle draw less that.</item>
 /// </list>
 /// Nothing is said until there is a week of whole days (<see cref="BillForecast.DaysNeeded"/>).
 /// </summary>
@@ -28,8 +31,10 @@ internal static class HabitsFinder
     /// <summary>The average month, 365.25 / 12 days.</summary>
     public const double DaysPerMonth = 365.25 / 12;
 
-    public static IdleHabits? From(IReadOnlyList<HourUse> hours, DateOnly today, decimal price, string? currency)
+    /// <param name="setup">The service's idle threshold and what the PC draws asleep; <see cref="IdleSetup.Default"/> when null.</param>
+    public static IdleHabits? From(IReadOnlyList<HourUse> hours, DateOnly today, decimal price, string? currency, IdleSetup? setup = null)
     {
+        var idle = setup ?? IdleSetup.Default;
         var since = today.AddDays(-7 * Weeks);
         var whole = HourUse.WholeDays(hours, today).Where(d => d.Day >= since).Select(d => d.Day).ToHashSet();
         if (whole.Count < BillForecast.DaysNeeded) return null;
@@ -44,7 +49,7 @@ internal static class HabitsFinder
             var (day, of) = ((int)hour.Local.DayOfWeek, hour.Local.Hour);
             sums[day, of] += hour.IdleKwh * 1000;
             (dates[day, of] ??= []).Add(DateOnly.FromDateTime(hour.Local));
-            savedKwh += Saved(hour, i > 0 ? hours[i - 1] : null);
+            savedKwh += Saved(hour, i > 0 ? hours[i - 1] : null, idle);
         }
 
         var heatmap = new double[IdleHabits.Days, IdleHabits.Hours];
@@ -66,12 +71,16 @@ internal static class HabitsFinder
         return new IdleHabits(heatmap, worst, WindowHours, decimal.Round((decimal)monthKwh * price, 2), monthKwh, currency);
     }
 
-    /// <summary>What sleeping after <see cref="SleepAfter"/> would have cut from <paramref name="hour"/>'s idle energy.</summary>
-    internal static double Saved(HourUse hour, HourUse? before)
+    /// <summary>What sleeping after <see cref="SleepAfter"/> would have cut from <paramref name="hour"/>'s idle energy, net
+    /// of what the PC draws asleep.</summary>
+    internal static double Saved(HourUse hour, HourUse? before, IdleSetup setup)
     {
         if (hour.IdleKwh <= 0 || hour.IdleSeconds <= 0) return 0;
-        if (before is { Seen: true } b && b.IdleSeconds >= CarriesOver.TotalSeconds) return hour.IdleKwh;
-        return hour.IdleKwh * Math.Max(0, hour.IdleSeconds - SleepAfter.TotalSeconds) / hour.IdleSeconds;
+        var awake = Math.Max(0, (SleepAfter - setup.IdleAfter).TotalSeconds);
+        var asleep = before is { Seen: true } b && b.IdleSeconds >= CarriesOver.TotalSeconds
+            ? hour.IdleSeconds
+            : Math.Max(0, hour.IdleSeconds - awake);
+        return asleep * Math.Max(0, hour.IdleKwh / hour.IdleSeconds - setup.AsleepW / 1000 / 3600);
     }
 
     private static double Window(double[] byHour, int start)

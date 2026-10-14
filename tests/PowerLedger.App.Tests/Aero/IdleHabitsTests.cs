@@ -4,7 +4,7 @@ using static PowerLedger.App.Tests.InsightsSeries;
 namespace PowerLedger.App.Tests;
 
 /// <summary>Aero look design §4, Habits: the 7 × 24 idle heatmap over 4 weeks, the worst 2-hour window, and the saving a
-/// month from sleeping after 10 idle minutes.</summary>
+/// month from sleeping after 10 idle minutes, less what the PC draws asleep.</summary>
 public class IdleHabitsTests
 {
     private static readonly TimeZoneInfo Utc = TimeZoneInfo.Utc;
@@ -28,22 +28,53 @@ public class IdleHabitsTests
         (habits.WorstWindowStart, habits.WorstWindowHours).ShouldBe((22, 2));
     }
 
+    /// <summary>Report finding 5: idle time only starts counting once the user has been away the idle threshold, 5 minutes
+    /// by default, so sleeping after 10 idle minutes keeps only the next 5 of it awake, not 10.</summary>
     [Fact]
-    public void The_saving_keeps_the_first_ten_minutes_of_a_spell_awake()
+    public void The_saving_keeps_awake_only_what_is_left_of_ten_minutes_once_idle_time_counts()
     {
-        var habits = HabitsFinder.From(Days(28, Evenings), Today, 0.20m, "GBP").ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(28, Evenings), Today, 0.20m, "GBP", new IdleSetup(TimeSpan.FromMinutes(5), AsleepW: 0)).ShouldNotBeNull();
 
-        // Each evening: 22:00's 100 Wh less its first 10 minutes (83.3 Wh), and all of 23:00's, which carries on the spell.
-        var perDay = 0.1 * 50 / 60 + 0.1;
+        // Each evening: 22:00's 100 Wh less its first 5 counted minutes (91.7 Wh), and all of 23:00's, which carries on the spell.
+        var perDay = 0.1 * 55 / 60 + 0.1;
         habits.SavingPerMonthKwh.ShouldBe(perDay * 365.25 / 12, 1e-9);
         habits.SavingPerMonthCost.ShouldBe(decimal.Round((decimal)(perDay * 365.25 / 12) * 0.20m, 2));
         habits.Currency.ShouldBe("GBP");
     }
 
+    /// <summary>With the idle threshold at 30 minutes, a PC that slept after 10 would be asleep before any idle time counted.</summary>
+    [Fact]
+    public void Past_a_threshold_of_ten_minutes_all_the_idle_time_is_saved()
+    {
+        var habits = HabitsFinder.From(Days(28, Evenings), Today, 1m, "USD", new IdleSetup(TimeSpan.FromMinutes(30), AsleepW: 0)).ShouldNotBeNull();
+
+        habits.SavingPerMonthKwh.ShouldBe(0.2 * 365.25 / 12, 1e-9);
+    }
+
+    /// <summary>Report finding 5: a PC asleep still draws a little, so the saving is the idle draw less the sleeping one.</summary>
+    [Fact]
+    public void Sleep_is_not_taken_to_draw_nothing()
+    {
+        var habits = HabitsFinder.From(Days(28, Evenings), Today, 1m, "USD", new IdleSetup(TimeSpan.FromMinutes(5), AsleepW: 2)).ShouldNotBeNull();
+
+        // 100 W idle against 2 W asleep: 55 minutes of 98 W at 22:00, and the hour of 98 W at 23:00.
+        var perDay = (98.0 * 55 / 60 + 98) / 1000;
+        habits.SavingPerMonthKwh.ShouldBe(perDay * 365.25 / 12, 1e-9);
+    }
+
+    [Fact]
+    public void Idling_at_less_than_sleep_draws_saves_nothing()
+    {
+        var habits = HabitsFinder.From(Days(28, local => local.Hour >= 22 ? (0.001, 3600) : (0, 0)), Today, 1m, "USD", new IdleSetup(TimeSpan.FromMinutes(5), AsleepW: 2))
+            .ShouldNotBeNull();
+
+        habits.SavingPerMonthKwh.ShouldBe(0);
+    }
+
     [Fact]
     public void A_short_idle_spell_saves_nothing()
     {
-        var habits = HabitsFinder.From(Days(28, local => local.Hour == 12 ? (0.01, 540) : (0, 0)), Today, 1m, "USD").ShouldNotBeNull();
+        var habits = HabitsFinder.From(Days(28, local => local.Hour == 12 ? (0.01, 240) : (0, 0)), Today, 1m, "USD").ShouldNotBeNull();
 
         habits.SavingPerMonthKwh.ShouldBe(0);
         habits.SavingPerMonthCost.ShouldBe(0m);
@@ -91,7 +122,7 @@ public class IdleHabitsTests
         var habits = HabitsFinder.From(Days(10, Evenings), Today, 1m, "USD").ShouldNotBeNull();
 
         habits.Heatmap[(int)DayOfWeek.Monday, 22].ShouldBe(100, 1e-9);
-        habits.SavingPerMonthKwh.ShouldBe((0.1 * 50 / 60 + 0.1) * 365.25 / 12, 1e-9);
+        habits.SavingPerMonthKwh.ShouldBe((0.1 * 55 / 60 + 0.1 - 2.0 * (55.0 / 60 + 1) / 1000) * 365.25 / 12, 1e-9);
     }
 
     /// <summary>London's clocks went back on 25 October 2026: that Sunday has two 01:00 hours, and its idle cell holds both

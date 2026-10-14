@@ -11,7 +11,9 @@ namespace PowerLedger.App;
 /// </summary>
 /// <param name="co2KgPerKwh">Settings' CO₂ per kWh as it stands at each read, so a change there reaches the next one.</param>
 /// <param name="region">Windows' region (<see cref="GridFactors.WindowsRegion"/>), for naming where the factor came from.</param>
-internal sealed class Insights(IRangeHistory history, Func<double> co2KgPerKwh, string? region) : IInsights
+/// <param name="idle">The service's idle threshold and what the PC draws asleep, for the Habits saving, as they stand at
+/// each read; <see cref="IdleSetup.Default"/> without it.</param>
+internal sealed class Insights(IRangeHistory history, Func<double> co2KgPerKwh, string? region, Func<IdleSetup>? idle = null) : IInsights
 {
     /// <summary>The longest look back any finding takes: the forecast's and unusual use's 8 weeks.</summary>
     public const int Days = 7 * 8;
@@ -39,7 +41,7 @@ internal sealed class Insights(IRangeHistory history, Func<double> co2KgPerKwh, 
 
         var forecast = BillForecasts.From(HourUse.WholeDays(hours, today), today, todayLeft, monthKwh, monthCost, todayPrice, currency);
         var anomalies = UsageAnomalies.Find(hours, now, zone);
-        var habits = HabitsFinder.From(hours, today, price, currency);
+        var habits = HabitsFinder.From(hours, today, todayPrice, currency, idle?.Invoke());
         var carbon = Carbon.Estimate(monthKwh, report.Totals.EnergyKwh + Before(Ranges.Midnight(from, zone), now, zone), kgPerKwh, region);
         return new InsightsReport(forecast, anomalies, habits, carbon);
     }

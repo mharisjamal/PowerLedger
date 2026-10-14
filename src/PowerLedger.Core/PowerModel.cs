@@ -61,6 +61,13 @@ public sealed class PowerModel
     /// </summary>
     public Reading Evaluate(Sample s) => Evaluate(s, out _);
 
+    /// <summary>The processor load under which a PC left alone counts as idle (report finding 5): above it the PC is working,
+    /// a build, an agent or a download, and that is use, not idle waste.</summary>
+    public const double IdleCpuLoad = 0.10;
+
+    /// <summary>The busiest graphics card's load under which a PC left alone counts as idle.</summary>
+    public const double IdleGpuLoad = 0.05;
+
     /// <summary>
     /// Evaluates one tick, as <see cref="Evaluate(Sample)"/> does, and gives what the monitors drew as this reading counts
     /// them. The Service feeds <c>Components.Cpu</c>, <c>Gpu</c> and <c>Display</c> back into the calibration learner, and
@@ -76,7 +83,10 @@ public sealed class PowerModel
         var gpu = GpuWatts(s);
         var display = DisplayModel.PanelWatts(_profile, s.Brightness, s.DisplayOn);
         monitors = _monitors.Watts(s.DisplayOn);
-        var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds;
+        // Idle is the user away and the PC doing nothing; a load nobody could read counts as none, as its watts do. Idle time
+        // nobody reported, with the App closed, comes in as 0, so the PC counts as in use.
+        var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds
+                       && Load(s.CpuLoad) < IdleCpuLoad && Load(s.DGpuLoad ?? 0) < IdleGpuLoad;
         var isLaptop = _profile.Chassis == ChassisKind.Laptop;
 
         if (isLaptop && s.HasDischargeRate && s.BatteryRateW is { } measured)

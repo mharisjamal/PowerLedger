@@ -140,6 +140,18 @@ public class InsightsTests
         report.Carbon.Source.ShouldBe("The United Kingdom's grid in 2023, from Ember");
     }
 
+    /// <summary>Report finding 5: the saving follows the service's idle threshold; at 30 minutes, a PC that slept after 10
+    /// would be asleep before any idle time counted, so all of it is saved.</summary>
+    [Fact]
+    public void The_habits_saving_follows_the_service_s_idle_setup()
+    {
+        Holds(Hours(Today.AddDays(-56), 57, Utc, _ => 0.1, local => local.Hour >= 22 ? (0.05, 3600) : (0, 0)), Utc);
+
+        var report = new Insights(_history, () => 0.236, "GB", () => new IdleSetup(TimeSpan.FromMinutes(30), AsleepW: 0)).Read(Now, Utc);
+
+        report.Habits.ShouldNotBeNull().SavingPerMonthKwh.ShouldBe(0.1 * 365.25 / 12, 1e-9);
+    }
+
     [Fact]
     public void A_spike_yesterday_is_found()
     {
