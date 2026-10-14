@@ -158,6 +158,14 @@ display scales 1, 1.25 and 1.5. The tests read the committed crops in
 - When a window is left out of capture or starts its glass, every frame copies the whole desktop for half a second.
   Windows can hand over a frame drawn before the exclusion took hold, and no dirty rectangle would ever take that out of
   the copy.
+- **Pace.** The capture thread runs below normal priority, so the glass gives way to the person's own work, except from
+  a whole copy being asked for (a window shown again, left out of capture, starting its glass) until that half second
+  and its first two whole copies are done, when it runs at normal priority, as the window's own thread does. Below
+  normal throughout, a busy PC (every core taken by threads of normal priority) gave the thread no turn for seconds after
+  a window came back from Win+M or the tray (sampled then: ready, its processor time not moving), and its glass showed
+  what had been behind it before. Measured with 12 busy loops on the 8 thread i7-1165G7 and nothing else on the
+  screen, LiquidGlassGpuTests' After_minimise_all for the Aero window (taskbar and tray, one process a run): before, 18
+  of 26 runs failed (6 of 8 with the test as it is now), every failing piece drawn from the old copy; after, 0 of 20.
 - **HDR.** `IDXGIOutput5::DuplicateOutput1` takes the desktop as scRGB half floats. The shaders divide by the monitor's
   SDR white level (DisplayConfig `GET_SDR_WHITE_LEVEL`), clamp, encode as sRGB and round to 8 bits, which is what the
   browser shows in an SDR window there.
