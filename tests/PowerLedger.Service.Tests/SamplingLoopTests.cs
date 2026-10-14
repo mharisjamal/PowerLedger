@@ -184,10 +184,39 @@ public class SamplingLoopTests
         await SleepBooks(() => charges.Count > 0 ? charges.Dequeue() : null, expectedW: 0.8 * BatteryRoundTrip.Factor, learned: 0.8);
     }
 
-    private static async Task SleepBooks(Func<BatteryCharge?>? battery, double expectedW, double? learned)
+    /// <summary>Plan AC review: a Fast Startup shutdown signs everyone out and then hibernates, which the service sees as a
+    /// suspend. It draws nothing like a sleep, and the battery loses next to nothing in it, so it is booked as no energy
+    /// and teaches nothing.</summary>
+    [Fact]
+    public async Task A_suspend_with_nobody_signed_in_books_nothing_and_learns_nothing()
+    {
+        var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: false, 40, 50)]);
+        await SleepBooks(() => charges.Count > 0 ? charges.Dequeue() : null, expectedW: 0, learned: null, signedIn: () => false);
+    }
+
+    /// <summary>Plan AC review: a hibernate draws nothing, so it books no energy and teaches nothing.</summary>
+    [Fact]
+    public async Task A_hibernate_books_nothing_and_learns_nothing()
+    {
+        var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: false, 40, 50)]);
+        await SleepBooks(() => charges.Count > 0 ? charges.Dequeue() : null, expectedW: 0, learned: null, hibernated: since => since.AddSeconds(3));
+    }
+
+    /// <summary>Plan AC review: a Modern Standby PC that hibernates hours into its sleep drew asleep until then.</summary>
+    [Fact]
+    public async Task A_sleep_that_went_on_into_a_hibernate_books_the_part_before_it()
+    {
+        var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: false, 39.5, 50)]);
+        await SleepBooks(
+            () => charges.Count > 0 ? charges.Dequeue() : null, expectedW: SleepPower.LaptopDrainW * BatteryRoundTrip.Factor / 4, learned: null,
+            hibernated: since => since.AddMinutes(30));
+    }
+
+    private static async Task SleepBooks(
+        Func<BatteryCharge?>? battery, double expectedW, double? learned, Func<bool>? signedIn = null, Func<DateTimeOffset, DateTimeOffset?>? hibernated = null)
     {
         using var t = new TestDatabase();
-        await using var loop = new Harness(t, battery: battery);
+        await using var loop = new Harness(t, battery: battery, signedIn: signedIn, hibernated: hibernated);
         await loop.StartAsync();
         await loop.Ticks(10);                                       // 00:55:01 to 00:55:10
         await loop.Send(new SuspendCommand());
@@ -690,7 +719,8 @@ public class SamplingLoopTests
         /// <param name="watched">Whether anyone looks at the live figures; always, when left out.</param>
         public Harness(
             TestDatabase database, LoopOptions? options = null, Func<int, FakeSensorSet>? makeSet = null,
-            Func<FakeTimeProvider, TimeProvider>? loopClock = null, Func<bool>? watched = null, Func<BatteryCharge?>? battery = null)
+            Func<FakeTimeProvider, TimeProvider>? loopClock = null, Func<bool>? watched = null, Func<BatteryCharge?>? battery = null,
+            Func<bool>? signedIn = null, Func<DateTimeOffset, DateTimeOffset?>? hibernated = null)
         {
             Clock.SetLocalTimeZone(Plus2);
             Monitors = new MonitorBoard(MonitorBoardTests.Catalogue, Clock);
@@ -714,7 +744,9 @@ public class SamplingLoopTests
                 SystemShuttingDown: () => false,
                 DatabaseNotice: null,
                 Watched: watched,
-                Battery: battery);
+                Battery: battery,
+                SignedIn: signedIn,
+                Hibernated: hibernated);
             var clock = loopClock?.Invoke(Clock) ?? Clock;
             _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Monitors, clock, NullLogger<SamplingLoop>.Instance, options);
         }

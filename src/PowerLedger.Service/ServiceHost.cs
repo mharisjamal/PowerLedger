@@ -171,6 +171,8 @@ internal static class ServiceHost
             SystemShuttingDown: () => shutdown.SystemShuttingDown,
             DatabaseNotice: provider.GetRequiredService<OpenedDatabase>().Notice,
             Watched: () => signals.Watched,
-            Battery: BatteryGauge.Windows());
+            Battery: BatteryGauge.Windows(),
+            SignedIn: SleepKinds.SomeoneSignedIn,
+            Hibernated: SleepKinds.Hibernated);
     }
 }

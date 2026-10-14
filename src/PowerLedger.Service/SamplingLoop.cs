@@ -29,9 +29,13 @@ internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationS
 /// whenever the loop picks its interval; always, when left out.</param>
 /// <param name="Battery">The laptop battery's charge, read as the machine goes to sleep and as it wakes (see
 /// <see cref="SleepKeeper"/>); null when there is none or it reports no watt-hours. Left out, nothing is learned.</param>
+/// <param name="SignedIn">Whether anyone is signed in to Windows, asked as the machine goes to sleep: a Fast Startup
+/// shutdown signs everyone out first (see <see cref="SleepKinds"/>). Left out, someone always is.</param>
+/// <param name="Hibernated">When the machine hibernated since the time given, asked as it wakes; null when it slept. Left
+/// out, it never did.</param>
 internal sealed record LoopEnvironment(
     Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice,
-    Func<bool>? Watched = null, Func<BatteryCharge?>? Battery = null);
+    Func<bool>? Watched = null, Func<BatteryCharge?>? Battery = null, Func<bool>? SignedIn = null, Func<DateTimeOffset, DateTimeOffset?>? Hibernated = null);
 
 /// <summary>
 /// The service's heart (spec §3, §6, §7). Once a sample interval it reads the sensors, runs the model, feeds the
@@ -125,7 +129,7 @@ internal sealed class SamplingLoop : BackgroundService
         _nutSecret = new NutSecret(new SettingsRepository(database));
         _sessions = new SessionTracker(new SessionRepository(database));
         _calibration = new CalibrationKeeper(new CalibrationRepository(database), _options.Calibration, _options.CalibrationSaveEvery);
-        _sleep = new SleepKeeper(new SettingsRepository(database), environment.Battery, log);
+        _sleep = new SleepKeeper(new SettingsRepository(database), environment.Battery, log, environment.SignedIn, environment.Hibernated);
         _rollups = new Rollups(_raw, new AggregateRepository(database), new SessionRepository(database));
         _retention = new RetentionRunner(database, clock.LocalTimeZone);
         _buffer = new WriteBuffer(_raw.InsertBatch);
