@@ -449,6 +449,22 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
                 }
                 Walk(window);
                 pieces.ShouldNotBeEmpty();
+                // From the tray the panes rise and glide in again once the window has painted twice, for about one and a
+                // half seconds; on a busy PC that ends past those 3 s, and a piece read mid way is drawn as it was then
+                // (moved, scaled). Read once every piece is at rest: no pane over it still risen or scaled (its fade runs
+                // on the same clock, so it is done too).
+                static bool AtRest(DependencyObject piece, Window window)
+                {
+                    for (var node = piece; node != null && node != window; node = VisualTreeHelper.GetParent(node))
+                    {
+                        if (node is UIElement { RenderTransform.Value.IsIdentity: false }) return false;
+                    }
+                    return true;
+                }
+                UiHarness.PumpUntil(() => pieces.TrueForAll(p => AtRest(p, window)), TimeSpan.FromSeconds(30), "the reveal over");
+                // A read is answered as its frame begins: a first one's frame draws what the reveal's end left due.
+                var first = gpu.ReadAsync(pieces[0]);
+                UiHarness.PumpUntil(() => first.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
                 var stale = new List<string>();
                 foreach (var piece in pieces)
                 {
@@ -475,6 +491,46 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             }
             return 0;
         }));
+
+    /// <summary>
+    /// The window shown again on a busy PC (every core taken by threads of normal priority): the capture thread, below
+    /// normal, got no turn for seconds, so the desktop copy kept the window that was behind before and the glass was
+    /// drawn from it (After_minimise_all's "stale" pieces with nothing else on the screen, the owner's Win+M report).
+    /// From the window showing again until its whole copies are done (two, and every frame for half a second), the thread
+    /// runs at normal priority, as the window's own does; then below normal again.
+    /// </summary>
+    [Fact]
+    public void Shown_again_the_capture_runs_at_normal_priority_until_the_whole_desktop_is_in()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            var picture = FakeGlassSource.Picture(400, 300, (x, y) => ((byte)x, (byte)y, 90));
+            using var scene = Show(picture, 300, 200, 300, 200);
+            UiHarness.PumpUntil(() => scene.Glass.Composed && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
+            var session = Gpu(scene).Session;
+            // The desk repainting brings frames with a picture: the whole desktop comes in, and the thread is at rest.
+            var desk = (Border)scene.Desk.Content;
+            bool AtRest()
+            {
+                desk.Opacity = desk.Opacity == 1 ? 0.99 : 1;
+                return !session.WholeCopyPending && CapturePriorities().All(p => p == System.Diagnostics.ThreadPriorityLevel.BelowNormal);
+            }
+            UiHarness.PumpUntil(AtRest, TimeSpan.FromSeconds(5), "the capture at rest, below normal");
+            scene.Window.Hide();
+            UiHarness.PumpUntil(() => !session.Running, TimeSpan.FromSeconds(5), "the duplication let go");
+            scene.Window.Show();
+            // At once, before the thread has had a turn to copy anything: on a busy PC it now gets one.
+            CapturePriorities().ShouldContain(System.Diagnostics.ThreadPriorityLevel.Normal, "the capture hurries while the desktop it holds is old");
+            UiHarness.PumpUntil(AtRest, TimeSpan.FromSeconds(5), "below normal again once the whole desktop is in");
+            return 0;
+        }));
+
+    /// <summary>The live capture threads' priorities.</summary>
+    private static List<System.Diagnostics.ThreadPriorityLevel> CapturePriorities()
+    {
+        var ids = MonitorCapture.ThreadIds.ToHashSet();
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        return process.Threads.Cast<System.Diagnostics.ProcessThread>().Where(t => ids.Contains(t.Id)).Select(t => t.PriorityLevel).ToList();
+    }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hwnd, int command);

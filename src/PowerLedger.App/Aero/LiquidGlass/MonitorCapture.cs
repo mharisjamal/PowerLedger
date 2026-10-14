@@ -211,16 +211,56 @@ internal sealed class MonitorCapture : IDisposable
 
     /// <summary>Copies the whole desktop again on the next two frames: a window was just left out of capture, and
     /// Windows may hand over a frame or two drawn before that took hold, the window in it, which no dirty rectangle
-    /// would ever take out of the copy.</summary>
+    /// would ever take out of the copy. Or a window shows again, and the copy is as old as when it went. Until then the
+    /// thread runs at normal priority (<see cref="Hurry"/>).</summary>
     public void RefreshAll()
     {
-        _needFull = 2;
-        Interlocked.Exchange(ref _fullUntil, Stopwatch.GetTimestamp() + Stopwatch.Frequency / 2);
+        lock (_paceGate)
+        {
+            _needFull = 2;
+            Interlocked.Exchange(ref _fullUntil, Stopwatch.GetTimestamp() + Stopwatch.Frequency / 2);
+            Hurry(true);
+        }
         _wake.Set();
     }
 
     /// <summary>Until then, every frame copies the whole desktop (half a second after <see cref="RefreshAll"/>).</summary>
     private long _fullUntil;
+
+    private readonly object _paceGate = new();
+    private volatile bool _hurried;
+
+    /// <summary>
+    /// The thread's pace: below normal at rest, so the glass gives way to the person's own work; normal from
+    /// <see cref="RefreshAll"/> until its whole copies are done (two, and every frame for half a second, as a frame then
+    /// may still hold a window just left out of capture), as a window's own thread runs. Below normal, a busy PC (every
+    /// core taken by threads of normal priority) gave the thread no turn for seconds after a window showed again, and its
+    /// glass was drawn from the copy of what was behind it before (the owner's Win+M). Under the pace lock.
+    /// </summary>
+    private void Hurry(bool on)
+    {
+        if (_hurried == on) return;
+        _hurried = on;
+        try
+        {
+            _thread.Priority = on ? ThreadPriority.Normal : ThreadPriority.BelowNormal;
+        }
+        catch (ThreadStateException)
+        {
+            // The thread has ended: the session went.
+        }
+    }
+
+    /// <summary>On the capture thread, each round: back to below normal once the whole copies are done (two, and every
+    /// frame for half a second).</summary>
+    private void Settle()
+    {
+        if (!_hurried) return;
+        lock (_paceGate)
+        {
+            if (_needFull == 0 && Stopwatch.GetTimestamp() >= Interlocked.Read(ref _fullUntil)) Hurry(false);
+        }
+    }
 
     public void Dispose()
     {
@@ -299,6 +339,7 @@ internal sealed class MonitorCapture : IDisposable
         {
             while (!_disposed)
             {
+                Settle();
                 var (subscribers, consumers) = Active();
                 if ((subscribers.Count == 0 && consumers.Count == 0) || Failed)
                 {
