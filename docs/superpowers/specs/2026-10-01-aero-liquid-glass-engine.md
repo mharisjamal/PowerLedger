@@ -326,6 +326,44 @@ saw 320 to 570 desktop changes in 30 s.
 Per frame on the capture thread (thread cycle counters, overlay over a video): Present 0.72 M cycles, the layer copied
 to the back buffer 0.33 M, acquiring and releasing the frame 0.57 M, drawing the piece 0.07 M.
 
+### Rest, battery and presents (2026-10-14, perf review P8, P10, P11)
+
+The same method, now committed as `tests/PowerLedger.App.Tests/Aero/LiquidGlass/LiquidGlassCpu.cs` (opt in with
+`PL_CPU_DIR`; `PL_CPU_ENERGY_SAVER=1` as if Energy Saver were on): the main window (1100 by 700 at 125 %, 9 composed
+pieces, the Aero shell's fixture, so no reading rolls in) over the mockup's background on a window across the monitor
+(rest), or over the intro video looping in its own process (video); 10 s to settle, then 30 s. It adds the capture
+thread's wakeups (its context switches, NtQuerySystemInformation) and cycles (QueryThreadCycleTime), the process's cycles
+(QueryProcessCycleTime), and the pixels copied a present. Before is main at df3d5d4, after is plan-ac/glass; the rounds
+alternate. Five other agents built and tested on the same laptop throughout (the CPU at 50 to 100 %, 3 GB of 16 free),
+which spiked the test process by tens of points for seconds at a time, glass on or none; so the process's CPU is given
+as a median, and the capture thread's own counts carry the comparison.
+
+| Scene | Before | After |
+|---|---|---|
+| Rest, nothing changing (frames 0 a second): capture thread | 79 to 115 wakeups/s, 9.1 to 28.2 M cycles/s (3 runs) | 4.9 to 11.8 wakeups/s, 1.4 to 2.2 M cycles/s (4 runs) |
+| Rest, nothing changing: process | 1.82 % median (1.61 to 1.98), 37 to 60 M cycles/s | 0.89 % median (0.68 to 1.09; one run 11.3 %, a spike as glass none had too), 20 to 23 M cycles/s |
+| Rest, glass none: process | | 1.09 %, 26 M cycles/s (1 run) |
+| Video: capture thread per frame drawn | 3.4 to 6.4, median 4.0 M cycles (6 runs) | 3.3 to 4.3, median 3.9 M cycles (8 runs) |
+| Video: frames drawn, process | 1.8 to 10.8 a second, 2.19 to 10.93 % (median 4.7 %) | 3.9 to 18.1 a second, 3.90 to 11.30 % (median 4.04 %) |
+| Video: copied from the layer a present | the whole layer, 4.81 MB | 4.14 MB (the pieces cover 86 % of this window) |
+| Overlay over a video: copied a present | the whole layer | 0.17 MB |
+| Video under Energy Saver | | 0.4 to 14.4 frames drawn a second (4 runs; the 2 % budget held one at 0.4), 2.97 to 5.99 % |
+
+- **At rest** the capture thread wakes about a tenth as often and spends a tenth of the cycles; the process falls to what
+  the window costs with no glass. With other windows changing elsewhere on the screen (4 to 7 frames a second came in
+  during some rest runs), both builds wake per frame alike.
+- **Over a video** the governor slowed the before build harder (the spikes pushed the process over its 8 %), so the
+  frame rates differ; per frame drawn the capture thread costs the same. The dirty rectangles save GPU copying and DWM's
+  composing, not this process's CPU: on this window the glass covers most of the client area, so the saving is 14 % of
+  the copy here, more where a change behind touches fewer pieces.
+- **Energy Saver** holds the glass at 15 frames a second or fewer.
+- **The look**: the Aero window over a still picture with another window sliding behind part of it, grabbed on screen
+  (`LiquidGlassCpu.Grab`), 1375 by 875 at 125 %: before against after, 0 pixels differ in 2 of 4 pairs; in the others
+  only the search box's blinking caret (9 to 10 pixels) and up to 7 single pixels 1 to 4 levels apart (two runs of one
+  build: 2 such pixels).
+- **Jank**: LiquidGlassMotionProofTests, three runs each: after, content lag worst 1 frame moving and 0 resizing, the
+  glass's window worst 1 frame; before, the same in two runs and a 6 frame content lag in one, under the load.
+
 ### Which path, when
 
 | Case | Path |
