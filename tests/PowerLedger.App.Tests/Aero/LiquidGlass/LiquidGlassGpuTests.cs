@@ -710,6 +710,13 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             MonitorCapture.StillPicture = picture;
             LiquidGlassSources.Override = null;
             LiquidGlassSources.ExcludeFromCapture = false;
+            // The same picture over the whole monitor, under our window: nothing else changes behind the glass, so the
+            // capture draws no frame of its own over both pieces between the turns.
+            var image = new Image { Source = picture, Stretch = Stretch.None };
+            var desk = ScreenCapture.Show(new Border { Background = Brushes.Black, Child = image }, 0, 0, 10, 10);
+            var dpi = VisualTreeHelper.GetDpi(desk).DpiScaleX;
+            (desk.Left, desk.Top, desk.Width, desk.Height) = (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+            (image.Width, image.Height) = (picture.PixelWidth / dpi, picture.PixelHeight / dpi);
             LiquidGlassSources.AllowScreenshots = false;
             LiquidGlassSources.GpuAllowed = true;
             LiquidGlassBackdrop Piece(double left) => new()
@@ -745,6 +752,7 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
                 var (checks, wrong) = (GpuGlassWindow.PresentsChecked - checkedBefore, GpuGlassWindow.PresentsOff - offBefore);
                 var lines = new List<string>();
                 var worst = 0.0;
+                System.IO.Directory.CreateDirectory(UiHarness.Folder);
                 foreach (var piece in pieces)
                 {
                     var read = gpu.ReadAsync(piece);
@@ -754,16 +762,34 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
                     var scale = VisualTreeHelper.GetDpi(piece).DpiScaleX;
                     int w = (int)Math.Round(piece.ActualWidth * scale), h = (int)Math.Round(piece.ActualHeight * scale);
                     drawn.Length.ShouldBe(w * h * 4);
-                    var screen = ScreenCapture.Grab((int)Math.Round(at.X), (int)Math.Round(at.Y), w, h);
-                    var off = 0;
-                    for (var i = 0; i < drawn.Length; i++)
+                    // Another program's window passing over the spot (the desktop is shared) spoils a grab: up to three, a
+                    // moment apart. A stale buffer would stay, as nothing changes behind.
+                    var share = 1.0;
+                    for (var grab = 0; grab < 3 && share > 0; grab++)
                     {
-                        if (i % 4 != 3 && Math.Abs(drawn[i] - screen[i]) > 1) off++;
+                        if (grab > 0) UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                        var screen = ScreenCapture.Grab((int)Math.Round(at.X), (int)Math.Round(at.Y), w, h);
+                        var off = 0;
+                        for (var i = 0; i < drawn.Length; i++)
+                        {
+                            if (i % 4 != 3 && Math.Abs(drawn[i] - screen[i]) > 1) off++;
+                        }
+                        share = Math.Min(share, off / (w * h * 3.0));
+                        if (off > 0) LiquidGlassProofTests.Write(BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, screen, w * 4), System.IO.Path.Combine(UiHarness.Folder, $"liquid-glass-present-{lines.Count}-{grab}.png"));
                     }
-                    var share = off / (w * h * 3.0);
                     worst = Math.Max(worst, share);
                     lines.Add($"{share:P3} of channels off the layer");
                 }
+                var owner = new WindowInteropHelper(window).Handle;
+                var deskHwnd = new WindowInteropHelper(desk).Handle;
+                var order = new List<string>();
+                for (var h = GetWindow(owner, 0); h != IntPtr.Zero && order.Count < 400; h = GetWindow(h, 2))
+                {
+                    if (h == owner) order.Add("owner");
+                    else if (h == gpu.CompanionHwnd) order.Add("glass");
+                    else if (h == deskHwnd) order.Add("desk");
+                }
+                if (worst > 0) output.WriteLine($"z-order: {string.Join(" > ", order)}");
                 output.WriteLine($"frames presented by their own rectangles: {presented}; back buffers not the layer as presented: {wrong} of {checks}; on screen: {string.Join(", ", lines)}");
                 presented.ShouldBeGreaterThan(0);
                 checks.ShouldBeGreaterThan(0);
@@ -774,6 +800,7 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             {
                 GpuGlassWindow.CheckPresents = false;
                 window.Close();
+                desk.Close();
                 MonitorCapture.StillPicture = null;
                 LiquidGlassSources.ExcludeFromCapture = true;
             }

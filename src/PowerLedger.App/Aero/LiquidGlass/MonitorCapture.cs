@@ -284,7 +284,7 @@ internal sealed class MonitorCapture : IDisposable
     internal static readonly TimeSpan Quiet = LiquidGlassGovernor.Fastest * 3;
 
     /// <summary>How long one look for a frame waits while nothing is due but what Windows hands over (perf review P8): a
-    /// still desktop wakes the thread four times a second rather than at the display's rate. A frame ends the wait at once.</summary>
+    /// still desktop has the thread look four times a second rather than at the display's rate. A frame ends the wait at once.</summary>
     internal static readonly TimeSpan IdleLook = TimeSpan.FromMilliseconds(250);
 
     private bool _quiet;

@@ -146,7 +146,7 @@ display scales 1, 1.25 and 1.5. The tests read the committed crops in
   Only a change wholly inside one of our windows is compared, as it may be that window repainting.
 - **Quiet frames slow the pace.** After a frame that draws nothing, the next look waits a tenth of a second; the first
   frame that draws brings back the governor's pace.
-- **A still desktop costs four wakeups a second** (2026-10-14, perf review P8). While nothing is due but Windows' next
+- **A still desktop costs four looks a second** (2026-10-14, perf review P8). While nothing is due but Windows' next
   frame, one look waits a quarter of a second (`MonitorCapture.IdleLook`) rather than one display refresh, which woke
   the thread at the display's rate for nothing. A frame ends the wait at once, so nothing behind is drawn later. What a
   composed window asks of its glass meanwhile (a piece new, moved or resized, a read, the window shown) is drawn on its
@@ -194,7 +194,9 @@ display scales 1, 1.25 and 1.5. The tests read the committed crops in
   size; the swap chain (flip model, two buffers) is fed from it. Its back buffer holds the frame before last, so a frame
   copies from the layer only the rectangles it drew and those the frame before drew, and tells DWM only its own
   (`IDXGISwapChain1::Present1` with dirty rectangles), so the copy and DWM's composing grow with the glass drawn, not the
-  window. The whole layer is copied and presented after a clear (a piece moved or gone), for the first two frames of new
+  window. DXGI doesn't fill the back buffer in (measured: copying only this frame's leaves the frame before's changes
+  out of it). A rectangle inside another is left out, and where they add up to the layer (a video behind every piece)
+  the whole layer is copied, or presented, at once. The whole layer is copied and presented after a clear (a piece moved or gone), for the first two frames of new
   buffers (the swap chain made or resized), and for two frames after a present that didn't plainly succeed, when which
   buffer comes next is unknown. What shows is the layer either way, pixel for pixel
   (`Each_frame_presents_only_what_it_drew_and_the_screen_still_shows_every_piece`).
