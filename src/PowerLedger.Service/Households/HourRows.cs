@@ -28,7 +28,7 @@ internal sealed class HourRows(AggregateRepository aggregates, TariffRepository 
         var changedMs = Math.Max(nowMs, household.LatestChange(deviceId) + 1);   // the clock may have gone back
         var kept = household.RowsBetween(deviceId, from.ToUnixTimeMilliseconds(), nowMs).ToDictionary(row => row.HourMs);
         var changed = new List<HouseholdRow>();
-        foreach (var hour in aggregates.ReadHours(from, now))
+        foreach (var hour in LaidBack(aggregates.ReadHours(from, now), from))
         {
             var row = Of(deviceId, hour, schedule.At(hour.Start), changedMs);
             if (kept.TryGetValue(row.HourMs, out var before) && before.SameFigures(row)) continue;
@@ -55,6 +55,43 @@ internal sealed class HourRows(AggregateRepository aggregates, TariffRepository 
         hour.OnSeconds, hour.BatterySeconds, hour.IdleOnSeconds + hour.IdleOffSeconds,
         hour.MeasuredSeconds, hour.CalibratedSeconds, hour.EstimatedSeconds,
         tariff is null ? null : CostMicro(hour.CountedWh, tariff.PricePerKwh), tariff?.Currency, changedMs);
+
+    /// <summary>
+    /// The hours with what the PC drew asleep laid back over the hours it slept (Plan AC review), as the PC's own report lays
+    /// it: a sleep is stored in the hour the PC woke in, and is spread evenly back from the wake over its gap, so each
+    /// hour's energy is its parts and its own sleep. An hour slept through, which has no row of its own, gets one with its
+    /// sleep alone. Sleep from before the first hour from <paramref name="from"/> is left out, as the report leaves out
+    /// sleep from before its range.
+    /// </summary>
+    internal static List<Aggregate> LaidBack(IReadOnlyList<Aggregate> hours, DateTimeOffset from)
+    {
+        var first = new DateTimeOffset(from.UtcTicks + ((Hour.Ticks - (from.UtcTicks % Hour.Ticks)) % Hour.Ticks), TimeSpan.Zero);
+        var laid = hours.ToDictionary(hour => hour.Start, hour => hour with { AsleepWh = 0 });
+        foreach (var hour in hours)
+        {
+            if (hour.AsleepWh <= 0) continue;
+            if (hour.GapSeconds <= 0)
+            {
+                laid[hour.Start] = laid[hour.Start] with { AsleepWh = laid[hour.Start].AsleepWh + hour.AsleepWh };
+                continue;
+            }
+            var perSecond = hour.AsleepWh / hour.GapSeconds;
+            var left = hour.GapSeconds;
+            var cursor = hour.Start + Hour - TimeSpan.FromSeconds(Math.Min(hour.OnSeconds, Hour.TotalSeconds));   // the wake
+            while (left > 0 && cursor > first)
+            {
+                var start = new DateTimeOffset((cursor.UtcTicks - 1) - ((cursor.UtcTicks - 1) % Hour.Ticks), TimeSpan.Zero);
+                var taken = Math.Min(left, (cursor - start).TotalSeconds);
+                var into = laid.GetValueOrDefault(start) ?? Aggregate.Empty(start);
+                laid[start] = into with { AsleepWh = into.AsleepWh + (taken * perSecond) };
+                left -= taken;
+                cursor = start;
+            }
+        }
+        return [.. laid.Values.OrderBy(hour => hour.Start)];
+    }
+
+    private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
 
     /// <summary>Watt-hours at a price per kWh, in millionths, halves rounded away from zero.</summary>
     internal static long CostMicro(double energyWh, decimal pricePerKwh) =>

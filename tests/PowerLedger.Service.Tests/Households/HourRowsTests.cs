@@ -57,19 +57,37 @@ public sealed class HourRowsTests : IDisposable
         Cost(3).ShouldBe((4_000L, "EUR"));
     }
 
-    /// <summary>Accuracy A10: the household counts what this PC drew asleep, as its own report does.</summary>
+    /// <summary>Accuracy A10: the household counts what this PC drew asleep, as its own report does, in the hours it slept
+    /// (Plan AC review): stored whole in the hour it woke in, it made that hour's energy far more than its parts.</summary>
     [Fact]
-    public void An_hour_s_energy_and_cost_count_what_the_pc_drew_asleep()
+    public void An_hour_s_energy_and_cost_count_what_the_pc_drew_asleep_in_it()
     {
         Tariffs.Add(new Tariff(Midnight.AddDays(-30), 0.25m, "GBP"));
-        Aggregates.UpsertHour(Hour(0, energyWh: 42.5) with { GapSeconds = 7 * 3600, AsleepWh = 6 });
+        // Woke at 02:01:40 after sleeping from midnight, drawing a watt-hour every thousand seconds.
+        Aggregates.UpsertHour(Hour(2, energyWh: 42.5) with { GapSeconds = 7300, AsleepWh = 7.3 });
 
-        Rows.Build(Me, Midnight.AddDays(-1), Midnight.AddHours(3));
+        Rows.Build(Me, Midnight.AddDays(-1), Midnight.AddHours(3)).ShouldBe(3);
 
-        var row = Household.Row(Me, Midnight.ToUnixTimeMilliseconds()).ShouldNotBeNull();
-        row.EnergyWh.ShouldBe(48.5);
-        row.CostMicro.ShouldBe(12_125L);
-        row.RestWh.ShouldBe(17.5);                                  // the parts are the PC's awake
+        var slept = Household.Row(Me, Midnight.ToUnixTimeMilliseconds()).ShouldNotBeNull();
+        (slept.EnergyWh, slept.CostMicro, slept.CpuWh, slept.RestWh, slept.OnS).ShouldBe((3.6, 900L, 0.0, 0.0, 0.0));
+        Household.Row(Me, Midnight.AddHours(1).ToUnixTimeMilliseconds()).ShouldNotBeNull().EnergyWh.ShouldBe(3.6, 1e-9);
+        var woke = Household.Row(Me, Midnight.AddHours(2).ToUnixTimeMilliseconds()).ShouldNotBeNull();
+        woke.EnergyWh.ShouldBe(42.6, 1e-9);
+        woke.CostMicro.ShouldBe(10_650L);
+        woke.RestWh.ShouldBe(17.5);                                 // the parts are the PC's awake
+    }
+
+    /// <summary>A sleep from before the rows built is laid back only as far as their start, as the PC's own report lays
+    /// back a sleep from before its range.</summary>
+    [Fact]
+    public void A_sleep_from_before_the_start_counts_only_from_it()
+    {
+        Aggregates.UpsertHour(Hour(0, energyWh: 42.5) with { GapSeconds = 7300, AsleepWh = 7.3 });
+
+        Rows.Build(Me, Midnight.AddHours(-1), Midnight.AddHours(3)).ShouldBe(2);
+
+        Household.Row(Me, Midnight.AddHours(-1).ToUnixTimeMilliseconds()).ShouldNotBeNull().EnergyWh.ShouldBe(3.6, 1e-9);
+        Household.Row(Me, Midnight.ToUnixTimeMilliseconds()).ShouldNotBeNull().EnergyWh.ShouldBe(42.6, 1e-9);
     }
 
     /// <summary>Accuracy A9: the household counts what this PC's battery gave at the wall it was charged from.</summary>
