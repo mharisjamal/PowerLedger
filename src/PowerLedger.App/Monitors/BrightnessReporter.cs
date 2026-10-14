@@ -38,9 +38,11 @@ internal sealed class BrightnessReporter(IServiceLink link, IBrightnessReader re
             var status = await link.GetStatusAsync().ConfigureAwait(false);
             if (status?.Monitors is not { Count: > 0 } listed || status.Last is { DisplayOn: false }) return;
             var instances = Instances(listed);
-            var (brightness, power) = ui.Current.ReadMonitorBrightness ? Answered(reader.Read(), instances) : ([], []);
+            // Unasked, the monitors' power states are sent as none at all, not as none answered: the service takes a monitor
+            // that answered before and stays quiet while the App asks for one switched off at its button (Plan AC).
+            var (brightness, power) = ui.Current.ReadMonitorBrightness ? Answered(reader.Read(), instances) : ([], null);
             var driven = Driven(displays.Read(), instances);
-            if (brightness.Count > 0 || power.Count > 0 || driven.Count > 0)
+            if (brightness.Count > 0 || power is { Count: > 0 } || driven.Count > 0)
                 await link.ReportBrightnessAsync(brightness, power, driven).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -72,7 +74,7 @@ internal sealed class BrightnessReporter(IServiceLink link, IBrightnessReader re
 
     /// <summary>The brightnesses and the power states of the monitors the service listed, each monitor once, under the instance
     /// the service gave it.</summary>
-    private static (List<MonitorBrightness> Brightness, List<MonitorPowerReading> Power) Answered(IReadOnlyList<DdcReading> readings, Dictionary<string, string> instances)
+    private static (List<MonitorBrightness> Brightness, List<MonitorPowerReading>? Power) Answered(IReadOnlyList<DdcReading> readings, Dictionary<string, string> instances)
     {
         var brightness = new List<MonitorBrightness>();
         var power = new List<MonitorPowerReading>();

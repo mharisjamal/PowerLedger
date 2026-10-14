@@ -30,9 +30,20 @@ internal sealed class Ups : IDisposable
     /// <summary>The usage of a top-level collection that is a power summary, which some devices publish instead.</summary>
     public const ushort SummaryUsage = 0x24;
 
-    /// <summary>What a load percentage is multiplied by when only the volt-ampere rating is known (spec §4). NUT's
-    /// Eaton subdriver assumes the same 0.8 where a UPS reports no real power.</summary>
-    public const double PowerFactor = 0.8;
+    /// <summary>
+    /// The watts a UPS rated <paramref name="voltAmps"/> delivers at full load, for a load percentage when only the
+    /// volt-ampere rating is known (Plan AC). Consumer line-interactive units are rated 0.55 to 0.67 W per VA (a Back-UPS
+    /// 1500 VA at 900 W, a CyberPower 1500 VA at 900 to 1000 W), so 0.6 up to 3 kVA, where the old 0.8 read 33% high; the
+    /// online units above it are rated 0.9.
+    /// </summary>
+    public static double WattsPerVoltAmp(double voltAmps) => voltAmps <= LargestConsumerVoltAmps ? 0.6 : 0.9;
+
+    /// <summary>The power factor taken for a UPS's apparent output power when it reports none of its own: a PC's supply with
+    /// active PFC, as nearly all are now, runs at 0.9 and over.</summary>
+    public const double ApparentPowerFactor = 0.9;
+
+    /// <summary>The largest rating taken for a consumer unit.</summary>
+    public const double LargestConsumerVoltAmps = 3000;
 
     private const ushort PowerConverter = 0x16;
     private const ushort Output = 0x1C;
@@ -89,7 +100,8 @@ internal sealed class Ups : IDisposable
 
     /// <summary>
     /// One round of reads, taking the watts from the most exact source this UPS has (spec §4): its output's own active
-    /// power, else its load percentage of its rated watts, else of its rated volt-amperes at an assumed power factor.
+    /// power, else its load percentage of its rated watts, else of its rated volt-amperes at the watts per VA a UPS of
+    /// that rating is rated for.
     /// Each report is read once however many of the fields it holds, and the ratings, which never change, are read
     /// once and kept.
     /// </summary>
@@ -117,9 +129,9 @@ internal sealed class Ups : IDisposable
         if (_ratedWatts is { } rated && Sane(load * rated)) return (load * rated, UpsPowerSource.LoadOfRatedWatts);
 
         _ratedVoltAmps ??= Rating(round, _voltAmpRating);
-        if (_ratedVoltAmps is { } voltAmps && Sane(load * voltAmps * PowerFactor))
+        if (_ratedVoltAmps is { } voltAmps && Sane(load * voltAmps * WattsPerVoltAmp(voltAmps)))
         {
-            return (load * voltAmps * PowerFactor, UpsPowerSource.LoadOfRatedVoltAmps);
+            return (load * voltAmps * WattsPerVoltAmp(voltAmps), UpsPowerSource.LoadOfRatedVoltAmps);
         }
         return (null, UpsPowerSource.None);
     }

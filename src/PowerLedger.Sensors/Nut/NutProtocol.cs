@@ -73,10 +73,12 @@ internal static class NutProtocol
     }
 
     /// <summary>
-    /// A UPS's output watts from its variables, from the most exact figure it offers: its real power (ups.realpower); its
-    /// apparent power (ups.power) times the power factor it reports (output.powerfactor); its load (ups.load) of its rated
-    /// real power; its apparent power at an assumed power factor of 0.8; and its load of its rated apparent power at its own
-    /// factor or that assumed one. Only watts above nought count, as with a UPS read over USB.
+    /// A UPS's watts from its variables, from the most exact figure it offers: what it draws from the mains
+    /// (input.realpower), its own use included, as a meter at the wall would read (Plan AC); its real output power
+    /// (ups.realpower); its apparent power (ups.power) times the power factor it reports (output.powerfactor); its load
+    /// (ups.load) of its rated real power; its apparent power at an assumed power factor of 0.9; and its load of its rated
+    /// apparent power at its own factor or at the watts per VA a UPS of that rating is rated for. Only watts above nought
+    /// count, as with a UPS read over USB, so a UPS on battery, drawing nothing from the mains, gives its output.
     /// </summary>
     public static (double? Watts, UpsPowerSource Source) Power(IReadOnlyDictionary<string, string> variables)
     {
@@ -90,14 +92,15 @@ internal static class NutProtocol
         var apparent = Number("ups.power");
         var load = Number("ups.load") is { } percent && percent is >= 0 and <= 200 ? percent / 100 : (double?)null;
 
+        if (Number("input.realpower") is { } input && Sane(input)) return (input, UpsPowerSource.InputPower);
         if (Number("ups.realpower") is { } real && Sane(real)) return (real, UpsPowerSource.ActivePower);
         if (apparent is { } va && factor is { } known && Sane(va * known)) return (va * known, UpsPowerSource.ApparentPower);
         if (load is { } share && Number("ups.realpower.nominal") is { } ratedWatts && Sane(share * ratedWatts))
             return (share * ratedWatts, UpsPowerSource.LoadOfRatedWatts);
-        if (apparent is { } guessed && Sane(guessed * Ups.PowerFactor))
-            return (guessed * Ups.PowerFactor, UpsPowerSource.ApparentPowerAssumedFactor);
-        if (load is { } part && Number("ups.power.nominal") is { } ratedVa && Sane(part * ratedVa * (factor ?? Ups.PowerFactor)))
-            return (part * ratedVa * (factor ?? Ups.PowerFactor), UpsPowerSource.LoadOfRatedVoltAmps);
+        if (apparent is { } guessed && Sane(guessed * Ups.ApparentPowerFactor))
+            return (guessed * Ups.ApparentPowerFactor, UpsPowerSource.ApparentPowerAssumedFactor);
+        if (load is { } part && Number("ups.power.nominal") is { } ratedVa && Sane(part * ratedVa * (factor ?? Ups.WattsPerVoltAmp(ratedVa))))
+            return (part * ratedVa * (factor ?? Ups.WattsPerVoltAmp(ratedVa)), UpsPowerSource.LoadOfRatedVoltAmps);
         return (null, UpsPowerSource.None);
     }
 

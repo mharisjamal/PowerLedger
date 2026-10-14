@@ -73,7 +73,7 @@ public class TariffScheduleTests
     public void Co2_and_comparisons()
     {
         Co2.Kg(0.284, 0.38).ShouldBe(0.10792, 1e-9);
-        Co2.DefaultKgPerKwh.ShouldBe(0.40);
+        Co2.DefaultKgPerKwh.ShouldBe(0.481);
         Comparisons.LedBulbHours(1.0).ShouldBe(100, 1e-9);
         Comparisons.PhoneCharges(1.0).ShouldBe(1000.0 / 15, 1e-9);
         Comparisons.EvKm(1.0).ShouldBe(1 / 0.18, 1e-9);

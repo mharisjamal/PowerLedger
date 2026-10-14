@@ -8,7 +8,7 @@ namespace PowerLedger.Core;
 /// <param name="CpuLoad">0..1.</param>
 /// <param name="BatteryRateW">Discharge watts (positive) whenever the machine's own battery is discharging: on battery, and
 /// on AC under a load the adapter can't carry, when it is a floor for the total. Null while charging or idle, when unknown,
-/// and on a battery that reports relative units rather than milliwatts. Charging is never in any field of a sample.</param>
+/// and on a battery that reports relative units rather than milliwatts. Charging is in no field of a sample but <paramref name="BatteryChargeW"/>.</param>
 /// <param name="Brightness">0..1 for the internal panel; null when unavailable.</param>
 /// <param name="Suspect">Set by the validator when a value was replaced or looks implausible.</param>
 /// <param name="DGpuScope">What <paramref name="DGpuW"/> covers when a vendor library measured it.</param>
@@ -36,6 +36,8 @@ namespace PowerLedger.Core;
 /// <param name="PanelInactive">True when Windows lists the built-in panel as showing nothing while the console display is on
 /// elsewhere: a docked laptop with its lid shut, or one set to show on the second screen only. The panel then draws nothing.
 /// False when it shows, and when nothing says (a machine with no built-in panel, or one Windows lists no panel for).</param>
+/// <param name="BatteryChargeW">Charge watts, positive, while a laptop's own battery charges on AC; null otherwise. Never the
+/// PC's consumption: the model only takes it off a total that holds it, a UPS's or an input meter's (Plan AC).</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -65,7 +67,8 @@ public sealed record Sample(
     double? SystemMeterW = null,
     SystemMeterKind SystemMeter = SystemMeterKind.None,
     string? SystemMeterName = null,
-    bool PanelInactive = false)
+    bool PanelInactive = false,
+    double? BatteryChargeW = null)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>

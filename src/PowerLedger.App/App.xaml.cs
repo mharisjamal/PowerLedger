@@ -79,7 +79,7 @@ public partial class App : Application
 
         var options = AppOptions.Parse(e.Args);
         var store = new UiPreferencesStore(UiPreferencesStore.DefaultPath);
-        var preferences = store.Load();
+        var preferences = store.Load().Co2Once(GridFactors.Suggested(GridFactors.WindowsRegion()).Grams / 1000);   // Plan AC
         var zone = TimeZoneInfo.Local;
         var culture = CultureInfo.CurrentCulture;
         _culture = culture;

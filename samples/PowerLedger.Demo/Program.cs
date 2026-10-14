@@ -44,7 +44,7 @@ internal static class Program
             facts.GpuTdpW ?? (facts.Chassis == ChassisKind.Laptop ? HardwareFacts.LaptopDefaults.GpuTdpW : HardwareFacts.DesktopDefaults.GpuTdpW));
 
         // Learn fast so a short preview can reach Calibrated; the service uses 10-minute thresholds.
-        var learner = new CalibrationLearner(new CalibrationOptions(HalfLifeSamples: 60, MinBucketSamples: 15, MinTotalSamples: 15));
+        var learner = new CalibrationLearner(new CalibrationOptions(MinBucketSamples: 15, MinTotalSamples: 15));
         var calibration = new CalibrationRepository(db);
         learner.Import(calibration.Load(facts.Hash));
         var model = new PowerModel(profile, hardware, new PowerModelOptions(), learner);

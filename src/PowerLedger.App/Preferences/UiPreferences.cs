@@ -68,6 +68,11 @@ internal sealed record UiPreferences
     /// <see cref="Sanitised"/> cannot tell that 0 from a real factor.</summary>
     public double Co2KgPerKwh { get; set; } = Co2.DefaultKgPerKwh;
 
+    /// <summary>The CO₂ factor has been seeded from Windows' region once (Plan AC, <see cref="Co2Once"/>). False for a new
+    /// install and for a ui.json from before it, or with anything but true for it, which marks the file for the seeding.</summary>
+    [JsonConverter(typeof(TrueOnlyJsonConverter))]
+    public bool Co2Seeded { get; init; }
+
     /// <summary>The first-run wizard was finished once; it shows until then (spec §9).</summary>
     public bool FirstRunDone { get; init; }
 
@@ -142,6 +147,13 @@ internal sealed record UiPreferences
     public UiPreferences Locked() => Look == Look.Aero && !AeroApproved
         ? this with { Look = Look.Midnight, LookIntroduced = true }
         : this;
+
+    /// <summary>The same preferences with the CO₂ factor seeded, once: a factor still at a default (0.10's 0.40, which it
+    /// called the world average, or the world's 481 g) takes <paramref name="suggestedKgPerKwh"/>, the grid of Windows'
+    /// region; one the user chose is kept. Marked done either way, which the next save keeps.</summary>
+    public UiPreferences Co2Once(double suggestedKgPerKwh) => Co2Seeded
+        ? this
+        : this with { Co2KgPerKwh = Co2.Seeded(Co2KgPerKwh, suggestedKgPerKwh), Co2Seeded = true };
 
     /// <summary>The same preferences with 0.10.8's Edge light reset made, once: a file from before it has its Edge light
     /// put to 10 % and the reset marked done, which the next save keeps.</summary>

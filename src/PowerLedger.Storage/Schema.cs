@@ -145,4 +145,14 @@ internal static class Schema
             last_synced_ms INTEGER
         );
         """;
+
+    /// <summary>The calibration learner of Plan AC: each bucket's mean CPU watts, the weight of its data in minutes on
+    /// battery, and the spreads its slope is fitted from. A bucket from before has a null CPU mean, which the learner reads as
+    /// one that kept only its mean rest.</summary>
+    public const string V4 = """
+        ALTER TABLE calibration ADD COLUMN cpu_w           REAL;
+        ALTER TABLE calibration ADD COLUMN minutes         REAL NOT NULL DEFAULT 0;
+        ALTER TABLE calibration ADD COLUMN cpu_spread      REAL NOT NULL DEFAULT 0;
+        ALTER TABLE calibration ADD COLUMN cpu_draw_spread REAL NOT NULL DEFAULT 0;
+        """;
 }

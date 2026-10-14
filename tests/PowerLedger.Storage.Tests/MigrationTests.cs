@@ -14,8 +14,8 @@ public sealed class MigrationTests : IDisposable
     {
         using var db = SqliteDatabase.OpenAndMigrate(_path);
         using var c = db.Open();
-        Migrator.LatestVersion.ShouldBe(3);
-        Migrator.CurrentVersion(c).ShouldBe(3);
+        Migrator.LatestVersion.ShouldBe(4);
+        Migrator.CurrentVersion(c).ShouldBe(4);
         Columns(c, "samples_raw").ShouldContain("total_source");
         Columns(c, "samples_raw").ShouldContain("gpu_scope");
         Columns(c, "samples_raw").ShouldContain("measured_mask");
@@ -54,6 +54,23 @@ public sealed class MigrationTests : IDisposable
         Scalar(backup, "SELECT COUNT(*) FROM samples_raw").ShouldBe(1);
         Columns(backup, "samples_raw").ShouldNotContain("measured_mask");
         Scalar(backup, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'outbox_minutes'").ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_version_3_database_keeps_its_learned_buckets_as_buckets_from_before_the_cpu_share()
+    {
+        using (var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _path, Pooling = false }.ToString()))
+        {
+            c.Open();
+            Migrator.Exec(c, "CREATE TABLE schema_version (version INTEGER NOT NULL, applied_ms INTEGER NOT NULL)");
+            Migrator.Exec(c, Schema.V1 + Schema.V2 + Schema.V3);
+            Migrator.Exec(c, "INSERT INTO schema_version(version, applied_ms) VALUES (1, 0), (2, 0), (3, 0)");
+            Migrator.Exec(c, "INSERT INTO calibration (inventory_hash, bucket, baseline_w, samples, updated_ms) VALUES ('abc', 6, 3.4, 6000, 0)");
+        }
+
+        using var db = SqliteDatabase.OpenAndMigrate(_path);
+        using (var c = db.Open()) Migrator.CurrentVersion(c).ShouldBe(4);
+        new CalibrationRepository(db).Load("abc").Buckets.ShouldBe([new Core.BucketState(6, 3.4, 6000)]);
     }
 
     /// <summary>Each test disposes its own database, which closes only that database's pooled connections: clearing every

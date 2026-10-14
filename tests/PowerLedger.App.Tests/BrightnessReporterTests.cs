@@ -191,7 +191,7 @@ public sealed class BrightnessReporterTests : IDisposable
         foreach (var report in _link.BrightnessReports)
         {
             report.Monitors.ShouldBeEmpty();
-            report.Power.ShouldBeEmpty();
+            report.Power.ShouldBeNull();      // not asked, rather than none answered: the service then reads no silence as off
             report.Displays.ShouldBe([Driven(Statuses.Dell, 60, false)]);
         }
 

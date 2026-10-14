@@ -592,7 +592,7 @@ public class MonitorBoardTests
     }
 
     [Fact]
-    public void The_refresh_rate_and_hdr_state_the_app_reads_are_shown_until_they_go_stale_and_hdr_changes_no_watts()
+    public void The_refresh_rate_and_hdr_state_the_app_reads_are_shown_until_they_go_stale()
     {
         _board.Detected([Dell, Unnamed]);
         _board.Report([], displays: [Shown(Dell, 144, hdr: true), Shown(Unnamed, 60)]);
@@ -602,9 +602,6 @@ public class MonitorBoardTests
         status[0].Hdr.ShouldBe(true);
         status[1].RefreshHz.ShouldBe(60);
         status[1].Hdr.ShouldBe(false);
-        var withHdr = _board.Watts(displayOn: true);
-        _board.Report([], displays: [Shown(Dell, 144, hdr: false)]);
-        _board.Watts(displayOn: true).ShouldBe(withHdr);
 
         MonitorBoard.DisplayStale.ShouldBe(TimeSpan.FromMinutes(3));
         _clock.Advance(MonitorBoard.DisplayStale);
@@ -614,6 +611,90 @@ public class MonitorBoardTests
         var stale = _board.Status(displayOn: true);
         stale.Select(m => m.RefreshHz).ShouldBe([null, null]);
         stale.Select(m => m.Hdr).ShouldBe([null, null]);
+    }
+
+    [Fact]
+    public void With_hdr_on_an_lcd_monitor_draws_at_full_backlight_whatever_brightness_it_reports()
+    {
+        // Plan AC: an LCD in HDR runs its backlight at full, so a 25 W listing at 30% read 12 W low.
+        _board.Detected([Dell]);
+        _board.Report([new MonitorBrightness { Instance = Dell.Instance, Brightness = 0.3 }], displays: [Shown(Dell, 60, hdr: false)]);
+        _board.Status(displayOn: true).ShouldHaveSingleItem().WattsNow.ShouldBe(DellAt(0.3), 1e-9);
+
+        _board.Report([], displays: [Shown(Dell, 60, hdr: true)]);
+        var hdr = _board.Status(displayOn: true).ShouldHaveSingleItem();
+        hdr.WattsNow.ShouldBe(DellAt(1), 1e-9);
+        hdr.Brightness.ShouldBe(0.3);                      // what the monitor says, still shown as it is
+        _board.Watts(displayOn: true).OwnPlug.ShouldBe(DellAt(1), 1e-9);
+    }
+
+    [Fact]
+    public void With_hdr_on_an_oled_monitor_draws_at_the_brightness_it_reports()
+    {
+        var oled = new MonitorFacts(@"DISPLAY\GSM5BFF\7&1A2B&0&UID4356", "GSM5BFF-OLED1", "GSM", "5BFF", "LG 27GR95QE", 27, 2560, 1440);
+        var catalogue = MonitorCatalogue.Parse(new StringReader("""
+            brand,model_number,model_name,alternatives,inches,width,height,panel,on_w,sleep_w,off_w,max_nits,hdr,certified
+            LG,27GR95QE,27GR95QE,,27,2560,1440,OLED,30.1,0.4,0.3,200,,2023-03-01
+            """));
+        var board = new MonitorBoard(catalogue, _clock);
+        board.Detected([oled]);
+        board.Status(displayOn: true).ShouldHaveSingleItem().Source.ShouldBe(MonitorSource.Model);
+        board.Report([new MonitorBrightness { Instance = oled.Instance, Brightness = 0.3 }], displays: [Shown(oled, 60, hdr: false)]);
+        var sdr = board.Status(displayOn: true).ShouldHaveSingleItem().WattsNow;
+
+        board.Report([], displays: [Shown(oled, 60, hdr: true)]);
+        board.Status(displayOn: true).ShouldHaveSingleItem().WattsNow.ShouldBe(sdr, 1e-9);
+    }
+
+    [Fact]
+    public void A_monitor_that_answered_and_then_went_quiet_while_the_app_kept_reading_draws_its_off_figure()
+    {
+        // Plan AC: switched off at its button over HDMI, a monitor stops answering while Windows still drives it. Its last
+        // answer goes stale, and as an unknown state it would draw its whole on figure, 20 to 30 W.
+        _board.Detected([Dell, Unnamed]);
+        _board.Report([], [Said(Dell, MonitorPowerState.On), Said(Unnamed, MonitorPowerState.On)]);
+        for (var minute = 1; minute <= 3; minute++)
+        {
+            _clock.Advance(TimeSpan.FromMinutes(1));
+            _board.Report([], [Said(Unnamed, MonitorPowerState.On)]);        // the Dell no longer answers
+        }
+        _board.Status(displayOn: true)[0].PowerState.ShouldBe(MonitorPowerState.On);   // three minutes: not stale yet
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        var quiet = _board.Status(displayOn: true)[0];
+        quiet.PowerState.ShouldBe(MonitorPowerState.Off);
+        quiet.WattsNow.ShouldBe(0.3);
+
+        // It answers again: it is on.
+        _board.Report([], [Said(Dell, MonitorPowerState.On)]);
+        _board.Status(displayOn: true)[0].PowerState.ShouldBe(MonitorPowerState.On);
+    }
+
+    [Fact]
+    public void A_single_monitor_gone_quiet_is_off_too_but_not_when_the_app_stopped_asking_or_stopped_reporting()
+    {
+        _board.Detected([Dell]);
+        _board.Report([], [Said(Dell, MonitorPowerState.On)]);
+        _clock.Advance(MonitorBoard.PowerStale);
+        _board.Report([], []);                                               // asked, and nothing answered
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _board.Status(displayOn: true).ShouldHaveSingleItem().PowerState.ShouldBe(MonitorPowerState.Off);
+
+        // An App the user told not to ask the monitors sends no power states at all: its silence says nothing of them.
+        var unasked = new MonitorBoard(Catalogue, _clock);
+        unasked.Detected([Dell]);
+        unasked.Report([], [Said(Dell, MonitorPowerState.On)]);
+        _clock.Advance(MonitorBoard.PowerStale);
+        unasked.Report([], null, [Shown(Dell, 60)]);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        unasked.Status(displayOn: true).ShouldHaveSingleItem().PowerState.ShouldBe(MonitorPowerState.Unknown);
+
+        // Nor does an App that stopped reporting: the last report that asked is stale too.
+        var gone = new MonitorBoard(Catalogue, _clock);
+        gone.Detected([Dell]);
+        gone.Report([], [Said(Dell, MonitorPowerState.On)]);
+        _clock.Advance(MonitorBoard.PowerStale + TimeSpan.FromSeconds(1));
+        gone.Status(displayOn: true).ShouldHaveSingleItem().PowerState.ShouldBe(MonitorPowerState.Unknown);
     }
 
     [Fact]
