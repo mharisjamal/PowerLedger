@@ -89,7 +89,7 @@ public sealed class MigrationTests : IDisposable
             Migrator.Exec(c, "INSERT INTO schema_version(version, applied_ms) VALUES (1, 0), (2, 0), (3, 0), (4, 0)");
             Migrator.Exec(c, "INSERT INTO samples_1m VALUES (0, 30, 30, 0.5, 0.2, 0.05, 0.07, 0.18, 0, 0, 0, 0, 60, 30, 0, 60, 60, 0, 0)");
             Migrator.Exec(c, "INSERT INTO samples_1m VALUES (60000, 30, 30, 0.5, 0.2, 0.05, 0.07, 0.18, 0, 0, 0, 0, 0, 0, 3600, 1, 0, 0, 0)");
-            Migrator.Exec(c, "INSERT INTO samples_1h VALUES (0, 30, 30, 30, 12, 3, 4, 11, 0, 0, 0, 0, 3600, 3600, 0, 3600, 3600, 0, 0)");
+            Migrator.Exec(c, "INSERT INTO samples_1h VALUES (36000000, 30, 30, 30, 12, 3, 4, 11, 0, 0, 0, 0, 3600, 3600, 0, 3600, 3600, 0, 0)");
         }
 
         using var db = SqliteDatabase.OpenAndMigrate(_path);
@@ -97,7 +97,36 @@ public sealed class MigrationTests : IDisposable
         var minutes = repo.ReadMinutes(DateTimeOffset.FromUnixTimeMilliseconds(0), DateTimeOffset.FromUnixTimeMilliseconds(120_000));
         minutes.Select(m => m.BatteryWh).ShouldBe([0.25, 0]);
         minutes.Select(m => m.AsleepWh).ShouldBe([0.0, 0]);
-        repo.ReadHours(DateTimeOffset.FromUnixTimeMilliseconds(0), DateTimeOffset.FromUnixTimeMilliseconds(1)).ShouldHaveSingleItem().BatteryWh.ShouldBe(30);
+        repo.ReadHours(DateTimeOffset.FromUnixTimeMilliseconds(36000000), DateTimeOffset.FromUnixTimeMilliseconds(36000001)).ShouldHaveSingleItem().BatteryWh.ShouldBe(30);
+    }
+
+    /// <summary>Plan AC review: a laptop draws less on its battery than on AC, so an hour's energy shared by the time it spent
+    /// on battery gave the battery too much of it (9.7% on the owner's laptop). An hour whose minutes are kept takes the sum
+    /// of theirs, which are on battery or not throughout; the share stands in only for the time whose minutes are purged.</summary>
+    [Fact]
+    public void A_version_4_database_gives_an_hour_the_battery_energy_of_its_minutes()
+    {
+        using (var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _path, Pooling = false }.ToString()))
+        {
+            c.Open();
+            Migrator.Exec(c, "CREATE TABLE schema_version (version INTEGER NOT NULL, applied_ms INTEGER NOT NULL)");
+            Migrator.Exec(c, Schema.V1 + Schema.V2 + Schema.V3 + Schema.V4);
+            Migrator.Exec(c, "INSERT INTO schema_version(version, applied_ms) VALUES (1, 0), (2, 0), (3, 0), (4, 0)");
+            // The first hour: a minute on battery at 12 W and one on AC at 30 W, both kept.
+            Migrator.Exec(c, "INSERT INTO samples_1m VALUES (0, 12, 12, 0.2, 0, 0, 0, 0.2, 0, 0, 0, 0, 60, 60, 0, 60, 60, 0, 0)");
+            Migrator.Exec(c, "INSERT INTO samples_1m VALUES (60000, 30, 30, 0.5, 0, 0, 0, 0.5, 0, 0, 0, 0, 60, 0, 0, 60, 60, 0, 0)");
+            Migrator.Exec(c, "INSERT INTO samples_1h VALUES (0, 21, 30, 0.7, 0, 0, 0, 0.7, 0, 0, 0, 0, 120, 60, 0, 120, 120, 0, 0)");
+            // The second: its first minutes purged (an hour on battery at 12 W for half of 40 minutes, then 20 at 30 W on
+            // AC), and its last minute, on battery at 12 W, kept.
+            Migrator.Exec(c, "INSERT INTO samples_1m VALUES (7140000, 12, 12, 0.2, 0, 0, 0, 0.2, 0, 0, 0, 0, 60, 60, 0, 60, 60, 0, 0)");
+            Migrator.Exec(c, "INSERT INTO samples_1h VALUES (3600000, 20, 30, 14.2, 0, 0, 0, 14.2, 0, 0, 0, 0, 2460, 1260, 0, 2460, 2460, 0, 0)");
+            // The third: on AC throughout.
+            Migrator.Exec(c, "INSERT INTO samples_1h VALUES (7200000, 30, 30, 30, 0, 0, 0, 30, 0, 0, 0, 0, 3600, 0, 0, 3600, 3600, 0, 0)");
+        }
+
+        using var db = SqliteDatabase.OpenAndMigrate(_path);
+        var hours = new AggregateRepository(db).ReadHours(DateTimeOffset.FromUnixTimeMilliseconds(0), DateTimeOffset.FromUnixTimeMilliseconds(3 * 3600_000));
+        hours.Select(h => h.BatteryWh).ToArray().ShouldBe([0.2, 0.2 + (14.0 * 1200 / 2400), 0], tolerance: 1e-9);
     }
 
     /// <summary>Each test disposes its own database, which closes only that database's pooled connections: clearing every

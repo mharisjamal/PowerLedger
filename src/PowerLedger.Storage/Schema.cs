@@ -158,9 +158,12 @@ internal static class Schema
 
     /// <summary>Asleep energy (accuracy A10): what the machine drew asleep, estimated, on the tick that reached back across
     /// the sleep, and in the minute and hour rows the sleep is stored in. Rows from before read none. And the energy the
-    /// battery gave (accuracy A9), at the pack, which the totals count at the wall: rows from before take their energy's
-    /// share of on-time spent on battery, which is exact for a minute on battery throughout. A tick on battery keeps what the
-    /// pack itself gave, the total less a monitor with a plug of its own, since the minutes are folded from the ticks.</summary>
+    /// battery gave (accuracy A9), at the pack, which the totals count at the wall: a minute row from before takes its
+    /// energy's share of its on-time spent on battery, which is exact for a minute on battery throughout, as most are. An
+    /// hour row takes the sum of its minutes' (Plan AC review: a laptop draws less on battery, so the hour's own share gave
+    /// the battery 9.7% too much on the owner's), and the share of what its minutes leave only where retention purged them.
+    /// Each figure comes from the rows' own columns alone, so running it again gives the same. A tick on battery keeps what
+    /// the pack itself gave, the total less a monitor with a plug of its own, since the minutes are folded from the ticks.</summary>
     public const string V5 = """
         ALTER TABLE samples_raw ADD COLUMN asleep_w REAL;
         ALTER TABLE samples_raw ADD COLUMN pack_w REAL;
@@ -169,6 +172,14 @@ internal static class Schema
         ALTER TABLE samples_1m  ADD COLUMN battery_wh REAL NOT NULL DEFAULT 0;
         ALTER TABLE samples_1h  ADD COLUMN battery_wh REAL NOT NULL DEFAULT 0;
         UPDATE samples_1m SET battery_wh = energy_wh * MIN(1.0, battery_s / on_s) WHERE on_s > 0 AND battery_s > 0;
-        UPDATE samples_1h SET battery_wh = energy_wh * MIN(1.0, battery_s / on_s) WHERE on_s > 0 AND battery_s > 0;
+        UPDATE samples_1h SET battery_wh = (
+            SELECT MIN(h.energy_wh, MAX(0, COALESCE(SUM(m.battery_wh), 0) + CASE
+                WHEN h.on_s - COALESCE(SUM(m.on_s), 0) > 0 AND h.battery_s - COALESCE(SUM(m.battery_s), 0) > 0
+                THEN (h.energy_wh - COALESCE(SUM(m.energy_wh), 0))
+                     * MIN(1.0, (h.battery_s - COALESCE(SUM(m.battery_s), 0)) / (h.on_s - COALESCE(SUM(m.on_s), 0)))
+                ELSE 0 END))
+            FROM samples_1h h LEFT JOIN samples_1m m ON m.start_ms >= h.start_ms AND m.start_ms < h.start_ms + 3600000
+            WHERE h.start_ms = samples_1h.start_ms)
+        WHERE on_s > 0 AND battery_s > 0;
         """;
 }
