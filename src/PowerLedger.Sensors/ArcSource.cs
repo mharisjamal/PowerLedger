@@ -92,6 +92,7 @@ public sealed class ArcSource : ISensorSource
         if (!Supported) return;
         var card = draft.AddGpu(DiscreteGpu.IntelVendor, _deviceId);
         card.Scope = _scope;
+        card.Exact = true;                                         // Level Zero's energy counter, over the tick
         try
         {
             card.Watts = Watts();

@@ -76,6 +76,7 @@ public sealed class NvidiaSource : ISensorSource
             if (card.Name.Length > 0) found.Name = card.Name;
             found.Rating = card.Rating;
             found.Watts = reading.PowerWatts;
+            found.Exact = reading.Exact;
             found.Load = reading.LoadFraction;
         }
     }

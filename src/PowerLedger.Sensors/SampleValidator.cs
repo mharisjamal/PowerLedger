@@ -8,7 +8,8 @@ namespace PowerLedger.Sensors;
 /// real change of level rather than rejected forever. The seconds after an AC change are flagged so the calibration
 /// learner skips them while the quality label switches at once.
 /// CPU watts come from the energy meter as averages of real energy over the tick, so they are range-checked but never
-/// spike-filtered: a jump from idle to turbo is a fact, not a glitch. The watts a UPS or a power supply reports are
+/// spike-filtered: a jump from idle to turbo is a fact, not a glitch. So are a graphics card's watts read from its own
+/// energy counter (<see cref="GpuCard.Exact"/>). The watts a UPS or a power supply reports are
 /// treated the same way, and are the readings a ceiling matters most for, since the model takes one of them as the whole
 /// machine's total. The spike test's window is a span of time, not a count of readings, so it means the same whether the
 /// loop reads every second or every five (perf review §4), and readings from before a sleep drop out of it on their own.
@@ -118,7 +119,7 @@ public sealed class SampleValidator
             }
             checkedCards.Add(card with
             {
-                Watts = Check(card.Watts, _options.GpuMaxW, channel, spikeFilter: true, now, ref suspect),
+                Watts = Check(card.Watts, _options.GpuMaxW, channel, spikeFilter: !card.Exact, now, ref suspect),
                 Load = Fraction(card.Load, ref suspect),
             });
         }

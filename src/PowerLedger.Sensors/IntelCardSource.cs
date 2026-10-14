@@ -72,6 +72,7 @@ public sealed class IntelCardSource : ISensorSource
 
         var card = draft.AddGpu(DiscreteGpu.IntelVendor, _card.DeviceId);
         card.Scope = GpuPowerScope.Board;
+        card.Exact = true;                                         // IGCL's energy counter, over the tick
         try
         {
             card.Watts = Watts();

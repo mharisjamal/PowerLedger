@@ -42,6 +42,7 @@ public class ArcSourceTests
         draft.DGpuPresent.ShouldBeTrue();
         draft.DGpuScope.ShouldBe(GpuPowerScope.Board);
         draft.DGpuW.ShouldNotBeNull().ShouldBe(190, 1e-9);
+        draft.Gpus.ShouldHaveSingleItem().Exact.ShouldBeTrue();             // energy over the tick
         package.Reads.ShouldBe(0);
     }
 

@@ -142,8 +142,11 @@ public sealed class GpuCardDraft
     /// <summary>What <see cref="Watts"/> covers.</summary>
     public GpuPowerScope Scope { get; set; } = GpuPowerScope.Board;
 
+    /// <summary>True when <see cref="Watts"/> is the card's energy counter's gain over the tick (see <see cref="GpuCard.Exact"/>).</summary>
+    public bool Exact { get; set; }
+
     /// <summary>The card's rating for working its watts out from its load; null until a source knows the card's name or memory.</summary>
     public GpuRating? Rating { get; set; }
 
-    internal GpuCard ToCard() => new(Name ?? "", Watts, Load, Scope, Rating?.Watts);
+    internal GpuCard ToCard() => new(Name ?? "", Watts, Load, Scope, Rating?.Watts, Exact);
 }

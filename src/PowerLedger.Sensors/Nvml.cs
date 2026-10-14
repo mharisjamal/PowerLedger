@@ -6,7 +6,8 @@ namespace PowerLedger.Sensors;
 /// <param name="Present">True when at least one NVIDIA GPU answered.</param>
 /// <param name="PowerWatts">Current draw, or null on a card with no power measurement hardware.</param>
 /// <param name="LoadFraction">Utilisation 0..1, or null when the card declines to answer.</param>
-public readonly record struct GpuReading(bool Present, double? PowerWatts, double? LoadFraction);
+/// <param name="Exact">True when <paramref name="PowerWatts"/> came from the card's energy counter, exact over the tick.</param>
+public readonly record struct GpuReading(bool Present, double? PowerWatts, double? LoadFraction, bool Exact = false);
 
 /// <summary>One NVIDIA GPU as NVML describes it.</summary>
 /// <param name="Name">"Quadro 6000" from an older driver, "NVIDIA GeForce RTX 4070" from a newer one; empty when NVML

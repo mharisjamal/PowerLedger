@@ -142,6 +142,32 @@ public class SampleValidatorTests
     }
 
     [Fact]
+    public void A_card_whose_watts_are_exact_over_the_tick_is_range_checked_but_never_spike_filtered()
+    {
+        // NVML's energy counter on Volta and newer, Level Zero's and IGCL's give the energy over the tick, as the processor's
+        // meter does, so a step up from idle is a fact; the first tick of each was replaced with the last (accuracy A11).
+        var validator = new SampleValidator();
+        Sample Card(int second, double? watts, bool exact = true)
+            => Raw(gpu: watts, second: second) with { Gpus = [new GpuCard("NVIDIA GeForce RTX 4070", watts, 0.5, Exact: exact)] };
+        for (var i = 0; i < 30; i++) validator.Validate(Card(i, 10)).Suspect.ShouldBeFalse();
+
+        var step = validator.Validate(Card(30, 200));
+        step.Gpus.ShouldNotBeNull().Single().Watts.ShouldBe(200);
+        step.DGpuW.ShouldBe(200);
+        step.Suspect.ShouldBeFalse();
+        validator.Validate(Card(31, 10)).DGpuW.ShouldBe(10);
+        validator.Validate(Card(32, 200)).DGpuW.ShouldBe(200);              // a burst every other tick is kept too
+
+        var misread = validator.Validate(Card(33, 5000));
+        misread.Gpus.ShouldNotBeNull().Single().Watts.ShouldBeNull();
+        misread.Suspect.ShouldBeTrue();
+
+        var instant = new SampleValidator();                                 // a figure the card's library samples is filtered still
+        for (var i = 0; i < 30; i++) instant.Validate(Card(i, 10, exact: false));
+        instant.Validate(Card(30, 200, exact: false)).DGpuW.ShouldBe(10);
+    }
+
+    [Fact]
     public void A_sustained_rise_is_accepted_on_its_second_reading_instead_of_being_rejected_forever()
     {
         var validator = new SampleValidator();

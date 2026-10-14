@@ -14,7 +14,11 @@ namespace PowerLedger.Core;
 /// <param name="Scope">What <paramref name="Watts"/> covers.</param>
 /// <param name="RatedW">The card's own rated power for working its watts out from its load; null leaves it to the
 /// machine's figure.</param>
-public sealed record GpuCard(string Name, double? Watts, double? Load, GpuPowerScope Scope = GpuPowerScope.Board, double? RatedW = null)
+/// <param name="Exact">True when <paramref name="Watts"/> is the energy the card's own counter gained over the tick, as
+/// NVML's on Volta and newer, Level Zero's and IGCL's are: exact like the processor's meter, so the validator range-checks
+/// it but never takes a step up for a spike (accuracy A11).</param>
+public sealed record GpuCard(
+    string Name, double? Watts, double? Load, GpuPowerScope Scope = GpuPowerScope.Board, double? RatedW = null, bool Exact = false)
 {
     /// <summary>The single figures a tick keeps for all its cards together, as the frame, the stored reading and the
     /// validator's older checks see them: a card is present when there is any; the watts are the sum only when every card
