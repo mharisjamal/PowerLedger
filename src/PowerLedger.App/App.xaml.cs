@@ -67,7 +67,7 @@ public partial class App : Application
     private AeroAccess? _aero;
     private WindowWatch? _watch;
     private (bool Visible, bool OnScreen)? _reportedWindows;
-    private bool? _efficient;
+    private readonly EfficiencyMode _efficiency = new(on => ProcessQos.Efficient(on));
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -208,6 +208,9 @@ public partial class App : Application
         // A minute after start, then hourly (Updater's own cadence): pending feedback goes out once the PC is online again.
         _feedbackRetryTimer = TimeProvider.System.CreateTimer(_ => _ = _feedbackSender!.RetryPendingAsync(), null, Updater.FirstCheck, Updater.CheckEvery);
         if (!options.StartInTray) ShowWindow();
+        // Efficiency mode waits for the first window to show, so it never slows that window's first paint; started in the
+        // tray, for the start's own work on the UI thread to be done.
+        else Dispatcher.InvokeAsync(_efficiency.Settled, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
@@ -223,11 +226,7 @@ public partial class App : Application
     {
         if (_watch is not { } watch) return;
         if (_now is not null) _now.IsWatched = watch.Shows;
-        if (_efficient != !watch.Shows)
-        {
-            _efficient = !watch.Shows;
-            ProcessQos.Efficient(!watch.Shows);
-        }
+        _efficiency.Windows(watch.Shows);
         var windows = (watch.Visible, watch.Shows);
         if (_reportedWindows == windows) return;
         _reportedWindows = windows;
