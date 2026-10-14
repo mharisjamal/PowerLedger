@@ -398,7 +398,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
             }
             if (!waiting) _pending.Clear();
             _wants = waiting;
-            if (composed.Count > 0 || clear) PresentLayer(renderer);
+            if (composed.Count > 0 || clear) PresentLayer(renderer, composed, clear);
             if (imaged.Count > 0)
             {
                 renderer.Finish(_picture);
@@ -567,15 +567,70 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         }
         (_layerWidth, _layerHeight) = size;
         _clearLayer = true;
+        _wholeAhead = 2;
     }
 
-    /// <summary>On the capture thread: the layer onto the swap chain's back buffer, presented without waiting.</summary>
-    private void PresentLayer(GpuGlassRenderer renderer)
+    /// <summary>
+    /// Under the GPU lock (the capture thread, or the UI thread's DrawNow): the layer onto the swap chain's back buffer,
+    /// presented without waiting. The flip model's back buffer holds the frame before last, so only what this frame and
+    /// the frame before drew (<paramref name="drawn"/>, in the layer's pixels) is copied onto it, and DWM is told only what
+    /// this frame drew (Present1's dirty rectangles): the copy and DWM's composing grow with the glass drawn, not the
+    /// window (perf review P11). The whole layer is copied and presented after a clear (<paramref name="whole"/>), for the
+    /// first two frames of new buffers, and for two frames after a present that didn't succeed.
+    /// </summary>
+    private void PresentLayer(GpuGlassRenderer renderer, List<Int32Rect> drawn, bool whole)
     {
         if (_swapChain == IntPtr.Zero || _layer == IntPtr.Zero || GetBuffer(_swapChain, out var back) < 0) return;
-        renderer.Copy(back, _layer);
+        _dirty.Clear();
+        foreach (var r in drawn)
+        {
+            int left = Math.Max(0, r.X), top = Math.Max(0, r.Y), right = Math.Min(_layerWidth, r.X + r.Width), bottom = Math.Min(_layerHeight, r.Y + r.Height);
+            if (right > left && bottom > top) _dirty.Add(new CaptureNative.RECT { Left = left, Top = top, Right = right, Bottom = bottom });
+        }
+        whole |= _wholeAhead > 0 || _dirty.Count == 0;
+        if (whole || _wholeBefore)
+        {
+            renderer.Copy(back, _layer);
+        }
+        else
+        {
+            foreach (var r in _dirty) renderer.Copy(back, _layer, r);
+            foreach (var r in _dirtyBefore) renderer.Copy(back, _layer, r);
+        }
+        if (CheckPresents) Check(renderer, back);
         CaptureNative.Release(back);
-        GpuNative.Present(_swapChain);
+        var hr = whole ? GpuNative.Present(_swapChain) : Present1(_swapChain, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_dirty));
+        if (!whole && hr == 0) Interlocked.Increment(ref PartialPresents);
+        (_dirty, _dirtyBefore) = (_dirtyBefore, _dirty);
+        _wholeBefore = whole;
+        if (_wholeAhead > 0) _wholeAhead--;
+        // Not presented, or not plainly (an occluded window): which buffer comes next is unknown, so the next two are whole.
+        if (hr != 0) _wholeAhead = 2;
+    }
+
+    /// <summary>What the last present drew (its dirty rectangles), and this one's, in the layer's pixels; lists kept.</summary>
+    private List<CaptureNative.RECT> _dirtyBefore = [], _dirty = [];
+
+    /// <summary>The last present was of the whole layer.</summary>
+    private bool _wholeBefore = true;
+
+    /// <summary>How many presents from now copy and present the whole layer: two after new buffers or a failed present.</summary>
+    private int _wholeAhead = 2;
+
+    /// <summary>How many presents named only what they drew, for the tests and the measurements.</summary>
+    internal static long PartialPresents;
+
+    /// <summary>For the tests: before each present, the back buffer and the layer are read back whole and compared, and a
+    /// present whose buffer isn't the layer is counted (<see cref="PresentsOff"/>). Off, the default, nothing is read.</summary>
+    internal static volatile bool CheckPresents;
+
+    internal static long PresentsChecked, PresentsOff;
+
+    private void Check(GpuGlassRenderer renderer, IntPtr back)
+    {
+        var whole = new Int32Rect(0, 0, _layerWidth, _layerHeight);
+        Interlocked.Increment(ref PresentsChecked);
+        if (!renderer.Read(back, whole).AsSpan().SequenceEqual(renderer.Read(_layer, whole))) Interlocked.Increment(ref PresentsOff);
     }
 
     /// <summary>Under the GPU lock.</summary>

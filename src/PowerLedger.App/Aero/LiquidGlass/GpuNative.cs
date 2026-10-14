@@ -133,7 +133,7 @@ internal static unsafe class GpuNative
     public static extern long GetWindowLongPtrW(IntPtr hwnd, int index);
 
     // IDXGIObject: 6 GetParent. IDXGIFactory2: 24 CreateSwapChainForComposition. IDXGISwapChain: 8 Present, 9 GetBuffer,
-    // 13 ResizeBuffers.
+    // 13 ResizeBuffers. IDXGISwapChain1: 22 Present1.
     public static int GetParent(IntPtr dxgiObject, in Guid iid, out IntPtr parent)
     {
         fixed (Guid* i = &iid)
@@ -153,6 +153,26 @@ internal static unsafe class GpuNative
     }
 
     public static int Present(IntPtr swapChain) => ((delegate* unmanaged[Stdcall]<IntPtr, uint, uint, int>)V(swapChain)[8])(swapChain, 0, 0);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DXGI_PRESENT_PARAMETERS
+    {
+        public uint DirtyRectsCount;
+        public CaptureNative.RECT* DirtyRects;
+        public CaptureNative.RECT* ScrollRect;
+        public System.Drawing.Point* ScrollOffset;
+    }
+
+    /// <summary>IDXGISwapChain1::Present1 (slot 22) without waiting, naming the rectangles that changed since the last
+    /// present: everything outside them must be as that present left it.</summary>
+    public static int Present1(IntPtr swapChain, ReadOnlySpan<CaptureNative.RECT> dirty)
+    {
+        fixed (CaptureNative.RECT* rects = dirty)
+        {
+            var parameters = new DXGI_PRESENT_PARAMETERS { DirtyRectsCount = (uint)dirty.Length, DirtyRects = rects };
+            return ((delegate* unmanaged[Stdcall]<IntPtr, uint, uint, DXGI_PRESENT_PARAMETERS*, int>)V(swapChain)[22])(swapChain, 0, 0, &parameters);
+        }
+    }
 
     public static int GetBuffer(IntPtr swapChain, out IntPtr texture)
     {

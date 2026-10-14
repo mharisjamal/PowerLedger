@@ -693,4 +693,93 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             }
             return 0;
         }));
+
+    /// <summary>
+    /// Perf review P11: a glass frame copies onto the swap chain only what it and the frame before drew (the flip model's
+    /// back buffer is the frame before last, which DXGI doesn't fill in) and tells DWM only what it drew (Present1's dirty
+    /// rectangles), yet each present's buffer holds the whole layer (both read back before each present) and the screen
+    /// shows every piece as last drawn. Two pieces side by side, drawn in turn (one changes at a time, so a frame draws
+    /// one), then the screen grabbed against the layer they were drawn into. The glass reads a still picture, so our
+    /// windows may be captured for the grab.
+    /// </summary>
+    [Fact]
+    public void Each_frame_presents_only_what_it_drew_and_the_screen_still_shows_every_piece()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            var picture = FakeGlassSource.Picture(1920, 1080, (x, y) => ((byte)(x / 8), (byte)(y / 5), (byte)(60 + (x + y) % 120)));
+            MonitorCapture.StillPicture = picture;
+            LiquidGlassSources.Override = null;
+            LiquidGlassSources.ExcludeFromCapture = false;
+            LiquidGlassSources.AllowScreenshots = false;
+            LiquidGlassSources.GpuAllowed = true;
+            LiquidGlassBackdrop Piece(double left) => new()
+            {
+                CornerRadius = new CornerRadius(0), Width = 120, Height = 90, Margin = new Thickness(left, 10, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            };
+            var pieces = new[] { Piece(10), Piece(160) };
+            var window = new Window
+            {
+                WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, ResizeMode = ResizeMode.NoResize, Topmost = true,
+                ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, UseLayoutRounding = true,
+                Left = 320, Top = 260, Width = 300, Height = 120, Content = new Grid { Children = { pieces[0], pieces[1] } },
+            };
+            window.Show();
+            try
+            {
+                UiHarness.PumpUntil(() => pieces.All(p => p.Composed) && Gpu(pieces[0]).Frames > 0, TimeSpan.FromSeconds(20), "both pieces composed and drawn");
+                UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+                var gpu = Gpu(pieces[0]);
+                var partial = GpuGlassWindow.PartialPresents;
+                var (checkedBefore, offBefore) = (GpuGlassWindow.PresentsChecked, GpuGlassWindow.PresentsOff);
+                GpuGlassWindow.CheckPresents = true;
+                for (var i = 0; i < 7; i++)
+                {
+                    pieces[i % 2].BlurDeviation = 2 + 0.75 * (i + 1);   // a new blur: that piece alone is drawn again
+                    UiHarness.Pump(TimeSpan.FromMilliseconds(150));
+                }
+                UiHarness.Pump(TimeSpan.FromMilliseconds(300));
+                DwmFlush();
+                var presented = GpuGlassWindow.PartialPresents - partial;
+                GpuGlassWindow.CheckPresents = false;
+                var (checks, wrong) = (GpuGlassWindow.PresentsChecked - checkedBefore, GpuGlassWindow.PresentsOff - offBefore);
+                var lines = new List<string>();
+                var worst = 0.0;
+                foreach (var piece in pieces)
+                {
+                    var read = gpu.ReadAsync(piece);
+                    UiHarness.PumpUntil(() => read.IsCompleted, TimeSpan.FromSeconds(10), "the read back");
+                    var drawn = read.Result;
+                    var at = piece.PointToScreen(new Point(0, 0));
+                    var scale = VisualTreeHelper.GetDpi(piece).DpiScaleX;
+                    int w = (int)Math.Round(piece.ActualWidth * scale), h = (int)Math.Round(piece.ActualHeight * scale);
+                    drawn.Length.ShouldBe(w * h * 4);
+                    var screen = ScreenCapture.Grab((int)Math.Round(at.X), (int)Math.Round(at.Y), w, h);
+                    var off = 0;
+                    for (var i = 0; i < drawn.Length; i++)
+                    {
+                        if (i % 4 != 3 && Math.Abs(drawn[i] - screen[i]) > 1) off++;
+                    }
+                    var share = off / (w * h * 3.0);
+                    worst = Math.Max(worst, share);
+                    lines.Add($"{share:P3} of channels off the layer");
+                }
+                output.WriteLine($"frames presented by their own rectangles: {presented}; back buffers not the layer as presented: {wrong} of {checks}; on screen: {string.Join(", ", lines)}");
+                presented.ShouldBeGreaterThan(0);
+                checks.ShouldBeGreaterThan(0);
+                wrong.ShouldBe(0, "each present's buffer holds the whole layer");
+                worst.ShouldBeLessThan(0.001);
+            }
+            finally
+            {
+                GpuGlassWindow.CheckPresents = false;
+                window.Close();
+                MonitorCapture.StillPicture = null;
+                LiquidGlassSources.ExcludeFromCapture = true;
+            }
+            return 0;
+        }));
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmFlush();
 }

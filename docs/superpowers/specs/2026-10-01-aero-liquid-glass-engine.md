@@ -190,6 +190,14 @@ display scales 1, 1.25 and 1.5. The tests read the committed crops in
 - A DirectComposition target on the owner itself would be drawn over WPF's content whatever its topmost flag says,
   because that flag places it only against child windows. That was measured: the text vanished.
 - Pieces are drawn in WPF's drawing order (the visual tree's), so a card or a dialog is drawn over the glass beneath it.
+- **Only what was drawn is presented** (2026-10-14, perf review P11). Pieces are drawn into a layer the client area's
+  size; the swap chain (flip model, two buffers) is fed from it. Its back buffer holds the frame before last, so a frame
+  copies from the layer only the rectangles it drew and those the frame before drew, and tells DWM only its own
+  (`IDXGISwapChain1::Present1` with dirty rectangles), so the copy and DWM's composing grow with the glass drawn, not the
+  window. The whole layer is copied and presented after a clear (a piece moved or gone), for the first two frames of new
+  buffers (the swap chain made or resized), and for two frames after a present that didn't plainly succeed, when which
+  buffer comes next is unknown. What shows is the layer either way, pixel for pixel
+  (`Each_frame_presents_only_what_it_drew_and_the_screen_still_shows_every_piece`).
 - Springs, slides and fades move pieces without a layout pass. AeroMotion tells the engine
   (`LiquidGlassSources.Animate`), and while anything animates each piece takes a quick look every frame: its transform
   to the root and its ancestors' opacity. It is placed again only when that look changed.
