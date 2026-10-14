@@ -221,8 +221,11 @@ public sealed record AskAgainRequest(long Id) : PipeRequest(Id);
 
 /// <summary>Plan Q §4: whether the sender's main window is showing, sent when it connects and whenever that changes, so the
 /// service installs an update while nobody is looking at PowerLedger. Sent only to a service whose status carries
-/// <see cref="ServiceStatus.Updates"/>; an older one would take it for a broken line.</summary>
-public sealed record UiStateRequest(long Id, bool WindowVisible) : PipeRequest(Id);
+/// <see cref="ServiceStatus.Updates"/>; an older one would take it for a broken line. <paramref name="OverlayVisible"/>
+/// says whether the watts overlay shows: it is no window an update waits for, but while it or the window shows, someone may
+/// be looking at the live figures, so the service reads at the set interval rather than every five seconds (perf review §4).
+/// An older App leaves it out, which reads as hidden; an older service ignores it.</summary>
+public sealed record UiStateRequest(long Id, bool WindowVisible, bool OverlayVisible = false) : PipeRequest(Id);
 
 /// <summary>Plan Q §3: the blocking window's Update now. The service installs the newest release at once if it can, and
 /// answers <see cref="OkReply"/>; otherwise an <see cref="ErrorReply"/> says why, and the App falls back to its own setup.</summary>

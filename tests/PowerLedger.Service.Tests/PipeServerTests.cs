@@ -104,6 +104,25 @@ public sealed class PipeServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_subscriber_counts_as_watching_until_it_says_its_windows_are_hidden_or_leaves()
+    {
+        var client = await ConnectAsync();
+        _signals.Watched.ShouldBeFalse();
+        await client.WriteAsync(new SubscribeRequest(1));
+        (await client.ReadAsync()).ShouldBe(new OkReply(1));
+        await WaitFor.True(() => _signals.Watched);
+        await client.WriteAsync(new UiStateRequest(2, WindowVisible: false));
+        (await client.ReadAsync()).ShouldBe(new OkReply(2));
+        _signals.Watched.ShouldBeFalse();
+
+        await client.WriteAsync(new UiStateRequest(3, WindowVisible: false, OverlayVisible: true));
+        (await client.ReadAsync()).ShouldBe(new OkReply(3));
+        _signals.Watched.ShouldBeTrue();
+        await client.DisposeAsync();
+        await WaitFor.True(() => !_signals.Watched);
+    }
+
+    [Fact]
     public async Task Several_clients_are_served_at_once_and_a_client_that_leaves_is_forgotten()
     {
         await using var a = await ConnectAsync();

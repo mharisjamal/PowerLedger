@@ -1,6 +1,6 @@
 # PowerLedger.Service
 
-The Windows service that records how much power the PC uses. It samples once a second, stores readings in
+The Windows service that records how much power the PC uses. It samples once a second while the App's window or overlay shows (every 5 s otherwise), stores readings in
 `C:\ProgramData\PowerLedger\power.db`, and serves live readings, status and settings on `\\.\pipe\PowerLedger.v1`.
 
 ## Running it

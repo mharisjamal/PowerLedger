@@ -10,7 +10,9 @@ namespace PowerLedger.Sensors;
 /// CPU watts come from the energy meter as averages of real energy over the tick, so they are range-checked but never
 /// spike-filtered: a jump from idle to turbo is a fact, not a glitch. The watts a UPS or a power supply reports are
 /// treated the same way, and are the readings a ceiling matters most for, since the model takes one of them as the whole
-/// machine's total. Single-threaded: the sampling loop owns it.
+/// machine's total. The spike test's window is a span of time, not a count of readings, so it means the same whether the
+/// loop reads every second or every five (perf review §4), and readings from before a sleep drop out of it on their own.
+/// Single-threaded: the sampling loop owns it.
 /// </summary>
 public sealed class SampleValidator
 {
@@ -23,12 +25,18 @@ public sealed class SampleValidator
     private bool? _lastOnBattery;
     private DateTimeOffset _transitionAt = DateTimeOffset.MinValue;
 
+    /// <summary>The fewest readings the spike test compares against: a median of one or two says nothing.</summary>
+    private const int FewestToCompare = 3;
+
+    private readonly TimeSpan _window;
+
     public SampleValidator(ValidatorOptions? options = null)
     {
         _options = options ?? new ValidatorOptions();
-        _cpu = new Channel(_options.MedianWindow);
-        _gpu = new Channel(_options.MedianWindow);
-        _battery = new Channel(_options.MedianWindow);
+        _window = TimeSpan.FromSeconds(_options.MedianWindow);
+        _cpu = new Channel(_window);
+        _gpu = new Channel(_window);
+        _battery = new Channel(_window);
     }
 
     /// <summary>How many ticks have been marked suspect since the service started (spec §4, shown in status).</summary>
@@ -46,10 +54,11 @@ public sealed class SampleValidator
         _lastOnBattery = raw.OnBattery;
         if ((raw.Timestamp - _transitionAt).TotalSeconds < _options.TransitionSeconds) suspect = true;
 
-        var cpu = Check(raw.CpuPackageW, _options.CpuMaxW, _cpu, spikeFilter: false, ref suspect);
-        var cards = raw.Gpus is { Count: > 0 } listed ? Cards(listed, ref suspect) : null;
-        var gpu = cards is null ? Check(raw.DGpuW, _options.GpuMaxW, _gpu, spikeFilter: true, ref suspect) : null;
-        var battery = Check(raw.BatteryRateW, _options.BatteryMaxW, _battery, spikeFilter: true, ref suspect);
+        var now = raw.Timestamp;
+        var cpu = Check(raw.CpuPackageW, _options.CpuMaxW, _cpu, spikeFilter: false, now, ref suspect);
+        var cards = raw.Gpus is { Count: > 0 } listed ? Cards(listed, now, ref suspect) : null;
+        var gpu = cards is null ? Check(raw.DGpuW, _options.GpuMaxW, _gpu, spikeFilter: true, now, ref suspect) : null;
+        var battery = Check(raw.BatteryRateW, _options.BatteryMaxW, _battery, spikeFilter: true, now, ref suspect);
         var igpu = InRange(raw.IGpuW, _options.CpuMaxW, ref suspect);
 
         // A UPS or a power supply gives the whole machine's draw, and the model takes it as the total, so a misread unit
@@ -95,7 +104,7 @@ public sealed class SampleValidator
 
     /// <summary>Each card's watts range-checked and spike-filtered in a window of its own, and its load kept to 0..1. A card
     /// is followed by its place in the list and its name, which stay put from tick to tick.</summary>
-    private List<GpuCard> Cards(IReadOnlyList<GpuCard> cards, ref bool suspect)
+    private List<GpuCard> Cards(IReadOnlyList<GpuCard> cards, DateTimeOffset now, ref bool suspect)
     {
         var checkedCards = new List<GpuCard>(cards.Count);
         for (var index = 0; index < cards.Count; index++)
@@ -104,26 +113,27 @@ public sealed class SampleValidator
             var key = FormattableString.Invariant($"{index}:{card.Name}");
             if (!_cards.TryGetValue(key, out var channel))
             {
-                channel = new Channel(_options.MedianWindow);
+                channel = new Channel(_window);
                 _cards[key] = channel;
             }
             checkedCards.Add(card with
             {
-                Watts = Check(card.Watts, _options.GpuMaxW, channel, spikeFilter: true, ref suspect),
+                Watts = Check(card.Watts, _options.GpuMaxW, channel, spikeFilter: true, now, ref suspect),
                 Load = Fraction(card.Load, ref suspect),
             });
         }
         return checkedCards;
     }
 
-    private double? Check(double? value, double max, Channel channel, bool spikeFilter, ref bool suspect)
+    private double? Check(double? value, double max, Channel channel, bool spikeFilter, DateTimeOffset now, ref bool suspect)
     {
         if (InRange(value, max, ref suspect) is not { } reading) return null;
 
-        // The spike test engages only once the window is full: a median of one or two readings says nothing.
+        // The spike test engages only once the window has a whole span of readings behind it.
+        channel.Age(now);
         var isSpike = spikeFilter
-            && channel.Window.Count >= _options.MedianWindow
-            && channel.Window.Median is { } median && median > 0
+            && channel.Spans(now, FewestToCompare)
+            && channel.Median is { } median && median > 0
             && reading >= median * _options.OutlierFactor;
 
         if (isSpike && channel.ConsecutiveSpikes == 0)
@@ -135,10 +145,10 @@ public sealed class SampleValidator
         }
 
         // A second high reading in a row is a real change of level, so the old median no longer applies.
-        if (isSpike) channel.Window.Reset();
+        if (isSpike) channel.ClearWindow();
 
         channel.ConsecutiveSpikes = 0;
-        channel.Window.Add(reading);
+        channel.Add(now, reading);
         channel.Last = reading;
         return reading;
     }
@@ -169,15 +179,63 @@ public sealed class SampleValidator
         return reading;
     }
 
-    private sealed class Channel(int window)
+    /// <summary>One reading's recent values, over a span of time: the readings no older than the window, and when the run
+    /// they belong to began. A run breaks when no reading came for a whole window, as across a sleep.</summary>
+    private sealed class Channel(TimeSpan window)
     {
-        public RollingMedian Window { get; } = new(window);
+        private readonly Queue<(DateTimeOffset At, double Value)> _values = new();
+        private double[] _scratch = new double[32];
+        private DateTimeOffset? _since;
+        private DateTimeOffset _newest;
+
         public double? Last { get; set; }
+
         public int ConsecutiveSpikes { get; set; }
+
+        /// <summary>The median of the window's readings, or null while it has none.</summary>
+        public double? Median
+        {
+            get
+            {
+                if (_values.Count == 0) return null;
+                if (_scratch.Length < _values.Count) _scratch = new double[_values.Count * 2];
+                var count = 0;
+                foreach (var (_, value) in _values) _scratch[count++] = value;
+                var span = _scratch.AsSpan(0, count);
+                span.Sort();
+                var middle = count / 2;
+                return count % 2 == 1 ? span[middle] : (span[middle - 1] + span[middle]) / 2;
+            }
+        }
+
+        /// <summary>Drops the readings older than the window before <paramref name="now"/>, and the whole run when even the
+        /// newest is.</summary>
+        public void Age(DateTimeOffset now)
+        {
+            if (_values.Count > 0 && now - _newest > window) ClearWindow();
+            while (_values.TryPeek(out var oldest) && oldest.At < now - window) _values.Dequeue();
+        }
+
+        /// <summary>True once the run has gone on for the whole window and the window holds at least <paramref name="fewest"/>.</summary>
+        public bool Spans(DateTimeOffset now, int fewest) => _since is { } since && now - since >= window && _values.Count >= fewest;
+
+        public void Add(DateTimeOffset at, double value)
+        {
+            _since ??= at;
+            _newest = at;
+            _values.Enqueue((at, value));
+        }
+
+        /// <summary>Forgets the window and starts a new run; the last good reading stands.</summary>
+        public void ClearWindow()
+        {
+            _values.Clear();
+            _since = null;
+        }
 
         public void Reset()
         {
-            Window.Reset();
+            ClearWindow();
             Last = null;
             ConsecutiveSpikes = 0;
         }

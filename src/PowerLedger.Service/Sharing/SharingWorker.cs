@@ -525,7 +525,7 @@ internal sealed class SharingWorker : BackgroundService
         }
     }
 
-    private double GapThreshold => EnergyIntegrator.GapThresholdFor((_board.Settings ?? ServiceSettings.Default).SampleIntervalSeconds);
+    private double GapThreshold => SamplingLoop.GapThresholdFor(_board.Settings ?? ServiceSettings.Default);
 
     /// <summary>Each source's failures since the last look. A count lower than last time means the sensor set was rebuilt,
     /// and it counts from zero again.</summary>

@@ -469,6 +469,39 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task Unwatched_the_loop_reads_every_five_seconds_and_at_the_set_interval_from_the_moment_someone_looks()
+    {
+        using var t = new TestDatabase();
+        var watched = false;
+        await using var loop = new Harness(t, watched: () => Volatile.Read(ref watched));
+        await loop.StartAsync();
+        loop.Clock.Advance(TimeSpan.FromSeconds(4));
+        await Task.Delay(100);
+        loop.TickCount.ShouldBe(0);
+        loop.Clock.Advance(TimeSpan.FromSeconds(1));
+        await WaitFor.True(() => loop.TickCount == 1);              // 00:55:05
+
+        Volatile.Write(ref watched, true);                          // the App's window opens
+        await loop.Send(new WatchersChangedCommand());
+        await loop.Ticks(3);                                        // 00:55:06 to 00:55:08
+
+        Volatile.Write(ref watched, false);
+        await loop.Send(new WatchersChangedCommand());
+        loop.Clock.Advance(TimeSpan.FromSeconds(4));
+        await Task.Delay(100);
+        loop.TickCount.ShouldBe(4);
+        loop.Clock.Advance(TimeSpan.FromSeconds(1.5));              // a beat Windows put off a little
+        await WaitFor.True(() => loop.TickCount == 5);              // 00:55:13.5
+        await loop.StopAsync();
+
+        var rows = new RawSampleRepository(t.Db).Read(Start, Start.AddMinutes(1));
+        rows.Select(r => r.DeltaSeconds).ShouldBe([5, 1, 1, 1, 5.5]);
+        var minute = new AggregateRepository(t.Db).ReadMinutes(Start, Start.AddMinutes(1)).ShouldHaveSingleItem();
+        minute.GapSeconds.ShouldBe(0);                              // a five-second reading, late or not, is no gap
+        minute.OnSeconds.ShouldBe(13.5, 1e-9);
+    }
+
+    [Fact]
     public async Task A_resume_is_done_only_once_its_new_timer_runs()
     {
         using var t = new TestDatabase();
@@ -527,9 +560,10 @@ public class SamplingLoopTests
         private readonly List<FakeSensorSet> _sets = [];
 
         /// <param name="loopClock">What the loop sees of <see cref="Clock"/>, when that is not the fake clock itself.</param>
+        /// <param name="watched">Whether anyone looks at the live figures; always, when left out.</param>
         public Harness(
             TestDatabase database, LoopOptions? options = null, Func<int, FakeSensorSet>? makeSet = null,
-            Func<FakeTimeProvider, TimeProvider>? loopClock = null)
+            Func<FakeTimeProvider, TimeProvider>? loopClock = null, Func<bool>? watched = null)
         {
             Clock.SetLocalTimeZone(Plus2);
             Monitors = new MonitorBoard(MonitorBoardTests.Catalogue, Clock);
@@ -547,7 +581,8 @@ public class SamplingLoopTests
                 Inventory: () => Facts.Laptop(),
                 SystemUptime: () => TimeSpan.FromHours(3),
                 SystemShuttingDown: () => false,
-                DatabaseNotice: null);
+                DatabaseNotice: null,
+                Watched: watched);
             var clock = loopClock?.Invoke(Clock) ?? Clock;
             _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Monitors, clock, NullLogger<SamplingLoop>.Instance, options);
         }

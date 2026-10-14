@@ -31,6 +31,11 @@ internal sealed class ApplySettingsCommand(ServiceSettings settings) : LoopComma
     public ServiceSettings Settings { get; } = settings;
 }
 
+/// <summary>Whether anyone looks at the live figures changed: the loop picks its interval again (perf review §4).</summary>
+internal sealed class WatchersChangedCommand : LoopCommand
+{
+}
+
 /// <summary>Forget what calibration has learned for this machine.</summary>
 internal sealed class ResetCalibrationCommand : LoopCommand
 {

@@ -9,7 +9,7 @@ namespace PowerLedger.Sensors;
 /// <param name="PsuMaxW">Upper plausible bound for a PC power supply's watts, whether it reports its DC output or what it
 /// draws from the wall. The largest that report over USB are rated about 1.6 kW, and the wall figure sits a little above
 /// the rails, so past this the report has been misread rather than the supply loaded.</param>
-/// <param name="MedianWindow">How many recent values the outlier test compares against.</param>
+/// <param name="MedianWindow">How many seconds of recent values the outlier test compares against.</param>
 /// <param name="OutlierFactor">A value this many times the median or more is treated as a spike.</param>
 /// <param name="TransitionSeconds">How long after an AC change a tick stays marked suspect.</param>
 /// <param name="PlatformMaxW">Upper plausible bound for a whole-platform energy rail (Snapdragon X's <c>system</c>). Those

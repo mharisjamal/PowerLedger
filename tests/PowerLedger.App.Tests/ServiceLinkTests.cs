@@ -394,6 +394,28 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_overlays_state_goes_with_the_windows_and_only_a_change_is_sent()
+    {
+        var (service, link) = await Connect(ServiceUpdates);
+        await using (service)
+        await using (link)
+        {
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Any());
+            service.Requests.OfType<UiStateRequest>().Single().OverlayVisible.ShouldBeFalse();
+
+            link.ReportOverlay(true);
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 2);
+            var last = service.Requests.OfType<UiStateRequest>().Last();
+            (last.WindowVisible, last.OverlayVisible).ShouldBe((false, true));
+            link.ReportOverlay(true);
+            link.ReportWindow(true);
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 3);
+            last = service.Requests.OfType<UiStateRequest>().Last();
+            (last.WindowVisible, last.OverlayVisible).ShouldBe((true, true));
+        }
+    }
+
+    [Fact]
     public async Task The_window_state_set_before_connecting_is_the_one_sent()
     {
         var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";

@@ -115,6 +115,33 @@ public class SampleValidatorTests
     }
 
     [Fact]
+    public void At_one_reading_every_five_seconds_the_spike_window_covers_the_same_half_minute()
+    {
+        var validator = new SampleValidator();
+        for (var second = 0; second <= 25; second += 5) validator.Validate(Raw(gpu: 10, second: second));
+        validator.Validate(Raw(gpu: 200, second: 29)).DGpuW.ShouldBe(200);     // under half a minute of readings says nothing yet
+
+        validator = new SampleValidator();
+        for (var second = 0; second <= 30; second += 5) validator.Validate(Raw(gpu: 10, second: second));
+        var spike = validator.Validate(Raw(gpu: 200, second: 35));
+        spike.DGpuW.ShouldBe(10);
+        spike.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Readings_from_before_a_sleep_say_nothing_about_after_it()
+    {
+        var validator = new SampleValidator();
+        for (var i = 0; i < 30; i++) validator.Validate(Raw(gpu: 10, second: i));
+        var woken = validator.Validate(Raw(gpu: 60, second: 150));
+        woken.DGpuW.ShouldBe(60);
+        woken.Suspect.ShouldBeFalse();
+
+        for (var second = 151; second < 180; second++) validator.Validate(Raw(gpu: 60, second: second));
+        validator.Validate(Raw(gpu: 200, second: 181)).DGpuW.ShouldBe(60);    // the window is the new level's half minute
+    }
+
+    [Fact]
     public void A_sustained_rise_is_accepted_on_its_second_reading_instead_of_being_rejected_forever()
     {
         var validator = new SampleValidator();

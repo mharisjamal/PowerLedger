@@ -23,8 +23,11 @@ internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationS
 /// <param name="SystemUptime">How long Windows has been running, to tell a boot from a service restart.</param>
 /// <param name="SystemShuttingDown">True once the service control manager has announced a shutdown.</param>
 /// <param name="DatabaseNotice">What start-up had to do to the database, for the status screen.</param>
+/// <param name="Watched">Whether anyone may be looking at the live figures (<see cref="ServiceSignals.Watched"/>), asked
+/// whenever the loop picks its interval; always, when left out.</param>
 internal sealed record LoopEnvironment(
-    Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice);
+    Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice,
+    Func<bool>? Watched = null);
 
 /// <summary>
 /// The service's heart (spec §3, §6, §7). Once a sample interval it reads the sensors, runs the model, feeds the
@@ -39,6 +42,13 @@ internal sealed record LoopEnvironment(
 /// </summary>
 internal sealed class SamplingLoop : BackgroundService
 {
+    /// <summary>
+    /// How often the loop reads while nobody looks at the live figures (perf review §4, research §3), unless the set interval
+    /// is slower still. Energy stays exact at any interval, since the meters add energy up over the tick; only the live
+    /// view and the raw rows grow coarser, and nobody is looking at the one.
+    /// </summary>
+    public static readonly TimeSpan UnwatchedInterval = TimeSpan.FromSeconds(5);
+
     private static readonly TimeSpan Minute = TimeSpan.FromMinutes(1);
     private static readonly string Version =
         typeof(SamplingLoop).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
@@ -75,6 +85,7 @@ internal sealed class SamplingLoop : BackgroundService
     private DateTimeOffset _startedAt;
     private DateTimeOffset _minute;
     private DateTimeOffset? _foldFrom;
+    private TimeSpan _interval;
     private bool _suspended;
     private bool _carryOverMonitors;
     private long _ticks;
@@ -110,9 +121,20 @@ internal sealed class SamplingLoop : BackgroundService
     /// <summary>Readings recorded since start. Rises only once a tick is completely done.</summary>
     public long Ticks => Interlocked.Read(ref _ticks);
 
-    private TimeSpan Interval => TimeSpan.FromSeconds(_settings.SampleIntervalSeconds);
+    private double GapThreshold => GapThresholdFor(_settings);
 
-    private double GapThreshold => EnergyIntegrator.GapThresholdFor(_settings.SampleIntervalSeconds);
+    /// <summary>The gap threshold for readings taken under <paramref name="settings"/>: two of the slowest intervals the loop
+    /// reads at, the set one or <see cref="UnwatchedInterval"/>, so a beat Windows put off a little never counts as a sleep.</summary>
+    internal static double GapThresholdFor(ServiceSettings settings)
+        => EnergyIntegrator.GapThresholdFor(Math.Max(settings.SampleIntervalSeconds, UnwatchedInterval.TotalSeconds));
+
+    /// <summary>The interval the loop wants now: the set one while anyone may be looking, otherwise
+    /// <see cref="UnwatchedInterval"/> when that is slower.</summary>
+    private TimeSpan WantedInterval()
+    {
+        var set = TimeSpan.FromSeconds(_settings.SampleIntervalSeconds);
+        return _environment.Watched?.Invoke() != false || set >= UnwatchedInterval ? set : UnwatchedInterval;
+    }
 
     /// <summary>
     /// Completes once the loop has started and its beat runs, so every tick the clock gives from then on is seen; fails
@@ -153,7 +175,8 @@ internal sealed class SamplingLoop : BackgroundService
                     return;
                 }
                 _metronome = Metronome.For(_clock);
-                _metronome.Start(Interval);
+                _interval = WantedInterval();
+                _metronome.Start(_interval);
                 _started = true;
                 _ready.TrySetResult();
             }
@@ -179,13 +202,24 @@ internal sealed class SamplingLoop : BackgroundService
     {
         while (_commands.Reader.TryRead(out var command))
         {
-            if (Handle(command))
-            {
-                if (_suspended) _metronome!.Stop();               // no beats while the machine sleeps
-                else _metronome!.Start(Interval);                 // a new interval, or a machine that just woke
-            }
+            Pace(restart: Handle(command));
             command.Complete();                                    // only now (see Handle); one that failed stays failed
         }
+    }
+
+    /// <summary>Starts the beat over at the interval wanted now, when that changed or <paramref name="restart"/> says so;
+    /// stops it while the machine sleeps.</summary>
+    private void Pace(bool restart)
+    {
+        if (_suspended)
+        {
+            if (restart) _metronome!.Stop();
+            return;
+        }
+        var wanted = WantedInterval();
+        if (!restart && wanted == _interval) return;
+        _interval = wanted;
+        _metronome!.Start(wanted);
     }
 
     /// <summary>The watchdog gave up on a read; a fresh thread has the loop.</summary>
@@ -259,7 +293,7 @@ internal sealed class SamplingLoop : BackgroundService
         var now = _clock.GetUtcNow();
         try
         {
-            var result = _worker.Read(now, _tickClock.Measure(now, _settings.SampleIntervalSeconds));
+            var result = _worker.Read(now, _tickClock.Measure(now, _interval.TotalSeconds));
             _tickClock.Commit(now);
             var reading = _model!.Evaluate(result.Sample, out var monitorWatts);
             reading = reading with { Measured = Frames.Measured(result.Sample, reading.TotalSource) };   // stored for data sharing
@@ -359,8 +393,9 @@ internal sealed class SamplingLoop : BackgroundService
     /// asked to, so that, as with <see cref="Ready"/>, every tick the clock gives once the command is done is seen: a tick
     /// given before the new beat existed would be lost, and a test moves its fake clock the moment it is told.
     /// </summary>
-    /// <returns>True when the beat must start over, or stop: the sample interval changed, the machine is going to sleep,
-    /// or it woke, and a tick queued while it slept must not fire before the rebuilt sensors have had a full interval.</returns>
+    /// <returns>True when the beat must start over, or stop, whatever the interval: the machine is going to sleep, or it
+    /// woke, and a tick queued while it slept must not fire before the rebuilt sensors have had a full interval. A new
+    /// interval, from settings or from someone starting or stopping looking, is picked after every command.</returns>
     private bool Handle(LoopCommand command)
     {
         var now = _clock.GetUtcNow();
@@ -378,8 +413,10 @@ internal sealed class SamplingLoop : BackgroundService
                     restartTimer = true;
                     break;
                 case ApplySettingsCommand apply:
-                    restartTimer = Apply(apply.Settings);
+                    Apply(apply.Settings);
                     break;
+                case WatchersChangedCommand:
+                    break;                                         // the interval is picked again after every command
                 case ResetCalibrationCommand:
                     _calibration.Reset(now);
                     _log.LogInformation("Calibration reset for hardware {Hash}", _calibration.Hash);
@@ -415,14 +452,13 @@ internal sealed class SamplingLoop : BackgroundService
         _log.LogInformation("Resumed");
     }
 
-    private bool Apply(ServiceSettings settings)
+    /// <summary>Puts new settings in force; a new interval takes effect when the loop picks its interval after the command.</summary>
+    private void Apply(ServiceSettings settings)
     {
         if (settings.Validate() is { } problem) throw new ArgumentException(problem, nameof(settings));
-        var intervalChanged = settings.SampleIntervalSeconds != _settings.SampleIntervalSeconds;
         settings = _nutSecret.Take(settings);                // the UPS server's password is kept apart, never stored or sent
         _settingsStore.Save(settings);
         Use(settings);
-        return intervalChanged;
     }
 
     private void Stop()

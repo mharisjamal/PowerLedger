@@ -55,6 +55,11 @@ internal sealed class FakeLink : IServiceLink
 
     public void ReportWindow(bool visible) => Windows.Add(visible);
 
+    /// <summary>Each overlay state the App reported, in order.</summary>
+    public List<bool> Overlays { get; } = [];
+
+    public void ReportOverlay(bool showing) => Overlays.Add(showing);
+
     public Task<WriteResult> UpdateNowAsync(CancellationToken cancel = default) => Write("updateNow");
 
     /// <summary>What every change comes back as.</summary>
