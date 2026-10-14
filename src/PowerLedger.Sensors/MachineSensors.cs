@@ -35,7 +35,8 @@ public sealed class MachineSensors : IDisposable
     /// the Service, in session 0, must supply it.</param>
     /// <param name="validatorOptions">Overrides for the plausible ranges and windows.</param>
     /// <param name="monitorsDetected">Told which external monitors are attached, from the thread that reads the set: once WMI
-    /// first answers, and whenever they change (checked once a minute). Leave null to skip reading them.</param>
+    /// first answers, and whenever they change (checked when Windows announces a monitor, lid or display change, and every
+    /// quarter of an hour). Leave null to skip reading them.</param>
     /// <param name="readPowerSupply">The owner's tick for reading a power supply over USB, asked afresh before every read.
     /// Leave null where there is nobody to ask, which leaves any power supply alone altogether.</param>
     /// <param name="nut">The owner's UPS on another computer (Network UPS Tools), asked afresh every tick; null while none is set
