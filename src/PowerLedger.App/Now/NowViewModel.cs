@@ -11,12 +11,15 @@ namespace PowerLedger.App;
 /// <summary>
 /// The Now screen (spec §9): the live reading and its quality, the last minute, the meter, the power budget, today's and
 /// the month's ledgers, and today's chart. Readings arrive on the link's thread and are posted to the UI thread; history
-/// is read every minute and the status and settings every ten seconds, both off the UI thread.
+/// is read every minute and the status and settings every ten seconds, both off the UI thread; while no window shows,
+/// every five minutes and every minute (perf review P13), and both at once when one shows again.
 /// </summary>
 internal sealed partial class NowViewModel : ObservableObject, IDisposable
 {
     public static readonly TimeSpan HistoryEvery = TimeSpan.FromMinutes(1);
     public static readonly TimeSpan StatusEvery = TimeSpan.FromSeconds(10);
+    public static readonly TimeSpan HiddenHistoryEvery = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan HiddenStatusEvery = TimeSpan.FromMinutes(1);
     public static readonly TimeSpan ConnectGrace = TimeSpan.FromSeconds(3);
 
     private readonly IServiceLink _link;
@@ -118,7 +121,8 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
 
     /// <summary>Whether a window of the App's shows, the overlay among them (perf review P1). Unwatched, a reading keeps
     /// only the newest frame, the last minute's samples, the day's peak and the tray's text: the live panel, which no
-    /// window would draw, is built again once, from all that, when one shows.</summary>
+    /// window would draw, is built again once, from all that, when one shows. The history and the status are read less
+    /// often meanwhile (perf review P13), and both at once when one shows.</summary>
     public bool IsWatched
     {
         get => _isWatched;
@@ -127,6 +131,9 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
             if (_isWatched == value) return;
             _isWatched = value;
             if (value) RebuildLive();
+            // Shown, both are read at once and then as often as before; hidden, the next read waits a whole hidden period.
+            _historyTimer?.Change(value ? TimeSpan.Zero : HiddenHistoryEvery, value ? HistoryEvery : HiddenHistoryEvery);
+            _statusTimer?.Change(value ? TimeSpan.Zero : HiddenStatusEvery, value ? StatusEvery : HiddenStatusEvery);
         }
     }
 
@@ -149,8 +156,10 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     /// <summary>Starts the timers; the first history read happens at once. Call once, on the UI thread.</summary>
     public void Start()
     {
-        _historyTimer = _clock.CreateTimer(_ => RefreshHistory(), null, TimeSpan.Zero, HistoryEvery);
-        _statusTimer = _clock.CreateTimer(_ => _ = PollAsync(), null, StatusEvery, StatusEvery);
+        var history = _isWatched ? HistoryEvery : HiddenHistoryEvery;
+        var status = _isWatched ? StatusEvery : HiddenStatusEvery;
+        _historyTimer = _clock.CreateTimer(_ => RefreshHistory(), null, TimeSpan.Zero, history);
+        _statusTimer = _clock.CreateTimer(_ => _ = PollAsync(), null, status, status);
         _graceTimer = _clock.CreateTimer(_ => _threads.Post(EndGrace), null, ConnectGrace, Timeout.InfiniteTimeSpan);
         if (_link.IsConnected) OnConnectionChanged(true);
     }

@@ -561,6 +561,62 @@ public class NowViewModelTests
     }
 
     [Fact]
+    public void Unwatched_it_reads_the_history_every_five_minutes_and_the_status_every_minute()
+    {
+        // Perf review P13: a hidden App read today's history every minute and the status every ten seconds.
+        var model = Model();
+        _link.Connect(true);
+        model.Start();
+        model.IsWatched = false;
+        var (reads, polls) = (_history.Reads, _link.StatusReads);
+
+        _clock.Advance(NowViewModel.StatusEvery);
+        _link.StatusReads.ShouldBe(polls);
+        _clock.Advance(NowViewModel.HistoryEvery - NowViewModel.StatusEvery);   // a minute on
+        _history.Reads.ShouldBe(reads);
+        _link.StatusReads.ShouldBe(polls + 1);
+
+        _clock.Advance(NowViewModel.HiddenHistoryEvery - NowViewModel.HistoryEvery);   // five minutes on
+        _history.Reads.ShouldBe(reads + 1);
+        _link.StatusReads.ShouldBe(polls + 5);
+    }
+
+    [Fact]
+    public void Watched_again_it_reads_both_at_once_and_then_as_often_as_before()
+    {
+        var model = Model();
+        _link.Connect(true);
+        model.Start();
+        model.IsWatched = false;
+        var (reads, polls) = (_history.Reads, _link.StatusReads);
+
+        model.IsWatched = true;
+        _history.Reads.ShouldBe(reads + 1);
+        _link.StatusReads.ShouldBe(polls + 1);
+
+        _clock.Advance(NowViewModel.StatusEvery);
+        _link.StatusReads.ShouldBe(polls + 2);
+        _clock.Advance(NowViewModel.HistoryEvery - NowViewModel.StatusEvery);
+        _history.Reads.ShouldBe(reads + 2);
+    }
+
+    [Fact]
+    public void Started_unwatched_it_reads_as_a_hidden_app_does()
+    {
+        var model = Model();
+        _link.Connect(true);
+        model.IsWatched = false;   // the App started in the tray
+        model.Start();
+        var (reads, polls) = (_history.Reads, _link.StatusReads);
+
+        _clock.Advance(NowViewModel.HistoryEvery);
+        _history.Reads.ShouldBe(reads);
+        _link.StatusReads.ShouldBe(polls + 1);
+        _clock.Advance(NowViewModel.HiddenHistoryEvery - NowViewModel.HistoryEvery);
+        _history.Reads.ShouldBe(reads + 1);
+    }
+
+    [Fact]
     public void The_tray_tooltips_words_change_only_with_the_whole_watts()
     {
         // Perf review P2: a tooltip in tenths changed every second, and each change is a message to Explorer.

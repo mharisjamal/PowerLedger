@@ -168,12 +168,32 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Idle_time_is_reported_on_connecting_and_every_five_seconds()
+    public async Task Idle_time_is_reported_on_connecting_and_every_fifteen_seconds_while_no_window_shows()
     {
-        await WaitFor.True(() => _service.Requests.OfType<ReportActivityRequest>().Any());
+        // Perf review P13: the service keeps a report for 30 s, so a hidden App reports a third as often.
+        int Reports() => _service.Requests.OfType<ReportActivityRequest>().Count();
+        await WaitFor.True(() => Reports() == 1);
         _service.Requests.OfType<ReportActivityRequest>().Single().IdleSeconds.ShouldBe(42);
+
         _clock.Advance(PipeServiceLink.ActivityEvery);
-        await WaitFor.True(() => _service.Requests.OfType<ReportActivityRequest>().Count() == 2);
+        await Task.Delay(100);   // a report wrongly sent has the time to arrive
+        Reports().ShouldBe(1);
+
+        _clock.Advance(PipeServiceLink.HiddenActivityEvery - PipeServiceLink.ActivityEvery);
+        await WaitFor.True(() => Reports() == 2);
+    }
+
+    [Fact]
+    public async Task A_window_showing_reports_idle_time_at_once_and_then_every_five_seconds()
+    {
+        int Reports() => _service.Requests.OfType<ReportActivityRequest>().Count();
+        await WaitFor.True(() => Reports() == 1);
+
+        _link.ReportWindow(true);
+        await WaitFor.True(() => Reports() == 2);
+
+        _clock.Advance(PipeServiceLink.ActivityEvery);
+        await WaitFor.True(() => Reports() == 3);
     }
 
     [Fact]
