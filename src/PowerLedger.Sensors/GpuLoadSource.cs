@@ -13,14 +13,16 @@ namespace PowerLedger.Sensors;
 /// over a library's, so a measured card keeps its own figure and none is counted twice. A card only this source reads and
 /// Windows has switched off draws nothing. The counters are read at most every <see cref="ReadEvery"/>, because a read walks
 /// every process on every engine, and the loads are held in between. Each card's load over every engine, video decode
-/// included, goes to <see cref="SampleDraft.DGpuBusyLoad"/> for the idle test alone.
+/// included, goes to <see cref="SampleDraft.DGpuBusyLoad"/> for the idle test alone, and so does that of the graphics in
+/// the processor (Plan AC review): a laptop playing a film decodes it there, and their watts, which the processor's
+/// package already holds, are never asked of them.
 /// </summary>
 public sealed class GpuLoadSource : ISensorSource
 {
     /// <summary>How often the counters are read; the ticks in between carry the last loads.</summary>
     public static readonly TimeSpan ReadEvery = TimeSpan.FromSeconds(5);
 
-    private const string NoCard = "no discrete GPU";
+    private const string NoAdapter = "no graphics adapter";
 
     private readonly Func<IReadOnlyList<GpuAdapter>> _adapters;
     private readonly Func<EngineSnapshot> _read;
@@ -29,6 +31,8 @@ public sealed class GpuLoadSource : ISensorSource
     private readonly Dictionary<string, Func<bool>> _poweredOff = new(StringComparer.OrdinalIgnoreCase);
     private readonly DxgiAdapters? _dxgi;
     private IReadOnlyList<GpuAdapter> _cards = [];
+    private IReadOnlyList<GpuAdapter> _processorGraphics = [];
+    private double? _processorBusy;
     private Dictionary<string, (double? Load, double? Busy)> _loads = new(StringComparer.OrdinalIgnoreCase);
     private EngineSnapshot? _previous;
     private TimeSpan? _readAt;
@@ -96,6 +100,7 @@ public sealed class GpuLoadSource : ISensorSource
             // Every engine, a film's decoder included, for the idle test: any card's, a library's card too.
             if (busy is { } working) draft.DGpuBusyLoad = Math.Max(draft.DGpuBusyLoad ?? 0, working);
         }
+        if (_processorBusy is { } decoding) draft.DGpuBusyLoad = Math.Max(draft.DGpuBusyLoad ?? 0, decoding);
     }
 
     public void Dispose() => _dxgi?.Dispose();
@@ -112,12 +117,15 @@ public sealed class GpuLoadSource : ISensorSource
     /// that was not in the last read starts over rather than comparing one adapter's counts with another's.</summary>
     private void Read()
     {
-        var before = _cards.Select(card => card.CounterLuid).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        _cards = DiscreteGpu.Candidates(_adapters());
-        if (_cards.Count == 0)
+        var before = _cards.Concat(_processorGraphics).Select(card => card.CounterLuid).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var adapters = _adapters();
+        _cards = DiscreteGpu.Candidates(adapters);
+        _processorGraphics = ProcessorGraphics(adapters);
+        if (_cards.Count == 0 && _processorGraphics.Count == 0)
         {
             _previous = null;
             _loads = new(StringComparer.OrdinalIgnoreCase);
+            _processorBusy = null;
             return;
         }
 
@@ -130,8 +138,19 @@ public sealed class GpuLoadSource : ISensorSource
                 : (null, null);
         }
         _loads = loads;
+        _processorBusy = null;
+        foreach (var graphics in _processorGraphics)
+        {
+            if (_previous is not { } earlier || !before.Contains(graphics.CounterLuid)) continue;
+            if (GpuEngines.Busiest(earlier, snapshot, graphics.CounterLuid, everyEngine: true) is { } busy) _processorBusy = Math.Max(_processorBusy ?? 0, busy);
+        }
         _previous = snapshot;
     }
+
+    /// <summary>The graphics in the processor, and any other hardware adapter that is no card: never a software rasteriser
+    /// or one of Microsoft's own adapters.</summary>
+    private static IReadOnlyList<GpuAdapter> ProcessorGraphics(IEnumerable<GpuAdapter> adapters)
+        => [.. adapters.Where(adapter => !adapter.Software && adapter.VendorId != DiscreteGpu.MicrosoftVendor && !DiscreteGpu.IsCandidate(adapter))];
 
     /// <summary>Whether Windows has the card switched off, asked once per card of the display adapter with its PCI ids.
     /// Anything that cannot answer counts as on, which never hides real draw.</summary>
@@ -158,14 +177,16 @@ public sealed class GpuLoadSource : ISensorSource
     {
         try
         {
-            _cards = DiscreteGpu.Candidates(_adapters());
+            var adapters = _adapters();
+            _cards = DiscreteGpu.Candidates(adapters);
+            _processorGraphics = ProcessorGraphics(adapters);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
             // A DXGI failure arrives as whichever exception its HRESULT maps to, so none is singled out.
             return "Windows would not list the graphics adapters";
         }
-        if (_cards.Count == 0) return NoCard;
+        if (_cards.Count == 0 && _processorGraphics.Count == 0) return NoAdapter;
 
         try
         {

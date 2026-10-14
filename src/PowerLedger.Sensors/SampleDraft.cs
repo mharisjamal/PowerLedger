@@ -76,7 +76,8 @@ public sealed class SampleDraft
     /// <summary>The least a measured card's watts cover.</summary>
     public GpuPowerScope DGpuScope => Totals.Scope;
 
-    /// <summary>The busiest card's load over every engine, video included, for the idle test alone (see
+    /// <summary>The busiest graphics' load over every engine, video included, a card's or the processor's own, for the idle
+    /// test alone (see
     /// <see cref="Sample.DGpuBusyLoad"/>); Windows' load counters fill it.</summary>
     public double? DGpuBusyLoad { get; set; }
 

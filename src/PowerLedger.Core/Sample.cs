@@ -41,8 +41,9 @@ namespace PowerLedger.Core;
 /// <param name="AcTransition">Set by the validator, with <paramref name="Suspect"/>, in the seconds after the machine went on
 /// or off mains, when the battery rate Windows gives is from before the change. Only this, not any doubt, makes the model
 /// pass over the battery's rate.</param>
-/// <param name="DGpuBusyLoad">The busiest discrete card's load over every engine, video decode and copy included, 0..1;
-/// null where nothing read it. Only the idle test reads it: a film keeps the card's decoder busy and the PC in use, while
+/// <param name="DGpuBusyLoad">The busiest graphics' load over every engine, video decode and copy included, 0..1: any
+/// card's, or the processor's own graphics' (Plan AC review); null where nothing read it. Only the idle test reads it: a
+/// film keeps a decoder busy and the PC in use, while
 /// <paramref name="DGpuLoad"/>, the shaders' load, is what the card's rating turns into watts.</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,

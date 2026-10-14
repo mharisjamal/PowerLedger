@@ -26,17 +26,50 @@ public class GpuLoadSourceTests
     }
 
     [Fact]
-    public void Without_a_card_the_source_says_so_and_claims_nothing()
+    public void Without_any_graphics_the_source_says_so_and_claims_nothing()
     {
         var engines = new Engines(() => _now);
-        var source = new GpuLoadSource(() => ProcessorGraphicsOnly, engines.Read, () => _now);
+        var source = new GpuLoadSource(() => [ProcessorGraphicsOnly[1]], engines.Read, () => _now);
 
         source.Supported.ShouldBeFalse();
-        source.Unavailable.ShouldBe("no discrete GPU");
+        source.Unavailable.ShouldBe("no graphics adapter");
         var draft = Tick(source, 0);
         draft.DGpuPresent.ShouldBeFalse();
         draft.DGpuLoad.ShouldBeNull();
+        draft.DGpuBusyLoad.ShouldBeNull();
         engines.Reads.ShouldBe(0);
+    }
+
+    /// <summary>Plan AC review: a laptop with graphics in its processor alone plays a film on them, so their engines, every
+    /// one, keep it from counting as idle; they claim no card, and their watts are in the processor's package already.</summary>
+    [Fact]
+    public void A_film_on_the_processor_s_graphics_keeps_the_pc_busy_and_claims_no_card()
+    {
+        var engines = new Engines(() => _now, ProcessorGraphicsOnly[0].CounterLuid) { Busy = 0.01, Decoding = 0.3 };
+        var source = new GpuLoadSource(() => ProcessorGraphicsOnly, engines.Read, () => _now);
+
+        source.Supported.ShouldBeTrue();
+        Tick(source, 0).DGpuBusyLoad.ShouldBeNull();
+        var film = Tick(source, 5);
+        film.DGpuPresent.ShouldBeFalse();
+        film.Gpus.ShouldBeEmpty();
+        film.DGpuLoad.ShouldBeNull();
+        film.DGpuBusyLoad.ShouldNotBeNull().ShouldBe(0.3, 1e-9);
+    }
+
+    /// <summary>Plan AC review: beside a card, the processor's graphics playing a film keep the PC busy too, while the card's
+    /// load for its watts is its own.</summary>
+    [Fact]
+    public void Beside_a_card_the_busier_of_it_and_the_processor_s_graphics_is_the_busy_load()
+    {
+        var card = new Engines(() => _now) { Busy = 0.02 };
+        var processor = new Engines(() => _now, ProcessorGraphicsOnly[0].CounterLuid) { Decoding = 0.3 };
+        var source = new GpuLoadSource(() => [Radeon, .. ProcessorGraphicsOnly], () => Merge(card.Read(), processor.Read()), () => _now);
+
+        Tick(source, 0);
+        var film = Tick(source, 5);
+        film.Gpus.ShouldHaveSingleItem().Load.ShouldNotBeNull().ShouldBe(0.02, 1e-9);
+        film.DGpuBusyLoad.ShouldNotBeNull().ShouldBe(0.3, 1e-9);
     }
 
     [Fact]
@@ -123,7 +156,7 @@ public class GpuLoadSourceTests
         var gone = Tick(source, 5);
         gone.DGpuPresent.ShouldBeFalse();
         gone.DGpuLoad.ShouldBeNull();
-        engines.Reads.ShouldBe(1);
+        engines.Reads.ShouldBe(2);                                  // the processor's graphics are still read, for the idle test
     }
 
     [Fact]
@@ -186,10 +219,14 @@ public class GpuLoadSourceTests
         film.ToSample(DateTimeOffset.UnixEpoch, 1).DGpuBusyLoad.ShouldNotBeNull().ShouldBe(0.6, 1e-9);
     }
 
-    /// <summary>One process keeping the card's 3D engine busy for a set share of the time, and another its video decoder.</summary>
-    private sealed class Engines(Func<TimeSpan> clock)
+    private static EngineSnapshot Merge(EngineSnapshot a, EngineSnapshot b)
+        => new(a.At, a.RunningTime.Concat(b.RunningTime).ToDictionary(pair => pair.Key, pair => pair.Value));
+
+    /// <summary>One process keeping an adapter's 3D engine busy for a set share of the time, and another its video decoder;
+    /// the card's, when no adapter is named.</summary>
+    private sealed class Engines(Func<TimeSpan> clock, string? luid = null)
     {
-        private string _luid = Radeon.CounterLuid;
+        private string _luid = luid ?? Radeon.CounterLuid;
         private TimeSpan _last;
         private double _busySeconds;
         private double _decodingSeconds;
