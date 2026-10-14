@@ -73,16 +73,20 @@ public enum UpsPowerSource
     /// <summary>Its load percentage of its rated watts: whole percents, so steps of 1% of the rating.</summary>
     LoadOfRatedWatts = 2,
 
-    /// <summary>Its load percentage of its rated volt-amperes, at an assumed power factor of 0.8: an estimate.</summary>
+    /// <summary>Its load percentage of its rated volt-amperes, at the watts per VA a UPS of that rating is rated for (0.6
+    /// up to 3 kVA, 0.9 over): an estimate.</summary>
     LoadOfRatedVoltAmps = 3,
 
     /// <summary>Its apparent output power times the power factor it reports itself (NUT's ups.power and
     /// output.powerfactor): measured.</summary>
     ApparentPower = 4,
 
-    /// <summary>Its apparent output power at an assumed power factor of 0.8, for a UPS that reports no factor: an
+    /// <summary>Its apparent output power at an assumed power factor of 0.9, for a UPS that reports no factor: an
     /// estimate.</summary>
     ApparentPowerAssumedFactor = 5,
+
+    /// <summary>What it draws from the mains (NUT's input.realpower), its own use included, as a meter at the wall reads.</summary>
+    InputPower = 6,
 }
 
 /// <summary>A kind of device that reports power over USB. Piped as an integer: append new members, never renumber.</summary>

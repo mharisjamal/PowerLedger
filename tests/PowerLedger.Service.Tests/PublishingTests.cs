@@ -92,6 +92,7 @@ public class PublishingTests
     [InlineData(UpsPowerSource.ActivePower, "real output power")]
     [InlineData(UpsPowerSource.LoadOfRatedWatts, "load of its rated watts")]
     [InlineData(UpsPowerSource.LoadOfRatedVoltAmps, "load of its rated VA, estimated")]
+    [InlineData(UpsPowerSource.InputPower, "real input power, its own use included")]
     public void A_ups_says_how_its_watts_were_found(UpsPowerSource source, string how)
         => Frames.PowerDevices(Samples.At(Samples.T0) with { UpsOutputW = 142, UpsSource = source, UpsName = "APC Back-UPS ES 850G2" })
             .ShouldHaveSingleItem().How.ShouldBe(how);

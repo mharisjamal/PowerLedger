@@ -56,7 +56,7 @@ public class UpsSourceTests
         using var source = Source();
         var draft = Tick(source);
 
-        draft.UpsOutputW.ShouldNotBeNull().ShouldBe(183.6, 1e-9);                 // 27% of 850 VA at 0.8
+        draft.UpsOutputW.ShouldNotBeNull().ShouldBe(137.7, 1e-9);                 // 27% of 850 VA at 0.6 W per VA
         draft.UpsSource.ShouldBe(UpsPowerSource.LoadOfRatedVoltAmps);
     }
 
@@ -336,7 +336,7 @@ public class UpsSourceTests
 
         using var source = Source();
 
-        Tick(source).UpsOutputW.ShouldNotBeNull().ShouldBe(183.6, 1e-9);          // 27% of the output flow's 850 VA at 0.8
+        Tick(source).UpsOutputW.ShouldNotBeNull().ShouldBe(137.7, 1e-9);          // 27% of the output flow's 850 VA at 0.6 W per VA
     }
 
     [Fact]

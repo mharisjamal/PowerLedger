@@ -28,11 +28,14 @@ public class NutSourceTests
     }
 
     [Theory]
+    [InlineData(new[] { "input.realpower", "330", "ups.realpower", "300" }, 330.0, UpsPowerSource.InputPower)]          // its own use included
+    [InlineData(new[] { "input.realpower", "0", "ups.realpower", "300" }, 300.0, UpsPowerSource.ActivePower)]           // on battery, the mains give nothing
     [InlineData(new[] { "ups.realpower", "300", "ups.power", "500", "output.powerfactor", "0.9" }, 300.0, UpsPowerSource.ActivePower)]
     [InlineData(new[] { "ups.power", "500", "output.powerfactor", "0.9", "ups.load", "30", "ups.realpower.nominal", "900" }, 450.0, UpsPowerSource.ApparentPower)]
     [InlineData(new[] { "ups.power", "500", "ups.load", "30", "ups.realpower.nominal", "900" }, 270.0, UpsPowerSource.LoadOfRatedWatts)]
-    [InlineData(new[] { "ups.power", "500", "ups.load", "30", "ups.power.nominal", "1500" }, 400.0, UpsPowerSource.ApparentPowerAssumedFactor)]
-    [InlineData(new[] { "ups.load", "30", "ups.power.nominal", "1500" }, 360.0, UpsPowerSource.LoadOfRatedVoltAmps)]
+    [InlineData(new[] { "ups.power", "500", "ups.load", "30", "ups.power.nominal", "1500" }, 450.0, UpsPowerSource.ApparentPowerAssumedFactor)]   // at 0.9
+    [InlineData(new[] { "ups.load", "30", "ups.power.nominal", "1500" }, 270.0, UpsPowerSource.LoadOfRatedVoltAmps)]    // 0.6 W per VA
+    [InlineData(new[] { "ups.load", "30", "ups.power.nominal", "6000" }, 1620.0, UpsPowerSource.LoadOfRatedVoltAmps)]   // 0.9 over 3 kVA
     [InlineData(new[] { "ups.load", "30", "ups.power.nominal", "1500", "output.powerfactor", "0.6" }, 270.0, UpsPowerSource.LoadOfRatedVoltAmps)]
     [InlineData(new[] { "ups.realpower", "0", "ups.load", "0", "ups.realpower.nominal", "900" }, null, UpsPowerSource.None)]
     [InlineData(new[] { "ups.realpower", "n/a", "battery.charge", "100" }, null, UpsPowerSource.None)]
