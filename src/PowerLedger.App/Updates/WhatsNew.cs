@@ -8,6 +8,17 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.11.0",
+        [
+            "Plugged in laptops read truer, usually 10 to 20% higher: PowerLedger now learns how the rest of your laptop rises with the processor.",
+            "Sleep counts: what your PC uses asleep is learned from your laptop's battery and shown as Asleep (estimated). Hibernating, or shutting down with Fast Startup, counts as nothing.",
+            "Energy your laptop takes from its battery counts at the wall it was charged from, about 22% more, shown as wall equivalent.",
+            "Idle now means nobody is using the PC and it is doing nothing; time it spends working on its own, or playing a video, counts as in use.",
+            "The bill forecast counts days the PC was off and prices the days left at today's tariff; CO2 starts from your region's grid or the world's 481 g per kWh.",
+            "Snapdragon laptops read their whole PC power, a docked laptop with its lid shut stops counting its screen, and video no longer counts as graphics load.",
+            "PowerLedger itself uses far less power: it reads every 5 seconds while no window is open, runs in Windows' efficiency mode, and does almost nothing in the tray.",
+            "Aero's glass rests while your screen is still, goes lighter under Energy Saver (or on battery with Lighter glass on battery), and shows your desktop at once after minimise all, even on a busy PC.",
+        ]),
         ("0.10.10",
         [
             "Aero's glass keeps up with the window: drag or resize it and the glass moves in the same frame, at your display's refresh rate.",
