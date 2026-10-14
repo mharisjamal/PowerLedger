@@ -63,6 +63,39 @@ public class WindowWatchTests
         });
 
     [Fact]
+    public void A_window_of_another_thread_is_left_alone()
+    {
+        // The watch's own thread can't read another's window; a test run's windows on threads of their own once made
+        // every later window there throw as it was laid out.
+        var watch = UiHarness.OnUi(WindowWatch.EveryWindow);
+        var shown = Sta.Run(() =>
+        {
+            var window = OffScreen();   // left open: Windows takes it down with its thread
+            window.Show();
+            window.UpdateLayout();
+            return window.IsVisible;
+        });
+        shown.ShouldBeTrue();
+        UiHarness.OnUi(() => watch.Shows).ShouldBeFalse();
+
+        var second = UiHarness.OnUi(() =>
+        {
+            var window = OffScreen();
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+                return watch.Shows;
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+        second.ShouldBeTrue("its own thread's windows are still watched");
+    }
+
+    [Fact]
     public void Every_window_shown_is_watched_without_being_handed_in()
         => UiHarness.OnUi(() =>
         {

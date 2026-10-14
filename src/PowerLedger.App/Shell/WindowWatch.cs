@@ -6,11 +6,13 @@ namespace PowerLedger.App;
 /// Whether any of the App's windows shows (perf review P1): the shell's window in any look, the overlay, a dialog. A
 /// window hidden to the tray or minimised shows nothing. The live panel, the polling and the App's power throttling
 /// follow <see cref="Shows"/>; the service is told <see cref="Visible"/>. A window is watched from when it is handed in, or
-/// first laid out, until it closes. Call on the UI thread.
+/// first laid out, until it closes. Only the windows of the thread that made the watch count, the App's UI thread: a
+/// window of another can't be read from it. Call on that thread.
 /// </summary>
 internal sealed class WindowWatch
 {
     private readonly List<Window> _windows = [];
+    private readonly System.Windows.Threading.Dispatcher _thread = System.Windows.Threading.Dispatcher.CurrentDispatcher;
 
     /// <summary>Whether any window is on screen: visible and not minimised.</summary>
     public bool Shows { get; private set; }
@@ -32,10 +34,10 @@ internal sealed class WindowWatch
         return watch;
     }
 
-    /// <summary>Watches <paramref name="window"/> until it closes; one already watched is left as it is.</summary>
+    /// <summary>Watches <paramref name="window"/> until it closes; one already watched, or another thread's, is left as it is.</summary>
     public void Watch(Window window)
     {
-        if (_windows.Contains(window)) return;
+        if (window.Dispatcher != _thread || _windows.Contains(window)) return;
         _windows.Add(window);
         window.IsVisibleChanged += OnVisibleChanged;
         window.StateChanged += OnStateChanged;
