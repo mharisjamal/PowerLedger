@@ -348,6 +348,19 @@ public class PowerModelTests
         Laptop().Evaluate(TestData.Laptop(idleSeconds: 600, cpuLoad: 0.099, gpuLoad: 0.049)).UserIdle.ShouldBeTrue();
     }
 
+    /// <summary>A film on the graphics card keeps its decoder busy, not its shaders: no load for its watts, but no idle PC
+    /// either. The idle test reads the card's every engine where the sensors gave it.</summary>
+    [Fact]
+    public void A_film_playing_to_nobody_at_the_keyboard_is_not_idle()
+    {
+        var film = TestData.Laptop(idleSeconds: 600, cpuLoad: 0.02, gpuLoad: 0.01) with { DGpuBusyLoad = 0.6 };
+        var r = Laptop().Evaluate(film);
+        r.UserIdle.ShouldBeFalse();
+        r.Components.Gpu.ShouldBe(Laptop().Evaluate(film with { DGpuBusyLoad = null }).Components.Gpu);   // its watts as before
+        Laptop().Evaluate(film with { DGpuBusyLoad = 0.02 }).UserIdle.ShouldBeTrue();
+        Laptop().Evaluate(film with { DGpuBusyLoad = null }).UserIdle.ShouldBeTrue();   // not read: the shaders' load decides
+    }
+
     /// <summary>A graphics load nobody could read counts as idle, as the model counts its watts; a processor load that is not
     /// a number counts as none, as everywhere else in the model.</summary>
     [Fact]

@@ -41,6 +41,9 @@ namespace PowerLedger.Core;
 /// <param name="AcTransition">Set by the validator, with <paramref name="Suspect"/>, in the seconds after the machine went on
 /// or off mains, when the battery rate Windows gives is from before the change. Only this, not any doubt, makes the model
 /// pass over the battery's rate.</param>
+/// <param name="DGpuBusyLoad">The busiest discrete card's load over every engine, video decode and copy included, 0..1;
+/// null where nothing read it. Only the idle test reads it: a film keeps the card's decoder busy and the PC in use, while
+/// <paramref name="DGpuLoad"/>, the shaders' load, is what the card's rating turns into watts.</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -72,7 +75,8 @@ public sealed record Sample(
     string? SystemMeterName = null,
     bool PanelInactive = false,
     double? BatteryChargeW = null,
-    bool AcTransition = false)
+    bool AcTransition = false,
+    double? DGpuBusyLoad = null)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>

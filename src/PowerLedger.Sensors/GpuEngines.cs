@@ -51,14 +51,17 @@ public sealed class GpuEngines
     /// as when Windows reuses a process id, counts as idle.
     /// </summary>
     /// <param name="luid">The adapter as the counters name it; see <see cref="GpuAdapter.CounterLuid"/>.</param>
+    /// <param name="everyEngine">Every engine counts, video and copy included: whether the card works at all, for the idle
+    /// test, rather than what its shaders draw.</param>
     /// <returns>0 when no process uses the adapter; null when no time passed between the snapshots.</returns>
-    public static double? Busiest(EngineSnapshot before, EngineSnapshot after, string luid)
+    public static double? Busiest(EngineSnapshot before, EngineSnapshot after, string luid, bool everyEngine = false)
     {
         var elapsed = after.At - before.At;
         var engines = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var (instance, time) in after.RunningTime)
         {
-            if (EngineOf(instance, luid) is not { } engine || !IsLoadEngine(instance) || !before.RunningTime.TryGetValue(instance, out var earlier)) continue;
+            if (EngineOf(instance, luid) is not { } engine || !(everyEngine || IsLoadEngine(instance))
+                || !before.RunningTime.TryGetValue(instance, out var earlier)) continue;
             if (elapsed <= 0) return null;
             engines[engine] = engines.GetValueOrDefault(engine) + Math.Max(0, time - earlier) / (double)elapsed;
         }

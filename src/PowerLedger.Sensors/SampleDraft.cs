@@ -76,6 +76,10 @@ public sealed class SampleDraft
     /// <summary>The least a measured card's watts cover.</summary>
     public GpuPowerScope DGpuScope => Totals.Scope;
 
+    /// <summary>The busiest card's load over every engine, video included, for the idle test alone (see
+    /// <see cref="Sample.DGpuBusyLoad"/>); Windows' load counters fill it.</summary>
+    public double? DGpuBusyLoad { get; set; }
+
     private GpuTotals Totals => GpuCard.Totals(Cards());
 
     /// <summary>Adds a card a source has found. The card's own library adds it first; Windows' load counters then fill in
@@ -103,7 +107,7 @@ public sealed class SampleDraft
             UserIdleSeconds, SessionLocked, Suspect: false,
             totals.Scope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName, PsuWallW,
             cards.Count > 0 ? cards : null, PlatformOwnDraw(),
-            SystemMeterW, SystemMeter, SystemMeterName, PanelInactive, BatteryChargeW);
+            SystemMeterW, SystemMeter, SystemMeterName, PanelInactive, BatteryChargeW, DGpuBusyLoad: DGpuBusyLoad);
     }
 
     /// <summary>The platform rail as the machine's own draw. Charging the battery is never the PC's consumption, so a rail

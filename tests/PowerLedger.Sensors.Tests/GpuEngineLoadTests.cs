@@ -50,6 +50,16 @@ public class GpuEngineLoadTests
         GpuEngines.Busiest(At(10, (Instance(100, 0), 4), (Instance(300, 1, "VideoDecode"), 0)), onlyVideo, Card).ShouldBe(0);
     }
 
+    [Fact]
+    public void Counting_every_engine_a_film_keeps_the_card_busy()
+    {
+        // The idle test wants to know whether the card works at all: a film playing is no idle machine.
+        var before = At(10, (Instance(100, 0), 4), (Instance(300, 1, "VideoDecode"), 0));
+        var after = At(15, (Instance(100, 0), 4), (Instance(300, 1, "VideoDecode"), 3.5));
+        GpuEngines.Busiest(before, after, Card, everyEngine: true).ShouldNotBeNull().ShouldBe(0.7, 1e-9);
+        GpuEngines.Busiest(before, after, Card).ShouldBe(0);
+    }
+
     [Theory]
     [InlineData("3D", true)]
     [InlineData("3d", true)]

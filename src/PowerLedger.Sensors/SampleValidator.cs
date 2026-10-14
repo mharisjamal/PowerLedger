@@ -76,6 +76,7 @@ public sealed class SampleValidator
         var brightness = Fraction(raw.Brightness, ref suspect);
         var load = Fraction(raw.CpuLoad, ref suspect) ?? 0;
         var gpuLoad = cards is null ? Fraction(raw.DGpuLoad, ref suspect) : null;
+        var gpuBusy = Fraction(raw.DGpuBusyLoad, ref suspect);
 
         if (suspect) SuspectCount++;
         var checkedSample = raw with
@@ -87,6 +88,7 @@ public sealed class SampleValidator
             Brightness = brightness,
             CpuLoad = load,
             DGpuLoad = gpuLoad,
+            DGpuBusyLoad = gpuBusy,
             UpsOutputW = ups,
             PsuOutputW = psu,
             PsuWallW = wall,

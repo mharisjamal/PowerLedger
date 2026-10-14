@@ -174,15 +174,31 @@ public class GpuLoadSourceTests
     public void The_source_is_named_for_the_status_screen()
         => new GpuLoadSource(() => [Radeon], new Engines(() => _now).Read, () => _now).Name.ShouldBe("gpu-load");
 
-    /// <summary>One process keeping the card's 3D engine busy for a set share of the time.</summary>
+    [Fact]
+    public void A_film_on_the_card_is_no_load_for_its_watts_but_keeps_it_busy_for_the_idle_test()
+    {
+        var engines = new Engines(() => _now) { Busy = 0.02, Decoding = 0.6 };
+        var source = new GpuLoadSource(() => [Radeon], engines.Read, () => _now);
+        Tick(source, 0);
+        var film = Tick(source, 5);
+        film.DGpuLoad.ShouldNotBeNull().ShouldBe(0.02, 1e-9);        // the shaders: what the card's rating turns into watts
+        film.DGpuBusyLoad.ShouldNotBeNull().ShouldBe(0.6, 1e-9);     // every engine: a film playing is no idle PC
+        film.ToSample(DateTimeOffset.UnixEpoch, 1).DGpuBusyLoad.ShouldNotBeNull().ShouldBe(0.6, 1e-9);
+    }
+
+    /// <summary>One process keeping the card's 3D engine busy for a set share of the time, and another its video decoder.</summary>
     private sealed class Engines(Func<TimeSpan> clock)
     {
         private string _luid = Radeon.CounterLuid;
         private TimeSpan _last;
         private double _busySeconds;
+        private double _decodingSeconds;
 
         /// <summary>The share of the time since the last read the engine was busy.</summary>
         public double Busy { get; set; }
+
+        /// <summary>The share of the time since the last read the video decoder was busy.</summary>
+        public double Decoding { get; set; }
 
         public int Reads { get; private set; }
 
@@ -198,10 +214,12 @@ public class GpuLoadSourceTests
             Reads++;
             var now = clock();
             _busySeconds += (now - _last).TotalSeconds * Busy;
+            _decodingSeconds += (now - _last).TotalSeconds * Decoding;
             _last = now;
             return new EngineSnapshot(now.Ticks, new Dictionary<string, long>
             {
                 [$"pid_4242_{_luid}_phys_0_eng_0_engtype_3D"] = (long)Math.Round(_busySeconds * TimeSpan.TicksPerSecond),
+                [$"pid_4343_{_luid}_phys_0_eng_3_engtype_VideoDecode"] = (long)Math.Round(_decodingSeconds * TimeSpan.TicksPerSecond),
             });
         }
     }
