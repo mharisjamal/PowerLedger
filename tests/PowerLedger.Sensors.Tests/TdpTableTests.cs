@@ -86,6 +86,22 @@ public class TdpTableTests
     [InlineData("Intel(R) Arc(TM) A770M Graphics", 150)]
     [InlineData("NVIDIA GeForce RTX 3050 Laptop GPU", 60)]          // not the desktop RTX 3050's 130 W
     [InlineData("NVIDIA GeForce RTX 3050 Ti Laptop GPU", 60)]
+    [InlineData("NVIDIA GeForce RTX 3050 6GB Laptop GPU", 60)]      // Plan AC review: these three were rated 130 W
+    [InlineData("NVIDIA GeForce RTX 3050 4GB Laptop GPU", 60)]
+    [InlineData("NVIDIA GeForce RTX 3050 A Laptop GPU", 45)]
+    [InlineData("NVIDIA RTX A1000 Laptop GPU", 70)]                 // and the workstation laptops their desktop namesakes'
+    [InlineData("NVIDIA RTX A2000 Laptop GPU", 70)]
+    [InlineData("NVIDIA RTX A2000 8GB Laptop GPU", 70)]
+    [InlineData("NVIDIA RTX A3000 Laptop GPU", 100)]
+    [InlineData("NVIDIA RTX A3000 12GB Laptop GPU", 100)]
+    [InlineData("NVIDIA RTX A4000 Laptop GPU", 115)]
+    [InlineData("NVIDIA RTX A5000 Laptop GPU", 130)]
+    [InlineData("NVIDIA RTX A5500 Laptop GPU", 130)]
+    [InlineData("NVIDIA RTX 2000 Ada Generation Laptop GPU", 90)]
+    [InlineData("NVIDIA RTX 3000 Ada Generation Laptop GPU", 100)]
+    [InlineData("NVIDIA RTX 3500 Ada Generation Laptop GPU", 115)]
+    [InlineData("NVIDIA RTX 4000 Ada Generation Laptop GPU", 130)]
+    [InlineData("NVIDIA RTX 5000 Ada Generation Laptop GPU", 140)]
     [InlineData("NVIDIA GeForce RTX 3060 Laptop GPU", 90)]
     [InlineData("NVIDIA GeForce RTX 3080 Ti Laptop GPU", 130)]
     [InlineData("NVIDIA GeForce RTX 4060 Laptop GPU", 90)]
