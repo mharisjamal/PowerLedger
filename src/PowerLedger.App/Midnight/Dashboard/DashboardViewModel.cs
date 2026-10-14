@@ -279,7 +279,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             pill,
             TimeZoneInfo.ConvertTime(now, _zone),
             _summary.Read(now, _zone),
-            _history.Read(Ranges.LastDays(31, now, _zone, _culture), _zone),
+            _history.Read(Ranges.LastDays(31, now, _zone, _culture) with { Bucket = TimeSpan.FromHours(1) }, _zone),
             _history.Read(LastMonthSoFar(now, _zone), _zone),
             chartRange,
             kept is not null ? kept.Chart : _history.Read(chartRange, _zone),
@@ -506,7 +506,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         var today = snapshot.Today;
         var todayDay = DateOnly.FromDateTime(read.LocalNow.DateTime);
         var average = DashboardMaths.AverageDayWh(read.Recent?.Days.Where(day => day.Day < todayDay).ToList() ?? []);
-        var change = DashboardMaths.TodayTrend(today.EnergyKwh * 1000, average, read.LocalNow.TimeOfDay.TotalDays);
+        var change = DashboardMaths.TodayTrend(today.EnergyKwh * 1000, average, DayShape.ShareBy(read.Recent?.Series ?? [], read.LocalNow, _zone) ?? read.LocalNow.TimeOfDay.TotalDays);
         return Energy(today, change, DashboardMaths.Fill(today.EnergyKwh * 1000, average ?? 0), "vs your average day");
     }
 

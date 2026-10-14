@@ -37,7 +37,8 @@ internal sealed class Insights(IRangeHistory history, Func<double> co2KgPerKwh, 
         var hours = report.Series.Select(row => HourUse.From(row, zone)).ToList();
         var midnight = Ranges.Midnight(today, zone);
         var tomorrow = Ranges.Midnight(today.AddDays(1), zone);
-        var todayLeft = (tomorrow - now) / (tomorrow - midnight);
+        // What recent days used after this time of day (report finding 19); an even spread only without any.
+        var todayLeft = 1 - (DayShape.ShareBy(hours, today, TimeZoneInfo.ConvertTime(now, zone).TimeOfDay) ?? (now - midnight) / (tomorrow - midnight));
 
         var forecast = BillForecasts.From(HourUse.WholeDays(hours, today), today, todayLeft, monthKwh, monthCost, todayPrice, currency);
         var anomalies = UsageAnomalies.Find(hours, now, zone);

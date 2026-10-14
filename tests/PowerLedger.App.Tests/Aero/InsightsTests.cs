@@ -53,6 +53,19 @@ public class InsightsTests
         report.Forecast.ShouldBe(new BillForecast(13.20m, 13.20m, 13.20m, "GBP", 56, true, 52.8, 52.8, 52.8));
     }
 
+    /// <summary>Report finding 19: the rest of today is what recent days used after this time of day. A PC used only in the
+    /// evening has all of its day still to come at noon, not half of it.</summary>
+    [Fact]
+    public void The_rest_of_today_follows_the_shape_of_recent_days()
+    {
+        Holds(Hours(Today.AddDays(-56), 57, Utc, local => local.Hour >= 18 ? 0.4 : 0), Utc);
+
+        var report = Make().Read(Now, Utc);
+
+        // 14 days of 2.4 kWh, nothing yet today, then all of today and the 15 days after it: 72 kWh at 0.25.
+        report.Forecast.ShouldBe(new BillForecast(18.00m, 18.00m, 18.00m, "GBP", 56, true, 72, 72, 72));
+    }
+
     /// <summary>Report finding 4: after a tariff change the days left cost today's price, and the month so far what it did.</summary>
     [Fact]
     public void The_days_left_are_priced_at_today_s_tariff()

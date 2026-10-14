@@ -118,18 +118,19 @@ public sealed class ReportQueries(SqliteDatabase db)
 
     /// <param name="to">The range's end. The window runs on to the next whole row, but time past the end has not happened
     /// yet, so it is neither asleep nor unmonitored (report finding 7).</param>
-    private static RangeTotals Summarise(Window w, TariffSchedule schedule, DateTimeOffset to)
+    private RangeTotals Summarise(Window w, TariffSchedule schedule, DateTimeOffset to)
     {
         double energy = 0, cpu = 0, gpu = 0, display = 0, rest = 0, idleOn = 0, idleOff = 0;
         double onS = 0, idleOnS = 0, idleOffS = 0, gapS = 0, measuredS = 0, calibratedS = 0, estimatedS = 0, peak = 0;
         DateTimeOffset? peakAt = null;
+        Aggregate? peakRow = null;
         foreach (var r in w.Rows)
         {
             energy += r.EnergyWh; cpu += r.CpuWh; gpu += r.GpuWh; display += r.DisplayWh; rest += r.RestWh;
             idleOn += r.IdleOnWh; idleOff += r.IdleOffWh;
             onS += r.OnSeconds; idleOnS += r.IdleOnSeconds; idleOffS += r.IdleOffSeconds;
             measuredS += r.MeasuredSeconds; calibratedS += r.CalibratedSeconds; estimatedS += r.EstimatedSeconds;
-            if (r.MaxW > peak) { peak = r.MaxW; peakAt = r.Start; }
+            if (r.MaxW > peak) { peak = r.MaxW; peakAt = r.Start; peakRow = r; }
         }
 
         // Each sleep laid back from its wake, as a chart lays it, and only its part inside the window counted: a night's
@@ -141,6 +142,11 @@ public sealed class ReportQueries(SqliteDatabase db)
             var slept = woke - TimeSpan.FromSeconds(row.GapSeconds);
             if (Min(woke, end) > Max(slept, w.From)) gapS += (Min(woke, end) - Max(slept, w.From)).TotalSeconds;
         }
+
+        // An hour row's start is no time for its peak (report finding 19): the minute it was in, while the hour's minutes
+        // are kept; once retention has purged them, nothing says when in the hour it was, so no time is given.
+        if (peakRow is not null && w.Hours.Exists(h => ReferenceEquals(h, peakRow)))
+            peakAt = new AggregateRepository(db).ReadMinutes(peakRow.Start, peakRow.Start + Hour).MaxBy(m => m.MaxW)?.Start;
 
         var qualityS = measuredS + calibratedS + estimatedS;
         var onHours = onS / 3600.0;

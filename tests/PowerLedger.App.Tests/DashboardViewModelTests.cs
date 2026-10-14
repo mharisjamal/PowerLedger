@@ -87,6 +87,24 @@ public sealed class DashboardViewModelTests : IDisposable
         HardwareNames.Memory(34359738368d, 0).ShouldBe("32 GB RAM");
     }
 
+    /// <summary>Report finding 19: today is held against what recent days had used by this time of day, not against an even
+    /// share of the day. A PC used only from noon has used 2.5 of its 12 hours' energy by 14:32.</summary>
+    [Fact]
+    public void Today_s_trend_follows_the_shape_of_recent_days()
+    {
+        _history.Answer = range => range.Title switch
+        {
+            "Last 31 days" => Reports.Typical(range, 31 * 0.3) is var typical
+                ? typical with { Series = [.. typical.Series.Select(row => row with { EnergyWh = row.Start.Hour >= 12 ? 25 : 0 })] }
+                : null,
+            _ => Reports.Typical(range),
+        };
+        var dashboard = Dashboard();
+        dashboard.Show();
+
+        dashboard.Kpis[1].Trend.ShouldBe("348%");             // 284 Wh against 300 Wh × 2.535 / 12 = 63.4 Wh expected
+    }
+
     [Fact]
     public void The_cards_come_from_the_live_reading_and_the_history()
     {

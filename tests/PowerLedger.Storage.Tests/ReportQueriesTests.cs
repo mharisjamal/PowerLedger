@@ -158,6 +158,35 @@ public class ReportQueriesTests
         totals.UnmonitoredHours.ShouldBe(7.5 - 7 - 1 / 60.0, 1e-9);
     }
 
+    /// <summary>Report finding 19: a long range reads hour rows, whose start is no time for a peak; while the hour's minutes
+    /// are kept, the peak is the minute it was in.</summary>
+    [Fact]
+    public void A_peak_in_an_hour_row_is_timed_by_its_minute()
+    {
+        using var t = new TestDatabase();
+        var agg = new AggregateRepository(t.Db);
+        var hour = Enumerable.Range(0, 60).Select(i => Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), Fixtures.Minute(i * 60, i == 37 ? 90 : 30))).ToList();
+        agg.UpsertHour(Downsampler.ToHour(Fixtures.T0, hour));
+        foreach (var m in hour) agg.UpsertMinute(m);
+
+        var totals = new ReportQueries(t.Db).Totals(Fixtures.T0.AddDays(-4), Fixtures.T0.AddHours(1));
+
+        (totals.PeakW, totals.PeakAt).ShouldBe((90.0, (DateTimeOffset?)Fixtures.T0.AddMinutes(37)));
+    }
+
+    /// <summary>Once retention has purged the hour's minutes, nothing says when in the hour the peak was, so no time is given.</summary>
+    [Fact]
+    public void A_peak_in_an_hour_whose_minutes_are_purged_has_no_time()
+    {
+        using var t = new TestDatabase();
+        var hour = Enumerable.Range(0, 60).Select(i => Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), Fixtures.Minute(i * 60, i == 37 ? 90 : 30))).ToList();
+        new AggregateRepository(t.Db).UpsertHour(Downsampler.ToHour(Fixtures.T0, hour));
+
+        var totals = new ReportQueries(t.Db).Totals(Fixtures.T0.AddDays(-4), Fixtures.T0.AddHours(1));
+
+        (totals.PeakW, totals.PeakAt).ShouldBe((90.0, (DateTimeOffset?)null));
+    }
+
     /// <summary>Report finding 7: a long range reads whole hour rows, so its window runs on to the next whole hour; the time
     /// past the range's end has not happened, and is not unmonitored.</summary>
     [Fact]

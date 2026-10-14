@@ -28,7 +28,7 @@ internal static class BillForecasts
 
     /// <param name="days">Whole days of history, any order; days before the last 8 weeks and from today on are ignored.</param>
     /// <param name="today">The local day under way.</param>
-    /// <param name="todayLeft">The share of today still to come, 0 to 1.</param>
+    /// <param name="todayLeft">The share of today's energy still to come, 0 to 1, as recent days used theirs (<see cref="DayShape"/>).</param>
     /// <param name="monthKwh">What the month has used so far, today's part included.</param>
     /// <param name="monthCost">What <paramref name="monthKwh"/> cost at the tariffs in force as it was used; 0 with no tariff.</param>
     /// <param name="price">Today's price per kWh, for the energy still to come; 0 with no tariff.</param>
