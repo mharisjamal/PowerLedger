@@ -67,6 +67,7 @@ public partial class App : Application
     private AeroAccess? _aero;
     private WindowWatch? _watch;
     private bool? _reportedVisible;
+    private bool? _efficient;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -209,12 +210,18 @@ public partial class App : Application
         if (e.PropertyName == nameof(NowViewModel.TrayTooltip)) _tray?.Show(_now?.Last?.TotalW, _now?.TrayTooltip ?? "PowerLedger");
     }
 
-    /// <summary>A window of the App's showed or went: the live panel is built only while one shows (perf review P1), and the
-    /// service hears whether one is visible, the overlay among them (Plan Q §4).</summary>
+    /// <summary>A window of the App's showed or went: the live panel is built only while one shows (perf review P1), Windows
+    /// runs the App in efficiency mode while none does (P3), and the service hears whether one is visible, the overlay among
+    /// them (Plan Q §4).</summary>
     private void OnWindowsChanged()
     {
         if (_watch is not { } watch) return;
         if (_now is not null) _now.IsWatched = watch.Shows;
+        if (_efficient != !watch.Shows)
+        {
+            _efficient = !watch.Shows;
+            ProcessQos.Efficient(!watch.Shows);
+        }
         if (_reportedVisible == watch.Visible) return;
         _reportedVisible = watch.Visible;
         _link?.ReportWindow(watch.Visible);
