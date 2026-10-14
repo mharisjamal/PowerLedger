@@ -43,6 +43,21 @@ public class RawSampleRepositoryTests
         repo.Read(Fixtures.T0, Fixtures.T0.AddHours(3)).Last().AsleepW.ShouldBeNull();   // the App's read, from any version
     }
 
+    /// <summary>Plan AC review: the minutes are folded from the stored rows, so what the pack gave on a tick on battery is
+    /// stored with it, and the battery energy leaves out a monitor with its own plug however often a minute is folded.</summary>
+    [Fact]
+    public void What_the_pack_gave_comes_back_for_the_service()
+    {
+        using var t = new TestDatabase();
+        var repo = new RawSampleRepository(t.Db);
+        var onBattery = Fixtures.Reading(0) with { OnBattery = true, PackW = 34.2 };
+        var onAc = Fixtures.Reading(1);
+        repo.InsertBatch([onBattery, onAc]);
+
+        repo.ReadAll(Fixtures.T0, Fixtures.T0.AddHours(1)).ShouldBe(new[] { onBattery, onAc });
+        repo.ReadRange(Fixtures.T0.ToUnixTimeMilliseconds(), Fixtures.T0.AddHours(1).ToUnixTimeMilliseconds()).ShouldBe(new[] { onBattery, onAc });
+    }
+
     [Fact]
     public void A_batch_round_trips_every_field()
     {

@@ -28,6 +28,20 @@ public class BatteryRoundTripTests
         EnergyIntegrator.Integrate(Tick(10, onBattery: true)).BatteryWh.ShouldBe(0);   // a gap
     }
 
+    /// <summary>Plan AC review: a monitor with a plug of its own draws from the wall while the laptop runs on its battery, so
+    /// only what the pack gave is battery energy; booking the whole total counted a laptop beside a 25 W monitor as drawing
+    /// that monitor from its battery, at the wall equivalent besides. A reading that says nothing of its pack is all pack.</summary>
+    [Fact]
+    public void Only_what_the_pack_gave_is_battery_energy()
+    {
+        var slice = EnergyIntegrator.Integrate(Tick(59.2, onBattery: true) with { PackW = 34.2 }, maxDeltaSeconds: 7200);
+        slice.Wh.ShouldBe(59.2, 1e-9);
+        slice.BatteryWh.ShouldBe(34.2, 1e-9);
+        EnergyIntegrator.Integrate(Tick(59.2, onBattery: true), maxDeltaSeconds: 7200).BatteryWh.ShouldBe(59.2, 1e-9);
+        EnergyIntegrator.Integrate(Tick(59.2, onBattery: true) with { PackW = 80 }, maxDeltaSeconds: 7200).BatteryWh.ShouldBe(59.2, 1e-9);
+        EnergyIntegrator.Integrate(Tick(59.2, onBattery: false) with { PackW = 34.2 }, maxDeltaSeconds: 7200).BatteryWh.ShouldBe(0);
+    }
+
     [Fact]
     public void A_row_counts_its_battery_energy_at_the_wall_and_its_sleep_as_booked()
     {

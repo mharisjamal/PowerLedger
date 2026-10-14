@@ -11,8 +11,8 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         "on_battery, display_on, user_idle, locked, cpu_load, gpu_load, brightness, suspect";
 
     /// <summary>What storage versions 2 and 5 added: where the total came from, what the card's figure covered, what was
-    /// measured, and what the machine drew asleep on the tick that reached back across a sleep.</summary>
-    private const string Provenance = "total_source, gpu_scope, measured_mask, asleep_w";
+    /// measured, what the machine drew asleep on the tick that reached back across a sleep, and what the pack gave on battery.</summary>
+    private const string Provenance = "total_source, gpu_scope, measured_mask, asleep_w, pack_w";
 
     /// <summary>Writes all readings in one transaction. Same timestamp replaces the earlier row.</summary>
     public void InsertBatch(IReadOnlyList<Reading> readings)
@@ -23,8 +23,8 @@ public sealed class RawSampleRepository(SqliteDatabase db)
         using var cmd = c.CreateCommand();
         cmd.CommandText = $"INSERT OR REPLACE INTO samples_raw ({Columns}, {Provenance}) VALUES " +
             "($ts, $delta, $total, $quality, $cpu, $gpu, $display, $ram, $storage, $board, $extras, $monitors, $psu, $rest, " +
-            "$onBattery, $displayOn, $userIdle, $locked, $cpuLoad, $gpuLoad, $brightness, $suspect, $totalSource, $gpuScope, $measured, $asleep)";
-        var names = new[] { "$ts", "$delta", "$total", "$quality", "$cpu", "$gpu", "$display", "$ram", "$storage", "$board", "$extras", "$monitors", "$psu", "$rest", "$onBattery", "$displayOn", "$userIdle", "$locked", "$cpuLoad", "$gpuLoad", "$brightness", "$suspect", "$totalSource", "$gpuScope", "$measured", "$asleep" };
+            "$onBattery, $displayOn, $userIdle, $locked, $cpuLoad, $gpuLoad, $brightness, $suspect, $totalSource, $gpuScope, $measured, $asleep, $pack)";
+        var names = new[] { "$ts", "$delta", "$total", "$quality", "$cpu", "$gpu", "$display", "$ram", "$storage", "$board", "$extras", "$monitors", "$psu", "$rest", "$onBattery", "$displayOn", "$userIdle", "$locked", "$cpuLoad", "$gpuLoad", "$brightness", "$suspect", "$totalSource", "$gpuScope", "$measured", "$asleep", "$pack" };
         foreach (var n in names) cmd.Parameters.Add(new SqliteParameter(n, null));
 
         foreach (var r in readings)
@@ -32,7 +32,8 @@ public sealed class RawSampleRepository(SqliteDatabase db)
             var p = r.Components;
             object?[] values = [Rows.Ms(r.Timestamp), r.DeltaSeconds, r.TotalW, (int)r.Quality, p.Cpu, p.Gpu, p.Display, p.Ram, p.Storage, p.Board, p.Extras, p.Monitors, p.PsuLoss, p.Unattributed,
                 r.OnBattery ? 1 : 0, r.DisplayOn ? 1 : 0, r.UserIdle ? 1 : 0, r.SessionLocked ? 1 : 0, r.CpuLoad, r.GpuLoad, r.Brightness, r.Suspect ? 1 : 0,
-                (int)r.TotalSource, (int)r.GpuScope, (int)r.Measured, r.AsleepW is { } asleep && double.IsFinite(asleep) ? asleep : null];
+                (int)r.TotalSource, (int)r.GpuScope, (int)r.Measured, r.AsleepW is { } asleep && double.IsFinite(asleep) ? asleep : null,
+                r.PackW is { } pack && double.IsFinite(pack) ? pack : null];
             for (var i = 0; i < values.Length; i++) cmd.Parameters[i].Value = values[i] ?? DBNull.Value;
             cmd.ExecuteNonQuery();
         }
@@ -73,7 +74,7 @@ public sealed class RawSampleRepository(SqliteDatabase db)
                 ? reading with
                 {
                     TotalSource = (TotalSource)r.GetInt32(22), GpuScope = (GpuPowerScope)r.GetInt32(23), Measured = (MeasuredParts)r.GetInt32(24),
-                    AsleepW = Rows.NullableDouble(r, 25),
+                    AsleepW = Rows.NullableDouble(r, 25), PackW = Rows.NullableDouble(r, 26),
                 }
                 : reading);
         }

@@ -159,9 +159,11 @@ internal static class Schema
     /// <summary>Asleep energy (accuracy A10): what the machine drew asleep, estimated, on the tick that reached back across
     /// the sleep, and in the minute and hour rows the sleep is stored in. Rows from before read none. And the energy the
     /// battery gave (accuracy A9), at the pack, which the totals count at the wall: rows from before take their energy's
-    /// share of on-time spent on battery, which is exact for a minute on battery throughout.</summary>
+    /// share of on-time spent on battery, which is exact for a minute on battery throughout. A tick on battery keeps what the
+    /// pack itself gave, the total less a monitor with a plug of its own, since the minutes are folded from the ticks.</summary>
     public const string V5 = """
         ALTER TABLE samples_raw ADD COLUMN asleep_w REAL;
+        ALTER TABLE samples_raw ADD COLUMN pack_w REAL;
         ALTER TABLE samples_1m  ADD COLUMN asleep_wh REAL NOT NULL DEFAULT 0;
         ALTER TABLE samples_1h  ADD COLUMN asleep_wh REAL NOT NULL DEFAULT 0;
         ALTER TABLE samples_1m  ADD COLUMN battery_wh REAL NOT NULL DEFAULT 0;

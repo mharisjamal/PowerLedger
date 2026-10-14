@@ -13,6 +13,9 @@ namespace PowerLedger.Core;
 /// <param name="AsleepW">What the machine drew while it slept, estimated (accuracy A10), on the tick that reaches back across
 /// the sleep: the energy integrator books it over that tick's gap as asleep energy. Null on every other tick, and on a gap
 /// the service was never told was a sleep.</param>
+/// <param name="PackW">On battery, what the battery itself gave (Plan AC review): the total less what a monitor with a plug
+/// of its own drew from the wall. Only it counts as battery energy, at the wall equivalent. Null on AC, and on a reading
+/// from before it was stored, which counts its whole total.</param>
 public sealed record Reading(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -30,4 +33,5 @@ public sealed record Reading(
     TotalSource TotalSource = TotalSource.Model,
     GpuPowerScope GpuScope = GpuPowerScope.Board,
     MeasuredParts Measured = MeasuredParts.None,
-    double? AsleepW = null);
+    double? AsleepW = null,
+    double? PackW = null);

@@ -82,6 +82,20 @@ public class PowerModelTests
         r.Components.Monitors.ShouldBe(25 + 6.2, 1e-9);
         r.Components.Unattributed.ShouldBe(34.2 - 14.6 - 4.1 - 4.2 - 6.2, 1e-9);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+        r.PackW.ShouldNotBeNull().ShouldBe(34.2, 1e-9);   // the battery gave the rate; the monitor with its own plug drew from the wall
+    }
+
+    /// <summary>Plan AC review: what the battery gave on a tick is the total less the monitors with plugs of their own,
+    /// whichever figure the total came from; on AC the reading says nothing of a pack.</summary>
+    [Fact]
+    public void A_reading_on_battery_says_what_its_pack_gave()
+    {
+        var monitors = new FixedDraw(new(OwnPlug: 25, FromPc: 6.2));
+        var modelled = Laptop(monitors: monitors).Evaluate(TestData.Laptop(onBattery: true));
+        modelled.TotalSource.ShouldBe(TotalSource.Model);
+        modelled.PackW.ShouldNotBeNull().ShouldBe(modelled.TotalW - 25, 1e-9);
+        Laptop(monitors: monitors).Evaluate(TestData.Laptop(battery: 34.2)).PackW.ShouldBeNull();
+        Laptop(monitors: monitors).Evaluate(TestData.Laptop()).PackW.ShouldBeNull();
     }
 
     [Fact]

@@ -114,6 +114,20 @@ public sealed partial class PowerModel
     /// <param name="monitors">What the <see cref="IMonitorDraw"/> said, asked once for this reading.</param>
     public Reading Evaluate(Sample s, out MonitorWatts monitors)
     {
+        var reading = Total(s, out monitors);
+        return reading.OnBattery ? reading with { PackW = PackWatts(reading, monitors.OwnPlug) } : reading;
+    }
+
+    /// <summary>
+    /// What the battery gave on a tick on battery (Plan AC review), which is what counts at the wall equivalent: the total
+    /// less the monitors with plugs of their own, which draw from the wall whatever the PC runs on; a UPS that powers the
+    /// monitors too gave them as well, and its reading holds them.
+    /// </summary>
+    private double PackWatts(Reading r, double ownPlug)
+        => r.TotalSource == TotalSource.Ups && _profile.UpsLoad != UpsLoad.ThisPc ? r.TotalW : Math.Max(0, r.TotalW - ownPlug);
+
+    private Reading Total(Sample s, out MonitorWatts monitors)
+    {
         var cpu = CpuWatts(s);
         var gpu = GpuWatts(s);
         var display = DisplayModel.PanelWatts(_profile, s);

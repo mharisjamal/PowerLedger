@@ -41,6 +41,10 @@ public static class EnergyIntegrator
             OnSeconds: r.DeltaSeconds,
             BatterySeconds: r.OnBattery ? r.DeltaSeconds : 0,
             GapSeconds: 0,
-            BatteryWh: r.OnBattery ? wh : 0);
+            BatteryWh: r.OnBattery ? Math.Min(wh, PackWatts(r) * hours) : 0);
     }
+
+    /// <summary>What the battery gave on a tick on battery: the reading's pack watts, a monitor with its own plug left out
+    /// (Plan AC review), or its whole total when it says nothing of them, as a reading stored before them does.</summary>
+    private static double PackWatts(Reading r) => r.PackW is { } pack && double.IsFinite(pack) && pack >= 0 ? pack : r.TotalW;
 }
