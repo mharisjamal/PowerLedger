@@ -36,17 +36,22 @@ internal sealed class ResetCalibrationCommand : LoopCommand
 {
 }
 
-/// <summary>The loop's inbox.</summary>
+/// <summary>The loop's inbox, and the event that wakes the loop's thread when something arrives.</summary>
 internal sealed class LoopCommands
 {
     private readonly Channel<LoopCommand> _channel = Channel.CreateUnbounded<LoopCommand>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly AutoResetEvent _arrived = new(false);
 
     public ChannelReader<LoopCommand> Reader => _channel.Reader;
+
+    /// <summary>Set whenever a command is queued; the loop's thread waits on it with its beat.</summary>
+    public WaitHandle Arrived => _arrived;
 
     /// <summary>Queues the command. The task completes once the loop has carried it out, and fails if the loop refused it.</summary>
     public Task SendAsync(LoopCommand command)
     {
         if (!_channel.Writer.TryWrite(command)) command.Fail(new InvalidOperationException("The service is stopping."));
+        else _arrived.Set();
         return command.Done;
     }
 

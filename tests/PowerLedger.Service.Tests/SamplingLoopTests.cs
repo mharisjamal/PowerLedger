@@ -148,6 +148,62 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task Every_tick_runs_on_the_loops_own_thread_and_never_on_the_thread_pool()
+    {
+        using var t = new TestDatabase();
+        var threads = new List<(int Id, bool Pool, string? Name)>();
+        await using var loop = new Harness(t, makeSet: _ => new FakeSensorSet((ts, delta) =>
+        {
+            lock (threads) threads.Add((Environment.CurrentManagedThreadId, Thread.CurrentThread.IsThreadPoolThread, Thread.CurrentThread.Name));
+            return Samples.At(ts, delta, batteryW: 20);
+        }));
+        await loop.StartAsync();
+        await loop.Ticks(5);
+        await loop.Send(new ApplySettingsCommand(loop.Board.Settings.ShouldNotBeNull() with { SampleIntervalSeconds = 2 }));
+        loop.Clock.Advance(TimeSpan.FromSeconds(2));
+        await WaitFor.True(() => loop.TickCount == 6);
+
+        lock (threads)
+        {
+            threads.Count.ShouldBe(6);
+            threads.Select(thread => thread.Id).Distinct().ShouldHaveSingleItem().ShouldNotBe(Environment.CurrentManagedThreadId);
+            threads.ShouldAllBe(thread => !thread.Pool && thread.Name == "PowerLedger loop");
+        }
+    }
+
+    [Fact]
+    public async Task Stopping_while_a_sensor_read_hangs_still_writes_the_readings_and_closes_the_session()
+    {
+        using var t = new TestDatabase();
+        using var gate = new ManualResetEventSlim(false);
+        var reads = 0;
+        await using var loop = new Harness(t, makeSet: _ => new FakeSensorSet((ts, delta) =>
+        {
+            if (Interlocked.Increment(ref reads) == 3) gate.Wait();
+            return Samples.At(ts, delta, batteryW: 20);
+        }));
+        try
+        {
+            await loop.StartAsync();
+            await loop.Ticks(2);
+            loop.Clock.Advance(TimeSpan.FromSeconds(1));            // the third read hangs, long before the watchdog would
+            await WaitFor.True(() => Volatile.Read(ref reads) == 3);
+            await loop.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+            new RawSampleRepository(t.Db).Count().ShouldBe(2);
+            new SessionRepository(t.Db).List(Start.AddHours(-1), Start.AddHours(1)).ShouldHaveSingleItem()
+                .EndReason.ShouldBe(SessionReason.ServiceStop);
+            loop.Board.Status.ShouldNotBeNull().SensorRestarts.ShouldBe(0);   // a stop is not a hang
+            loop.Sets.ShouldHaveSingleItem().Disposed.ShouldBeFalse();         // still stuck in its call
+        }
+        finally
+        {
+            gate.Set();
+        }
+        await WaitFor.True(() => loop.Sets.Single().Disposed);
+    }
+
+    [Fact]
     public async Task Detected_monitors_are_listed_in_the_status_and_added_to_the_reading()
     {
         using var t = new TestDatabase();
