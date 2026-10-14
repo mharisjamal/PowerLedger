@@ -429,8 +429,8 @@ internal sealed class SamplingLoop : BackgroundService
     /// given before the new beat existed would be lost, and a test moves its fake clock the moment it is told.
     /// </summary>
     /// <returns>True when the beat must start over, or stop, whatever the interval: the machine is going to sleep, or it
-    /// woke, and a tick queued while it slept must not fire before the rebuilt sensors have had a full interval. A new
-    /// interval, from settings or from someone starting or stopping looking, is picked after every command.</returns>
+    /// woke, and a tick queued while it slept must not fire before a full interval has passed since. A new interval, from
+    /// settings or from someone starting or stopping looking, is picked after every command.</returns>
     private bool Handle(LoopCommand command)
     {
         var now = _clock.GetUtcNow();

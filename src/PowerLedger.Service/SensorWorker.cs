@@ -186,7 +186,7 @@ internal sealed class SensorWorker : IDisposable
     {
         if (Volatile.Read(ref _lane) is not { } lane || Volatile.Read(ref lane.State) != Reading) return;
         var left = TimeSpan.FromSeconds((Volatile.Read(ref lane.Deadline) - _clock.GetTimestamp()) / (double)_clock.TimestampFrequency);
-        if (left > TimeSpan.Zero)
+        if (left >= TimeSpan.FromMilliseconds(1))                  // the timer's own resolution: closer than that is due
         {
             try
             {
