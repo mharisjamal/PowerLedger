@@ -24,6 +24,8 @@ internal sealed class ReadAbandonedException : Exception
 /// rule; perf review §7: one thread, no thread pool hops). A read is watched by a timer armed only while it runs. One that
 /// overruns its timeout abandons the thread, stuck in its call, together with its set, and starts the loop again on a fresh
 /// thread, which builds a fresh set on its first read; the stuck thread disposes its set and ends once its call returns.
+/// Building a set, which a busy machine can take many seconds over the first time, has an allowance of its own; the read
+/// that follows has the usual one from when the set is ready.
 /// Each set is built with a token that is cancelled the moment the set is abandoned or thrown away, before a fresh one can
 /// be built, so whatever a stuck call passes on when it returns can be told apart and ignored. Everything but
 /// <see cref="Interrupt"/> and <see cref="Abandoned"/> is called from the loop's own thread.
@@ -39,6 +41,7 @@ internal sealed class SensorWorker : IDisposable
 
     private readonly Func<CancellationToken, ISensorSet> _factory;
     private readonly TimeSpan _timeout;
+    private readonly TimeSpan _buildTimeout;
     private readonly TimeProvider _clock;
     private readonly ITimer _watchdog;
     private Action? _body;
@@ -46,10 +49,13 @@ internal sealed class SensorWorker : IDisposable
     private Lane? _lane;
     private int _abandoned;
 
-    public SensorWorker(Func<CancellationToken, ISensorSet> factory, TimeSpan timeout, TimeProvider clock)
+    /// <param name="timeout">How long a read may take.</param>
+    /// <param name="buildTimeout">How long building a set, and disposing the one it replaces, may take.</param>
+    public SensorWorker(Func<CancellationToken, ISensorSet> factory, TimeSpan timeout, TimeSpan buildTimeout, TimeProvider clock)
     {
         _factory = factory;
         _timeout = timeout;
+        _buildTimeout = buildTimeout;
         _clock = clock;
         _watchdog = clock.CreateTimer(static worker => ((SensorWorker)worker!).OnWatchdog(), this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
@@ -75,30 +81,33 @@ internal sealed class SensorWorker : IDisposable
     public TickResult Read(DateTimeOffset timestamp, double deltaSeconds)
     {
         var lane = t_lane ?? throw new InvalidOperationException("Only the loop's own thread reads the sensors.");
-        Volatile.Write(ref lane.Since, _clock.GetTimestamp());
-        Volatile.Write(ref lane.State, Reading);
-        _watchdog.Change(_timeout, Timeout.InfiniteTimeSpan);
         TickResult? result = null;
         ExceptionDispatchInfo? failure = null;
         try
         {
-            if (lane.Thrown is { } old)
+            if (lane.Set is null || lane.Thrown is not null)
             {
-                lane.Thrown = null;
-                DisposeQuietly(old);
+                Arm(lane, _buildTimeout);
+                if (lane.Thrown is { } old)
+                {
+                    lane.Thrown = null;
+                    DisposeQuietly(old);
+                }
+                lane.Set ??= _factory(lane.Tokens.Token);
             }
-            var set = lane.Set ??= _factory(lane.Tokens.Token);
+            Arm(lane, _timeout);
+            var set = lane.Set;
             result = new TickResult(set.Read(timestamp, deltaSeconds), set.Health, set.SuspectCount);
+        }
+        catch (ReadAbandonedException)
+        {
+            throw;
         }
         catch (Exception error)
         {
             failure = ExceptionDispatchInfo.Capture(error);
         }
-        if (Interlocked.CompareExchange(ref lane.State, Idle, Reading) != Reading)
-        {
-            lane.DisposeSets();                                   // the set goes with the thread that was given up on
-            throw new ReadAbandonedException();
-        }
+        if (Interlocked.CompareExchange(ref lane.State, Idle, Reading) != Reading) throw GivenUpOn(lane);
         _watchdog.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         failure?.Throw();
         return result!;
@@ -133,6 +142,22 @@ internal sealed class SensorWorker : IDisposable
         t_lane?.DisposeSets();
     }
 
+    /// <summary>Gives the call about to be made <paramref name="allowance"/> from now. The deadline is written before the
+    /// lane counts as reading, so a watchdog that sees it reading never sees an older deadline.</summary>
+    private void Arm(Lane lane, TimeSpan allowance)
+    {
+        Volatile.Write(ref lane.Deadline, _clock.GetTimestamp() + (long)(allowance.TotalSeconds * _clock.TimestampFrequency));
+        if (Interlocked.CompareExchange(ref lane.State, Reading, Idle) == GivenUp) throw GivenUpOn(lane);
+        _watchdog.Change(allowance, Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>The set goes with the thread that was given up on, which then ends.</summary>
+    private static ReadAbandonedException GivenUpOn(Lane lane)
+    {
+        lane.DisposeSets();
+        return new ReadAbandonedException();
+    }
+
     private void StartLane()
     {
         var lane = new Lane();
@@ -153,11 +178,11 @@ internal sealed class SensorWorker : IDisposable
     }
 
     /// <summary>The watchdog's timer fired. It may have been armed for a read that has finished since, or fire a little
-    /// early by the monotonic clock, so the read under way is timed afresh and given whatever it has left.</summary>
+    /// early by the monotonic clock, so the call under way is timed afresh and given whatever it has left.</summary>
     private void OnWatchdog()
     {
         if (Volatile.Read(ref _lane) is not { } lane || Volatile.Read(ref lane.State) != Reading) return;
-        var left = _timeout - _clock.GetElapsedTime(Volatile.Read(ref lane.Since));
+        var left = TimeSpan.FromSeconds((Volatile.Read(ref lane.Deadline) - _clock.GetTimestamp()) / (double)_clock.TimestampFrequency);
         if (left > TimeSpan.Zero)
         {
             try
@@ -198,7 +223,7 @@ internal sealed class SensorWorker : IDisposable
     private sealed class Lane
     {
         public int State;
-        public long Since;
+        public long Deadline;
         public ISensorSet? Set;
         public ISensorSet? Thrown;
         public CancellationTokenSource Tokens = new();

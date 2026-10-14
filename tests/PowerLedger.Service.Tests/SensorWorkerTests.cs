@@ -8,6 +8,7 @@ namespace PowerLedger.Service.Tests;
 public class SensorWorkerTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan BuildTimeout = TimeSpan.FromSeconds(60);
 
     [Fact]
     public async Task Every_read_runs_on_the_loops_own_thread_against_one_set()
@@ -71,6 +72,56 @@ public class SensorWorkerTests
         finally
         {
             gate.Set();
+        }
+    }
+
+    [Fact]
+    public async Task Building_a_set_has_its_own_longer_allowance_and_the_read_after_it_the_usual_one()
+    {
+        var clock = new FakeTimeProvider();
+        using var building = new ManualResetEventSlim(false);
+        using var reading = new ManualResetEventSlim(false);
+        var built = new List<FakeSensorSet>();
+        var builds = 0;
+        await using var loop = new Loop(_ =>
+        {
+            if (Interlocked.Increment(ref builds) == 1) building.Wait(); // a first build on a busy machine
+            return Add(built, Built(built).Length == 0 ? new FakeSensorSet((t, d) => { reading.Wait(); return Samples.At(t, d); }) : new FakeSensorSet());
+        }, clock);
+        try
+        {
+            var first = loop.Read(Samples.T0);
+            await WaitFor.True(() => Volatile.Read(ref builds) == 1);
+            clock.Advance(BuildTimeout - TimeSpan.FromSeconds(1));
+            first.IsCompleted.ShouldBeFalse();
+            building.Set();
+            await WaitFor.True(() => Built(built) is [{ Reads: 1 }]);
+            clock.Advance(Timeout - TimeSpan.FromMilliseconds(1));     // the read's own allowance starts once the set is built
+            first.IsCompleted.ShouldBeFalse();
+            clock.Advance(TimeSpan.FromMilliseconds(1));
+            (await first).ShouldBeNull();
+            loop.Worker.Abandoned.ShouldBe(1);
+
+            var hungBuild = new FakeTimeProvider();
+            using var never = new ManualResetEventSlim(false);
+            var tries = 0;
+            await using var stuck = new Loop(_ =>
+            {
+                if (Interlocked.Increment(ref tries) == 1) never.Wait();
+                return new FakeSensorSet();
+            }, hungBuild);
+            var read = stuck.Read(Samples.T0);
+            await WaitFor.True(() => Volatile.Read(ref tries) == 1);
+            hungBuild.Advance(BuildTimeout - TimeSpan.FromMilliseconds(1));
+            read.IsCompleted.ShouldBeFalse();
+            hungBuild.Advance(TimeSpan.FromMilliseconds(1));
+            (await read).ShouldBeNull();
+            never.Set();
+        }
+        finally
+        {
+            building.Set();
+            reading.Set();
         }
     }
 
@@ -249,7 +300,7 @@ public class SensorWorkerTests
 
         public Loop(Func<CancellationToken, ISensorSet> factory, TimeProvider clock)
         {
-            Worker = new SensorWorker(factory, Timeout, clock);
+            Worker = new SensorWorker(factory, Timeout, BuildTimeout, clock);
             Worker.Start(Run, onAbandoned: _ => Interlocked.Exchange(ref _current, null)?.TrySetResult(null));
         }
 

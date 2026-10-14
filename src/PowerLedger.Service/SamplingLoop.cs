@@ -11,9 +11,11 @@ namespace PowerLedger.Service;
 /// <param name="SensorTimeout">A sensor read that takes longer abandons the set (Plan B's watchdog rule).</param>
 /// <param name="CalibrationSaveEvery">How often the learner is saved while the service runs.</param>
 /// <param name="Calibration">Learner thresholds; the defaults are spec §5's.</param>
-internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationSaveEvery, CalibrationOptions Calibration)
+/// <param name="SensorBuildTimeout">Building a sensor set that takes longer abandons it. The first build after start loads
+/// every vendor's library and asks WMI, which takes a couple of seconds on an idle machine and far longer on a busy one.</param>
+internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationSaveEvery, CalibrationOptions Calibration, TimeSpan SensorBuildTimeout)
 {
-    public static LoopOptions Default { get; } = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10), new CalibrationOptions());
+    public static LoopOptions Default { get; } = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10), new CalibrationOptions(), TimeSpan.FromMinutes(1));
 }
 
 /// <summary>What the loop needs from the machine and the host, so tests can supply fakes.</summary>
@@ -114,7 +116,7 @@ internal sealed class SamplingLoop : BackgroundService
         _rollups = new Rollups(_raw, new AggregateRepository(database));
         _retention = new RetentionRunner(database, clock.LocalTimeZone);
         _buffer = new WriteBuffer(_raw.InsertBatch);
-        _worker = new SensorWorker(environment.Sensors, _options.SensorTimeout, clock);
+        _worker = new SensorWorker(environment.Sensors, _options.SensorTimeout, _options.SensorBuildTimeout, clock);
         _tickClock = new TickClock(clock);
     }
 
