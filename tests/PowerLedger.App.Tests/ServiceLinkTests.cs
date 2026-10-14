@@ -506,6 +506,31 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         (await link.UpdateNowAsync()).ShouldBe(WriteResult.Done);
     }
 
+    /// <summary>Plan AC review: a service counts a subscriber that has said nothing of its windows as watching for 15 seconds
+    /// (its SilentGrace), so the first asks all come inside them, and a service from before Plan Q, which never says it
+    /// handles updates, is not asked every minute for ever: the asks end once a service still starting would long have said.</summary>
+    [Fact]
+    public async Task A_service_is_asked_soon_within_its_grace_and_not_for_ever()
+    {
+        PipeServiceLink.LearnUpdatesBackoff.Take(4).Aggregate(TimeSpan.Zero, (sum, wait) => sum + wait).ShouldBeLessThan(TimeSpan.FromSeconds(15));
+        PipeServiceLink.LearnUpdatesBackoff.Aggregate(TimeSpan.Zero, (sum, wait) => sum + wait).ShouldBeGreaterThan(TimeSpan.FromMinutes(2));
+
+        var (service, link) = await Connect(updates: null);
+        await using (service)
+        await using (link)
+        {
+            int Asked() => service.Requests.OfType<GetStatusRequest>().Count();
+            await WaitFor.True(() => Asked() == 1);
+            for (var advance = 0; advance < PipeServiceLink.LearnUpdatesBackoff.Length + 5; advance++)
+            {
+                var before = Asked();
+                _clock.Advance(TimeSpan.FromMinutes(1));
+                for (var waited = 0; waited < 50 && Asked() == before; waited++) await Task.Delay(10);
+            }
+            Asked().ShouldBe(PipeServiceLink.LearnUpdatesBackoff.Length + 1);
+        }
+    }
+
     [Fact]
     public async Task An_older_service_is_never_sent_the_window_state_or_update_now()
     {

@@ -222,8 +222,12 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
     internal static readonly TimeSpan[] Backoff = [.. new[] { 1, 2, 4, 8, 16, 30 }.Select(s => TimeSpan.FromSeconds(s))];
 
-    /// <summary>The waits between asking a connected service whether it handles updates, until it says (the last repeats).</summary>
-    internal static readonly TimeSpan[] LearnUpdatesBackoff = [.. new[] { 2, 5, 10, 30, 60 }.Select(s => TimeSpan.FromSeconds(s))];
+    /// <summary>The waits between asking a connected service whether it handles updates, until it says (Plan AC review). The
+    /// first four add up to 10 seconds, inside the 15 a service counts a subscriber that has said nothing of its windows as
+    /// watching; then longer, for a service still starting at boot, whose updater says once the data server has answered
+    /// or 30 seconds have passed. After the last, about four minutes on, the asking stops: a service from before Plan Q
+    /// never says.</summary>
+    internal static readonly TimeSpan[] LearnUpdatesBackoff = [.. new[] { 1, 2, 3, 4, 5, 10, 15, 30, 60, 60, 60 }.Select(s => TimeSpan.FromSeconds(s))];
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>The newest consent version a service from before Plan Q takes.</summary>
@@ -507,9 +511,10 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     /// <summary>Asks a new connection's service whether it handles updates (Plan Q §4), which an older one's status
     /// doesn't say; one that does is told the window state at once, and from then on at each change. A service still
     /// starting has no status yet, and one whose updater hasn't published says nothing of updates either, so it is asked
-    /// again after each of <see cref="LearnUpdatesBackoff"/>, then every minute, until it says: asked once, an App that met
-    /// a service just started after an update or at boot never told it its windows, and kept it reading every second.
-    /// Never throws: a service that doesn't answer is simply not told.</summary>
+    /// again after each of <see cref="LearnUpdatesBackoff"/> until it says: asked once, an App that met a service just
+    /// started after an update or at boot never told it its windows, and kept it reading every second. One that has not
+    /// said after the last is from before Plan Q and is asked no more. Never throws: a service that doesn't answer is simply
+    /// not told.</summary>
     private async Task LearnUpdatesAsync(MessageChannel channel, CancellationToken cancel)
     {
         try
@@ -525,7 +530,8 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
                 {
                     // Slow, as a service starting at boot can be: asked again below.
                 }
-                await Task.Delay(LearnUpdatesBackoff[Math.Min(asked, LearnUpdatesBackoff.Length - 1)], clock, cancel).ConfigureAwait(false);
+                if (asked >= LearnUpdatesBackoff.Length) return;
+                await Task.Delay(LearnUpdatesBackoff[asked], clock, cancel).ConfigureAwait(false);
             }
             _takesUiState = channel;
             await SendWindowAsync(channel, cancel).ConfigureAwait(false);
