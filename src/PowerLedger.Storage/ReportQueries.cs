@@ -16,12 +16,12 @@ public sealed class ReportQueries(SqliteDatabase db)
     {
         var window = Load(from, to);
         var schedule = new TariffRepository(db).Schedule();
-        return (Summarise(window, schedule), Days(window.Rows, schedule, zone));
+        return (Summarise(window, schedule, to), Days(window.Rows, schedule, zone));
     }
 
     /// <summary>Totals for the range. The window is widened to whole rows of the resolution used, so no partial row is dropped.</summary>
     public RangeTotals Totals(DateTimeOffset from, DateTimeOffset to)
-        => Summarise(Load(from, to), new TariffRepository(db).Schedule());
+        => Summarise(Load(from, to), new TariffRepository(db).Schedule(), to);
 
     /// <summary>One bucket per local calendar day that has rows, oldest first. Days are cut at local midnight; in a zone
     /// whose offset is not a whole number of hours, a range long enough to read hour rows shifts that cut to the enclosing UTC hour.</summary>
@@ -46,14 +46,11 @@ public sealed class ReportQueries(SqliteDatabase db)
         for (var i = 0; i < count; i++) buckets[i] = Aggregate.Empty(cut.Start(i));
 
         var window = Load(from, to);
-        var rows = window.Hours.Select(h => (Row: h, Length: Hour)).Concat(window.Minutes.Select(m => (Row: m, Length: Minute)));
-        foreach (var (row, length) in rows)
+        foreach (var (row, length) in window.Sized)
         {
             var index = Math.Clamp(cut.Index(row.Start), 0, count - 1);
             buckets[index] = buckets[index].Plus(row with { GapSeconds = 0 });
-            // A sleep is stored in the row where the machine woke, and the time on in that row came after the wake.
-            var woke = row.Start + length - TimeSpan.FromSeconds(Math.Min(row.OnSeconds, length.TotalSeconds));
-            LayBack(asleep, woke, row.GapSeconds, from, cut);
+            LayBack(asleep, Woke(row, length), row.GapSeconds, from, cut);
         }
         return [.. buckets.Select((b, i) => b with
         {
@@ -64,9 +61,12 @@ public sealed class ReportQueries(SqliteDatabase db)
 
     /// <summary>
     /// The rows for a range, and the window they cover: the range widened to whole rows. A short range reads minute rows
-    /// throughout, so it is exact to the minute; an hour row stands in only for an hour whose minutes retention has purged.
-    /// A long range reads hour rows, which are kept forever, and minute rows only past the last hour the hourly job has
-    /// folded, so the read stays bounded and an hour in progress is never lost. No hour is ever counted twice.
+    /// throughout, so it is exact to the minute; an hour row stands in only for an hour whose minutes retention has purged,
+    /// one older than the oldest minute row kept (report finding 7: an hour with no minutes in the range is otherwise one
+    /// the PC slept through in it, and its row holds minutes from outside the range, before a range that starts mid hour,
+    /// as Today does in a zone half an hour off UTC). A long range reads hour rows, which are kept forever, and minute rows
+    /// only past the last hour the hourly job has folded, so the read stays bounded and an hour in progress is never lost.
+    /// No hour is ever counted twice.
     /// </summary>
     private Window Load(DateTimeOffset from, DateTimeOffset to)
     {
@@ -81,6 +81,7 @@ public sealed class ReportQueries(SqliteDatabase db)
             var minutes = repo.ReadMinutes(minuteFrom, minuteTo);
             var covered = minutes.Select(m => Floor(m.Start, Hour)).ToHashSet();
             var purged = repo.ReadHours(hourFrom, hourTo).Where(h => !covered.Contains(h.Start)).ToList();
+            if (purged.Count > 0 && repo.FirstMinuteStart() is { } kept) purged.RemoveAll(h => h.Start >= kept);
             return purged.Count > 0 ? new Window(hourFrom, hourTo, purged, minutes) : new Window(minuteFrom, minuteTo, [], minutes);
         }
 
@@ -106,9 +107,18 @@ public sealed class ReportQueries(SqliteDatabase db)
         }
     }
 
+    /// <summary>When the machine woke from the sleep a row holds: a sleep is stored in the row where the machine woke, and
+    /// the time on in that row came after the wake.</summary>
+    private static DateTimeOffset Woke(Aggregate row, TimeSpan length)
+        => row.Start + length - TimeSpan.FromSeconds(Math.Min(row.OnSeconds, length.TotalSeconds));
+
     private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
 
-    private static RangeTotals Summarise(Window w, TariffSchedule schedule)
+    private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
+
+    /// <param name="to">The range's end. The window runs on to the next whole row, but time past the end has not happened
+    /// yet, so it is neither asleep nor unmonitored (report finding 7).</param>
+    private static RangeTotals Summarise(Window w, TariffSchedule schedule, DateTimeOffset to)
     {
         double energy = 0, cpu = 0, gpu = 0, display = 0, rest = 0, idleOn = 0, idleOff = 0;
         double onS = 0, idleOnS = 0, idleOffS = 0, gapS = 0, measuredS = 0, calibratedS = 0, estimatedS = 0, peak = 0;
@@ -117,9 +127,19 @@ public sealed class ReportQueries(SqliteDatabase db)
         {
             energy += r.EnergyWh; cpu += r.CpuWh; gpu += r.GpuWh; display += r.DisplayWh; rest += r.RestWh;
             idleOn += r.IdleOnWh; idleOff += r.IdleOffWh;
-            onS += r.OnSeconds; idleOnS += r.IdleOnSeconds; idleOffS += r.IdleOffSeconds; gapS += r.GapSeconds;
+            onS += r.OnSeconds; idleOnS += r.IdleOnSeconds; idleOffS += r.IdleOffSeconds;
             measuredS += r.MeasuredSeconds; calibratedS += r.CalibratedSeconds; estimatedS += r.EstimatedSeconds;
             if (r.MaxW > peak) { peak = r.MaxW; peakAt = r.Start; }
+        }
+
+        // Each sleep laid back from its wake, as a chart lays it, and only its part inside the window counted: a night's
+        // sleep from 22:00 is 7 hours of a day that starts at midnight, not 9 (report finding 7).
+        var end = Max(w.From, Min(w.To, to));
+        foreach (var (row, length) in w.Sized)
+        {
+            var woke = Woke(row, length);
+            var slept = woke - TimeSpan.FromSeconds(row.GapSeconds);
+            if (Min(woke, end) > Max(slept, w.From)) gapS += (Min(woke, end) - Max(slept, w.From)).TotalSeconds;
         }
 
         var qualityS = measuredS + calibratedS + estimatedS;
@@ -138,7 +158,7 @@ public sealed class ReportQueries(SqliteDatabase db)
             IdleOnHours: idleOnS / 3600.0,
             IdleOffHours: idleOffS / 3600.0,
             AsleepHours: asleepHours,
-            UnmonitoredHours: Math.Max(0, (w.To - w.From).TotalHours - onHours - asleepHours),
+            UnmonitoredHours: Math.Max(0, (end - w.From).TotalHours - onHours - asleepHours),
             CpuKwh: cpu / 1000, GpuKwh: gpu / 1000, DisplayKwh: display / 1000, RestKwh: rest / 1000,
             IdleOnKwh: idleOn / 1000, IdleOffKwh: idleOff / 1000,
             MeasuredShare: Share(measuredS, qualityS),
@@ -209,5 +229,9 @@ public sealed class ReportQueries(SqliteDatabase db)
     private sealed record Window(DateTimeOffset From, DateTimeOffset To, List<Aggregate> Hours, List<Aggregate> Minutes)
     {
         public List<Aggregate> Rows { get; } = [.. Hours.Concat(Minutes).OrderBy(r => r.Start)];
+
+        /// <summary>Every row with its length.</summary>
+        public IEnumerable<(Aggregate Row, TimeSpan Length)> Sized
+            => Hours.Select(h => (h, Hour)).Concat(Minutes.Select(m => (m, Minute)));
     }
 }

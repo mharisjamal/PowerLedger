@@ -107,10 +107,11 @@ public class ReportQueriesTests
         using var t = new TestDatabase();
         var readings = Fixtures.Minute(0).Take(30).Append(Fixtures.Reading(30, delta: 1800)).ToList();
         new AggregateRepository(t.Db).UpsertMinute(Downsampler.ToMinute(Fixtures.T0, readings, maxDeltaSeconds: 5));
-        var totals = new ReportQueries(t.Db).Totals(Fixtures.T0, Fixtures.T0.AddHours(1));
+        // The half hour asleep ended 30 seconds into 12:00, so it began before 12:00: a range from 11:00 holds all of it.
+        var totals = new ReportQueries(t.Db).Totals(Fixtures.T0.AddHours(-1), Fixtures.T0.AddHours(1));
         totals.AsleepHours.ShouldBe(0.5, 1e-9);
         totals.OnHours.ShouldBe(30 / 3600.0, 1e-9);
-        totals.UnmonitoredHours.ShouldBe(1 - 0.5 - 30 / 3600.0, 1e-9);
+        totals.UnmonitoredHours.ShouldBe(2 - 0.5 - 30 / 3600.0, 1e-9);
     }
 
     [Fact]
@@ -120,6 +121,56 @@ public class ReportQueriesTests
         new AggregateRepository(t.Db).UpsertHour(Downsampler.ToHour(Fixtures.T0, [Downsampler.ToMinute(Fixtures.T0, Fixtures.Minute(0, 100))]));
         var totals = new ReportQueries(t.Db).Totals(Fixtures.T0, Fixtures.T0.AddHours(1));
         totals.EnergyKwh.ShouldBe(100.0 / 60 / 1000, 1e-9);
+    }
+
+    /// <summary>Report finding 7: a range that starts mid hour, 12:17 here, whose minutes of that hour are missing (the PC
+    /// slept) must not take that hour's row, which holds 12:00 to 12:16, before the range. In a zone half an hour off UTC
+    /// the same put 20 minutes of yesterday into Today. An hour row only stands in for minutes retention has purged.</summary>
+    [Fact]
+    public void An_hour_row_stands_in_only_for_an_hour_older_than_the_oldest_minute_kept()
+    {
+        using var t = new TestDatabase();
+        var agg = new AggregateRepository(t.Db);
+        var early = Enumerable.Range(0, 17).Select(i => Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), Fixtures.Minute(i * 60, 60))).ToList();
+        agg.UpsertHour(Downsampler.ToHour(Fixtures.T0, early));
+        foreach (var m in early) agg.UpsertMinute(m);
+        agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0.AddHours(1), Fixtures.Minute(3600, 120)));
+
+        // 12:17 to 13:17 holds only 13:00's minute.
+        new ReportQueries(t.Db).Totals(Fixtures.T0.AddMinutes(17), Fixtures.T0.AddMinutes(77)).EnergyKwh.ShouldBe(2.0 / 1000, 1e-9);
+    }
+
+    /// <summary>Report finding 7: a sleep from 22:00 to 07:00 is 9 hours, but only 7 of them are in a day that starts at
+    /// midnight. It is laid back from the wake, as a chart lays it, and clipped to the range.</summary>
+    [Fact]
+    public void Asleep_hours_are_laid_back_from_the_wake_and_clipped_to_the_range()
+    {
+        using var t = new TestDatabase();
+        var woke = Fixtures.T0.AddHours(-5);
+        new AggregateRepository(t.Db).UpsertMinute(Aggregate.Empty(woke) with
+        {
+            EnergyWh = 0.5, AvgW = 30, MaxW = 30, OnSeconds = 60, MeasuredSeconds = 60, SampleCount = 60, GapSeconds = 9 * 3600,
+        });
+
+        var totals = new ReportQueries(t.Db).Totals(woke.AddHours(-7), woke.AddMinutes(30));
+
+        totals.AsleepHours.ShouldBe(7, 1e-9);
+        totals.UnmonitoredHours.ShouldBe(7.5 - 7 - 1 / 60.0, 1e-9);
+    }
+
+    /// <summary>Report finding 7: a long range reads whole hour rows, so its window runs on to the next whole hour; the time
+    /// past the range's end has not happened, and is not unmonitored.</summary>
+    [Fact]
+    public void Unmonitored_time_ends_at_the_range_s_end_not_the_next_whole_hour()
+    {
+        using var t = new TestDatabase();
+        var start = Fixtures.T0.AddDays(-4);
+        new AggregateRepository(t.Db).UpsertHour(Downsampler.ToHour(start, [Downsampler.ToMinute(start, Fixtures.Minute(0, 60))]));
+
+        var totals = new ReportQueries(t.Db).Totals(start, Fixtures.T0.AddMinutes(10));
+
+        totals.OnHours.ShouldBe(1 / 60.0, 1e-9);
+        totals.UnmonitoredHours.ShouldBe(4 * 24 + 10 / 60.0 - 1 / 60.0, 1e-9);
     }
 
     [Fact]
