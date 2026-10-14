@@ -185,12 +185,41 @@ internal static class TrayArt
     /// <summary>The space between digits: Bahnschrift's own, a little under a tenth of an em, and never under a pixel.</summary>
     private static int Gap(int em) => Math.Max(1, (int)Math.Round(em * 0.09));
 
+    /// <summary>Each fit worked out, by font, slots and icon size, which are all it depends on (perf review P2): working one
+    /// out draws and scans the ten digits at every size tried, about 2 ms, where a redraw from it takes under half a ms.</summary>
+    private static readonly Dictionary<(string Family, FontStyle Style, int Slots, int Size), (int Em, int Top, int Height)> KeptFits = new();
+
+    /// <summary>Forgets every fit, for a change of scale: the next drawing works its own out again.</summary>
+    public static void ClearFits()
+    {
+        lock (KeptFits) KeptFits.Clear();
+    }
+
+    /// <summary>How many fits are kept for icons <paramref name="size"/> pixels square, for a test.</summary>
+    internal static int FitsKept(int size)
+    {
+        lock (KeptFits) return KeptFits.Keys.Count(key => key.Size == size);
+    }
+
+    /// <summary>The fit for <paramref name="slots"/> digits at <paramref name="size"/>, worked out once and then kept.</summary>
+    private static (int Em, int Top, int Height) Fit(FontFamily family, FontStyle style, int slots, int size)
+    {
+        var key = (family.Name, style, slots, size);
+        lock (KeptFits)
+        {
+            if (KeptFits.TryGetValue(key, out var kept)) return kept;
+        }
+        var fit = Measure(family, style, slots, size);
+        lock (KeptFits) KeptFits[key] = fit;
+        return fit;
+    }
+
     /// <summary>
     /// The largest whole-pixel font size at which <paramref name="slots"/> of the widest digit, a gap apart, fit inside the
     /// tile's edge with a pixel of amber around them for every 16 pixels of icon, with where the digits' ink begins below
     /// the drawing point and how tall it is.
     /// </summary>
-    private static (int Em, int Top, int Height) Fit(FontFamily family, FontStyle style, int slots, int size)
+    private static (int Em, int Top, int Height) Measure(FontFamily family, FontStyle style, int slots, int size)
     {
         var margin = Math.Max(1, (int)Math.Round(size / 16.0));
         for (var em = size; ; em--)

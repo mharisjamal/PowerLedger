@@ -22,18 +22,63 @@ internal static class TrayGlyph
 }
 
 /// <summary>
+/// The tray's pictures (perf review P2): each drawn when a reading first needs it, and kept for the readings that come back
+/// to it, the most recent first. One pushed out by newer ones is freed; the one shown is always the most recent, so it is
+/// never among them. Call on one thread.
+/// </summary>
+internal sealed class TrayIcons(Func<string?, int, Icon> draw, int capacity = TrayIcons.Kept) : IDisposable
+{
+    /// <summary>How many pictures are kept: a PC's readings mostly move within a few watts.</summary>
+    public const int Kept = 16;
+
+    private readonly LinkedList<(string? Text, int Size, Icon Icon)> _recent = new();
+
+    /// <summary>How many are kept now.</summary>
+    public int Count => _recent.Count;
+
+    /// <summary>The picture for <paramref name="text"/> at <paramref name="size"/> pixels, drawn only if it isn't kept.</summary>
+    public Icon Get(string? text, int size)
+    {
+        for (var node = _recent.First; node is not null; node = node.Next)
+        {
+            if (node.Value.Text != text || node.Value.Size != size) continue;
+            _recent.Remove(node);
+            _recent.AddFirst(node);
+            return node.Value.Icon;
+        }
+        var icon = draw(text, size);
+        _recent.AddFirst((text, size, icon));
+        while (_recent.Count > capacity)
+        {
+            _recent.Last!.Value.Icon.Dispose();
+            _recent.RemoveLast();
+        }
+        return icon;
+    }
+
+    public void Dispose()
+    {
+        foreach (var (_, _, icon) in _recent) icon.Dispose();
+        _recent.Clear();
+    }
+}
+
+/// <summary>
 /// The tray icon (spec §9). It draws the live watts on the brand's amber tile, or the logo until there is a reading, and
-/// redraws only when the rounded value changes; the tooltip gives now and today; the menu opens the window, restarts into
-/// a downloaded update while one is ready (spec §13), toggles start with Windows, and exits the UI while the service keeps
-/// logging. Call it on the UI thread.
+/// redraws only when the rounded value changes, from pictures kept for the values seen lately; the tooltip gives now and
+/// today, and goes to Windows only when its words change; the menu opens the window, restarts into a downloaded update
+/// while one is ready (spec §13), toggles start with Windows, and exits the UI while the service keeps logging. Call it on
+/// the UI thread.
 /// </summary>
 internal sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _update;
     private readonly ToolStripMenuItem _overlay;
-    private Icon? _current;
+    private readonly TrayIcons _icons = new(TrayArt.DrawIcon);
+    private string? _tooltip;
     private int? _shown;
+    private int _size;
     private bool _drawn;
     private bool _disposed;
     private Action? _clicked;
@@ -65,19 +110,25 @@ internal sealed class TrayIcon : IDisposable
         Show(null, "PowerLedger · waiting for the service");
     }
 
-    /// <summary>Updates the tooltip, and the icon when the rounded watts changed.</summary>
+    /// <summary>Updates the tooltip when its words changed, and the icon when the rounded watts or the small-icon size did:
+    /// a new size, from a change of scale, also lets the digits be fitted to it afresh.</summary>
     public void Show(double? watts, string tooltip)
     {
         if (_disposed) return;
-        _icon.Text = tooltip.Length > 127 ? tooltip[..127] : tooltip;
+        var text = tooltip.Length > 127 ? tooltip[..127] : tooltip;
+        if (text != _tooltip)
+        {
+            _tooltip = text;
+            _icon.Text = text;   // each change is a message to Explorer
+        }
         var rounded = TrayGlyph.Round(watts);
-        if (_drawn && rounded == _shown) return;
+        var size = SystemInformation.SmallIconSize.Width;
+        if (_drawn && rounded == _shown && size == _size) return;
+        if (_drawn && size != _size) TrayArt.ClearFits();
         _drawn = true;
         _shown = rounded;
-        var next = Render(TrayGlyph.Text(rounded));
-        _icon.Icon = next;
-        _current?.Dispose();
-        _current = next;
+        _size = size;
+        _icon.Icon = _icons.Get(TrayGlyph.Text(rounded), size);
     }
 
     /// <summary>A notification from the tray, the monthly report's (spec §9). Clicking it opens <paramref name="open"/>.</summary>
@@ -139,12 +190,6 @@ internal sealed class TrayIcon : IDisposable
         _disposed = true;
         _icon.Visible = false;
         _icon.Dispose();
-        _current?.Dispose();
+        _icons.Dispose();
     }
-
-    /// <summary>
-    /// The text on the amber tile, or the logo without it, at the small-icon size of the system's scale. The icon owns its
-    /// handle, which <see cref="Show"/> and <see cref="Dispose"/> free with the icon.
-    /// </summary>
-    private static Icon Render(string? text) => TrayArt.DrawIcon(text, SystemInformation.SmallIconSize.Width);
 }

@@ -140,9 +140,10 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     /// <summary>The newest reading, for the tray icon.</summary>
     public ReadingFrame? Last => _last;
 
-    /// <summary>The tray's tooltip: now and today (spec §9).</summary>
+    /// <summary>The tray's tooltip: now, in whole watts as the icon has it, and today (spec §9). Whole, its words change only
+    /// when the icon does or today's figures are read again, and each change is a message to Explorer (perf review P2).</summary>
     public string TrayTooltip => _last is { } frame
-        ? $"{Format.Watts(frame.TotalW, _culture)} W · {frame.Quality}\nToday {Today.Energy} kWh · {Today.Cost}"
+        ? $"{Format.WholeWatts(frame.TotalW, _culture)} W · {frame.Quality}\nToday {Today.Energy} kWh · {Today.Cost}"
         : IsServiceDown ? "PowerLedger · service not running" : "PowerLedger · waiting for the service";
 
     /// <summary>Starts the timers; the first history read happens at once. Call once, on the UI thread.</summary>

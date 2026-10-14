@@ -48,7 +48,7 @@ public class NowViewModelTests
         model.Live.Budget[0].Watts.ShouldBe("14.6 W");
         model.Live.Budget[0].Percent.ShouldBe("43%");
         model.Live.BudgetTotalW.ShouldBe(34.2, 1e-9);
-        model.TrayTooltip.ShouldStartWith("34.2 W · Measured");
+        model.TrayTooltip.ShouldStartWith("34 W · Measured");   // whole, as the icon (perf review P2)
     }
 
     [Theory]
@@ -557,7 +557,22 @@ public class NowViewModelTests
         model.Last.ShouldNotBeNull().TotalW.ShouldBe(34.2);
         changed.ShouldContain(nameof(NowViewModel.Last));
         changed.ShouldContain(nameof(NowViewModel.TrayTooltip));
-        model.TrayTooltip.ShouldStartWith("34.2 W · Measured");
+        model.TrayTooltip.ShouldStartWith("34 W · Measured");
+    }
+
+    [Fact]
+    public void The_tray_tooltips_words_change_only_with_the_whole_watts()
+    {
+        // Perf review P2: a tooltip in tenths changed every second, and each change is a message to Explorer.
+        var model = Model();
+        _link.Push(Frames.At(Now, totalW: 34.2));
+        var tip = model.TrayTooltip;
+
+        _link.Push(Frames.At(Now.AddSeconds(1), totalW: 34.4));
+        model.TrayTooltip.ShouldBe(tip);
+
+        _link.Push(Frames.At(Now.AddSeconds(2), totalW: 34.6));
+        model.TrayTooltip.ShouldStartWith("35 W · Measured");
     }
 
     [Fact]
