@@ -189,7 +189,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         int Reports() => _service.Requests.OfType<ReportActivityRequest>().Count();
         await WaitFor.True(() => Reports() == 1);
 
-        _link.ReportWindow(true);
+        _link.ReportWindow(true, onScreen: true);
         await WaitFor.True(() => Reports() == 2);
 
         _clock.Advance(PipeServiceLink.ActivityEvery);
@@ -407,9 +407,37 @@ public sealed class ServiceLinkTests : IAsyncLifetime
             await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Any());
             service.Requests.OfType<UiStateRequest>().Single().WindowVisible.ShouldBeFalse();
 
-            link.ReportWindow(true);
+            link.ReportWindow(true, onScreen: true);
             await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 2);
             service.Requests.OfType<UiStateRequest>().Last().WindowVisible.ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task A_minimised_window_holds_an_update_but_the_service_hears_nobody_watches_unless_the_overlay_shows()
+    {
+        var (service, link) = await Connect(ServiceUpdates);
+        await using (service)
+        await using (link)
+        {
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Any());
+            service.Requests.OfType<UiStateRequest>().Single().Watching.ShouldBe(false);
+
+            link.ReportWindow(true, onScreen: false);   // minimised
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 2);
+            var last = service.Requests.OfType<UiStateRequest>().Last();
+            (last.WindowVisible, last.Watching).ShouldBe((true, false));
+
+            link.ReportOverlay(true);
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 3);
+            service.Requests.OfType<UiStateRequest>().Last().Watching.ShouldBe(true);
+            link.ReportOverlay(false);
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 4);
+            service.Requests.OfType<UiStateRequest>().Last().Watching.ShouldBe(false);
+            link.ReportWindow(true, onScreen: true);
+            await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 5);
+            last = service.Requests.OfType<UiStateRequest>().Last();
+            (last.WindowVisible, last.Watching).ShouldBe((true, true));
         }
     }
 
@@ -428,7 +456,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
             var last = service.Requests.OfType<UiStateRequest>().Last();
             (last.WindowVisible, last.OverlayVisible).ShouldBe((false, true));
             link.ReportOverlay(true);
-            link.ReportWindow(true);
+            link.ReportWindow(true, onScreen: true);
             await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Count() == 3);
             last = service.Requests.OfType<UiStateRequest>().Last();
             (last.WindowVisible, last.OverlayVisible).ShouldBe((true, true));
@@ -441,7 +469,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
         await using var service = new FakeService(name) { Status = Statuses.Running() with { Updates = ServiceUpdates } };
         await using var link = new PipeServiceLink(name, new FixedIdle(0), _clock, new TrustAnyServer());
-        link.ReportWindow(true);
+        link.ReportWindow(true, onScreen: true);
         service.Start();
         link.Start();
         await WaitFor.True(() => service.Requests.OfType<UiStateRequest>().Any());
@@ -454,7 +482,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
         await using var service = new FakeService(name) { StatusError = "The service is still starting." };
         await using var link = new PipeServiceLink(name, new FixedIdle(0), _clock, new TrustAnyServer());
-        link.ReportWindow(true);
+        link.ReportWindow(true, onScreen: true);
         service.Start();
         link.Start();
         await WaitFor.True(() => service.Requests.OfType<GetStatusRequest>().Any());
@@ -485,7 +513,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         await using (service)
         await using (link)
         {
-            link.ReportWindow(true);
+            link.ReportWindow(true, onScreen: true);
             (await link.UpdateNowAsync()).Succeeded.ShouldBeFalse();
             await Task.Delay(100);   // give a wrongly-sent request a chance to arrive
             service.Requests.OfType<UiStateRequest>().ShouldBeEmpty();
@@ -501,7 +529,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         await using (service)
         await using (link)
         {
-            link.ReportWindow(true);
+            link.ReportWindow(true, onScreen: true);
             await Task.Delay(100);
             service.Requests.OfType<UiStateRequest>().ShouldBeEmpty();
             (await link.UpdateNowAsync()).ShouldBe(new WriteResult(RefuseAll.Reason));

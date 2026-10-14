@@ -65,6 +65,25 @@ public class ServiceSignalsTests
     }
 
     [Fact]
+    public void A_minimised_window_holds_an_update_but_nobody_watches_it()
+    {
+        var signals = new ServiceSignals(new FakeTimeProvider());
+        signals.Subscribed("a");
+        signals.ReportWindow("a", 1, visible: true, overlay: false, watching: false);   // minimised to the taskbar
+        signals.WindowShowingIn(1).ShouldBeTrue();
+        signals.Watched.ShouldBeFalse();
+        signals.ReportWindow("a", 1, visible: true, overlay: false, watching: true);
+        signals.Watched.ShouldBeTrue();
+        signals.ReportWindow("a", 1, visible: false, overlay: true, watching: true);    // only the overlay
+        signals.WindowShowingIn(1).ShouldBeFalse();
+        signals.Watched.ShouldBeTrue();
+
+        signals.ReportWindow("b", 1, visible: true);                                    // an older App says only what shows
+        signals.ReportWindow("a", 1, visible: false, overlay: false, watching: false);
+        signals.Watched.ShouldBeTrue();
+    }
+
+    [Fact]
     public void A_subscriber_that_never_says_counts_as_watching_only_for_a_short_grace()
     {
         // An App whose first status asks met a service still starting never told it its windows: it must not keep the

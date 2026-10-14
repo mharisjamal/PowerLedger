@@ -164,10 +164,12 @@ internal interface IServiceLink : IAsyncDisposable
     /// <see cref="HouseholdStatus.Network"/> is set; an older one doesn't know the request.</summary>
     Task<HouseholdOutcome> OpenPairingWindowAsync(CancellationToken cancel = default);
 
-    /// <summary>Plan Q §4: whether the main window is showing now. Kept, and told to a service that takes it on every
-    /// connection and every change, so the service installs an update while nobody is looking at PowerLedger. Never sent
-    /// to an older service, whose status has no <see cref="ServiceStatus.Updates"/>. Returns at once.</summary>
-    void ReportWindow(bool visible);
+    /// <summary>Plan Q §4: whether a shell window is showing now, minimised or not (<paramref name="visible"/>), so the
+    /// service installs an update while nobody is looking at PowerLedger; and whether one is on screen, not minimised
+    /// (<paramref name="onScreen"/>), so the service reads at the set interval only while someone may be looking (perf
+    /// review §4). Kept, and told to a service that takes it on every connection and every change. Never sent to an older
+    /// service, whose status has no <see cref="ServiceStatus.Updates"/>. Returns at once.</summary>
+    void ReportWindow(bool visible, bool onScreen);
 
     /// <summary>Whether the watts overlay shows now. Told with the window's state, to the same services: while either
     /// shows, the service reads at the set interval rather than every five seconds (perf review §4). Returns at once.</summary>
@@ -236,6 +238,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     private volatile MessageChannel? _channel;
     private volatile string? _refusal;
     private volatile bool _windowVisible;
+    private volatile bool _windowOnScreen;
     private volatile bool _overlayVisible;
     private TaskCompletionSource _windowShown = new(TaskCreationOptions.RunContinuationsAsynchronously);   // completed when one shows
     private volatile MessageChannel? _takesUiState;   // the connection whose service said it handles updates
@@ -344,10 +347,11 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public Task<HouseholdOutcome> OpenPairingWindowAsync(CancellationToken cancel = default)
         => HouseholdAsync(new PairingWindowRequest(NextId()), cancel);
 
-    public void ReportWindow(bool visible)
+    public void ReportWindow(bool visible, bool onScreen)
     {
         var was = _windowVisible;
         _windowVisible = visible;
+        _windowOnScreen = onScreen;
         if (visible && !was)
         {
             // The user is back: the idle time goes now rather than at the end of a hidden wait.
@@ -533,12 +537,15 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         }
     }
 
-    /// <summary>Tells the service whether the window and the overlay show now. Never throws.</summary>
+    /// <summary>Tells the service whether the window and the overlay show now, and whether anyone may be looking: a window
+    /// on screen or the overlay. Never throws.</summary>
     private async Task SendWindowAsync(MessageChannel channel, CancellationToken cancel)
     {
         try
         {
-            await RequestAsync(channel, new UiStateRequest(NextId(), _windowVisible, _overlayVisible), cancel).ConfigureAwait(false);
+            var overlay = _overlayVisible;
+            await RequestAsync(channel, new UiStateRequest(NextId(), _windowVisible, overlay, _windowOnScreen || overlay), cancel)
+                .ConfigureAwait(false);
         }
         catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException or TimeoutException
                                           or PipeProtocolException)

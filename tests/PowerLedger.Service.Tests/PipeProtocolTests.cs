@@ -31,17 +31,19 @@ public class PipeProtocolTests
         new UiStateRequest(12, WindowVisible: true),
         new UpdateNowRequest(13),
         new UiStateRequest(14, WindowVisible: false, OverlayVisible: true),
+        new UiStateRequest(15, WindowVisible: true, Watching: false),
     };
 
     [Fact]
     public void The_Apps_window_state_and_update_now_have_their_wire_names()
     {
-        Text(new UiStateRequest(1, true)).ShouldBe("""{"type":"uiState","windowVisible":true,"overlayVisible":false,"id":1}""" + "\n");
+        Text(new UiStateRequest(1, true, Watching: true))
+            .ShouldBe("""{"type":"uiState","windowVisible":true,"overlayVisible":false,"watching":true,"id":1}""" + "\n");
         Text(new UpdateNowRequest(2)).ShouldBe("""{"type":"updateNow","id":2}""" + "\n");
     }
 
     [Fact]
-    public void A_window_state_from_an_app_that_knows_no_overlay_has_none()
+    public void A_window_state_from_an_app_that_knows_no_overlay_has_none_and_says_nothing_of_watching()
         => PipeProtocol.Deserialize(Encoding.UTF8.GetBytes("""{"type":"uiState","windowVisible":true,"id":1}"""))
             .ShouldBe(new UiStateRequest(1, true, OverlayVisible: false));
 

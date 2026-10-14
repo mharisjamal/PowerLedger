@@ -76,7 +76,7 @@ internal sealed partial class PipeHandler(
             case DeleteMyDataRequest request:
                 return await ShareAsync(new DeleteMyDataCommand(request.Id), cancel).ConfigureAwait(false);
             case UiStateRequest request:
-                signals.ReportWindow(client, session, request.WindowVisible, request.OverlayVisible);
+                signals.ReportWindow(client, session, request.WindowVisible, request.OverlayVisible, request.Watching);
                 return new OkReply(request.Id);
             case UpdateNowRequest request:
                 if (updates is null) return new ErrorReply(request.Id, "This service doesn't install updates itself.");
