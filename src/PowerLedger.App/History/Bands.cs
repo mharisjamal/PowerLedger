@@ -29,6 +29,9 @@ internal static class Bands
         }).ToList();
         if (withTotal)
         {
+            // What the PC drew asleep (accuracy A10) is in the total but in none of the bands, so it has its own line, with no
+            // share, since the shares are of the bands as drawn.
+            if (t.AsleepKwh > 0) rows.Add(new PartRow(null, "Asleep (estimated)", Format.Kwh(t.AsleepKwh, culture), "", 0));
             rows.Add(new PartRow(null, "Total", Format.Kwh(t.EnergyKwh, culture), total > 0 ? Format.Percent(1, culture) : Format.Missing, total > 0 ? 1 : 0));
         }
         return rows;

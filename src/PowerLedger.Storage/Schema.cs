@@ -155,4 +155,12 @@ internal static class Schema
         ALTER TABLE calibration ADD COLUMN cpu_spread      REAL NOT NULL DEFAULT 0;
         ALTER TABLE calibration ADD COLUMN cpu_draw_spread REAL NOT NULL DEFAULT 0;
         """;
+
+    /// <summary>Asleep energy (accuracy A10): what the machine drew asleep, estimated, on the tick that reached back across
+    /// the sleep, and in the minute and hour rows the sleep is stored in. Rows from before read none.</summary>
+    public const string V5 = """
+        ALTER TABLE samples_raw ADD COLUMN asleep_w REAL;
+        ALTER TABLE samples_1m  ADD COLUMN asleep_wh REAL NOT NULL DEFAULT 0;
+        ALTER TABLE samples_1h  ADD COLUMN asleep_wh REAL NOT NULL DEFAULT 0;
+        """;
 }

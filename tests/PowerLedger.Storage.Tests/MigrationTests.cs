@@ -14,8 +14,11 @@ public sealed class MigrationTests : IDisposable
     {
         using var db = SqliteDatabase.OpenAndMigrate(_path);
         using var c = db.Open();
-        Migrator.LatestVersion.ShouldBe(4);
-        Migrator.CurrentVersion(c).ShouldBe(4);
+        Migrator.LatestVersion.ShouldBe(5);
+        Migrator.CurrentVersion(c).ShouldBe(5);
+        Columns(c, "samples_raw").ShouldContain("asleep_w");
+        Columns(c, "samples_1m").ShouldContain("asleep_wh");
+        Columns(c, "samples_1h").ShouldContain("asleep_wh");
         Columns(c, "samples_raw").ShouldContain("total_source");
         Columns(c, "samples_raw").ShouldContain("gpu_scope");
         Columns(c, "samples_raw").ShouldContain("measured_mask");
@@ -69,7 +72,7 @@ public sealed class MigrationTests : IDisposable
         }
 
         using var db = SqliteDatabase.OpenAndMigrate(_path);
-        using (var c = db.Open()) Migrator.CurrentVersion(c).ShouldBe(4);
+        using (var c = db.Open()) Migrator.CurrentVersion(c).ShouldBe(Migrator.LatestVersion);
         new CalibrationRepository(db).Load("abc").Buckets.ShouldBe([new Core.BucketState(6, 3.4, 6000)]);
     }
 

@@ -159,6 +159,7 @@ internal static class ServiceHost
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
             SystemShuttingDown: () => shutdown.SystemShuttingDown,
             DatabaseNotice: provider.GetRequiredService<OpenedDatabase>().Notice,
-            Watched: () => signals.Watched);
+            Watched: () => signals.Watched,
+            Battery: BatteryGauge.Windows());
     }
 }

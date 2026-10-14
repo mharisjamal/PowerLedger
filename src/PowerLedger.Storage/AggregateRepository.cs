@@ -11,6 +11,10 @@ public sealed class AggregateRepository(SqliteDatabase db)
         "start_ms, avg_w, max_w, energy_wh, cpu_wh, gpu_wh, display_wh, rest_wh, idle_on_wh, idle_off_wh, " +
         "idle_on_s, idle_off_s, on_s, battery_s, gap_s, sample_count, measured_s, calibrated_s, estimated_s";
 
+    /// <summary>What storage version 5 added: what the machine drew asleep (accuracy A10). The App reads the database
+    /// read-only and may meet one the service has not upgraded yet, whose rows read with none.</summary>
+    private const string Asleep = "asleep_wh";
+
     /// <summary>Writes or replaces one minute row, keyed by its start. Because it replaces, build the row from every raw
     /// row in that minute (spec §7), never from one run's own ticks, or a restart inside the minute erases the earlier part.</summary>
     public void UpsertMinute(Aggregate a) => Upsert(MinuteTable, a);
@@ -64,8 +68,8 @@ public sealed class AggregateRepository(SqliteDatabase db)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = $"INSERT OR REPLACE INTO {table} ({Columns}) VALUES " +
-            "($start, $avg, $max, $energy, $cpu, $gpu, $display, $rest, $idleOn, $idleOff, $idleOnS, $idleOffS, $on, $battery, $gap, $count, $measured, $calibrated, $estimated)";
+        cmd.CommandText = $"INSERT OR REPLACE INTO {table} ({Columns}, {Asleep}) VALUES " +
+            "($start, $avg, $max, $energy, $cpu, $gpu, $display, $rest, $idleOn, $idleOff, $idleOnS, $idleOffS, $on, $battery, $gap, $count, $measured, $calibrated, $estimated, $asleep)";
         Rows.Add(cmd, "$start", Rows.Ms(a.Start));
         Rows.Add(cmd, "$avg", a.AvgW);
         Rows.Add(cmd, "$max", a.MaxW);
@@ -85,20 +89,32 @@ public sealed class AggregateRepository(SqliteDatabase db)
         Rows.Add(cmd, "$measured", a.MeasuredSeconds);
         Rows.Add(cmd, "$calibrated", a.CalibratedSeconds);
         Rows.Add(cmd, "$estimated", a.EstimatedSeconds);
+        Rows.Add(cmd, "$asleep", a.AsleepWh);
         cmd.ExecuteNonQuery();
     }
 
     private List<Aggregate> Read(string table, DateTimeOffset from, DateTimeOffset to)
     {
         using var c = db.Open();
+        var asleep = HasColumn(c, table, Asleep);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = $"SELECT {Columns} FROM {table} WHERE start_ms >= $from AND start_ms < $to ORDER BY start_ms";
+        cmd.CommandText = $"SELECT {Columns}{(asleep ? ", " + Asleep : "")} FROM {table} WHERE start_ms >= $from AND start_ms < $to ORDER BY start_ms";
         Rows.Add(cmd, "$from", Rows.Ms(from));
         Rows.Add(cmd, "$to", Rows.Ms(to));
         using var r = cmd.ExecuteReader();
         var list = new List<Aggregate>();
-        while (r.Read()) list.Add(Map(r));
+        while (r.Read()) list.Add(asleep ? Map(r) with { AsleepWh = r.GetDouble(19) } : Map(r));
         return list;
+    }
+
+    /// <summary>True when <paramref name="table"/> has <paramref name="column"/>; asked of the schema, which a read-only
+    /// connection can do.</summary>
+    private static bool HasColumn(SqliteConnection c, string table, string column)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column";
+        Rows.Add(cmd, "$column", column);
+        return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
     }
 
     private DateTimeOffset? LastStart(string table)

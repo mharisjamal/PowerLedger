@@ -148,4 +148,15 @@ public class DownsamplerTests
         h.SampleCount.ShouldBe(3);
         h.EnergyWh.ShouldBe((30.0 + 40.0) / 3600, 1e-9);
     }
+
+    [Fact]
+    public void Asleep_energy_lands_in_the_minute_the_machine_woke_in_and_its_hour_apart_from_the_energy_awake()
+    {
+        var first = Downsampler.ToMinute(TestData.T0, [At(0, 30), At(1, 30, delta: 7200) with { AsleepW = 0.5 }]);
+        first.AsleepWh.ShouldBe(1, 1e-9);
+        first.EnergyWh.ShouldBe(30.0 / 3600, 1e-9);
+        first.AvgW.ShouldBe(30, 1e-9);
+        var second = Downsampler.ToMinute(TestData.T0.AddMinutes(1), [At(60, 40, delta: 1800) with { AsleepW = 2 }]);
+        Downsampler.ToHour(TestData.T0, [first, second]).AsleepWh.ShouldBe(2, 1e-9);
+    }
 }

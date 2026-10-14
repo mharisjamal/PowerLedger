@@ -31,9 +31,11 @@ internal sealed record LivePanel(
 }
 
 /// <summary>Today's ledger, as the user reads it.</summary>
+/// <param name="AsleepEnergy">What the PC drew asleep today, estimated (accuracy A10), which Energy and Cost count, as the
+/// note on the asleep line; empty when it drew none.</param>
 internal sealed record TodayLedger(
     string Date, string Energy, string Cost, string Tariff, string Average, string Peak, string PeakAt,
-    string On, string Idle, string IdleWasted, string Asleep, string Co2, string Co2Factor)
+    string On, string Idle, string IdleWasted, string Asleep, string Co2, string Co2Factor, string AsleepEnergy = "")
 {
     public static TodayLedger Empty { get; } = new(
         "", Format.Missing, Format.Missing, "", Format.Missing, Format.Missing, "", Format.Missing, Format.Missing, "",

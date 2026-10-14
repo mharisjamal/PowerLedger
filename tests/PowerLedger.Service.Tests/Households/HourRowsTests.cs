@@ -57,6 +57,21 @@ public sealed class HourRowsTests : IDisposable
         Cost(3).ShouldBe((4_000L, "EUR"));
     }
 
+    /// <summary>Accuracy A10: the household counts what this PC drew asleep, as its own report does.</summary>
+    [Fact]
+    public void An_hour_s_energy_and_cost_count_what_the_pc_drew_asleep()
+    {
+        Tariffs.Add(new Tariff(Midnight.AddDays(-30), 0.25m, "GBP"));
+        Aggregates.UpsertHour(Hour(0, energyWh: 42.5) with { GapSeconds = 7 * 3600, AsleepWh = 6 });
+
+        Rows.Build(Me, Midnight.AddDays(-1), Midnight.AddHours(3));
+
+        var row = Household.Row(Me, Midnight.ToUnixTimeMilliseconds()).ShouldNotBeNull();
+        row.EnergyWh.ShouldBe(48.5);
+        row.CostMicro.ShouldBe(12_125L);
+        row.RestWh.ShouldBe(17.5);                                  // the parts are the PC's awake
+    }
+
     [Fact]
     public void A_row_changes_only_when_its_figures_do()
     {

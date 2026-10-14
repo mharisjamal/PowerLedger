@@ -169,6 +169,42 @@ public class SamplingLoopTests
         minute.OnSeconds.ShouldBe(14, 1e-6);
     }
 
+    /// <summary>Accuracy A10: a sleep is no longer free. Before anything is learned a laptop on battery loses half a watt.</summary>
+    [Fact]
+    public Task A_sleep_books_what_the_laptop_draws_asleep_half_a_watt_before_it_has_learned_its_own()
+        => SleepBooks(battery: null, expectedW: SleepPower.LaptopDrainW, learned: null);
+
+    /// <summary>Accuracy A10: the battery's charge as the laptop went to sleep and as it woke, on battery throughout, teaches
+    /// what it loses asleep, which the sleep is then booked at and the service keeps for the App.</summary>
+    [Fact]
+    public async Task A_sleep_on_battery_teaches_what_the_laptop_loses_asleep_and_books_the_sleep_at_it()
+    {
+        var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: false, 38.4, 50)]);   // 1.6 Wh in 2 h
+        await SleepBooks(() => charges.Count > 0 ? charges.Dequeue() : null, expectedW: 0.8, learned: 0.8);
+    }
+
+    private static async Task SleepBooks(Func<BatteryCharge?>? battery, double expectedW, double? learned)
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t, battery: battery);
+        await loop.StartAsync();
+        await loop.Ticks(10);                                       // 00:55:01 to 00:55:10
+        await loop.Send(new SuspendCommand());
+        loop.Clock.Advance(TimeSpan.FromHours(2));
+        await loop.Send(new ResumeCommand());
+        await loop.Ticks(5);
+        await loop.StopAsync();
+
+        var minutes = new AggregateRepository(t.Db).ReadMinutes(Start, Start.AddHours(3));
+        var gap = minutes.Sum(m => m.GapSeconds);
+        gap.ShouldBe(2 * 3600 + 1, 1e-6);
+        minutes.Sum(m => m.AsleepWh).ShouldBe(expectedW * gap / 3600, 1e-9);
+        minutes.Sum(m => m.EnergyWh).ShouldBe(new RawSampleRepository(t.Db).Read(Start, Start.AddHours(3)).Sum(r => EnergyIntegrator.Integrate(r).Wh), 1e-9);
+        var kept = SleepDrain.Parse(new SettingsRepository(t.Db).Get(SleepDrain.SettingsKey)).Watts;
+        if (learned is { } watts) kept.ShouldNotBeNull().ShouldBe(watts, 1e-9);
+        else kept.ShouldBeNull();
+    }
+
     [Fact]
     public async Task Every_tick_runs_on_the_loops_own_thread_and_never_on_the_thread_pool()
     {
@@ -653,7 +689,7 @@ public class SamplingLoopTests
         /// <param name="watched">Whether anyone looks at the live figures; always, when left out.</param>
         public Harness(
             TestDatabase database, LoopOptions? options = null, Func<int, FakeSensorSet>? makeSet = null,
-            Func<FakeTimeProvider, TimeProvider>? loopClock = null, Func<bool>? watched = null)
+            Func<FakeTimeProvider, TimeProvider>? loopClock = null, Func<bool>? watched = null, Func<BatteryCharge?>? battery = null)
         {
             Clock.SetLocalTimeZone(Plus2);
             Monitors = new MonitorBoard(MonitorBoardTests.Catalogue, Clock);
@@ -676,7 +712,8 @@ public class SamplingLoopTests
                 SystemUptime: () => TimeSpan.FromHours(3),
                 SystemShuttingDown: () => false,
                 DatabaseNotice: null,
-                Watched: watched);
+                Watched: watched,
+                Battery: battery);
             var clock = loopClock?.Invoke(Clock) ?? Clock;
             _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Monitors, clock, NullLogger<SamplingLoop>.Instance, options);
         }

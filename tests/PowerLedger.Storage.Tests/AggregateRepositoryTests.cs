@@ -15,9 +15,40 @@ public class AggregateRepositoryTests
     {
         using var t = new TestDatabase();
         var repo = new AggregateRepository(t.Db);
-        var m = Minute(0);
+        var m = Minute(0) with { GapSeconds = 3600, AsleepWh = 0.85 };
         repo.UpsertMinute(m);
         repo.ReadMinutes(Fixtures.T0, Fixtures.T0.AddMinutes(1)).Single().ShouldBe(m);
+        repo.UpsertHour(m);
+        repo.ReadHours(Fixtures.T0, Fixtures.T0.AddMinutes(1)).Single().ShouldBe(m);
+    }
+
+    /// <summary>The App opens the database read-only and may meet one the service has not upgraded yet: its rows read as
+    /// before, with nothing asleep.</summary>
+    [Fact]
+    public void Rows_from_a_database_before_asleep_energy_read_with_none()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"powerledger-v4-{Guid.NewGuid():N}.db");
+        try
+        {
+            using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False"))
+            {
+                c.Open();
+                Migrator.Exec(c, "CREATE TABLE schema_version (version INTEGER NOT NULL, applied_ms INTEGER NOT NULL)");
+                Migrator.Exec(c, Schema.V1 + Schema.V2 + Schema.V3 + Schema.V4);
+                Migrator.Exec(c, $"INSERT INTO samples_1m VALUES ({Fixtures.T0.ToUnixTimeMilliseconds()}, 30, 30, 0.5, 0.2, 0.05, 0.07, 0.18, 0, 0, 0, 0, 60, 60, 0, 60, 60, 0, 0)");
+            }
+            using var app = new SqliteDatabase(path, readOnly: true);
+            var row = new AggregateRepository(app).ReadMinutes(Fixtures.T0, Fixtures.T0.AddMinutes(1)).ShouldHaveSingleItem();
+            row.EnergyWh.ShouldBe(0.5);
+            row.AsleepWh.ShouldBe(0);
+        }
+        finally
+        {
+            foreach (var f in new[] { path, path + "-wal", path + "-shm" })
+            {
+                try { File.Delete(f); } catch (IOException) { }
+            }
+        }
     }
 
     [Fact]

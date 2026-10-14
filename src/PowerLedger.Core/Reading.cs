@@ -10,6 +10,9 @@ namespace PowerLedger.Core;
 /// <param name="GpuScope">What the discrete GPU's measured watts covered, as the sample gave it.</param>
 /// <param name="Measured">Which figures a device measured rather than the model worked out. The loop marks it from the
 /// sample; the model leaves it empty.</param>
+/// <param name="AsleepW">What the machine drew while it slept, estimated (accuracy A10), on the tick that reaches back across
+/// the sleep: the energy integrator books it over that tick's gap as asleep energy. Null on every other tick, and on a gap
+/// the service was never told was a sleep.</param>
 public sealed record Reading(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -26,4 +29,5 @@ public sealed record Reading(
     bool Suspect,
     TotalSource TotalSource = TotalSource.Model,
     GpuPowerScope GpuScope = GpuPowerScope.Board,
-    MeasuredParts Measured = MeasuredParts.None);
+    MeasuredParts Measured = MeasuredParts.None,
+    double? AsleepW = null);

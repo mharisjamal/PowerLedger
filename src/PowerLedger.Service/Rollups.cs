@@ -26,7 +26,7 @@ internal sealed class Rollups(RawSampleRepository raw, AggregateRepository aggre
         {
             var start = chunk < from ? from : chunk;
             var end = chunk + Hour < to ? chunk + Hour : to;
-            foreach (var minute in raw.Read(start, end).GroupBy(r => Floor(r.Timestamp, Minute)))
+            foreach (var minute in raw.ReadAll(start, end).GroupBy(r => Floor(r.Timestamp, Minute)))
             {
                 var awake = Downsampler.ToMinute(minute.Key, [.. minute.Where(r => !wakes.Within(r))], gapThresholdSeconds);
                 List<Reading> slept = [.. minute.Where(wakes.Within)];
