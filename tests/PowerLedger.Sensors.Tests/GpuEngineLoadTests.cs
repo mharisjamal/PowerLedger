@@ -26,14 +26,55 @@ public class GpuEngineLoadTests
     }
 
     [Fact]
-    public void The_busiest_engine_is_the_cards_load()
+    public void The_busiest_3d_or_compute_engine_is_the_cards_load()
     {
-        var before = At(10, (Instance(100, 0), 4), (Instance(100, 2, "Copy"), 1), (Instance(300, 1, "VideoDecode"), 0));
-        var after = At(15, (Instance(100, 0), 5), (Instance(100, 2, "Copy"), 1.5), (Instance(300, 1, "VideoDecode"), 3.5));
+        var before = At(10, (Instance(100, 0), 4), (Instance(200, 4, "Compute_0"), 0), (Instance(100, 2, "Copy"), 1));
+        var after = At(15, (Instance(100, 0), 5), (Instance(200, 4, "Compute_0"), 2), (Instance(100, 2, "Copy"), 4));
 
-        // 3D 20 %, copy 10 %, video decode 70 %.
-        GpuEngines.Busiest(before, after, Card).ShouldNotBeNull().ShouldBe(0.7, 1e-9);
+        // 3D 20 %, compute 40 %, copy 60 %.
+        GpuEngines.Busiest(before, after, Card).ShouldNotBeNull().ShouldBe(0.4, 1e-9);
     }
+
+    [Fact]
+    public void Video_decode_is_no_load_so_a_film_does_not_count_as_a_game()
+    {
+        // 4K video on a big card keeps its fixed-function decoder busy at a few watts, not the shaders at a hundred.
+        var before = At(10, (Instance(100, 0), 4), (Instance(300, 1, "VideoDecode"), 0), (Instance(300, 5, "VideoProcessing"), 0),
+            (Instance(300, 6, "Video Encode"), 0), (Instance(300, 7, "Video Codec_0"), 0));
+        var after = At(15, (Instance(100, 0), 5), (Instance(300, 1, "VideoDecode"), 3.5), (Instance(300, 5, "VideoProcessing"), 3),
+            (Instance(300, 6, "Video Encode"), 4), (Instance(300, 7, "Video Codec_0"), 4.5));
+
+        GpuEngines.Busiest(before, after, Card).ShouldNotBeNull().ShouldBe(0.2, 1e-9);
+
+        var onlyVideo = At(15, (Instance(100, 0), 4), (Instance(300, 1, "VideoDecode"), 3.5));
+        GpuEngines.Busiest(At(10, (Instance(100, 0), 4), (Instance(300, 1, "VideoDecode"), 0)), onlyVideo, Card).ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("3D", true)]
+    [InlineData("3d", true)]
+    [InlineData("High Priority 3D", true)]
+    [InlineData("Compute_0", true)]
+    [InlineData("Compute_1", true)]
+    [InlineData("High Priority Compute", true)]
+    [InlineData("Cuda", true)]
+    [InlineData("Graphics_1", true)]
+    [InlineData("", true)]
+    [InlineData("VideoDecode", false)]
+    [InlineData("Video Decode", false)]
+    [InlineData("VideoEncode", false)]
+    [InlineData("VideoProcessing", false)]
+    [InlineData("Video Codec_0", false)]
+    [InlineData("Copy", false)]
+    [InlineData("Security", false)]
+    [InlineData("LegacyOverlay", false)]
+    [InlineData("Timer 0", false)]
+    public void Only_3d_and_compute_engines_are_load(string type, bool load)
+        => GpuEngines.IsLoadEngine(Instance(100, 0, type)).ShouldBe(load);
+
+    [Fact]
+    public void An_instance_without_an_engine_type_counts_since_nothing_says_what_it_is()
+        => GpuEngines.IsLoadEngine("pid_1234_luid_0x00000000_0x0000D1A4_phys_0_eng_0").ShouldBeTrue();
 
     [Fact]
     public void An_engine_is_never_busier_than_all_the_time_there_was()

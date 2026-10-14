@@ -43,9 +43,12 @@ public sealed class GpuEngines
     }
 
     /// <summary>
-    /// The adapter's load between two snapshots, 0..1, the way Task Manager reports a GPU: each engine's processes are
-    /// added up and capped at the whole engine, and the busiest engine is the load. A process that started or ended in
-    /// between is left out, and a count that went backwards, as when Windows reuses a process id, counts as idle.
+    /// The adapter's load between two snapshots, 0..1, much as Task Manager reports a GPU: each engine's processes are
+    /// added up and capped at the whole engine, and the busiest engine is the load. Only the 3D and compute engines count
+    /// (<see cref="IsLoadEngine"/>): the load is turned into watts by the card's rating, which its shaders draw, and video
+    /// decode, encode and copy run on small fixed-function engines that draw a few watts at full tilt, so a 4K film would
+    /// otherwise count as a game. A process that started or ended in between is left out, and a count that went backwards,
+    /// as when Windows reuses a process id, counts as idle.
     /// </summary>
     /// <param name="luid">The adapter as the counters name it; see <see cref="GpuAdapter.CounterLuid"/>.</param>
     /// <returns>0 when no process uses the adapter; null when no time passed between the snapshots.</returns>
@@ -55,11 +58,28 @@ public sealed class GpuEngines
         var engines = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var (instance, time) in after.RunningTime)
         {
-            if (EngineOf(instance, luid) is not { } engine || !before.RunningTime.TryGetValue(instance, out var earlier)) continue;
+            if (EngineOf(instance, luid) is not { } engine || !IsLoadEngine(instance) || !before.RunningTime.TryGetValue(instance, out var earlier)) continue;
             if (elapsed <= 0) return null;
             engines[engine] = engines.GetValueOrDefault(engine) + Math.Max(0, time - earlier) / (double)elapsed;
         }
         return engines.Count == 0 ? 0 : Math.Min(1, engines.Values.Max());
+    }
+
+    /// <summary>
+    /// True for an engine that draws the card's power when busy: 3D ("3D", "High Priority 3D", NVIDIA's "Graphics_1") and
+    /// compute ("Compute_0", "High Priority Compute", "Cuda"). Video decode, encode and processing, copy, security, overlay
+    /// and timer engines are not. An instance that names no engine type counts, since nothing says what it is.
+    /// </summary>
+    internal static bool IsLoadEngine(string instance)
+    {
+        var at = instance.LastIndexOf("_engtype_", StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return true;
+        var type = instance.AsSpan(at + "_engtype_".Length);
+        return type.IsEmpty
+            || type.Contains("3D", StringComparison.OrdinalIgnoreCase)
+            || type.Contains("Compute", StringComparison.OrdinalIgnoreCase)
+            || type.StartsWith("Cuda", StringComparison.OrdinalIgnoreCase)
+            || type.StartsWith("Graphics", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The engine an instance runs on, e.g. "phys_0_eng_3", or null when it belongs to another adapter.</summary>
