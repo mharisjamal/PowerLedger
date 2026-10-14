@@ -49,6 +49,14 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
     /// <summary>The last refresh rate and HDR state for each monitor by instance, kept as its brightness is.</summary>
     private readonly Dictionary<string, ((double RefreshHz, bool Hdr) Display, TimeSpan At)> _displays = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>When each attached monitor last answered whether it is on, kept after the answer goes stale so a monitor that
+    /// stopped answering can be told from one that never did (Plan AC).</summary>
+    private readonly Dictionary<string, TimeSpan> _answered = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>When the App last reported having asked the monitors whether they are on, answered or not; null until it
+    /// has. An App the user told not to ask them sends no power states at all, which leaves this as it was.</summary>
+    private TimeSpan? _asked;
+
     /// <summary>How long the displays had been on when the latest reading said whether they are, counted from the board's
     /// start: the clock what the App reported ages by.</summary>
     private TimeSpan _displaysOnFor;
@@ -90,6 +98,7 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             DropStale(_brightness, BrightnessStale, on);
             DropStale(_power, PowerStale, on);
             DropStale(_displays, DisplayStale, on);
+            foreach (var instance in _answered.Keys.Where(instance => Attached(instance) is null).ToList()) _answered.Remove(instance);
         }
     }
 
@@ -130,11 +139,14 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
                 var monitor = Attached(reading.Instance);
                 if (monitor is not null) _brightness[monitor.Facts.Instance] = (Math.Clamp(reading.Brightness, 0, 1), on);
             }
+            if (power is not null) _asked = on;
             foreach (var reading in power ?? [])
             {
                 if (reading.State is not (MonitorPowerState.On or MonitorPowerState.Standby or MonitorPowerState.Off)) continue;
                 var monitor = Attached(reading.Instance);
-                if (monitor is not null) _power[monitor.Facts.Instance] = (reading.State, on);
+                if (monitor is null) continue;
+                _power[monitor.Facts.Instance] = (reading.State, on);
+                _answered[monitor.Facts.Instance] = on;
             }
             foreach (var display in displays ?? [])
             {
@@ -221,15 +233,19 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
         double? brightness = _brightness.TryGetValue(facts.Instance, out var reading) && !IsStale(reading.At, on, BrightnessStale)
             ? reading.Brightness
             : null;
+        // A monitor that answered and then went quiet while the App kept asking was switched off at its button, as one on
+        // HDMI is while Windows still drives it: it draws its off figure, not the on figure an unknown state draws (Plan AC).
         var state = _power.TryGetValue(facts.Instance, out var said) && !IsStale(said.At, on, PowerStale)
             ? said.State
-            : MonitorPowerState.Unknown;
+            : WentQuiet(facts.Instance, on) ? MonitorPowerState.Off : MonitorPowerState.Unknown;
         (double RefreshHz, bool Hdr)? display =
             _displays.TryGetValue(facts.Instance, out var driven) && !IsStale(driven.At, on, DisplayStale) ? driven.Display : null;
         // A figure the user typed is what the monitor draws as they use it, so it is taken as it is, and the brightness is
         // reported only for the user to see. PowerLedger's own figure, from the list or the estimate, is the draw at the
         // list's test luminance, so it is scaled from where that sits on the monitor's brightness scale to the monitor's.
-        var onNow = choice?.Watts ?? MonitorPower.At(monitor.OnW, brightness, monitor.Anchor);
+        // An LCD in HDR runs its backlight at full whatever brightness it reports (Plan AC); an OLED's pixels still follow it.
+        var backlight = display is { Hdr: true } && !monitor.Oled ? 1 : brightness;
+        var onNow = choice?.Watts ?? MonitorPower.At(monitor.OnW, backlight, monitor.Anchor);
         // An LCD panel driven faster than the list's 60 Hz draws more while it is on (spec §3). Nothing is known of what an
         // OLED panel adds, and a figure the user typed is already what the monitor draws as they use it.
         var drivenOn = counted && displayOn && state is (MonitorPowerState.On or MonitorPowerState.Unknown);
@@ -268,6 +284,12 @@ internal sealed class MonitorBoard(MonitorCatalogue catalogue, TimeProvider cloc
             },
         };
     }
+
+    /// <summary>Whether a monitor answered once and has stopped: its last answer is stale while the App has asked again since,
+    /// recently enough to be still asking. Called with the lock held.</summary>
+    private bool WentQuiet(string instance, TimeSpan on)
+        => _answered.TryGetValue(instance, out var answered) && _asked is { } asked
+           && asked > answered && !IsStale(asked, on, PowerStale) && IsStale(answered, on, PowerStale);
 
     /// <summary>How long the displays have been on at <paramref name="now"/>, going by what the latest reading said since it
     /// came. Called with the lock held.</summary>

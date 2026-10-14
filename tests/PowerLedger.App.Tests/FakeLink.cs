@@ -70,13 +70,13 @@ internal sealed class FakeLink : IServiceLink
     /// <summary>Every brightness report the App sent, in order, with the brightnesses, the power states and the display
     /// settings it carried. They are kept apart from <see cref="Writes"/>, being reports rather than changes the user asked
     /// for.</summary>
-    public List<(IReadOnlyList<MonitorBrightness> Monitors, IReadOnlyList<MonitorPowerReading> Power, IReadOnlyList<MonitorDisplayReading> Displays)> BrightnessReports { get; } = [];
+    public List<(IReadOnlyList<MonitorBrightness> Monitors, IReadOnlyList<MonitorPowerReading>? Power, IReadOnlyList<MonitorDisplayReading> Displays)> BrightnessReports { get; } = [];
 
     /// <summary>When set, a brightness report fails with this.</summary>
     public Exception? ReportThrows { get; set; }
 
     public Task<WriteResult> ReportBrightnessAsync(
-        IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading> power, IReadOnlyList<MonitorDisplayReading> displays,
+        IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading>? power, IReadOnlyList<MonitorDisplayReading> displays,
         CancellationToken cancel = default)
     {
         if (ReportThrows is { } error) return Task.FromException<WriteResult>(error);

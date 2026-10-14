@@ -81,9 +81,10 @@ internal interface IServiceLink : IAsyncDisposable
 
     /// <summary>Tells the service the brightness and the power state its monitors answered with, and the refresh rate and HDR
     /// state Windows drives each at (Plans J and K), once the server has passed the check. Only for a service whose status
-    /// lists monitors: one from before them drops a connection that sends it this.</summary>
+    /// lists monitors: one from before them drops a connection that sends it this. No power states at all, rather than none
+    /// answered, says the monitors were not asked.</summary>
     Task<WriteResult> ReportBrightnessAsync(
-        IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading> power, IReadOnlyList<MonitorDisplayReading> displays,
+        IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading>? power, IReadOnlyList<MonitorDisplayReading> displays,
         CancellationToken cancel = default);
 
     /// <summary>Records the user's answer to the consent dialog, or a change in Settings → Privacy (data-sharing design §1).
@@ -254,7 +255,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public Task<WriteResult> ResetCalibrationAsync(CancellationToken cancel = default) => WriteAsync(new ResetCalibrationRequest(NextId()), cancel);
 
     public Task<WriteResult> ReportBrightnessAsync(
-        IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading> power, IReadOnlyList<MonitorDisplayReading> displays,
+        IReadOnlyList<MonitorBrightness> monitors, IReadOnlyList<MonitorPowerReading>? power, IReadOnlyList<MonitorDisplayReading> displays,
         CancellationToken cancel = default)
         => WriteAsync(new ReportBrightnessRequest(NextId(), monitors, power, displays), cancel);
 
