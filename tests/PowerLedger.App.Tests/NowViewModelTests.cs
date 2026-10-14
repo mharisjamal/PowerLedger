@@ -48,7 +48,7 @@ public class NowViewModelTests
         model.Live.Budget[0].Watts.ShouldBe("14.6 W");
         model.Live.Budget[0].Percent.ShouldBe("43%");
         model.Live.BudgetTotalW.ShouldBe(34.2, 1e-9);
-        model.TrayTooltip.ShouldStartWith("34.2 W · Measured");
+        model.TrayTooltip.ShouldStartWith("34 W · Measured");   // whole, as the icon (perf review P2)
     }
 
     [Theory]
@@ -550,5 +550,120 @@ public class NowViewModelTests
         model.Co2KgPerKwh = 0.8;
         model.Today.Co2.ShouldBe("0.23");
         model.Today.Co2Factor.ShouldBe("0.80 kg / kWh grid");
+    }
+
+    [Fact]
+    public void Unwatched_a_reading_keeps_the_newest_frame_and_the_tray_but_builds_no_live_panel()
+    {
+        // Perf review P1: with every window hidden, a reading a second rebuilt a panel nothing drew.
+        var model = Model();
+        _link.Push(Frames.At(Now, totalW: 20.0));
+        var live = model.Live;
+        model.IsWatched = false;
+        var changed = new List<string?>();
+        model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        _link.Push(Frames.At(Now.AddSeconds(1), totalW: 34.2));
+
+        model.Live.ShouldBeSameAs(live);
+        changed.ShouldNotContain(nameof(NowViewModel.Live));
+        model.Last.ShouldNotBeNull().TotalW.ShouldBe(34.2);
+        changed.ShouldContain(nameof(NowViewModel.Last));
+        changed.ShouldContain(nameof(NowViewModel.TrayTooltip));
+        model.TrayTooltip.ShouldStartWith("34 W · Measured");
+    }
+
+    [Fact]
+    public void Unwatched_it_reads_the_history_every_five_minutes_and_the_status_every_minute()
+    {
+        // Perf review P13: a hidden App read today's history every minute and the status every ten seconds.
+        var model = Model();
+        _link.Connect(true);
+        model.Start();
+        model.IsWatched = false;
+        var (reads, polls) = (_history.Reads, _link.StatusReads);
+
+        _clock.Advance(NowViewModel.StatusEvery);
+        _link.StatusReads.ShouldBe(polls);
+        _clock.Advance(NowViewModel.HistoryEvery - NowViewModel.StatusEvery);   // a minute on
+        _history.Reads.ShouldBe(reads);
+        _link.StatusReads.ShouldBe(polls + 1);
+
+        _clock.Advance(NowViewModel.HiddenHistoryEvery - NowViewModel.HistoryEvery);   // five minutes on
+        _history.Reads.ShouldBe(reads + 1);
+        _link.StatusReads.ShouldBe(polls + 5);
+    }
+
+    [Fact]
+    public void Watched_again_it_reads_both_at_once_and_then_as_often_as_before()
+    {
+        var model = Model();
+        _link.Connect(true);
+        model.Start();
+        model.IsWatched = false;
+        var (reads, polls) = (_history.Reads, _link.StatusReads);
+
+        model.IsWatched = true;
+        _history.Reads.ShouldBe(reads + 1);
+        _link.StatusReads.ShouldBe(polls + 1);
+
+        _clock.Advance(NowViewModel.StatusEvery);
+        _link.StatusReads.ShouldBe(polls + 2);
+        _clock.Advance(NowViewModel.HistoryEvery - NowViewModel.StatusEvery);
+        _history.Reads.ShouldBe(reads + 2);
+    }
+
+    [Fact]
+    public void Started_unwatched_it_reads_as_a_hidden_app_does()
+    {
+        var model = Model();
+        _link.Connect(true);
+        model.IsWatched = false;   // the App started in the tray
+        model.Start();
+        var (reads, polls) = (_history.Reads, _link.StatusReads);
+
+        _clock.Advance(NowViewModel.HistoryEvery);
+        _history.Reads.ShouldBe(reads);
+        _link.StatusReads.ShouldBe(polls + 1);
+        _clock.Advance(NowViewModel.HiddenHistoryEvery - NowViewModel.HistoryEvery);
+        _history.Reads.ShouldBe(reads + 1);
+    }
+
+    [Fact]
+    public void The_tray_tooltips_words_change_only_with_the_whole_watts()
+    {
+        // Perf review P2: a tooltip in tenths changed every second, and each change is a message to Explorer.
+        var model = Model();
+        _link.Push(Frames.At(Now, totalW: 34.2));
+        var tip = model.TrayTooltip;
+
+        _link.Push(Frames.At(Now.AddSeconds(1), totalW: 34.4));
+        model.TrayTooltip.ShouldBe(tip);
+
+        _link.Push(Frames.At(Now.AddSeconds(2), totalW: 34.6));
+        model.TrayTooltip.ShouldStartWith("35 W · Measured");
+    }
+
+    [Fact]
+    public void Watched_again_the_live_panel_is_built_once_from_the_readings_that_came_meanwhile()
+    {
+        var model = Model();
+        model.IsWatched = false;
+        _link.Push(Frames.At(Now, totalW: 20.0));
+        _link.Push(Frames.At(Now.AddSeconds(1), totalW: 48.0));
+        _link.Push(Frames.At(Now.AddSeconds(2), totalW: 34.2));
+        var lives = 0;
+        model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(NowViewModel.Live)) lives++;
+        };
+
+        model.IsWatched = true;
+
+        lives.ShouldBe(1);
+        model.Live.Watts.ShouldBe(34.2);
+        model.Live.Spark.Select(sample => sample.Watts).ShouldBe(new[] { 20.0, 48.0, 34.2 });
+        model.Live.PeakW.ShouldBe(48.0);
+        model.Live.Eyebrow.ShouldBe("Live · battery discharge · 14:32:09");
     }
 }

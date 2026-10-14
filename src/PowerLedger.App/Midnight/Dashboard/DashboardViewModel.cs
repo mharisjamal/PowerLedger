@@ -43,6 +43,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private readonly IUiSettings? _ui;
     private EnergyPeriod _energyPeriod;
     private bool _detailed;
+    private bool _shown;
     private HistorySpan _historySpan;
     private DashboardDetail? _detail;
 
@@ -206,15 +207,24 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
+    /// <summary>The page is shown: the live reading as it is now, then a read now and every minute until it is hidden.
+    /// Call on the UI thread.</summary>
     public void Show()
     {
+        if (!_shown)
+        {
+            _shown = true;
+            OnPropertyChanged(nameof(Live));   // the readings let pass while hidden, caught up in one
+            Rebuild();
+        }
         Refresh();
         _timer ??= _clock.CreateTimer(_ => _threads.Post(Tick), null, RefreshEvery, RefreshEvery);
     }
 
+    /// <summary>The page is hidden: no reads, and a live reading passes it by until it shows again (perf review P1).</summary>
     public void Hide()
     {
+        _shown = false;
         _timer?.Dispose();
         _timer = null;
     }
@@ -419,6 +429,8 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     {
         switch (e.PropertyName)
         {
+            case nameof(NowViewModel.Live) when !_shown:
+                break;   // nothing draws it; Show catches up
             case nameof(NowViewModel.Live):
             case nameof(NowViewModel.Today):
             case nameof(NowViewModel.Month):

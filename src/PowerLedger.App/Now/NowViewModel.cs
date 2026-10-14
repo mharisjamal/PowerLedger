@@ -11,12 +11,15 @@ namespace PowerLedger.App;
 /// <summary>
 /// The Now screen (spec §9): the live reading and its quality, the last minute, the meter, the power budget, today's and
 /// the month's ledgers, and today's chart. Readings arrive on the link's thread and are posted to the UI thread; history
-/// is read every minute and the status and settings every ten seconds, both off the UI thread.
+/// is read every minute and the status and settings every ten seconds, both off the UI thread; while no window shows,
+/// every five minutes and every minute (perf review P13), and both at once when one shows again.
 /// </summary>
 internal sealed partial class NowViewModel : ObservableObject, IDisposable
 {
     public static readonly TimeSpan HistoryEvery = TimeSpan.FromMinutes(1);
     public static readonly TimeSpan StatusEvery = TimeSpan.FromSeconds(10);
+    public static readonly TimeSpan HiddenHistoryEvery = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan HiddenStatusEvery = TimeSpan.FromMinutes(1);
     public static readonly TimeSpan ConnectGrace = TimeSpan.FromSeconds(3);
 
     private readonly IServiceLink _link;
@@ -49,6 +52,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     private ReadingFrame? _last;
     private double _livePeak;
     private DateOnly _liveDay;
+    private bool _isWatched = true;
 
     private LivePanel _live = LivePanel.Waiting;
     private TodayLedger _today = TodayLedger.Empty;
@@ -115,6 +119,24 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
 
     public bool IsCollecting { get => _isCollecting; private set => SetProperty(ref _isCollecting, value); }
 
+    /// <summary>Whether a window of the App's shows, the overlay among them (perf review P1). Unwatched, a reading keeps
+    /// only the newest frame, the last minute's samples, the day's peak and the tray's text: the live panel, which no
+    /// window would draw, is built again once, from all that, when one shows. The history and the status are read less
+    /// often meanwhile (perf review P13), and both at once when one shows.</summary>
+    public bool IsWatched
+    {
+        get => _isWatched;
+        set
+        {
+            if (_isWatched == value) return;
+            _isWatched = value;
+            if (value) RebuildLive();
+            // Shown, both are read at once and then as often as before; hidden, the next read waits a whole hidden period.
+            _historyTimer?.Change(value ? TimeSpan.Zero : HiddenHistoryEvery, value ? HistoryEvery : HiddenHistoryEvery);
+            _statusTimer?.Change(value ? TimeSpan.Zero : HiddenStatusEvery, value ? StatusEvery : HiddenStatusEvery);
+        }
+    }
+
     /// <summary>Each status the service answered a poll with, on the UI thread: the updater reads how updates stand from it
     /// (Plan Q §3, §4), whether or not a window shows.</summary>
     public event Action<ServiceStatus>? StatusRead;
@@ -125,16 +147,19 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
     /// <summary>The newest reading, for the tray icon.</summary>
     public ReadingFrame? Last => _last;
 
-    /// <summary>The tray's tooltip: now and today (spec §9).</summary>
+    /// <summary>The tray's tooltip: now, in whole watts as the icon has it, and today (spec §9). Whole, its words change only
+    /// when the icon does or today's figures are read again, and each change is a message to Explorer (perf review P2).</summary>
     public string TrayTooltip => _last is { } frame
-        ? $"{Format.Watts(frame.TotalW, _culture)} W · {frame.Quality}\nToday {Today.Energy} kWh · {Today.Cost}"
+        ? $"{Format.WholeWatts(frame.TotalW, _culture)} W · {frame.Quality}\nToday {Today.Energy} kWh · {Today.Cost}"
         : IsServiceDown ? "PowerLedger · service not running" : "PowerLedger · waiting for the service";
 
     /// <summary>Starts the timers; the first history read happens at once. Call once, on the UI thread.</summary>
     public void Start()
     {
-        _historyTimer = _clock.CreateTimer(_ => RefreshHistory(), null, TimeSpan.Zero, HistoryEvery);
-        _statusTimer = _clock.CreateTimer(_ => _ = PollAsync(), null, StatusEvery, StatusEvery);
+        var history = _isWatched ? HistoryEvery : HiddenHistoryEvery;
+        var status = _isWatched ? StatusEvery : HiddenStatusEvery;
+        _historyTimer = _clock.CreateTimer(_ => RefreshHistory(), null, TimeSpan.Zero, history);
+        _statusTimer = _clock.CreateTimer(_ => _ = PollAsync(), null, status, status);
         _graceTimer = _clock.CreateTimer(_ => _threads.Post(EndGrace), null, ConnectGrace, Timeout.InfiniteTimeSpan);
         if (_link.IsConnected) OnConnectionChanged(true);
     }
@@ -213,8 +238,15 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
         _livePeak = Math.Max(_livePeak, double.IsFinite(frame.TotalW) ? frame.TotalW : 0);
         _window.Add(frame.Timestamp, frame.TotalW);
         _last = frame;
-        RebuildLive();
+        ShowLive();
         OnPropertyChanged(nameof(Last));
+    }
+
+    /// <summary>The live panel while a window shows; unwatched, only the tray's text.</summary>
+    private void ShowLive()
+    {
+        if (_isWatched) RebuildLive();
+        else OnPropertyChanged(nameof(TrayTooltip));
     }
 
     private void RebuildLive()
@@ -260,7 +292,7 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
             Chart = Charts.Build(snapshot.TodayRange, snapshot.TodaySeries, ChartUnit.Watts, _zone, _culture);
             Legend = new ChartLegend(Wh(snapshot.Today.CpuKwh), Wh(snapshot.Today.GpuKwh), Wh(snapshot.Today.DisplayKwh), Wh(snapshot.Today.RestKwh));
         }
-        RebuildLive();
+        ShowLive();
     }
 
     /// <summary>A desktop's readings never come from a battery: the one Windows shows there is a UPS, which powers more

@@ -10,6 +10,11 @@ only that platform's native libraries, where a platform-neutral build carries ei
 SQLite. The installer (installer\PowerLedger.iss) packs every folder and installs the build that matches the PC.
 artifacts\publish is emptied first, so an installer is never built from two different publishes.
 
+Both programs are compiled ahead of time (ReadyToRun, perf review P15): the runtime already ships that way, and now
+PowerLedger's own assemblies and the libraries it uses do too, so the service's first sensor build at boot and the
+App's first window at logon run native code instead of waiting on the JIT, at the cost of bigger files (the sizes
+printed at the end).
+
 .PARAMETER Configuration
 The configuration to publish; Release by default.
 
@@ -39,7 +44,7 @@ $programs = @(
 )
 foreach ($rid in $Runtime) {
     foreach ($program in $programs) {
-        dotnet publish (Join-Path $root $program.Project) -c $Configuration -r $rid --self-contained true `
+        dotnet publish (Join-Path $root $program.Project) -c $Configuration -r $rid --self-contained true -p:PublishReadyToRun=true `
             -o (Join-Path $out "$rid\$($program.Folder)") --nologo "-p:PowerLedgerGoogleClientSecret=$GoogleClientSecret"
         if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $($program.Project) ($rid)." }
     }

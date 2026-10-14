@@ -51,6 +51,10 @@ public partial class DashboardView : UserControl
         DataContextChanged += (_, _) => Attach(DataContext as DashboardViewModel);
         Loaded += OnLoaded;
         Unloaded += (_, _) => Detach();
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible) ShowNow();   // the reading as it is now, after any that passed it by while hidden
+        };
         SizeChanged += (_, _) => Reflow();
         Scroller.SizeChanged += (_, _) => Reflow();
         PreviewKeyDown += (_, e) =>
@@ -137,7 +141,7 @@ public partial class DashboardView : UserControl
         switch (e.PropertyName)
         {
             case nameof(DashboardViewModel.Live):
-                ShowNow();
+                if (IsVisible) ShowNow();   // hidden, nothing draws it (perf review P1); showing again does
                 break;
             case nameof(DashboardViewModel.Parts):
                 ShowParts();

@@ -89,6 +89,10 @@ internal partial class SettingsView : UserControl
             _now = null;
             Follow(null);
         };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible) ShowWatts();
+        };
     }
 
     /// <summary>The cards, for a test.</summary>
@@ -108,9 +112,11 @@ internal partial class SettingsView : UserControl
         if (e.PropertyName == nameof(SettingsViewModel.Glass)) ShowCards();
     }
 
+    /// <summary>A reading puts its watts in the cards while the page shows; hidden, nothing (perf review P1), and showing
+    /// again does.</summary>
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(NowViewModel.Live)) ShowWatts();
+        if (e.PropertyName == nameof(NowViewModel.Live) && IsVisible) ShowWatts();
     }
 
     /// <summary>Each card's glass, and which is chosen.</summary>

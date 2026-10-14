@@ -139,10 +139,10 @@ public class AeroPageRenderingTests
                     var at = $"{size} on {theme}";
                     var view = new PartsView { DataContext = screen };
                     using var page = Page(view, width, theme);
-                    var rows = Find<ItemsControl>(view, items => items.ItemsSource == screen.Parts).ShouldNotBeNull(at);
-                    foreach (var part in screen.Parts)
+                    var rows = Find<ItemsControl>(view, items => RowsInPlace.GetItems(items) == screen.Parts).ShouldNotBeNull(at);   // rows kept in place (perf review P14)
+                    foreach (var (part, index) in screen.Parts.Select((part, index) => (part, index)))
                     {
-                        var row = rows.ItemContainerGenerator.ContainerFromItem(part).ShouldBeAssignableTo<DependencyObject>(at)!;
+                        var row = rows.ItemContainerGenerator.ContainerFromIndex(index).ShouldBeAssignableTo<DependencyObject>(at)!;
                         Find<TextBlock>(row, t => t.Text == part.Name).ShouldNotBeNull($"{part.Name} {at}");
                         Find<TextBlock>(row, t => t.Text == part.NowW).ShouldNotBeNull($"{part.Name} {at}");
                         Find<TextBlock>(row, t => t.Text == part.Energy).ShouldNotBeNull($"{part.Name} {at}");

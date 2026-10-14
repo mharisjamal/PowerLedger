@@ -208,13 +208,15 @@ internal sealed class LastInputIdleSource : IIdleSource
 
 /// <summary>
 /// The App's end of \\.\pipe\PowerLedger.v1. It connects, subscribes, passes frames on, answers requests by id and
-/// reports idle time every five seconds. When the service goes away it tries again after 1, 2, 4, 8, 16 and then every
-/// 30 seconds (spec §8), and subscribes again once back. Each connection's server is checked when it connects, and a
-/// change is sent only to one that passed.
+/// reports idle time every five seconds while a window of the App's is visible, and every fifteen while none is (perf
+/// review P13; the service keeps a report for thirty), at once when one shows. When the service goes away it tries again
+/// after 1, 2, 4, 8, 16 and then every 30 seconds (spec §8), and subscribes again once back. Each connection's server is
+/// checked when it connects, and a change is sent only to one that passed.
 /// </summary>
 internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimeProvider clock, IServerCheck check) : IServiceLink
 {
     public static readonly TimeSpan ActivityEvery = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan HiddenActivityEvery = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
     internal static readonly TimeSpan[] Backoff = [.. new[] { 1, 2, 4, 8, 16, 30 }.Select(s => TimeSpan.FromSeconds(s))];
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
@@ -232,6 +234,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     private volatile string? _refusal;
     private volatile bool _windowVisible;
     private volatile bool _overlayVisible;
+    private TaskCompletionSource _windowShown = new(TaskCreationOptions.RunContinuationsAsynchronously);   // completed when one shows
     private volatile MessageChannel? _takesUiState;   // the connection whose service said it handles updates
     private Task? _run;
 
@@ -340,7 +343,13 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
 
     public void ReportWindow(bool visible)
     {
+        var was = _windowVisible;
         _windowVisible = visible;
+        if (visible && !was)
+        {
+            // The user is back: the idle time goes now rather than at the end of a hidden wait.
+            Interlocked.Exchange(ref _windowShown, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+        }
         if (!_disposed && _takesUiState is { } channel) _ = SendWindowAsync(channel, _stop.Token);
     }
 
@@ -521,14 +530,21 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         }
     }
 
+    /// <summary>The idle time, now and then every <see cref="ActivityEvery"/> while a window is visible, or every <see
+    /// cref="HiddenActivityEvery"/> while none is, timed from each report's start as a periodic timer is; a window showing
+    /// ends a wait at once.</summary>
     private async Task ReportActivityAsync(MessageChannel channel, CancellationToken cancel)
     {
-        using var timer = new PeriodicTimer(ActivityEvery, clock);
-        do
+        while (true)
         {
+            using var round = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            var shown = Volatile.Read(ref _windowShown).Task;
+            var wait = Task.Delay(_windowVisible ? ActivityEvery : HiddenActivityEvery, clock, round.Token);
             await RequestAsync(channel, new ReportActivityRequest(NextId(), idle.IdleSeconds()), cancel).ConfigureAwait(false);
+            await Task.WhenAny(wait, shown).ConfigureAwait(false);
+            await round.CancelAsync().ConfigureAwait(false);
+            cancel.ThrowIfCancellationRequested();
         }
-        while (await timer.WaitForNextTickAsync(cancel).ConfigureAwait(false));
     }
 
     private async Task<PipeMessage?> SendAsync(PipeRequest request, CancellationToken cancel)

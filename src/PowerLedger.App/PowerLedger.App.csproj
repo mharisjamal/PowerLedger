@@ -14,6 +14,9 @@
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
     <!-- The liquid glass's capture calls DXGI and Direct3D 11 through their vtables (Aero\LiquidGlass\CaptureNative.cs). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Nothing listens for PropertyChanging, so the MVVM Toolkit raises only PropertyChanged: one event less on every
+         property set (perf review P15). -->
+    <MvvmToolkitEnableINotifyPropertyChangingSupport>false</MvvmToolkitEnableINotifyPropertyChangingSupport>
   </PropertyGroup>
 
   <ItemGroup>

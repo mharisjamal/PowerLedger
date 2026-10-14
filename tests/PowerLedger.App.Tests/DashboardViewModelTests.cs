@@ -106,6 +106,29 @@ public sealed class DashboardViewModelTests : IDisposable
     }
 
     [Fact]
+    public void Hidden_it_lets_live_readings_pass_and_catches_up_once_on_show()
+    {
+        // Perf review P1: the hidden Dashboard made new cards and parts for every reading.
+        var dashboard = Dashboard();
+        dashboard.Show();
+        dashboard.Hide();
+        var changed = new List<string?>();
+        dashboard.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        _link.Push(Frames.At(Now.AddSeconds(1), totalW: 97.4));
+        _link.Push(Frames.At(Now.AddSeconds(2), totalW: 51.6));
+
+        changed.ShouldBeEmpty();
+        dashboard.Kpis[0].Big.ShouldBe("34.2 W");
+
+        dashboard.Show();
+
+        changed.Count(name => name == nameof(DashboardViewModel.Live)).ShouldBe(1);
+        dashboard.Kpis[0].Big.ShouldBe("51.6 W");
+        dashboard.Parts.Single(part => part.Part == Part.Cpu).NowW.ShouldBe("14.6 W");
+    }
+
+    [Fact]
     public void The_cards_come_from_the_live_reading_and_the_history()
     {
         var dashboard = Dashboard();
@@ -148,6 +171,7 @@ public sealed class DashboardViewModelTests : IDisposable
     public void The_live_figures_and_the_status_are_the_now_pages_and_a_new_reading_redraws_the_first_card()
     {
         var dashboard = Dashboard();
+        dashboard.Show();
         var raised = new List<string?>();
         dashboard.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
 

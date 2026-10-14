@@ -355,8 +355,9 @@
                                 <TextBlock Grid.Column="6" Style="{StaticResource Head}" Text="Trend" Margin="8,0,0,0" />
                             </Grid>
                         </Border>
-                        <ItemsControl ItemsSource="{Binding Parts}" Focusable="False">
-                            <ItemsControl.ItemTemplate>
+                        <!-- The parts come new with every reading: their rows change in place (perf review P14). -->
+                        <ItemsControl local:RowsInPlace.Items="{Binding Parts}" Focusable="False">
+                            <local:RowsInPlace.Template>
                                 <DataTemplate DataType="{x:Type local:DashboardPart}">
                                     <Border Style="{StaticResource M.Table.Row}" Padding="8,0">
                                         <Grid>
@@ -392,7 +393,7 @@
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
-                            </ItemsControl.ItemTemplate>
+                            </local:RowsInPlace.Template>
                         </ItemsControl>
                     </StackPanel>
                 </StackPanel>

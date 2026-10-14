@@ -8,7 +8,14 @@ internal sealed class FakeHistory : IHistory
     /// <summary>Where the history begins, for the All range; null until a test sets it.</summary>
     public DateTimeOffset? First { get; set; }
 
-    public HistorySnapshot? Read(DateTimeOffset now, TimeZoneInfo zone) => Snapshot;
+    /// <summary>How many times the history was read.</summary>
+    public int Reads { get; private set; }
+
+    public HistorySnapshot? Read(DateTimeOffset now, TimeZoneInfo zone)
+    {
+        Reads++;
+        return Snapshot;
+    }
 
     public DateTimeOffset? FirstRow() => First;
 }
