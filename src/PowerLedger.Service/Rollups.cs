@@ -7,9 +7,10 @@ namespace PowerLedger.Service;
 /// Minute and hour rows (spec §7). A minute is folded from the raw rows in storage, never from the loop's own buffer:
 /// UpsertMinute replaces the row, so a restart inside a minute must add to what the earlier run wrote (Plan B handoff).
 /// An hour is folded only once its last minute has been, because the report reads minute rows for any hour that has no
-/// hour row yet (Plan A handoff). Folding is idempotent: folding a range again rewrites the same rows.
+/// hour row yet (Plan A handoff). Folding is idempotent: folding a range again rewrites the same rows. A tick the machine
+/// woke within is a gap whatever its length; any other is one only past the gap threshold (see <see cref="Wakes"/>).
 /// </summary>
-internal sealed class Rollups(RawSampleRepository raw, AggregateRepository aggregates)
+internal sealed class Rollups(RawSampleRepository raw, AggregateRepository aggregates, SessionRepository sessions)
 {
     private static readonly TimeSpan Minute = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
@@ -19,13 +20,18 @@ internal sealed class Rollups(RawSampleRepository raw, AggregateRepository aggre
     {
         from = Floor(from, Minute);
         to = Floor(to, Minute);
+        if (from >= to) return;
+        var wakes = Wakes.Between(sessions, from, to);
         for (var chunk = Floor(from, Hour); chunk < to; chunk += Hour)
         {
             var start = chunk < from ? from : chunk;
             var end = chunk + Hour < to ? chunk + Hour : to;
             foreach (var minute in raw.Read(start, end).GroupBy(r => Floor(r.Timestamp, Minute)))
             {
-                aggregates.UpsertMinute(Downsampler.ToMinute(minute.Key, [.. minute], gapThresholdSeconds));
+                var awake = Downsampler.ToMinute(minute.Key, [.. minute.Where(r => !wakes.Within(r))], gapThresholdSeconds);
+                List<Reading> slept = [.. minute.Where(wakes.Within)];
+                // With a threshold of nought, any tick is a gap: the sleep goes in as gap seconds, with no energy.
+                aggregates.UpsertMinute(slept.Count == 0 ? awake : awake.Plus(Downsampler.ToMinute(minute.Key, slept, maxDeltaSeconds: 0)));
             }
         }
         for (var hour = Floor(from, Hour); hour + Hour <= to; hour += Hour) FoldHour(hour);

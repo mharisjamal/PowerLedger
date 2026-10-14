@@ -122,7 +122,7 @@ internal sealed class SamplingLoop : BackgroundService
         _nutSecret = new NutSecret(new SettingsRepository(database));
         _sessions = new SessionTracker(new SessionRepository(database));
         _calibration = new CalibrationKeeper(new CalibrationRepository(database), _options.Calibration, _options.CalibrationSaveEvery);
-        _rollups = new Rollups(_raw, new AggregateRepository(database));
+        _rollups = new Rollups(_raw, new AggregateRepository(database), new SessionRepository(database));
         _retention = new RetentionRunner(database, clock.LocalTimeZone);
         _buffer = new WriteBuffer(_raw.InsertBatch);
         _worker = new SensorWorker(environment.Sensors, _options.SensorTimeout, _options.SensorBuildTimeout, clock);
@@ -134,8 +134,9 @@ internal sealed class SamplingLoop : BackgroundService
 
     private double GapThreshold => GapThresholdFor(_settings);
 
-    /// <summary>The gap threshold for readings taken under <paramref name="settings"/>: two of the slowest intervals the loop
-    /// reads at, the set one or <see cref="UnwatchedInterval"/>, so a beat Windows put off a little never counts as a sleep.</summary>
+    /// <summary>The gap threshold for readings taken under <paramref name="settings"/>, for the slowest interval the loop
+    /// reads at, the set one or <see cref="UnwatchedInterval"/>: a minute (accuracy A17), so neither a stall nor a beat
+    /// Windows put off counts as sleep. A tick the machine woke within is a gap whatever its length (see <see cref="Wakes"/>).</summary>
     internal static double GapThresholdFor(ServiceSettings settings)
         => EnergyIntegrator.GapThresholdFor(Math.Max(settings.SampleIntervalSeconds, UnwatchedInterval.TotalSeconds));
 

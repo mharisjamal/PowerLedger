@@ -9,7 +9,7 @@ namespace PowerLedger.Service.Sharing;
 /// always give the same rows.
 /// <list type="bullet">
 /// <item>A reading counts in the minute its timestamp falls in. Suspect readings are left out, and so are gaps, readings
-/// whose Δt is past the gap threshold, which the ledger counts as no energy at all.</item>
+/// whose Δt is past the gap threshold or that the machine woke within, which the ledger counts as no energy at all.</item>
 /// <item>Watts and the processor's load are averaged over the seconds; the graphics load and the brightness over the
 /// seconds of the readings that had one, and are null when none did.</item>
 /// <item>Where the total came from and what the card's figure covered go to the value holding the most seconds, the lowest
@@ -33,11 +33,13 @@ internal static class MinuteBuilder
 
     /// <param name="maxDeltaSeconds">The gap threshold for the sample interval the readings were taken at
     /// (<see cref="EnergyIntegrator.GapThresholdFor"/>).</param>
-    public static IReadOnlyList<MinuteRow> Build(IReadOnlyList<Reading> rows, TimeZoneInfo zone, double maxDeltaSeconds = EnergyIntegrator.MaxDeltaSeconds)
+    /// <param name="wakes">When the machine woke: a tick it woke within is a gap whatever its length, as the ledger counts it.</param>
+    public static IReadOnlyList<MinuteRow> Build(
+        IReadOnlyList<Reading> rows, TimeZoneInfo zone, double maxDeltaSeconds = EnergyIntegrator.MaxDeltaSeconds, Wakes? wakes = null)
     {
         var minutes = new List<MinuteRow>();
         var groups = rows
-            .Where(row => Counts(row, maxDeltaSeconds))
+            .Where(row => Counts(row, maxDeltaSeconds) && wakes?.Within(row) != true)
             .GroupBy(row => Math.DivRem(row.Timestamp.ToUnixTimeMilliseconds(), MinuteMs).Quotient)
             .OrderBy(group => group.Key);
         foreach (var group in groups)

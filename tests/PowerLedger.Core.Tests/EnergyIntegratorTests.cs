@@ -77,9 +77,10 @@ public class EnergyIntegratorTests
         var e = EnergyIntegrator.Integrate(Reading(delta: 7), maxDeltaSeconds: 10);
         e.Gap.ShouldBeFalse();
         e.OnSeconds.ShouldBe(7);
-        EnergyIntegrator.GapThresholdFor(1).ShouldBe(5);
-        EnergyIntegrator.GapThresholdFor(4).ShouldBe(8);
-        EnergyIntegrator.GapThresholdFor(5).ShouldBe(10);
+        // Accuracy A17: a stall while awake, a hung read or a slow disk, still drew power; only past a minute is it a gap.
+        EnergyIntegrator.GapThresholdFor(1).ShouldBe(60);
+        EnergyIntegrator.GapThresholdFor(5).ShouldBe(60);
+        EnergyIntegrator.GapThresholdFor(45).ShouldBe(90);
     }
 
     [Fact]

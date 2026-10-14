@@ -112,7 +112,7 @@ public class SamplingLoopTests
     }
 
     [Fact]
-    public async Task A_hung_sensor_read_costs_one_tick_and_the_stall_becomes_a_gap()
+    public async Task A_hung_sensor_read_costs_one_tick_and_the_stall_counts_as_awake()
     {
         using var t = new TestDatabase();
         using var gate = new ManualResetEventSlim(false);
@@ -145,7 +145,28 @@ public class SamplingLoopTests
 
         var last = new RawSampleRepository(t.Db).Read(Start, Start.AddMinutes(1))[^1];
         last.Timestamp.ShouldBe(Start.AddSeconds(13.5));
-        last.DeltaSeconds.ShouldBe(11.5, 1e-6);                      // from the last good tick, so it counts as a gap
+        last.DeltaSeconds.ShouldBe(11.5, 1e-6);                      // from the last good tick
+        var minute = new AggregateRepository(t.Db).ReadMinutes(Start, Start.AddMinutes(1)).ShouldHaveSingleItem();
+        minute.GapSeconds.ShouldBe(0);                              // the machine was awake and drawing power (accuracy A17)
+        minute.OnSeconds.ShouldBe(13.5, 1e-6);
+    }
+
+    [Fact]
+    public async Task A_sleep_shorter_than_a_minute_is_still_a_gap()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t);
+        await loop.StartAsync();
+        await loop.Ticks(10);                                       // 00:55:01 to 00:55:10
+        await loop.Send(new SuspendCommand());
+        loop.Clock.Advance(TimeSpan.FromSeconds(20));               // a short Modern Standby sleep
+        await loop.Send(new ResumeCommand());
+        await loop.Ticks(5);                                        // 00:55:31 to 00:55:35
+        await loop.StopAsync();
+
+        var minute = new AggregateRepository(t.Db).ReadMinutes(Start, Start.AddMinutes(1)).ShouldHaveSingleItem();
+        minute.GapSeconds.ShouldBe(21, 1e-6);                       // 00:55:10 to 00:55:31
+        minute.OnSeconds.ShouldBe(14, 1e-6);
     }
 
     [Fact]

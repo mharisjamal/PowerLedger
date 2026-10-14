@@ -7,13 +7,16 @@ public class RollupsTests
 {
     private const double Gap = 5;
 
+    /// <summary>The service's own threshold (accuracy A17).</summary>
+    private static readonly double RollupsGap = PowerLedger.Core.EnergyIntegrator.GapThresholdFor(1);
+
     [Fact]
     public void Each_minute_with_raw_rows_is_folded_and_empty_minutes_are_skipped()
     {
         using var t = new TestDatabase();
         var (raw, aggregates) = Repositories(t);
         raw.InsertBatch([.. Seconds(0, 60), .. Seconds(120, 60)]);   // minutes 0 and 2; minute 1 is empty
-        new Rollups(raw, aggregates).FoldRange(T(0), T(3), Gap);
+        new Rollups(raw, aggregates, new SessionRepository(t.Db)).FoldRange(T(0), T(3), Gap);
 
         var minutes = aggregates.ReadMinutes(T(0), T(3));
         minutes.Select(m => m.Start).ShouldBe(new[] { T(0), T(2) });
@@ -22,11 +25,33 @@ public class RollupsTests
     }
 
     [Fact]
+    public void A_stall_while_awake_counts_as_awake_and_the_tick_after_a_resume_is_a_gap_however_short_the_sleep()
+    {
+        using var t = new TestDatabase();
+        var (raw, aggregates) = Repositories(t);
+        var sessions = new SessionRepository(t.Db);
+        sessions.Open(PowerLedger.Contracts.SessionReason.ServiceStart, T(0));
+        raw.InsertBatch([.. Seconds(0, 10), Readings.At(36) with { DeltaSeconds = 27 }]);   // a read hung for 26 s at 10:00:09
+        sessions.Open(PowerLedger.Contracts.SessionReason.Resume, T(0).AddSeconds(50));               // asleep 10:00:36 to 10:00:50
+        raw.InsertBatch([Readings.At(51) with { DeltaSeconds = 15 }, .. Seconds(52, 8)]);
+        raw.InsertBatch([Readings.At(179) with { DeltaSeconds = 120 }]);                   // 2 min with no reading and no resume
+        new Rollups(raw, aggregates, sessions).FoldRange(T(0), T(3), RollupsGap);
+
+        var minutes = aggregates.ReadMinutes(T(0), T(4));
+        minutes[0].OnSeconds.ShouldBe(10 + 27 + 8, 1e-9);
+        minutes[0].GapSeconds.ShouldBe(15, 1e-9);
+        minutes[0].SampleCount.ShouldBe(20);
+        minutes[0].EnergyWh.ShouldBe((10 + 27 + 8) * 36 / 3600.0, 1e-9);
+        minutes[1].Start.ShouldBe(T(2));
+        minutes[1].GapSeconds.ShouldBe(120, 1e-9);
+    }
+
+    [Fact]
     public void Ticks_from_a_second_run_inside_a_folded_minute_are_added_not_replaced()
     {
         using var t = new TestDatabase();
         var (raw, aggregates) = Repositories(t);
-        var rollups = new Rollups(raw, aggregates);
+        var rollups = new Rollups(raw, aggregates, new SessionRepository(t.Db));
         raw.InsertBatch([.. Seconds(0, 20)]);
         rollups.FoldRange(T(0), T(1), Gap);
         raw.InsertBatch([.. Seconds(30, 20)]);
@@ -39,7 +64,7 @@ public class RollupsTests
     {
         using var t = new TestDatabase();
         var (raw, aggregates) = Repositories(t);
-        var rollups = new Rollups(raw, aggregates);
+        var rollups = new Rollups(raw, aggregates, new SessionRepository(t.Db));
         raw.InsertBatch([.. Seconds(0, 1800)]);                       // 10:00 to 10:30
         rollups.FoldRange(T(0), T(30), Gap);
         aggregates.ReadHours(T(0), T(60)).ShouldBeEmpty();
@@ -54,7 +79,7 @@ public class RollupsTests
     {
         using var t = new TestDatabase();
         var (raw, aggregates) = Repositories(t);
-        var rollups = new Rollups(raw, aggregates);
+        var rollups = new Rollups(raw, aggregates, new SessionRepository(t.Db));
         raw.InsertBatch([.. Seconds(0, 180)]);                        // 10:00 to 10:03
         rollups.FoldRange(T(0), T(1), Gap);                          // the old run folded 10:00, then died
         rollups.CatchUp(T(5), TimeSpan.FromHours(48), Gap);
@@ -67,7 +92,7 @@ public class RollupsTests
     {
         using var t = new TestDatabase();
         var (raw, aggregates) = Repositories(t);
-        var rollups = new Rollups(raw, aggregates);
+        var rollups = new Rollups(raw, aggregates, new SessionRepository(t.Db));
         raw.InsertBatch([.. Seconds(3480, 240)]);                     // 10:58 to 11:02
         rollups.FoldRange(T(58), T(59), Gap);                        // only 10:58 was folded before the crash
         rollups.CatchUp(T(63), TimeSpan.FromHours(48), Gap);
@@ -80,7 +105,7 @@ public class RollupsTests
     {
         using var t = new TestDatabase();
         var (raw, aggregates) = Repositories(t);
-        new Rollups(raw, aggregates).CatchUp(T(5), TimeSpan.FromHours(48), Gap);
+        new Rollups(raw, aggregates, new SessionRepository(t.Db)).CatchUp(T(5), TimeSpan.FromHours(48), Gap);
         aggregates.LastMinuteStart().ShouldBeNull();
     }
 
