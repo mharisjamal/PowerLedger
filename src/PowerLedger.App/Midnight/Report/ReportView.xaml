@@ -79,6 +79,8 @@
                         <app:LedgerRow Key="Peak" Value="{Binding Data.Peak}" Note="{Binding Data.PeakAt}" />
                         <app:LedgerRow Key="Asleep (estimated)" Value="{Binding Data.AsleepEnergy}" Note="kWh, in the energy"
                                        Visibility="{Binding Data.AsleepEnergy, Converter={StaticResource VisibleWhenText}}" />
+                        <app:LedgerRow Key="From the battery" Value="{Binding Data.BatteryEnergy}" Note="kWh, wall equivalent"
+                                       Visibility="{Binding Data.BatteryEnergy, Converter={StaticResource VisibleWhenText}}" />
                     </StackPanel>
                 </Border>
                 <Border Grid.Row="1" Style="{StaticResource Right}">

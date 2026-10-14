@@ -15,7 +15,7 @@ public class AggregateRepositoryTests
     {
         using var t = new TestDatabase();
         var repo = new AggregateRepository(t.Db);
-        var m = Minute(0) with { GapSeconds = 3600, AsleepWh = 0.85 };
+        var m = Minute(0) with { GapSeconds = 3600, AsleepWh = 0.85, BatteryWh = 0.4 };
         repo.UpsertMinute(m);
         repo.ReadMinutes(Fixtures.T0, Fixtures.T0.AddMinutes(1)).Single().ShouldBe(m);
         repo.UpsertHour(m);
@@ -41,6 +41,7 @@ public class AggregateRepositoryTests
             var row = new AggregateRepository(app).ReadMinutes(Fixtures.T0, Fixtures.T0.AddMinutes(1)).ShouldHaveSingleItem();
             row.EnergyWh.ShouldBe(0.5);
             row.AsleepWh.ShouldBe(0);
+            row.BatteryWh.ShouldBe(0);
         }
         finally
         {

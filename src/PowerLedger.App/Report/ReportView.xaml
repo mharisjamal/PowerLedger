@@ -48,6 +48,8 @@
                         <local:LedgerRow Key="Peak" Value="{Binding Data.Peak}" Note="{Binding Data.PeakAt}" />
                         <local:LedgerRow Key="Asleep (estimated)" Value="{Binding Data.AsleepEnergy}" Note="kWh, in the energy"
                                          Visibility="{Binding Data.AsleepEnergy, Converter={StaticResource VisibleWhenText}}" />
+                        <local:LedgerRow Key="From the battery" Value="{Binding Data.BatteryEnergy}" Note="kWh, wall equivalent"
+                                         Visibility="{Binding Data.BatteryEnergy, Converter={StaticResource VisibleWhenText}}" />
                     </StackPanel>
                     <StackPanel Grid.Column="2">
                         <Border Style="{StaticResource LedgerHead}"><TextBlock Style="{StaticResource Text.Eyebrow}" Text="TIME" /></Border>

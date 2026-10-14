@@ -40,7 +40,8 @@ public static class Downsampler
         MeasuredSeconds: r.Quality == Quality.Measured ? e.OnSeconds : 0,
         CalibratedSeconds: r.Quality == Quality.Calibrated ? e.OnSeconds : 0,
         EstimatedSeconds: r.Quality == Quality.Estimated ? e.OnSeconds : 0,
-        AsleepWh: e.AsleepWh);
+        AsleepWh: e.AsleepWh,
+        BatteryWh: e.BatteryWh);
 
     private static Aggregate WithAverage(Aggregate a) => a with { AvgW = a.OnSeconds > 0 ? a.EnergyWh / (a.OnSeconds / 3600.0) : 0 };
 }

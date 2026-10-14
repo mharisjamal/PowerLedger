@@ -79,9 +79,9 @@ public sealed record SleepDrain(double DrainedWh, double Hours)
 
 /// <summary>
 /// What a PC draws asleep (accuracy A10). A laptop draws what its battery loses asleep, as learned (<see cref="SleepDrain"/>),
-/// or <see cref="LaptopDrainW"/> before it has learned: from the battery on battery, and on AC through its adapter, which
-/// is at its least efficient with so little to deliver and draws a little with nothing to deliver at all. A desktop draws
-/// <see cref="DesktopW"/> at the wall.
+/// or <see cref="LaptopDrainW"/> before it has learned: on battery from the battery, counted at the wall it was charged from
+/// (<see cref="BatteryRoundTrip"/>), and on AC through its adapter, which is at its least efficient with so little to
+/// deliver and draws a little with nothing to deliver at all. A desktop draws <see cref="DesktopW"/> at the wall.
 /// </summary>
 public static class SleepPower
 {
@@ -91,11 +91,12 @@ public static class SleepPower
     /// <summary>A desktop asleep draws 1 to 4 W at the wall (accuracy review, finding 10).</summary>
     public const double DesktopW = 2;
 
-    /// <summary>What the PC draws asleep: a laptop on battery from the battery, on AC at the wall; a desktop at the wall.</summary>
+    /// <summary>What the PC draws asleep, at the wall: a laptop on battery at the wall equivalent of its drain, on AC through
+    /// its adapter; a desktop as it is.</summary>
     public static double Watts(bool laptop, bool onBattery, SleepDrain? learned)
     {
         if (!laptop) return DesktopW;
         var drain = learned?.Watts ?? LaptopDrainW;
-        return onBattery ? drain : AdapterEfficiency.Wall(drain);
+        return onBattery ? drain * BatteryRoundTrip.Factor : AdapterEfficiency.Wall(drain);
     }
 }

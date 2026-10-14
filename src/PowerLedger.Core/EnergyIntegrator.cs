@@ -40,6 +40,7 @@ public static class EnergyIntegrator
             IdleOffSeconds: r.UserIdle && !r.DisplayOn ? r.DeltaSeconds : 0,
             OnSeconds: r.DeltaSeconds,
             BatterySeconds: r.OnBattery ? r.DeltaSeconds : 0,
-            GapSeconds: 0);
+            GapSeconds: 0,
+            BatteryWh: r.OnBattery ? wh : 0);
     }
 }

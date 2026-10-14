@@ -181,6 +181,30 @@ public class ReportQueriesTests
         totals.CpuKwh.ShouldBe(0);
     }
 
+    /// <summary>Accuracy A9: what the battery gave counts at the wall it was charged from, in the total, the cost and each
+    /// day, and apart as its wall equivalent; the average stays at the pack, as the live watts do.</summary>
+    [Fact]
+    public void Energy_from_the_battery_counts_at_its_wall_equivalent_and_the_average_stays_at_the_pack()
+    {
+        using var t = new TestDatabase();
+        var agg = new AggregateRepository(t.Db);
+        for (var i = 0; i < 60; i++)
+            agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), [.. Enumerable.Range(i * 60, 60).Select(s => Fixtures.Reading(s, 30, onBattery: true))]));
+        for (var i = 60; i < 120; i++)
+            agg.UpsertMinute(Downsampler.ToMinute(Fixtures.T0.AddMinutes(i), Fixtures.Minute(i * 60, 30)));
+        new TariffRepository(t.Db).Add(new Tariff(Fixtures.T0, 0.20m, "USD"));
+
+        var (totals, days) = new ReportQueries(t.Db).Report(Fixtures.T0, Fixtures.T0.AddHours(2), TimeZoneInfo.Utc);
+
+        var wall = (30 * BatteryRoundTrip.Factor + 30) / 1000;                  // 30 Wh from the battery, 30 Wh on AC
+        totals.EnergyKwh.ShouldBe(wall, 1e-12);
+        totals.BatteryKwh.ShouldBe(30 * BatteryRoundTrip.Factor / 1000, 1e-12);
+        totals.Cost.ShouldBe(decimal.Round((decimal)wall * 0.20m, 6), 0.000001m);
+        totals.AvgW.ShouldBe(30, 1e-9);
+        totals.CpuKwh.ShouldBe(0.024, 1e-12);                                   // the parts stay at the pack
+        days.ShouldHaveSingleItem().EnergyKwh.ShouldBe(wall, 1e-12);
+    }
+
     [Fact]
     public void A_night_asleep_is_split_between_the_days_it_spanned_and_the_days_add_up_to_the_total()
     {

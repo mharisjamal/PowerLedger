@@ -132,4 +132,20 @@ public class ReportDataTests
         rows[4].Part.ShouldBeNull();
         Bands.Rows(asleep.Totals, English, withTotal: false).Count.ShouldBe(4);
     }
+
+    /// <summary>Accuracy A9: what the battery gave is shown at its wall equivalent, labelled so; the Breakdown table lists
+    /// what charging lost above the total it is part of.</summary>
+    [Fact]
+    public void What_the_battery_gave_is_shown_at_its_wall_equivalent()
+    {
+        Month().BatteryEnergy.ShouldBe("");
+        var report = Reports.Typical(Ranges.ThisMonth(Now, Utc, English));
+        var battery = report with { Totals = report.Totals with { BatteryKwh = 1.22 } };
+        ReportData.From(battery, Timeouts, 0.38, Utc, English).BatteryEnergy.ShouldBe("1.22");
+
+        var rows = Bands.Rows(battery.Totals, English, withTotal: true);
+        rows.Select(r => r.Name).ShouldBe(["CPU package", "GPU", "Display", "Rest of system", "Battery charging losses", "Total"]);
+        rows[4].Energy.ShouldBe(Format.Kwh(1.22 * (1 - (1 / BatteryRoundTrip.Factor)), English));
+        rows[4].Energy.ShouldBe("0.219");
+    }
 }

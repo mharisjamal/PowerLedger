@@ -169,10 +169,11 @@ public class SamplingLoopTests
         minute.OnSeconds.ShouldBe(14, 1e-6);
     }
 
-    /// <summary>Accuracy A10: a sleep is no longer free. Before anything is learned a laptop on battery loses half a watt.</summary>
+    /// <summary>Accuracy A10: a sleep is no longer free. Before anything is learned a laptop on battery loses half a watt,
+    /// booked at the wall it was charged from (A9).</summary>
     [Fact]
     public Task A_sleep_books_what_the_laptop_draws_asleep_half_a_watt_before_it_has_learned_its_own()
-        => SleepBooks(battery: null, expectedW: SleepPower.LaptopDrainW, learned: null);
+        => SleepBooks(battery: null, expectedW: SleepPower.LaptopDrainW * BatteryRoundTrip.Factor, learned: null);
 
     /// <summary>Accuracy A10: the battery's charge as the laptop went to sleep and as it woke, on battery throughout, teaches
     /// what it loses asleep, which the sleep is then booked at and the service keeps for the App.</summary>
@@ -180,7 +181,7 @@ public class SamplingLoopTests
     public async Task A_sleep_on_battery_teaches_what_the_laptop_loses_asleep_and_books_the_sleep_at_it()
     {
         var charges = new Queue<BatteryCharge>([new(OnAc: false, 40, 50), new(OnAc: false, 38.4, 50)]);   // 1.6 Wh in 2 h
-        await SleepBooks(() => charges.Count > 0 ? charges.Dequeue() : null, expectedW: 0.8, learned: 0.8);
+        await SleepBooks(() => charges.Count > 0 ? charges.Dequeue() : null, expectedW: 0.8 * BatteryRoundTrip.Factor, learned: 0.8);
     }
 
     private static async Task SleepBooks(Func<BatteryCharge?>? battery, double expectedW, double? learned)

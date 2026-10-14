@@ -147,13 +147,15 @@ public sealed class ReportQueries(SqliteDatabase db)
     /// yet, so it is neither asleep nor unmonitored (report finding 7).</param>
     private RangeTotals Summarise(Window w, TariffSchedule schedule, DateTimeOffset to)
     {
-        double energy = 0, cpu = 0, gpu = 0, display = 0, rest = 0, idleOn = 0, idleOff = 0;
+        double energy = 0, counted = 0, battery = 0, cpu = 0, gpu = 0, display = 0, rest = 0, idleOn = 0, idleOff = 0;
         double onS = 0, idleOnS = 0, idleOffS = 0, gapS = 0, measuredS = 0, calibratedS = 0, estimatedS = 0, peak = 0;
         DateTimeOffset? peakAt = null;
         Aggregate? peakRow = null;
         foreach (var r in w.Rows)
         {
-            energy += r.EnergyWh; cpu += r.CpuWh; gpu += r.GpuWh; display += r.DisplayWh; rest += r.RestWh;
+            // What the battery gave counts at the wall it was charged from (accuracy A9); the average stays at the pack.
+            energy += r.EnergyWh; counted += r.AwakeCountedWh; battery += r.BatteryWh;
+            cpu += r.CpuWh; gpu += r.GpuWh; display += r.DisplayWh; rest += r.RestWh;
             idleOn += r.IdleOnWh; idleOff += r.IdleOffWh;
             onS += r.OnSeconds; idleOnS += r.IdleOnSeconds; idleOffS += r.IdleOffSeconds;
             measuredS += r.MeasuredSeconds; calibratedS += r.CalibratedSeconds; estimatedS += r.EstimatedSeconds;
@@ -180,10 +182,10 @@ public sealed class ReportQueries(SqliteDatabase db)
         var qualityS = measuredS + calibratedS + estimatedS;
         var onHours = onS / 3600.0;
         var asleepHours = gapS / 3600.0;
-        var cost = schedule.Cost(w.Rows.Select(r => (r.Start, r.EnergyWh)).Concat(asleepPriced));
+        var cost = schedule.Cost(w.Rows.Select(r => (r.Start, r.AwakeCountedWh)).Concat(asleepPriced));
         return new RangeTotals(
             From: w.From, To: w.To,
-            EnergyKwh: (energy + asleep) / 1000,
+            EnergyKwh: (counted + asleep) / 1000,
             Cost: cost.Amount,
             Currency: cost.Currency,
             CostIsPartial: cost.Partial,
@@ -199,7 +201,8 @@ public sealed class ReportQueries(SqliteDatabase db)
             MeasuredShare: Share(measuredS, qualityS),
             CalibratedShare: Share(calibratedS, qualityS),
             EstimatedShare: Share(estimatedS, qualityS),
-            AsleepKwh: asleep / 1000);
+            AsleepKwh: asleep / 1000,
+            BatteryKwh: battery * BatteryRoundTrip.Factor / 1000);
     }
 
     /// <summary>A bucket per local day that has rows or sleep. What the machine drew asleep goes to the days the sleep
@@ -226,10 +229,10 @@ public sealed class ReportQueries(SqliteDatabase db)
             var rows = awake.GetValueOrDefault(day) ?? [];
             var slept = asleep.GetValueOrDefault(day) ?? [];
             var asleepWh = slept.Sum(piece => piece.Wh);
-            var cost = schedule.Cost(rows.Select(r => (r.Start, r.EnergyWh)).Concat(slept));
+            var cost = schedule.Cost(rows.Select(r => (r.Start, r.AwakeCountedWh)).Concat(slept));
             return new DayTotals(
                 day,
-                EnergyKwh: (rows.Sum(r => r.EnergyWh) + asleepWh) / 1000,
+                EnergyKwh: (rows.Sum(r => r.AwakeCountedWh) + asleepWh) / 1000,
                 Cost: cost.Amount,
                 Currency: cost.Currency,
                 CostIsPartial: cost.Partial,

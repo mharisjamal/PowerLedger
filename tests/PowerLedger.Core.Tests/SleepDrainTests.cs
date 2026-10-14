@@ -65,10 +65,11 @@ public class SleepDrainTests
     [Fact]
     public void A_laptop_draws_half_a_watt_asleep_until_it_has_learned_its_own()
     {
-        SleepPower.Watts(laptop: true, onBattery: true, SleepDrain.None).ShouldBe(SleepPower.LaptopDrainW);
-        SleepPower.Watts(laptop: true, onBattery: true, learned: null).ShouldBe(SleepPower.LaptopDrainW);
+        // On battery, at the wall it was charged from (accuracy A9).
+        SleepPower.Watts(laptop: true, onBattery: true, SleepDrain.None).ShouldBe(SleepPower.LaptopDrainW * BatteryRoundTrip.Factor, 1e-12);
+        SleepPower.Watts(laptop: true, onBattery: true, learned: null).ShouldBe(SleepPower.LaptopDrainW * BatteryRoundTrip.Factor, 1e-12);
         var learned = SleepDrain.None.Learn(Charge(40), Charge(37.6), TimeSpan.FromHours(8));
-        SleepPower.Watts(laptop: true, onBattery: true, learned).ShouldBe(0.3, 1e-9);
+        SleepPower.Watts(laptop: true, onBattery: true, learned).ShouldBe(0.3 * BatteryRoundTrip.Factor, 1e-9);
     }
 
     [Fact]
