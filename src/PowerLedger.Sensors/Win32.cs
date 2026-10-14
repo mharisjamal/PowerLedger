@@ -29,16 +29,20 @@ internal static class Win32
     /// <summary>Cumulative 100 ns counters since boot. Kernel time already includes idle time.</summary>
     public readonly record struct SystemTimes(ulong Idle, ulong Kernel, ulong User);
 
-    public static BatteryState? ReadBatteryState()
+    public static BatteryState? ReadBatteryState() => ReadBatteryState(BatteriesAreShortTerm());
+
+    /// <summary>The battery's state, with whether the batteries are short-term as already asked of Windows, since that
+    /// doesn't change while the machine runs and asking costs a second call into the power manager.</summary>
+    public static BatteryState? ReadBatteryState(bool shortTerm)
     {
         var state = default(SystemBatteryStateInfo);
         var status = CallNtPowerInformation(SystemBatteryState, IntPtr.Zero, 0, ref state, (uint)Marshal.SizeOf<SystemBatteryStateInfo>());
         if (status != 0) return null;
-        return new BatteryState(state.AcOnLine != 0, state.BatteryPresent != 0, state.Charging != 0, state.Discharging != 0, state.Rate, BatteriesAreShortTerm());
+        return new BatteryState(state.AcOnLine != 0, state.BatteryPresent != 0, state.Charging != 0, state.Discharging != 0, state.Rate, shortTerm);
     }
 
     /// <summary>False when Windows will not say, which keeps a real battery counted.</summary>
-    private static bool BatteriesAreShortTerm()
+    public static bool BatteriesAreShortTerm()
     {
         var capabilities = default(SystemPowerCapabilitiesInfo);
         var status = CallNtPowerInformation(SystemPowerCapabilities, IntPtr.Zero, 0, ref capabilities, (uint)Marshal.SizeOf<SystemPowerCapabilitiesInfo>());
