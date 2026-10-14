@@ -21,14 +21,20 @@ public class CsvExportTests
         lines[1].ShouldBe("2026-09-08T12:00:00Z,1,34.25,Measured,14.5,4,3,1,0,0,0,0,0,11.75,true,true,false,false,0.3,,0.6,false");
     }
 
+    /// <summary>Plan AC review: with what the PC drew asleep and what its battery gave, at the pack, so a row's energy as the
+    /// totals count it can be worked out from the file.</summary>
     [Fact]
     public void Minute_and_hour_rows_are_one_line_each()
     {
-        var row = Aggregate.Empty(T0) with { AvgW = 30, MaxW = 41.5, EnergyWh = 0.5, CpuWh = 0.2, RestWh = 0.3, OnSeconds = 60, SampleCount = 60, MeasuredSeconds = 60 };
+        var row = Aggregate.Empty(T0) with
+        {
+            AvgW = 30, MaxW = 41.5, EnergyWh = 0.5, CpuWh = 0.2, RestWh = 0.3, OnSeconds = 60, SampleCount = 60, MeasuredSeconds = 60,
+            AsleepWh = 0.85, BatteryWh = 0.25,
+        };
 
         var lines = CsvExport.Rows([row]);
 
-        lines[0].ShouldBe("start_utc,avg_w,max_w,energy_wh,cpu_wh,gpu_wh,display_wh,rest_wh,idle_on_wh,idle_off_wh,idle_on_s,idle_off_s,on_s,battery_s,gap_s,samples,measured_s,calibrated_s,estimated_s");
-        lines[1].ShouldBe("2026-09-08T12:00:00Z,30,41.5,0.5,0.2,0,0,0.3,0,0,0,0,60,0,0,60,60,0,0");
+        lines[0].ShouldBe("start_utc,avg_w,max_w,energy_wh,cpu_wh,gpu_wh,display_wh,rest_wh,idle_on_wh,idle_off_wh,idle_on_s,idle_off_s,on_s,battery_s,gap_s,samples,measured_s,calibrated_s,estimated_s,asleep_wh,battery_wh");
+        lines[1].ShouldBe("2026-09-08T12:00:00Z,30,41.5,0.5,0.2,0,0,0.3,0,0,0,0,60,0,0,60,60,0,0,0.85,0.25");
     }
 }

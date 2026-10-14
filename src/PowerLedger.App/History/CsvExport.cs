@@ -3,7 +3,9 @@ using PowerLedger.Core;
 
 namespace PowerLedger.App;
 
-/// <summary>History as CSV lines (spec §9 exports): invariant culture, UTC timestamps in ISO 8601, one column per stored field.</summary>
+/// <summary>History as CSV lines (spec §9 exports): invariant culture, UTC timestamps in ISO 8601, one column per stored field.
+/// A row's asleep_wh is what the PC drew asleep, estimated, over the sleep it woke from in the row; battery_wh is what its
+/// battery gave, at the pack, which the totals count at the wall equivalent.</summary>
 internal static class CsvExport
 {
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
@@ -31,7 +33,7 @@ internal static class CsvExport
         var lines = new List<string>(rows.Count + 1)
         {
             "start_utc,avg_w,max_w,energy_wh,cpu_wh,gpu_wh,display_wh,rest_wh,idle_on_wh,idle_off_wh,idle_on_s,idle_off_s," +
-            "on_s,battery_s,gap_s,samples,measured_s,calibrated_s,estimated_s",
+            "on_s,battery_s,gap_s,samples,measured_s,calibrated_s,estimated_s,asleep_wh,battery_wh",
         };
         foreach (var a in rows)
         {
@@ -39,7 +41,7 @@ internal static class CsvExport
                 Time(a.Start), N(a.AvgW), N(a.MaxW), N(a.EnergyWh), N(a.CpuWh), N(a.GpuWh), N(a.DisplayWh), N(a.RestWh),
                 N(a.IdleOnWh), N(a.IdleOffWh), N(a.IdleOnSeconds), N(a.IdleOffSeconds),
                 N(a.OnSeconds), N(a.BatterySeconds), N(a.GapSeconds), a.SampleCount.ToString(Invariant),
-                N(a.MeasuredSeconds), N(a.CalibratedSeconds), N(a.EstimatedSeconds)));
+                N(a.MeasuredSeconds), N(a.CalibratedSeconds), N(a.EstimatedSeconds), N(a.AsleepWh), N(a.BatteryWh)));
         }
         return lines;
     }
