@@ -9,7 +9,9 @@ namespace PowerLedger.App;
 /// first laid out, until it closes. Only the windows of the thread that made the watch count, the App's UI thread: a
 /// window of another can't be read from it. Call on that thread.
 /// </summary>
-internal sealed class WindowWatch
+/// <param name="aside">Windows that show but are no shell window, such as the watts overlay: they count in
+/// <see cref="Shows"/> but not in <see cref="Visible"/>, since no update need wait for them.</param>
+internal sealed class WindowWatch(Func<Window, bool>? aside = null)
 {
     private readonly List<Window> _windows = [];
     private readonly System.Windows.Threading.Dispatcher _thread = System.Windows.Threading.Dispatcher.CurrentDispatcher;
@@ -17,8 +19,8 @@ internal sealed class WindowWatch
     /// <summary>Whether any window is on screen: visible and not minimised.</summary>
     public bool Shows { get; private set; }
 
-    /// <summary>Whether any window is visible, minimised or not: Plan Q §4's "the window shows", which keeps the service
-    /// from installing an update under it.</summary>
+    /// <summary>Whether any shell window is visible, minimised or not: Plan Q §4's "the window shows", which keeps the
+    /// service from installing an update under it. A window set aside never counts.</summary>
     public bool Visible { get; private set; }
 
     /// <summary>Raised when <see cref="Shows"/> or <see cref="Visible"/> changes.</summary>
@@ -27,9 +29,9 @@ internal sealed class WindowWatch
     /// <summary>A watch on every window the process lays out, from now on: once, at start. A window's first layout sizes
     /// it, so it is watched from its first showing; Loaded would not do, since WPF raises it only on a window that has a
     /// handler of its own for it.</summary>
-    public static WindowWatch EveryWindow()
+    public static WindowWatch EveryWindow(Func<Window, bool>? aside = null)
     {
-        var watch = new WindowWatch();
+        var watch = new WindowWatch(aside);
         EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.SizeChangedEvent, new SizeChangedEventHandler((sender, _) => watch.Watch((Window)sender)));
         return watch;
     }
@@ -61,7 +63,7 @@ internal sealed class WindowWatch
 
     private void Update()
     {
-        var visible = _windows.Exists(window => window.IsVisible);
+        var visible = _windows.Exists(window => window.IsVisible && aside?.Invoke(window) != true);
         var shows = _windows.Exists(window => window.IsVisible && window.WindowState != WindowState.Minimized);
         if (visible == Visible && shows == Shows) return;
         Visible = visible;

@@ -53,7 +53,7 @@ internal sealed class FakeLink : IServiceLink
     /// <summary>Each window state the App reported, in order.</summary>
     public List<bool> Windows { get; } = [];
 
-    public void ReportWindow(bool visible) => Windows.Add(visible);
+    public void ReportWindow(bool visible, bool onScreen) => Windows.Add(visible);
 
     /// <summary>Each overlay state the App reported, in order.</summary>
     public List<bool> Overlays { get; } = [];

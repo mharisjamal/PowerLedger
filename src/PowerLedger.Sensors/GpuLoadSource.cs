@@ -12,7 +12,8 @@ namespace PowerLedger.Sensors;
 /// card, is added here with its load and its rating, and the power model turns the load into watts. No watts are written
 /// over a library's, so a measured card keeps its own figure and none is counted twice. A card only this source reads and
 /// Windows has switched off draws nothing. The counters are read at most every <see cref="ReadEvery"/>, because a read walks
-/// every process on every engine, and the loads are held in between.
+/// every process on every engine, and the loads are held in between. Each card's load over every engine, video decode
+/// included, goes to <see cref="SampleDraft.DGpuBusyLoad"/> for the idle test alone.
 /// </summary>
 public sealed class GpuLoadSource : ISensorSource
 {
@@ -28,7 +29,7 @@ public sealed class GpuLoadSource : ISensorSource
     private readonly Dictionary<string, Func<bool>> _poweredOff = new(StringComparer.OrdinalIgnoreCase);
     private readonly DxgiAdapters? _dxgi;
     private IReadOnlyList<GpuAdapter> _cards = [];
-    private Dictionary<string, double?> _loads = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, (double? Load, double? Busy)> _loads = new(StringComparer.OrdinalIgnoreCase);
     private EngineSnapshot? _previous;
     private TimeSpan? _readAt;
 
@@ -77,7 +78,7 @@ public sealed class GpuLoadSource : ISensorSource
         var taken = new HashSet<GpuCardDraft>();
         foreach (var adapter in _cards)
         {
-            var load = _loads.GetValueOrDefault(adapter.CounterLuid);
+            var (load, busy) = _loads.GetValueOrDefault(adapter.CounterLuid);
             var card = Recognise(draft, adapter, taken);
             if (card is null)
             {
@@ -85,13 +86,15 @@ public sealed class GpuLoadSource : ISensorSource
                 if (PoweredOff(adapter))
                 {
                     card.Watts = 0;
-                    load = 0;
+                    load = busy = 0;
                 }
             }
             taken.Add(card);
             card.Name ??= adapter.Description;
             card.Rating ??= TdpTable.Bundled.GpuOrGuess(adapter.Description, adapter.DedicatedBytes);
             card.Load ??= load;                 // and never the watts, which the card's library may already have measured
+            // Every engine, a film's decoder included, for the idle test: any card's, a library's card too.
+            if (busy is { } working) draft.DGpuBusyLoad = Math.Max(draft.DGpuBusyLoad ?? 0, working);
         }
     }
 
@@ -119,12 +122,12 @@ public sealed class GpuLoadSource : ISensorSource
         }
 
         var snapshot = _read();
-        var loads = new Dictionary<string, double?>(StringComparer.OrdinalIgnoreCase);
+        var loads = new Dictionary<string, (double? Load, double? Busy)>(StringComparer.OrdinalIgnoreCase);
         foreach (var card in _cards)
         {
             loads[card.CounterLuid] = _previous is { } earlier && before.Contains(card.CounterLuid)
-                ? GpuEngines.Busiest(earlier, snapshot, card.CounterLuid)
-                : null;
+                ? (GpuEngines.Busiest(earlier, snapshot, card.CounterLuid), GpuEngines.Busiest(earlier, snapshot, card.CounterLuid, everyEngine: true))
+                : (null, null);
         }
         _loads = loads;
         _previous = snapshot;

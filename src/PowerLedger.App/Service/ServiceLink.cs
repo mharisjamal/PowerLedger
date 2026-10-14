@@ -164,10 +164,12 @@ internal interface IServiceLink : IAsyncDisposable
     /// <see cref="HouseholdStatus.Network"/> is set; an older one doesn't know the request.</summary>
     Task<HouseholdOutcome> OpenPairingWindowAsync(CancellationToken cancel = default);
 
-    /// <summary>Plan Q §4: whether the main window is showing now. Kept, and told to a service that takes it on every
-    /// connection and every change, so the service installs an update while nobody is looking at PowerLedger. Never sent
-    /// to an older service, whose status has no <see cref="ServiceStatus.Updates"/>. Returns at once.</summary>
-    void ReportWindow(bool visible);
+    /// <summary>Plan Q §4: whether a shell window is showing now, minimised or not (<paramref name="visible"/>), so the
+    /// service installs an update while nobody is looking at PowerLedger; and whether one is on screen, not minimised
+    /// (<paramref name="onScreen"/>), so the service reads at the set interval only while someone may be looking (perf
+    /// review §4). Kept, and told to a service that takes it on every connection and every change. Never sent to an older
+    /// service, whose status has no <see cref="ServiceStatus.Updates"/>. Returns at once.</summary>
+    void ReportWindow(bool visible, bool onScreen);
 
     /// <summary>Whether the watts overlay shows now. Told with the window's state, to the same services: while either
     /// shows, the service reads at the set interval rather than every five seconds (perf review §4). Returns at once.</summary>
@@ -219,6 +221,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public static readonly TimeSpan HiddenActivityEvery = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
     internal static readonly TimeSpan[] Backoff = [.. new[] { 1, 2, 4, 8, 16, 30 }.Select(s => TimeSpan.FromSeconds(s))];
+
+    /// <summary>The waits between asking a connected service whether it handles updates, until it says (the last repeats).</summary>
+    internal static readonly TimeSpan[] LearnUpdatesBackoff = [.. new[] { 2, 5, 10, 30, 60 }.Select(s => TimeSpan.FromSeconds(s))];
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>The newest consent version a service from before Plan Q takes.</summary>
@@ -233,6 +238,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     private volatile MessageChannel? _channel;
     private volatile string? _refusal;
     private volatile bool _windowVisible;
+    private volatile bool _windowOnScreen;
     private volatile bool _overlayVisible;
     private TaskCompletionSource _windowShown = new(TaskCreationOptions.RunContinuationsAsynchronously);   // completed when one shows
     private volatile MessageChannel? _takesUiState;   // the connection whose service said it handles updates
@@ -341,10 +347,11 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public Task<HouseholdOutcome> OpenPairingWindowAsync(CancellationToken cancel = default)
         => HouseholdAsync(new PairingWindowRequest(NextId()), cancel);
 
-    public void ReportWindow(bool visible)
+    public void ReportWindow(bool visible, bool onScreen)
     {
         var was = _windowVisible;
         _windowVisible = visible;
+        _windowOnScreen = onScreen;
         if (visible && !was)
         {
             // The user is back: the idle time goes now rather than at the end of a hidden wait.
@@ -498,30 +505,47 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     }
 
     /// <summary>Asks a new connection's service whether it handles updates (Plan Q §4), which an older one's status
-    /// doesn't say; one that does is told the window state at once, and from then on at each change. Never throws: a
-    /// service that doesn't answer is simply not told.</summary>
+    /// doesn't say; one that does is told the window state at once, and from then on at each change. A service still
+    /// starting has no status yet, and one whose updater hasn't published says nothing of updates either, so it is asked
+    /// again after each of <see cref="LearnUpdatesBackoff"/>, then every minute, until it says: asked once, an App that met
+    /// a service just started after an update or at boot never told it its windows, and kept it reading every second.
+    /// Never throws: a service that doesn't answer is simply not told.</summary>
     private async Task LearnUpdatesAsync(MessageChannel channel, CancellationToken cancel)
     {
         try
         {
-            if (await RequestAsync(channel, new GetStatusRequest(NextId()), cancel).ConfigureAwait(false) is not StatusReply { Status.Updates: not null })
-                return;
+            for (var asked = 0; ; asked++)
+            {
+                try
+                {
+                    if (await RequestAsync(channel, new GetStatusRequest(NextId()), cancel).ConfigureAwait(false) is StatusReply { Status.Updates: not null })
+                        break;
+                }
+                catch (TimeoutException)
+                {
+                    // Slow, as a service starting at boot can be: asked again below.
+                }
+                await Task.Delay(LearnUpdatesBackoff[Math.Min(asked, LearnUpdatesBackoff.Length - 1)], clock, cancel).ConfigureAwait(false);
+            }
             _takesUiState = channel;
             await SendWindowAsync(channel, cancel).ConfigureAwait(false);
         }
         catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException or TimeoutException
                                           or PipeProtocolException)
         {
-            // The connection ended, or the service is slow: the next connection asks again.
+            // The connection ended: the next connection asks again.
         }
     }
 
-    /// <summary>Tells the service whether the window and the overlay show now. Never throws.</summary>
+    /// <summary>Tells the service whether the window and the overlay show now, and whether anyone may be looking: a window
+    /// on screen or the overlay. Never throws.</summary>
     private async Task SendWindowAsync(MessageChannel channel, CancellationToken cancel)
     {
         try
         {
-            await RequestAsync(channel, new UiStateRequest(NextId(), _windowVisible, _overlayVisible), cancel).ConfigureAwait(false);
+            var overlay = _overlayVisible;
+            await RequestAsync(channel, new UiStateRequest(NextId(), _windowVisible, overlay, _windowOnScreen || overlay), cancel)
+                .ConfigureAwait(false);
         }
         catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException or TimeoutException
                                           or PipeProtocolException)

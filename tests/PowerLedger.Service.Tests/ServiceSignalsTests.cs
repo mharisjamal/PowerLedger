@@ -65,6 +65,67 @@ public class ServiceSignalsTests
     }
 
     [Fact]
+    public void A_minimised_window_holds_an_update_but_nobody_watches_it()
+    {
+        var signals = new ServiceSignals(new FakeTimeProvider());
+        signals.Subscribed("a");
+        signals.ReportWindow("a", 1, visible: true, overlay: false, watching: false);   // minimised to the taskbar
+        signals.WindowShowingIn(1).ShouldBeTrue();
+        signals.Watched.ShouldBeFalse();
+        signals.ReportWindow("a", 1, visible: true, overlay: false, watching: true);
+        signals.Watched.ShouldBeTrue();
+        signals.ReportWindow("a", 1, visible: false, overlay: true, watching: true);    // only the overlay
+        signals.WindowShowingIn(1).ShouldBeFalse();
+        signals.Watched.ShouldBeTrue();
+
+        signals.ReportWindow("b", 1, visible: true);                                    // an older App says only what shows
+        signals.ReportWindow("a", 1, visible: false, overlay: false, watching: false);
+        signals.Watched.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_subscriber_that_never_says_counts_as_watching_only_for_a_short_grace()
+    {
+        // An App whose first status asks met a service still starting never told it its windows: it must not keep the
+        // service reading every second for good.
+        var clock = new FakeTimeProvider();
+        var signals = new ServiceSignals(clock);
+        var heard = 0;
+        signals.WatchersChanged += () => heard++;
+        signals.Subscribed("a");
+        signals.Watched.ShouldBeTrue();
+        clock.Advance(ServiceSignals.SilentGrace - TimeSpan.FromSeconds(1));
+        signals.Watched.ShouldBeTrue();
+        clock.Advance(TimeSpan.FromSeconds(1));
+        signals.Watched.ShouldBeFalse("it said nothing within the grace");
+        heard.ShouldBe(2);                                               // the loop hears it, to slow down
+
+        signals.ReportWindow("a", 1, visible: true);                     // it speaks up later: it counts again
+        signals.Watched.ShouldBeTrue();
+        signals.ForgetClient("a");
+        signals.Watched.ShouldBeFalse();
+
+        signals.Subscribed("b");
+        signals.ReportWindow("b", 1, visible: false);
+        clock.Advance(ServiceSignals.SilentGrace);
+        heard.ShouldBe(6);                                               // an App that said in time: the grace changes nothing
+    }
+
+    [Fact]
+    public void A_console_run_says_it_installs_no_updates_so_an_app_still_tells_it_its_windows()
+    {
+        // The App tells its windows only to a service whose status speaks of updates; a console run that said nothing would
+        // be left at a silent subscriber's grace, and read every five seconds under an open window.
+        var console = ServiceHost.BoardFor(asService: false);
+        console.Publish(SharingFakes.Status());
+        console.Status.ShouldNotBeNull().Updates.ShouldBe(new Contracts.UpdateStatus(false, null, null, false));
+
+        var installed = ServiceHost.BoardFor(asService: true);
+        installed.Publish(SharingFakes.Status());
+        installed.Status.ShouldNotBeNull().Updates.ShouldBeNull();      // until its update worker says
+    }
+
+    [Fact]
     public void Whoever_follows_the_watchers_hears_each_change_and_only_changes()
     {
         var signals = new ServiceSignals(new FakeTimeProvider());

@@ -21,8 +21,8 @@ namespace PowerLedger.Core;
 /// </summary>
 public sealed class CalibrationLearner : IBaselineProvider
 {
-    /// <summary>Counts saturate here; anything past the trust thresholds carries no information.</summary>
-    public const int SampleCap = int.MaxValue / CalibrationBuckets.Count;
+    /// <summary>A bucket's seconds on battery saturate here; anything past the trust thresholds carries no information.</summary>
+    public const int SecondsCap = int.MaxValue / CalibrationBuckets.Count;
 
     /// <summary>Baselines outside ±this are treated as corrupt on import.</summary>
     public const double SanityBoundW = 10_000;
@@ -59,7 +59,7 @@ public sealed class CalibrationLearner : IBaselineProvider
     private readonly CalibrationOptions _options;
     private readonly double _halfLifeSeconds;
     private readonly Stats[] _stats = new Stats[CalibrationBuckets.Count];
-    private readonly int[] _samples = new int[CalibrationBuckets.Count];
+    private readonly double[] _seconds = new double[CalibrationBuckets.Count];   // on battery, each tick's capped length
 
     /// <summary>The minute being averaged: its bucket's index, or -1 for none, and its time-weighted sums.</summary>
     private int _window = -1;
@@ -73,15 +73,16 @@ public sealed class CalibrationLearner : IBaselineProvider
         {
             throw new ArgumentOutOfRangeException(nameof(options), _options.HalfLifeHours, "The half-life must be a positive number of hours.");
         }
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_options.MinBucketSamples);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_options.MinTotalSamples);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_options.MinBucketSeconds);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_options.MinTotalSeconds);
         _halfLifeSeconds = _options.HalfLifeHours * 3600;
     }
 
-    /// <summary>Battery samples observed so far across all buckets (saturating).</summary>
-    public int TotalSamples
+    /// <summary>Seconds on battery learned from so far across all buckets, whole (each bucket's saturating at
+    /// <see cref="SecondsCap"/>): each tick counts its own length, at most <see cref="LongestPauseSeconds"/>.</summary>
+    public int TotalSeconds
     {
-        get { lock (_gate) { return _samples.Sum(); } }
+        get { lock (_gate) { return (int)_seconds.Sum(); } }
     }
 
     /// <summary>The rest's share of each CPU watt as learned, for the status; null until the CPU has been seen at more than
@@ -124,24 +125,24 @@ public sealed class CalibrationLearner : IBaselineProvider
             _windowCpu += seconds * cpuW;
             _windowDraw += seconds * draw;
             _windowLast = s.Timestamp;
-            if (_samples[i] < SampleCap) _samples[i]++;
+            _seconds[i] = Math.Min(_seconds[i] + seconds, SecondsCap);
             if (_windowSeconds >= WindowSeconds) CloseWindow();
         }
     }
 
     /// <summary>The bucket's level, the rest at a CPU drawing nothing; null for unknown buckets and until the bucket and the
-    /// machine have enough samples.</summary>
+    /// machine have enough seconds on battery.</summary>
     public double? GetBaseline(int bucket) => GetRest(bucket)?.InterceptW;
 
     /// <summary>The bucket's rest as a level and a share of each CPU watt; null for unknown buckets and until the bucket and
-    /// the machine have enough samples.</summary>
+    /// the machine have enough seconds on battery.</summary>
     public RestOfSystem? GetRest(int bucket)
     {
         if (!IsValid(bucket)) return null;
         var i = Index(bucket);
         lock (_gate)
         {
-            if (_samples.Sum() < _options.MinTotalSamples || _samples[i] < _options.MinBucketSamples) return null;
+            if (_seconds.Sum() < _options.MinTotalSeconds || _seconds[i] < _options.MinBucketSeconds) return null;
             var stats = Snapshot();
             if (stats[i].Minutes <= 0) return null;
             var slope = SlopeOf(stats);
@@ -157,17 +158,17 @@ public sealed class CalibrationLearner : IBaselineProvider
             var stats = Snapshot();
             return new CalibrationState(
                 Enumerable.Range(0, CalibrationBuckets.Count)
-                    .Where(i => _samples[i] > 0 && stats[i].Minutes > 0)
+                    .Where(i => _seconds[i] > 0 && stats[i].Minutes > 0)
                     .Select(i => new BucketState(
-                        BucketOf(i), stats[i].Draw - stats[i].Cpu, _samples[i], stats[i].Cpu, stats[i].Minutes, stats[i].CpuSpread,
+                        BucketOf(i), stats[i].Draw - stats[i].Cpu, (int)Math.Ceiling(_seconds[i]), stats[i].Cpu, stats[i].Minutes, stats[i].CpuSpread,
                         stats[i].CpuDrawSpread))
                     .ToList());
         }
     }
 
     /// <summary>Replaces all state with the snapshot. Rows with an unknown bucket, a non-finite or absurd figure, or no
-    /// samples are ignored. A row from before 0.11, with no CPU figure, keeps its mean rest at <see cref="MigratedCpuW"/>
-    /// with the weight the old average held.</summary>
+    /// seconds are ignored. A row from before 0.11, with no CPU figure, keeps its mean rest at <see cref="MigratedCpuW"/>
+    /// with the weight the old average held; its count of one-second ticks is its seconds.</summary>
     public void Import(CalibrationState state)
     {
         lock (_gate)
@@ -189,7 +190,7 @@ public sealed class CalibrationLearner : IBaselineProvider
                 }
                 var i = Index(b.Bucket);
                 _stats[i] = stats;
-                _samples[i] = Math.Min(b.Samples, SampleCap);
+                _seconds[i] = Math.Min(b.Samples, SecondsCap);
             }
         }
     }
@@ -296,7 +297,7 @@ public sealed class CalibrationLearner : IBaselineProvider
     private void Clear()
     {
         Array.Clear(_stats);
-        Array.Clear(_samples);
+        Array.Clear(_seconds);
         _window = -1;
         _windowSeconds = _windowCpu = _windowDraw = 0;
     }

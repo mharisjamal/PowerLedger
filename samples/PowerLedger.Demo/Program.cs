@@ -44,7 +44,7 @@ internal static class Program
             facts.GpuTdpW ?? (facts.Chassis == ChassisKind.Laptop ? HardwareFacts.LaptopDefaults.GpuTdpW : HardwareFacts.DesktopDefaults.GpuTdpW));
 
         // Learn fast so a short preview can reach Calibrated; the service uses 10-minute thresholds.
-        var learner = new CalibrationLearner(new CalibrationOptions(MinBucketSamples: 15, MinTotalSamples: 15));
+        var learner = new CalibrationLearner(new CalibrationOptions(MinBucketSeconds: 15, MinTotalSeconds: 15));
         var calibration = new CalibrationRepository(db);
         learner.Import(calibration.Load(facts.Hash));
         var model = new PowerModel(profile, hardware, new PowerModelOptions(), learner);
@@ -133,7 +133,7 @@ internal static class Program
         };
         var p = r.Components;
         var rest = p.Unattributed + p.Ram + p.Storage + p.Board + p.Extras + p.PsuLoss + p.Monitors;
-        Console.Write($"\r  {r.TotalW,6:F1} W   {label}   cpu {p.Cpu,5:F1}   gpu {p.Gpu,4:F1}   display {p.Display,4:F1}   rest {rest,5:F1}   learned {learner.TotalSamples,4} ticks ");
+        Console.Write($"\r  {r.TotalW,6:F1} W   {label}   cpu {p.Cpu,5:F1}   gpu {p.Gpu,4:F1}   display {p.Display,4:F1}   rest {rest,5:F1}   learned {learner.TotalSeconds,4} s ");
     }
 
     private static void PrintReport(SqliteDatabase db)

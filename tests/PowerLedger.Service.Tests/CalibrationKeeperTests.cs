@@ -6,7 +6,7 @@ namespace PowerLedger.Service.Tests;
 
 public class CalibrationKeeperTests
 {
-    private static readonly CalibrationOptions Quick = new(MinBucketSamples: 1, MinTotalSamples: 2);
+    private static readonly CalibrationOptions Quick = new(MinBucketSeconds: 1, MinTotalSeconds: 2);
     private static readonly DateTimeOffset Now = Samples.T0;
 
     [Fact]
@@ -21,7 +21,7 @@ public class CalibrationKeeperTests
         var keeper = new CalibrationKeeper(repository, Quick, TimeSpan.FromMinutes(10));
         keeper.Use("abc", Now);
         keeper.Hash.ShouldBe("abc");
-        keeper.Learner.TotalSamples.ShouldBe(3);
+        keeper.Learner.TotalSeconds.ShouldBe(3);
     }
 
     [Fact]
@@ -33,8 +33,8 @@ public class CalibrationKeeperTests
         keeper.Use("old", Now);
         Feed(keeper.Learner, 3);
         keeper.Use("new", Now);
-        keeper.Learner.TotalSamples.ShouldBe(0);
-        Loaded(repository, "old").TotalSamples.ShouldBe(3);
+        keeper.Learner.TotalSeconds.ShouldBe(0);
+        Loaded(repository, "old").TotalSeconds.ShouldBe(3);
     }
 
     [Fact]
@@ -61,12 +61,12 @@ public class CalibrationKeeperTests
         Feed(keeper.Learner, 3);
         keeper.Save(Now);
         keeper.Reset(Now);
-        keeper.Learner.TotalSamples.ShouldBe(0);
+        keeper.Learner.TotalSeconds.ShouldBe(0);
         repository.Load("abc").Buckets.ShouldBeEmpty();
     }
 
     [Fact]
-    public void Status_counts_battery_samples_and_trusted_buckets()
+    public void Status_counts_seconds_on_battery_and_trusted_buckets()
     {
         using var t = new TestDatabase();
         var keeper = new CalibrationKeeper(new CalibrationRepository(t.Db), Quick, TimeSpan.FromMinutes(10));

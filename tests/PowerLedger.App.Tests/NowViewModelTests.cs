@@ -471,6 +471,15 @@ public class NowViewModelTests
     }
 
     [Fact]
+    public void Calibration_progress_is_seconds_on_battery_whatever_the_sample_interval()
+    {
+        _link.Settings = ServiceSettings.Default with { SampleIntervalSeconds = 5 };
+        var model = Model();
+        _link.Connect(true);
+        model.Status.Calibration.ShouldBe("Calibrating · 15m of 30m on battery");
+    }
+
+    [Fact]
     public void A_desktop_s_status_never_speaks_of_calibrating_on_battery()
     {
         _link.Settings = ServiceSettings.Default with { Profile = MachineProfile.DefaultDesktop };

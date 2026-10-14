@@ -348,6 +348,19 @@ public class PowerModelTests
         Laptop().Evaluate(TestData.Laptop(idleSeconds: 600, cpuLoad: 0.099, gpuLoad: 0.049)).UserIdle.ShouldBeTrue();
     }
 
+    /// <summary>A film on the graphics card keeps its decoder busy, not its shaders: no load for its watts, but no idle PC
+    /// either. The idle test reads the card's every engine where the sensors gave it.</summary>
+    [Fact]
+    public void A_film_playing_to_nobody_at_the_keyboard_is_not_idle()
+    {
+        var film = TestData.Laptop(idleSeconds: 600, cpuLoad: 0.02, gpuLoad: 0.01) with { DGpuBusyLoad = 0.6 };
+        var r = Laptop().Evaluate(film);
+        r.UserIdle.ShouldBeFalse();
+        r.Components.Gpu.ShouldBe(Laptop().Evaluate(film with { DGpuBusyLoad = null }).Components.Gpu);   // its watts as before
+        Laptop().Evaluate(film with { DGpuBusyLoad = 0.02 }).UserIdle.ShouldBeTrue();
+        Laptop().Evaluate(film with { DGpuBusyLoad = null }).UserIdle.ShouldBeTrue();   // not read: the shaders' load decides
+    }
+
     /// <summary>A graphics load nobody could read counts as idle, as the model counts its watts; a processor load that is not
     /// a number counts as none, as everywhere else in the model.</summary>
     [Fact]
@@ -532,12 +545,21 @@ public class PowerModelTests
     }
 
     [Fact]
-    public void A_battery_rate_on_a_suspect_tick_is_no_reading_and_the_model_stands_in()
+    public void A_battery_rate_in_the_seconds_after_an_ac_change_is_no_reading_and_the_model_stands_in()
     {
         // The validator flags the seconds after an AC change, when the rate Windows gives is from before it.
-        var r = Laptop(baseline: 9).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true, suspect: true));
+        var r = Laptop(baseline: 9).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true, suspect: true) with { AcTransition = true });
         (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Calibrated));
         r.TotalW.ShouldBe(14.6 + 4.1 + 4.2 + 9, 1e-9);
+        r.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_battery_rate_on_a_tick_suspect_for_something_else_is_still_the_total()
+    {
+        // A GPU spike replaced, or a brightness out of range clamped, says nothing against the battery's rate.
+        var r = Laptop(baseline: 9).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true, suspect: true));
+        (r.TotalSource, r.Quality, r.TotalW).ShouldBe((TotalSource.Battery, Quality.Measured, 34.2));
         r.Suspect.ShouldBeTrue();
     }
 

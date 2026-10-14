@@ -384,14 +384,14 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public void The_calibration_line_follows_the_sample_interval_and_the_chassis_saved()
+    public void The_calibration_line_counts_seconds_on_battery_whatever_the_sample_interval_and_follows_the_chassis_saved()
     {
         _link.Connect(true);
         var model = Model();
         model.Show();
 
         model.Service.SampleInterval = "2";
-        model.Calibration.ShouldBe("Learning on battery: 30m of 1h 00m needed.");
+        model.Calibration.ShouldBe("Learning on battery: 15m of 30m needed.");   // the service counts seconds, not ticks
 
         model.Service.Chassis = ChassisKind.Desktop;
         model.Calibration.ShouldBe("Not used on a desktop: it has no battery, so its readings are estimated.");

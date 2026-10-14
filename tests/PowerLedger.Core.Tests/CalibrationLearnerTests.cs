@@ -6,8 +6,8 @@ namespace PowerLedger.Core.Tests;
 
 public class CalibrationLearnerTests
 {
-    // Small trust thresholds so tests stay fast; production defaults are 300 / 1800 ticks and a six-hour half-life.
-    private static readonly CalibrationOptions Fast = new(MinBucketSamples: 5, MinTotalSamples: 5);
+    // Small trust thresholds so tests stay fast; production defaults are 300 / 1800 seconds and a six-hour half-life.
+    private static readonly CalibrationOptions Fast = new(MinBucketSeconds: 5, MinTotalSeconds: 5);
 
     private const double Gpu = 2, Display = 4;
 
@@ -49,10 +49,31 @@ public class CalibrationLearnerTests
     [Fact]
     public void Nothing_is_reported_before_the_minimum_sample_counts()
     {
-        var learner = new CalibrationLearner(new CalibrationOptions(MinBucketSamples: 50, MinTotalSamples: 100));
+        var learner = new CalibrationLearner(new CalibrationOptions(MinBucketSeconds: 50, MinTotalSeconds: 100));
         Feed(learner, TestData.T0, 40, cpuW: 10, restW: 9);
         learner.GetBaseline(Bright60).ShouldBeNull();
         ((IBaselineProvider)learner).GetRest(Bright60).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Trust_counts_seconds_on_battery_so_five_second_ticks_take_no_longer_than_one_second_ticks()
+    {
+        // Nobody watching, the service reads every five seconds: ten minutes on battery is 120 ticks, and must be ten minutes.
+        var learner = new CalibrationLearner(new CalibrationOptions(MinBucketSeconds: 300, MinTotalSeconds: 600));
+        var at = TestData.T0;
+        for (var i = 0; i < 119; i++, at = at.AddSeconds(5))
+        {
+            learner.Observe(TestData.Laptop(cpu: 10, gpu: Gpu, battery: 10 + Gpu + Display + 9, onBattery: true, delta: 5, ts: at), 10, Gpu, Display);
+        }
+        learner.TotalSeconds.ShouldBe(595);
+        learner.GetBaseline(Bright60).ShouldBeNull();
+        learner.Observe(TestData.Laptop(cpu: 10, gpu: Gpu, battery: 10 + Gpu + Display + 9, onBattery: true, delta: 5, ts: at), 10, Gpu, Display);
+        learner.TotalSeconds.ShouldBe(600);
+        learner.GetBaseline(Bright60).ShouldNotBeNull();
+
+        // A tick after a long stall counts no more than the longest pause.
+        learner.Observe(TestData.Laptop(cpu: 10, gpu: Gpu, battery: 21, onBattery: true, delta: 300, ts: at.AddSeconds(300)), 10, Gpu, Display);
+        learner.TotalSeconds.ShouldBe(600 + (int)CalibrationLearner.LongestPauseSeconds);
     }
 
     [Fact]
@@ -169,7 +190,7 @@ public class CalibrationLearnerTests
         learner.Observe(TestData.Laptop(battery: null, onBattery: true), 10, 2, 4);
         learner.Observe(TestData.Laptop(battery: -5, onBattery: true), 10, 2, 4);
         learner.Observe(TestData.Laptop(battery: 0, onBattery: true), 10, 2, 4);
-        learner.TotalSamples.ShouldBe(0);
+        learner.TotalSeconds.ShouldBe(0);
         learner.Export().Buckets.ShouldBeEmpty();
     }
 
@@ -184,7 +205,7 @@ public class CalibrationLearnerTests
 
         var restored = new CalibrationLearner(Fast);
         restored.Import(state);
-        restored.TotalSamples.ShouldBe(30 * 60 + 10);
+        restored.TotalSeconds.ShouldBe(30 * 60 + 10);
         Rest(restored, Bright60).InterceptW.ShouldBe(Rest(learner, Bright60).InterceptW, 1e-9);
         Rest(restored, Bright60).PerCpuWatt.ShouldBe(Rest(learner, Bright60).PerCpuWatt, 1e-9);
         Rest(restored, CalibrationBuckets.DisplayOff).At(10).ShouldBe(Rest(learner, CalibrationBuckets.DisplayOff).At(10), 1e-9);
@@ -200,7 +221,7 @@ public class CalibrationLearnerTests
         rest.PerCpuWatt.ShouldBe(PowerModel.LaptopRestPerCpuWatt, 1e-9);
         rest.At(CalibrationLearner.MigratedCpuW).ShouldBe(3.4, 1e-9);
         learner.LearnedRestPerCpuWatt.ShouldBeNull();
-        learner.TotalSamples.ShouldBe(6000);
+        learner.TotalSeconds.ShouldBe(6000);
 
         // It weighs what the old ten-minute average held, about 14 minutes, so an hour of new data outweighs it.
         Minutes(learner, TestData.T0, 60, [5, 15], interceptW: 1, perCpuWatt: 0.5);
@@ -223,7 +244,7 @@ public class CalibrationLearnerTests
             new BucketState(3, 5.0, 10, CpuW: 10, Minutes: 1, CpuSpread: -1),
             new BucketState(4, 5.0, 10, CpuW: 10, Minutes: 1, CpuDrawSpread: double.PositiveInfinity),
         ]));
-        learner.TotalSamples.ShouldBe(10);
+        learner.TotalSeconds.ShouldBe(10);
         Rest(learner, Bright60).At(10).ShouldBe(9.0, 1e-9);
         foreach (var bucket in new[] { 1, 2, 3, 4, 7, 99, CalibrationBuckets.MaxBucket }) learner.GetBaseline(bucket).ShouldBeNull();
     }
@@ -231,7 +252,7 @@ public class CalibrationLearnerTests
     [Fact]
     public void Thresholds_are_inclusive_and_independent()
     {
-        var learner = new CalibrationLearner(new CalibrationOptions(MinBucketSamples: 5, MinTotalSamples: 8));
+        var learner = new CalibrationLearner(new CalibrationOptions(MinBucketSeconds: 5, MinTotalSeconds: 8));
         var at = Feed(learner, TestData.T0, 5, cpuW: 10, restW: 9, brightness: 0.6);
         learner.GetBaseline(Bright60).ShouldBeNull();                                            // bucket ready, machine not (5 < 8)
         Feed(learner, at, 3, cpuW: 10, restW: 9, brightness: 0.2);
@@ -245,7 +266,7 @@ public class CalibrationLearnerTests
         var learner = new CalibrationLearner(Fast);
         learner.Observe(TestData.Laptop(battery: 25, onBattery: true), double.NaN, 2, 4);
         learner.Observe(TestData.Laptop(battery: 25, onBattery: true), 10, double.PositiveInfinity, 4);
-        learner.TotalSamples.ShouldBe(0);
+        learner.TotalSeconds.ShouldBe(0);
     }
 
     [Fact]
@@ -283,8 +304,8 @@ public class CalibrationLearnerTests
     {
         Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(HalfLifeHours: 0)));
         Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(HalfLifeHours: double.NaN)));
-        Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(MinBucketSamples: -1)));
-        Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(MinTotalSamples: 0)));
+        Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(MinBucketSeconds: -1)));
+        Should.Throw<ArgumentOutOfRangeException>(() => new CalibrationLearner(new CalibrationOptions(MinTotalSeconds: 0)));
     }
 
     [Fact]
@@ -293,7 +314,7 @@ public class CalibrationLearnerTests
         var learner = new CalibrationLearner(Fast);
         Feed(learner, TestData.T0, 10, cpuW: 10, restW: 9);
         learner.Reset();
-        learner.TotalSamples.ShouldBe(0);
+        learner.TotalSeconds.ShouldBe(0);
         learner.GetBaseline(Bright60).ShouldBeNull();
         learner.Export().Buckets.ShouldBeEmpty();
     }

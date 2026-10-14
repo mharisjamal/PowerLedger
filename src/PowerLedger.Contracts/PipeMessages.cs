@@ -224,8 +224,10 @@ public sealed record AskAgainRequest(long Id) : PipeRequest(Id);
 /// <see cref="ServiceStatus.Updates"/>; an older one would take it for a broken line. <paramref name="OverlayVisible"/>
 /// says whether the watts overlay shows: it is no window an update waits for, but while it or the window shows, someone may
 /// be looking at the live figures, so the service reads at the set interval rather than every five seconds (perf review §4).
-/// An older App leaves it out, which reads as hidden; an older service ignores it.</summary>
-public sealed record UiStateRequest(long Id, bool WindowVisible, bool OverlayVisible = false) : PipeRequest(Id);
+/// An older App leaves it out, which reads as hidden; an older service ignores it. <paramref name="WindowVisible"/> counts a
+/// minimised window, which an update waits for; <paramref name="Watching"/> says whether anyone may be looking: a window on
+/// screen, not minimised, or the overlay. An older App leaves it out, and the service takes either showing as watching.</summary>
+public sealed record UiStateRequest(long Id, bool WindowVisible, bool OverlayVisible = false, bool? Watching = null) : PipeRequest(Id);
 
 /// <summary>Plan Q §3: the blocking window's Update now. The service installs the newest release at once if it can, and
 /// answers <see cref="OkReply"/>; otherwise an <see cref="ErrorReply"/> says why, and the App falls back to its own setup.</summary>

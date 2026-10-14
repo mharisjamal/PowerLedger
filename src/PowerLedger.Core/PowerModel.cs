@@ -119,9 +119,10 @@ public sealed partial class PowerModel
         var display = DisplayModel.PanelWatts(_profile, s);
         monitors = _monitors.Watts(s.DisplayOn);
         // Idle is the user away and the PC doing nothing; a load nobody could read counts as none, as its watts do. Idle time
-        // nobody reported, with the App closed, comes in as 0, so the PC counts as in use.
+        // nobody reported, with the App closed, comes in as 0, so the PC counts as in use. The card counts busy on any engine:
+        // a film keeps only its decoder working, which is no load for its watts but is no idle PC either.
         var userIdle = s.UserIdleSeconds >= _options.IdleThresholdSeconds
-                       && Load(s.CpuLoad) < IdleCpuLoad && Load(s.DGpuLoad ?? 0) < IdleGpuLoad;
+                       && Load(s.CpuLoad) < IdleCpuLoad && Math.Max(Load(s.DGpuLoad ?? 0), Load(s.DGpuBusyLoad ?? 0)) < IdleGpuLoad;
         var isLaptop = _profile.Chassis == ChassisKind.Laptop;
         if (!string.IsNullOrWhiteSpace(s.PsuName)) _psuName = s.PsuName;
 
@@ -131,9 +132,9 @@ public sealed partial class PowerModel
         // it, since a GPU worked out from its load can be far over what it draws.
         var least = Math.Max(LeastBelievableW, LeastBelievableShare * ((Finite(s.CpuPackageW) is { } package ? Math.Max(0, package) : 0) + MeasuredGpuWatts(s)));
 
-        // A rate on a suspect tick is no reading either: the validator flags the seconds after an AC change, when the rate
-        // Windows gives is from before it.
-        if (isLaptop && s.HasDischargeRate && !s.Suspect && s.BatteryRateW is { } measured && measured + monitors.OwnPlug >= least)
+        // A rate in the seconds after an AC change is no reading either: Windows gives one from before it. Any other doubt
+        // the validator had (a GPU spike replaced, a brightness clamped) says nothing of the battery's rate.
+        if (isLaptop && s.HasDischargeRate && !s.AcTransition && s.BatteryRateW is { } measured && measured + monitors.OwnPlug >= least)
         {
             // The battery delivers what the monitors running off the laptop draw, so the measured rate already holds them:
             // they come out of the remainder, and only the monitors with a plug of their own are added.

@@ -347,6 +347,10 @@ public sealed class PipeHandlerTests : IDisposable
             .ShouldBe(new OkReply(62));
         _signals.WindowShowingIn(2).ShouldBeFalse();
         _signals.Watched.ShouldBeTrue();
+        (await _handler.HandleAsync(new UiStateRequest(63, true, Watching: false), "client-1", CancellationToken.None, session: 2))
+            .ShouldBe(new OkReply(63));
+        _signals.WindowShowingIn(2).ShouldBeTrue();                      // minimised: an update still waits
+        _signals.Watched.ShouldBeFalse();                                // but nobody looks at the figures
     }
 
     [Fact]

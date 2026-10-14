@@ -63,11 +63,40 @@ public class WindowWatchTests
         });
 
     [Fact]
+    public void A_window_set_aside_shows_but_is_no_shell_window_an_update_waits_for()
+        => UiHarness.OnUi(() =>
+        {
+            // The watts overlay: someone may be looking at it, but the service needn't hold an update for it.
+            var overlay = OffScreen();
+            var shell = OffScreen();
+            var watch = new WindowWatch(window => window == overlay);
+            try
+            {
+                watch.Watch(overlay);
+                watch.Watch(shell);
+                overlay.Show();
+                watch.Shows.ShouldBeTrue();
+                watch.Visible.ShouldBeFalse("the overlay is no shell window");
+
+                shell.Show();
+                shell.WindowState = WindowState.Minimized;
+                watch.Visible.ShouldBeTrue("a minimised shell window still holds an update");
+                overlay.Hide();
+                watch.Shows.ShouldBeFalse();
+            }
+            finally
+            {
+                overlay.Close();
+                shell.Close();
+            }
+        });
+
+    [Fact]
     public void A_window_of_another_thread_is_left_alone()
     {
         // The watch's own thread can't read another's window; a test run's windows on threads of their own once made
         // every later window there throw as it was laid out.
-        var watch = UiHarness.OnUi(WindowWatch.EveryWindow);
+        var watch = UiHarness.OnUi(() => WindowWatch.EveryWindow());
         var shown = Sta.Run(() =>
         {
             var window = OffScreen();   // left open: Windows takes it down with its thread

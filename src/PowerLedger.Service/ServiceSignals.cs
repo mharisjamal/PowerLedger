@@ -10,10 +10,15 @@ internal sealed class ServiceSignals(TimeProvider clock)
     /// <summary>A report older than this comes from an App that has gone quiet, and is ignored.</summary>
     public static readonly TimeSpan ReportLifetime = TimeSpan.FromSeconds(30);
 
+    /// <summary>How long a subscriber that has said nothing of its windows counts as watching: long enough for an App to ask
+    /// whether the service takes its window state and say it, short enough that one which never does (an App from before
+    /// Plan Q, a console client) leaves the service at its unwatched pace.</summary>
+    public static readonly TimeSpan SilentGrace = TimeSpan.FromSeconds(15);
+
     private readonly Lock _gate = new();
     private readonly Dictionary<string, (double IdleSeconds, long At)> _reports = new();
-    private readonly Dictionary<string, (uint? Session, bool Visible, bool Overlay)> _windows = new();
-    private readonly HashSet<string> _subscribed = new();
+    private readonly Dictionary<string, (uint? Session, bool Visible, bool Watching)> _windows = new();
+    private readonly Dictionary<string, Grace> _subscribed = new();
     private volatile bool _displayOn = true;
     private volatile bool _sessionLocked;
 
@@ -33,10 +38,9 @@ internal sealed class ServiceSignals(TimeProvider clock)
     public event Action? WatchersChanged;
 
     /// <summary>
-    /// True while someone may be looking at the live figures (perf review §4): an App says its main window or its overlay
-    /// shows, or an App has subscribed to the readings without saying anything of its windows, as an older App does and as
-    /// any App does with a service run from the console, which it never tells. Nobody at all, or every App hidden in the
-    /// tray, is nobody watching.
+    /// True while someone may be looking at the live figures (perf review §4): an App says it is watched (a window on screen,
+    /// not minimised, or its overlay; an older App, which doesn't say, its window or overlay showing), or an App subscribed to the readings less than <see cref="SilentGrace"/> ago and hasn't said anything of its
+    /// windows yet. Nobody at all, every App hidden in the tray, or a subscriber silent past the grace is nobody watching.
     /// </summary>
     public bool Watched
     {
@@ -46,8 +50,15 @@ internal sealed class ServiceSignals(TimeProvider clock)
         }
     }
 
-    /// <summary>A client subscribed to the readings.</summary>
-    public void Subscribed(string client) => Change(() => _subscribed.Add(client));
+    /// <summary>A client subscribed to the readings: it counts as watching until it says otherwise, or for
+    /// <see cref="SilentGrace"/> if it says nothing.</summary>
+    public void Subscribed(string client) => Change(() =>
+    {
+        if (_subscribed.ContainsKey(client)) return;
+        var grace = new Grace();
+        _subscribed[client] = grace;
+        grace.Timer = clock.CreateTimer(_ => Change(() => grace.Over = true), null, SilentGrace, Timeout.InfiniteTimeSpan);
+    });
 
     /// <summary>One App client's idle time, keyed by its connection so each session's App keeps its own report.</summary>
     public void ReportIdle(string client, double idleSeconds)
@@ -56,10 +67,12 @@ internal sealed class ServiceSignals(TimeProvider clock)
         lock (_gate) _reports[client] = (idleSeconds, clock.GetTimestamp());
     }
 
-    /// <summary>Plan Q §4: whether one App client's main window is showing, and the session it is in; and whether its
-    /// watts overlay shows, which counts as someone watching but is no window an update waits for.</summary>
-    public void ReportWindow(string client, uint? session, bool visible, bool overlay = false)
-        => Change(() => _windows[client] = (session, visible, overlay));
+    /// <summary>Plan Q §4: whether one App client's main window is showing, minimised or not, and the session it is in;
+    /// whether its watts overlay shows, which counts as someone watching but is no window an update waits for; and whether
+    /// anyone may be looking at all (<paramref name="watching"/>): null from an older App, which then counts as watched
+    /// while its window or its overlay shows.</summary>
+    public void ReportWindow(string client, uint? session, bool visible, bool overlay = false, bool? watching = null)
+        => Change(() => _windows[client] = (session, visible, watching ?? (visible || overlay)));
 
     /// <summary>True while an App in <paramref name="session"/> says its main window is showing: the update worker waits
     /// for it to go, or for the user to leave it. An App that hasn't said, or has gone, shows nothing.</summary>
@@ -73,7 +86,7 @@ internal sealed class ServiceSignals(TimeProvider clock)
     {
         _reports.Remove(client);
         _windows.Remove(client);
-        _subscribed.Remove(client);
+        if (_subscribed.Remove(client, out var grace)) grace.Timer?.Dispose();
     });
 
     /// <summary>
@@ -97,7 +110,8 @@ internal sealed class ServiceSignals(TimeProvider clock)
     }
 
     private bool WatchedNow()
-        => _windows.Values.Any(window => window.Visible || window.Overlay) || _subscribed.Any(client => !_windows.ContainsKey(client));
+        => _windows.Values.Any(window => window.Watching)
+           || _subscribed.Any(subscriber => !subscriber.Value.Over && !_windows.ContainsKey(subscriber.Key));
 
     /// <summary>Makes a change under the lock, and tells whoever follows the watchers when it turned them.</summary>
     private void Change(Action change)
@@ -110,5 +124,12 @@ internal sealed class ServiceSignals(TimeProvider clock)
             turned = WatchedNow() != before;
         }
         if (turned) WatchersChanged?.Invoke();
+    }
+
+    /// <summary>A subscriber's grace: its timer, and whether it has run out.</summary>
+    private sealed class Grace
+    {
+        public ITimer? Timer;
+        public bool Over;
     }
 }

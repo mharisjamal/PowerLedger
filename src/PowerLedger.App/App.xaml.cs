@@ -66,8 +66,8 @@ public partial class App : Application
     private bool _exiting;
     private AeroAccess? _aero;
     private WindowWatch? _watch;
-    private bool? _reportedVisible;
-    private bool? _efficient;
+    private (bool Visible, bool OnScreen)? _reportedWindows;
+    private readonly EfficiencyMode _efficiency = new(on => ProcessQos.Efficient(on));
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -190,7 +190,8 @@ public partial class App : Application
         _brightness = new BrightnessReporter(_link, _brightnessReader, new DisplayConfigReader(), _preferences, TimeProvider.System);
         _now.PropertyChanged += OnNowChanged;
         // Perf review P1: with no window of the App's on screen, a reading builds nothing that none would draw.
-        _watch = WindowWatch.EveryWindow();
+        // The overlay shows, but is no window an update waits for: it reaches the service only as itself (ReportOverlay).
+        _watch = WindowWatch.EveryWindow(window => window is Aero.OverlayWindow);
         _watch.Changed += OnWindowsChanged;
         OnWindowsChanged();
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
@@ -207,6 +208,9 @@ public partial class App : Application
         // A minute after start, then hourly (Updater's own cadence): pending feedback goes out once the PC is online again.
         _feedbackRetryTimer = TimeProvider.System.CreateTimer(_ => _ = _feedbackSender!.RetryPendingAsync(), null, Updater.FirstCheck, Updater.CheckEvery);
         if (!options.StartInTray) ShowWindow();
+        // Efficiency mode waits for the first window to show, so it never slows that window's first paint; started in the
+        // tray, for the start's own work on the UI thread to be done.
+        else Dispatcher.InvokeAsync(_efficiency.Settled, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     private void OnNowChanged(object? sender, PropertyChangedEventArgs e)
@@ -215,20 +219,18 @@ public partial class App : Application
     }
 
     /// <summary>A window of the App's showed or went: the live panel is built only while one shows (perf review P1), Windows
-    /// runs the App in efficiency mode while none does (P3), and the service hears whether one is visible, the overlay among
-    /// them (Plan Q §4).</summary>
+    /// runs the App in efficiency mode while none does (P3), and the service hears whether a shell window is visible, which
+    /// an update waits for (Plan Q §4), and whether one is on screen, which it reads faster for (perf review §4); the overlay
+    /// it hears of on its own.</summary>
     private void OnWindowsChanged()
     {
         if (_watch is not { } watch) return;
         if (_now is not null) _now.IsWatched = watch.Shows;
-        if (_efficient != !watch.Shows)
-        {
-            _efficient = !watch.Shows;
-            ProcessQos.Efficient(!watch.Shows);
-        }
-        if (_reportedVisible == watch.Visible) return;
-        _reportedVisible = watch.Visible;
-        _link?.ReportWindow(watch.Visible);
+        _efficiency.Windows(watch.Shows);
+        var windows = (watch.Visible, watch.Shows);
+        if (_reportedWindows == windows) return;
+        _reportedWindows = windows;
+        _link?.ReportWindow(windows.Visible, windows.Shows);
     }
 
     /// <summary>The tray menu offers the update the card offers.</summary>
