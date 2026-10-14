@@ -168,7 +168,11 @@ public partial class App : Application
         var now = _now;
         _overlay = new Aero.OverlayHost(
             settings, () => new Aero.OverlayWindow(now, settings, _theme),
-            (offered, on) => _tray?.OfferOverlay(offered, on, () => settings.ToggleOverlay.Execute(null)));
+            (offered, on) =>
+            {
+                _tray?.OfferOverlay(offered, on, () => settings.ToggleOverlay.Execute(null));
+                _link?.ReportOverlay(offered && on);              // it shows in Aero when on: someone may be looking (perf review §4)
+            });
         _link.HouseholdNoticeReceived += OnHouseholdNotice;
         _monthly = new MonthlyReports(
             history, sleep, Pdf, MonthlyReports.DefaultFolder, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh,

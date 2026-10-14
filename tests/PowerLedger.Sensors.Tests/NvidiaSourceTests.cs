@@ -20,6 +20,18 @@ public class NvidiaSourceTests
     }
 
     [Fact]
+    public void A_card_read_from_its_energy_counter_is_marked_exact_and_one_read_from_its_power_figure_is_not()
+    {
+        var draft = new SampleDraft();
+        new NvidiaSource(() => new GpuReading(true, 150, 0.4, Exact: true), present: true, unavailable: null).Contribute(draft);
+        draft.Gpus.ShouldHaveSingleItem().Exact.ShouldBeTrue();
+
+        draft = new SampleDraft();
+        From(watts: 18.5, load: 0.42).Contribute(draft);
+        draft.Gpus.ShouldHaveSingleItem().Exact.ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_card_with_no_power_sensor_still_reports_presence_and_load()
     {
         // The MX330 measured on the development laptop: utilisation yes, power not supported.

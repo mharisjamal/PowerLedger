@@ -55,6 +55,7 @@ internal sealed class NvmlPower
     public GpuReading Read()
     {
         var watts = CounterWatts();
+        var exact = watts is not null;
         if (watts is null)
         {
             var powerResult = _device.PowerUsage(out var milliwatts);
@@ -64,7 +65,7 @@ internal sealed class NvmlPower
 
         var loadResult = _device.Utilisation(out var busy);
         ThrowIfBroken(loadResult);
-        return new GpuReading(true, watts, loadResult == Success ? busy / 100.0 : null);
+        return new GpuReading(true, watts, loadResult == Success ? busy / 100.0 : null, exact);
     }
 
     /// <summary>The energy counter's watts since the previous read, or null when it can't give them this time.</summary>

@@ -37,7 +37,8 @@ public sealed class SqliteDatabase : IDisposable
     }
 
     /// <summary>
-    /// A connection with busy_timeout set; writers also get WAL, with its files kept after the last writer closes,
+    /// A connection with busy_timeout set; writers also get WAL, with its files kept after the last writer closes but the
+    /// log cut back to 4 MB once checkpointed (perf review §16: it had grown to 10.9 MB beside a 6.6 MB database),
     /// synchronous=NORMAL and foreign keys.
     /// </summary>
     public SqliteConnection Open()
@@ -53,6 +54,7 @@ public sealed class SqliteDatabase : IDisposable
                 if (IsEmptyFile()) Migrator.Exec(c, "PRAGMA auto_vacuum = INCREMENTAL");
                 Migrator.Exec(c, "PRAGMA journal_mode = WAL");
                 PersistentWal.TryEnable(c);
+                Migrator.Exec(c, "PRAGMA journal_size_limit = 4194304");
                 Migrator.Exec(c, "PRAGMA synchronous = NORMAL");
                 Migrator.Exec(c, "PRAGMA foreign_keys = ON");
             }

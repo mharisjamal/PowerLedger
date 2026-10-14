@@ -204,6 +204,17 @@ public class MinuteBuilderTests
     }
 
     [Fact]
+    public void The_tick_after_a_resume_is_left_out_however_short_the_sleep_as_the_ledger_counts_it_a_gap()
+    {
+        var wakes = new Wakes([Noon.AddSeconds(30)]);
+        var minute = MinuteBuilder.Build(
+            [Row(Noon.AddSeconds(10), watts: 30), Row(Noon.AddSeconds(31), watts: 90, delta: 21), Row(Noon.AddSeconds(32), watts: 40)],
+            London, maxDeltaSeconds: 60, wakes).ShouldHaveSingleItem();
+        (minute.Samples, minute.EstimatedS).ShouldBe((2, 2.0));
+        minute.AvgW.ShouldBe(35, 1e-9);
+    }
+
+    [Fact]
     public void A_minute_a_clock_set_back_filled_beyond_what_the_server_takes_is_left_out()
     {
         // Two passes over the same minute of wall-clock time hold 121.2 seconds of readings; the server takes at most 120.

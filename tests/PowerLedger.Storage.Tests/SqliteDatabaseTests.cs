@@ -21,6 +21,26 @@ public class SqliteDatabaseTests
     }
 
     [Fact]
+    public void A_writer_keeps_its_write_ahead_log_to_four_megabytes_once_checkpointed()
+    {
+        using var t = new TestDatabase();
+        using var c = t.Db.Open();
+        Scalar<long>(c, "PRAGMA journal_size_limit").ShouldBe(4 * 1024 * 1024);
+
+        // A log a big write grew past the limit is cut back to it once checkpointed; a persistent log never shrank before.
+        Migrator.Exec(c, "CREATE TABLE filler (data BLOB)");
+        using (var tx = c.BeginTransaction())
+        {
+            for (var i = 0; i < 400; i++) Migrator.Exec(c, "INSERT INTO filler VALUES (zeroblob(32768))");
+            tx.Commit();
+        }
+        new FileInfo(t.Path + "-wal").Length.ShouldBeGreaterThan(4 * 1024 * 1024);
+        Scalar<long>(c, "PRAGMA wal_checkpoint(RESTART)");
+        Migrator.Exec(c, "INSERT INTO filler VALUES (zeroblob(16))");     // the next write starts the log over, and cuts it
+        new FileInfo(t.Path + "-wal").Length.ShouldBeLessThanOrEqualTo(4 * 1024 * 1024);
+    }
+
+    [Fact]
     public void Opening_twice_does_not_re_run_migrations()
     {
         using var t = new TestDatabase();

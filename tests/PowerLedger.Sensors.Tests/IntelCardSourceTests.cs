@@ -20,6 +20,7 @@ public class IntelCardSourceTests
         var card = Tick(source).Gpus.ShouldHaveSingleItem();
 
         card.Watts.ShouldNotBeNull().ShouldBe(180, 1e-9);
+        card.Exact.ShouldBeTrue();                                           // energy over the tick
         card.Scope.ShouldBe(GpuPowerScope.Board);
         card.VendorId.ShouldBe(DiscreteGpu.IntelVendor);
         card.DeviceId.ShouldBe(A770);

@@ -143,6 +143,7 @@ internal sealed class PipeServer(
                 if (message is SubscribeRequest && frames is null)
                 {
                     frames = feed.Subscribe();
+                    signals.Subscribed(client);                       // someone may be looking at the live figures
                     if (notices is not null && session is { } at) householdNotices = notices.Subscribe(at);
                     pump = Task.WhenAll(PumpAsync(channel, frames, done.Token), PumpAsync(channel, householdNotices, done.Token));
                 }

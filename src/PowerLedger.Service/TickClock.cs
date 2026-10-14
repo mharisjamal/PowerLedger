@@ -32,4 +32,7 @@ internal sealed class TickClock(TimeProvider clock)
 
     /// <summary>The machine woke: the next measurement uses the wall clock.</summary>
     public void MarkResumed() => _resumed = true;
+
+    /// <summary>True when the next tick's interval reaches back across a sleep.</summary>
+    public bool SpansSleep => _resumed && _lastStamp is not null;
 }

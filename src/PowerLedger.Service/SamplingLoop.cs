@@ -11,31 +11,53 @@ namespace PowerLedger.Service;
 /// <param name="SensorTimeout">A sensor read that takes longer abandons the set (Plan B's watchdog rule).</param>
 /// <param name="CalibrationSaveEvery">How often the learner is saved while the service runs.</param>
 /// <param name="Calibration">Learner thresholds; the defaults are spec §5's.</param>
-internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationSaveEvery, CalibrationOptions Calibration)
+/// <param name="SensorBuildTimeout">Building a sensor set that takes longer abandons it. The first build after start loads
+/// every vendor's library and asks WMI, which takes a couple of seconds on an idle machine and far longer on a busy one.</param>
+internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationSaveEvery, CalibrationOptions Calibration, TimeSpan SensorBuildTimeout)
 {
-    public static LoopOptions Default { get; } = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10), new CalibrationOptions());
+    public static LoopOptions Default { get; } = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10), new CalibrationOptions(), TimeSpan.FromMinutes(1));
 }
 
 /// <summary>What the loop needs from the machine and the host, so tests can supply fakes.</summary>
 /// <param name="Sensors">Builds a sensor set, on the sensor thread; again after every resume or abandoned set. The token
 /// is cancelled once the set is abandoned or thrown away (see <see cref="SensorWorker"/>).</param>
-/// <param name="Inventory">Detects the hardware, at start and on every resume.</param>
+/// <param name="Inventory">Detects the hardware, at start and once graphics adapters or batteries have come or gone.</param>
 /// <param name="SystemUptime">How long Windows has been running, to tell a boot from a service restart.</param>
 /// <param name="SystemShuttingDown">True once the service control manager has announced a shutdown.</param>
 /// <param name="DatabaseNotice">What start-up had to do to the database, for the status screen.</param>
+/// <param name="Watched">Whether anyone may be looking at the live figures (<see cref="ServiceSignals.Watched"/>), asked
+/// whenever the loop picks its interval; always, when left out.</param>
 internal sealed record LoopEnvironment(
-    Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice);
+    Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice,
+    Func<bool>? Watched = null);
 
 /// <summary>
 /// The service's heart (spec §3, §6, §7). Once a sample interval it reads the sensors, runs the model, feeds the
 /// learner, buffers the reading and pushes it to subscribers. At each minute boundary it writes the batch, folds the
 /// finished minute and hour, and runs whatever housekeeping is due. Between ticks it carries out suspend, resume,
-/// settings and calibration commands. Nothing else touches the sensor set, the model, the learner, the buffer, the
-/// sessions or the settings, so none of them needs a lock. The monitor board is shared: the sensor thread writes what it
-/// detects and the pipe what the App reports, so the board locks for itself.
+/// settings and calibration commands. It all runs on one dedicated thread, the sensor worker's (perf review §7), which
+/// sleeps in a single wait for its beat, a command or the stop, so a tick wakes one thread and no thread pool. Nothing else
+/// touches the sensor set, the model, the learner, the buffer, the sessions or the settings, so none of them needs a lock;
+/// when the watchdog gives up on a stuck read, a fresh thread takes the loop over and the stuck one never touches them
+/// again. The monitor board is shared: the sensor thread writes what it detects and the pipe what the App reports, so the
+/// board locks for itself.
 /// </summary>
 internal sealed class SamplingLoop : BackgroundService
 {
+    /// <summary>
+    /// How often the loop reads while nobody looks at the live figures (perf review §4, research §3), unless the set interval
+    /// is slower still. Energy stays exact at any interval, since the meters add energy up over the tick; only the live
+    /// view and the raw rows grow coarser, and nobody is looking at the one.
+    /// </summary>
+    public static readonly TimeSpan UnwatchedInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long after a resume the sensor set is rebuilt (perf review §12). A machine in Modern Standby wakes
+    /// briefly many times an hour; one that sleeps again within the minute never pays for a rebuild.</summary>
+    public static readonly TimeSpan RebuildAfterResume = TimeSpan.FromMinutes(1);
+
+    /// <summary>How long after the last device came or went the hardware is detected again: a dock brings several.</summary>
+    public static readonly TimeSpan DevicesSettle = TimeSpan.FromSeconds(30);
+
     private static readonly TimeSpan Minute = TimeSpan.FromMinutes(1);
     private static readonly string Version =
         typeof(SamplingLoop).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
@@ -61,13 +83,20 @@ internal sealed class SamplingLoop : BackgroundService
     private readonly SensorWorker _worker;
     private readonly TickClock _tickClock;
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private ServiceSettings _settings = ServiceSettings.Default;
+    private CancellationToken _stop;
+    private IMetronome? _metronome;
+    private bool _started;
     private InventoryFacts? _facts;
     private PowerModel? _model;
     private DateTimeOffset _startedAt;
     private DateTimeOffset _minute;
     private DateTimeOffset? _foldFrom;
+    private DateTimeOffset? _rebuildAt;
+    private DateTimeOffset? _devicesChangedAt;
+    private TimeSpan _interval;
     private bool _suspended;
     private bool _carryOverMonitors;
     private long _ticks;
@@ -93,85 +122,133 @@ internal sealed class SamplingLoop : BackgroundService
         _nutSecret = new NutSecret(new SettingsRepository(database));
         _sessions = new SessionTracker(new SessionRepository(database));
         _calibration = new CalibrationKeeper(new CalibrationRepository(database), _options.Calibration, _options.CalibrationSaveEvery);
-        _rollups = new Rollups(_raw, new AggregateRepository(database));
+        _rollups = new Rollups(_raw, new AggregateRepository(database), new SessionRepository(database));
         _retention = new RetentionRunner(database, clock.LocalTimeZone);
         _buffer = new WriteBuffer(_raw.InsertBatch);
-        _worker = new SensorWorker(environment.Sensors, _options.SensorTimeout, clock);
+        _worker = new SensorWorker(environment.Sensors, _options.SensorTimeout, _options.SensorBuildTimeout, clock);
         _tickClock = new TickClock(clock);
     }
 
     /// <summary>Readings recorded since start. Rises only once a tick is completely done.</summary>
     public long Ticks => Interlocked.Read(ref _ticks);
 
-    private TimeSpan Interval => TimeSpan.FromSeconds(_settings.SampleIntervalSeconds);
+    private double GapThreshold => GapThresholdFor(_settings);
 
-    private double GapThreshold => EnergyIntegrator.GapThresholdFor(_settings.SampleIntervalSeconds);
+    /// <summary>The gap threshold for readings taken under <paramref name="settings"/>, for the slowest interval the loop
+    /// reads at, the set one or <see cref="UnwatchedInterval"/>: a minute (accuracy A17), so neither a stall nor a beat
+    /// Windows put off counts as sleep. A tick the machine woke within is a gap whatever its length (see <see cref="Wakes"/>).</summary>
+    internal static double GapThresholdFor(ServiceSettings settings)
+        => EnergyIntegrator.GapThresholdFor(Math.Max(settings.SampleIntervalSeconds, UnwatchedInterval.TotalSeconds));
+
+    /// <summary>The interval the loop wants now: the set one while anyone may be looking, otherwise
+    /// <see cref="UnwatchedInterval"/> when that is slower.</summary>
+    private TimeSpan WantedInterval()
+    {
+        var set = TimeSpan.FromSeconds(_settings.SampleIntervalSeconds);
+        return _environment.Watched?.Invoke() != false || set >= UnwatchedInterval ? set : UnwatchedInterval;
+    }
 
     /// <summary>
-    /// Completes once the loop has started and its timer runs, so every tick the clock gives from then on is seen; fails
-    /// if start-up failed. .NET runs ExecuteAsync on the thread pool, so StartAsync returns before this.
+    /// Completes once the loop has started and its beat runs, so every tick the clock gives from then on is seen; fails
+    /// if start-up failed. Start-up runs on the loop's own thread, so StartAsync returns before this.
     /// </summary>
     internal Task Ready => _ready.Task;
 
-    protected override async Task ExecuteAsync(CancellationToken stop)
+    /// <summary>Starts the loop's thread; the task ends when the loop has stopped and written everything.</summary>
+    protected override Task ExecuteAsync(CancellationToken stop)
+    {
+        _stop = stop;
+        _worker.Start(Run, OnAbandoned);
+        stop.Register(_worker.Interrupt);                         // a read stuck as the service stops holds nothing up
+        return _finished.Task;
+    }
+
+    /// <summary>
+    /// The loop, on the sensor worker's thread: started once, then waiting in one wait for the stop, a command or the beat,
+    /// in that order of precedence, so a command that arrives with a tick is carried out first. A thread that takes the loop
+    /// over from one the watchdog gave up on picks it up where it stands.
+    /// </summary>
+    private void Run()
     {
         try
         {
-            Start();
-        }
-        catch (Exception error)
-        {
-            _log.LogCritical(error, "PowerLedger could not start");
-            _ready.TrySetException(error);
-            throw;
-        }
-        var timer = new PeriodicTimer(Interval, _clock);
-        _ready.TrySetResult();
-        Task<bool>? tick = null;
-        Task<bool>? inbox = null;
-        try
-        {
-            while (!stop.IsCancellationRequested)
+            if (!_started)
             {
-                tick ??= timer.WaitForNextTickAsync(stop).AsTask();
-                inbox ??= _commands.Reader.WaitToReadAsync(stop).AsTask();
-                await Task.WhenAny(tick, inbox).ConfigureAwait(false);
-                if (stop.IsCancellationRequested) break;
-
-                if (inbox.IsCompleted)
+                try
                 {
-                    var open = await inbox.ConfigureAwait(false);
-                    inbox = null;
-                    if (!open) break;
-                    while (_commands.Reader.TryRead(out var command))
-                    {
-                        if (Handle(command))
-                        {
-                            timer.Dispose();                       // a new interval, or a machine that just woke
-                            timer = new PeriodicTimer(Interval, _clock);
-                            tick = null;
-                        }
-                        command.Complete();                        // only now (see Handle); one that failed stays failed
-                    }
+                    Start();
                 }
-
-                if (tick is { IsCompleted: true })
+                catch (Exception error)
                 {
-                    var running = await tick.ConfigureAwait(false);
-                    tick = null;
-                    if (!running) break;
-                    if (!_suspended) await TickAsync(stop).ConfigureAwait(false);
+                    _log.LogCritical(error, "PowerLedger could not start");
+                    _ready.TrySetException(error);
+                    _finished.TrySetException(error);
+                    _commands.Close();
+                    return;
                 }
+                _metronome = Metronome.For(_clock);
+                _interval = WantedInterval();
+                _metronome.Start(_interval);
+                _started = true;
+                _ready.TrySetResult();
+            }
+
+            WaitHandle[] wakes = [_stop.WaitHandle, _commands.Arrived, _metronome!.Beat];
+            while (WaitHandle.WaitAny(wakes) is var woken && woken != 0 && !_stop.IsCancellationRequested)
+            {
+                if (woken == 1) Carry();
+                else if (!_suspended) Tick();
             }
         }
-        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        catch (Exception error) when (error is not ReadAbandonedException)
         {
+            _log.LogCritical(error, "The sampling loop failed");
+            Finish(error);
+            return;
         }
-        finally
+        Finish(null);
+    }
+
+    /// <summary>Carries out every command waiting, each completed only once its new beat runs (see <see cref="Handle"/>).</summary>
+    private void Carry()
+    {
+        while (_commands.Reader.TryRead(out var command))
         {
-            timer.Dispose();
-            Stop();
+            Pace(restart: Handle(command));
+            command.Complete();                                    // only now (see Handle); one that failed stays failed
         }
+    }
+
+    /// <summary>Starts the beat over at the interval wanted now, when that changed or <paramref name="restart"/> says so;
+    /// stops it while the machine sleeps.</summary>
+    private void Pace(bool restart)
+    {
+        if (_suspended)
+        {
+            if (restart) _metronome!.Stop();
+            return;
+        }
+        var wanted = WantedInterval();
+        if (!restart && wanted == _interval) return;
+        _interval = wanted;
+        _metronome!.Start(wanted);
+    }
+
+    /// <summary>The watchdog gave up on a read; a fresh thread has the loop.</summary>
+    private void OnAbandoned(bool overran)
+    {
+        if (overran) _log.LogWarning("A sensor read took longer than {Timeout}; the sensor set was replaced", _options.SensorTimeout);
+    }
+
+    /// <summary>Writes what is left and ends the loop: the stop is done once the readings are, and the sensors are let go
+    /// last, so a set slow to close holds nothing up.</summary>
+    private void Finish(Exception? failure)
+    {
+        Stop();
+        if (failure is null) _finished.TrySetResult();
+        else _finished.TrySetException(failure);
+        _worker.Dispose();
+        _metronome?.Dispose();
     }
 
     private void Start()
@@ -223,24 +300,23 @@ internal sealed class SamplingLoop : BackgroundService
         _board.Publish(settings);
     }
 
-    private async Task TickAsync(CancellationToken stop)
+    private void Tick()
     {
         var now = _clock.GetUtcNow();
         try
         {
-            var result = await _worker.ReadAsync(now, _tickClock.Measure(now, _settings.SampleIntervalSeconds), stop).ConfigureAwait(false);
-            if (result is null)
-            {
-                _log.LogWarning("A sensor read took longer than {Timeout}; the sensor set was replaced", _options.SensorTimeout);
-                return;
-            }
+            CatchUpWithTheHardware(now);
+            var spansSleep = _tickClock.SpansSleep;
+            var result = _worker.Read(now, _tickClock.Measure(now, _interval.TotalSeconds));
             _tickClock.Commit(now);
             var reading = _model!.Evaluate(result.Sample, out var monitorWatts);
             reading = reading with { Measured = Frames.Measured(result.Sample, reading.TotalSource) };   // stored for data sharing
             var parts = reading.Components;
             // The battery delivers what the monitors running off the laptop draw, so they are taken out with the display, or
-            // the learner would learn them into the rest of the laptop. The figure is the one the reading used.
-            if (!result.Sample.PanelInactive) _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
+            // the learner would learn them into the rest of the laptop. The figure is the one the reading used. The first
+            // tick after a sleep is not learned from: the meters' figures are averages over the sleep, the battery's is now.
+            // Nor is a tick with the lid shut, whose panel draws nothing.
+            if (!spansSleep && !result.Sample.PanelInactive) _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
             _buffer.Add(reading);
             var frame = Frames.From(reading, result.Sample);
             _feed.Publish(frame);
@@ -252,10 +328,30 @@ internal sealed class SamplingLoop : BackgroundService
             Interlocked.Exchange(ref _ticks, ticks);
             _failures = 0;
         }
-        catch (Exception error) when (error is not OperationCanceledException)
+        catch (Exception error) when (error is not ReadAbandonedException)
         {
             _failures++;
             if ((_failures & (_failures - 1)) == 0) _log.LogError(error, "A tick failed ({Failures} in a row)", _failures);
+        }
+    }
+
+    /// <summary>
+    /// Before a read: once devices have settled, the hardware is detected again and the sensor set rebuilt for it; a minute
+    /// after a resume, the set is rebuilt, since across a sleep a card's library can lose its card and a counter reset.
+    /// </summary>
+    private void CatchUpWithTheHardware(DateTimeOffset now)
+    {
+        if (_devicesChangedAt is { } changed && now - changed >= DevicesSettle)
+        {
+            _devicesChangedAt = null;
+            Detect(now, _settings);
+            _worker.Rebuild();
+            _log.LogInformation("Hardware detected again after devices came or went");
+        }
+        if (_rebuildAt is { } due && now >= due)
+        {
+            _rebuildAt = null;
+            _worker.Rebuild();
         }
     }
 
@@ -329,12 +425,13 @@ internal sealed class SamplingLoop : BackgroundService
     }
 
     /// <summary>
-    /// Carries out a command, or fails it. The loop completes one that succeeds only after starting the tick timer over
-    /// when asked to, so that, as with <see cref="Ready"/>, every tick the clock gives once the command is done is seen:
-    /// a tick given before the new timer existed would be lost, and a test moves its fake clock the moment it is told.
+    /// Carries out a command, or fails it. The loop completes one that succeeds only after starting its beat over when
+    /// asked to, so that, as with <see cref="Ready"/>, every tick the clock gives once the command is done is seen: a tick
+    /// given before the new beat existed would be lost, and a test moves its fake clock the moment it is told.
     /// </summary>
-    /// <returns>True when the tick timer must start over: the sample interval changed, or the machine woke, and a tick
-    /// the timer queued while it slept must not fire before the rebuilt sensors have had a full interval.</returns>
+    /// <returns>True when the beat must start over, or stop, whatever the interval: the machine is going to sleep, or it
+    /// woke, and a tick queued while it slept must not fire before a full interval has passed since. A new interval, from
+    /// settings or from someone starting or stopping looking, is picked after every command.</returns>
     private bool Handle(LoopCommand command)
     {
         var now = _clock.GetUtcNow();
@@ -345,13 +442,19 @@ internal sealed class SamplingLoop : BackgroundService
             {
                 case SuspendCommand:
                     Suspend(now);
+                    restartTimer = true;
                     break;
                 case ResumeCommand:
                     Resume(now);
                     restartTimer = true;
                     break;
                 case ApplySettingsCommand apply:
-                    restartTimer = Apply(apply.Settings);
+                    Apply(apply.Settings);
+                    break;
+                case WatchersChangedCommand:
+                    break;                                         // the interval is picked again after every command
+                case DevicesChangedCommand:
+                    _devicesChangedAt = now;
                     break;
                 case ResetCalibrationCommand:
                     _calibration.Reset(now);
@@ -378,24 +481,28 @@ internal sealed class SamplingLoop : BackgroundService
         _log.LogInformation("Suspended");
     }
 
+    /// <summary>
+    /// The machine woke (perf review §12). The hardware is the same, since a dock that changed while it slept is told
+    /// through device notifications, and the sensor set goes on; only the display, whose brightness and monitors a sleep
+    /// often changes, is read afresh, and the set is rebuilt a minute on, unless the machine sleeps again first.
+    /// </summary>
     private void Resume(DateTimeOffset now)
     {
-        _worker.Rebuild();
-        Detect(now, _settings);
+        _worker.RefreshDisplay();
+        _rebuildAt = now + RebuildAfterResume;
         _sessions.Resume(now);
         _tickClock.MarkResumed();
         _suspended = false;
         _log.LogInformation("Resumed");
     }
 
-    private bool Apply(ServiceSettings settings)
+    /// <summary>Puts new settings in force; a new interval takes effect when the loop picks its interval after the command.</summary>
+    private void Apply(ServiceSettings settings)
     {
         if (settings.Validate() is { } problem) throw new ArgumentException(problem, nameof(settings));
-        var intervalChanged = settings.SampleIntervalSeconds != _settings.SampleIntervalSeconds;
         settings = _nutSecret.Take(settings);                // the UPS server's password is kept apart, never stored or sent
         _settingsStore.Save(settings);
         Use(settings);
-        return intervalChanged;
     }
 
     private void Stop()
@@ -414,7 +521,6 @@ internal sealed class SamplingLoop : BackgroundService
         }
         finally
         {
-            _worker.Dispose();
             _commands.Close();
         }
     }

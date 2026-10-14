@@ -169,6 +169,10 @@ internal interface IServiceLink : IAsyncDisposable
     /// to an older service, whose status has no <see cref="ServiceStatus.Updates"/>. Returns at once.</summary>
     void ReportWindow(bool visible);
 
+    /// <summary>Whether the watts overlay shows now. Told with the window's state, to the same services: while either
+    /// shows, the service reads at the set interval rather than every five seconds (perf review §4). Returns at once.</summary>
+    void ReportOverlay(bool showing);
+
     /// <summary>Plan Q §3: the blocking window's Update now, to a service that installs updates itself; otherwise, or
     /// when it can't, what went wrong, and the App falls back to its own setup.</summary>
     Task<WriteResult> UpdateNowAsync(CancellationToken cancel = default);
@@ -227,6 +231,7 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     private volatile MessageChannel? _channel;
     private volatile string? _refusal;
     private volatile bool _windowVisible;
+    private volatile bool _overlayVisible;
     private volatile MessageChannel? _takesUiState;   // the connection whose service said it handles updates
     private Task? _run;
 
@@ -336,6 +341,13 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public void ReportWindow(bool visible)
     {
         _windowVisible = visible;
+        if (!_disposed && _takesUiState is { } channel) _ = SendWindowAsync(channel, _stop.Token);
+    }
+
+    public void ReportOverlay(bool showing)
+    {
+        if (_overlayVisible == showing) return;
+        _overlayVisible = showing;
         if (!_disposed && _takesUiState is { } channel) _ = SendWindowAsync(channel, _stop.Token);
     }
 
@@ -495,12 +507,12 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         }
     }
 
-    /// <summary>Tells the service whether the window shows now. Never throws.</summary>
+    /// <summary>Tells the service whether the window and the overlay show now. Never throws.</summary>
     private async Task SendWindowAsync(MessageChannel channel, CancellationToken cancel)
     {
         try
         {
-            await RequestAsync(channel, new UiStateRequest(NextId(), _windowVisible), cancel).ConfigureAwait(false);
+            await RequestAsync(channel, new UiStateRequest(NextId(), _windowVisible, _overlayVisible), cancel).ConfigureAwait(false);
         }
         catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException or TimeoutException
                                           or PipeProtocolException)

@@ -73,6 +73,7 @@ internal sealed class SharingWorker : BackgroundService
     private readonly SharingStore _store;
     private readonly OutboxRepository _outbox;
     private readonly RawSampleRepository _raw;
+    private readonly SessionRepository _sessions;
     private readonly TariffRepository _tariffs;
     private readonly AggregateRepository _hours;
 
@@ -100,6 +101,7 @@ internal sealed class SharingWorker : BackgroundService
         _store = new SharingStore(new SettingsRepository(database), environment.PickMinute);
         _outbox = new OutboxRepository(database);
         _raw = new RawSampleRepository(database);
+        _sessions = new SessionRepository(database);
         _tariffs = new TariffRepository(database);
         _hours = new AggregateRepository(database);
     }
@@ -414,7 +416,7 @@ internal sealed class SharingWorker : BackgroundService
         }
         var now = _clock.GetUtcNow();
         var nowMs = now.ToUnixTimeMilliseconds();
-        var minutes = MinuteBuilder.Build(_raw.ReadRange(nowMs - HourMs, nowMs), Zone, GapThreshold);
+        var minutes = Minutes(nowMs - HourMs, nowMs);
         var day = minutes.Count > 0 ? minutes[^1].Day : Today(now);
         var events = OutboxEvents.Read(_outbox, day);
         var usage = events.Usage ?? new UsageCounts(day, 0, new Dictionary<string, int>(), new Dictionary<string, int>(), 0, 0, 0, "system", "en");
@@ -518,14 +520,19 @@ internal sealed class SharingWorker : BackgroundService
         {
             if (giveWay && _commands.AppWaiting) throw new GiveWay();
             var to = Math.Min(cutoff, ((from / HourMs) + 1) * HourMs);
-            var minutes = MinuteBuilder.Build(_raw.ReadRange(from, to), Zone, GapThreshold);
+            var minutes = Minutes(from, to);
             if (minutes.Count > 0) _outbox.InsertMinutes(minutes);
             _store.CollectedTo = to;
             from = to;
         }
     }
 
-    private double GapThreshold => EnergyIntegrator.GapThresholdFor((_board.Settings ?? ServiceSettings.Default).SampleIntervalSeconds);
+    private double GapThreshold => SamplingLoop.GapThresholdFor(_board.Settings ?? ServiceSettings.Default);
+
+    /// <summary>The minute rows of the readings in [<paramref name="fromMs"/>, <paramref name="toMs"/>), with their gaps as the ledger has them.</summary>
+    private IReadOnlyList<MinuteRow> Minutes(long fromMs, long toMs)
+        => MinuteBuilder.Build(_raw.ReadRange(fromMs, toMs), Zone, GapThreshold,
+            Wakes.Between(_sessions, DateTimeOffset.FromUnixTimeMilliseconds(fromMs), DateTimeOffset.FromUnixTimeMilliseconds(toMs)));
 
     /// <summary>Each source's failures since the last look. A count lower than last time means the sensor set was rebuilt,
     /// and it counts from zero again.</summary>

@@ -49,14 +49,15 @@ public class SamplingLoopTests
             (SessionReason.Resume, SessionReason.ServiceStop, Start.AddMinutes(7), Start.AddMinutes(10)),
         });
 
-        loop.Sets.Count.ShouldBe(2);                                // a fresh sensor set after the resume
+        loop.Sets.Count.ShouldBe(2);                                // a fresh sensor set a minute after the resume
         await WaitFor.True(() => loop.Sets.All(s => s.Disposed));
+        loop.Detections.ShouldBe(1);                                // the hardware, at start only
 
         new SettingsRepository(t.Db).Get(RetentionRunner.LastPurgeKey)
             .ShouldBe(Start.AddMinutes(5).ToString("O", CultureInfo.InvariantCulture));   // the 03:00 local purge
         var learned = new CalibrationLearner();
         learned.Import(new CalibrationRepository(t.Db).Load(Facts.Laptop().Hash));
-        learned.TotalSamples.ShouldBe(480);
+        learned.TotalSamples.ShouldBe(479);                         // all but the first after the resume, which spans the sleep
 
         var status = loop.Board.Status.ShouldNotBeNull();
         status.Ticks.ShouldBe(480);
@@ -111,7 +112,7 @@ public class SamplingLoopTests
     }
 
     [Fact]
-    public async Task A_hung_sensor_read_costs_one_tick_and_the_stall_becomes_a_gap()
+    public async Task A_hung_sensor_read_costs_one_tick_and_the_stall_counts_as_awake()
     {
         using var t = new TestDatabase();
         using var gate = new ManualResetEventSlim(false);
@@ -144,7 +145,135 @@ public class SamplingLoopTests
 
         var last = new RawSampleRepository(t.Db).Read(Start, Start.AddMinutes(1))[^1];
         last.Timestamp.ShouldBe(Start.AddSeconds(13.5));
-        last.DeltaSeconds.ShouldBe(11.5, 1e-6);                      // from the last good tick, so it counts as a gap
+        last.DeltaSeconds.ShouldBe(11.5, 1e-6);                      // from the last good tick
+        var minute = new AggregateRepository(t.Db).ReadMinutes(Start, Start.AddMinutes(1)).ShouldHaveSingleItem();
+        minute.GapSeconds.ShouldBe(0);                              // the machine was awake and drawing power (accuracy A17)
+        minute.OnSeconds.ShouldBe(13.5, 1e-6);
+    }
+
+    [Fact]
+    public async Task A_sleep_shorter_than_a_minute_is_still_a_gap()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t);
+        await loop.StartAsync();
+        await loop.Ticks(10);                                       // 00:55:01 to 00:55:10
+        await loop.Send(new SuspendCommand());
+        loop.Clock.Advance(TimeSpan.FromSeconds(20));               // a short Modern Standby sleep
+        await loop.Send(new ResumeCommand());
+        await loop.Ticks(5);                                        // 00:55:31 to 00:55:35
+        await loop.StopAsync();
+
+        var minute = new AggregateRepository(t.Db).ReadMinutes(Start, Start.AddMinutes(1)).ShouldHaveSingleItem();
+        minute.GapSeconds.ShouldBe(21, 1e-6);                       // 00:55:10 to 00:55:31
+        minute.OnSeconds.ShouldBe(14, 1e-6);
+    }
+
+    [Fact]
+    public async Task Every_tick_runs_on_the_loops_own_thread_and_never_on_the_thread_pool()
+    {
+        using var t = new TestDatabase();
+        var threads = new List<(int Id, bool Pool, string? Name)>();
+        await using var loop = new Harness(t, makeSet: _ => new FakeSensorSet((ts, delta) =>
+        {
+            lock (threads) threads.Add((Environment.CurrentManagedThreadId, Thread.CurrentThread.IsThreadPoolThread, Thread.CurrentThread.Name));
+            return Samples.At(ts, delta, batteryW: 20);
+        }));
+        await loop.StartAsync();
+        await loop.Ticks(5);
+        await loop.Send(new ApplySettingsCommand(loop.Board.Settings.ShouldNotBeNull() with { SampleIntervalSeconds = 2 }));
+        loop.Clock.Advance(TimeSpan.FromSeconds(2));
+        await WaitFor.True(() => loop.TickCount == 6);
+
+        lock (threads)
+        {
+            threads.Count.ShouldBe(6);
+            threads.Select(thread => thread.Id).Distinct().ShouldHaveSingleItem().ShouldNotBe(Environment.CurrentManagedThreadId);
+            threads.ShouldAllBe(thread => !thread.Pool && thread.Name == "PowerLedger loop");
+        }
+    }
+
+    [Fact]
+    public async Task Stopping_while_a_sensor_read_hangs_still_writes_the_readings_and_closes_the_session()
+    {
+        using var t = new TestDatabase();
+        using var gate = new ManualResetEventSlim(false);
+        var reads = 0;
+        await using var loop = new Harness(t, makeSet: _ => new FakeSensorSet((ts, delta) =>
+        {
+            if (Interlocked.Increment(ref reads) == 3) gate.Wait();
+            return Samples.At(ts, delta, batteryW: 20);
+        }));
+        try
+        {
+            await loop.StartAsync();
+            await loop.Ticks(2);
+            loop.Clock.Advance(TimeSpan.FromSeconds(1));            // the third read hangs, long before the watchdog would
+            await WaitFor.True(() => Volatile.Read(ref reads) == 3);
+            await loop.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+            new RawSampleRepository(t.Db).Count().ShouldBe(2);
+            new SessionRepository(t.Db).List(Start.AddHours(-1), Start.AddHours(1)).ShouldHaveSingleItem()
+                .EndReason.ShouldBe(SessionReason.ServiceStop);
+            loop.Board.Status.ShouldNotBeNull().SensorRestarts.ShouldBe(0);   // a stop is not a hang
+            loop.Sets.ShouldHaveSingleItem().Disposed.ShouldBeFalse();         // still stuck in its call
+        }
+        finally
+        {
+            gate.Set();
+        }
+        await WaitFor.True(() => loop.Sets.Single().Disposed);
+    }
+
+    [Fact]
+    public async Task A_resume_keeps_the_hardware_facts_and_the_sensor_set_refreshes_the_display_and_rebuilds_the_set_a_minute_later()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t);
+        await loop.StartAsync();
+        await loop.Ticks(2);
+        await loop.Send(new SuspendCommand());
+        loop.Clock.Advance(TimeSpan.FromMinutes(5));
+        await loop.Send(new ResumeCommand());
+        loop.Detections.ShouldBe(1);
+        loop.Sets.ShouldHaveSingleItem().DisplayRefreshes.ShouldBe(1);
+
+        await loop.Ticks(59);                                       // 01:00:03 to 01:01:01: the set from before the sleep
+        loop.Sets.ShouldHaveSingleItem().Reads.ShouldBe(61);
+        await loop.Ticks(1);                                        // a minute after the resume
+        loop.Sets.Count.ShouldBe(2);
+        loop.Sets[0].Disposed.ShouldBeTrue();
+        loop.Sets[1].Reads.ShouldBe(1);
+        loop.Detections.ShouldBe(1);
+
+        // A machine that goes back to sleep inside the minute rebuilds a minute after it next wakes.
+        await loop.Send(new SuspendCommand());
+        await loop.Send(new ResumeCommand());
+        await loop.Ticks(30);
+        await loop.Send(new SuspendCommand());
+        await loop.Send(new ResumeCommand());
+        await loop.Ticks(59);
+        loop.Sets.Count.ShouldBe(2);
+        await loop.Ticks(1);
+        loop.Sets.Count.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Devices_coming_and_going_have_the_hardware_detected_again_once_they_settle_and_the_set_rebuilt()
+    {
+        using var t = new TestDatabase();
+        await using var loop = new Harness(t);
+        await loop.StartAsync();
+        await loop.Ticks(1);
+        await loop.Send(new DevicesChangedCommand());
+        await loop.Ticks(20);
+        await loop.Send(new DevicesChangedCommand());               // a dock brings its devices one after another
+        await loop.Ticks(29);
+        (loop.Detections, loop.Sets.Count).ShouldBe((1, 1));
+        await loop.Ticks(1);                                        // half a minute after the last
+        (loop.Detections, loop.Sets.Count).ShouldBe((2, 2));
+        await loop.Ticks(60);
+        (loop.Detections, loop.Sets.Count).ShouldBe((2, 2));
     }
 
     [Fact]
@@ -429,6 +558,39 @@ public class SamplingLoopTests
     }
 
     [Fact]
+    public async Task Unwatched_the_loop_reads_every_five_seconds_and_at_the_set_interval_from_the_moment_someone_looks()
+    {
+        using var t = new TestDatabase();
+        var watched = false;
+        await using var loop = new Harness(t, watched: () => Volatile.Read(ref watched));
+        await loop.StartAsync();
+        loop.Clock.Advance(TimeSpan.FromSeconds(4));
+        await Task.Delay(100);
+        loop.TickCount.ShouldBe(0);
+        loop.Clock.Advance(TimeSpan.FromSeconds(1));
+        await WaitFor.True(() => loop.TickCount == 1);              // 00:55:05
+
+        Volatile.Write(ref watched, true);                          // the App's window opens
+        await loop.Send(new WatchersChangedCommand());
+        await loop.Ticks(3);                                        // 00:55:06 to 00:55:08
+
+        Volatile.Write(ref watched, false);
+        await loop.Send(new WatchersChangedCommand());
+        loop.Clock.Advance(TimeSpan.FromSeconds(4));
+        await Task.Delay(100);
+        loop.TickCount.ShouldBe(4);
+        loop.Clock.Advance(TimeSpan.FromSeconds(1.5));              // a beat Windows put off a little
+        await WaitFor.True(() => loop.TickCount == 5);              // 00:55:13.5
+        await loop.StopAsync();
+
+        var rows = new RawSampleRepository(t.Db).Read(Start, Start.AddMinutes(1));
+        rows.Select(r => r.DeltaSeconds).ShouldBe([5, 1, 1, 1, 5.5]);
+        var minute = new AggregateRepository(t.Db).ReadMinutes(Start, Start.AddMinutes(1)).ShouldHaveSingleItem();
+        minute.GapSeconds.ShouldBe(0);                              // a five-second reading, late or not, is no gap
+        minute.OnSeconds.ShouldBe(13.5, 1e-9);
+    }
+
+    [Fact]
     public async Task A_resume_is_done_only_once_its_new_timer_runs()
     {
         using var t = new TestDatabase();
@@ -485,11 +647,13 @@ public class SamplingLoopTests
     {
         private readonly SamplingLoop _loop;
         private readonly List<FakeSensorSet> _sets = [];
+        private int _detections;
 
         /// <param name="loopClock">What the loop sees of <see cref="Clock"/>, when that is not the fake clock itself.</param>
+        /// <param name="watched">Whether anyone looks at the live figures; always, when left out.</param>
         public Harness(
             TestDatabase database, LoopOptions? options = null, Func<int, FakeSensorSet>? makeSet = null,
-            Func<FakeTimeProvider, TimeProvider>? loopClock = null)
+            Func<FakeTimeProvider, TimeProvider>? loopClock = null, Func<bool>? watched = null)
         {
             Clock.SetLocalTimeZone(Plus2);
             Monitors = new MonitorBoard(MonitorBoardTests.Catalogue, Clock);
@@ -504,10 +668,15 @@ public class SamplingLoopTests
                         return set;
                     }
                 },
-                Inventory: () => Facts.Laptop(),
+                Inventory: () =>
+                {
+                    Interlocked.Increment(ref _detections);
+                    return Facts.Laptop();
+                },
                 SystemUptime: () => TimeSpan.FromHours(3),
                 SystemShuttingDown: () => false,
-                DatabaseNotice: null);
+                DatabaseNotice: null,
+                Watched: watched);
             var clock = loopClock?.Invoke(Clock) ?? Clock;
             _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Monitors, clock, NullLogger<SamplingLoop>.Instance, options);
         }
@@ -523,6 +692,9 @@ public class SamplingLoopTests
         public StatusBoard Board { get; } = new();
 
         public long TickCount => _loop.Ticks;
+
+        /// <summary>How many times the loop detected the hardware.</summary>
+        public int Detections => Volatile.Read(ref _detections);
 
         public List<FakeSensorSet> Sets
         {

@@ -34,6 +34,21 @@ public class NvmlPowerTests
     }
 
     [Fact]
+    public void A_reading_says_whether_its_watts_are_the_energy_counters_exact_figure()
+    {
+        var (device, clock, power) = Card();
+        power.Read().Exact.ShouldBeFalse();                                  // the power figure: no interval yet
+
+        clock.Advance(1);
+        device.EnergyMillijoules += 150_000;
+        power.Read().Exact.ShouldBeTrue();
+
+        clock.Advance(1);
+        device.EnergyResult = FakeNvmlDevice.NotSupported;
+        power.Read().Exact.ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_card_before_volta_has_no_counter_and_keeps_the_power_figure_without_being_asked_again()
     {
         var (device, clock, power) = Card();

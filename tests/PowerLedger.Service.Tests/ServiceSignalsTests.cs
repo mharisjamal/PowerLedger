@@ -44,6 +44,60 @@ public class ServiceSignalsTests
     }
 
     [Fact]
+    public void Someone_watches_while_an_app_shows_its_window_or_its_overlay_or_has_subscribed_without_saying()
+    {
+        var signals = new ServiceSignals(new FakeTimeProvider());
+        signals.Watched.ShouldBeFalse();                                 // no App: nobody looks
+        signals.Subscribed("a");
+        signals.Watched.ShouldBeTrue();                                  // an App that says nothing of its windows may be looking
+        signals.ReportWindow("a", 1, visible: false);
+        signals.Watched.ShouldBeFalse();                                 // hidden in the tray
+        signals.ReportWindow("a", 1, visible: false, overlay: true);
+        signals.Watched.ShouldBeTrue();
+        signals.WindowShowingIn(1).ShouldBeFalse();                      // the overlay is no window an update must wait for
+        signals.ReportWindow("a", 1, visible: true);
+        signals.Watched.ShouldBeTrue();
+        signals.ForgetClient("a");
+        signals.Watched.ShouldBeFalse();
+
+        signals.ReportWindow("b", null, visible: true);                  // a session Windows wouldn't name still has a viewer
+        signals.Watched.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Whoever_follows_the_watchers_hears_each_change_and_only_changes()
+    {
+        var signals = new ServiceSignals(new FakeTimeProvider());
+        var heard = 0;
+        signals.WatchersChanged += () => heard++;
+        signals.Subscribed("a");
+        heard.ShouldBe(1);
+        signals.ReportWindow("a", 1, visible: true);
+        heard.ShouldBe(1);                                               // still watched
+        signals.ReportWindow("a", 1, visible: false);
+        heard.ShouldBe(2);
+        signals.ReportWindow("a", 1, visible: false);
+        signals.Subscribed("b");
+        signals.ReportWindow("b", 1, visible: false);
+        heard.ShouldBe(4);                                               // b subscribed and was watched until it said
+        signals.ForgetClient("a");
+        heard.ShouldBe(4);
+    }
+
+    [Fact]
+    public void The_service_wakes_its_loop_to_pick_its_interval_again_when_the_watchers_change()
+    {
+        var signals = new ServiceSignals(new FakeTimeProvider());
+        var commands = new LoopCommands();
+        ServiceHost.FollowWatchers(signals, commands);
+        commands.Arrived.WaitOne(0).ShouldBeFalse();
+        signals.Subscribed("a");
+        commands.Arrived.WaitOne(0).ShouldBeTrue();
+        commands.Reader.TryRead(out var command).ShouldBeTrue();
+        command.ShouldBeOfType<WatchersChangedCommand>();
+    }
+
+    [Fact]
     public void A_window_in_a_session_windows_wouldnt_name_counts_nowhere()
     {
         var signals = new ServiceSignals(new FakeTimeProvider());

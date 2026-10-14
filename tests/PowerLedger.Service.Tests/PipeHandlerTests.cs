@@ -342,6 +342,11 @@ public sealed class PipeHandlerTests : IDisposable
         _signals.WindowShowingIn(2).ShouldBeTrue();
         (await _handler.HandleAsync(new UiStateRequest(61, false), "client-1", CancellationToken.None, session: 2)).ShouldBe(new OkReply(61));
         _signals.WindowShowingIn(2).ShouldBeFalse();
+        _signals.Watched.ShouldBeFalse();
+        (await _handler.HandleAsync(new UiStateRequest(62, false, OverlayVisible: true), "client-1", CancellationToken.None, session: 2))
+            .ShouldBe(new OkReply(62));
+        _signals.WindowShowingIn(2).ShouldBeFalse();
+        _signals.Watched.ShouldBeTrue();
     }
 
     [Fact]

@@ -20,6 +20,11 @@ public class ServiceHostTests
             var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             await pipe.ConnectAsync(5000);
             await using var client = new MessageChannel(pipe);
+            // An App subscribed: someone may be looking, so the service reads at its set interval, not every five seconds.
+            var watching = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            await watching.ConnectAsync(5000);
+            await using var watcher = new MessageChannel(watching);
+            await watcher.WriteAsync(new SubscribeRequest(1));
 
             ServiceStatus? status = null;
             var deadline = DateTime.UtcNow.AddSeconds(20);

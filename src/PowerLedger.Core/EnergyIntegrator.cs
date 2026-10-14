@@ -4,11 +4,18 @@ namespace PowerLedger.Core;
 /// (sleep, hibernate, service stop) with zero energy. Non-finite readings contribute nothing.</summary>
 public static class EnergyIntegrator
 {
-    /// <summary>Floor for the gap threshold; the Service raises it with <see cref="GapThresholdFor"/> when sampling slower than 1 Hz.</summary>
+    /// <summary>The gap threshold for readings taken with nothing known of when the machine slept; the Service, which
+    /// knows, uses <see cref="GapThresholdFor"/> and marks each tick after a resume a gap itself.</summary>
     public const double MaxDeltaSeconds = 5;
 
-    /// <summary>Gap threshold for a sample interval: at least <see cref="MaxDeltaSeconds"/>, and two intervals so timer jitter never counts as sleep.</summary>
-    public static double GapThresholdFor(double sampleIntervalSeconds) => Math.Max(MaxDeltaSeconds, 2 * sampleIntervalSeconds);
+    /// <summary>The longest tick counted as awake when the machine did not wake within it (accuracy A17): a stall while it
+    /// ran, a hung read or a slow disk, still drew power, which counting it as sleep lost. Past a minute, the service
+    /// missed the time, as in a sleep it was never told of.</summary>
+    public const double LongestAwakeTickSeconds = 60;
+
+    /// <summary>Gap threshold for a sample interval: <see cref="LongestAwakeTickSeconds"/>, or two intervals when they are
+    /// longer, so neither a stall nor timer jitter while awake counts as sleep.</summary>
+    public static double GapThresholdFor(double sampleIntervalSeconds) => Math.Max(LongestAwakeTickSeconds, 2 * sampleIntervalSeconds);
 
     public static EnergySlice Integrate(Reading r, double maxDeltaSeconds = MaxDeltaSeconds)
     {

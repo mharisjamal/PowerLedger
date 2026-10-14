@@ -12,6 +12,9 @@ internal interface ISensorSet : IDisposable
     IReadOnlyList<SourceHealth> Health { get; }
 
     int SuspectCount { get; }
+
+    /// <summary>The machine woke: the display source reads the brightness and the monitors afresh at the next read.</summary>
+    void RefreshDisplay();
 }
 
 /// <summary>The real sensors, assembled by Plan B's factory.</summary>
@@ -22,6 +25,8 @@ internal sealed class MachineSensorSet(MachineSensors sensors) : ISensorSet
     public IReadOnlyList<SourceHealth> Health => sensors.Sampler.Health;
 
     public int SuspectCount => sensors.Validator.SuspectCount;
+
+    public void RefreshDisplay() => sensors.Display.Refresh();
 
     public void Dispose() => sensors.Dispose();
 }

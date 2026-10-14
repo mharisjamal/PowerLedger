@@ -20,7 +20,7 @@ internal sealed class SuspendCommand : LoopCommand
 {
 }
 
-/// <summary>The machine woke: rebuild the sensors, detect the hardware, open a session.</summary>
+/// <summary>The machine woke: open a session and refresh the display; the sensor set is rebuilt a minute later.</summary>
 internal sealed class ResumeCommand : LoopCommand
 {
 }
@@ -31,24 +31,46 @@ internal sealed class ApplySettingsCommand(ServiceSettings settings) : LoopComma
     public ServiceSettings Settings { get; } = settings;
 }
 
+/// <summary>A graphics adapter or a battery came or went: the loop detects the hardware again once they settle.</summary>
+internal sealed class DevicesChangedCommand : LoopCommand
+{
+}
+
+/// <summary>Whether anyone looks at the live figures changed: the loop picks its interval again (perf review §4).</summary>
+internal sealed class WatchersChangedCommand : LoopCommand
+{
+}
+
 /// <summary>Forget what calibration has learned for this machine.</summary>
 internal sealed class ResetCalibrationCommand : LoopCommand
 {
 }
 
-/// <summary>The loop's inbox.</summary>
+/// <summary>The loop's inbox, and the event that wakes the loop's thread when something arrives.</summary>
 internal sealed class LoopCommands
 {
     private readonly Channel<LoopCommand> _channel = Channel.CreateUnbounded<LoopCommand>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly AutoResetEvent _arrived = new(false);
 
     public ChannelReader<LoopCommand> Reader => _channel.Reader;
+
+    /// <summary>Set whenever a command is queued; the loop's thread waits on it with its beat.</summary>
+    public WaitHandle Arrived => _arrived;
 
     /// <summary>Queues the command. The task completes once the loop has carried it out, and fails if the loop refused it.</summary>
     public Task SendAsync(LoopCommand command)
     {
         if (!_channel.Writer.TryWrite(command)) command.Fail(new InvalidOperationException("The service is stopping."));
+        else _arrived.Set();
         return command.Done;
     }
+
+    /// <summary>Queues a command nobody waits for. One refused because the service is stopping is looked at here: a failed
+    /// task left unlooked-at would be recorded as a service crash.</summary>
+    public void Post(LoopCommand command)
+        => SendAsync(command).ContinueWith(
+            static failed => _ = failed.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
     /// <summary>Closes the inbox and fails whatever is still queued, so no sender waits for ever.</summary>
     internal void Close()

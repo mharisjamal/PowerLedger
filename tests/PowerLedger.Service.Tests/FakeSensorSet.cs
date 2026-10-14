@@ -7,9 +7,12 @@ namespace PowerLedger.Service.Tests;
 internal sealed class FakeSensorSet(Func<DateTimeOffset, double, Sample>? script = null) : ISensorSet
 {
     private int _reads;
+    private int _displayRefreshes;
     private volatile bool _disposed;
 
     public int Reads => Volatile.Read(ref _reads);
+
+    public int DisplayRefreshes => Volatile.Read(ref _displayRefreshes);
 
     public int ThreadId { get; private set; }
 
@@ -28,6 +31,8 @@ internal sealed class FakeSensorSet(Func<DateTimeOffset, double, Sample>? script
     public IReadOnlyList<SourceHealth> Health => [new("fake", true, null, 0, 0, null)];
 
     public int SuspectCount => 0;
+
+    public void RefreshDisplay() => Interlocked.Increment(ref _displayRefreshes);
 
     public void Dispose() => _disposed = true;
 }
