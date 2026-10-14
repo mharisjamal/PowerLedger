@@ -52,9 +52,29 @@ internal static class ScreenCapture
         public int Compression, SizeImage, XPelsPerMeter, YPelsPerMeter, ClrUsed, ClrImportant;
     }
 
-    /// <summary>Runs <paramref name="work"/> with this thread per-monitor DPI aware, so the windows it makes are.</summary>
+    /// <summary>
+    /// The screen, one test at a time over every process in the session: test runs at once (parallel worktrees) share one
+    /// desktop, and one run's topmost windows (a desk, an "other app") would land over another's desk, in its capture.
+    /// A mutex, so a run that dies holding it lets it go (abandoned), and a test's own nested <see cref="Aware"/> holds it
+    /// again.
+    /// </summary>
+    private static readonly Mutex Screen = new(false, @"Local\PowerLedger.Tests.Screen");
+
+    /// <summary>How long a test waits for another process's test to leave the screen: far longer than any one test.</summary>
+    private static readonly TimeSpan ScreenWait = TimeSpan.FromMinutes(10);
+
+    /// <summary>Runs <paramref name="work"/> holding the screen (<see cref="Screen"/>), with this thread per-monitor DPI
+    /// aware, so the windows it makes are.</summary>
     public static T Aware<T>(Func<T> work)
     {
+        try
+        {
+            if (!Screen.WaitOne(ScreenWait)) throw new TimeoutException($"Another test process held the screen for {ScreenWait.TotalMinutes} minutes.");
+        }
+        catch (AbandonedMutexException)
+        {
+            // A run that died on the screen: its windows went with it, and the screen is ours.
+        }
         var before = SetThreadDpiAwarenessContext(PerMonitorAwareV2);
         try
         {
@@ -63,6 +83,7 @@ internal static class ScreenCapture
         finally
         {
             SetThreadDpiAwarenessContext(before);
+            Screen.ReleaseMutex();
         }
     }
 

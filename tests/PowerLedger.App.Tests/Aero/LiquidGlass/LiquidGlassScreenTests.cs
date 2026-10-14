@@ -77,4 +77,32 @@ public class LiquidGlassScreenTests(ITestOutputHelper output)
         result.Item2.ShouldBeGreaterThan(0.95);
         result.Item3.ShouldBeGreaterThan(0.995);
     }
+
+    /// <summary>
+    /// Two test runs at once (parallel worktrees) share one desktop: one run's topmost windows (an orange "other app", a
+    /// full screen desk) landed over the other's desk, and that run's glass rightly showed them (After_minimise_all's
+    /// "stale" pieces, the capture tests' "desk 0"). A test on the screen holds it, against every other process, until
+    /// it is done.
+    /// </summary>
+    [Fact]
+    public void A_test_on_the_screen_holds_it_against_every_other_test_process()
+    {
+        // Another process's test asking for the screen now, as a mutex is held per thread: a thread of our own asks.
+        static bool Free() => Task.Run(() =>
+        {
+            using var screen = new Mutex(false, @"Local\PowerLedger.Tests.Screen");
+            try
+            {
+                if (!screen.WaitOne(0)) return false;
+            }
+            catch (AbandonedMutexException)
+            {
+            }
+            screen.ReleaseMutex();
+            return true;
+        }).Result;
+        var during = UiHarness.OnUi(() => ScreenCapture.Aware(() => Free()));
+        during.ShouldBeFalse("held while a test is on the screen");
+        Free().ShouldBeTrue("let go once the test is done");
+    }
 }
