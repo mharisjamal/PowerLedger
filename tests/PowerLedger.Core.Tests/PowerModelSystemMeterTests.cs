@@ -79,6 +79,30 @@ public class PowerModelSystemMeterTests
     }
 
     [Fact]
+    public void A_meter_reading_far_under_the_modelled_draw_is_no_reading()
+    {
+        var model = Desktop().Evaluate(DesktopTick());
+        var r = Desktop().Evaluate(WithMeter(DesktopTick(), 1e-7));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        r.TotalW.ShouldBe(model.TotalW, 1e-9);
+    }
+
+    [Fact]
+    public void A_laptops_meter_on_ac_has_the_battery_charge_taken_off_at_the_wall()
+    {
+        // The meter on the laptop's input sees what the adapter draws for the battery too, and the PC hasn't used that yet.
+        var laptop = new PowerModel(MachineProfile.DefaultLaptop, HardwareFacts.LaptopDefaults, new PowerModelOptions(), new FixedBaseline(null));
+        var dc = 14.6 + 4.1 + 4.2 + PowerModel.LaptopBaselineW + (PowerModel.LaptopRestPerCpuWatt * 14.6);
+        var chargeAtWall = AdapterEfficiency.Wall(dc + 25) - AdapterEfficiency.Wall(dc);
+
+        var r = laptop.Evaluate(WithMeter(TestData.Laptop() with { BatteryChargeW = 25 }, 70));
+
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.PowerMeter, Quality.Measured));
+        r.TotalW.ShouldBe(70 - chargeAtWall, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+    }
+
+    [Fact]
     public void A_laptop_on_its_battery_never_takes_a_meter_on_its_input()
     {
         var tick = WithMeter(TestData.Laptop(battery: 34.2, onBattery: true), 50);

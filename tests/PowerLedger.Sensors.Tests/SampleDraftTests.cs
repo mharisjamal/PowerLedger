@@ -114,4 +114,11 @@ public class SampleDraftTests
         var onBattery = new SampleDraft { PlatformW = 14, BatteryChargeW = 30, PlatformHoldsCharging = true, OnBattery = true };
         onBattery.ToSample(DateTimeOffset.UnixEpoch, 1).PlatformW.ShouldBe(14);
     }
+
+    [Fact]
+    public void The_charge_rate_goes_on_to_the_model_for_the_totals_that_hold_it()
+    {
+        new SampleDraft { BatteryChargeW = 30 }.ToSample(DateTimeOffset.UnixEpoch, 1).BatteryChargeW.ShouldBe(30);
+        new SampleDraft().ToSample(DateTimeOffset.UnixEpoch, 1).BatteryChargeW.ShouldBeNull();
+    }
 }

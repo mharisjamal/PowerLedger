@@ -100,7 +100,7 @@ public sealed class SampleDraft
             UserIdleSeconds, SessionLocked, Suspect: false,
             totals.Scope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName, PsuWallW,
             cards.Count > 0 ? cards : null, PlatformOwnDraw(),
-            SystemMeterW, SystemMeter, SystemMeterName);
+            SystemMeterW, SystemMeter, SystemMeterName, BatteryChargeW);
     }
 
     /// <summary>The platform rail as the machine's own draw. Charging the battery is never the PC's consumption, so a rail

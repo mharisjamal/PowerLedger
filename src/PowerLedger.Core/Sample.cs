@@ -8,7 +8,7 @@ namespace PowerLedger.Core;
 /// <param name="CpuLoad">0..1.</param>
 /// <param name="BatteryRateW">Discharge watts (positive) whenever the machine's own battery is discharging: on battery, and
 /// on AC under a load the adapter can't carry, when it is a floor for the total. Null while charging or idle, when unknown,
-/// and on a battery that reports relative units rather than milliwatts. Charging is never in any field of a sample.</param>
+/// and on a battery that reports relative units rather than milliwatts. Charging is in no field of a sample but <paramref name="BatteryChargeW"/>.</param>
 /// <param name="Brightness">0..1 for the internal panel; null when unavailable.</param>
 /// <param name="Suspect">Set by the validator when a value was replaced or looks implausible.</param>
 /// <param name="DGpuScope">What <paramref name="DGpuW"/> covers when a vendor library measured it.</param>
@@ -33,6 +33,8 @@ namespace PowerLedger.Core;
 /// <paramref name="PsuWallW"/>: never divided by an efficiency.</param>
 /// <param name="SystemMeter">What gave <paramref name="SystemMeterW"/>.</param>
 /// <param name="SystemMeterName">What the meter is called, for the status screen.</param>
+/// <param name="BatteryChargeW">Charge watts, positive, while a laptop's own battery charges on AC; null otherwise. Never the
+/// PC's consumption: the model only takes it off a total that holds it, a UPS's or an input meter's (Plan AC).</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -61,7 +63,8 @@ public sealed record Sample(
     double? PlatformW = null,
     double? SystemMeterW = null,
     SystemMeterKind SystemMeter = SystemMeterKind.None,
-    string? SystemMeterName = null)
+    string? SystemMeterName = null,
+    double? BatteryChargeW = null)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>

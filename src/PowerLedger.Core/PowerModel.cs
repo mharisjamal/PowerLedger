@@ -12,7 +12,8 @@ namespace PowerLedger.Core;
 /// power supply says it draws from the wall, which is a total already, or else its DC output over that efficiency, a
 /// desktop's supply read at the load it is carrying or a laptop's adapter; and otherwise the model, which sums the parts with a
 /// learned (laptop) or default "rest of system" baseline and divides by that same efficiency. Each of the measured totals
-/// counts only above zero, since a machine that runs draws something. A UPS or power supply total keeps the model's
+/// counts only from a watt and a third of what was measured inside the machine up, since a machine that runs draws at least
+/// that; a battery rate counts only on a tick the validator did not flag. A UPS or power supply total keeps the model's
 /// parts, and the rest is what the total leaves of them. The external monitors draw what the <see cref="IMonitorDraw"/>
 /// says (nothing, when the model is given none). A monitor with a plug of its own is added after the efficiency
 /// division, and on top of a measured rate or a power supply's reading; a UPS that powers the monitors too already
@@ -63,6 +64,12 @@ public sealed partial class PowerModel
     /// measurements of GCN cards run about 40% over the chip figure (accuracy review, A16).</summary>
     public const double GcnRestOfCardFactor = 1.4;
 
+    /// <summary>A measured total under this is no reading of a running machine (Plan AC).</summary>
+    public const double LeastBelievableW = 1;
+
+    /// <summary>A measured total under this share of what was measured inside the machine is no reading of it (Plan AC).</summary>
+    public const double LeastBelievableShare = 0.3;
+
     private readonly MachineProfile _profile;
     private readonly HardwareFacts _facts;
     private readonly PowerModelOptions _options;
@@ -108,7 +115,15 @@ public sealed partial class PowerModel
         var isLaptop = _profile.Chassis == ChassisKind.Laptop;
         if (!string.IsNullOrWhiteSpace(s.PsuName)) _psuName = s.PsuName;
 
-        if (isLaptop && s.HasDischargeRate && s.BatteryRateW is { } measured)
+        // Plan AC: a measured total under a third of what was measured inside the machine (its CPU package and any GPU that
+        // reads its own watts), or under a watt, is no reading of it but a stale rate, a dead sensor or a misread unit (a
+        // HID report's exponent read wrong gives 1e-7 W): the next source, or the model, stands in. Only measured parts set
+        // it, since a GPU worked out from its load can be far over what it draws.
+        var least = Math.Max(LeastBelievableW, LeastBelievableShare * ((Finite(s.CpuPackageW) is { } package ? Math.Max(0, package) : 0) + MeasuredGpuWatts(s)));
+
+        // A rate on a suspect tick is no reading either: the validator flags the seconds after an AC change, when the rate
+        // Windows gives is from before it.
+        if (isLaptop && s.HasDischargeRate && !s.Suspect && s.BatteryRateW is { } measured && measured + monitors.OwnPlug >= least)
         {
             // The battery delivers what the monitors running off the laptop draw, so the measured rate already holds them:
             // they come out of the remainder, and only the monitors with a plug of their own are added.
@@ -153,25 +168,31 @@ public sealed partial class PowerModel
 
         // A laptop running on its battery draws through neither a UPS nor a power supply, whatever they read.
         var onItsBattery = isLaptop && s.OnBattery;
-        if (!onItsBattery && UpsWatts(s) is { } ups)
+        // What a laptop charging on AC draws for its battery at the wall, which a UPS's reading or an input meter's holds and
+        // the PC has not used: the battery rule (see AtLeastTheDischarge) takes it off them.
+        var charge = isLaptop && !s.OnBattery && Finite(s.BatteryChargeW) is { } charging && charging > 0
+            ? FromTheWall(beforePsu + charging, isLaptop, onBattery: false, _psuName) - FromTheWall(beforePsu, isLaptop, onBattery: false, _psuName)
+            : 0;
+        if (!onItsBattery && UpsWatts(s) is { } ups && (_profile.UpsLoad == UpsLoad.ThisPc ? ups + monitors.OwnPlug : ups) >= least)
         {
             // A UPS that powers this PC alone leaves out the monitors with plugs of their own; one that powers the monitors too
             // already holds them. A load of the rated volt-amperes assumes a power factor, so a total from it is an estimate.
-            var total = _profile.UpsLoad == UpsLoad.ThisPc ? ups + monitors.OwnPlug : ups;
+            var total = LessTheCharge(_profile.UpsLoad == UpsLoad.ThisPc ? ups + monitors.OwnPlug : ups, charge, parts);
             var upsQuality = s.UpsSource is UpsPowerSource.LoadOfRatedVoltAmps or UpsPowerSource.ApparentPowerAssumedFactor
                 ? Quality.Estimated
                 : Quality.Measured;
             return Build(s, total, upsQuality, WithRest(parts, total), userIdle, TotalSource.Ups);
         }
-        if (!onItsBattery && SystemMeterWatts(s) is { } meter)
+        if (!onItsBattery && SystemMeterWatts(s) is { } meter && meter + monitors.OwnPlug >= least)
         {
             // The machine's own input meter, a platform power meter or its management controller, measures what it draws
             // at its input, its supply's losses and all, so like a supply's wall figure nothing is divided.
-            var meterTotal = meter + monitors.OwnPlug;
+            var meterParts = parts with { PsuLoss = 0 };
+            var meterTotal = LessTheCharge(meter + monitors.OwnPlug, charge, meterParts);
             var from = s.SystemMeter == SystemMeterKind.Bmc ? TotalSource.Bmc : TotalSource.PowerMeter;
-            return Build(s, meterTotal, Quality.Measured, WithRest(parts with { PsuLoss = 0 }, meterTotal), userIdle, from);
+            return Build(s, meterTotal, Quality.Measured, WithRest(meterParts, meterTotal), userIdle, from);
         }
-        if (Finite(s.PlatformW) is { } platform && platform > 0)
+        if (Finite(s.PlatformW) is { } platform && platform > 0 && FromTheWall(platform, isLaptop, s.OnBattery, _psuName) + monitors.OwnPlug >= least)
         {
             // It comes before a power supply's figures: it meters the whole machine, where a supply may feed only part of it.
             // The processor's own meter of the whole platform (Snapdragon X's system rail) measures the machine's DC draw,
@@ -182,14 +203,14 @@ public sealed partial class PowerModel
             var railTotal = AtLeastTheDischarge(s, isLaptop, drawn + monitors.OwnPlug, monitors.OwnPlug);
             return Build(s, railTotal, Quality.Measured, WithRest(parts with { PsuLoss = drawn - platform }, railTotal), userIdle, TotalSource.PlatformMeter);
         }
-        if (!onItsBattery && WallWatts(s) is { } wall)
+        if (!onItsBattery && WallWatts(s) is { } wall && wall + monitors.OwnPlug >= least)
         {
             // What the supply says it draws from the wall is the whole draw already, its own losses and all, so nothing is
             // divided and no loss is worked out: what it holds of the supply's is no more knowable than the rest of it.
             var wallTotal = wall + monitors.OwnPlug;
             return Build(s, wallTotal, Quality.Measured, WithRest(parts with { PsuLoss = 0 }, wallTotal), userIdle, TotalSource.PowerSupplyWall);
         }
-        if (!onItsBattery && PowerSupplyWatts(s) is { } output)
+        if (!onItsBattery && PowerSupplyWatts(s) is { } output && FromTheWall(output, isLaptop, onBattery: false, s.PsuName) + monitors.OwnPlug >= least)
         {
             // The power supply draws its DC output over its efficiency from the wall, and loses the difference. A desktop's
             // supply is read off its tier's curve at the load it is carrying, since one idling at a fraction of its rating
@@ -201,6 +222,27 @@ public sealed partial class PowerModel
         var modelled = beforePsu + psuLoss + monitors.OwnPlug;
         var floored = AtLeastTheDischarge(s, isLaptop, modelled, monitors.OwnPlug);
         return Build(s, floored, quality, floored > modelled ? WithRest(parts, floored) : parts, userIdle, TotalSource.Model);
+    }
+
+    /// <summary>The total with what charging the battery drew at the wall taken off, never taking it under the parts the
+    /// model knows of (all but the rest): the charge rate and the adapter's share of it are estimates beside a measured
+    /// total.</summary>
+    private static double LessTheCharge(double total, double charge, Components parts)
+        => charge > 0 ? Math.Max(total - charge, Math.Min(total, parts.Sum - parts.Unattributed)) : total;
+
+    /// <summary>What the cards that read their own watts measured, the rest of each card included; 0 when none did.</summary>
+    private double MeasuredGpuWatts(Sample s)
+    {
+        if (s.Gpus is { Count: > 0 } cards)
+        {
+            var sum = 0.0;
+            foreach (var card in cards)
+            {
+                if (Finite(card.Watts) is not null) sum += CardWatts(card.Name, card.Watts, card.Scope, card.Load, card.RatedW, onlyCard: false);
+            }
+            return sum;
+        }
+        return s.DGpuPresent && Finite(s.DGpuW) is not null ? CardWatts(null, s.DGpuW, s.DGpuScope, s.DGpuLoad, rated: null, onlyCard: true) : 0;
     }
 
     /// <summary>

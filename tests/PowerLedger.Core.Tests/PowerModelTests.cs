@@ -465,7 +465,7 @@ public class PowerModelTests
     }
 
     [Fact]
-    public void A_ups_answering_no_watts_at_all_leaves_the_total_to_the_model_and_the_first_watt_above_zero_takes_it()
+    public void A_ups_answering_no_watts_at_all_or_too_few_to_be_the_pc_leaves_the_total_to_the_model()
     {
         // A load comes in whole percents, so a PC drawing less than one percent of a 520 VA rating, about 2.6 W, reads as
         // zero, and so does a sensor that has died. Taken as the total it would turn this 225.9 W desktop into 0 W,
@@ -477,10 +477,72 @@ public class PowerModelTests
         zero.Components.Unattributed.ShouldBe(0);
         zero.Components.Sum.ShouldBe(zero.TotalW, 1e-9);
 
-        var barely = Desktop(profile: profile).Evaluate(WithUps(DesktopTick(), 0.5));
-        (barely.TotalSource, barely.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
-        barely.TotalW.ShouldBe(0.5, 1e-9);
-        barely.Components.Sum.ShouldBe(barely.TotalW, 1e-9);
+        // Plan AC: a reading under a third of what was measured inside the machine, its CPU's 50 W and its GPU's 120 W, or
+        // under a watt, is no reading of it either: half a watt, or the 1e-7 W of a HID report whose unit exponent was
+        // misread, would book a 226 W desktop as nothing, measured. A third and up is taken.
+        foreach (var watts in new[] { 0.5, 1e-7, 0.29 * 170 })
+        {
+            var tiny = Desktop(profile: profile).Evaluate(WithUps(DesktopTick(), watts));
+            (tiny.TotalSource, tiny.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+            tiny.TotalW.ShouldBe(Bronze650(192), 1e-9);
+        }
+        var low = Desktop(profile: profile).Evaluate(WithUps(DesktopTick(), 0.31 * 170));
+        (low.TotalSource, low.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
+        low.TotalW.ShouldBe(0.31 * 170, 1e-9);
+        low.Components.Sum.ShouldBe(low.TotalW, 1e-9);
+
+        // A GPU worked out from its load says nothing of what the machine must draw, so it sets no such floor.
+        var estimatedGpu = DesktopTick() with { DGpuW = null, DGpuLoad = 1 };
+        Desktop(profile: profile).Evaluate(WithUps(estimatedGpu, 0.31 * 50)).TotalSource.ShouldBe(TotalSource.Ups);
+    }
+
+    [Fact]
+    public void On_battery_a_stale_rate_far_under_the_parts_is_no_reading_and_the_model_stands_in()
+    {
+        // The owner's data: single ticks flagged on battery under heavy load with a stale 0.01 W rate, booked as measured.
+        var r = Laptop().Evaluate(TestData.Laptop(cpu: 25, battery: 0.01, onBattery: true));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+        r.TotalW.ShouldBe(25 + 4.1 + 4.2 + PowerModel.LaptopBaselineW + (PowerModel.LaptopRestPerCpuWatt * 25), 1e-9);
+        r.Components.PsuLoss.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_battery_rate_on_a_suspect_tick_is_no_reading_and_the_model_stands_in()
+    {
+        // The validator flags the seconds after an AC change, when the rate Windows gives is from before it.
+        var r = Laptop(baseline: 9).Evaluate(TestData.Laptop(battery: 34.2, onBattery: true, suspect: true));
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Model, Quality.Calibrated));
+        r.TotalW.ShouldBe(14.6 + 4.1 + 4.2 + 9, 1e-9);
+        r.Suspect.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_laptop_charging_on_a_ups_has_the_charge_taken_off_the_ups_reading_at_the_wall()
+    {
+        // The UPS feeds the adapter, which feeds the laptop and its battery: 30 W of charge is in the UPS's 75 W, and more
+        // than 30 W of it at the wall, since the adapter loses some of what it passes on.
+        var profile = MachineProfile.DefaultLaptop with { UpsLoad = UpsLoad.ThisPc };
+        var tick = WithUps(TestData.Laptop() with { BatteryChargeW = 30 }, 75);
+        var r = Laptop(profile: profile).Evaluate(tick);
+        var dc = 14.6 + 4.1 + 4.2 + Rest;
+        var chargeAtWall = Adapter(dc + 30) - Adapter(dc);
+        chargeAtWall.ShouldBeGreaterThan(30);
+        (r.TotalSource, r.Quality).ShouldBe((TotalSource.Ups, Quality.Measured));
+        r.TotalW.ShouldBe(75 - chargeAtWall, 1e-9);
+        r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
+
+        // Taking the charge off never leaves less than the parts the model knows of.
+        var parts = 14.6 + 4.1 + 4.2 + (Adapter(dc) - dc);
+        var floored = Laptop(profile: profile).Evaluate(WithUps(TestData.Laptop() with { BatteryChargeW = 60 }, 60));
+        floored.TotalW.ShouldBe(parts, 1e-9);
+        floored.Components.Unattributed.ShouldBe(0, 1e-9);
+    }
+
+    [Fact]
+    public void A_desktop_has_nothing_taken_off_for_a_charge_since_any_battery_it_has_is_a_ups()
+    {
+        var profile = MachineProfile.DefaultDesktop with { UpsLoad = UpsLoad.ThisPc };
+        Desktop(profile: profile).Evaluate(WithUps(DesktopTick() with { BatteryChargeW = 40 }, 250)).TotalW.ShouldBe(250, 1e-9);
     }
 
     [Fact]
@@ -554,7 +616,7 @@ public class PowerModelTests
         half.Components.Sum.ShouldBe(half.TotalW, 1e-9);
 
         // Two percent of the rating: a unit makes three quarters of its best there, not all of it.
-        var idle = Desktop().Evaluate(WithPsu(DesktopTick(), 20));
+        var idle = Desktop().Evaluate(WithPsu(IdleDesktopTick(), 20));
         idle.TotalW.ShouldBe(20 / (0.92 * 0.75), 1e-9);
         idle.TotalW.ShouldBeGreaterThan(20 / 0.92 * 1.3);
         idle.Components.PsuLoss.ShouldBe(20 / (0.92 * 0.75) - 20, 1e-9);
@@ -565,7 +627,7 @@ public class PowerModelTests
     public void A_supply_whose_name_says_no_rating_is_read_on_its_tier_s_curve_at_650_W()
     {
         // With no rating to read the load against, the supply is taken for the 650 W most desktops ship with.
-        var r = Desktop().Evaluate(WithPsu(DesktopTick(), 20, name: "Corsair"));
+        var r = Desktop().Evaluate(WithPsu(IdleDesktopTick(), 20, name: "Corsair"));
         r.TotalW.ShouldBe(Bronze650(20), 1e-9);
         r.TotalW.ShouldBeGreaterThan(20 / 0.85 * 1.2);
         r.Components.Sum.ShouldBe(r.TotalW, 1e-9);
@@ -638,7 +700,7 @@ public class PowerModelTests
     }
 
     [Fact]
-    public void A_power_supply_answering_no_watts_leaves_the_total_to_the_model_and_the_first_watt_above_zero_takes_it()
+    public void A_power_supply_answering_no_watts_or_too_few_to_be_the_pc_leaves_the_total_to_the_model()
     {
         // A running machine draws something, so nought watts is a sensor that has died rather than a reading of the rails.
         var zero = Desktop().Evaluate(WithPsu(DesktopTick(), 0));
@@ -646,11 +708,14 @@ public class PowerModelTests
         zero.TotalW.ShouldBe(Hx1000i(192), 1e-9);
         zero.Components.Sum.ShouldBe(zero.TotalW, 1e-9);
 
-        // Half a watt of a thousand is the very bottom of the curve, where a unit makes under a third of its best.
-        var barely = Desktop().Evaluate(WithPsu(DesktopTick(), 0.5));
-        (barely.TotalSource, barely.Quality).ShouldBe((TotalSource.PowerSupply, Quality.Measured));
-        barely.TotalW.ShouldBe(0.5 / (0.92 * 0.315), 1e-9);
-        barely.Components.Sum.ShouldBe(barely.TotalW, 1e-9);
+        // Half a watt from a machine the model puts at 200 W and more is a misread too (Plan AC), wherever it is read: on
+        // the rails or at the wall.
+        foreach (var tick in new[] { WithPsu(DesktopTick(), 0.5), WithWall(DesktopTick(), 0.5) })
+        {
+            var barely = Desktop().Evaluate(tick);
+            (barely.TotalSource, barely.Quality).ShouldBe((TotalSource.Model, Quality.Estimated));
+            barely.TotalW.ShouldBe(Hx1000i(192), 1e-9);
+        }
     }
 
     [Fact]
@@ -797,6 +862,9 @@ public class PowerModelTests
     /// <summary>A desktop tick: the CPU drawing 50 W and the GPU 120 W, with no built-in panel. The default desktop adds 5 W
     /// of memory, 2 W of storage and 15 W of board and fans, so 192 W go through its Bronze supply.</summary>
     private static Sample DesktopTick() => TestData.Laptop(cpu: 50, gpu: 120, brightness: null);
+
+    /// <summary>An idle desktop tick, its CPU at 5 W and its GPU at 3 W.</summary>
+    private static Sample IdleDesktopTick() => TestData.Laptop(cpu: 5, gpu: 3, brightness: null);
 
     private static Sample WithUps(Sample s, double? watts, UpsPowerSource source = UpsPowerSource.ActivePower)
         => s with { UpsOutputW = watts, UpsSource = source, UpsName = "APC Back-UPS ES 850G2" };
