@@ -5,7 +5,8 @@ namespace PowerLedger.Core;
 /// means and spreads.</summary>
 /// <param name="BaselineW">The bucket's mean rest of system (what the battery gave less the CPU, GPU and display), raw, so
 /// it may be below zero.</param>
-/// <param name="Samples">Battery ticks observed in the bucket (saturating), for the trust thresholds and the status.</param>
+/// <param name="Samples">Seconds on battery observed in the bucket, whole (saturating), for the trust thresholds and the
+/// status. Before 0.11 a count of one-second ticks, which is the same.</param>
 /// <param name="CpuW">The mean CPU package watts over the same data; null for a bucket saved before 0.11, which kept only
 /// <paramref name="BaselineW"/>.</param>
 /// <param name="Minutes">The weight of the data, in minutes on battery, after ageing.</param>

@@ -55,6 +55,6 @@ internal sealed class CalibrationKeeper(CalibrationRepository repository, Calibr
         {
             if (Learner.GetBaseline(bucket) is not null) trusted++;
         }
-        return new CalibrationStatus(Learner.TotalSamples, options.MinTotalSamples, trusted, CalibrationBuckets.Count, Learner.LearnedRestPerCpuWatt);
+        return new CalibrationStatus(Learner.TotalSeconds, options.MinTotalSeconds, trusted, CalibrationBuckets.Count, Learner.LearnedRestPerCpuWatt);
     }
 }

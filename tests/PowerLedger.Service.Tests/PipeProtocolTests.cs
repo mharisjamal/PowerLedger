@@ -43,6 +43,16 @@ public class PipeProtocolTests
     }
 
     [Fact]
+    public void Calibration_seconds_keep_the_wire_names_of_the_ticks_they_replace()
+    {
+        // Before 0.11 the service sent one-second ticks there: the same figures, so either end may be the older.
+        var text = Text(new StatusReply(1, Status()));
+        text.ShouldContain("\"calibration\":{\"batterySamples\":900,\"samplesNeeded\":1800,");
+        var back = (StatusReply)PipeProtocol.Deserialize(Encoding.UTF8.GetBytes(text.TrimEnd('\n')));
+        (back.Status.Calibration.BatterySeconds, back.Status.Calibration.SecondsNeeded).ShouldBe((900, 1800));
+    }
+
+    [Fact]
     public void A_window_state_from_an_app_that_knows_no_overlay_has_none_and_says_nothing_of_watching()
         => PipeProtocol.Deserialize(Encoding.UTF8.GetBytes("""{"type":"uiState","windowVisible":true,"id":1}"""))
             .ShouldBe(new UiStateRequest(1, true, OverlayVisible: false));

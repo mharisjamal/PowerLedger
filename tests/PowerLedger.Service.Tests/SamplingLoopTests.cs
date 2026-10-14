@@ -57,7 +57,7 @@ public class SamplingLoopTests
             .ShouldBe(Start.AddMinutes(5).ToString("O", CultureInfo.InvariantCulture));   // the 03:00 local purge
         var learned = new CalibrationLearner();
         learned.Import(new CalibrationRepository(t.Db).Load(Facts.Laptop().Hash));
-        learned.TotalSamples.ShouldBe(479);                         // all but the first after the resume, which spans the sleep
+        learned.TotalSeconds.ShouldBe(479);                         // all but the first after the resume, which spans the sleep
 
         var status = loop.Board.Status.ShouldNotBeNull();
         status.Ticks.ShouldBe(480);
@@ -437,7 +437,7 @@ public class SamplingLoopTests
         // The panel draws nothing then, so the rest of the laptop would be learned with the panel's figure in it.
         var learned = new CalibrationLearner();
         learned.Import(new CalibrationRepository(t.Db).Load(Facts.Laptop().Hash));
-        learned.TotalSamples.ShouldBe(0);
+        learned.TotalSeconds.ShouldBe(0);
         loop.Board.Status.ShouldNotBeNull().Last.ShouldNotBeNull().Components.Display.ShouldBe(0);
     }
 

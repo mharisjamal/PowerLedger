@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace PowerLedger.Contracts;
 
 /// <summary>What the status screen shows (spec §8).</summary>
@@ -46,10 +48,14 @@ public sealed record UpdateStatus(bool ServiceInstalls, string? Stage, string? M
 /// <param name="LastError">The most recent failure, for the status screen.</param>
 public sealed record SourceStatus(string Name, bool Supported, string? Unavailable, int Failures, string? LastError);
 
-/// <param name="BatterySamples">Battery ticks learned from so far.</param>
-/// <param name="SamplesNeeded">Battery ticks needed before any baseline is trusted.</param>
+/// <param name="BatterySeconds">Seconds on battery learned from so far, whatever the tick rate. On the wire as
+/// "batterySamples": a service before 0.11 sent one-second ticks there, which is the same.</param>
+/// <param name="SecondsNeeded">Seconds on battery needed before any baseline is trusted ("samplesNeeded" on the wire).</param>
 /// <param name="TrustedBuckets">Brightness buckets with a trusted baseline.</param>
 /// <param name="Buckets">All brightness buckets, display-off included.</param>
 /// <param name="RestPerCpuWatt">What the rest of the laptop adds for each watt its CPU package draws, as learned on
 /// battery; null until the CPU has been seen at more than one level there, and from a service before 0.11.</param>
-public sealed record CalibrationStatus(int BatterySamples, int SamplesNeeded, int TrustedBuckets, int Buckets, double? RestPerCpuWatt = null);
+public sealed record CalibrationStatus(
+    [property: JsonPropertyName("batterySamples")] int BatterySeconds,
+    [property: JsonPropertyName("samplesNeeded")] int SecondsNeeded,
+    int TrustedBuckets, int Buckets, double? RestPerCpuWatt = null);

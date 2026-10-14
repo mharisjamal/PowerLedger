@@ -32,7 +32,6 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     private readonly CultureInfo _culture;
     private readonly Func<string?> _region;
     private ITimer? _timer;
-    private int _sampleSeconds = 1;
     private ChassisKind? _chassis;
     private IReadOnlyList<string> _tariffHistory = [];
     private string _detected = "";
@@ -335,7 +334,6 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         {
             if (settings is not null)
             {
-                _sampleSeconds = settings.SampleIntervalSeconds;
                 _chassis = settings.Profile.Chassis;
                 if (refill || !Service.IsLoaded) Service.Load(settings);
             }
@@ -361,11 +359,10 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>The service took the settings the form sent. The form is left as it is, since the user may have changed it
-    /// since; the calibration line speaks of the chassis and sample interval sent, from the status read again now while the
-    /// screen shows. Raised on the UI thread.</summary>
+    /// since; the calibration line speaks of the chassis sent, from the status read again now while the screen shows.
+    /// Raised on the UI thread.</summary>
     private void OnSaved(ServiceSettings settings)
     {
-        _sampleSeconds = settings.SampleIntervalSeconds;
         _chassis = settings.Profile.Chassis;
         if (_timer is not null) _threads.Background(() => _ = ReadStatusAsync());
     }
@@ -419,7 +416,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         Service.ShowPowerDevices(status.PowerDevices ?? []);         // and one from before power devices reads none
         Service.ShowNut(status.Sources);
         var c = status.Calibration;
-        var learned = Format.Duration(c.BatterySamples * _sampleSeconds / 3600.0);
+        var learned = Format.Duration(c.BatterySeconds / 3600.0);   // seconds on battery, whatever the tick rate
         // The battery on a desktop is a UPS, which powers more than the machine, so a desktop's readings never use it.
         // A UPS or power supply reading is measured rather than estimated, so only "not used" always holds, not "estimated".
         Calibration = _chassis == ChassisKind.Desktop
@@ -429,7 +426,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             : c.TrustedBuckets > 0
                 ? $"Learned from {learned} on battery; {c.TrustedBuckets.ToString(_culture)} of {c.Buckets.ToString(_culture)} brightness levels trusted"
                   + (c.RestPerCpuWatt is { } share ? $"; the rest of the laptop adds {share.ToString("0.00", _culture)} W for each CPU watt." : ".")
-                : $"Learning on battery: {learned} of {Format.Duration(c.SamplesNeeded * _sampleSeconds / 3600.0)} needed.";
+                : $"Learning on battery: {learned} of {Format.Duration(c.SecondsNeeded / 3600.0)} needed.";
         ServiceState = $"Service {status.Version.Split('+')[0]} · {status.Ticks.ToString("N0", _culture)} readings since "
                        + TimeZoneInfo.ConvertTime(status.StartedAt, _zone).ToString("d MMM yyyy HH:mm", _culture);
         Sources = [.. status.Sources.Select(Line)];

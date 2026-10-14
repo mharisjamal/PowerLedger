@@ -324,8 +324,9 @@ internal sealed partial class NowViewModel : ObservableObject, IDisposable
                        && status.Last?.Total is not (TotalSource.Ups or TotalSource.PowerSupply or TotalSource.PowerSupplyWall
                            or TotalSource.PowerMeter or TotalSource.Bmc);
         var interval = _settings?.SampleIntervalSeconds ?? 1;
-        var learned = Format.Duration(status.Calibration.BatterySamples * interval / 3600.0);
-        var needed = Format.Duration(status.Calibration.SamplesNeeded * interval / 3600.0);
+        // Seconds on battery, whatever the tick rate (the service reads every five seconds while nobody watches).
+        var learned = Format.Duration(status.Calibration.BatterySeconds / 3600.0);
+        var needed = Format.Duration(status.Calibration.SecondsNeeded / 3600.0);
         // A UPS or power supply reading is measured rather than estimated, so a desktop is not always either.
         var calibration = desktop ? status.Last?.Quality == Quality.Measured ? "Desktop · measured" : "Desktop · estimated"
             : status.Calibration.TrustedBuckets > 0 ? $"Calibration {learned} on battery"
