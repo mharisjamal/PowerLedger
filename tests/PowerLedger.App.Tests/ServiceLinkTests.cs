@@ -449,6 +449,36 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_service_still_starting_is_asked_again_until_it_says_it_handles_updates_and_then_hears_the_window_state()
+    {
+        var name = $"PowerLedger.app-test.{Guid.NewGuid():N}";
+        await using var service = new FakeService(name) { StatusError = "The service is still starting." };
+        await using var link = new PipeServiceLink(name, new FixedIdle(0), _clock, new TrustAnyServer());
+        link.ReportWindow(true);
+        service.Start();
+        link.Start();
+        await WaitFor.True(() => service.Requests.OfType<GetStatusRequest>().Any());
+
+        service.Status = Statuses.Running() with { Updates = null };   // running, but its updater hasn't said yet
+        service.StatusError = null;
+        await WaitFor.True(() =>
+        {
+            _clock.Advance(TimeSpan.FromSeconds(1));
+            return service.Requests.OfType<GetStatusRequest>().Count() >= 2;
+        });
+        service.Requests.OfType<UiStateRequest>().ShouldBeEmpty();
+
+        service.Status = Statuses.Running() with { Updates = ServiceUpdates };
+        await WaitFor.True(() =>
+        {
+            _clock.Advance(TimeSpan.FromSeconds(1));
+            return service.Requests.OfType<UiStateRequest>().Any();
+        }, timeoutMs: 10_000);
+        service.Requests.OfType<UiStateRequest>().Single().WindowVisible.ShouldBeTrue();
+        (await link.UpdateNowAsync()).ShouldBe(WriteResult.Done);
+    }
+
+    [Fact]
     public async Task An_older_service_is_never_sent_the_window_state_or_update_now()
     {
         var (service, link) = await Connect(updates: null);

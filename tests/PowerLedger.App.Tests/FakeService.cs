@@ -19,6 +19,9 @@ internal sealed class FakeService(string name) : IAsyncDisposable
 
     public ServiceStatus Status { get; set; } = Statuses.Running();
 
+    /// <summary>When set, a status request is answered with this error, as a service still starting answers.</summary>
+    public string? StatusError { get; set; }
+
     /// <summary>When set, the service refuses every change with this message, as it does a value out of range.</summary>
     public string? Refuse { get; set; }
 
@@ -126,6 +129,7 @@ internal sealed class FakeService(string name) : IAsyncDisposable
 
     private PipeMessage Reply(PipeRequest request) => request switch
     {
+        GetStatusRequest r when StatusError is { } starting => new ErrorReply(r.Id, starting),
         GetStatusRequest r => new StatusReply(r.Id, Status),
         UpdateNowRequest when Refuse is { } refusal => new ErrorReply(request.Id, refusal),
         GetSettingsRequest r => new SettingsReply(r.Id, ServiceSettings.Default),

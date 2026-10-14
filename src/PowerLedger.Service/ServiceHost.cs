@@ -72,7 +72,7 @@ internal static class ServiceHost
         services.AddSingleton<ShutdownSignal>();
         services.AddSingleton<LoopCommands>();
         services.AddSingleton<LiveFeed>();
-        services.AddSingleton<StatusBoard>();
+        services.AddSingleton(_ => BoardFor(asService));
         services.AddSingleton(provider => new MonitorBoard(MonitorCatalogue.Shipped, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton(provider => OpenedDatabase.Open(paths.Database, provider.GetRequiredService<TimeProvider>().GetUtcNow(), folderNotice));
         services.AddSingleton(provider => provider.GetRequiredService<OpenedDatabase>().Database);
@@ -137,6 +137,17 @@ internal static class ServiceHost
     /// again at once rather than at its next beat, which may be five seconds off.</summary>
     internal static void FollowWatchers(ServiceSignals signals, LoopCommands commands)
         => signals.WatchersChanged += () => commands.Post(new WatchersChangedCommand());
+
+    /// <summary>The status board. The installed service's update worker publishes how updates stand; a console run has
+    /// none, so its board says from the start that it installs nothing: the App tells its windows only to a service whose
+    /// status speaks of updates, and a subscriber that never tells counts as watching only for
+    /// <see cref="ServiceSignals.SilentGrace"/>.</summary>
+    internal static StatusBoard BoardFor(bool asService)
+    {
+        var board = new StatusBoard();
+        if (!asService) board.Publish(new UpdateStatus(ServiceInstalls: false, Stage: null, MinVersion: null, UpdateRequired: false));
+        return board;
+    }
 
     private static LoopEnvironment LoopEnvironmentFor(IServiceProvider provider, bool asService)
     {

@@ -219,6 +219,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     public static readonly TimeSpan HiddenActivityEvery = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
     internal static readonly TimeSpan[] Backoff = [.. new[] { 1, 2, 4, 8, 16, 30 }.Select(s => TimeSpan.FromSeconds(s))];
+
+    /// <summary>The waits between asking a connected service whether it handles updates, until it says (the last repeats).</summary>
+    internal static readonly TimeSpan[] LearnUpdatesBackoff = [.. new[] { 2, 5, 10, 30, 60 }.Select(s => TimeSpan.FromSeconds(s))];
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>The newest consent version a service from before Plan Q takes.</summary>
@@ -498,21 +501,35 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
     }
 
     /// <summary>Asks a new connection's service whether it handles updates (Plan Q §4), which an older one's status
-    /// doesn't say; one that does is told the window state at once, and from then on at each change. Never throws: a
-    /// service that doesn't answer is simply not told.</summary>
+    /// doesn't say; one that does is told the window state at once, and from then on at each change. A service still
+    /// starting has no status yet, and one whose updater hasn't published says nothing of updates either, so it is asked
+    /// again after each of <see cref="LearnUpdatesBackoff"/>, then every minute, until it says: asked once, an App that met
+    /// a service just started after an update or at boot never told it its windows, and kept it reading every second.
+    /// Never throws: a service that doesn't answer is simply not told.</summary>
     private async Task LearnUpdatesAsync(MessageChannel channel, CancellationToken cancel)
     {
         try
         {
-            if (await RequestAsync(channel, new GetStatusRequest(NextId()), cancel).ConfigureAwait(false) is not StatusReply { Status.Updates: not null })
-                return;
+            for (var asked = 0; ; asked++)
+            {
+                try
+                {
+                    if (await RequestAsync(channel, new GetStatusRequest(NextId()), cancel).ConfigureAwait(false) is StatusReply { Status.Updates: not null })
+                        break;
+                }
+                catch (TimeoutException)
+                {
+                    // Slow, as a service starting at boot can be: asked again below.
+                }
+                await Task.Delay(LearnUpdatesBackoff[Math.Min(asked, LearnUpdatesBackoff.Length - 1)], clock, cancel).ConfigureAwait(false);
+            }
             _takesUiState = channel;
             await SendWindowAsync(channel, cancel).ConfigureAwait(false);
         }
         catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException or TimeoutException
                                           or PipeProtocolException)
         {
-            // The connection ended, or the service is slow: the next connection asks again.
+            // The connection ended: the next connection asks again.
         }
     }
 
