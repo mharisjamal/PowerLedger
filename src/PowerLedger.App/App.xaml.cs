@@ -190,7 +190,8 @@ public partial class App : Application
         _brightness = new BrightnessReporter(_link, _brightnessReader, new DisplayConfigReader(), _preferences, TimeProvider.System);
         _now.PropertyChanged += OnNowChanged;
         // Perf review P1: with no window of the App's on screen, a reading builds nothing that none would draw.
-        _watch = WindowWatch.EveryWindow();
+        // The overlay shows, but is no window an update waits for: it reaches the service only as itself (ReportOverlay).
+        _watch = WindowWatch.EveryWindow(window => window is Aero.OverlayWindow);
         _watch.Changed += OnWindowsChanged;
         OnWindowsChanged();
         _instance.OnShowRequested(() => Dispatcher.InvokeAsync(ShowWindow));
@@ -215,8 +216,8 @@ public partial class App : Application
     }
 
     /// <summary>A window of the App's showed or went: the live panel is built only while one shows (perf review P1), Windows
-    /// runs the App in efficiency mode while none does (P3), and the service hears whether one is visible, the overlay among
-    /// them (Plan Q §4).</summary>
+    /// runs the App in efficiency mode while none does (P3), and the service hears whether a shell window is visible (Plan Q
+    /// §4); the overlay it hears of on its own.</summary>
     private void OnWindowsChanged()
     {
         if (_watch is not { } watch) return;
