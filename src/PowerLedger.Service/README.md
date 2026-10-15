@@ -17,7 +17,7 @@ The Windows service that records how much power the PC uses. It samples once a s
 
 | Path | What |
 |---|---|
-| `power.db` | readings, rollups, sessions, tariffs, calibration, settings |
+| `power.db` | readings, rollups, the energy each app used by the hour (kept 400 days, never shared), sessions, tariffs, calibration, settings |
 | `power.db-wal`, `power.db-shm` | SQLite's write-ahead log and its index, kept after the service stops so the App, which may only read the folder, can still open the history |
 | `power.db.bak` | a copy taken before each schema upgrade |
 | `power.corrupt-*.db`, `power.untrusted-*.db` | a damaged database, or one another account owned, set aside at start |

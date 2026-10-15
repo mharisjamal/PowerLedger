@@ -173,6 +173,8 @@ internal static class ServiceHost
             Watched: () => signals.Watched,
             Battery: BatteryGauge.Windows(),
             SignedIn: SleepKinds.SomeoneSignedIn,
-            Hibernated: SleepKinds.Hibernated);
+            Hibernated: SleepKinds.Hibernated,
+            Processes: static () => new WindowsProcesses(),
+            Foreground: signals.ForegroundProcesses);
     }
 }

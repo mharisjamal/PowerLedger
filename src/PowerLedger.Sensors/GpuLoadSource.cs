@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using PowerLedger.Core;
 
 namespace PowerLedger.Sensors;
 
@@ -15,7 +16,9 @@ namespace PowerLedger.Sensors;
 /// every process on every engine, and the loads are held in between. Each card's load over every engine, video decode
 /// included, goes to <see cref="SampleDraft.DGpuBusyLoad"/> for the idle test alone, and so does that of the graphics in
 /// the processor (Plan AC review): a laptop playing a film decodes it there, and their watts, which the processor's
-/// package already holds, are never asked of them.
+/// package already holds, are never asked of them. From the same reads, each process's time on the cards' engines and on
+/// the processor's graphics' goes to <see cref="SampleDraft.Graphics"/> for the Apps page (Plan AE), held between reads
+/// like the loads: no counter is read for it that is not read already.
 /// </summary>
 public sealed class GpuLoadSource : ISensorSource
 {
@@ -35,6 +38,7 @@ public sealed class GpuLoadSource : ISensorSource
     private double? _processorBusy;
     private Dictionary<string, (double? Load, double? Busy)> _loads = new(StringComparer.OrdinalIgnoreCase);
     private EngineSnapshot? _previous;
+    private GraphicsWork? _work;
     private TimeSpan? _readAt;
 
     /// <summary>Finds the cards through DXGI and checks that Windows publishes the counters.</summary>
@@ -101,6 +105,7 @@ public sealed class GpuLoadSource : ISensorSource
             if (busy is { } working) draft.DGpuBusyLoad = Math.Max(draft.DGpuBusyLoad ?? 0, working);
         }
         if (_processorBusy is { } decoding) draft.DGpuBusyLoad = Math.Max(draft.DGpuBusyLoad ?? 0, decoding);
+        draft.Graphics = _work;
     }
 
     public void Dispose() => _dxgi?.Dispose();
@@ -124,6 +129,7 @@ public sealed class GpuLoadSource : ISensorSource
         if (_cards.Count == 0 && _processorGraphics.Count == 0)
         {
             _previous = null;
+            _work = null;
             _loads = new(StringComparer.OrdinalIgnoreCase);
             _processorBusy = null;
             return;
@@ -144,7 +150,32 @@ public sealed class GpuLoadSource : ISensorSource
             if (_previous is not { } earlier || !before.Contains(graphics.CounterLuid)) continue;
             if (GpuEngines.Busiest(earlier, snapshot, graphics.CounterLuid, everyEngine: true) is { } busy) _processorBusy = Math.Max(_processorBusy ?? 0, busy);
         }
+        _work = _previous is { } last ? Work(last, snapshot, before) : null;
         _previous = snapshot;
+    }
+
+    /// <summary>Each process's time on the cards' engines and on the processor's graphics' between two reads, for the
+    /// adapters both reads knew. An instance new since the last read counts all its time, which began with it; a count that
+    /// went backwards, as when Windows gives a process's id to another, counts as none.</summary>
+    private GraphicsWork Work(EngineSnapshot before, EngineSnapshot after, HashSet<string> known)
+    {
+        string[] cards = [.. _cards.Select(card => card.CounterLuid).Where(known.Contains)];
+        string[] processor = [.. _processorGraphics.Select(graphics => graphics.CounterLuid).Where(known.Contains)];
+        var work = new Dictionary<uint, GraphicsTime>();
+        foreach (var (instance, time) in after.RunningTime)
+        {
+            if (GpuEngines.ProcessOf(instance) is not { } pid) continue;
+            var onCard = cards.Any(luid => instance.Contains(luid, StringComparison.OrdinalIgnoreCase));
+            if (!onCard && !processor.Any(luid => instance.Contains(luid, StringComparison.OrdinalIgnoreCase))) continue;
+            var spent = Math.Max(0, before.RunningTime.TryGetValue(instance, out var earlier) ? time - earlier : time);
+            if (spent == 0) continue;
+            var load = GpuEngines.IsLoadEngine(instance) ? spent : 0;
+            var sum = work.GetValueOrDefault(pid);
+            work[pid] = onCard
+                ? sum with { CardLoad = sum.CardLoad + load, CardAny = sum.CardAny + spent }
+                : sum with { ProcessorLoad = sum.ProcessorLoad + load, ProcessorAny = sum.ProcessorAny + spent };
+        }
+        return new GraphicsWork(work);
     }
 
     /// <summary>The graphics in the processor, and any other hardware adapter that is no card: never a software rasteriser

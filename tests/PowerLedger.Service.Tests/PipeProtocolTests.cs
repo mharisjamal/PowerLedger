@@ -32,7 +32,17 @@ public class PipeProtocolTests
         new UpdateNowRequest(13),
         new UiStateRequest(14, WindowVisible: false, OverlayVisible: true),
         new UiStateRequest(15, WindowVisible: true, Watching: false),
+        new ReportActivityRequest(16, 3, ForegroundPid: 4242),
     };
+
+    [Fact]
+    public void The_window_in_front_travels_with_the_idle_time_and_an_older_app_names_none()
+    {
+        Text(new ReportActivityRequest(1, 5, ForegroundPid: 4242))
+            .ShouldBe("""{"type":"reportActivity","idleSeconds":5,"foregroundPid":4242,"id":1}""" + "\n");
+        PipeProtocol.Deserialize(Encoding.UTF8.GetBytes("""{"type":"reportActivity","idleSeconds":5,"id":1}"""))
+            .ShouldBe(new ReportActivityRequest(1, 5));
+    }
 
     [Fact]
     public void The_Apps_window_state_and_update_now_have_their_wire_names()

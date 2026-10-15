@@ -72,8 +72,10 @@ public sealed record SetTariffRequest(long Id, decimal PricePerKwh, string Curre
 public sealed record ResetCalibrationRequest(long Id) : PipeRequest(Id);
 
 /// <summary>Seconds since the last keyboard or mouse input in the sender's session. The service runs in session 0
-/// and cannot see input, so the App reports it every few seconds.</summary>
-public sealed record ReportActivityRequest(long Id, double IdleSeconds) : PipeRequest(Id);
+/// and cannot see input, so the App reports it every few seconds. <paramref name="ForegroundPid"/> is the process whose
+/// window is in front in that session, which the Apps page counts as the time an app held the front (Plan AE); an older
+/// App leaves it out, as does one with no window in front, and an older service ignores it.</summary>
+public sealed record ReportActivityRequest(long Id, double IdleSeconds, uint? ForegroundPid = null) : PipeRequest(Id);
 
 /// <summary>The brightness and the power state of the external monitors that answered in the sender's session, and the
 /// refresh rate and HDR state Windows drives each at, acknowledged with an <see cref="OkReply"/>. The service runs in session

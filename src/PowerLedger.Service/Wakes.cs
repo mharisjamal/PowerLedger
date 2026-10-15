@@ -23,11 +23,16 @@ internal sealed class Wakes(IEnumerable<DateTimeOffset> at)
     /// <summary>True when the machine woke inside <paramref name="reading"/>'s interval: after its previous tick, and by its own.</summary>
     public bool Within(Reading reading)
     {
-        if (!double.IsFinite(reading.DeltaSeconds) || reading.DeltaSeconds <= 0) return false;
         foreach (var woke in _at)
         {
-            if (woke <= reading.Timestamp && (reading.Timestamp - woke).TotalSeconds < reading.DeltaSeconds) return true;
+            if (Within(woke, reading)) return true;
         }
         return false;
     }
+
+    /// <summary>True when a wake at <paramref name="woke"/> lies inside <paramref name="reading"/>'s interval. The loop asks
+    /// it of its last wake, so the energy by app leaves out the ticks the rollups leave out.</summary>
+    public static bool Within(DateTimeOffset woke, Reading reading)
+        => double.IsFinite(reading.DeltaSeconds) && reading.DeltaSeconds > 0
+           && woke <= reading.Timestamp && (reading.Timestamp - woke).TotalSeconds < reading.DeltaSeconds;
 }

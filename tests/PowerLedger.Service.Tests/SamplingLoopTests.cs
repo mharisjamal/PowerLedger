@@ -68,6 +68,87 @@ public class SamplingLoopTests
         last.ShouldNotBeNull().Timestamp.ShouldBe(Start.AddMinutes(10));
     }
 
+    /// <summary>
+    /// Plan AE: every hour's apps add up to the hour row's processor and graphics energy, through the top of an hour, a sleep
+    /// and a restart inside an hour: the same watts and intervals, gaps left out the same way. Watts and loads vary, with
+    /// quiet minutes for the resting draw to be learned from, a card measured beside the processor's graphics, busy time
+    /// nobody running explains and drivers' time.
+    /// </summary>
+    [Fact]
+    public async Task Each_hours_energy_by_app_adds_up_to_its_hour_row()
+    {
+        using var t = new TestDatabase();
+        var count = 0;
+        Sample Script(DateTimeOffset ts, double delta)
+        {
+            var n = Interlocked.Increment(ref count);
+            var quiet = ts.Minute % 3 == 0;
+            var cardW = quiet ? 4.0 : 4 + (n % 11);
+            return Samples.At(ts, delta, cpuW: quiet ? 2 + (n % 3 * 0.1) : 6 + (n % 7), cpuLoad: quiet ? 0.01 : 0.4) with
+            {
+                IGpuW = quiet ? 0.2 : 1.5,
+                DGpuPresent = true,
+                DGpuW = cardW,
+                DGpuLoad = quiet ? 0 : 0.3,
+                Gpus = [new GpuCard("Radeon RX 7800 XT", cardW, quiet ? 0 : 0.3)],
+                Graphics = new GraphicsWork(new Dictionary<uint, GraphicsTime> { [200] = new(300, 400, 20, 30), [999] = new(100, 100, 0, 5) }),
+            };
+        }
+        FakeProcesses Machine()
+        {
+            var processes = new FakeProcesses { ClosedPerRead = 100, DriversPerRead = 50 };
+            processes.Add(new FakeProcesses.Fake(200, "chrome.exe", path: @"C:\Program Files\Google\Chrome\Application\chrome.exe"), 600, 600);
+            processes.Add(new FakeProcesses.Fake(300, "game.exe", path: @"D:\Games\game.exe"), 300, 300);
+            processes.Add(new FakeProcesses.Fake(100, "svchost.exe", session: 0, path: @"C:\WINDOWS\System32\svchost.exe"), 100, 100);
+            return processes;
+        }
+
+        var first = Machine();
+        await using (var loop = new Harness(t, makeSet: _ => new FakeSensorSet(Script), processes: () => first, foreground: front =>
+        {
+            front.Clear();
+            front.Add(200);
+        }))
+        {
+            await loop.StartAsync();
+            await loop.Ticks(300);                                  // 00:55:01 to 01:00:00
+            await loop.Send(new SuspendCommand());
+            loop.Clock.Advance(TimeSpan.FromSeconds(30));           // shorter than the gap threshold: a gap for the wake alone
+            await loop.Send(new ResumeCommand());
+            await loop.Ticks(240);                                  // 01:00:31, which reaches back across the sleep, to 01:04:30
+            await loop.StopAsync();
+        }
+        first.Disposed.ShouldBeTrue();
+
+        var second = Machine();
+        await using (var loop = new Harness(t, makeSet: _ => new FakeSensorSet(Script), processes: () => second, at: Start.AddMinutes(55)))
+        {
+            await loop.StartAsync();
+            await loop.Ticks(660);                                  // 01:50:01 to 02:01:00
+            await loop.StopAsync();
+        }
+
+        var aggregates = new AggregateRepository(t.Db);
+        var hours = aggregates.ReadHours(Start.AddHours(-1), Start.AddHours(3));
+        hours.Select(hour => hour.Start).ShouldBe([Start.AddMinutes(-55), Start.AddMinutes(5)]);     // 02:00 is not over
+        var apps = new AppHoursRepository(t.Db);
+        foreach (var hour in hours)
+        {
+            var rows = apps.ReadHour(hour.Start);
+            hour.CpuWh.ShouldBeGreaterThan(0);
+            hour.GpuWh.ShouldBeGreaterThan(0);
+            rows.Sum(row => row.CpuWh).ShouldBe(hour.CpuWh, 1e-9, $"processor, {hour.Start:HH:mm}");
+            rows.Sum(row => row.GpuWh).ShouldBe(hour.GpuWh, 1e-9, $"graphics, {hour.Start:HH:mm}");
+            rows.Select(row => row.Key).ShouldBe(
+                [@"c:\program files\google\chrome\application\chrome.exe", @"d:\games\game.exe", AppKeys.Windows, AppKeys.Idle, AppKeys.Closed], ignoreOrder: true);
+        }
+        var underway = aggregates.ReadMinutes(Start.AddMinutes(65), Start.AddMinutes(70));             // 02:00 so far
+        apps.ReadHour(Start.AddMinutes(65)).Sum(row => row.CpuWh).ShouldBe(underway.Sum(minute => minute.CpuWh), 1e-9);
+
+        var chrome = apps.ReadHour(Start.AddMinutes(-55)).Single(row => row.Key.EndsWith("chrome.exe", StringComparison.Ordinal));
+        (chrome.RunSeconds, chrome.FrontSeconds).ShouldBe((299.0, 299.0));
+    }
+
     [Fact]
     public async Task After_a_crash_the_open_session_closes_at_its_last_tick_and_the_unfolded_minutes_are_caught_up()
     {
@@ -787,11 +868,15 @@ public class SamplingLoopTests
 
         /// <param name="loopClock">What the loop sees of <see cref="Clock"/>, when that is not the fake clock itself.</param>
         /// <param name="watched">Whether anyone looks at the live figures; always, when left out.</param>
+        /// <param name="processes">The processes for the energy by app; none worked out, when left out.</param>
+        /// <param name="at">When the clock starts; <see cref="Start"/> when left out.</param>
         public Harness(
             TestDatabase database, LoopOptions? options = null, Func<int, FakeSensorSet>? makeSet = null,
             Func<FakeTimeProvider, TimeProvider>? loopClock = null, Func<bool>? watched = null, Func<BatteryCharge?>? battery = null,
-            Func<bool>? signedIn = null, Func<DateTimeOffset, DateTimeOffset?>? hibernated = null)
+            Func<bool>? signedIn = null, Func<DateTimeOffset, DateTimeOffset?>? hibernated = null,
+            Func<Sensors.IProcessSource>? processes = null, Action<List<uint>>? foreground = null, DateTimeOffset? at = null)
         {
+            Clock = new FakeTimeProvider(at ?? Start);
             Clock.SetLocalTimeZone(Plus2);
             Monitors = new MonitorBoard(MonitorBoardTests.Catalogue, Clock);
             makeSet ??= _ => new FakeSensorSet((ts, delta) => Samples.At(ts, delta, batteryW: 20));
@@ -816,12 +901,14 @@ public class SamplingLoopTests
                 Watched: watched,
                 Battery: battery,
                 SignedIn: signedIn,
-                Hibernated: hibernated);
+                Hibernated: hibernated,
+                Processes: processes,
+                Foreground: foreground);
             var clock = loopClock?.Invoke(Clock) ?? Clock;
             _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Monitors, clock, NullLogger<SamplingLoop>.Instance, options);
         }
 
-        public FakeTimeProvider Clock { get; } = new(Start);
+        public FakeTimeProvider Clock { get; }
 
         public MonitorBoard Monitors { get; }
 

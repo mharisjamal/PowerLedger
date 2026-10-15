@@ -230,6 +230,19 @@ public sealed class PipeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task The_window_in_front_reaches_the_signals_with_the_idle_time()
+    {
+        List<uint> front = [];
+        (await Send(new ReportActivityRequest(16, 3, ForegroundPid: 4242))).ShouldBe(new OkReply(16));
+        _signals.ForegroundProcesses(front);
+        front.ShouldBe([4242u]);
+
+        (await Send(new ReportActivityRequest(17, 3, ForegroundPid: 0))).ShouldBe(new OkReply(17));   // no window in front
+        _signals.ForegroundProcesses(front);
+        front.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_brightness_report_goes_to_the_monitor_board_without_bothering_the_loop()
     {
         _monitors.Detected([MonitorBoardTests.Dell]);
