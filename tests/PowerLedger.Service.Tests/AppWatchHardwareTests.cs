@@ -130,7 +130,7 @@ public sealed class AppWatchHardwareTests(ITestOutputHelper output) : IDisposabl
                              $"{onWattSeconds / onSeconds:F2} W with it: {extra:F2} W extra; the loop was given {given:F2} W ({(given / extra) - 1:P1})");
             // Shares of the working watts match a loop's extra watts only when it is most of the work: on a busy PC, and
             // more so one at its power limit, a loop's extra watts are no measure of its share.
-            background.ShouldBeLessThan(0.1, "the PC was too busy without the loop for this check to say anything");
+            background.ShouldBeLessThan(RestingWatts.QuietLoad, "the PC was too busy without the loop for this check to say anything");
             given.ShouldBe(extra, extra * 0.15);
         }
         finally
