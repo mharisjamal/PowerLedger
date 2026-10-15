@@ -113,6 +113,7 @@ internal sealed class GlassMaterial : IDisposable
             if (!_applied.Contains(key) || !Same(_applied[key], value)) _applied[key] = value;
         }
         Changed?.Invoke(Current);
+        GlassInk.RefreshAll();
     }
 
     public void Dispose()
@@ -189,20 +190,7 @@ internal sealed class GlassMaterial : IDisposable
 
         // Text: every step at the ink's full strength on the strict glass; otherwise the mockup's steps (.sub at 80 %).
         var text = colours["A.C.Text"];
-        if (strict)
-        {
-            colours["A.C.Text2"] = colours["A.C.Text3"] = colours["A.C.NavText"] = colours["A.C.SegText"] = colours["A.C.LabText"] = colours["A.C.CapText"] = colours["A.C.HomeSub"] = text;
-        }
-        else
-        {
-            colours["A.C.Text2"] = WithAlpha(text, VideoText2);
-            colours["A.C.Text3"] = WithAlpha(text, VideoText3);
-            colours["A.C.NavText"] = WithAlpha(text, NavText);
-            colours["A.C.SegText"] = WithAlpha(text, SegText);
-            colours["A.C.LabText"] = WithAlpha(text, LabText);
-            colours["A.C.CapText"] = WithAlpha(text, CapText);
-            colours["A.C.HomeSub"] = WithAlpha(text, HomeSub);
-        }
+        foreach (var (key, share) in TextSteps) colours[key] = strict ? text : WithAlpha(text, share);
         if (settings.IncreaseContrast) colours["A.C.SeeThroughWash"] = Scaled(colours["A.C.SeeThroughWash"], 2);
 
         // Menus and dialogs: as dense as their text needs over either backdrop; denser still under Reduce transparency,
@@ -330,6 +318,14 @@ internal sealed class GlassMaterial : IDisposable
 
     /// <summary>The top bar's "2 PCs" under Home, at 82 %.</summary>
     public const double HomeSub = 0.82;
+
+    /// <summary>The quieter text steps, each as its share of the ink (the strict glass draws every one whole). GlassInk
+    /// takes the same steps for the ink it lays on a piece over a bright backdrop.</summary>
+    internal static readonly (string Key, double Share)[] TextSteps =
+    [
+        ("A.C.Text2", VideoText2), ("A.C.Text3", VideoText3), ("A.C.NavText", NavText), ("A.C.SegText", SegText), ("A.C.LabText", LabText),
+        ("A.C.CapText", CapText), ("A.C.HomeSub", HomeSub),
+    ];
 
     /// <summary>How dense Reduce transparency makes the tint, and at least the menus and dialogs: still glass.</summary>
     public const double ReducedAlpha = 0.86;

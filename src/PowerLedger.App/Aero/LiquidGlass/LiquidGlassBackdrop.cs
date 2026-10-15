@@ -4,6 +4,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
+using System.Windows.Threading;
 
 namespace PowerLedger.App.Aero;
 
@@ -168,8 +169,134 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         var inside = new InsideGlassSource(this, outer);
         _source = inside;
         _source.Changed += OnSourceChanged;
+        // Its tone is the outer content over the outer piece's own backdrop.
+        _outerPiece = null;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(outer); i++)
+        {
+            if (VisualTreeHelper.GetChild(outer, i) is LiquidGlassBackdrop other && !ReferenceEquals(other, this)) _outerPiece = other;
+        }
+        if (_outerPiece != null) _outerPiece.ToneChanged += ToneSoon;
         inside.Refresh();
         OnSourceChanged();
+    }
+
+    private LiquidGlassBackdrop? _outerPiece;
+
+    /// <summary>
+    /// The tone of what the piece shows (Plan AD): the mean light of its backdrop after the recipe's brightness, as an
+    /// sRGB colour, or null while there is none (no picture yet, the glass off). The look's ink follows it (GlassInk).
+    /// The GPU path reads it on the GPU from the desktop copy as it draws; the CPU path, the wallpaper and a nested piece
+    /// read it from the picture they already hold, at most ten times a second.
+    /// </summary>
+    internal Color? Tone { get; private set; }
+
+    /// <summary>Raised on the UI thread when <see cref="Tone"/> changed.</summary>
+    internal event Action? ToneChanged;
+
+    /// <summary>The tone, as the GPU path read it (GpuGlassWindow), or none.</summary>
+    internal void SetTone(Color? tone)
+    {
+        if (Tone == tone) return;
+        Tone = tone;
+        ToneChanged?.Invoke();
+    }
+
+    /// <summary>How often a piece off the GPU path reads its tone, at most.</summary>
+    internal static readonly TimeSpan ToneEvery = TimeSpan.FromMilliseconds(100);
+
+    private DispatcherTimer? _toneTimer;
+    private Rect? _toneBox;
+
+    /// <summary>Reads the tone off the GPU path: at once when there is none yet, else once the moment has passed.</summary>
+    private void ToneSoon()
+    {
+        if (_gpu != null) return;
+        if (Tone == null && _source != null)
+        {
+            MeasureTone();
+            return;
+        }
+        if (_toneTimer == null)
+        {
+            _toneTimer = new DispatcherTimer(ToneEvery, DispatcherPriority.Background, (_, _) =>
+            {
+                _toneTimer!.Stop();
+                MeasureTone();
+            }, Dispatcher);
+            _toneTimer.Stop();
+        }
+        if (!_toneTimer.IsEnabled) _toneTimer.Start();
+    }
+
+    /// <summary>The tone from the picture in hand: the CPU path's (its live pixels), the wallpaper's (a small copy made once
+    /// per picture), or a nested piece's finished glass over the outer piece's tone.</summary>
+    private void MeasureTone()
+    {
+        if (_gpu != null) return;
+        if (_source is InsideGlassSource inside)
+        {
+            var under = _outerPiece?.Tone;
+            SetTone(under is { } u && inside.Mean is { } mean ? Contrast.Over(mean, u) : under);
+            return;
+        }
+        if (_source?.Image is not BitmapSource image || ScreenBox() is not { } box || _source.ScreenBounds is not { Width: > 0, Height: > 0 } bounds)
+        {
+            SetTone(null);
+            return;
+        }
+        SetTone(ToneOf(image, bounds, box, Brightness) ?? Tone);
+    }
+
+    /// <summary>The mean of <paramref name="box"/> (screen pixels) of <paramref name="image"/>, which lies at
+    /// <paramref name="bounds"/> on the screen.</summary>
+    internal static unsafe Color? ToneOf(BitmapSource image, Rect bounds, Rect box, double brightness)
+    {
+        if (image is WriteableBitmap { Format.BitsPerPixel: 32, IsFrozen: false } live)
+        {
+            var region = Region(box, bounds, live.PixelWidth, live.PixelHeight);
+            live.Lock();
+            try
+            {
+                var pixels = new ReadOnlySpan<byte>((void*)live.BackBuffer, live.BackBufferStride * live.PixelHeight);
+                return BackdropTone.Mean(pixels, live.PixelWidth, live.PixelHeight, live.BackBufferStride, region, brightness);
+            }
+            finally
+            {
+                live.Unlock();
+            }
+        }
+        var small = SmallCopy.Of(image);
+        return BackdropTone.Mean(small.Pixels, small.Width, small.Height, small.Width * 4, Region(box, bounds, small.Width, small.Height), brightness);
+    }
+
+    private static Int32Rect Region(Rect box, Rect bounds, int width, int height)
+    {
+        double sx = width / bounds.Width, sy = height / bounds.Height;
+        int x0 = (int)Math.Floor((box.X - bounds.X) * sx), y0 = (int)Math.Floor((box.Y - bounds.Y) * sy);
+        int x1 = (int)Math.Ceiling((box.Right - bounds.X) * sx), y1 = (int)Math.Ceiling((box.Bottom - bounds.Y) * sy);
+        return new Int32Rect(x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0));
+    }
+
+    /// <summary>A still picture (the wallpaper) at most 256 pixels wide, in BGRA, made once per picture.</summary>
+    private sealed class SmallCopy
+    {
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<BitmapSource, SmallCopy> Made = [];
+
+        public byte[] Pixels = [];
+        public int Width, Height;
+
+        public static SmallCopy Of(BitmapSource image) => Made.GetValue(image, Make);
+
+        private static SmallCopy Make(BitmapSource image)
+        {
+            var k = Math.Min(1, 256.0 / Math.Max(1, image.PixelWidth));
+            BitmapSource scaled = k < 1 ? new TransformedBitmap(image, new ScaleTransform(k, k)) : image;
+            var bgra = new FormatConvertedBitmap(scaled, PixelFormats.Bgra32, null, 0);
+            var copy = new SmallCopy { Width = bgra.PixelWidth, Height = bgra.PixelHeight };
+            copy.Pixels = new byte[copy.Width * copy.Height * 4];
+            bgra.CopyPixels(copy.Pixels, copy.Width * 4, 0);
+            return copy;
+        }
     }
 
     /// <summary>The source map in use is ready, for a test.</summary>
@@ -295,6 +422,11 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         if (_window != null && _source != null) LiquidGlassSources.Release(_window);
         (_source as InsideGlassSource)?.Dispose();
         _source = null;
+        if (_outerPiece != null) _outerPiece.ToneChanged -= ToneSoon;
+        _outerPiece = null;
+        _toneTimer?.Stop();
+        _toneBox = null;
+        SetTone(null);
         _window = null;
         _picture.Source = null;
         _displaceHost.Visibility = Visibility.Hidden;
@@ -315,6 +447,8 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
             RenderOptions.SetBitmapScalingMode(_picture, _source.Kind == LiquidGlassSourceKind.Wallpaper ? BitmapScalingMode.Linear : BitmapScalingMode.NearestNeighbor);
         }
         Place();
+        // New pixels behind (or a new kind): the ink may follow. The GPU path reads its own as it draws.
+        ToneSoon();
     }
 
     /// <summary>Lays the source's picture where it lies on the screen, under the piece: one picture, uploaded once, shared
@@ -343,6 +477,12 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         }
         var bounds = _source.ScreenBounds;
         if (bounds.Width <= 0 || bounds.Height <= 0) return;
+        if (_toneBox != box)
+        {
+            // Moved or resized over the picture: what it shows is elsewhere.
+            _toneBox = box;
+            ToneSoon();
+        }
         var m = _margin / _dpi;
         PlacePicture(m + (bounds.X - box.X) / _dpi, m + (bounds.Y - box.Y) / _dpi, bounds.Width / _dpi, bounds.Height / _dpi);
     }

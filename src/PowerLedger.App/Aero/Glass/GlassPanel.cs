@@ -48,6 +48,7 @@ public class GlassPanel : ContentControl
 
     public GlassPanel()
     {
+        Ink = new GlassInk(this);
         Focusable = false;
         Loaded += (_, _) =>
         {
@@ -79,6 +80,22 @@ public class GlassPanel : ContentControl
 
     /// <summary>Whether the piece sits on another piece's glass, whose content's text shadow already reaches it.</summary>
     public bool IsNested => (bool)GetValue(IsNestedProperty);
+
+    /// <summary>The piece's ink, which follows what its glass shows (Plan AD).</summary>
+    internal GlassInk Ink { get; }
+
+    public override void OnApplyTemplate()
+    {
+        base.OnApplyTemplate();
+        Ink.Use(GetTemplateChild("PART_Backdrop") as LiquidGlassBackdrop);
+    }
+
+    protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        // A new tint changes what the text sits on.
+        if (e.Property == BackgroundProperty) Ink?.Evaluate();
+    }
 
     /// <summary>Every loaded piece on this thread, so a window's shape can follow each one.</summary>
     public static IReadOnlyList<GlassPanel> Live => Panes;

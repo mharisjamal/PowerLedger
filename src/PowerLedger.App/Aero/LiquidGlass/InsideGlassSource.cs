@@ -59,6 +59,9 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
 
     public ImageSource? Image { get; private set; }
 
+    /// <summary>The finished glass's mean colour and cover (Plan AD), taken as it is drawn, for the piece's ink.</summary>
+    public Color? Mean { get; private set; }
+
     /// <summary>The piece's own box: the picture is always the piece's, wherever its window is.</summary>
     public Rect ScreenBounds => _piece.ScreenBox() ?? Rect.Empty;
 
@@ -128,6 +131,7 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         var glass = GlassRecipeCpu.Draw(pixels, w, h, dpi.DpiScaleX, _piece.Brightness, _piece.BlurDeviation * dpi.DpiScaleX, _piece.Scale);
         var bitmap = BitmapSource.Create(w, h, 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32, null, glass, w * 4);
         bitmap.Freeze();
+        Mean = BackdropTone.MeanPremultiplied(glass, w, h, w * 4);
         Image = bitmap;
         Interlocked.Increment(ref Drawn);
         Changed?.Invoke();
