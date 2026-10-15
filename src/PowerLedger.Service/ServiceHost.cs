@@ -175,6 +175,7 @@ internal static class ServiceHost
             SignedIn: SleepKinds.SomeoneSignedIn,
             Hibernated: SleepKinds.Hibernated,
             Processes: static () => new WindowsProcesses(),
-            Foreground: signals.ForegroundProcesses);
+            Foreground: signals.ForegroundProcesses,
+            Engines: static () => new EngineCounters());
     }
 }

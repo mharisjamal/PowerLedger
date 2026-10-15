@@ -150,37 +150,18 @@ public sealed class GpuLoadSource : ISensorSource
             if (_previous is not { } earlier || !before.Contains(graphics.CounterLuid)) continue;
             if (GpuEngines.Busiest(earlier, snapshot, graphics.CounterLuid, everyEngine: true) is { } busy) _processorBusy = Math.Max(_processorBusy ?? 0, busy);
         }
-        _work = _previous is { } last ? Work(last, snapshot, before) : null;
+        // Each process's time on the adapters both reads knew, for the Apps page.
+        _work = _previous is { } last
+            ? GpuEngines.Work(last, snapshot,
+                [.. _cards.Select(card => card.CounterLuid).Where(before.Contains)],
+                [.. _processorGraphics.Select(graphics => graphics.CounterLuid).Where(before.Contains)])
+            : null;
         _previous = snapshot;
-    }
-
-    /// <summary>Each process's time on the cards' engines and on the processor's graphics' between two reads, for the
-    /// adapters both reads knew. An instance new since the last read counts all its time, which began with it; a count that
-    /// went backwards, as when Windows gives a process's id to another, counts as none.</summary>
-    private GraphicsWork Work(EngineSnapshot before, EngineSnapshot after, HashSet<string> known)
-    {
-        string[] cards = [.. _cards.Select(card => card.CounterLuid).Where(known.Contains)];
-        string[] processor = [.. _processorGraphics.Select(graphics => graphics.CounterLuid).Where(known.Contains)];
-        var work = new Dictionary<uint, GraphicsTime>();
-        foreach (var (instance, time) in after.RunningTime)
-        {
-            if (GpuEngines.ProcessOf(instance) is not { } pid) continue;
-            var onCard = cards.Any(luid => instance.Contains(luid, StringComparison.OrdinalIgnoreCase));
-            if (!onCard && !processor.Any(luid => instance.Contains(luid, StringComparison.OrdinalIgnoreCase))) continue;
-            var spent = Math.Max(0, before.RunningTime.TryGetValue(instance, out var earlier) ? time - earlier : time);
-            if (spent == 0) continue;
-            var load = GpuEngines.IsLoadEngine(instance) ? spent : 0;
-            var sum = work.GetValueOrDefault(pid);
-            work[pid] = onCard
-                ? sum with { CardLoad = sum.CardLoad + load, CardAny = sum.CardAny + spent }
-                : sum with { ProcessorLoad = sum.ProcessorLoad + load, ProcessorAny = sum.ProcessorAny + spent };
-        }
-        return new GraphicsWork(work);
     }
 
     /// <summary>The graphics in the processor, and any other hardware adapter that is no card: never a software rasteriser
     /// or one of Microsoft's own adapters.</summary>
-    private static IReadOnlyList<GpuAdapter> ProcessorGraphics(IEnumerable<GpuAdapter> adapters)
+    internal static IReadOnlyList<GpuAdapter> ProcessorGraphics(IEnumerable<GpuAdapter> adapters)
         => [.. adapters.Where(adapter => !adapter.Software && adapter.VendorId != DiscreteGpu.MicrosoftVendor && !DiscreteGpu.IsCandidate(adapter))];
 
     /// <summary>Whether Windows has the card switched off, asked once per card of the display adapter with its PCI ids.

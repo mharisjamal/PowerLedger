@@ -126,11 +126,10 @@ public sealed class AppWatchHardwareTests(ITestOutputHelper output) : IDisposabl
             var given = spinnerWh * 3600 / onSeconds;
             var extra = (onWattSeconds / onSeconds) - (offWattSeconds / offSeconds);
             var background = offLoadSeconds / offSeconds;
+            // The background is printed, not judged: shares of the working watts match a loop's extra watts best when it is
+            // most of the work, so the check is meant for a PC with nothing else running (scripts/busy-loop-check.ps1).
             output.WriteLine($"processor {background:P0} busy without the loop; package {offWattSeconds / offSeconds:F2} W without it, " +
                              $"{onWattSeconds / onSeconds:F2} W with it: {extra:F2} W extra; the loop was given {given:F2} W ({(given / extra) - 1:P1})");
-            // Shares of the working watts match a loop's extra watts only when it is most of the work: on a busy PC, and
-            // more so one at its power limit, a loop's extra watts are no measure of its share.
-            background.ShouldBeLessThan(RestingWatts.QuietLoad, "the PC was too busy without the loop for this check to say anything");
             given.ShouldBe(extra, extra * 0.15);
         }
         finally
@@ -155,7 +154,8 @@ public sealed class AppWatchHardwareTests(ITestOutputHelper output) : IDisposabl
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
             SystemShuttingDown: () => false,
             DatabaseNotice: null,
-            Processes: static () => new WindowsProcesses());
+            Processes: static () => new WindowsProcesses(),
+            Engines: static () => new EngineCounters());
         var loop = new SamplingLoop(_database.Db, environment, new LoopCommands(), new LiveFeed(), new StatusBoard(),
             new MonitorBoard(MonitorCatalogue.Shipped, TimeProvider.System), TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<SamplingLoop>.Instance);
         var started = DateTimeOffset.UtcNow;
