@@ -38,12 +38,13 @@ internal sealed class AppIcons(Func<string, ImageSource?> read)
         }
     }));
 
-    /// <summary>The icon a program's file holds, at <see cref="ReadSize"/>; null without one.</summary>
+    /// <summary>The icon a program's file holds, at <see cref="ReadSize"/>; null without one. A program on a network share
+    /// keeps its glyph: the ledger never reaches across the network for a picture.</summary>
     internal static ImageSource? Read(string path)
     {
         try
         {
-            if (!File.Exists(path)) return null;
+            if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal) || !File.Exists(path)) return null;
             using var icon = System.Drawing.Icon.ExtractIcon(path, 0, ReadSize);
             if (icon is null) return null;
             using var bitmap = icon.ToBitmap();
