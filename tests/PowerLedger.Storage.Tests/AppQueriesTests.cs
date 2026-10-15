@@ -171,6 +171,28 @@ public class AppQueriesTests
         range.CostIsPartial.ShouldBeFalse();
     }
 
+    /// <summary>A tariff taking effect half way through an hour prices from the next hour on, as the report prices a row by
+    /// its start; one after the range prices nothing in it.</summary>
+    [Fact]
+    public void A_tariff_starting_inside_the_range_prices_each_apps_hours_from_its_start_on()
+    {
+        using var t = new TestDatabase();
+        for (var h = 0; h < 4; h++)
+        {
+            App(t, H0.AddHours(h), "a", "A", 1000);
+            App(t, H0.AddHours(h), "b", "B", 500);
+        }
+        var tariffs = new TariffRepository(t.Db);
+        tariffs.Add(new Tariff(H0.AddDays(-1), 0.10m, "USD"));
+        tariffs.Add(new Tariff(H0.AddHours(1).AddMinutes(30), 0.20m, "USD"));   // from 13:30: the 14:00 and 15:00 hours
+        tariffs.Add(new Tariff(H0.AddDays(1), 9m, "USD"));
+
+        var apps = new AppQueries(t.Db).Read(H0, H0.AddHours(4)).Apps;
+
+        apps.Single(a => a.Key == "a").Cost.ShouldBe(2 * 1m * 0.10m + 2 * 1m * 0.20m);
+        apps.Single(a => a.Key == "b").Cost.ShouldBe(2 * 0.5m * 0.10m + 2 * 0.5m * 0.20m);
+    }
+
     [Fact]
     public void Energy_priced_in_another_currency_is_left_out_and_said_so()
     {

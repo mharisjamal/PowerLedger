@@ -73,8 +73,11 @@ public sealed class AppQueries(SqliteDatabase db)
     {
         var hourFrom = Ceiling(from, Hour);
         var hourTo = Ceiling(to, Hour);
-        var schedule = new TariffRepository(db).Schedule();
-        List<AppHour> hours;
+        var tariffs = new TariffRepository(db).All();
+        var schedule = new TariffSchedule(tariffs);
+        List<AppTotal> totals;
+        Dictionary<DateTimeOffset, double> traced;
+        List<(DateTimeOffset Start, Dictionary<string, double> Wh)> spans;
         DateTimeOffset start;
         DateTimeOffset? counted;
         using (var c = db.Open())
@@ -83,7 +86,11 @@ public sealed class AppQueries(SqliteDatabase db)
             if (counted is not { } first) return AppsRange.None(hourFrom, hourTo, null, schedule.Currency);
             start = first > hourFrom ? first : hourFrom;
             if (start >= hourTo) return AppsRange.None(hourFrom, hourTo, first, schedule.Currency);
-            hours = AppRows(c, start, hourTo);
+            // Summed in the database, not row by row here: a year holds some 260,000 app rows. The hours are cut where a
+            // tariff takes effect, so each span is priced at one tariff.
+            var cuts = tariffs.Select(t => t.EffectiveFrom).Where(at => at > start && at < hourTo).Distinct().Order().ToList();
+            (totals, spans) = Totals(c, start, hourTo, cuts);
+            traced = Traced(c, start, hourTo);
         }
 
         var partial = false;
@@ -95,13 +102,11 @@ public sealed class AppQueries(SqliteDatabase db)
             return new PricedWh(list.Sum(s => s.Wh), cost.Amount);
         }
 
-        var apps = hours.GroupBy(h => h.Key, StringComparer.Ordinal).Select(g =>
-        {
-            var newest = g.MaxBy(h => h.Start)!;
-            return new AppUse(
-                g.Key, newest.Name, newest.Path, g.Sum(h => h.Cpu), g.Sum(h => h.Gpu), g.Sum(h => h.Run), g.Sum(h => h.Front),
-                Priced(g.Select(h => (h.Start, h.Cpu + h.Gpu))).Cost);
-        }).OrderByDescending(a => a.Wh).ThenBy(a => a.Key, StringComparer.Ordinal).ToList();
+        // Each app's energy priced span by span, a span being the hours between two tariffs, so every hour is priced at
+        // the tariff in force at its start, as the report prices a row.
+        var apps = totals.Select(t => new AppUse(
+                t.Key, t.Name, t.Path, t.Cpu, t.Gpu, t.Run, t.Front, Priced(spans.Select(s => (s.Start, s.Wh.GetValueOrDefault(t.Key)))).Cost))
+            .OrderByDescending(a => a.Wh).ThenBy(a => a.Key, StringComparer.Ordinal).ToList();
 
         // The hour rows of the same hours, and the hour under way from its minutes.
         var repo = new AggregateRepository(db);
@@ -110,7 +115,6 @@ public sealed class AppQueries(SqliteDatabase db)
         var minutes = tailFrom < hourTo ? repo.ReadMinutes(tailFrom, hourTo) : [];
         var sized = folded.Select(r => (Row: r, Length: Hour)).Concat(minutes.Select(r => (Row: r, Length: TimeSpan.FromMinutes(1)))).ToList();
 
-        var traced = hours.GroupBy(h => h.Start).ToDictionary(g => g.Key, g => g.Sum(h => h.Cpu + h.Gpu));
         var untraced = sized.GroupBy(s => Floor(s.Row.Start, Hour))
             .Select(g => (g.Key, Math.Max(0, g.Sum(s => s.Row.CpuWh + s.Row.GpuWh) - traced.GetValueOrDefault(g.Key))));
 
@@ -152,21 +156,55 @@ public sealed class AppQueries(SqliteDatabase db)
         return cmd.ExecuteScalar() is long ms ? Rows.Time(ms) : null;
     }
 
-    private static List<AppHour> AppRows(SqliteConnection c, DateTimeOffset from, DateTimeOffset to)
+    /// <summary>
+    /// Each app's sums over the hours, with the name and path of its newest hour, and its energy in each span between two
+    /// <paramref name="cuts"/>, in one pass over the rows: grouped by the app and the span (the cuts a row's hour is past),
+    /// SQLite taking a group's bare columns from the row MAX() picks.
+    /// </summary>
+    private static (List<AppTotal> Totals, List<(DateTimeOffset Start, Dictionary<string, double> Wh)> Spans) Totals(
+        SqliteConnection c, DateTimeOffset from, DateTimeOffset to, List<DateTimeOffset> cuts)
     {
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT start_ms, app_key, name, path, cpu_wh, gpu_wh, run_s, front_s FROM app_hours WHERE start_ms >= $from AND start_ms < $to";
+        var span = cuts.Count == 0 ? "0" : string.Join(" + ", cuts.Select((_, i) => $"(start_ms >= $cut{i})"));
+        using var cmd = Command(c, from, to,
+            $"SELECT app_key, {span} AS span, name, path, MAX(start_ms), TOTAL(cpu_wh), TOTAL(gpu_wh), TOTAL(run_s), TOTAL(front_s) FROM app_hours " +
+            "WHERE start_ms >= $from AND start_ms < $to GROUP BY app_key, span");
+        for (var i = 0; i < cuts.Count; i++) Rows.Add(cmd, $"$cut{i}", Rows.Ms(cuts[i]));
+        var spans = cuts.Prepend(from).Select(at => (Start: at, Wh: new Dictionary<string, double>(StringComparer.Ordinal))).ToList();
+        var newest = new Dictionary<string, (long At, string Name, string? Path)>(StringComparer.Ordinal);
+        var sums = new Dictionary<string, (double Cpu, double Gpu, double Run, double Front)>(StringComparer.Ordinal);
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                var key = r.GetString(0);
+                var (at, cpu, gpu) = (r.GetInt64(4), Finite(r.GetDouble(5)), Finite(r.GetDouble(6)));
+                if (!newest.TryGetValue(key, out var last) || at > last.At) newest[key] = (at, r.GetString(2), Rows.NullableString(r, 3));
+                var sum = sums.GetValueOrDefault(key);
+                sums[key] = (sum.Cpu + cpu, sum.Gpu + gpu, sum.Run + Finite(r.GetDouble(7)), sum.Front + Finite(r.GetDouble(8)));
+                spans[(int)r.GetInt64(1)].Wh[key] = cpu + gpu;
+            }
+        }
+        var totals = sums.Select(s => new AppTotal(s.Key, newest[s.Key].Name, newest[s.Key].Path, s.Value.Cpu, s.Value.Gpu, s.Value.Run, s.Value.Front)).ToList();
+        return (totals, spans);
+    }
+
+    /// <summary>The processor and graphics energy the hour's apps were given, hour by hour.</summary>
+    private static Dictionary<DateTimeOffset, double> Traced(SqliteConnection c, DateTimeOffset from, DateTimeOffset to)
+    {
+        using var cmd = Command(c, from, to, "SELECT start_ms, TOTAL(cpu_wh + gpu_wh) FROM app_hours WHERE start_ms >= $from AND start_ms < $to GROUP BY start_ms");
+        using var r = cmd.ExecuteReader();
+        var traced = new Dictionary<DateTimeOffset, double>();
+        while (r.Read()) traced[Rows.Time(r.GetInt64(0))] = Finite(r.GetDouble(1));
+        return traced;
+    }
+
+    private static SqliteCommand Command(SqliteConnection c, DateTimeOffset from, DateTimeOffset to, string sql)
+    {
+        var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
         Rows.Add(cmd, "$from", Rows.Ms(from));
         Rows.Add(cmd, "$to", Rows.Ms(to));
-        using var r = cmd.ExecuteReader();
-        var list = new List<AppHour>();
-        while (r.Read())
-        {
-            list.Add(new AppHour(
-                Rows.Time(r.GetInt64(0)), r.GetString(1), r.GetString(2), Rows.NullableString(r, 3),
-                Finite(r.GetDouble(4)), Finite(r.GetDouble(5)), Finite(r.GetDouble(6)), Finite(r.GetDouble(7))));
-        }
-        return list;
+        return cmd;
     }
 
     private static double Finite(double value) => double.IsFinite(value) ? value : 0;
@@ -182,6 +220,6 @@ public sealed class AppQueries(SqliteDatabase db)
         return remainder == 0 ? t : t.AddTicks(unit.Ticks - remainder);
     }
 
-    /// <summary>One row of <c>app_hours</c>.</summary>
-    private sealed record AppHour(DateTimeOffset Start, string Key, string Name, string? Path, double Cpu, double Gpu, double Run, double Front);
+    /// <summary>One app's sums over the hours read.</summary>
+    private sealed record AppTotal(string Key, string Name, string? Path, double Cpu, double Gpu, double Run, double Front);
 }
