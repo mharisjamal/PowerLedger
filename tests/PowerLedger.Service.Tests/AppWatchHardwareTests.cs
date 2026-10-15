@@ -81,7 +81,7 @@ public sealed class AppWatchHardwareTests(ITestOutputHelper output) : IDisposabl
             watch.Start();
             var last = Stopwatch.GetTimestamp();
             var at = DateTimeOffset.UtcNow;
-            double onWattSeconds = 0, onSeconds = 0, offWattSeconds = 0, offSeconds = 0;
+            double onWattSeconds = 0, onSeconds = 0, offWattSeconds = 0, offSeconds = 0, offLoadSeconds = 0;
             void Tick(bool on)
             {
                 var wait = 1000 - (int)Stopwatch.GetElapsedTime(last).TotalMilliseconds;
@@ -101,11 +101,12 @@ public sealed class AppWatchHardwareTests(ITestOutputHelper output) : IDisposabl
                 {
                     offWattSeconds += watts * seconds;
                     offSeconds += seconds;
+                    offLoadSeconds += sample.CpuLoad * seconds;
                 }
             }
 
             for (var s = 0; s < 75; s++) Tick(on: false);          // a quiet minute or so to learn the resting draw from
-            offWattSeconds = offSeconds = 0;
+            offWattSeconds = offSeconds = offLoadSeconds = 0;
             for (var round = 0; round < 8; round++)
             {
                 spinning = Process.Start(new ProcessStartInfo(spinner, "/d /q /c \"for /l %i in (0,0,1) do rem\"") { CreateNoWindow = true, UseShellExecute = false });
@@ -124,8 +125,12 @@ public sealed class AppWatchHardwareTests(ITestOutputHelper output) : IDisposabl
             var spinnerWh = repository.ReadHour(hour).Concat(repository.ReadHour(hour.AddHours(-1))).Where(row => row.Key == key).Sum(row => row.CpuWh);
             var given = spinnerWh * 3600 / onSeconds;
             var extra = (onWattSeconds / onSeconds) - (offWattSeconds / offSeconds);
-            output.WriteLine($"package {offWattSeconds / offSeconds:F2} W without the loop, {onWattSeconds / onSeconds:F2} W with it: {extra:F2} W extra; " +
-                             $"the loop was given {given:F2} W ({(given / extra) - 1:P1})");
+            var background = offLoadSeconds / offSeconds;
+            output.WriteLine($"processor {background:P0} busy without the loop; package {offWattSeconds / offSeconds:F2} W without it, " +
+                             $"{onWattSeconds / onSeconds:F2} W with it: {extra:F2} W extra; the loop was given {given:F2} W ({(given / extra) - 1:P1})");
+            // Shares of the working watts match a loop's extra watts only when it is most of the work: on a busy PC, and
+            // more so one at its power limit, a loop's extra watts are no measure of its share.
+            background.ShouldBeLessThan(0.1, "the PC was too busy without the loop for this check to say anything");
             given.ShouldBe(extra, extra * 0.15);
         }
         finally
@@ -136,6 +141,49 @@ public sealed class AppWatchHardwareTests(ITestOutputHelper output) : IDisposabl
                 left.WaitForExit();
             }
             Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>The loop itself, with this PC's own sensors and processes for three minutes at the watched pace: every hour's
+    /// apps add up to its raw readings' processor and graphics energy, integrated as the rollups do, and to its minute rows.</summary>
+    [Fact]
+    public async Task With_this_PCs_own_sensors_and_processes_the_apps_add_up_to_the_readings()
+    {
+        var environment = new LoopEnvironment(
+            Sensors: _ => new MachineSensorSet(MachineSensors.Create(() => true, () => false)),
+            Inventory: HardwareInventory.Detect,
+            SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
+            SystemShuttingDown: () => false,
+            DatabaseNotice: null,
+            Processes: static () => new WindowsProcesses());
+        var loop = new SamplingLoop(_database.Db, environment, new LoopCommands(), new LiveFeed(), new StatusBoard(),
+            new MonitorBoard(MonitorCatalogue.Shipped, TimeProvider.System), TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<SamplingLoop>.Instance);
+        var started = DateTimeOffset.UtcNow;
+        await loop.StartAsync(CancellationToken.None);
+        await loop.Ready.WaitAsync(TimeSpan.FromMinutes(2));
+        await Task.Delay(TimeSpan.FromMinutes(3));
+        await loop.StopAsync(CancellationToken.None);
+        loop.Dispose();
+        var stopped = DateTimeOffset.UtcNow;
+
+        var raw = new RawSampleRepository(_database.Db).ReadAll(started.AddMinutes(-1), stopped.AddMinutes(1));
+        var minutes = new AggregateRepository(_database.Db).ReadMinutes(started.AddMinutes(-1), stopped.AddMinutes(1));
+        var apps = new AppHoursRepository(_database.Db);
+        var threshold = SamplingLoop.GapThresholdFor(ServiceSettings.Default);
+        output.WriteLine($"{raw.Count} readings, {loop.Ticks} ticks");
+        foreach (var hour in raw.GroupBy(reading => Rollups.Floor(reading.Timestamp, TimeSpan.FromHours(1))))
+        {
+            var rows = apps.ReadHour(hour.Key);
+            var cpu = hour.Sum(reading => EnergyIntegrator.Integrate(reading, threshold).CpuWh);
+            var gpu = hour.Sum(reading => EnergyIntegrator.Integrate(reading, threshold).GpuWh);
+            var folded = minutes.Where(minute => Rollups.Floor(minute.Start, TimeSpan.FromHours(1)) == hour.Key).ToList();
+            output.WriteLine($"{hour.Key:HH:mm}: readings {cpu:F6} Wh processor, {gpu:F6} Wh graphics; minute rows {folded.Sum(m => m.CpuWh):F6}, " +
+                             $"{folded.Sum(m => m.GpuWh):F6}; apps {rows.Sum(r => r.CpuWh):F6}, {rows.Sum(r => r.GpuWh):F6} in {rows.Count} rows");
+            foreach (var row in rows.OrderByDescending(r => r.CpuWh + r.GpuWh).Take(12))
+                output.WriteLine($"    {row.Name} ({row.Key}): {row.CpuWh * 1000:F2} mWh, {row.GpuWh * 1000:F2} mWh, ran {row.RunSeconds:F0} s, front {row.FrontSeconds:F0} s");
+            rows.Sum(row => row.CpuWh).ShouldBe(cpu, 1e-9);
+            rows.Sum(row => row.GpuWh).ShouldBe(gpu, 1e-9);
+            rows.Sum(row => row.CpuWh).ShouldBe(folded.Sum(minute => minute.CpuWh), 1e-9);
         }
     }
 
