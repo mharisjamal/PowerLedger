@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using PowerLedger.Core;
 using PowerLedger.Sensors;
 using Shouldly;
 
@@ -217,6 +218,45 @@ public class GpuLoadSourceTests
         film.DGpuLoad.ShouldNotBeNull().ShouldBe(0.02, 1e-9);        // the shaders: what the card's rating turns into watts
         film.DGpuBusyLoad.ShouldNotBeNull().ShouldBe(0.6, 1e-9);     // every engine: a film playing is no idle PC
         film.ToSample(DateTimeOffset.UnixEpoch, 1).DGpuBusyLoad.ShouldNotBeNull().ShouldBe(0.6, 1e-9);
+    }
+
+    /// <summary>Plan AE: the Apps page splits a card's working watts by each process's time on its engines, and the
+    /// processor's graphics' by time on theirs, from the reads the loads already take.</summary>
+    [Fact]
+    public void Each_process_s_time_on_the_card_and_on_the_processor_s_graphics_goes_with_the_sample()
+    {
+        var card = Radeon.CounterLuid;
+        var iris = ProcessorGraphicsOnly[0].CounterLuid;
+        var software = ProcessorGraphicsOnly[1].CounterLuid;
+        var reads = new Queue<EngineSnapshot>(
+        [
+            new(0, new Dictionary<string, long>
+            {
+                [$"pid_10_{card}_phys_0_eng_0_engtype_3D"] = 1000,
+                [$"pid_20_{iris}_phys_0_eng_0_engtype_3D"] = 500,
+                [$"pid_40_{card}_phys_0_eng_0_engtype_3D"] = 9000,
+            }),
+            new(5 * TimeSpan.TicksPerSecond, new Dictionary<string, long>
+            {
+                [$"pid_10_{card}_phys_0_eng_0_engtype_3D"] = 4000,
+                [$"pid_10_{card}_phys_0_eng_3_engtype_VideoDecode"] = 700,      // new since the last read: all of it is new
+                [$"pid_20_{iris}_phys_0_eng_0_engtype_3D"] = 800,
+                [$"pid_30_{iris}_phys_0_eng_1_engtype_Copy"] = 50,
+                [$"pid_40_{card}_phys_0_eng_0_engtype_3D"] = 10,                // the id went to a new process: nothing
+                [$"pid_50_{software}_phys_0_eng_0_engtype_3D"] = 999,           // no graphics anyone measures
+            }),
+        ]);
+        var source = new GpuLoadSource(() => [Radeon, .. ProcessorGraphicsOnly], reads.Dequeue, () => _now);
+
+        Tick(source, 0).Graphics.ShouldBeNull();                    // one read is no window yet
+        var work = Tick(source, 5).Graphics.ShouldNotBeNull();
+        work.ByProcess.Keys.ShouldBe([10u, 20u, 30u], ignoreOrder: true);
+        work.ByProcess[10].ShouldBe(new GraphicsTime(CardLoad: 3000, CardAny: 3700, ProcessorLoad: 0, ProcessorAny: 0));
+        work.ByProcess[20].ShouldBe(new GraphicsTime(0, 0, ProcessorLoad: 300, ProcessorAny: 300));
+        work.ByProcess[30].ShouldBe(new GraphicsTime(0, 0, 0, ProcessorAny: 50));
+        var held = Tick(source, 6);                                 // between reads the last window holds, as the loads do
+        held.Graphics.ShouldBeSameAs(work);
+        held.ToSample(DateTimeOffset.UnixEpoch, 1).Graphics.ShouldBeSameAs(work);
     }
 
     private static EngineSnapshot Merge(EngineSnapshot a, EngineSnapshot b)

@@ -45,6 +45,8 @@ namespace PowerLedger.Core;
 /// card's, or the processor's own graphics' (Plan AC review); null where nothing read it. Only the idle test reads it: a
 /// film keeps a decoder busy and the PC in use, while
 /// <paramref name="DGpuLoad"/>, the shaders' load, is what the card's rating turns into watts.</param>
+/// <param name="Graphics">Each process's time on the graphics engines over the load counters' last window, for the Apps
+/// page's split (Plan AE); null where nothing reads the counters, or before their second read.</param>
 public sealed record Sample(
     DateTimeOffset Timestamp,
     double DeltaSeconds,
@@ -77,7 +79,8 @@ public sealed record Sample(
     bool PanelInactive = false,
     double? BatteryChargeW = null,
     bool AcTransition = false,
-    double? DGpuBusyLoad = null)
+    double? DGpuBusyLoad = null,
+    GraphicsWork? Graphics = null)
 {
     /// <summary>True when the tick carries a usable discharge rate: on battery, finite, and above zero
     /// (zero or negative means charging or a transition blip). The model and the calibration learner both gate on this.</summary>

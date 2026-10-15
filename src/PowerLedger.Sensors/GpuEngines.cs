@@ -94,4 +94,15 @@ public sealed class GpuEngines
         var type = engine.IndexOf("_engtype_", StringComparison.OrdinalIgnoreCase);
         return type < 0 ? engine : engine[..type];
     }
+
+    /// <summary>The process an instance counts, from its "pid_1234_" prefix; null when it names none.</summary>
+    internal static uint? ProcessOf(string instance)
+    {
+        if (!instance.StartsWith("pid_", StringComparison.OrdinalIgnoreCase)) return null;
+        var digits = instance.AsSpan(4);
+        var end = digits.IndexOf('_');
+        return uint.TryParse(end < 0 ? digits : digits[..end], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var pid)
+            ? pid
+            : null;
+    }
 }

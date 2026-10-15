@@ -81,6 +81,10 @@ public sealed class SampleDraft
     /// <see cref="Sample.DGpuBusyLoad"/>); Windows' load counters fill it.</summary>
     public double? DGpuBusyLoad { get; set; }
 
+    /// <summary>Each process's time on the graphics engines, for the Apps page (see <see cref="Sample.Graphics"/>); Windows'
+    /// load counters fill it.</summary>
+    public GraphicsWork? Graphics { get; set; }
+
     private GpuTotals Totals => GpuCard.Totals(Cards());
 
     /// <summary>Adds a card a source has found. The card's own library adds it first; Windows' load counters then fill in
@@ -108,7 +112,7 @@ public sealed class SampleDraft
             UserIdleSeconds, SessionLocked, Suspect: false,
             totals.Scope, UpsOutputW, UpsSource, UpsName, PsuOutputW, PsuName, PsuWallW,
             cards.Count > 0 ? cards : null, PlatformOwnDraw(),
-            SystemMeterW, SystemMeter, SystemMeterName, PanelInactive, BatteryChargeW, DGpuBusyLoad: DGpuBusyLoad);
+            SystemMeterW, SystemMeter, SystemMeterName, PanelInactive, BatteryChargeW, DGpuBusyLoad: DGpuBusyLoad, Graphics: Graphics);
     }
 
     /// <summary>The platform rail as the machine's own draw. Charging the battery is never the PC's consumption, so a rail
