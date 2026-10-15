@@ -49,7 +49,7 @@ public class AeroShellRenderingTests
     public void Every_page_in_both_themes_wide_and_narrow(string themeName, int width, int height)
     {
         var theme = Enum.Parse<Theme>(themeName);
-        foreach (var page in new[] { Page.Dashboard, Page.Breakdown, Page.Parts, Page.Insights, Page.Report, Page.Household, Page.Settings })
+        foreach (var page in new[] { Page.Dashboard, Page.Apps, Page.Breakdown, Page.Parts, Page.Insights, Page.Report, Page.Household, Page.Settings })
         {
             using var saver = new FakeSaver();
             Draw($"aero-{page}-{theme}-{width}.png", () => AeroFixtures.Shell(saver), width, height, theme, window =>

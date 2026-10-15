@@ -30,7 +30,7 @@ public class AeroWindowTests
             window.Bounds = new Rect(-20000, 10, 1000, 700);
             window.Page = Page.Now;
             shell.Page.ShouldBe(Page.Dashboard, "Classic's Now arrives as the Dashboard");
-            foreach (var own in new[] { Page.Parts, Page.Insights, Page.Breakdown, Page.Report, Page.Household, Page.Settings, Page.Dashboard })
+            foreach (var own in new[] { Page.Parts, Page.Insights, Page.Apps, Page.Breakdown, Page.Report, Page.Household, Page.Settings, Page.Dashboard })
             {
                 window.Page = own;
                 shell.Page.ShouldBe(own, $"Aero has a {own} page");

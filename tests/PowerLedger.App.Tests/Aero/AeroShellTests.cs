@@ -60,15 +60,15 @@ public class AeroShellTests
     }
 
     [Fact]
-    public void The_sidebar_lists_the_seven_pages_and_the_pill_follows_the_page()
+    public void The_sidebar_lists_the_eight_pages_and_the_pill_follows_the_page()
     {
         using var saver = new FakeSaver();
         var shell = AeroFixtures.Shell(saver);
         OnWindow(shell, window =>
         {
             UiHarness.Find<StackPanel>(window, p => p.Name == "NavItems")!.Children.OfType<RadioButton>().Select(AutomationProperties.GetName)
-                .ShouldBe(["Dashboard", "History", "Parts", "Insights", "Reports", "Household", "Settings"]);
-            foreach (var (name, page) in new[] { ("Insights", Page.Insights), ("Parts", Page.Parts), ("History", Page.Breakdown), ("Settings", Page.Settings), ("Dashboard", Page.Dashboard) })
+                .ShouldBe(["Dashboard", "Apps", "History", "Parts", "Insights", "Reports", "Household", "Settings"]);
+            foreach (var (name, page) in new[] { ("Insights", Page.Insights), ("Apps", Page.Apps), ("Parts", Page.Parts), ("History", Page.Breakdown), ("Settings", Page.Settings), ("Dashboard", Page.Dashboard) })
             {
                 var item = NavItem(window, name);
                 item.IsChecked = true;

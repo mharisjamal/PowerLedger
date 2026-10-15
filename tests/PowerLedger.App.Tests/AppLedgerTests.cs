@@ -59,6 +59,18 @@ public class AppLedgerTests
         rows.Where(r => r.Kind != AppRowKind.Total).Sum(r => r.Fraction).ShouldBe(1, 1e-12);
     }
 
+    /// <summary>A line with some energy never reads as none: under half a percent is "<1%", "less than 1 percent".</summary>
+    [Fact]
+    public void A_line_under_half_a_percent_reads_as_less_than_one()
+    {
+        var day = Day();
+        var rows = AppLedger.Rows(day with { Apps = [.. day.Apps, Use("c:\\tiny.exe", "Tiny", 4)] }, English);
+        var tiny = rows.Single(r => r.Name == "Tiny");
+
+        tiny.Share.ShouldBe("<1%");
+        tiny.Spoken.ShouldBe("Tiny, 0.004 kWh, less than 1 percent, 0 rupees");
+    }
+
     [Fact]
     public void Each_line_costs_its_own_hours_and_the_total_is_their_sum()
     {
@@ -145,6 +157,7 @@ public class AppLedgerTests
 
         rows.Where(r => r.Kind == AppRowKind.Beside).Select(r => r.Name).ShouldBe(["Other users"]);
         rows.Where(r => r.Kind == AppRowKind.Fixed).Select(r => r.Name).ShouldBe(["Screen", "Windows and idle", "Rest of your PC"]);
+        rows.Where(r => r.Apart).Select(r => r.Name).ShouldBe(["Screen"], "a rule sets the fixed lines apart");
     }
 
     /// <summary>Energy no app was given (the hour PowerLedger began counting apps in) has a line of its own, so the

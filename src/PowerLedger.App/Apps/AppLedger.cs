@@ -73,6 +73,9 @@ internal sealed record AppRow(string Key, AppRowKind Kind, string Name, string E
     /// <summary>The opened line in words, for a screen reader's help text.</summary>
     public string Detail { get; init; } = "";
 
+    /// <summary>The first of the fixed lines, which a rule sets apart from the apps above it.</summary>
+    public bool Apart { get; init; }
+
     /// <summary>Whether the line has a processor and graphics split to show.</summary>
     public bool HasSplit => Processor is not null;
 }
@@ -138,9 +141,13 @@ internal static class AppLedger
         {
             var fraction = whole > 0 ? wh / whole : 0;
             var energy = Format.Kwh(wh / 1000, culture);
-            var spoken = $"{name}, {energy} kWh, {Math.Round(Math.Clamp(fraction, 0, 1) * 100).ToString("0", culture)} percent";
+            // A line with some energy never reads as none: under half a percent is "<1%".
+            var tiny = fraction > 0 && Math.Round(fraction * 100) == 0;
+            var share = tiny ? "<1%" : Format.Percent(fraction, culture);
+            var percent = tiny ? "less than 1" : Math.Round(Math.Clamp(fraction, 0, 1) * 100).ToString("0", culture);
+            var spoken = $"{name}, {energy} kWh, {percent} percent";
             if (currency is not null) spoken += ", " + Money.Spoken(cost, currency, culture);
-            return new AppRow(key, kind, name, energy, Format.Percent(fraction, culture), fraction, currency is null ? Format.Missing : Money.Format(cost, currency, culture), spoken)
+            return new AppRow(key, kind, name, energy, share, fraction, currency is null ? Format.Missing : Money.Format(cost, currency, culture), spoken)
             {
                 Glyph = glyph,
                 IsOpen = key == open,
@@ -198,7 +205,10 @@ internal static class AppLedger
         }
 
         const string screenNote = "The built-in panel and any monitors counted.";
-        rows.Add(Line(ScreenKey, AppRowKind.Fixed, "Screen", screen, screen > 0 ? Clean(range.Screen.Cost) : 0, AppGlyph.Screen) with { Note = screenNote, Detail = screenNote });
+        rows.Add(Line(ScreenKey, AppRowKind.Fixed, "Screen", screen, screen > 0 ? Clean(range.Screen.Cost) : 0, AppGlyph.Screen) with
+        {
+            Note = screenNote, Detail = screenNote, Apart = true,
+        });
         var systemNote = $"Windows' own processes {Format.Kwh(Wh(windows) / 1000, culture)} kWh, and the processor and graphics at rest {Format.Kwh(Wh(idle) / 1000, culture)} kWh.";
         rows.Add(Line(SystemKey, AppRowKind.Fixed, "Windows and idle", Wh(windows) + Wh(idle), Clean(windows?.Cost) + Clean(idle?.Cost), AppGlyph.System) with
         {

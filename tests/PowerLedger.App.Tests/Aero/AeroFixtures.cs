@@ -20,7 +20,7 @@ internal static class AeroFixtures
         var dashboard = Dashboard(now, saver);
         var insight = new InsightsViewModel(insights ?? new FakeInsights(), UiThreads.Inline, new FakeTimeProvider(MidnightFixtures.Now), TimeZoneInfo.Utc);
         var shell = new ShellViewModel(now, MidnightFixtures.BreakdownScreen(), MidnightFixtures.ReportScreen(saver), MidnightFixtures.HouseholdScreen(pendingApprovals),
-            MidnightFixtures.SettingsScreen(ui ?? Moved(introduced: true)), MidnightFixtures.WizardScreen(), "0.10.0", updates, dashboard, insight)
+            MidnightFixtures.SettingsScreen(ui ?? Moved(introduced: true)), MidnightFixtures.WizardScreen(), "0.10.0", updates, dashboard, insight, AppsFixtures.Screen())
         {
             Page = Page.Dashboard,
         };

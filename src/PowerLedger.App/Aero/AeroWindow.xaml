@@ -170,6 +170,9 @@
                                 <StackPanel x:Name="NavItems" KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Once">
                                     <RadioButton Style="{StaticResource NavItem}" Tag="{StaticResource A.I.Dashboard}" AutomationProperties.Name="Dashboard" Checked="NavChecked"
                                                  IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Dashboard}}" />
+                                    <!-- Plan AE: the hero page, energy and cost by app, beside the Dashboard. -->
+                                    <RadioButton Style="{StaticResource NavItem}" Tag="{StaticResource A.I.Apps}" AutomationProperties.Name="Apps" Checked="NavChecked"
+                                                 IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Apps}}" />
                                     <RadioButton Style="{StaticResource NavItem}" Tag="{StaticResource A.I.History}" AutomationProperties.Name="History" Checked="NavChecked"
                                                  IsChecked="{Binding Page, Converter={StaticResource Is}, ConverterParameter={x:Static local:Page.Breakdown}}" />
                                     <RadioButton Style="{StaticResource NavItem}" Tag="{StaticResource A.I.Chip}" AutomationProperties.Name="Parts" Checked="NavChecked"

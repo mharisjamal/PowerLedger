@@ -70,7 +70,18 @@ internal sealed class AppsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>The ledger's lines (<see cref="AppLedger.Rows"/>), empty while there is nothing to show.</summary>
-    public IReadOnlyList<AppRow> Rows { get => _rows; private set => SetProperty(ref _rows, value); }
+    public IReadOnlyList<AppRow> Rows
+    {
+        get => _rows;
+        private set
+        {
+            var had = HasRows;
+            if (SetProperty(ref _rows, value) && had != HasRows) OnPropertyChanged(nameof(HasRows));
+        }
+    }
+
+    /// <summary>Whether there are lines, so the column heads show.</summary>
+    public bool HasRows => _rows.Count > 0;
 
     /// <summary>Why there are no lines: the history can't be read, or apps haven't been watched long enough yet; null
     /// while there are lines, and before the first read.</summary>

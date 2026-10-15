@@ -83,7 +83,7 @@ public class ScrollGlowWindowTests
         => OnWindow((window, shell) =>
         {
             var overflowing = 0;
-            foreach (var page in new[] { Page.Dashboard, Page.Breakdown, Page.Parts, Page.Insights, Page.Report, Page.Household, Page.Settings })
+            foreach (var page in new[] { Page.Dashboard, Page.Apps, Page.Breakdown, Page.Parts, Page.Insights, Page.Report, Page.Household, Page.Settings })
             {
                 shell.Page = page;
                 UiHarness.Pump(TimeSpan.FromMilliseconds(300));
