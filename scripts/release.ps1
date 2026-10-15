@@ -10,7 +10,8 @@ the universal installer and one per architecture with installer\build.ps1 -For b
 in installer\output with -SkipBuild), since an update downloads whichever matches the PC, creates the release vX.Y.Z with
 the notes in -Notes and all four installers attached, and checks that the SHA-256 GitHub lists for each is the local
 file's, since every installed copy checks its download against that digest (spec §13). -Draft makes a draft, which
-nobody is offered until it is published on GitHub.
+nobody is offered until it is published on GitHub. A release that isn't a draft is also forced: scripts\force-update.ps1
+raises MIN_APP_VERSION in server\wrangler.toml to it and commits that (push and deploy the Worker after); -NoForce skips it.
 
 Each installer is also signed, with its version, file name and SHA-256, by the owner's key,
 %USERPROFILE%\.powerledger\release-signing.pem (made once by
@@ -27,7 +28,8 @@ param(
     [Parameter(Mandatory)][string]$Notes,
     [string]$Repo = 'mharisjamal/PowerLedger',
     [switch]$SkipBuild,
-    [switch]$Draft
+    [switch]$Draft,
+    [switch]$NoForce
 )
 
 $ErrorActionPreference = 'Stop'
@@ -98,3 +100,7 @@ foreach ($name in $shas.Keys) {
 if (-not $Draft) { Invoke-Native 'git fetch' { git -C $root fetch --quiet --tags origin } | Out-Null }
 "Released ${tag}: https://github.com/$Repo/releases/tag/$tag"
 foreach ($name in $shas.Keys) { "${name}: $($shas[$name])" }
+
+# Every published release is forced (the owner's rule, 2026-10-15): older copies update to it once the Worker is deployed.
+# A draft is forced when it is published, with scripts\force-update.ps1. -NoForce leaves the minimum as it is.
+if (-not $Draft -and -not $NoForce) { & (Join-Path $PSScriptRoot 'force-update.ps1') -Version $version }
