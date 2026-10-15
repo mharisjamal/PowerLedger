@@ -110,6 +110,22 @@ internal static class AppLedger
     /// <summary>Whether <paramref name="key"/> is one of the service's special keys rather than an app's.</summary>
     public static bool IsSpecial(string key) => key.StartsWith("::", StringComparison.Ordinal);
 
+    /// <summary>
+    /// What an app is called on screen: the name the service read from its file (its description, else its product), any
+    /// em or en dash in it a plain hyphen, as every word on screen is written; without one, its file's name, or a Store
+    /// app's package name.
+    /// </summary>
+    public static string NameOf(AppUse app)
+    {
+        var name = app.Name.Trim();
+        if (name.Length == 0)
+        {
+            name = app.Key.StartsWith("pkg:", StringComparison.Ordinal) ? app.Key[4..].Split('_')[0]
+                : System.IO.Path.GetFileNameWithoutExtension(app.Path ?? app.Key);
+        }
+        return name.Replace((char)0x2014, '-').Replace((char)0x2013, '-');   // the em and en dash
+    }
+
     /// <summary>Whether the range has enough to show: apps have been watched for a few minutes in it.</summary>
     public static bool HasApps(AppsRange range) => range.Apps.Sum(a => Clean(a.Wh)) >= LeastWh;
 
@@ -123,7 +139,7 @@ internal static class AppLedger
     {
         if (!HasApps(range)) return [];
         AppUse? Find(string key) => range.Apps.FirstOrDefault(a => a.Key == key);
-        var apps = range.Apps.Where(a => !IsSpecial(a.Key) && Clean(a.Wh) > 0).OrderByDescending(a => a.Wh).ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var apps = range.Apps.Where(a => !IsSpecial(a.Key) && Clean(a.Wh) > 0).OrderByDescending(a => a.Wh).ThenBy(NameOf, StringComparer.CurrentCultureIgnoreCase).ToList();
         var listed = apps.Take(MostApps).ToList();
         var other = Together(AppQueries.OtherKey, [Find(AppQueries.OtherKey), .. apps.Skip(MostApps)]);
         var closed = Find(AppQueries.ClosedKey);
@@ -173,7 +189,7 @@ internal static class AppLedger
         AppRow App(AppUse app)
         {
             var store = app.Key.StartsWith("pkg:", StringComparison.Ordinal);
-            var row = Split(Line(app.Key, AppRowKind.App, app.Name, Wh(app), Clean(app.Cost), store ? AppGlyph.Store : AppGlyph.Program) with
+            var row = Split(Line(app.Key, AppRowKind.App, NameOf(app), Wh(app), Clean(app.Cost), store ? AppGlyph.Store : AppGlyph.Program) with
             {
                 Path = store ? null : app.Path,
             }, app, null);

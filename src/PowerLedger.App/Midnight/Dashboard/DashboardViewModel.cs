@@ -313,7 +313,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
 
     /// <summary>"Top app today: Google Chrome, 0.320 kWh" from today's apps, or null with none to name.</summary>
     private string? TopLine(AppsRange? apps)
-        => apps is not null && AppLedger.Top(apps) is { } top ? $"Top app today: {top.Name}, {Format.Kwh(top.Wh / 1000, _culture)} kWh" : null;
+        => apps is not null && AppLedger.Top(apps) is { } top ? $"Top app today: {AppLedger.NameOf(top)}, {Format.Kwh(top.Wh / 1000, _culture)} kWh" : null;
 
     /// <summary>The energy card's own reads: since the start, from the first row's day to now; this week so far, the
     /// same stretch of last week and the whole of it; the whole of last month. Today and this month so far come from the

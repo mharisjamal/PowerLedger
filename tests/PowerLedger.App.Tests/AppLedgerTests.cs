@@ -215,6 +215,19 @@ public class AppLedgerTests
         AppLedger.Top(Day([Use(AppQueries.IdleKey, "Idle", 500), Use("c:\\b.exe", "B", 3)]))!.Name.ShouldBe("B");
     }
 
+    /// <summary>A program's own name is shown as the service read it, with an em or en dash in it made a plain hyphen (the
+    /// owner's rule for every word on screen), and a program without one named by its file.</summary>
+    [Fact]
+    public void A_programs_name_never_shows_a_dash_and_a_nameless_one_is_named_by_its_file()
+    {
+        var rows = AppLedger.Rows(Day([Use(@"c:\tools\spotify.exe", "Spotify \u2013 Music \u2014 Player", 30), Use(@"c:\tools\my-tool.exe", "  ", 20, path: @"C:\Tools\My-Tool.exe"),
+            Use("pkg:contoso.notes_8wekyb3d8bbwe", "", 10)]), English);
+
+        rows.Take(3).Select(r => r.Name).ShouldBe(["Spotify - Music - Player", "My-Tool", "contoso.notes"]);
+        AppLedger.Top(Day([Use(@"c:\a.exe", "A \u2014 B", 30)]))!.Name.ShouldBe("A \u2014 B", "the use as read; the line names it");
+        AppLedger.NameOf(Use(@"c:\a.exe", "A \u2014 B", 30)).ShouldBe("A - B");
+    }
+
     [Fact]
     public void No_line_reads_with_a_dash()
         => AppLedger.Rows(Day(rest: 200, asleep: 20, losses: 10, untraced: 40), English)

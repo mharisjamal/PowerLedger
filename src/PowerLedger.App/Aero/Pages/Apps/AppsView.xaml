@@ -84,7 +84,7 @@
                         <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                             <TextBlock Style="{StaticResource A.PanelTitle}" Text="Apps" />
                             <TextBlock x:Name="Summary" Style="{StaticResource A.Label}" Margin="0,4,0,0" Text="{Binding Summary}" TextTrimming="CharacterEllipsis"
-                                       AutomationProperties.LiveSetting="Polite" Visibility="{Binding Summary, Converter={StaticResource VisibleWhenText}}" />
+                                       Visibility="{Binding Summary, Converter={StaticResource VisibleWhenText}}" />
                         </StackPanel>
                     </DockPanel>
                     <TextBlock Style="{StaticResource A.Page.Note}" Margin="0,-4,0,10" Text="{Binding Note}" Visibility="{Binding Note, Converter={StaticResource VisibleWhenText}}" />
@@ -118,7 +118,7 @@
                                     <Border x:Name="Rule" Height="1" Margin="14,8,14,8" Background="{DynamicResource A.B.GroupSep}" Visibility="Collapsed" />
                                     <Border x:Name="Card" CornerRadius="{DynamicResource A.R.MenuItem}" Background="Transparent">
                                         <StackPanel>
-                                            <app:Disclosure x:Name="Head" Style="{StaticResource Line}" IsExpanded="{Binding IsOpen, Mode=OneWay}" ToolTip="{Binding Name}"
+                                            <app:Disclosure x:Name="Head" Style="{StaticResource Line}" IsExpanded="{Binding IsOpen, Mode=OneWay}"
                                                             Command="{Binding DataContext.Toggle, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Key}"
                                                             AutomationProperties.Name="{Binding Spoken}" AutomationProperties.HelpText="{Binding Detail}">
                                                 <Grid>
@@ -133,7 +133,7 @@
                                                     <app:AppIcon x:Name="Picture" Width="28" Height="28" HorizontalAlignment="Left" Path="{Binding Path}" Glyph="{Binding Glyph}"
                                                                  Tile="{DynamicResource A.B.Well2}" Foreground="{DynamicResource A.B.Text2}" />
                                                     <TextBlock x:Name="Label" Grid.Column="1" Style="{StaticResource A.Page.Cell}" Margin="0,0,14,0" Text="{Binding Name}"
-                                                               TextTrimming="CharacterEllipsis" />
+                                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
                                                     <TextBlock x:Name="Energy" Grid.Column="2" Style="{StaticResource A.Page.Cell.Number}" Text="{Binding Energy}" />
                                                     <DockPanel Grid.Column="3" Margin="16,0,0,0" VerticalAlignment="Center">
                                                         <TextBlock DockPanel.Dock="Right" Style="{StaticResource A.Page.Cell.Number}" Foreground="{DynamicResource A.B.Text2}"
@@ -224,7 +224,6 @@
                                         <Setter TargetName="Chevron" Property="Visibility" Value="Hidden" />
                                         <Setter TargetName="Head" Property="IsHitTestVisible" Value="False" />
                                         <Setter TargetName="Head" Property="Focusable" Value="False" />
-                                        <Setter TargetName="Head" Property="ToolTip" Value="{x:Null}" />
                                     </DataTrigger>
                                     <!-- Opened: the line lit as a well, its details gliding down into place and the chevron
                                          turning; under reduced motion only the fade is left. -->
