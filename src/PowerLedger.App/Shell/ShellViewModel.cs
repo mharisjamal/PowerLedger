@@ -5,7 +5,8 @@ namespace PowerLedger.App;
 
 /// <summary>The screens of spec §9's rail, Midnight's Dashboard (Midnight look design §2), which stands in for Now there
 /// as Now stands in for it in Classic, and Aero's Parts and Insights (Aero look design §1), which only Aero has: the
-/// other looks show their landing page for them.</summary>
+/// other looks show their landing page for them. Aero's Apps page (Plan AE) the other looks show as their History, which
+/// lists the apps in a table.</summary>
 internal enum Page
 {
     Now,
@@ -16,6 +17,7 @@ internal enum Page
     Dashboard,
     Parts,
     Insights,
+    Apps,
 }
 
 /// <summary>The window: which page shows, the screens, the first-run wizard while it runs, and the version in the title bar.</summary>
@@ -28,7 +30,7 @@ internal sealed class ShellViewModel : ObservableObject
     public ShellViewModel(
         NowViewModel now, BreakdownViewModel breakdown, ReportViewModel report, HouseholdViewModel household, SettingsViewModel settings,
         WizardViewModel wizard, string version, Updater? updates = null, DashboardViewModel? dashboard = null,
-        InsightsViewModel? insights = null)
+        InsightsViewModel? insights = null, AppsViewModel? apps = null)
     {
         Now = now;
         Breakdown = breakdown;
@@ -40,6 +42,7 @@ internal sealed class ShellViewModel : ObservableObject
         Updates = updates;
         Dashboard = dashboard;
         Insights = insights;
+        Apps = apps;
         Wizard.Finished += EndSetup;
         Settings.SetupRequested += BeginSetup;
         Settings.PropertyChanged += (_, e) =>
@@ -57,6 +60,9 @@ internal sealed class ShellViewModel : ObservableObject
 
     /// <summary>Aero's Insights page (Aero look design §4); without it the page shows the Dashboard, or Now.</summary>
     public InsightsViewModel? Insights { get; }
+
+    /// <summary>Aero's Apps page (Plan AE); without it the page shows History, whose table lists the apps.</summary>
+    public AppsViewModel? Apps { get; }
 
     /// <summary>The title bars' Switch look button: the other look, chosen as in Settings, so the choice is kept.</summary>
     public IRelayCommand SwitchLook { get; }
@@ -126,6 +132,7 @@ internal sealed class ShellViewModel : ObservableObject
         Page.Dashboard => Dashboard ?? (object)Now,
         Page.Parts => Dashboard ?? (object)Now,   // Aero's Parts page draws DashboardViewModel.Parts
         Page.Insights => Insights ?? Dashboard ?? (object)Now,
+        Page.Apps => Apps ?? (object)Breakdown,
         Page.Breakdown => Breakdown,
         Page.Report => Report,
         Page.Household => Household,
@@ -155,7 +162,9 @@ internal sealed class ShellViewModel : ObservableObject
         else Dashboard?.Hide();
         if (shown == Page.Insights) Insights?.Show();
         else Insights?.Hide();
-        if (shown == Page.Breakdown) Breakdown.Show();
+        if (shown == Page.Apps) Apps?.Show();
+        else Apps?.Hide();
+        if (shown == Page.Breakdown || (shown == Page.Apps && Apps is null)) Breakdown.Show();
         else Breakdown.Hide();
         if (shown == Page.Report) Report.Show();
         else Report.Hide();

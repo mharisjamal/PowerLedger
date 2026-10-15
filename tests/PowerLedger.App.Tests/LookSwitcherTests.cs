@@ -260,12 +260,15 @@ public class LookSwitcherTests
         });
 
     /// <summary>Aero look design §1: a page only Aero has is shown as the other look's landing page when switching away
-    /// from it, and the landing pages map both ways.</summary>
+    /// from it, and the landing pages map both ways. Aero's Apps page (Plan AE) is the other looks' History, which lists
+    /// the apps.</summary>
     [Theory]
     [InlineData("Aero", "Insights", "Midnight", "Dashboard")]
     [InlineData("Aero", "Parts", "Midnight", "Dashboard")]
     [InlineData("Aero", "Insights", "Classic", "Now")]
     [InlineData("Aero", "Dashboard", "Classic", "Now")]
+    [InlineData("Aero", "Apps", "Midnight", "Breakdown")]
+    [InlineData("Aero", "Apps", "Classic", "Breakdown")]
     [InlineData("Classic", "Now", "Aero", "Dashboard")]
     [InlineData("Midnight", "Report", "Aero", "Report")]
     public void A_switch_shows_the_new_looks_own_page_for_one_it_has_no_view_for(string fromLook, string onPage, string toLook, string lands)

@@ -39,7 +39,8 @@ public partial class MainWindow : Window, IShellWindow
         set => WindowState = value;
     }
 
-    /// <summary>Classic has no Dashboard, nor Aero's Parts and Insights: each maps to Now, the landing page.</summary>
+    /// <summary>Classic has no Dashboard, nor Aero's Parts and Insights: each maps to Now, the landing page. Aero's Apps
+    /// maps to Breakdown, which lists the apps (Plan AE).</summary>
     Page IShellWindow.Page
     {
         get => Shell?.Page ?? Page.Now;
@@ -49,8 +50,13 @@ public partial class MainWindow : Window, IShellWindow
         }
     }
 
-    /// <summary>The page Classic shows for <paramref name="page"/>: Now for one it has no view for.</summary>
-    internal static Page OwnPage(Page page) => page is Page.Dashboard or Page.Parts or Page.Insights ? Page.Now : page;
+    /// <summary>The page Classic shows for <paramref name="page"/>: Now for one it has no view for, Breakdown for Apps.</summary>
+    internal static Page OwnPage(Page page) => page switch
+    {
+        Page.Dashboard or Page.Parts or Page.Insights => Page.Now,
+        Page.Apps => Page.Breakdown,
+        _ => page,
+    };
 
     Window IShellWindow.Window => this;
 

@@ -100,6 +100,7 @@ public class AeroShellLogicTests
     [InlineData("Household", "PowerLedger.App.Aero.HouseholdView")]
     [InlineData("Settings", "PowerLedger.App.Aero.SettingsView")]
     [InlineData("Insights", "PowerLedger.App.Aero.InsightsView")]
+    [InlineData("Apps", "PowerLedger.App.Aero.AppsView")]
     public void Each_page_has_its_view_by_page_not_only_by_type(string page, string view)
         => AeroPageHost.ViewName(Enum.Parse<Page>(page)).ShouldBe(view);
 }

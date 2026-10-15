@@ -83,6 +83,43 @@ public class ShellViewModelTests
         insights.Reads.Count.ShouldBe(2);
     }
 
+    /// <summary>Plan AE: the Apps page reads as it shows and every minute while it does, and stops once another shows.</summary>
+    [Fact]
+    public void The_apps_page_reads_only_while_it_shows()
+    {
+        var history = new FakeAppHistory();
+        var apps = new AppsViewModel(history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English);
+        var shell = new ShellViewModel(
+            new NowViewModel(new FakeLink(), new FakeHistory(), UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4, () => { }),
+            new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English),
+            new ReportViewModel(_link, _history, _householdHistory, new FakeSleep(), new FakeSaver(), _ => [], UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, 0.4),
+            new HouseholdViewModel(_link, _householdHistory, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, FakeAccount.Model(_link)),
+            new SettingsViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
+            new WizardViewModel(_link, _machine, _ui, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, "USD"),
+            "0.1.0", apps: apps);
+
+        shell.Page = Page.Apps;
+
+        shell.Current.ShouldBe(apps);
+        history.Reads.Count.ShouldBe(1);
+        _clock.Advance(AppsViewModel.RefreshEvery);
+        history.Reads.Count.ShouldBe(2);
+
+        shell.Page = Page.Breakdown;
+        _clock.Advance(AppsViewModel.RefreshEvery * 3);
+        history.Reads.Count.ShouldBe(2);
+    }
+
+    /// <summary>Without the Apps page (a look that lists apps on its History page instead), it shows History.</summary>
+    [Fact]
+    public void Without_the_apps_page_it_shows_history()
+    {
+        var bare = Shell();
+        bare.Page = Page.Apps;
+        bare.Current.ShouldBe(bare.Breakdown);
+        _history.Reads.ShouldNotBeEmpty("History reads as it would on its own page");
+    }
+
     [Fact]
     public void Without_insights_their_page_shows_the_dashboard_or_now()
     {

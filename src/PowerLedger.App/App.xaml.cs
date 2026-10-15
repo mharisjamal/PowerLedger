@@ -152,7 +152,9 @@ public partial class App : Application
         var prefs = _preferences;
         var insights = new InsightsViewModel(
             new Insights(history, () => prefs.Current.Co2KgPerKwh, GridFactors.WindowsRegion(), IdleSetup.Reader(_database)), threads, TimeProvider.System, zone, culture);
-        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard, insights);
+        // Plan AE: energy and cost by app, read on this PC and never shared, sent or synced.
+        var apps = new AppsViewModel(history, threads, TimeProvider.System, zone, culture);
+        _shell = new ShellViewModel(_now, _breakdown, _report, _household, _settings, _wizard, version, _updates, _dashboard, insights, apps);
         _shell.FeedbackRequested += OpenFeedbackWindow;
         // Review 6: a saved look that won't open at start opens Classic instead, which is then saved, through Settings as
         // any choice of look is, so the next start doesn't fail the same way; the switcher logs why.
@@ -254,6 +256,7 @@ public partial class App : Application
             Page.Household => "household",
             Page.Parts => "parts",
             Page.Insights => "insights",
+            Page.Apps => "apps",
             _ => "settings",
         });
     }

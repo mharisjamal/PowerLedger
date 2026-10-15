@@ -42,6 +42,7 @@ internal sealed class AeroPageHost : Grid
         Page.Household => "PowerLedger.App.Aero.HouseholdView",
         Page.Settings => "PowerLedger.App.Aero.SettingsView",
         Page.Insights => "PowerLedger.App.Aero.InsightsView",
+        Page.Apps => "PowerLedger.App.Aero.AppsView",
         _ => "PowerLedger.App.Aero.DashboardView",
     };
 
@@ -57,6 +58,7 @@ internal sealed class AeroPageHost : Grid
         HouseholdViewModel => ViewName(Page.Household),
         SettingsViewModel => ViewName(Page.Settings),
         InsightsViewModel => ViewName(Page.Insights),
+        AppsViewModel => ViewName(Page.Apps),
         _ => ViewName(Page.Dashboard),
     };
 
@@ -102,6 +104,7 @@ internal sealed class AeroPageHost : Grid
         Page.Breakdown => "History",
         Page.Parts => "Parts",
         Page.Insights => "Insights",
+        Page.Apps => "Apps",
         Page.Report => "Reports",
         Page.Household => "Household",
         _ => "Settings",
