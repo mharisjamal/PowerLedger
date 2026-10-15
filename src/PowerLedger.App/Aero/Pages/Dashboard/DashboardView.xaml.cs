@@ -252,6 +252,12 @@ public partial class DashboardView : UserControl
         if (_shell is not null) _shell.Page = Page.Report;
     }
 
+    /// <summary>Today's top app (Plan AE) opens the Apps page.</summary>
+    private void TopAppClick(object sender, RoutedEventArgs e)
+    {
+        if (_shell is not null) _shell.Page = Page.Apps;
+    }
+
     /// <summary>Day, Week or Month: the bars read again for the span, and the bubble slides to the word.</summary>
     private void SpanChecked(object sender, RoutedEventArgs e)
     {

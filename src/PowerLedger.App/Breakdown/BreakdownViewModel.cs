@@ -43,11 +43,19 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     private IReadOnlyList<PartRow> _foundParts = [];
     private string? _searchMessage;
     private string? _saved;
+    private readonly IAppHistory? _apps;
+    private bool _readsApps = true;
+    private AppsRange? _appsRead;
+    private IReadOnlyList<AppRow> _appRows = [];
+    private string? _appsMessage;
+    private bool _hasApps;
 
     /// <param name="saver">Where Save CSV asks to save; without one (Classic and Midnight, which don't offer it) the command
     /// does nothing.</param>
+    /// <param name="apps">Where the range's apps are read (Plan AE), for Midnight's and Classic's table of them; none
+    /// leaves the table out.</param>
     public BreakdownViewModel(IServiceLink link, IRangeHistory history, UiThreads threads, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture,
-        IFileSaver? saver = null)
+        IFileSaver? saver = null, IAppHistory? apps = null)
     {
         _link = link;
         _history = history;
@@ -56,6 +64,7 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
         _zone = zone;
         _culture = culture;
         _saver = saver;
+        _apps = apps;
         _footnote = FootnoteFor(null);
         Range = new RangePicker(RangeChoice.Today, Ranges.LocalDay(clock.GetUtcNow(), zone));
         Range.Changed += Refresh;
@@ -131,6 +140,34 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     /// <summary>What the display band holds, over any range and on this machine, and what the units mean.</summary>
     public string Footnote { get => _footnote; private set => SetProperty(ref _footnote, value); }
 
+    /// <summary>Whether History reads the range's apps (Plan AE): Midnight's and Classic's list them in a table; Aero, which
+    /// has a page of its own for them, turns it off while its window is open. Turned on while the page shows, it reads at
+    /// once.</summary>
+    public bool ReadsApps
+    {
+        get => _readsApps;
+        set
+        {
+            if (!SetProperty(ref _readsApps, value)) return;
+            if (value && _timer is not null) Refresh();
+            else if (!value)
+            {
+                _appsRead = null;
+                ShowApps();
+            }
+        }
+    }
+
+    /// <summary>The range's apps as the Apps page's ledger lists them (<see cref="AppLedger.Rows"/>).</summary>
+    public IReadOnlyList<AppRow> Apps { get => _appRows; private set => SetProperty(ref _appRows, value); }
+
+    /// <summary>Why the apps' table is empty: apps not watched a few minutes yet; null while it lists them.</summary>
+    public string? AppsMessage { get => _appsMessage; private set => SetProperty(ref _appsMessage, value); }
+
+    /// <summary>Whether the apps' table shows: the range's apps were read, listed or waiting to be. Hidden when they
+    /// couldn't be read, which the page's own message says.</summary>
+    public bool HasApps { get => _hasApps; private set => SetProperty(ref _hasApps, value); }
+
     /// <summary>The page is shown: read now, and every minute until it is hidden. Call on the UI thread.</summary>
     public void Show()
     {
@@ -149,7 +186,8 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     {
         var read = ++_reads;
         var range = Range.Resolve(_clock.GetUtcNow(), _zone, _culture);
-        _threads.Background(() => _ = ReadAsync(read, range));
+        var apps = ReadsApps ? _apps : null;
+        _threads.Background(() => _ = ReadAsync(read, range, apps));
     }
 
     public void Dispose()
@@ -173,18 +211,39 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
         return display + Units;
     }
 
-    private async Task ReadAsync(int read, DateRange range)
+    private async Task ReadAsync(int read, DateRange range, IAppHistory? apps)
     {
         var report = _history.Read(range, _zone);
+        AppsRange? appsRead = null;
+        try
+        {
+            appsRead = apps?.Apps(range);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Read as apps that couldn't be read: the table goes, and the next read tries again.
+        }
         var settings = await _link.GetSettingsAsync().ConfigureAwait(false);
         _threads.Post(() =>
         {
             if (read != _reads) return;
             _range = range;
             _report = report;
+            _appsRead = appsRead;
             Footnote = FootnoteFor(settings);
             Rebuild();
+            ShowApps();
         });
+    }
+
+    /// <summary>The apps' table from the last read (Plan AE): the ledger's lines; why it is empty; or nothing, when they
+    /// weren't read or couldn't be.</summary>
+    private void ShowApps()
+    {
+        var apps = ReadsApps ? _appsRead : null;
+        Apps = apps is null ? [] : AppLedger.Rows(apps, _culture);
+        HasApps = apps is not null;
+        AppsMessage = apps is not null && Apps.Count == 0 ? "Apps show here once PowerLedger has watched them for a few minutes." : null;
     }
 
     private void Rebuild()

@@ -396,6 +396,15 @@
                             </local:RowsInPlace.Template>
                         </ItemsControl>
                     </StackPanel>
+                    <!-- Plan AE: today's top app under the parts, a quiet line that opens History, where each app is listed. -->
+                    <Button x:Name="TopApp" Style="{StaticResource M.Button.Quiet}" HorizontalAlignment="Left" Margin="-12,8,0,6" Click="TopAppClick"
+                            Visibility="{Binding TopApp, Converter={StaticResource VisibleWhenText}}" AutomationProperties.Name="{Binding TopApp}"
+                            AutomationProperties.HelpText="Opens History, where each app is listed" ToolTip="Each app in History">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding TopApp}" VerticalAlignment="Center" />
+                            <TextBlock Style="{StaticResource M.Text.Glyph}" Text="&#xE76C;" FontSize="10" Margin="7,1,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Border>
         </StackPanel>

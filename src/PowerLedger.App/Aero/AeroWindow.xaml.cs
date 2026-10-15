@@ -87,6 +87,7 @@ internal partial class AeroWindow : Window, IShellWindow
             shell.Now.PropertyChanged -= OnNowChanged;
             if (shell.Insights is { } insights) insights.PropertyChanged -= OnInsightsChanged;
             if (shell.Dashboard is { } dashboard) dashboard.Detailed = false;
+            shell.Breakdown.ReadsApps = true;   // the other looks' History lists the apps again (Plan AE)
             _problemTimer.Stop();
             _toastTimer?.Stop();
             StopIntroVideo();
@@ -216,6 +217,7 @@ internal partial class AeroWindow : Window, IShellWindow
         if (!IsVisible) return;
         ShowPcs();   // this PC's watts, which a reading leaves alone while the window is hidden
         if (_shell.Dashboard is { } dashboard) dashboard.Detailed = true;
+        _shell.Breakdown.ReadsApps = false;   // Aero lists the apps on a page of their own (Plan AE), not on History
         // Shown again, from the tray: the reveal plays every time the window opens (0.10.6), not only the first.
         if (_shown && IsLoaded) QueueReveal();
         if (_shown) return;

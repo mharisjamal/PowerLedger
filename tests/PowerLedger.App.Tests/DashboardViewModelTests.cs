@@ -48,6 +48,40 @@ public sealed class DashboardViewModelTests : IDisposable
         return _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, UiThreads.Inline, _ui);
     }
 
+    /// <summary>Plan AE: under Where the power went, today's top app and its energy, read with the rest of the pass; none
+    /// before apps have been watched, with no apps to read, or when they can't be read.</summary>
+    [Fact]
+    public void Todays_top_app_is_named_with_its_energy_and_left_out_until_there_is_one()
+    {
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+        var apps = new FakeAppHistory();
+        var dashboard = _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, UiThreads.Inline, _ui, apps: apps);
+        dashboard.TopApp.ShouldBeNull();
+
+        dashboard.Show();
+
+        dashboard.TopApp.ShouldBe("Top app today: Google Chrome, 0.320 kWh");
+        apps.Reads.Single().Title.ShouldBe("Today");
+        apps.Reads[0].From.ShouldBe(new DateTimeOffset(2026, 9, 8, 0, 0, 0, TimeSpan.Zero));
+
+        apps.Answer = _ => Storage.AppsRange.None(Now.AddHours(-14), Now, null, "USD");
+        _clock.Advance(DashboardViewModel.RefreshEvery);
+        dashboard.TopApp.ShouldBeNull();
+
+        apps.Answer = _ => null;
+        _clock.Advance(DashboardViewModel.RefreshEvery);
+        dashboard.TopApp.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Without_the_apps_history_there_is_no_top_app_line()
+    {
+        var dashboard = Dashboard();
+        dashboard.Show();
+        dashboard.TopApp.ShouldBeNull();
+    }
+
     [Fact]
     public void Each_part_names_its_model_under_it_once_read_and_none_without()
     {

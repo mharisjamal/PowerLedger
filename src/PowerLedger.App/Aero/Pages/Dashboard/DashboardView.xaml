@@ -239,7 +239,32 @@
                 <aero:GlassPanel x:Name="PParts" Grid.Row="2" Grid.Column="2" Padding="24" AutomationProperties.Name="Where the power goes">
                     <StackPanel x:Name="PartsContent">
                         <TextBlock Text="Where the power goes" Style="{StaticResource Head}" />
-                        <Grid Width="180" Height="180" Margin="0,22,0,16" HorizontalAlignment="Center">
+                        <!-- Plan AE: today's top app under the head, a quiet line that opens the Apps page; the ring comes up by
+                             as much, so the pane keeps the mockup's height. -->
+                        <Button x:Name="TopApp" Style="{StaticResource A.RowBtn}" Padding="8,2" Margin="-8,2,-8,0" HorizontalAlignment="Left" Click="TopAppClick"
+                                Visibility="{Binding TopApp, Converter={StaticResource VisibleWhenText}}" AutomationProperties.Name="{Binding TopApp}"
+                                AutomationProperties.HelpText="Opens Apps" ToolTip="Open Apps">
+                            <DockPanel>
+                                <aero:Icon DockPanel.Dock="Right" Data="{StaticResource A.I.Chevron}" Size="12" StrokeWidth="2" Margin="5,0,0,0" Foreground="{DynamicResource A.B.Text2}"
+                                           RenderTransformOrigin=".5,.5">
+                                    <aero:Icon.RenderTransform>
+                                        <RotateTransform Angle="-90" />
+                                    </aero:Icon.RenderTransform>
+                                </aero:Icon>
+                                <TextBlock Text="{Binding TopApp}" Style="{StaticResource Sub}" VerticalAlignment="Center" />
+                            </DockPanel>
+                        </Button>
+                        <Grid Width="180" Height="180" HorizontalAlignment="Center">
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Margin" Value="0,22,0,16" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Visibility, ElementName=TopApp}" Value="Visible">
+                                            <Setter Property="Margin" Value="0,8,0,8" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
                             <aero:DonutChart x:Name="Ring" Parts="{Binding Parts}" />
                             <aero:GlassPanel x:Name="RingHole" Width="100" Height="100" CornerRadius="50" IsHitTestVisible="False" />
                         </Grid>

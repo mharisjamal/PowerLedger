@@ -88,6 +88,85 @@ public class MidnightPageRenderingTests
         Sizes(30_000, "history", "history-hour", "history-custom");
     }
 
+    /// <summary>Plan AE: Midnight's History lists the range's apps in a card of their own, the Apps ledger as a table:
+    /// each line's icon, name, kWh, share and cost, the fixed lines set apart, the total; a line's tooltip and help text
+    /// say what it holds, and a screen reader hears its name, energy, share and cost.</summary>
+    [Fact]
+    public void History_lists_the_ranges_apps_in_a_table_in_both_themes()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                using var styles = Midnight(theme);
+                var model = BreakdownScreen();
+                model.Show();
+                var view = new Midnight.HistoryView { DataContext = model };
+                using var page = Page(view, 1010);
+                PumpUntil(() => AllOf<AppIcon>(view).Where(i => i.Path is { } p && File.Exists(p)).All(i => i.Image is not null), TimeSpan.FromSeconds(10), "the icons");
+                Find<TextBlock>(view, t => t.Text == "By app").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
+                var table = Find<ItemsControl>(view, items => items.ItemsSource == model.Apps).ShouldNotBeNull(theme.ToString());
+                table.Items.Count.ShouldBe(model.Apps.Count, theme.ToString());
+                model.Apps.Count.ShouldBe(12, theme.ToString());
+                foreach (var app in model.Apps)
+                {
+                    var row = (FrameworkElement)table.ItemContainerGenerator.ContainerFromItem(app);
+                    Find<TextBlock>(row, t => t.Text == app.Name).ShouldNotBeNull($"{app.Name} on {theme}");
+                    Find<TextBlock>(row, t => t.Text == app.Energy).ShouldNotBeNull($"{app.Name} on {theme}");
+                    Find<TextBlock>(row, t => t.Text == app.Cost).ShouldNotBeNull($"{app.Name} on {theme}");
+                    var line = Find<Border>(row, b => b.Name == "Line")!;
+                    System.Windows.Automation.AutomationProperties.GetName(line).ShouldBe(app.Spoken, $"{app.Name} on {theme}");
+                }
+                page.Render($"midnight-history-apps-{theme}.png");
+            }
+        });
+        Sizes(30_000, "history-apps");
+    }
+
+    /// <summary>Plan AE: under Where the power went, today's top app and its energy, a quiet line that opens History,
+    /// where Midnight lists each app.</summary>
+    [Fact]
+    public void The_dashboard_names_todays_top_app_under_where_the_power_went_and_opens_history()
+    {
+        Directory.CreateDirectory(Folder);
+        OnUi(() =>
+        {
+            foreach (var theme in new[] { Theme.Dark, Theme.Light })
+            {
+                using var styles = Midnight(theme);
+                var model = MidnightFixtures.DashboardScreen(MidnightFixtures.NowScreen());
+                model.Show();
+                var view = new DashboardView { DataContext = model };
+                using var page = Page(view, 1010);
+                var line = (Button)view.FindName("TopApp");
+                line.IsVisible.ShouldBeTrue(theme.ToString());
+                System.Windows.Automation.AutomationProperties.GetName(line).ShouldBe("Top app today: Google Chrome, 0.344 kWh", theme.ToString());
+                Find<TextBlock>(line, t => t.Text == "Top app today: Google Chrome, 0.344 kWh").ShouldNotBeNull(theme.ToString());
+                // Drawn whole without the cut-off walk: the parts' rows reach 8 px past the card's text by design, for their hover wash.
+                RenderWhole(page.Host, page.Host.Background, $"midnight-dashboard-apps-{theme}.png");
+            }
+
+            using var saver = new FakeSaver();
+            var shell = MidnightFixtures.Shell(saver);
+            var window = MidnightFixtures.Window(shell, Theme.Dark);
+            window.Show();
+            try
+            {
+                Pump(TimeSpan.FromMilliseconds(800));
+                var line = Find<Button>(window, b => b.Name == "TopApp").ShouldNotBeNull();
+                line.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                Pump(TimeSpan.FromMilliseconds(300));
+                shell.Page.ShouldBe(PowerLedger.App.Page.Breakdown);
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+        Sizes(30_000, "dashboard-apps");
+    }
+
     [Fact]
     public void Report_shows_the_export_row_and_the_sheet_as_cards_and_its_png_export_draws_the_sheet_in_both_themes()
     {
@@ -686,7 +765,8 @@ public class MidnightPageRenderingTests
         var link = new FakeLink();
         link.Connect(true);
         var history = new FakeRangeHistory { Answer = range => Reports.Typical(range) with { Series = Week(range) } };
-        return new BreakdownViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English);
+        return new BreakdownViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English,
+            apps: new FakeAppHistory { Answer = _ => AppsFixtures.Day() });
     }
 
     private static IReadOnlyList<Aggregate> Week(DateRange range)

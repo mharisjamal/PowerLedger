@@ -114,8 +114,8 @@
                         <app:RowsInPlace.Template>
                             <DataTemplate DataType="{x:Type app:AppRow}">
                                 <StackPanel>
-                                    <!-- The fixed lines, set apart from the apps above them by a rule. -->
-                                    <Border x:Name="Rule" Height="1" Margin="14,8,14,8" Background="{DynamicResource A.B.WellTop}" Visibility="Collapsed" />
+                                    <!-- The fixed lines, set apart from the apps above them by a rule, the mockup's hairline (.sep). -->
+                                    <Border x:Name="Rule" Height="1" Margin="14,8,14,8" Background="{DynamicResource A.B.GroupSep}" Visibility="Collapsed" />
                                     <Border x:Name="Card" CornerRadius="{DynamicResource A.R.MenuItem}" Background="Transparent">
                                         <StackPanel>
                                             <app:Disclosure x:Name="Head" Style="{StaticResource Line}" IsExpanded="{Binding IsOpen, Mode=OneWay}" ToolTip="{Binding Name}"

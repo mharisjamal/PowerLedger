@@ -107,7 +107,7 @@ public partial class App : Application
 
         _now = new NowViewModel(_link, history, threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh, ServiceStarter.Start);
         var saver = new FileSaver();   // one Save as dialog for the Report's exports and History's Save CSV
-        _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture, saver);
+        _breakdown = new BreakdownViewModel(_link, history, threads, TimeProvider.System, zone, culture, saver, apps: history);
         _report = new ReportViewModel(
             _link, history, householdHistory, sleep, saver, Pdf,threads, TimeProvider.System, zone, culture, preferences.Co2KgPerKwh);
         var autostart = new StartWithWindows(Environment.ProcessPath!);
@@ -147,7 +147,7 @@ public partial class App : Application
         _wizard = new WizardViewModel(_link, history, _preferences, threads, TimeProvider.System, zone, culture, RegionCurrency());
         _consentGate = new ConsentGate(_link, threads, TimeProvider.System, OpenConsentDialog);
         _wizard.Finished += () => _consentGate?.CheckOnce();   // spec §2: a new install is asked as soon as the wizard finishes
-        _dashboard = new DashboardViewModel(_now, history, history, TimeProvider.System, zone, culture, threads, _preferences, new HardwareNames());
+        _dashboard = new DashboardViewModel(_now, history, history, TimeProvider.System, zone, culture, threads, _preferences, new HardwareNames(), apps: history);
         // Aero look design §4: Insights over the PC's own history, with Settings' CO₂ per kWh as it stands at each read.
         var prefs = _preferences;
         var insights = new InsightsViewModel(

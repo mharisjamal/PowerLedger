@@ -24,6 +24,8 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private readonly NowViewModel _now;
     private readonly IRangeHistory _history;
     private readonly IHistory _summary;
+    private readonly IAppHistory? _apps;
+    private string? _topApp;
     private readonly TimeProvider _clock;
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
@@ -54,10 +56,11 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     /// <param name="Before">The parts' range a period back, for their trends.</param>
     /// <param name="FirstRow">When the history begins, or null with none: this month is the first only when it begins in it.</param>
     /// <param name="Energy">The energy card's period as it was read.</param>
+    /// <param name="Apps">Today's apps (Plan AE), for the top app's line; null with none read.</param>
     private sealed record Reading(
         RangePill Pill, DateTimeOffset LocalNow, HistorySnapshot? Snapshot, RangeReport? Recent, RangeReport? LastMonth,
         DateRange ChartRange, RangeReport? Chart, DateRange PartsWindow, RangeReport? Parts, RangeReport? Before, DateTimeOffset? FirstRow = null,
-        EnergyReading? Energy = null, DetailReading? More = null);
+        EnergyReading? Energy = null, DetailReading? More = null, AppsRange? Apps = null);
 
     /// <summary>Aero's reads (Aero look design §1), made only while <see cref="Detailed"/>: yesterday to the same time,
     /// the last seven days by the day (the parts' trends), and Energy each day's fourteen periods of its span, by the day.</summary>
@@ -76,13 +79,15 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
     private sealed record EnergyReading(EnergyPeriod Period, RangeReport? SoFar = null, RangeReport? SamePoint = null, RangeReport? Whole = null);
 
     /// <param name="ui">Where the energy card's period is kept between runs; none keeps it for this run only.</param>
+    /// <param name="apps">Where today's apps are read for the top app's line (Plan AE); none leaves the line out.</param>
     public DashboardViewModel(
         NowViewModel now, IRangeHistory history, IHistory summary, TimeProvider clock, TimeZoneInfo zone, CultureInfo culture, UiThreads threads,
-        IUiSettings? ui = null, IHardwareNames? hardware = null)
+        IUiSettings? ui = null, IHardwareNames? hardware = null, IAppHistory? apps = null)
     {
         _now = now;
         _history = history;
         _summary = summary;
+        _apps = apps;
         _clock = clock;
         _zone = zone;
         _culture = culture;
@@ -178,6 +183,10 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
 
     /// <summary>"Where the power went": one row a part, CPU first.</summary>
     public IReadOnlyList<DashboardPart> Parts { get => _parts; private set => SetProperty(ref _parts, value); }
+
+    /// <summary>Under "Where the power went" (Plan AE): "Top app today: Google Chrome, 0.320 kWh", which opens the apps;
+    /// null before apps have been watched a few minutes today, and when they can't be read.</summary>
+    public string? TopApp { get => _topApp; private set => SetProperty(ref _topApp, value); }
 
     /// <summary>
     /// Whether the page on show wants Aero's figures as well (Aero look design §1, Plan S D3): Aero's window asks while it
@@ -276,6 +285,7 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
                 if (kept is null) ShowChart();
                 Rebuild();
                 ShowDetail();
+                TopApp = TopLine(reading.Apps);
             });
         });
     }
@@ -297,8 +307,13 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             _history.Read(partsRange, _zone),
             _history.Read(Before(partsRange, DaysOf(parts), _zone), _zone),
             first,
-            ReadEnergy(energy, now, first));
+            ReadEnergy(energy, now, first),
+            Apps: _apps?.Apps(Ranges.Today(now, _zone, _culture)));
     }
+
+    /// <summary>"Top app today: Google Chrome, 0.320 kWh" from today's apps, or null with none to name.</summary>
+    private string? TopLine(AppsRange? apps)
+        => apps is not null && AppLedger.Top(apps) is { } top ? $"Top app today: {top.Name}, {Format.Kwh(top.Wh / 1000, _culture)} kWh" : null;
 
     /// <summary>The energy card's own reads: since the start, from the first row's day to now; this week so far, the
     /// same stretch of last week and the whole of it; the whole of last month. Today and this month so far come from the

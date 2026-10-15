@@ -256,4 +256,55 @@ public class BreakdownViewModelTests
 
         _history.Exports.ShouldBeEmpty();
     }
+
+    /// <summary>Plan AE: Midnight's and Classic's History list the apps of the range chosen, the Apps page's ledger as a
+    /// table, read with the rest of the range.</summary>
+    [Fact]
+    public void The_apps_of_the_range_are_read_with_it_as_the_apps_page_lists_them()
+    {
+        var apps = new FakeAppHistory();
+        var model = new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, apps: apps);
+        model.Show();
+
+        apps.Reads.Single().Title.ShouldBe("Today");
+        model.Apps.ShouldBe(AppLedger.Rows(AppLedgerTests.Day() with { From = apps.Reads[0].From, To = apps.Reads[0].To }, English));
+        model.HasApps.ShouldBeTrue();
+        model.AppsMessage.ShouldBeNull();
+
+        model.Range.Choice = RangeChoice.SevenDays;
+        apps.Reads[^1].Title.ShouldBe("Last 7 days");
+    }
+
+    [Fact]
+    public void Before_apps_have_been_watched_the_table_says_when_they_show_and_unread_it_goes()
+    {
+        var apps = new FakeAppHistory { Answer = range => Storage.AppsRange.None(range.From, range.To, null, "USD") };
+        var model = new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, apps: apps);
+        model.Show();
+
+        model.Apps.ShouldBeEmpty();
+        model.HasApps.ShouldBeTrue("the table says why it is empty");
+        model.AppsMessage.ShouldBe("Apps show here once PowerLedger has watched them for a few minutes.");
+
+        apps.Answer = _ => null;
+        _clock.Advance(BreakdownViewModel.RefreshEvery);
+        model.HasApps.ShouldBeFalse("the page's own message says history can't be read");
+        model.AppsMessage.ShouldBeNull();
+    }
+
+    /// <summary>Aero shows the apps on a page of their own: while its window is open, History reads none.</summary>
+    [Fact]
+    public void While_reading_no_apps_none_are_read()
+    {
+        var apps = new FakeAppHistory();
+        var model = new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, apps: apps) { ReadsApps = false };
+        model.Show();
+
+        apps.Reads.ShouldBeEmpty();
+        model.HasApps.ShouldBeFalse();
+
+        model.ReadsApps = true;
+        apps.Reads.Count.ShouldBe(1, "reading apps again reads at once while the page shows");
+        model.HasApps.ShouldBeTrue();
+    }
 }

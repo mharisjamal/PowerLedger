@@ -1884,7 +1884,8 @@ public class RenderingTests
         var link = new FakeLink();
         link.Connect(true);
         var history = new FakeRangeHistory { Answer = range => Reports.Typical(range) with { Series = Week(range) } };
-        var model = new BreakdownViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English);
+        var model = new BreakdownViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English,
+            apps: new FakeAppHistory { Answer = _ => AppsFixtures.Day() });
         return model;
     }
 

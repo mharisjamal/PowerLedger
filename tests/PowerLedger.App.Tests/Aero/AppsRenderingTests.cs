@@ -226,6 +226,57 @@ public class AppsRenderingTests
             PumpUntil(() => details.Opacity >= 1, TimeSpan.FromMilliseconds(AeroMotion.ReducedFade + 400), "the short fade");
         });
 
+    /// <summary>The Dashboard's line under Where the power goes: today's top app and its energy, inside the pane at the
+    /// mockup's height (the ring comes up by as much), and it opens the Apps page.</summary>
+    [Theory]
+    [InlineData("Dark", 1440, 900)]
+    [InlineData("Light", 1440, 900)]
+    [InlineData("Dark", 960, 640)]
+    public void The_dashboard_names_todays_top_app_inside_its_pane_and_opens_apps(string themeName, int width, int height)
+        => OnUi(() =>
+        {
+            var theme = Enum.Parse<Theme>(themeName);
+            using var saver = new FakeSaver();
+            var shell = AeroFixtures.Shell(saver);
+            var window = AeroHost.Window(shell, theme);
+            using var motion = AeroMotion.Force(true);
+            window.Width = width;
+            window.Height = height;
+            window.Show();
+            try
+            {
+                Pump(TimeSpan.FromMilliseconds(500));
+                var view = (Aero.DashboardView)window.PageHost.Showing!;
+                var line = (Button)view.FindName("TopApp");
+                line.IsVisible.ShouldBeTrue();
+                AutomationProperties.GetName(line).ShouldBe("Top app today: Google Chrome, 0.344 kWh");
+                Find<TextBlock>(line, t => t.Text == "Top app today: Google Chrome, 0.344 kWh").ShouldNotBeNull();
+                var pane = (GlassPanel)view.FindName("PParts");
+                var content = (FrameworkElement)view.FindName("PartsContent");
+                var bottom = content.TranslatePoint(new Point(0, content.ActualHeight), pane).Y;
+                // Where the parts' list ends without the line, the mockup's own layout: the line takes no more room than that.
+                line.Visibility = Visibility.Collapsed;
+                view.UpdateLayout();
+                var before = content.TranslatePoint(new Point(0, content.ActualHeight), pane).Y;
+                line.ClearValue(UIElement.VisibilityProperty);
+                view.UpdateLayout();
+                bottom.ShouldBeLessThanOrEqualTo(before + 1, $"the parts' list ends where it did ({bottom:0.0} against {before:0.0})");
+                bottom.ShouldBeLessThan(pane.ActualHeight - 12, $"the parts' list ends inside the pane ({bottom:0.0} of {pane.ActualHeight:0.0})");
+                line.IsVisible.ShouldBeTrue();
+                window.UpdateLayout();
+                Render(window, width, height, $"aero-dashboard-top-app-{theme}-{width}.png");
+
+                line.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Pump(TimeSpan.FromMilliseconds(300));
+                shell.Page.ShouldBe(Page.Apps);
+                window.PageHost.Showing.ShouldBeOfType<AppsView>();
+            }
+            finally
+            {
+                window.CloseForSwitch();
+            }
+        });
+
     /// <summary>The keyboard: one Tab stop for the ledger, the arrows from line to line, Enter opens one; the total is no
     /// stop at all.</summary>
     [Fact]

@@ -55,7 +55,8 @@ internal static class MidnightFixtures
             },
         };
         var summary = new FakeHistory { Snapshot = Snapshots.Typical(Now, DaySeries(day)), First = Now.AddDays(-40) };
-        return new DashboardViewModel(now, history, summary, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, UiThreads.Inline, ui ?? new FakeUiSettings(), new FakeHardware());
+        return new DashboardViewModel(now, history, summary, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, UiThreads.Inline, ui ?? new FakeUiSettings(), new FakeHardware(),
+            apps: new FakeAppHistory { Answer = _ => AppsFixtures.Day() });
     }
 
     /// <summary>

@@ -28,4 +28,10 @@ public partial class DashboardView : UserControl
         var chosen = menu.Items.OfType<MenuItem>().FirstOrDefault(item => item.IsChecked) ?? menu.Items.OfType<MenuItem>().FirstOrDefault();
         chosen?.Dispatcher.BeginInvoke(() => Keyboard.Focus(chosen), System.Windows.Threading.DispatcherPriority.Input);
     }
+
+    /// <summary>Today's top app (Plan AE) opens History, where Midnight lists each app.</summary>
+    private void TopAppClick(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this)?.DataContext is ShellViewModel shell) shell.Page = Page.Breakdown;
+    }
 }
