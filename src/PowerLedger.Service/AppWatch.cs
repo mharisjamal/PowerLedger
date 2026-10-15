@@ -6,18 +6,28 @@ namespace PowerLedger.Service;
 
 /// <summary>
 /// The energy each app used, hour by hour (Plan AE, research §9), worked out inside the loop's own tick on the sensor
-/// thread, with no timer of its own. Each tick it takes one look at every process (<see cref="IProcessSource.Read"/>) and
-/// splits the tick's processor and graphics energy, exactly as the integrator booked it into the minute and hour rows,
-/// among the apps (<see cref="AppSplit"/>): the parts' resting draw to idle, drivers to Windows, busy time no running
-/// process explains to closed programs, the rest by each process's cycles, and the graphics by each process's time on their
-/// engines, as the GPU load counters already read it. So an hour's apps add up to its hour row's processor and graphics
-/// energy, gaps left out the same way. Apps are keyed by image path, Store package or one of the special keys
-/// (<see cref="AppKeys"/>): Windows' own processes and the kernel's are one app, another signed in user's are another, and a
-/// process is opened for its image once, when it is new. The hour in memory is written whole with each minute's readings,
-/// and an hour an earlier run wrote carries on from its rows. Never shared, never synced. Single-threaded: the loop's thread.
+/// thread, with no timer of its own. A look at every process (<see cref="IProcessSource.Read"/>) gives what each did since
+/// the last look, and the ticks' processor and graphics energy over that time, exactly as the integrator booked it into
+/// the minute and hour rows, is split among the apps (<see cref="AppSplit"/>): the parts' resting draw to idle, tick by
+/// tick; drivers to Windows, busy time no running process explains to closed programs, the rest by each process's cycles;
+/// the graphics by each process's time on their engines, as the GPU load counters already read it. So an hour's apps add
+/// up to its hour row's processor and graphics energy, gaps left out the same way.
+/// A look walks every thread on the machine, about 2 ms of the processor's time at 300 processes, so it is taken at most
+/// every <see cref="LookEvery"/>: every tick at the loop's unwatched pace, and every fifth while someone watches. The ticks in
+/// between are pooled and split by the look that ends them, over the same time; a gap, a write and a stop take a look at
+/// once. Apps are keyed by image path, Store package or one of the special keys (<see cref="AppKeys"/>): Windows' own
+/// processes and the kernel's are one app, another signed in user's are another, and a process is opened for its image
+/// once, when it is new. The hour in memory is written whole with each minute's readings, and an hour an earlier run wrote
+/// carries on from its rows. Never shared, never synced. Single-threaded: the loop's thread.
 /// </summary>
-internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repository, Action<List<uint>>? foreground = null) : IDisposable
+/// <param name="lookEvery">How long the ticks pool at most before a look; <see cref="LookEvery"/> when left out, nought for
+/// a look every tick.</param>
+internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repository, Action<List<uint>>? foreground = null, TimeSpan? lookEvery = null)
+    : IDisposable
 {
+    /// <summary>The least time between two looks, the loop's unwatched pace.</summary>
+    public static readonly TimeSpan LookEvery = TimeSpan.FromSeconds(5);
+
     private const int MostNames = 4096;
     private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
 
@@ -25,82 +35,75 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
     /// are the ones Windows lists by these names in session 0.</summary>
     private static readonly HashSet<string> KernelProcesses = new(StringComparer.OrdinalIgnoreCase) { "System", "Registry", "Secure System", "Memory Compression" };
 
+    private readonly double _lookEverySeconds = (lookEvery ?? LookEvery).TotalSeconds;
     private readonly List<ProcessCounts> _listed = [];
     private readonly List<Tracked> _live = [];
     private readonly Dictionary<uint, Tracked> _tracked = [];
     private readonly Dictionary<DateTimeOffset, AppHour> _hours = [];
+    private readonly List<Pool> _pools = [];
     private readonly Dictionary<string, string> _names = new(StringComparer.Ordinal);
     private readonly List<uint> _front = [];
     private readonly RestingWatts _cpuRest = new();
     private readonly RestingWatts _gpuRest = new();
     private readonly RestingWatts _graphicsRest = new();
     private ProcessorTimes _processors;
+    private GraphicsWork? _graphics;
     private bool _looked;
-    private long _tick;
+    private long _looks;
+    private long _ticks;
+    private double _pooledSeconds;
     private uint? _console;
     private DateTimeOffset? _hourNow;
+
+    /// <summary>Looks taken, for the tests and the cost check.</summary>
+    public long Looks => _looks;
 
     /// <summary>Takes the first look, which the first tick's work is measured from.</summary>
     public void Start() => Look(out _);
 
     /// <summary>
     /// Books one tick: <paramref name="reading"/>'s processor and graphics energy, integrated with the gap threshold the
-    /// rollups fold its minute with (nought for a tick that reaches back across a sleep), and what the processes did since
-    /// the last look. A gap books nothing; the look still starts the next tick afresh.
+    /// rollups fold its minute with (nought for a tick that reaches back across a sleep). Its resting part goes to idle at
+    /// once and its time in front to the app in front; the rest waits for the look that ends the pool. A gap books nothing
+    /// and takes a look at once, so the next tick's work starts afresh.
     /// </summary>
     public void Observe(Reading reading, Sample sample, double gapSeconds)
     {
         var energy = EnergyIntegrator.Integrate(reading, gapSeconds);
-        var looked = Look(out var work);
         var seconds = energy.OnSeconds;
         var rest = new RestWatts(_cpuRest.Watts, _gpuRest.Watts, _graphicsRest.Watts);
         Learn(reading, sample, seconds);
-        if (seconds <= 0) return;
-
-        var hour = HourOf(reading.Timestamp);
-        hour.Changed = true;
-        if (!looked)
+        _graphics = sample.Graphics;
+        _ticks++;
+        if (seconds > 0)
         {
-            BookUnsplit(hour, energy, rest);
-            return;
+            var hour = HourOf(reading.Timestamp);
+            hour.Changed = true;
+            var hours = seconds / 3600;
+            var cpuWh = Positive(energy.CpuWh);
+            var gpuWh = Positive(energy.GpuWh);
+            var idleCpu = Math.Min(cpuWh, rest.Cpu * hours);
+            var idleGpu = Math.Min(gpuWh, rest.Gpu * hours);
+            Add(hour, AppKeys.Idle, idleCpu, idleGpu);
+            var working = cpuWh - idleCpu;
+            var pool = PoolOf(hour);
+            pool.Working += working;
+            pool.Graphics += sample.IGpuW is { } graphics && double.IsFinite(graphics) ? Math.Min(working, Positive(graphics - rest.IGpu) * hours) : 0;
+            pool.Card += gpuWh - idleGpu;
+            pool.Seconds += seconds;
+            _pooledSeconds += seconds;
+            Front(hour, seconds);
         }
-
-        var (card, graphics) = Engines(sample.Graphics);
-        var split = AppSplit.Of(new TickEnergy(energy.CpuWh, energy.GpuWh, seconds, sample.IGpuW), rest, work, card, graphics);
-        Add(hour, AppKeys.Idle, split.IdleCpuWh, split.IdleGpuWh);
-        Add(hour, AppKeys.Windows, split.KernelCpuWh, split.KernelGpuWh);
-        Add(hour, AppKeys.Closed, split.ClosedCpuWh, split.ClosedGpuWh);
-        foreach (var process in _live)
-        {
-            var app = TotalsOf(process, hour);
-            app.CpuWh += process.CycleDelta * split.CpuWhPerCycle;
-            app.GpuWh += process.CycleDelta * split.GpuWhPerCycle;
-            app.Run(_tick, seconds);
-        }
-        if (sample.Graphics?.ByProcess is { } byProcess && (split.CpuWhPerGraphicsTime > 0 || split.GpuWhPerCardTime > 0))
-        {
-            foreach (var (pid, time) in Each(byProcess))
-            {
-                if (!_tracked.TryGetValue(pid, out var process)) continue;          // closed since: already counted as closed
-                var app = TotalsOf(process, hour);
-                app.CpuWh += (split.GraphicsByLoadEngines ? time.ProcessorLoad : time.ProcessorAny) * split.CpuWhPerGraphicsTime;
-                app.GpuWh += (split.CardByLoadEngines ? time.CardLoad : time.CardAny) * split.GpuWhPerCardTime;
-            }
-        }
-        if (foreground is not null)
-        {
-            foreground(_front);
-            foreach (var pid in _front)
-            {
-                if (_tracked.TryGetValue(pid, out var process)) TotalsOf(process, hour).Front(_tick, seconds);
-            }
-        }
+        // A beat Windows put off a little must not leave the unwatched pace a look short every other tick.
+        if (seconds <= 0 || _pooledSeconds >= _lookEverySeconds * 0.9) Settle();
     }
 
-    /// <summary>Writes every hour that changed since it was last written, each whole, and forgets those before the hour the
-    /// ticks are in once written. Throws what storage throws; what failed is written next time.</summary>
+    /// <summary>Writes every hour that changed since it was last written, each whole, after a look settles the pool, and
+    /// forgets those before the hour the ticks are in once written. Throws what storage throws; what failed is written next
+    /// time.</summary>
     public void Write()
     {
+        if (_pools.Count > 0) Settle();
         foreach (var hour in _hours.Values)
         {
             if (!hour.Changed) continue;
@@ -116,6 +119,76 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
     public void Dispose() => processes.Dispose();
 
     /// <summary>
+    /// Takes a look and splits the pooled ticks of each hour by what the processes did since the last one (see
+    /// <see cref="AppSplit"/>; the pool's resting part went to idle tick by tick, so it is split with nothing at rest). Each
+    /// app running at the look ran through the pool. Without a look to split by, as when Windows will not list the
+    /// processes, the pool goes to Other apps, since some app drew it.
+    /// </summary>
+    private void Settle()
+    {
+        var looked = Look(out var work);
+        if (_pools.Count == 0) return;
+        var (card, graphics) = Engines(_graphics);
+        foreach (var pool in _pools)
+        {
+            var hour = pool.Hour;
+            if (!looked)
+            {
+                Add(hour, AppKeys.Other, pool.Working, pool.Card);
+                continue;
+            }
+            var energy = new TickEnergy(pool.Working, pool.Card, pool.Seconds, pool.Graphics > 0 ? pool.Graphics * 3600 / pool.Seconds : null);
+            var split = AppSplit.Of(energy, default, work, card, graphics);
+            Add(hour, AppKeys.Idle, split.IdleCpuWh, split.IdleGpuWh);
+            Add(hour, AppKeys.Windows, split.KernelCpuWh, split.KernelGpuWh);
+            Add(hour, AppKeys.Closed, split.ClosedCpuWh, split.ClosedGpuWh);
+            foreach (var process in _live)
+            {
+                var app = TotalsOf(process, hour);
+                app.CpuWh += process.CycleDelta * split.CpuWhPerCycle;
+                app.GpuWh += process.CycleDelta * split.GpuWhPerCycle;
+                app.Run(_looks, pool.Seconds);
+            }
+            if (_graphics?.ByProcess is { } byProcess && (split.CpuWhPerGraphicsTime > 0 || split.GpuWhPerCardTime > 0))
+            {
+                foreach (var (pid, time) in Each(byProcess))
+                {
+                    if (!_tracked.TryGetValue(pid, out var process)) continue;      // closed since: counted as closed
+                    var app = TotalsOf(process, hour);
+                    app.CpuWh += (split.GraphicsByLoadEngines ? time.ProcessorLoad : time.ProcessorAny) * split.CpuWhPerGraphicsTime;
+                    app.GpuWh += (split.CardByLoadEngines ? time.CardLoad : time.CardAny) * split.GpuWhPerCardTime;
+                }
+            }
+        }
+        _pools.Clear();
+        _pooledSeconds = 0;
+    }
+
+    /// <summary>The tick's time in front, to the app of the process in front in each session, as the last look knows it.</summary>
+    private void Front(AppHour hour, double seconds)
+    {
+        if (foreground is null) return;
+        foreground(_front);
+        foreach (var pid in _front)
+        {
+            if (_tracked.TryGetValue(pid, out var process)) TotalsOf(process, hour).Front(_ticks, seconds);
+        }
+    }
+
+    private Pool PoolOf(AppHour hour)
+    {
+        foreach (var pool in _pools)
+        {
+            if (pool.Hour == hour) return pool;
+        }
+        var added = new Pool(hour);
+        _pools.Add(added);
+        return added;
+    }
+
+    private static double Positive(double x) => double.IsFinite(x) && x > 0 ? x : 0;
+
+    /// <summary>
     /// One look at every process: what each did since the last look, a process new since then counting everything it did,
     /// as it all happened since; the processors' busy and drivers' time likewise. A process is identified when it is first
     /// seen, by its id and start, so an id Windows gives to a later process is a new process; one no longer listed has
@@ -125,7 +198,7 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
     {
         work = default;
         if (!processes.Read(_listed, out var times)) return false;
-        _tick++;
+        _looks++;
         _console = processes.ConsoleSession() ?? _console;
         _live.Clear();
         ulong cycles = 0;
@@ -148,14 +221,14 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
             process.Cycles = listed.Cycles;
             process.Time = listed.Time;
             process.Session = listed.Session;
-            process.Seen = _tick;
+            process.Seen = _looks;
             _live.Add(process);
             cycles += process.CycleDelta;
             explained += process.TimeDelta;
         }
         foreach (var (pid, process) in _tracked)
         {
-            if (process.Seen != _tick) _tracked.Remove(pid);
+            if (process.Seen != _looks) _tracked.Remove(pid);
         }
 
         var measured = _looked;
@@ -253,17 +326,6 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
         static bool Quiet(double? load) => load is not { } l || (double.IsFinite(l) && l < RestingWatts.QuietLoad);
     }
 
-    /// <summary>A tick with no look to split it by: its resting part to idle, and the rest to Other apps, since some app
-    /// drew it.</summary>
-    private static void BookUnsplit(AppHour hour, EnergySlice energy, RestWatts rest)
-    {
-        var hours = energy.OnSeconds / 3600;
-        var idleCpu = Math.Min(Math.Max(0, energy.CpuWh), rest.Cpu * hours);
-        var idleGpu = Math.Min(Math.Max(0, energy.GpuWh), rest.Gpu * hours);
-        Add(hour, AppKeys.Idle, idleCpu, idleGpu);
-        Add(hour, AppKeys.Other, Math.Max(0, energy.CpuWh) - idleCpu, Math.Max(0, energy.GpuWh) - idleGpu);
-    }
-
     private static void Add(AppHour hour, string key, double cpuWh, double gpuWh)
     {
         if (cpuWh <= 0 && gpuWh <= 0) return;
@@ -326,5 +388,16 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
         public AppHour? Hour;
         public bool Other;
         public AppTotals? Totals;
+    }
+
+    /// <summary>One hour's ticks since the last look, their resting part taken out: the processor's working energy, the
+    /// part of it the processor's graphics drew on their rail, the cards' working energy, and how long the ticks ran.</summary>
+    private sealed class Pool(AppHour hour)
+    {
+        public AppHour Hour { get; } = hour;
+        public double Working;
+        public double Graphics;
+        public double Card;
+        public double Seconds;
     }
 }

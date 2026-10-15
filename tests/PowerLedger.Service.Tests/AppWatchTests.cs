@@ -28,11 +28,12 @@ public sealed class AppWatchTests : IDisposable
     private static Sample Sample(DateTimeOffset at, double load = 0.5, GraphicsWork? graphics = null, double? igpuW = null, double delta = 1)
         => Samples.At(at, delta, cpuLoad: load) with { Graphics = graphics, IGpuW = igpuW };
 
-    private AppWatch Watch() => new(_processes, new AppHoursRepository(_database.Db), front =>
+    /// <summary>A watch that looks every tick, so each tick is split by its own work.</summary>
+    private AppWatch Watch(TimeSpan? lookEvery = null) => new(_processes, new AppHoursRepository(_database.Db), front =>
     {
         front.Clear();
         front.AddRange(_front);
-    });
+    }, lookEvery ?? TimeSpan.Zero);
 
     private void Tick(AppWatch watch, DateTimeOffset at, double cpuW = 3600, double gpuW = 0, GraphicsWork? graphics = null, double? igpuW = null,
         double load = 0.5, double gapSeconds = 60)
@@ -253,6 +254,31 @@ public sealed class AppWatchTests : IDisposable
         var rows = Stored(Nine);
         rows.Keys.ShouldBe([AppKeys.Other]);
         rows[AppKeys.Other].CpuWh.ShouldBe(1, 1e-12);
+    }
+
+    [Fact]
+    public void At_a_one_second_pace_the_ticks_wait_for_a_look_every_five_seconds_and_a_write_looks_at_once()
+    {
+        var chrome = _processes.Add(new FakeProcesses.Fake(200, "chrome.exe", path: ChromePath), 600, 600);
+        var game = _processes.Add(new FakeProcesses.Fake(300, "game.exe", path: @"D:\Games\game.exe"), 0, 0);
+        using var watch = Watch(AppWatch.LookEvery);
+        watch.Start();
+        for (var s = 1; s <= 4; s++) Tick(watch, Nine.AddSeconds(s));
+        watch.Looks.ShouldBe(1);
+
+        chrome.CyclesPerRead = 0;                                   // what ran up to the fifth tick's look: the game alone
+        game.CyclesPerRead = 600;
+        Tick(watch, Nine.AddSeconds(5));
+        watch.Looks.ShouldBe(2);
+        Tick(watch, Nine.AddSeconds(6));
+        watch.Looks.ShouldBe(2);
+        watch.Write();
+        watch.Looks.ShouldBe(3);
+
+        var rows = Stored(Nine);
+        rows.Keys.ShouldBe([@"d:\games\game.exe"]);
+        rows[@"d:\games\game.exe"].CpuWh.ShouldBe(6, 1e-12);       // all six ticks, split by the work of their own time
+        rows[@"d:\games\game.exe"].RunSeconds.ShouldBe(6);
     }
 
     [Fact]
