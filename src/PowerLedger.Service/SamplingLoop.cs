@@ -33,9 +33,14 @@ internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationS
 /// shutdown signs everyone out first (see <see cref="SleepKinds"/>). Left out, someone always is.</param>
 /// <param name="Hibernated">When the machine hibernated since the time given, asked as it wakes; null when it slept. Left
 /// out, it never did.</param>
+/// <param name="Processes">What Windows says of the processes, for the energy by app (Plan AE, <see cref="AppWatch"/>),
+/// opened on the sensor thread at start. Left out, nothing is worked out by app.</param>
+/// <param name="Foreground">Fills a list with the process in front in each session whose App reported it lately (see
+/// <see cref="ServiceSignals.ForegroundProcesses"/>), asked once a tick. Left out, no app is ever in front.</param>
 internal sealed record LoopEnvironment(
     Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice,
-    Func<bool>? Watched = null, Func<BatteryCharge?>? Battery = null, Func<bool>? SignedIn = null, Func<DateTimeOffset, DateTimeOffset?>? Hibernated = null);
+    Func<bool>? Watched = null, Func<BatteryCharge?>? Battery = null, Func<bool>? SignedIn = null, Func<DateTimeOffset, DateTimeOffset?>? Hibernated = null,
+    Func<IProcessSource>? Processes = null, Action<List<uint>>? Foreground = null);
 
 /// <summary>
 /// The service's heart (spec §3, §6, §7). Once a sample interval it reads the sensors, runs the model, feeds the
@@ -109,6 +114,9 @@ internal sealed class SamplingLoop : BackgroundService
     private long _ticks;
     private long _databaseBytes;
     private int _failures;
+    private AppWatch? _apps;
+    private int _appFailures;
+    private DateTimeOffset? _lastWake;
 
     public SamplingLoop(
         SqliteDatabase database, LoopEnvironment environment, LoopCommands commands, LiveFeed feed, StatusBoard board,
@@ -257,6 +265,7 @@ internal sealed class SamplingLoop : BackgroundService
         else _finished.TrySetException(failure);
         _worker.Dispose();
         _metronome?.Dispose();
+        _apps?.Dispose();
     }
 
     private void Start()
@@ -279,6 +288,63 @@ internal sealed class SamplingLoop : BackgroundService
         // Settings from before monitors were detected wait for a tick that finds one; a first run has none to carry over.
         _carryOverMonitors = stored is not null && ProfilePolicy.HasMonitorsToCarryOver(_settings.Profile);
         RefreshDatabaseSize();
+        StartApps();
+    }
+
+    /// <summary>Opens the processes for the energy by app (Plan AE) and takes the first look. Should Windows refuse, the
+    /// service runs on without it.</summary>
+    private void StartApps()
+    {
+        if (_environment.Processes is not { } open) return;
+        IProcessSource? processes = null;
+        try
+        {
+            processes = open();
+            var apps = new AppWatch(processes, new AppHoursRepository(_database), _environment.Foreground);
+            apps.Start();
+            _apps = apps;
+        }
+        catch (Exception error)
+        {
+            processes?.Dispose();
+            _log.LogWarning(error, "The energy by app cannot be worked out this run");
+        }
+    }
+
+    /// <summary>
+    /// Books the tick's processor and graphics energy to the apps, with the gap threshold the rollups fold its minute with: a
+    /// tick the machine woke within is a gap whatever its length (<see cref="Wakes"/>), so an hour's apps add up to its hour
+    /// row. A failure here costs the apps that tick and never the reading, which is buffered already.
+    /// </summary>
+    private void ObserveApps(Reading reading, Sample sample, bool spansSleep)
+    {
+        if (_apps is null) return;
+        try
+        {
+            var asleep = spansSleep || (_lastWake is { } woke && Wakes.Within(woke, reading));
+            _apps.Observe(reading, sample, asleep ? 0 : GapThreshold);
+            _appFailures = 0;
+        }
+        catch (Exception error)
+        {
+            _appFailures++;
+            if ((_appFailures & (_appFailures - 1)) == 0) _log.LogWarning(error, "Sorting a tick's energy by app failed ({Failures} in a row)", _appFailures);
+        }
+    }
+
+    /// <summary>Writes the hours of energy by app with the readings they were worked out from; what fails is written with
+    /// the next minute's.</summary>
+    private void WriteApps()
+    {
+        if (_apps is null) return;
+        try
+        {
+            _apps.Write();
+        }
+        catch (Exception error)
+        {
+            _log.LogWarning(error, "Writing the energy by app failed");
+        }
     }
 
     /// <summary>Detects the hardware, records it, and folds it into the profile when this is a different machine.</summary>
@@ -329,6 +395,7 @@ internal sealed class SamplingLoop : BackgroundService
             // Nor is a tick with the lid shut, whose panel draws nothing.
             if (!spansSleep && !result.Sample.PanelInactive) _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
             _buffer.Add(reading);
+            ObserveApps(reading, result.Sample, spansSleep);
             // What the time awake since a wake drew from the battery, until the battery is read again to learn the sleep.
             _sleep.Awake(now, reading.OnBattery, spansSleep ? 0 : EnergyIntegrator.Integrate(reading, GapThreshold).BatteryWh);
             var frame = Frames.From(reading, result.Sample);
@@ -382,8 +449,9 @@ internal sealed class SamplingLoop : BackgroundService
     }
 
     /// <summary>
-    /// Writes the buffer, then folds every unfolded minute before <paramref name="upTo"/>. When the write fails nothing is
-    /// folded, because a minute folded from half its rows would stay wrong; the next write that succeeds folds the backlog.
+    /// Writes the buffer and the energy by app worked out from it, then folds every unfolded minute before
+    /// <paramref name="upTo"/>. When the write fails nothing is folded, because a minute folded from half its rows would stay
+    /// wrong, and the apps wait too; the next write that succeeds folds the backlog and writes them.
     /// </summary>
     private void WriteAndFold(DateTimeOffset upTo)
     {
@@ -394,6 +462,7 @@ internal sealed class SamplingLoop : BackgroundService
             _log.LogWarning("Writing readings failed: {Problem}", _buffer.Problem);
             return;
         }
+        WriteApps();
         _rollups.FoldRange(from, upTo, GapThreshold);
         _foldFrom = null;
     }
@@ -507,6 +576,7 @@ internal sealed class SamplingLoop : BackgroundService
         _worker.RefreshDisplay();
         _rebuildAt = now + RebuildAfterResume;
         _sessions.Resume(now);
+        _lastWake = now;                                     // the session's start, which the rollups take the wake from
         _tickClock.MarkResumed();
         _suspended = false;
         _log.LogInformation("Resumed");
