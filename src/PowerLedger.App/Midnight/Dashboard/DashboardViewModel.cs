@@ -308,7 +308,20 @@ internal sealed class DashboardViewModel : ObservableObject, IDisposable
             _history.Read(Before(partsRange, DaysOf(parts), _zone), _zone),
             first,
             ReadEnergy(energy, now, first),
-            Apps: _apps?.Apps(Ranges.Today(now, _zone, _culture)));
+            Apps: ReadApps(now));
+    }
+
+    /// <summary>Today's apps for the top app's line; apps that fail to read take the line away, and nothing else.</summary>
+    private AppsRange? ReadApps(DateTimeOffset now)
+    {
+        try
+        {
+            return _apps?.Apps(Ranges.Today(now, _zone, _culture));
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return null;
+        }
     }
 
     /// <summary>"Top app today: Google Chrome, 0.320 kWh" from today's apps, or null with none to name.</summary>

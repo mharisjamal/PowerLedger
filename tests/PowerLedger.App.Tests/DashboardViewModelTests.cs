@@ -74,6 +74,22 @@ public sealed class DashboardViewModelTests : IDisposable
         dashboard.TopApp.ShouldBeNull();
     }
 
+    /// <summary>The apps failing to read takes the line away and nothing else: the rest of the pass is read as ever.</summary>
+    [Fact]
+    public void Apps_that_fail_to_read_leave_the_rest_of_the_dashboard_be()
+    {
+        _link.Connect(true);
+        _link.Push(Frames.At(Now));
+        var apps = new FakeAppHistory { Answer = _ => throw new InvalidOperationException("locked") };
+        var dashboard = _dashboard = new DashboardViewModel(_now, _history, _summary, _clock, TimeZoneInfo.Utc, English, UiThreads.Inline, _ui, apps: apps);
+
+        dashboard.Show();
+
+        dashboard.TopApp.ShouldBeNull();
+        dashboard.ChartMessage.ShouldBeNull("the chart was read");
+        dashboard.Kpis[1].Big.ShouldNotBe(Format.NoReading);
+    }
+
     [Fact]
     public void Without_the_apps_history_there_is_no_top_app_line()
     {
