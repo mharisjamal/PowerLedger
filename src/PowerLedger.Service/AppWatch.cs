@@ -10,8 +10,8 @@ namespace PowerLedger.Service;
 /// the last look, and the ticks' processor and graphics energy over that time, exactly as the integrator booked it into
 /// the minute and hour rows, is split among the apps (<see cref="AppSplit"/>): the parts' resting draw to idle, tick by
 /// tick; drivers to Windows, busy time no running process explains to closed programs, the rest by each process's cycles;
-/// the graphics by each process's time on their engines, as the GPU load counters already read it. So an hour's apps add
-/// up to its hour row's processor and graphics energy, gaps left out the same way.
+/// the graphics by each process's time on their engines, as the GPU load counters read it, by the sensors or, where they do
+/// not read them, here. So an hour's apps add up to its hour row's processor and graphics energy, gaps left out the same way.
 /// A look walks every thread on the machine, about 2 ms of the processor's time at 300 processes, so it is taken at most
 /// every <see cref="LookEvery"/>: every tick at the loop's unwatched pace, and every fifth while someone watches. The ticks in
 /// between are pooled and split by the look that ends them, over the same time; a gap, a write and a stop take a look at
@@ -22,7 +22,11 @@ namespace PowerLedger.Service;
 /// </summary>
 /// <param name="lookEvery">How long the ticks pool at most before a look; <see cref="LookEvery"/> when left out, nought for
 /// a look every tick.</param>
-internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repository, Action<List<uint>>? foreground = null, TimeSpan? lookEvery = null)
+/// <param name="engines">Windows' GPU Engine counters, read with the looks, at most every <see cref="LookEvery"/>, on a PC
+/// whose sensors do not read them already (one whose every card NVIDIA's library reads), so a card's watts go by each
+/// process's time on its engines there too; the processor's split is followed only when they cannot be read.</param>
+internal sealed class AppWatch(
+    IProcessSource processes, AppHoursRepository repository, Action<List<uint>>? foreground = null, TimeSpan? lookEvery = null, IEngineCounters? engines = null)
     : IDisposable
 {
     /// <summary>The least time between two looks, the loop's unwatched pace.</summary>
@@ -48,6 +52,9 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
     private readonly RestingWatts _graphicsRest = new();
     private ProcessorTimes _processors;
     private GraphicsWork? _graphics;
+    private GraphicsWork? _engineWork;
+    private DateTimeOffset? _enginesReadAt;
+    private DateTimeOffset? _tickAt;
     private bool _looked;
     private long _looks;
     private long _ticks;
@@ -58,8 +65,12 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
     /// <summary>Looks taken, for the tests and the cost check.</summary>
     public long Looks => _looks;
 
-    /// <summary>Takes the first look, which the first tick's work is measured from.</summary>
-    public void Start() => Look(out _);
+    /// <summary>Takes the first look, which the first tick's work is measured from, and the engine counters' first read.</summary>
+    public void Start()
+    {
+        Look(out _);
+        ReadEngines();
+    }
 
     /// <summary>
     /// Books one tick: <paramref name="reading"/>'s processor and graphics energy, integrated with the gap threshold the
@@ -74,6 +85,7 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
         var rest = new RestWatts(_cpuRest.Watts, _gpuRest.Watts, _graphicsRest.Watts);
         Learn(reading, sample, seconds);
         _graphics = sample.Graphics;
+        _tickAt = reading.Timestamp;
         _ticks++;
         if (seconds > 0)
         {
@@ -127,8 +139,9 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
     private void Settle()
     {
         var looked = Look(out var work);
+        var engineWork = _graphics ?? OwnEngineWork();
         if (_pools.Count == 0) return;
-        var (card, graphics) = Engines(_graphics);
+        var (card, graphics) = Engines(engineWork);
         foreach (var pool in _pools)
         {
             var hour = pool.Hour;
@@ -149,7 +162,7 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
                 app.GpuWh += process.CycleDelta * split.GpuWhPerCycle;
                 app.Run(_looks, pool.Seconds);
             }
-            if (_graphics?.ByProcess is { } byProcess && (split.CpuWhPerGraphicsTime > 0 || split.GpuWhPerCardTime > 0))
+            if (engineWork?.ByProcess is { } byProcess && (split.CpuWhPerGraphicsTime > 0 || split.GpuWhPerCardTime > 0))
             {
                 foreach (var (pid, time) in Each(byProcess))
                 {
@@ -162,6 +175,30 @@ internal sealed class AppWatch(IProcessSource processes, AppHoursRepository repo
         }
         _pools.Clear();
         _pooledSeconds = 0;
+    }
+
+    /// <summary>The engines' work where the sensors read no load counters: the counters read with the look, but at most
+    /// once in <see cref="LookEvery"/> of the ticks' time, a look sooner, as a write's, keeping the last window.</summary>
+    private GraphicsWork? OwnEngineWork()
+    {
+        if (engines is null) return null;
+        if (_enginesReadAt is { } last && _tickAt is { } now && (now - last).TotalSeconds < _lookEverySeconds * 0.9) return _engineWork;
+        ReadEngines();
+        return _engineWork;
+    }
+
+    private void ReadEngines()
+    {
+        if (engines is null) return;
+        _enginesReadAt = _tickAt;
+        try
+        {
+            _engineWork = engines.Read();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _engineWork = null;                                     // the card's watts follow the processor's split meanwhile
+        }
     }
 
     /// <summary>The tick's time in front, to the app of the process in front in each session, as the last look knows it.</summary>
