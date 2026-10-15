@@ -76,4 +76,26 @@ public class FormatTests
         Money.Rate(0.125m, "USD", English).ShouldBe("$0.125");
         Money.Rate(0.12345m, "USD", English).ShouldBe("$0.1235");
     }
+
+    /// <summary>Plan AE: what a screen reader says for an amount, the currency named in words, not read out as a symbol.</summary>
+    [Fact]
+    public void Money_is_spoken_with_the_currency_named()
+    {
+        Money.Spoken(4m, "PKR", English).ShouldBe("4 rupees");
+        Money.Spoken(4.004m, "PKR", English).ShouldBe("4 rupees");
+        Money.Spoken(1m, "USD", English).ShouldBe("1 dollar");
+        Money.Spoken(0.32m, "USD", English).ShouldBe("0.32 dollars");
+        Money.Spoken(12m, "JPY", English).ShouldBe("12 yen");
+        Money.Spoken(5m, "XXX", English).ShouldBe("5 XXX");
+    }
+
+    /// <summary>A length of time as a screen reader says it.</summary>
+    [Fact]
+    public void A_length_of_time_is_spoken_in_words()
+    {
+        Format.SpokenDuration(6 * 3600 + 10 * 60).ShouldBe("6 hours 10 minutes");
+        Format.SpokenDuration(3600).ShouldBe("1 hour");
+        Format.SpokenDuration(60).ShouldBe("1 minute");
+        Format.SpokenDuration(20).ShouldBe("less than a minute");
+    }
 }

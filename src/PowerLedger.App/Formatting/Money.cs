@@ -29,6 +29,39 @@ internal static class Money
         return Format(decimal.Round(price, decimals, MidpointRounding.AwayFromZero), currency, culture, decimals);
     }
 
+    private static readonly ConcurrentDictionary<string, string?> Units = new(StringComparer.Ordinal);
+
+    /// <summary>Units whose name is the same for many as for one.</summary>
+    private static readonly HashSet<string> SameForMany = new(StringComparer.Ordinal)
+    {
+        "yen", "yuan", "won", "baht", "rand", "kip", "riel", "kyat", "ringgit", "rupiah", "dong", "renminbi", "naira", "som",
+    };
+
+    /// <summary>
+    /// An amount as a screen reader should say it (Plan AE): to the cent, without the cents when there are none, and the
+    /// currency named in words ("4 rupees", "0.32 dollars", "1 dollar") rather than a symbol it would spell out; a currency
+    /// no region names keeps its code.
+    /// </summary>
+    public static string Spoken(decimal amount, string currency, CultureInfo culture)
+    {
+        var cents = decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+        var number = cents.ToString(cents == decimal.Truncate(cents) ? "0" : "0.00", culture);
+        if (UnitFor(currency) is not { } unit) return number + " " + currency;
+        return number + " " + (cents == 1 || SameForMany.Contains(unit) ? unit : unit + "s");
+    }
+
+    /// <summary>The currency's unit in English, the last word of its name in lower case ("Pakistan Rupee": "rupee"), or
+    /// null when no region uses it.</summary>
+    private static string? UnitFor(string currency) => Units.GetOrAdd(currency, static code =>
+    {
+        foreach (var culture in CultureInfo.GetCultures(CultureTypes.SpecificCultures))
+        {
+            if (Region(culture.Name) is { } region && region.ISOCurrencySymbol == code && region.CurrencyEnglishName.Split(' ', StringSplitOptions.RemoveEmptyEntries) is [.., var last])
+                return last.ToLowerInvariant();
+        }
+        return null;
+    });
+
     /// <summary>
     /// The symbol for an ISO 4217 code, or null when no region uses it. The reader's own region wins when it uses the
     /// currency, then the currency's home country (the code's first two letters, as with USD and US), then any region.

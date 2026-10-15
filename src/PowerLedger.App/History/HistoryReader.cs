@@ -30,8 +30,20 @@ internal interface IHistory
 }
 
 /// <summary>The App's read-only view of the service's database (spec §3: the App never writes it).</summary>
-internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeHistory, IMachineHistory
+internal sealed class HistoryReader(SqliteDatabase database) : IHistory, IRangeHistory, IMachineHistory, IAppHistory
 {
+    public AppsRange? Apps(DateRange range)
+    {
+        try
+        {
+            return new AppQueries(database).Read(range.From, range.To);
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
     public HistorySnapshot? Read(DateTimeOffset now, TimeZoneInfo zone)
     {
         try

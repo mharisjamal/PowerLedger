@@ -51,6 +51,17 @@ internal static class Format
     public static string Scale(double value, double step, CultureInfo culture)
         => double.IsFinite(value) ? Math.Max(0, value).ToString(step >= 1 ? "0" : step >= 0.1 ? "0.0" : "0.00", culture) : Missing;
 
+    /// <summary>A length of time given in seconds, as a screen reader should say it: "6 hours 10 minutes", "1 hour", "45
+    /// minutes"; under half a minute, "less than a minute".</summary>
+    public static string SpokenDuration(double seconds)
+    {
+        var minutes = double.IsFinite(seconds) ? (long)Math.Round(Math.Max(0, seconds) / 60) : 0;
+        if (minutes == 0) return "less than a minute";
+        static string Count(long n, string unit) => n.ToString(CultureInfo.InvariantCulture) + " " + unit + (n == 1 ? "" : "s");
+        var (h, m) = (minutes / 60, minutes % 60);
+        return h == 0 ? Count(m, "minute") : m == 0 ? Count(h, "hour") : Count(h, "hour") + " " + Count(m, "minute");
+    }
+
     /// <summary>A size on disk or as sent, rounded up so a non-empty file never reads "0 KB": "41 KB".</summary>
     public static string Kb(long bytes, CultureInfo culture) => $"{Math.Ceiling(Math.Max(0, bytes) / 1024.0).ToString("N0", culture)} KB";
 

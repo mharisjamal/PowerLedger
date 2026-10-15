@@ -126,6 +126,27 @@ public sealed class HistoryReaderTests : IDisposable
         reader.Csv(range, ExportGrain.Hour).ShouldBeNull();
         reader.FirstDay(TimeZoneInfo.Utc).ShouldBeNull();
         reader.FirstRow().ShouldBeNull();
+        reader.Apps(range).ShouldBeNull();
+    }
+
+    /// <summary>Plan AE: today's apps from the service's app rows, through the App's read-only connection.</summary>
+    [Fact]
+    public void Todays_apps_are_read_from_the_app_rows()
+    {
+        using (var c = _writer.Open())
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "INSERT INTO app_hours (start_ms, app_key, name, path, cpu_wh, gpu_wh, run_s, front_s) VALUES " +
+                $"({Now.AddMinutes(-30).ToUnixTimeMilliseconds()}, 'c:\\a.exe', 'A', 'C:\\A.exe', 3, 1, 1800, 900), " +
+                $"({Now.AddDays(-1).ToUnixTimeMilliseconds()}, 'c:\\b.exe', 'B', NULL, 9, 0, 3600, 0)";
+            cmd.ExecuteNonQuery();
+        }
+
+        using var readOnly = new SqliteDatabase(_path, readOnly: true);
+        var apps = new HistoryReader(readOnly).Apps(Ranges.Today(Now, TimeZoneInfo.Utc, System.Globalization.CultureInfo.InvariantCulture)).ShouldNotBeNull();
+
+        apps.Apps.Select(a => (a.Name, a.Wh, a.Path)).ShouldBe([("A", 4, @"C:\A.exe")]);
+        apps.CountedSince.ShouldBe(Now.AddDays(-1));
     }
 
     /// <summary>The Dashboard's 1H pill (Midnight look design §4): a minute-bucket range reads the minute rows, one to a bucket.</summary>
