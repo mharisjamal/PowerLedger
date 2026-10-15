@@ -376,7 +376,8 @@ internal sealed class SamplingLoop : BackgroundService
         _minute = minute;
         _calibration.SaveIfDue(now);
         var purged = _retention.RunIfDue(now, RetentionOptions.Clamped(_settings.RawRetentionHours, _settings.HistoryRetentionYears));
-        if (purged is not null) _log.LogInformation("Retention removed {Raw} raw rows and {Minutes} minute rows", purged.RawDeleted, purged.MinutesDeleted);
+        if (purged is not null)
+            _log.LogInformation("Retention removed {Raw} raw rows, {Minutes} minute rows and {Apps} app rows", purged.RawDeleted, purged.MinutesDeleted, purged.AppHoursDeleted);
         RefreshDatabaseSize();
     }
 

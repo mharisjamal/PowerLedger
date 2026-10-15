@@ -1,0 +1,51 @@
+namespace PowerLedger.Core;
+
+/// <summary>
+/// How the Apps page's rows are keyed (Plan AE, storage version 6): an app's image path in lower case, "pkg:" and a Store
+/// package family, or one of the special keys here, which start with "::" and are never a path.
+/// </summary>
+public static class AppKeys
+{
+    /// <summary>Windows' own processes: every image under the Windows folder, the kernel's System, Registry, Secure System and
+    /// Memory Compression processes, and the time the processor spends on drivers' interrupts and deferred calls.</summary>
+    public const string Windows = "::windows";
+
+    /// <summary>The processor and graphics at rest, which no app is given: what they draw with nothing to do.</summary>
+    public const string Idle = "::idle";
+
+    /// <summary>Programs that ended before the service could see them: the busy time no running process explains.</summary>
+    public const string Closed = "::closed";
+
+    /// <summary>Another signed in user's apps: processes in a Windows session other than the console's.</summary>
+    public const string OtherUsers = "::otherusers";
+
+    /// <summary>Apps past the hour's busiest, together.</summary>
+    public const string Other = "::other";
+
+    /// <summary>The prefix of a Store app's key, followed by its package family.</summary>
+    public const string PackagePrefix = "pkg:";
+
+    /// <summary>True for the special keys, which are kept whatever their size.</summary>
+    public static bool IsSpecial(string key) => key.StartsWith("::", StringComparison.Ordinal);
+
+    /// <summary>A Store app's key.</summary>
+    public static string Package(string family) => PackagePrefix + family;
+
+    /// <summary>The plain name a special key's row is written with.</summary>
+    public static string? SpecialName(string key) => key switch
+    {
+        Windows => "Windows",
+        Idle => "Idle",
+        Closed => "Programs that already closed",
+        OtherUsers => "Other users",
+        Other => "Other apps",
+        _ => null,
+    };
+}
+
+/// <summary>One app's energy in one hour, as storage version 6 keeps it: its share of the hour's processor and graphics
+/// energy (the hour row's cpu_wh and gpu_wh), how long it had a process running and how long it held the window in front.</summary>
+/// <param name="Key">See <see cref="AppKeys"/>.</param>
+/// <param name="Name">What the App shows.</param>
+/// <param name="Path">The image the App takes the icon from; null for the special keys and when there is none.</param>
+public sealed record AppHourRow(string Key, string Name, string? Path, double CpuWh, double GpuWh, double RunSeconds, double FrontSeconds);

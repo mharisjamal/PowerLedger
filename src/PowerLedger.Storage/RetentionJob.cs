@@ -12,18 +12,22 @@ public sealed record RetentionOptions(int RawHours = 48, int HistoryYears = 2)
 
 /// <param name="RawDeleted">Raw rows removed.</param>
 /// <param name="MinutesDeleted">Minute rows removed.</param>
-public sealed record RetentionResult(int RawDeleted, int MinutesDeleted);
+/// <param name="AppHoursDeleted">Rows of the energy by app removed (Plan AE).</param>
+public sealed record RetentionResult(int RawDeleted, int MinutesDeleted, int AppHoursDeleted = 0);
 
 /// <summary>Daily housekeeping: purges expired rows and, weekly, reclaims free pages.</summary>
 public sealed class RetentionJob(SqliteDatabase db)
 {
-    /// <summary>Purges raw and minute rows older than the retention window. Options are clamped, so no caller can widen the purge past the spec's bounds. Hour rows are never touched.</summary>
+    /// <summary>Purges raw and minute rows older than the retention window, and the energy by app older than
+    /// <see cref="AppHoursRepository.Retention"/>. Options are clamped, so no caller can widen the purge past the spec's
+    /// bounds. Hour rows are never touched.</summary>
     public RetentionResult Run(DateTimeOffset now, RetentionOptions options)
     {
         var safe = RetentionOptions.Clamped(options.RawHours, options.HistoryYears);
         var raw = new RawSampleRepository(db).PurgeBefore(now.AddHours(-safe.RawHours));
         var minutes = new AggregateRepository(db).PurgeMinutesBefore(now.AddYears(-safe.HistoryYears));
-        return new RetentionResult(raw, minutes);
+        var apps = new AppHoursRepository(db).PurgeBefore(now - AppHoursRepository.Retention);
+        return new RetentionResult(raw, minutes, apps);
     }
 
     /// <summary>Reclaims free pages a little at a time. Weekly is plenty; never run a full VACUUM.</summary>
