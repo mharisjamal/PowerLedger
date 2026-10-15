@@ -324,6 +324,7 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _toneTimer?.Stop();
         Wait(false);
         Hook(false);
         if (_following.Count > 0) LiquidGlassSources.Animating -= OnAnimating;
@@ -405,11 +406,100 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
                 _canDraw = false;
                 _dispatcher.BeginInvoke(DispatcherPriority.Render, () => Present(imaged));
             }
+            // The ink follows what the glass shows (Plan AD): read again once glass was drawn, a few times a second at most.
+            if (composed.Count > 0 || imaged.Count > 0) _toneOwed = true;
+            if (_toneOwed) ReadTones(renderer);
             if (composed.Count == 0 && imaged.Count == 0) return;
             Interlocked.Increment(ref _frames);
             if (foreign) Interlocked.Increment(ref _foreignFrames);
             LiquidGlassGovernor.Delivered();
         }
+    }
+
+    // ---- Tones (Plan AD) ----
+
+    private static readonly long ToneTicks = (long)(System.Diagnostics.Stopwatch.Frequency * LiquidGlassBackdrop.ToneEvery.TotalSeconds);
+    private readonly float[] _toneMeans = new float[GpuGlassRenderer.MaxTones * 4];
+    private readonly int[] _toneIds = new int[GpuGlassRenderer.MaxTones], _toneIdsShown = new int[GpuGlassRenderer.MaxTones];
+    private readonly Color?[] _toneColours = new Color?[GpuGlassRenderer.MaxTones], _toneColoursShown = new Color?[GpuGlassRenderer.MaxTones];
+    private readonly object _toneGate = new();
+    private int _toneCount;
+    private long _toneAt;
+    private volatile bool _toneOwed;
+    private volatile bool _tonePublishQueued, _toneLaterQueued;
+    private DispatcherTimer? _toneTimer;
+    private long _toneReads;
+
+    /// <summary>How many times this window's tones were read, for the tests.</summary>
+    internal long ToneReads => Interlocked.Read(ref _toneReads);
+
+    /// <summary>Under the GPU lock (the capture thread, or the UI thread's DrawNow): each piece's tone read on the GPU and
+    /// handed to the UI thread; or, read too lately, a read asked for once the moment has passed.</summary>
+    private void ReadTones(GpuGlassRenderer renderer)
+    {
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (now - _toneAt < ToneTicks)
+        {
+            if (_toneLaterQueued) return;
+            _toneLaterQueued = true;
+            _dispatcher.BeginInvoke(DispatcherPriority.Background, ToneLater);
+            return;
+        }
+        _toneOwed = false;
+        _toneAt = now;
+        var jobs = Volatile.Read(ref _jobs);
+        var count = renderer.Tones(jobs, _toneMeans);
+        if (count == 0) return;
+        Interlocked.Increment(ref _toneReads);
+        lock (_toneGate)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                _toneIds[i] = jobs[i].Id;
+                _toneColours[i] = _toneMeans[4 * i + 3] > 0 ? BackdropTone.FromLinear(_toneMeans[4 * i], _toneMeans[4 * i + 1], _toneMeans[4 * i + 2]) : null;
+            }
+            _toneCount = count;
+        }
+        if (_tonePublishQueued) return;
+        _tonePublishQueued = true;
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, ShowTones);
+    }
+
+    /// <summary>On the UI thread: each piece takes its tone.</summary>
+    private void ShowTones()
+    {
+        _tonePublishQueued = false;
+        if (_disposed) return;
+        int count;
+        lock (_toneGate)
+        {
+            count = _toneCount;
+            Array.Copy(_toneIds, _toneIdsShown, count);
+            Array.Copy(_toneColours, _toneColoursShown, count);
+        }
+        foreach (var p in _pieces.Values)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                if (_toneIdsShown[i] != p.Id) continue;
+                if (_toneColoursShown[i] is { } tone && p.Element.OnGpu) p.Element.SetTone(tone);
+                break;
+            }
+        }
+    }
+
+    /// <summary>On the UI thread: a read once the moment has passed, through a frame of its own.</summary>
+    private void ToneLater()
+    {
+        if (_disposed) return;
+        _toneTimer ??= new DispatcherTimer(LiquidGlassBackdrop.ToneEvery, DispatcherPriority.Background, (_, _) =>
+        {
+            _toneTimer!.Stop();
+            _toneLaterQueued = false;
+            if (!_disposed && _toneOwed && _active) Want();
+        }, _dispatcher);
+        _toneTimer.Stop();
+        _toneTimer.Start();
     }
 
     /// <summary>On the capture thread: the device went. The UI thread drops what was made on it and makes it again on

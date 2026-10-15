@@ -29,7 +29,7 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
     public const int MaxPairs = 32;
 
     private static readonly Lazy<Dictionary<string, byte[]>> Code = new(() =>
-        new[] { "Fullscreen", "Bright", "Across", "Down", "Compare" }.ToDictionary(n => n, n =>
+        new[] { "Fullscreen", "Bright", "Across", "Down", "Compare", "Tone" }.ToDictionary(n => n, n =>
         {
             using var stream = typeof(GpuGlassRenderer).Assembly.GetManifestResourceStream($"PowerLedger.App.Aero.LiquidGlass.Shaders.GpuGlass.{n}.cso")
                 ?? throw new InvalidOperationException($"The {n} shader isn't embedded.");
@@ -43,6 +43,7 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
     private readonly float _sdrWhite;
     private readonly CaptureNative.RECT _bounds;
     private IntPtr _vs, _bright, _across, _down, _compare, _glass, _area, _linear, _desktopView, _previous, _previousView, _differs, _differsView, _differsRead, _syncRead;
+    private IntPtr _tone, _toneConstants, _tones, _tonesView, _tonesRead;
     private readonly Scratch _brightened = new(), _blurred = new();
 
     [StructLayout(LayoutKind.Sequential)]
@@ -98,6 +99,16 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
             View = Target = Texture = IntPtr.Zero;
         }
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ToneConstants
+    {
+        public int X, Y, Width, Height, Slot;
+        public float Brightness, SdrWhite, Pad;
+    }
+
+    /// <summary>The most pieces whose tone one call reads (<see cref="Tones"/>).</summary>
+    public const int MaxTones = 128;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct AreaConstants
@@ -164,7 +175,76 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
             Width = 1, Height = 1, MipLevels = 1, ArraySize = 1, Format = DXGI_FORMAT_B8G8R8A8_UNORM, SampleCount = 1, Usage = D3D11_USAGE_STAGING,
             CPUAccessFlags = D3D11_CPU_ACCESS_READ,
         };
-        return GpuNative.CreateTexture2D(_device, one, null, out _syncRead) >= 0;
+        if (GpuNative.CreateTexture2D(_device, one, null, out _syncRead) < 0) return false;
+        // The tones (Plan AD): four words a piece, and a staging copy to read them. Without them the glass still draws;
+        // only the ink stays the look's own.
+        if (!BuildTones())
+        {
+            foreach (var p in new[] { _tone, _toneConstants, _tonesView, _tones, _tonesRead }) CaptureNative.Release(p);
+            _tone = _toneConstants = _tonesView = _tones = _tonesRead = IntPtr.Zero;
+        }
+        return true;
+    }
+
+    private bool BuildTones()
+    {
+        if (CreateComputeShader(_device, Code.Value["Tone"], out _tone) < 0) return false;
+        if (CreateBuffer(_device, new D3D11_BUFFER_DESC { ByteWidth = (uint)sizeof(ToneConstants), BindFlags = D3D11_BIND_CONSTANT_BUFFER }, out _toneConstants) < 0) return false;
+        var words = new D3D11_BUFFER_DESC { ByteWidth = MaxTones * 16, BindFlags = D3D11_BIND_UNORDERED_ACCESS, MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS };
+        if (CreateBuffer(_device, words, out _tones) < 0) return false;
+        var raw = new D3D11_UNORDERED_ACCESS_VIEW_DESC { Format = DXGI_FORMAT_R32_TYPELESS, ViewDimension = D3D11_UAV_DIMENSION_BUFFER, NumElements = MaxTones * 4, Flags = D3D11_BUFFER_UAV_FLAG_RAW };
+        if (CreateUnorderedAccessView(_device, _tones, raw, out _tonesView) < 0) return false;
+        return CreateBuffer(_device, new D3D11_BUFFER_DESC { ByteWidth = MaxTones * 16, Usage = D3D11_USAGE_STAGING, CPUAccessFlags = D3D11_CPU_ACCESS_READ }, out _tonesRead) >= 0;
+    }
+
+    /// <summary>How many tone reads have run, for the tests and the measurements.</summary>
+    internal static long ToneReads;
+
+    /// <summary>
+    /// The tone behind each of <paramref name="jobs"/> (up to <see cref="MaxTones"/>), read on the GPU from the desktop
+    /// copy: the mean light of what each piece shows (its box, as far as its shape and its ancestors' clips leave it),
+    /// brightened as the glass is. <paramref name="means"/> takes four floats a job: the mean's linear red, green and
+    /// blue, and 1 where it was read (0 for a piece that shows nothing). One small read back. Returns how many jobs it
+    /// covered; 0 where the tones couldn't be built.
+    /// </summary>
+    public int Tones(GpuGlassJob[] jobs, float[] means)
+    {
+        if (_tone == IntPtr.Zero) return 0;
+        var count = Math.Min(Math.Min(jobs.Length, MaxTones), means.Length / 4);
+        Interlocked.Increment(ref ToneReads);
+        ClearUnorderedAccessViewUint(_context, _tonesView);
+        CSSetShader(_context, _tone);
+        CSSetShaderResources(_context, 0, _desktopView);
+        CSSetUnorderedAccessView(_context, _tonesView);
+        CSSetConstantBuffers(_context, 2, _toneConstants);
+        for (var i = 0; i < count; i++)
+        {
+            var job = jobs[i];
+            var seen = Rect.Intersect(job.Shape.Shape, job.Shape.Visible);
+            if (!seen.IsEmpty) seen.Intersect(new Rect(0, 0, job.Box.Width, job.Box.Height));
+            if (seen.IsEmpty || seen.Width < 1 || seen.Height < 1 || job.Shape.Opacity <= 0) continue;
+            var constants = new ToneConstants
+            {
+                X = job.Box.X - _bounds.Left + (int)seen.X, Y = job.Box.Y - _bounds.Top + (int)seen.Y, Width = (int)seen.Width, Height = (int)seen.Height, Slot = i,
+                Brightness = job.Brightness, SdrWhite = _sdrWhite,
+            };
+            UpdateSubresource(_context, _toneConstants, &constants, 0);
+            Dispatch(_context, 1, 1);
+        }
+        CSSetUnorderedAccessView(_context, IntPtr.Zero);
+        CSSetShaderResources(_context, 0, IntPtr.Zero);
+        CopyResource(_context, _tonesRead, _tones);
+        if (Map(_context, _tonesRead, out var mapped) < 0) return 0;
+        var words = (float*)mapped.Data;
+        for (var i = 0; i < count; i++)
+        {
+            means[4 * i] = words[4 * i];
+            means[4 * i + 1] = words[4 * i + 1];
+            means[4 * i + 2] = words[4 * i + 2];
+            means[4 * i + 3] = ((uint*)words)[4 * i + 3] == 1 ? 1 : 0;
+        }
+        Unmap(_context, _tonesRead);
+        return count;
     }
 
     /// <summary>Compares each rectangle (on the desktop copy) with the copy before it, on the GPU; bit n of the answer is
@@ -321,10 +401,12 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
 
     public void Dispose()
     {
-        foreach (var p in new[] { _vs, _bright, _across, _down, _compare, _glass, _area, _linear, _desktopView, _previousView, _previous, _differsView, _differs, _differsRead, _syncRead })
+        foreach (var p in new[] { _vs, _bright, _across, _down, _compare, _glass, _area, _linear, _desktopView, _previousView, _previous, _differsView, _differs, _differsRead, _syncRead,
+                     _tone, _toneConstants, _tonesView, _tones, _tonesRead })
         {
             CaptureNative.Release(p);
         }
+        _tone = _toneConstants = _tonesView = _tones = _tonesRead = IntPtr.Zero;
         _vs = _bright = _across = _down = _compare = _glass = _area = _linear = _desktopView = _previousView = _previous = _differsView = _differs = _differsRead = _syncRead = IntPtr.Zero;
         _brightened.Release();
         _blurred.Release();

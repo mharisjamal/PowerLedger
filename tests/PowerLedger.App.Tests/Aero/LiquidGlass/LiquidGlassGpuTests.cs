@@ -678,6 +678,31 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
         }));
 
     /// <summary>
+    /// Plan AD: on the GPU path the piece's tone is read on the GPU from the desktop copy as its glass is drawn: a white
+    /// window behind gives a white tone, a black one a black tone, and a still desktop asks for no more reads.
+    /// </summary>
+    [Fact]
+    public void On_the_gpu_the_piece_reads_the_tone_of_what_is_behind_it()
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            var white = FakeGlassSource.Picture(400, 300, (_, _) => (255, 255, 255));
+            using var scene = Show(white, 300, 200, 300, 200);
+            UiHarness.PumpUntil(() => scene.Glass.OnGpu && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
+            UiHarness.PumpUntil(() => scene.Glass.Tone is { } t && Contrast.Luminance(t) > 0.95, TimeSpan.FromSeconds(5), "a white tone");
+            ((Border)scene.Desk.Content).Child = new Border { Background = Brushes.Black };
+            UiHarness.PumpUntil(() => scene.Glass.Tone is { } t && Contrast.Luminance(t) < 0.01, TimeSpan.FromSeconds(5), "a black tone");
+            ((Border)scene.Desk.Content).Child = new Border { Background = new SolidColorBrush(Color.FromRgb(0x40, 0x80, 0xC0)) };
+            UiHarness.PumpUntil(() => scene.Glass.Tone is { } t && Math.Abs(t.B - Math.Min(255, 0xC0 * 1.1)) <= 3 && Math.Abs(t.R - 0x40 * 1.1) <= 3, TimeSpan.FromSeconds(5),
+                "the blue's tone, brightened as the glass is");
+            UiHarness.Pump(TimeSpan.FromMilliseconds(500));
+            var reads = Gpu(scene).ToneReads;
+            UiHarness.Pump(TimeSpan.FromSeconds(1));
+            output.WriteLine($"tone {scene.Glass.Tone}; reads at rest over 1 s: {Gpu(scene).ToneReads - reads}");
+            (Gpu(scene).ToneReads - reads).ShouldBe(0, "nothing read at rest");
+            return 0;
+        }));
+
+    /// <summary>
     /// A still desktop: the capture thread waits for Windows' next frame a quarter of a second at a time, not one display
     /// refresh at a time (perf review P8: 60 wakeups a second for nothing), and what the window asks of its glass meanwhile
     /// (here a read; a piece new, moved or changed) is served on the window's own thread at its next turn, not at the

@@ -43,7 +43,7 @@ foreach ($fx in Get-ChildItem $folder -Filter *.fx) {
     "{0} -> {1} bytes ({2})" -f $fx.Name, $bytes.Length, $Profile
 }
 $gpu = Join-Path $folder 'GpuGlass.hlsl'
-foreach ($entry in @(@('Fullscreen', 'vs_4_0'), @('Bright', 'ps_4_0'), @('Across', 'ps_4_0'), @('Down', 'ps_4_0'), @('Compare', 'cs_5_0'))) {
+foreach ($entry in @(@('Fullscreen', 'vs_4_0'), @('Bright', 'ps_4_0'), @('Across', 'ps_4_0'), @('Down', 'ps_4_0'), @('Compare', 'cs_5_0'), @('Tone', 'cs_5_0'))) {
     $bytes = [Fxc]::Compile((Get-Content $gpu -Raw), 'GpuGlass.hlsl', $entry[1], $entry[0])
     [IO.File]::WriteAllBytes((Join-Path $folder "GpuGlass.$($entry[0]).cso"), $bytes)
     "GpuGlass.hlsl {0} -> {1} bytes ({2})" -f $entry[0], $bytes.Length, $entry[1]
