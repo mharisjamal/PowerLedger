@@ -188,6 +188,31 @@ public class ServiceSignalsTests
     }
 
     [Fact]
+    public void The_windows_in_front_are_those_of_fresh_reports_and_go_with_their_app()
+    {
+        var clock = new FakeTimeProvider();
+        var signals = new ServiceSignals(clock);
+        List<uint> front = [99];
+        signals.ForegroundProcesses(front);
+        front.ShouldBeEmpty();
+
+        signals.ReportIdle("a", 10, foreground: 100);
+        signals.ReportIdle("b", 5, foreground: 200);
+        signals.ReportIdle("c", 5);                                     // an older App names none
+        signals.ForegroundProcesses(front);
+        front.ShouldBe([100u, 200u], ignoreOrder: true);
+
+        clock.Advance(ServiceSignals.ReportLifetime + TimeSpan.FromSeconds(1));
+        signals.ReportIdle("b", 5, foreground: 300);
+        signals.ForegroundProcesses(front);
+        front.ShouldBe([300u]);
+
+        signals.ForgetClient("b");
+        signals.ForegroundProcesses(front);
+        front.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void A_report_from_an_app_that_went_quiet_is_ignored()
     {
         var clock = new FakeTimeProvider();

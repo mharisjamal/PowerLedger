@@ -180,20 +180,30 @@ internal interface IServiceLink : IAsyncDisposable
     Task<WriteResult> UpdateNowAsync(CancellationToken cancel = default);
 }
 
-/// <summary>Seconds since the last keyboard or mouse input in this session.</summary>
+/// <summary>Seconds since the last keyboard or mouse input in this session, and the process whose window is in front.</summary>
 internal interface IIdleSource
 {
     double IdleSeconds();
+
+    /// <summary>The process that owns the window in front in this session; null when no window is.</summary>
+    uint? ForegroundProcessId();
 }
 
-/// <summary>The App runs in the user's session, so GetLastInputInfo describes the person at the keyboard. The service, in
-/// session 0, cannot see that, which is why the App reports it (Plan C's rules for Plan D).</summary>
+/// <summary>The App runs in the user's session, so GetLastInputInfo describes the person at the keyboard and
+/// GetForegroundWindow the window they look at. The service, in session 0, cannot see either, which is why the App reports
+/// them (Plan C's rules for Plan D; Plan AE for the window in front).</summary>
 internal sealed class LastInputIdleSource : IIdleSource
 {
     public double IdleSeconds()
     {
         var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
         return GetLastInputInfo(ref info) ? unchecked((uint)Environment.TickCount - info.Time) / 1000.0 : 0;
+    }
+
+    public uint? ForegroundProcessId()
+    {
+        var window = GetForegroundWindow();
+        return window != 0 && GetWindowThreadProcessId(window, out var pid) != 0 && pid != 0 ? pid : null;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -206,6 +216,12 @@ internal sealed class LastInputIdleSource : IIdleSource
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
 }
 
 /// <summary>
@@ -560,9 +576,9 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
         }
     }
 
-    /// <summary>The idle time, now and then every <see cref="ActivityEvery"/> while a window is visible, or every <see
-    /// cref="HiddenActivityEvery"/> while none is, timed from each report's start as a periodic timer is; a window showing
-    /// ends a wait at once.</summary>
+    /// <summary>The idle time and the process in front, now and then every <see cref="ActivityEvery"/> while a window is
+    /// visible, or every <see cref="HiddenActivityEvery"/> while none is, timed from each report's start as a periodic timer
+    /// is; a window showing ends a wait at once.</summary>
     private async Task ReportActivityAsync(MessageChannel channel, CancellationToken cancel)
     {
         while (true)
@@ -570,7 +586,8 @@ internal sealed class PipeServiceLink(string pipeName, IIdleSource idle, TimePro
             using var round = CancellationTokenSource.CreateLinkedTokenSource(cancel);
             var shown = Volatile.Read(ref _windowShown).Task;
             var wait = Task.Delay(_windowVisible ? ActivityEvery : HiddenActivityEvery, clock, round.Token);
-            await RequestAsync(channel, new ReportActivityRequest(NextId(), idle.IdleSeconds()), cancel).ConfigureAwait(false);
+            var report = new ReportActivityRequest(NextId(), idle.IdleSeconds(), idle.ForegroundProcessId());
+            await RequestAsync(channel, report, cancel).ConfigureAwait(false);
             await Task.WhenAny(wait, shown).ConfigureAwait(false);
             await round.CancelAsync().ConfigureAwait(false);
             cancel.ThrowIfCancellationRequested();

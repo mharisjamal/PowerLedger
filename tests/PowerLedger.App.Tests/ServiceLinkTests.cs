@@ -27,7 +27,7 @@ public sealed class ServiceLinkTests : IAsyncLifetime
     public ServiceLinkTests()
     {
         _service = new FakeService(_name);
-        _link = new PipeServiceLink(_name, new FixedIdle(42), _clock, new TrustAnyServer());
+        _link = new PipeServiceLink(_name, new FixedIdle(42, foreground: 4242), _clock, new TrustAnyServer());
         _link.FrameReceived += _frames.Enqueue;
         _link.ConnectionChanged += _changes.Enqueue;
     }
@@ -213,9 +213,18 @@ public sealed class ServiceLinkTests : IAsyncLifetime
         _service.Requests.OfType<SubscribeRequest>().Count().ShouldBe(2);
     }
 
-    private sealed class FixedIdle(double seconds) : IIdleSource
+    [Fact]
+    public async Task The_activity_report_names_the_process_whose_window_is_in_front()
+    {
+        await WaitFor.True(() => _service.Requests.OfType<ReportActivityRequest>().Any());
+        _service.Requests.OfType<ReportActivityRequest>().First().ForegroundPid.ShouldBe(4242u);
+    }
+
+    private sealed class FixedIdle(double seconds, uint? foreground = null) : IIdleSource
     {
         public double IdleSeconds() => seconds;
+
+        public uint? ForegroundProcessId() => foreground;
     }
 
     [Fact]

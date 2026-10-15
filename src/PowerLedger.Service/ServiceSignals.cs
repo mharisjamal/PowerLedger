@@ -16,7 +16,7 @@ internal sealed class ServiceSignals(TimeProvider clock)
     public static readonly TimeSpan SilentGrace = TimeSpan.FromSeconds(15);
 
     private readonly Lock _gate = new();
-    private readonly Dictionary<string, (double IdleSeconds, long At)> _reports = new();
+    private readonly Dictionary<string, (double IdleSeconds, long At, uint? Foreground)> _reports = new();
     private readonly Dictionary<string, (uint? Session, bool Visible, bool Watching)> _windows = new();
     private readonly Dictionary<string, Grace> _subscribed = new();
     private volatile bool _displayOn = true;
@@ -60,11 +60,26 @@ internal sealed class ServiceSignals(TimeProvider clock)
         grace.Timer = clock.CreateTimer(_ => Change(() => grace.Over = true), null, SilentGrace, Timeout.InfiniteTimeSpan);
     });
 
-    /// <summary>One App client's idle time, keyed by its connection so each session's App keeps its own report.</summary>
-    public void ReportIdle(string client, double idleSeconds)
+    /// <summary>One App client's idle time, keyed by its connection so each session's App keeps its own report, and the
+    /// process whose window is in front in its session (Plan AE), when it says.</summary>
+    public void ReportIdle(string client, double idleSeconds, uint? foreground = null)
     {
         if (!double.IsFinite(idleSeconds) || idleSeconds < 0) return;
-        lock (_gate) _reports[client] = (idleSeconds, clock.GetTimestamp());
+        lock (_gate) _reports[client] = (idleSeconds, clock.GetTimestamp(), foreground is 0 ? null : foreground);
+    }
+
+    /// <summary>Fills <paramref name="into"/> with the process in front in each session whose App reported lately, for the
+    /// sensor thread once a tick: an App that has gone quiet, or never says, names none.</summary>
+    public void ForegroundProcesses(List<uint> into)
+    {
+        into.Clear();
+        lock (_gate)
+        {
+            foreach (var (_, at, foreground) in _reports.Values)
+            {
+                if (foreground is { } pid && clock.GetElapsedTime(at) <= ReportLifetime) into.Add(pid);
+            }
+        }
     }
 
     /// <summary>Plan Q §4: whether one App client's main window is showing, minimised or not, and the session it is in;
@@ -98,7 +113,7 @@ internal sealed class ServiceSignals(TimeProvider clock)
         lock (_gate)
         {
             double? idle = null;
-            foreach (var (seconds, at) in _reports.Values)
+            foreach (var (seconds, at, _) in _reports.Values)
             {
                 var age = clock.GetElapsedTime(at);
                 if (age > ReportLifetime) continue;

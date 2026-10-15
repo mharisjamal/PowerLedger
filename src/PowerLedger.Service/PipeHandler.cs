@@ -51,7 +51,7 @@ internal sealed partial class PipeHandler(
             case ReportActivityRequest request:
                 if (!double.IsFinite(request.IdleSeconds) || request.IdleSeconds < 0)
                     return new ErrorReply(request.Id, "Idle time must be a number of seconds, zero or more.");
-                signals.ReportIdle(client, request.IdleSeconds);
+                signals.ReportIdle(client, request.IdleSeconds, request.ForegroundPid);
                 return new OkReply(request.Id);
             case ReportBrightnessRequest request:
                 if (request.Validate() is { } invalid) return new ErrorReply(request.Id, invalid);
