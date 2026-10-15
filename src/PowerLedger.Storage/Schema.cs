@@ -182,4 +182,26 @@ internal static class Schema
             WHERE h.start_ms = samples_1h.start_ms)
         WHERE on_s > 0 AND battery_s > 0;
         """;
+
+    /// <summary>V6 (Plan AE, the Apps page): the energy each app used, per hour. A row holds an app's share of the hour's
+    /// processor and graphics energy in samples_1h (cpu_wh, gpu_wh, at the pack, the bands' own scale), so for an hour the
+    /// service attributed throughout, each column summed over every key is that hour row's figure. Keys: an app's image path
+    /// in lower case, "pkg:" and a Store package family, or one of "::windows" (Windows' own processes), "::idle" (the
+    /// processor and graphics at rest, split by no app), "::closed" (programs that started and ended between two readings),
+    /// "::otherusers" (another signed in user's apps) and "::other" (apps past the hour's busiest 25). Name is what the App
+    /// shows; path, where there is one, is the image the App takes the icon from. run_s is how long the app had a process
+    /// running in the hour, front_s how long it held the window in front. Never shared, never synced to a household.</summary>
+    public const string V6 = """
+        CREATE TABLE app_hours (
+            start_ms INTEGER NOT NULL,
+            app_key  TEXT    NOT NULL,
+            name     TEXT    NOT NULL,
+            path     TEXT,
+            cpu_wh   REAL    NOT NULL,
+            gpu_wh   REAL    NOT NULL,
+            run_s    REAL    NOT NULL,
+            front_s  REAL    NOT NULL,
+            PRIMARY KEY (start_ms, app_key)
+        ) WITHOUT ROWID;
+        """;
 }
