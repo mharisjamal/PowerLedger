@@ -85,6 +85,12 @@ internal sealed class DisplacementField
         }
     }
 
+    /// <summary>The field kept at <paramref name="dpiScale"/> when it covers <paramref name="width"/> by
+    /// <paramref name="height"/>, or null: never made here (a piece's ink reads its tone through the field its glass already
+    /// made, and straight behind until then).</summary>
+    public static DisplacementField? Made(int width, int height, double dpiScale)
+        => Fields.TryGetValue(Math.Round(dpiScale, 4), out var field) && field.Width >= width && field.Height >= height ? field : null;
+
     /// <summary>The move at device pixel (<paramref name="x"/>, <paramref name="y"/>), in device pixels, for a
     /// displacement scale of <paramref name="scale"/> units.</summary>
     public (double X, double Y) Move(int x, int y, double scale)

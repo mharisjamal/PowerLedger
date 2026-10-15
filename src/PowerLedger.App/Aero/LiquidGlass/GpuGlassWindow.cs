@@ -419,15 +419,19 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     // ---- Tones (Plan AD) ----
 
     private static readonly long ToneTicks = (long)(System.Diagnostics.Stopwatch.Frequency * LiquidGlassBackdrop.ToneEvery.TotalSeconds);
-    private readonly float[] _toneMeans = new float[GpuGlassRenderer.MaxTones * 4];
+    private const int ToneFloats = BackdropTone.Cells * 3;
+    private readonly float[] _toneCells = new float[GpuGlassRenderer.MaxTones * ToneFloats], _toneCellsShown = new float[GpuGlassRenderer.MaxTones * ToneFloats];
+    private readonly Rect[] _toneRegions = new Rect[GpuGlassRenderer.MaxTones], _toneRegionsShown = new Rect[GpuGlassRenderer.MaxTones];
     private readonly int[] _toneIds = new int[GpuGlassRenderer.MaxTones], _toneIdsShown = new int[GpuGlassRenderer.MaxTones];
-    private readonly Color?[] _toneColours = new Color?[GpuGlassRenderer.MaxTones], _toneColoursShown = new Color?[GpuGlassRenderer.MaxTones];
+    private readonly float[] _toneRead = new float[GpuGlassRenderer.MaxTones * ToneFloats];
+    private readonly Rect[] _toneReadRegions = new Rect[GpuGlassRenderer.MaxTones];
     private readonly object _toneGate = new();
     private int _toneCount;
     private long _toneAt;
     private volatile bool _toneOwed;
     private volatile bool _tonePublishQueued, _toneLaterQueued;
     private DispatcherTimer? _toneTimer;
+    private Action? _toneLater, _showTones;
     private long _toneReads;
 
     /// <summary>How many times this window's tones were read, for the tests.</summary>
@@ -442,27 +446,25 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         {
             if (_toneLaterQueued) return;
             _toneLaterQueued = true;
-            _dispatcher.BeginInvoke(DispatcherPriority.Background, ToneLater);
+            _dispatcher.BeginInvoke(DispatcherPriority.Background, _toneLater ??= ToneLater);
             return;
         }
         _toneOwed = false;
         _toneAt = now;
         var jobs = Volatile.Read(ref _jobs);
-        var count = renderer.Tones(jobs, _toneMeans);
+        var count = renderer.Tones(jobs, _toneRead, _toneReadRegions);
         if (count == 0) return;
         Interlocked.Increment(ref _toneReads);
         lock (_toneGate)
         {
-            for (var i = 0; i < count; i++)
-            {
-                _toneIds[i] = jobs[i].Id;
-                _toneColours[i] = _toneMeans[4 * i + 3] > 0 ? BackdropTone.FromLinear(_toneMeans[4 * i], _toneMeans[4 * i + 1], _toneMeans[4 * i + 2]) : null;
-            }
+            for (var i = 0; i < count; i++) _toneIds[i] = jobs[i].Id;
+            Array.Copy(_toneRead, _toneCells, count * ToneFloats);
+            Array.Copy(_toneReadRegions, _toneRegions, count);
             _toneCount = count;
         }
         if (_tonePublishQueued) return;
         _tonePublishQueued = true;
-        _dispatcher.BeginInvoke(DispatcherPriority.Background, ShowTones);
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, _showTones ??= ShowTones);
     }
 
     /// <summary>On the UI thread: each piece takes its tone.</summary>
@@ -475,14 +477,15 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         {
             count = _toneCount;
             Array.Copy(_toneIds, _toneIdsShown, count);
-            Array.Copy(_toneColours, _toneColoursShown, count);
+            Array.Copy(_toneCells, _toneCellsShown, count * ToneFloats);
+            Array.Copy(_toneRegions, _toneRegionsShown, count);
         }
         foreach (var p in _pieces.Values)
         {
             for (var i = 0; i < count; i++)
             {
                 if (_toneIdsShown[i] != p.Id) continue;
-                if (_toneColoursShown[i] is { } tone && p.Element.OnGpu) p.Element.SetTone(tone);
+                if (!_toneRegionsShown[i].IsEmpty && p.Element.OnGpu) p.Element.SetTones(new ReadOnlySpan<float>(_toneCellsShown, i * ToneFloats, ToneFloats), _toneRegionsShown[i]);
                 break;
             }
         }

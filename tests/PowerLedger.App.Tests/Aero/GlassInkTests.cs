@@ -165,6 +165,41 @@ public class GlassInkTests
         BackdropTone.Mean(half, 64, 64, 256, new Int32Rect(100, 0, 10, 10), 1).ShouldBeNull();
     }
 
+    /// <summary>A piece's tone comes in 8 by 8 cells, so text over one side of a pane can take that side's ink.</summary>
+    [Fact]
+    public void A_pictures_tones_come_in_eight_by_eight_cells()
+    {
+        var pixels = new byte[64 * 32 * 4];
+        for (var y = 0; y < 32; y++)
+            for (var x = 0; x < 64; x++)
+            {
+                var v = (byte)(x < 32 ? 0 : 255);
+                var at = (y * 64 + x) * 4;
+                (pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]) = (v, v, v, 255);
+            }
+        var cells = new float[BackdropTone.Cells * 3];
+        BackdropTone.Measure(pixels, 64, 32, 256, new Int32Rect(-10, 0, 100, 32), 1, cells).ShouldBe(new Int32Rect(0, 0, 64, 32), "clipped to the picture");
+        for (var j = 0; j < BackdropTone.Side; j++)
+            for (var i = 0; i < BackdropTone.Side; i++)
+                cells[(j * BackdropTone.Side + i) * 3 + 1].ShouldBe(i < 4 ? 0f : 1f, 0.001f, $"cell {i}, {j}");
+        BackdropTone.MeanOf(cells).ShouldBe(BackdropTone.FromLinear(0.5, 0.5, 0.5));
+        var grid = new ToneGrid();
+        grid.Set(cells, new Rect(0, 0, 64, 32)).ShouldBeTrue();
+        grid.Set(cells, new Rect(0, 0, 64, 32)).ShouldBeFalse("nothing new");
+        grid.Mean(new Rect(0, 0, 32, 32), out _, out var g, out _).ShouldBeTrue();
+        g.ShouldBe(0, 0.001);
+        grid.Mean(new Rect(40, 4, 10, 10), out _, out g, out _).ShouldBeTrue();
+        g.ShouldBe(1, 0.001);
+        grid.Mean(new Rect(16, 0, 32, 32), out _, out g, out _).ShouldBeTrue();
+        g.ShouldBe(0.5, 0.001, "weighted by how much of each cell the area covers");
+        grid.Mean(new Rect(100, 0, 10, 10), out _, out _, out _).ShouldBeFalse();
+        // A picture smaller than the cells: every cell still has its tone.
+        var tiny = new byte[4 * 4 * 4];
+        Array.Fill(tiny, (byte)255);
+        BackdropTone.Measure(tiny, 4, 4, 16, new Int32Rect(0, 0, 4, 4), 1, cells).ShouldNotBeNull();
+        cells.ShouldAllBe(v => Math.Abs(v - 1) < 0.001);
+    }
+
     [Fact]
     public void A_translucent_pictures_tone_keeps_its_cover()
     {

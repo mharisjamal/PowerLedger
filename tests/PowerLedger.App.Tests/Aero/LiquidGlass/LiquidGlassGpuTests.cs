@@ -53,6 +53,12 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
         return new Scene(desk, window, glass);
     }
 
+    private static UIElement Column(UIElement element, int column)
+    {
+        Grid.SetColumn(element, column);
+        return element;
+    }
+
     private static GpuGlassWindow Gpu(Scene scene) => scene.Source.Gpu ?? throw new InvalidOperationException("The window isn't on the GPU path.");
 
     [Fact]
@@ -689,6 +695,26 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             using var scene = Show(white, 300, 200, 300, 200);
             UiHarness.PumpUntil(() => scene.Glass.OnGpu && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
             UiHarness.PumpUntil(() => scene.Glass.Tone is { } t && Contrast.Luminance(t) > 0.95, TimeSpan.FromSeconds(5), "a white tone");
+            // White on the left two thirds of the piece, black on the rest: the cells say which is where.
+            ((Border)scene.Desk.Content).Child = new Grid
+            {
+                ColumnDefinitions = { new ColumnDefinition(), new ColumnDefinition() },
+                Children = { new Border { Background = Brushes.White }, Column(new Border { Background = Brushes.Black }, 1) },
+            };
+            // What the glass shows of it, bent by the recipe's moves, worked out on the CPU (BackdropTone.MeasureBent): the
+            // GPU's cells agree.
+            var dpi = VisualTreeHelper.GetDpi(scene.Window).DpiScaleX;
+            var desk = FakeGlassSource.Picture(400, 300, (x, _) => x < 200 ? ((byte)255, (byte)255, (byte)255) : ((byte)0, (byte)0, (byte)0));
+            var deskPixels = new byte[400 * 300 * 4];
+            desk.CopyPixels(deskPixels, 400 * 4, 0);
+            var expected = new float[BackdropTone.Cells * 3];
+            BackdropTone.MeasureBent(deskPixels, 400, 300, 400 * 4, new Rect(0, 0, 400, 300), new Rect(0, 0, 300, 200), LiquidGlassRecipe.Brightness,
+                DisplacementField.Shared(300, 200, dpi), LiquidGlassRecipe.Scale, expected).ShouldBe(new Rect(0, 0, 300, 200));
+            double Off() => Enumerable.Range(0, BackdropTone.Cells).Max(c => Math.Abs(scene.Glass.Tones.Cells[c * 3 + 1] - expected[c * 3 + 1]));
+            UiHarness.PumpUntil(() => scene.Glass.Tone != null && Off() < 0.02, TimeSpan.FromSeconds(5), "the cells the glass shows");
+            scene.Glass.Tones.Region.ShouldBe(new Rect(0, 0, 300, 200), "the cells cover the whole piece");
+            expected.Where((_, k) => k % 3 == 1).ShouldContain(v => v > 0.9f, "white cells");
+            expected.Where((_, k) => k % 3 == 1).ShouldContain(v => v < 0.05f, "black cells");
             ((Border)scene.Desk.Content).Child = new Border { Background = Brushes.Black };
             UiHarness.PumpUntil(() => scene.Glass.Tone is { } t && Contrast.Luminance(t) < 0.01, TimeSpan.FromSeconds(5), "a black tone");
             ((Border)scene.Desk.Content).Child = new Border { Background = new SolidColorBrush(Color.FromRgb(0x40, 0x80, 0xC0)) };

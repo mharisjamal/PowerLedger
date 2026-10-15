@@ -12,7 +12,7 @@
 //            done here, so one map serves a piece at any size.
 //   Compare  whether any texel of a rectangle differs between two textures: a frame whose change is only our own window
 //            repainting (left out of capture, so the pixels are the same) is dropped without drawing.
-//   Tone     the mean light behind each piece, for the ink its text takes.
+//   Tone     the mean light each piece shows (its moves too), in 8 by 8 cells, for the ink its text takes.
 // Compiled by scripts/liquid-glass/compile-shaders.ps1 to GpuGlass.<entry>.cso (vs_4_0, ps_4_0, cs_5_0).
 
 Texture2D<float4> Desktop : register(t0);   // Bright: the desktop (8 bit sRGB, or scRGB half floats on an HDR monitor)
@@ -161,9 +161,11 @@ RWByteAddressBuffer Tones : register(u0);
 
 cbuffer Tone : register(b2)
 {
-    int2 ToneOrigin;       // the region's top left on the desktop texture
-    int2 ToneExtent;       // its width and height
-    int ToneSlot;          // which four words of Tones to write: one per piece
+    int2 ToneBox;          // the piece's box's top left on the desktop texture
+    int2 ToneSize;         // the box's width and height (what the moves mirror into)
+    int2 ToneOrigin;       // the region read, in the box's pixels: its top left
+    int2 ToneExtent;       // and its width and height
+    int ToneSlot;          // which piece's 64 cells of Tones to write (a kilobyte each)
     float ToneBrightness;  // brightness(k), as Bright applies it
     float ToneSdrWhite;    // as SdrWhite
     float TonePad;
@@ -171,9 +173,11 @@ cbuffer Tone : register(b2)
 
 groupshared float3 ToneSums[256];
 
-// Tone (Plan AD): the mean light of a piece's backdrop, for the ink its text takes (BackdropTone, GlassInk). One group a
-// piece, 32 by 32 texels sampled across its region (each thread four), brightened as Bright does, summed in linear
-// light; the mean's red, green and blue, then a 1 that says the slot was written.
+// Tone (Plan AD): the mean light of what a piece's glass shows in 8 by 8 cells, for the ink its text takes
+// (BackdropTone, GlassInk). One group a piece, 32 by 32 pixels sampled across its region (each thread a 2 by 2 block of
+// them), each read where the piece's move map takes it, mirrored into the box, as Down reads it (the blur left out),
+// brightened as Bright does, in linear light; each cell (2 by 2 threads, 16 samples) writes its mean's red, green and
+// blue, then a 1 that says it was written.
 [numthreads(16, 16, 1)]
 void Tone(uint3 t : SV_GroupThreadID, uint i : SV_GroupIndex)
 {
@@ -183,21 +187,21 @@ void Tone(uint3 t : SV_GroupThreadID, uint i : SV_GroupIndex)
     for (uint k = 0; k < 4; k++)
     {
         float2 cell = float2(t.xy * 2 + uint2(k & 1, k >> 1)) + 0.5;
-        int2 q = clamp(ToneOrigin + int2(cell * float2(ToneExtent) / 32), int2(0, 0), int2(w, h) - 1);
+        int2 p = ToneOrigin + int2(cell * float2(ToneExtent) / 32);
+        float2 m = Moves.Load(int3(p, 0));
+        int2 s = int2(MirrorPoint(p.x + 0.5 + m.x, ToneSize.x), MirrorPoint(p.y + 0.5 + m.y, ToneSize.y));
+        int2 q = clamp(ToneBox + s, int2(0, 0), int2(w, h) - 1);
         float3 c = Desktop.Load(int3(q, 0)).rgb;
         if (ToneSdrWhite > 0) c = ToSrgb(saturate(c / ToneSdrWhite));
         sum += ToLinear(min(c * ToneBrightness, 1));
     }
     ToneSums[i] = sum;
     GroupMemoryBarrierWithGroupSync();
-    for (uint s = 128; s > 0; s >>= 1)
+    if (((t.x | t.y) & 1) == 0)
     {
-        if (i < s) ToneSums[i] += ToneSums[i + s];
-        GroupMemoryBarrierWithGroupSync();
-    }
-    if (i == 0)
-    {
-        Tones.Store3(ToneSlot * 16, asuint(ToneSums[0] / 1024));
-        Tones.Store(ToneSlot * 16 + 12, 1);
+        float3 cell = ToneSums[i] + ToneSums[i + 1] + ToneSums[i + 16] + ToneSums[i + 17];
+        uint at = ToneSlot * 1024 + ((t.y >> 1) * 8 + (t.x >> 1)) * 16;
+        Tones.Store3(at, asuint(cell / 16));
+        Tones.Store(at + 12, 1);
     }
 }

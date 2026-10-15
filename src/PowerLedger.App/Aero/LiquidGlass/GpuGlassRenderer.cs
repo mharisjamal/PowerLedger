@@ -103,12 +103,15 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private struct ToneConstants
     {
-        public int X, Y, Width, Height, Slot;
+        public int BoxX, BoxY, BoxWidth, BoxHeight, X, Y, Width, Height, Slot;
         public float Brightness, SdrWhite, Pad;
     }
 
-    /// <summary>The most pieces whose tone one call reads (<see cref="Tones"/>).</summary>
+    /// <summary>The most pieces whose tones one call reads (<see cref="Tones"/>).</summary>
     public const int MaxTones = 128;
+
+    /// <summary>A piece's tones on the GPU: 8 by 8 cells of four words.</summary>
+    private const int ToneBytes = BackdropTone.Cells * 16;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct AreaConstants
@@ -190,27 +193,29 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
     {
         if (CreateComputeShader(_device, Code.Value["Tone"], out _tone) < 0) return false;
         if (CreateBuffer(_device, new D3D11_BUFFER_DESC { ByteWidth = (uint)sizeof(ToneConstants), BindFlags = D3D11_BIND_CONSTANT_BUFFER }, out _toneConstants) < 0) return false;
-        var words = new D3D11_BUFFER_DESC { ByteWidth = MaxTones * 16, BindFlags = D3D11_BIND_UNORDERED_ACCESS, MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS };
+        var words = new D3D11_BUFFER_DESC { ByteWidth = MaxTones * ToneBytes, BindFlags = D3D11_BIND_UNORDERED_ACCESS, MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS };
         if (CreateBuffer(_device, words, out _tones) < 0) return false;
-        var raw = new D3D11_UNORDERED_ACCESS_VIEW_DESC { Format = DXGI_FORMAT_R32_TYPELESS, ViewDimension = D3D11_UAV_DIMENSION_BUFFER, NumElements = MaxTones * 4, Flags = D3D11_BUFFER_UAV_FLAG_RAW };
+        var raw = new D3D11_UNORDERED_ACCESS_VIEW_DESC { Format = DXGI_FORMAT_R32_TYPELESS, ViewDimension = D3D11_UAV_DIMENSION_BUFFER, NumElements = MaxTones * ToneBytes / 4, Flags = D3D11_BUFFER_UAV_FLAG_RAW };
         if (CreateUnorderedAccessView(_device, _tones, raw, out _tonesView) < 0) return false;
-        return CreateBuffer(_device, new D3D11_BUFFER_DESC { ByteWidth = MaxTones * 16, Usage = D3D11_USAGE_STAGING, CPUAccessFlags = D3D11_CPU_ACCESS_READ }, out _tonesRead) >= 0;
+        return CreateBuffer(_device, new D3D11_BUFFER_DESC { ByteWidth = MaxTones * ToneBytes, Usage = D3D11_USAGE_STAGING, CPUAccessFlags = D3D11_CPU_ACCESS_READ }, out _tonesRead) >= 0;
     }
 
     /// <summary>How many tone reads have run, for the tests and the measurements.</summary>
     internal static long ToneReads;
 
     /// <summary>
-    /// The tone behind each of <paramref name="jobs"/> (up to <see cref="MaxTones"/>), read on the GPU from the desktop
-    /// copy: the mean light of what each piece shows (its box, as far as its shape and its ancestors' clips leave it),
-    /// brightened as the glass is. <paramref name="means"/> takes four floats a job: the mean's linear red, green and
-    /// blue, and 1 where it was read (0 for a piece that shows nothing). One small read back. Returns how many jobs it
-    /// covered; 0 where the tones couldn't be built.
+    /// The tones of each of <paramref name="jobs"/> (up to <see cref="MaxTones"/>), read on the GPU from the desktop copy:
+    /// the mean light of what each piece's glass shows (its box, as far as its shape and its ancestors' clips leave it,
+    /// each sample where the piece's moves take it) in 8 by 8 cells, brightened as the glass is. <paramref name="cells"/> takes three floats a cell, 64 cells a job (linear
+    /// red, green and blue), and <paramref name="regions"/> what each job's cells cover in its box's pixels, empty for a
+    /// piece that shows nothing. One small read back, of the pieces read. Returns how many jobs it covered; 0 where the
+    /// tones couldn't be built.
     /// </summary>
-    public int Tones(GpuGlassJob[] jobs, float[] means)
+    public int Tones(GpuGlassJob[] jobs, float[] cells, Rect[] regions)
     {
         if (_tone == IntPtr.Zero) return 0;
-        var count = Math.Min(Math.Min(jobs.Length, MaxTones), means.Length / 4);
+        var count = Math.Min(Math.Min(jobs.Length, MaxTones), Math.Min(cells.Length / (BackdropTone.Cells * 3), regions.Length));
+        if (count == 0) return 0;
         Interlocked.Increment(ref ToneReads);
         ClearUnorderedAccessViewUint(_context, _tonesView);
         CSSetShader(_context, _tone);
@@ -222,26 +227,42 @@ internal sealed unsafe class GpuGlassRenderer : IDisposable
             var job = jobs[i];
             var seen = Rect.Intersect(job.Shape.Shape, job.Shape.Visible);
             if (!seen.IsEmpty) seen.Intersect(new Rect(0, 0, job.Box.Width, job.Box.Height));
-            if (seen.IsEmpty || seen.Width < 1 || seen.Height < 1 || job.Shape.Opacity <= 0) continue;
+            if (seen.IsEmpty || seen.Width < 1 || seen.Height < 1 || job.Shape.Opacity <= 0 || job.MapView == IntPtr.Zero)
+            {
+                regions[i] = Rect.Empty;
+                continue;
+            }
             var constants = new ToneConstants
             {
-                X = job.Box.X - _bounds.Left + (int)seen.X, Y = job.Box.Y - _bounds.Top + (int)seen.Y, Width = (int)seen.Width, Height = (int)seen.Height, Slot = i,
-                Brightness = job.Brightness, SdrWhite = _sdrWhite,
+                BoxX = job.Box.X - _bounds.Left, BoxY = job.Box.Y - _bounds.Top, BoxWidth = job.Box.Width, BoxHeight = job.Box.Height,
+                X = (int)seen.X, Y = (int)seen.Y, Width = (int)seen.Width, Height = (int)seen.Height, Slot = i, Brightness = job.Brightness, SdrWhite = _sdrWhite,
             };
+            regions[i] = new Rect(constants.X, constants.Y, constants.Width, constants.Height);
             UpdateSubresource(_context, _toneConstants, &constants, 0);
+            // The piece's moves, as Down reads them.
+            CSSetShaderResources(_context, 2, job.MapView);
             Dispatch(_context, 1, 1);
         }
         CSSetUnorderedAccessView(_context, IntPtr.Zero);
         CSSetShaderResources(_context, 0, IntPtr.Zero);
-        CopyResource(_context, _tonesRead, _tones);
+        CSSetShaderResources(_context, 2, IntPtr.Zero);
+        CopySubresourceRegion(_context, _tonesRead, 0, 0, _tones, new D3D11_BOX { Right = (uint)(count * ToneBytes), Bottom = 1, Back = 1 });
         if (Map(_context, _tonesRead, out var mapped) < 0) return 0;
         var words = (float*)mapped.Data;
         for (var i = 0; i < count; i++)
         {
-            means[4 * i] = words[4 * i];
-            means[4 * i + 1] = words[4 * i + 1];
-            means[4 * i + 2] = words[4 * i + 2];
-            means[4 * i + 3] = ((uint*)words)[4 * i + 3] == 1 ? 1 : 0;
+            if (regions[i].IsEmpty) continue;
+            for (var c = 0; c < BackdropTone.Cells; c++)
+            {
+                var at = (i * BackdropTone.Cells + c) * 4;
+                if (((uint*)words)[at + 3] != 1)
+                {
+                    regions[i] = Rect.Empty;
+                    break;
+                }
+                var to = (i * BackdropTone.Cells + c) * 3;
+                (cells[to], cells[to + 1], cells[to + 2]) = (words[at], words[at + 1], words[at + 2]);
+            }
         }
         Unmap(_context, _tonesRead);
         return count;

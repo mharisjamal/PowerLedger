@@ -53,9 +53,14 @@ public class GlassPanel : ContentControl
         Loaded += (_, _) =>
         {
             if (!Panes.Contains(this)) Panes.Add(this);
-            SetValue(IsNestedKey, Outer(this) is not null);
+            OuterPanel = Outer(this);
+            SetValue(IsNestedKey, OuterPanel is not null);
         };
-        Unloaded += (_, _) => Panes.Remove(this);
+        Unloaded += (_, _) =>
+        {
+            Panes.Remove(this);
+            OuterPanel = null;
+        };
     }
 
     /// <summary>The piece's corners: the recipe's 28 for a pane; a capsule binds half its height (Capsule).</summary>
@@ -80,6 +85,9 @@ public class GlassPanel : ContentControl
 
     /// <summary>Whether the piece sits on another piece's glass, whose content's text shadow already reaches it.</summary>
     public bool IsNested => (bool)GetValue(IsNestedProperty);
+
+    /// <summary>The piece this one sits on while loaded, or null.</summary>
+    internal GlassPanel? OuterPanel { get; private set; }
 
     /// <summary>The piece's ink, which follows what its glass shows (Plan AD).</summary>
     internal GlassInk Ink { get; }
