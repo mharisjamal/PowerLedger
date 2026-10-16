@@ -290,14 +290,15 @@ internal sealed class AppWatch(
         process.User = AppUsers.Of(image?.UserSid);
         if (image?.Path is { Length: > 0 } path)
         {
-            var lower = path.ToLowerInvariant();
-            if (lower.StartsWith(processes.WindowsFolder, StringComparison.Ordinal))
+            if (AppKeys.IsWindows(path.ToLowerInvariant(), processes.WindowsFolder))
             {
                 process.Key = AppKeys.Windows;
+                process.User = AppUsers.Machine;
                 return process;
             }
             process.Path = path;
-            process.Key = image.PackageFamily is { Length: > 0 } family ? AppKeys.Package(family) : lower;
+            // One key across an app's updates, its version folders left out (review item 5).
+            process.Key = image.PackageFamily is { Length: > 0 } family ? AppKeys.Package(family) : AppKeys.ForPath(path);
             return process;
         }
         if (image?.PackageFamily is { Length: > 0 } package)

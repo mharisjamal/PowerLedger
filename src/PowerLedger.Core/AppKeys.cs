@@ -1,13 +1,17 @@
+using System.Text.RegularExpressions;
+
 namespace PowerLedger.Core;
 
 /// <summary>
-/// How the Apps page's rows are keyed (Plan AE, storage version 6): an app's image path in lower case, "pkg:" and a Store
-/// package family, or one of the special keys here, which start with "::" and are never a path.
+/// How the Apps page's rows are keyed (Plan AE, storage version 6): an app's image path in lower case without its version
+/// folders (<see cref="ForPath"/>), "pkg:" and a Store package family, or one of the special keys here, which start with
+/// "::" and are never a path.
 /// </summary>
-public static class AppKeys
+public static partial class AppKeys
 {
-    /// <summary>Windows' own processes: every image under the Windows folder, the kernel's System, Registry, Secure System and
-    /// Memory Compression processes, and the time the processor spends on drivers' interrupts and deferred calls.</summary>
+    /// <summary>Windows' own processes: every image under the Windows folder and Windows' own Defender, the kernel's System,
+    /// Registry, Secure System and Memory Compression processes, and the time the processor spends on drivers' interrupts and
+    /// deferred calls.</summary>
     public const string Windows = "::windows";
 
     /// <summary>The processor and graphics at rest, which no app is given: what they draw with nothing to do.</summary>
@@ -30,6 +34,44 @@ public static class AppKeys
 
     /// <summary>A Store app's key.</summary>
     public static string Package(string family) => PackagePrefix + family;
+
+    /// <summary>
+    /// An image's key (review item 5): its path in lower case, the folders a new version renames left out, so an app keeps
+    /// one line across its updates: a version folder ("app-1.0.9001", "130.0.2849.80", "4.18.24090.11-0"), a build's hash
+    /// folder ("d2e29494ec83") and a version after a folder's name ("IntelliJ IDEA 2024.2.1"). The drive and the file
+    /// name stay as they are.
+    /// </summary>
+    public static string ForPath(string path)
+    {
+        var parts = path.ToLowerInvariant().Split('\\');
+        List<string> kept = new(parts.Length);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var part = parts[i];
+            if (i > 0 && i < parts.Length - 1)
+            {
+                if (VersionFolder().IsMatch(part) || (HashFolder().IsMatch(part) && part.Any(char.IsDigit) && part.Any(char.IsLetter))) continue;
+                if (NamedVersion().Match(part) is { Success: true } named) part = named.Groups[1].Value;
+            }
+            kept.Add(part);
+        }
+        return string.Join('\\', kept);
+    }
+
+    /// <summary>True for an image, its path in lower case, that is Windows' own: under the Windows folder
+    /// (<paramref name="windowsFolder"/>, lower case, ending in a backslash), or Windows' own Defender's, whose antivirus and
+    /// its updates live outside it.</summary>
+    public static bool IsWindows(string lowerPath, string windowsFolder)
+        => lowerPath.StartsWith(windowsFolder, StringComparison.Ordinal) || lowerPath.Contains(@"\windows defender", StringComparison.Ordinal);
+
+    [GeneratedRegex(@"^(app-|v)?\d+(\.\d+)+([-_+][0-9a-z.]+)*$", RegexOptions.CultureInvariant)]
+    private static partial Regex VersionFolder();
+
+    [GeneratedRegex(@"^[0-9a-f]{8,}$", RegexOptions.CultureInvariant)]
+    private static partial Regex HashFolder();
+
+    [GeneratedRegex(@"^(.+?)[ _-]v?\d+(\.\d+)+$", RegexOptions.CultureInvariant)]
+    private static partial Regex NamedVersion();
 
     /// <summary>The plain name a special key's row is written with.</summary>
     public static string? SpecialName(string key) => key switch

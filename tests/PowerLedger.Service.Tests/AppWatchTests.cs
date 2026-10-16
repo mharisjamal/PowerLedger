@@ -340,6 +340,23 @@ public sealed class AppWatchTests : IDisposable
         rows[@"d:\games\game.exe"].RunSeconds.ShouldBe(6);
     }
 
+    /// <summary>Review item 5: two versions of one app running side by side, as while it updates, are one line; Windows'
+    /// own Defender, which lives outside the Windows folder, is Windows'.</summary>
+    [Fact]
+    public void An_app_is_one_line_across_its_versions_and_defender_is_windows()
+    {
+        _processes.Add(new FakeProcesses.Fake(200, "Discord.exe", path: @"C:\Users\Ann\AppData\Local\Discord\app-1.0.9001\Discord.exe", sid: Me), 300, 300);
+        _processes.Add(new FakeProcesses.Fake(201, "Discord.exe", path: @"C:\Users\Ann\AppData\Local\Discord\app-1.0.9002\Discord.exe", sid: Me), 300, 300);
+        _processes.Add(new FakeProcesses.Fake(300, "MsMpEng.exe", session: 0, path: @"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.24090.11-0\MsMpEng.exe", sid: "S-1-5-18"), 400, 400);
+        using var watch = Watch();
+        watch.Start();
+        Tick(watch, Nine.AddSeconds(1));
+        watch.Write();
+        var rows = Stored(Nine);
+        rows.Keys.ShouldBe([@"c:\users\ann\appdata\local\discord\discord.exe", AppKeys.Windows], ignoreOrder: true);
+        rows[@"c:\users\ann\appdata\local\discord\discord.exe"].CpuWh.ShouldBe(0.6, 1e-12);
+    }
+
     [Fact]
     public void A_process_is_opened_once_for_its_image_however_long_it_runs()
     {
