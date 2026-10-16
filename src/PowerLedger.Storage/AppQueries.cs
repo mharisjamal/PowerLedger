@@ -85,6 +85,9 @@ public sealed class AppQueries(SqliteDatabase db)
         var counted = HasTable(c) ? First(c) : null;
         if (counted is not { } first) return AppsRange.None(hourFrom, hourTo, null, schedule.Currency);
         var start = first > hourFrom ? first : hourFrom;
+        // In a zone off the hour, a day's first minutes fall in an hour that began the day before: until the day's first
+        // whole hour has rows, that hour under way stands in, so the day is never empty then (review item 12).
+        if (hourFrom > from && Newest(c) is { } newest && newest == Floor(from, Hour)) start = newest;
         if (start >= hourTo) return AppsRange.None(hourFrom, hourTo, first, schedule.Currency);
         // Summed in the database, not row by row here: a year holds some 260,000 app rows. The hours are cut where a tariff
         // takes effect, so each span is priced at one tariff.
@@ -152,6 +155,13 @@ public sealed class AppQueries(SqliteDatabase db)
     {
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT MIN(start_ms) FROM app_hours";
+        return cmd.ExecuteScalar() is long ms ? Rows.Time(ms) : null;
+    }
+
+    private static DateTimeOffset? Newest(SqliteConnection c)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT MAX(start_ms) FROM app_hours";
         return cmd.ExecuteScalar() is long ms ? Rows.Time(ms) : null;
     }
 

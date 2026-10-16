@@ -268,6 +268,26 @@ public class AppQueriesTests
         (after.Apps.Single().Wh, after.Screen.Wh, after.From).ShouldBe((6, 2, H0.AddHours(1)));
     }
 
+    /// <summary>Review item 12: in a zone half an hour off UTC, the day's first half hour falls in an hour that began the day
+    /// before. Until the day's first whole hour has rows, that hour under way stands in, so Today is never empty then.</summary>
+    [Fact]
+    public void In_a_day_s_first_half_hour_the_hour_under_way_stands_in()
+    {
+        using var t = new TestDatabase();
+        var rows = new AggregateRepository(t.Db);
+        for (var m = 0; m < 40; m++) rows.UpsertMinute(Hour(H0.AddMinutes(m), 0.1, 0, 0.05, 0.05, on: 60));
+        App(t, H0, "a", "A", 4);
+        var india = TimeSpan.FromHours(5.5);
+        var midnight = H0.AddMinutes(30).ToOffset(india);              // 18:00 local is 12:30 UTC; call it the day's start
+
+        var early = new AppQueries(t.Db).Read(midnight, H0.AddMinutes(40).ToOffset(india));
+        (early.Apps.Single().Wh, early.From).ShouldBe((4, H0));
+        early.Screen.Wh.ShouldBe(40 * 0.05, 1e-9);
+
+        App(t, H0.AddHours(1), "a", "A", 1);                            // the day's first whole hour has begun
+        new AppQueries(t.Db).Read(midnight, H0.AddMinutes(70).ToOffset(india)).Apps.Single().Wh.ShouldBe(1);
+    }
+
     [Fact]
     public void Hours_after_the_range_are_left_out()
     {
