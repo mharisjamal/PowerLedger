@@ -118,6 +118,7 @@ internal sealed class SamplingLoop : BackgroundService
     private int _failures;
     private AppWatch? _apps;
     private int _appFailures;
+    private int _appWriteFailures;
     private DateTimeOffset? _lastWake;
 
     public SamplingLoop(
@@ -344,17 +345,21 @@ internal sealed class SamplingLoop : BackgroundService
     }
 
     /// <summary>Writes the hours of energy by app with the readings they were worked out from; what fails is written with
-    /// the next minute's.</summary>
+    /// the next minute's. A write failing minute after minute is logged at the 1st, 2nd, 4th, 8th failure and so on, as
+    /// a failing tick is (review item 14).</summary>
     private void WriteApps()
     {
         if (_apps is null) return;
         try
         {
             _apps.Write();
+            _appWriteFailures = 0;
         }
         catch (Exception error)
         {
-            _log.LogWarning(error, "Writing the energy by app failed");
+            _appWriteFailures++;
+            if ((_appWriteFailures & (_appWriteFailures - 1)) == 0)
+                _log.LogWarning(error, "Writing the energy by app failed ({Failures} in a row)", _appWriteFailures);
         }
     }
 

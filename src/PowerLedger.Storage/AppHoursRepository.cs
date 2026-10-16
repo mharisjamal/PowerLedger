@@ -19,8 +19,9 @@ public sealed class AppHoursRepository(SqliteDatabase db)
     {
         foreach (var row in rows)
         {
+            // The message names no app: a key is a path, the user's folder in it, and the service's log goes with feedback.
             if (!double.IsFinite(row.CpuWh) || !double.IsFinite(row.GpuWh) || !double.IsFinite(row.RunSeconds) || !double.IsFinite(row.FrontSeconds))
-                throw new ArgumentException($"The row for {row.Key} holds a figure that is no number.", nameof(rows));
+                throw new ArgumentException("An app's row holds a figure that is no number.", nameof(rows));
         }
 
         using var c = db.Open();

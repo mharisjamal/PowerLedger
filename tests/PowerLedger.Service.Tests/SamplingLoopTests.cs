@@ -118,7 +118,7 @@ public class SamplingLoopTests
             await loop.Ticks(240);                                  // 01:00:31, which reaches back across the sleep, to 01:04:30
             await loop.StopAsync();
         }
-        first.Disposed.ShouldBeTrue();
+        await WaitFor.True(() => first.Disposed);                   // let go last, after the stop is done, as the sensors are
 
         var second = Machine();
         await using (var loop = new Harness(t, makeSet: _ => new FakeSensorSet(Script), processes: () => second, at: Start.AddMinutes(55)))
@@ -190,6 +190,27 @@ public class SamplingLoopTests
 
         await Should.ThrowAsync<ArgumentException>(() => loop.Send(new ApplySettingsCommand(slower with { SampleIntervalSeconds = 9 })));
         loop.Board.Settings.ShouldBe(slower);
+    }
+
+    /// <summary>Review item 14: writing the energy by app failing minute after minute is logged at the 1st, 2nd, 4th and 8th
+    /// failure, not every minute.</summary>
+    [Fact]
+    public async Task A_write_of_the_energy_by_app_failing_every_minute_is_logged_ever_more_rarely()
+    {
+        using var t = new TestDatabase();
+        var log = new RecordingLogger<SamplingLoop>();
+        var processes = new FakeProcesses();
+        processes.Add(new FakeProcesses.Fake(200, "chrome.exe", path: @"C:\Users\alice\AppData\Local\Chrome\chrome.exe"), 600, 600);
+        await using var loop = new Harness(t, processes: () => processes, log: log);
+        await loop.StartAsync();
+        using (var c = t.Db.Open())
+        {
+            using var fail = c.CreateCommand();
+            fail.CommandText = "CREATE TRIGGER no_room BEFORE INSERT ON app_hours BEGIN SELECT RAISE(ABORT, 'no room'); END";
+            fail.ExecuteNonQuery();
+        }
+        await loop.Ticks(4 * 60);                                   // four failed writes, to 00:59:00
+        log.Warnings.Count(warning => warning.StartsWith("Writing the energy by app", StringComparison.Ordinal)).ShouldBe(3);
     }
 
     [Fact]
@@ -874,7 +895,8 @@ public class SamplingLoopTests
             TestDatabase database, LoopOptions? options = null, Func<int, FakeSensorSet>? makeSet = null,
             Func<FakeTimeProvider, TimeProvider>? loopClock = null, Func<bool>? watched = null, Func<BatteryCharge?>? battery = null,
             Func<bool>? signedIn = null, Func<DateTimeOffset, DateTimeOffset?>? hibernated = null,
-            Func<Sensors.IProcessSource>? processes = null, Action<List<uint>>? foreground = null, DateTimeOffset? at = null)
+            Func<Sensors.IProcessSource>? processes = null, Action<List<uint>>? foreground = null, DateTimeOffset? at = null,
+            Microsoft.Extensions.Logging.ILogger<SamplingLoop>? log = null)
         {
             Clock = new FakeTimeProvider(at ?? Start);
             Clock.SetLocalTimeZone(Plus2);
@@ -905,7 +927,7 @@ public class SamplingLoopTests
                 Processes: processes,
                 Foreground: foreground);
             var clock = loopClock?.Invoke(Clock) ?? Clock;
-            _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Monitors, clock, NullLogger<SamplingLoop>.Instance, options);
+            _loop = new SamplingLoop(database.Db, environment, Commands, Feed, Board, Monitors, clock, log ?? NullLogger<SamplingLoop>.Instance, options);
         }
 
         public FakeTimeProvider Clock { get; }

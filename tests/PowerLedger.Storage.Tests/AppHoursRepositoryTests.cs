@@ -36,7 +36,8 @@ public class AppHoursRepositoryTests
         using var t = new TestDatabase();
         var repo = new AppHoursRepository(t.Db);
         repo.ReplaceHour(Hour, [Chrome]);
-        Should.Throw<ArgumentException>(() => repo.ReplaceHour(Hour, [Windows, Chrome with { GpuWh = double.NaN }]));
+        Should.Throw<ArgumentException>(() => repo.ReplaceHour(Hour, [Windows, Chrome with { GpuWh = double.NaN }]))
+            .Message.ShouldNotContain("chrome", Case.Insensitive);         // review item 14: a key is a path, and logs go with feedback
         repo.ReadHour(Hour).ShouldBe([Chrome]);
     }
 
