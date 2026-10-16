@@ -325,15 +325,16 @@ internal sealed class SamplingLoop : BackgroundService
 
     /// <summary>
     /// Books the tick's processor and graphics energy to the apps, with the gap threshold the rollups fold its minute with: a
-    /// tick the machine woke within is a gap whatever its length (<see cref="Wakes"/>), so an hour's apps add up to its hour
-    /// row. A failure here costs the apps that tick and never the reading, which is buffered already.
+    /// tick the machine woke within is a gap whatever its length (<see cref="Wakes"/>), the wake being the start of a resume
+    /// session as the rollups take it (review item 13), so an hour's apps add up to its hour row. A failure here costs the
+    /// apps that tick and never the reading, which is buffered already.
     /// </summary>
-    private void ObserveApps(Reading reading, Sample sample, bool spansSleep)
+    private void ObserveApps(Reading reading, Sample sample)
     {
         if (_apps is null) return;
         try
         {
-            var asleep = spansSleep || (_lastWake is { } woke && Wakes.Within(woke, reading));
+            var asleep = _lastWake is { } woke && Wakes.Within(woke, reading);
             _apps.Observe(reading, sample, asleep ? 0 : GapThreshold);
             _appFailures = 0;
         }
@@ -411,7 +412,7 @@ internal sealed class SamplingLoop : BackgroundService
             // Nor is a tick with the lid shut, whose panel draws nothing.
             if (!spansSleep && !result.Sample.PanelInactive) _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
             _buffer.Add(reading);
-            ObserveApps(reading, result.Sample, spansSleep);
+            ObserveApps(reading, result.Sample);
             // What the time awake since a wake drew from the battery, until the battery is read again to learn the sleep.
             _sleep.Awake(now, reading.OnBattery, spansSleep ? 0 : EnergyIntegrator.Integrate(reading, GapThreshold).BatteryWh);
             var frame = Frames.From(reading, result.Sample);
@@ -591,8 +592,7 @@ internal sealed class SamplingLoop : BackgroundService
         if (_suspended) _sleep.Resumed(now);                 // first, as close to the wake as can be
         _worker.RefreshDisplay();
         _rebuildAt = now + RebuildAfterResume;
-        _sessions.Resume(now);
-        _lastWake = now;                                     // the session's start, which the rollups take the wake from
+        if (_sessions.Resume(now)) _lastWake = now;          // the session's start, which the rollups take the wake from
         _tickClock.MarkResumed();
         _suspended = false;
         _log.LogInformation("Resumed");
