@@ -22,8 +22,8 @@ public readonly record struct ProcessorTimes(long Idle, long Kernel, long User, 
     public long Drivers => Dpc + Interrupt;
 }
 
-/// <summary>A process's image path and Store package family; either may be missing.</summary>
-public sealed record ProcessImage(string? Path, string? PackageFamily);
+/// <summary>A process's image path and Store package family, and the SID of the account it runs as; any may be missing.</summary>
+public sealed record ProcessImage(string? Path, string? PackageFamily, string? UserSid = null);
 
 /// <summary>What the Apps page asks Windows about processes (Plan AE), so tests can stand in for it. Single-threaded.</summary>
 public interface IProcessSource : IDisposable
@@ -37,9 +37,6 @@ public interface IProcessSource : IDisposable
 
     /// <summary>The process's image and package, or null when it cannot be opened or the id names another process now.</summary>
     ProcessImage? Image(uint pid, long createTime);
-
-    /// <summary>The session at the screen; null while none is, as while users switch.</summary>
-    uint? ConsoleSession();
 
     /// <summary>What the App calls an image: its description, else its product name, else its file name.</summary>
     string DisplayName(string path);
@@ -109,15 +106,13 @@ public sealed unsafe class WindowsProcesses : IProcessSource
         try
         {
             if (!GetProcessTimes(handle, out var created, out _, out _, out _) || created != createTime) return null;
-            return new ProcessImage(ImagePath(handle), PackageFamily(handle));
+            return new ProcessImage(ImagePath(handle), PackageFamily(handle), UserSid(handle));
         }
         finally
         {
             CloseHandle(handle);
         }
     }
-
-    public uint? ConsoleSession() => WTSGetActiveConsoleSessionId() is var session && session != uint.MaxValue ? session : null;
 
     public string DisplayName(string path)
     {
@@ -242,6 +237,26 @@ public sealed unsafe class WindowsProcesses : IProcessSource
         }
     }
 
+    /// <summary>The SID of the account the process runs as, from its token; null when the token will not be opened, as a
+    /// protected process's may not be.</summary>
+    private static string? UserSid(nint handle)
+    {
+        const uint TokenQuery = 0x0008;
+        const int TokenUser = 1;
+        if (!OpenProcessToken(handle, TokenQuery, out var token)) return null;
+        try
+        {
+            var buffer = stackalloc byte[256];
+            if (!GetTokenInformation(token, TokenUser, buffer, 256, out _)) return null;
+            var sid = *(nint*)buffer;                               // TOKEN_USER: the SID's address first
+            return sid == 0 ? null : new System.Security.Principal.SecurityIdentifier(sid).Value;
+        }
+        finally
+        {
+            CloseHandle(token);
+        }
+    }
+
     private static string? PackageFamily(nint handle)
     {
         const int Room = 256;
@@ -306,6 +321,11 @@ public sealed unsafe class WindowsProcesses : IProcessSource
     [DllImport("kernel32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern int GetPackageFamilyName(nint process, ref uint length, char* name);
 
-    [DllImport("kernel32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern uint WTSGetActiveConsoleSessionId();
+    [DllImport("advapi32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(nint process, uint access, out nint token);
+
+    [DllImport("advapi32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(nint token, int informationClass, void* information, int length, out int returned);
 }

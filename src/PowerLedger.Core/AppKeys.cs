@@ -48,4 +48,29 @@ public static class AppKeys
 /// <param name="Key">See <see cref="AppKeys"/>.</param>
 /// <param name="Name">What the App shows.</param>
 /// <param name="Path">The image the App takes the icon from; null for the special keys and when there is none.</param>
-public sealed record AppHourRow(string Key, string Name, string? Path, double CpuWh, double GpuWh, double RunSeconds, double FrontSeconds);
+/// <param name="User">Who ran it (<see cref="AppUsers"/>): the machine for Windows, services and the special keys.</param>
+public sealed record AppHourRow(string Key, string Name, string? Path, double CpuWh, double GpuWh, double RunSeconds, double FrontSeconds, int User = AppUsers.Machine);
+
+/// <summary>
+/// Who ran an app, as the Apps page tags it (review item 10): a number from the person's Windows account (a hash of its
+/// SID, never the SID or the name), so the App shows each person their own apps by name and pools everyone else's under
+/// Other users, whenever they ran them; nought for the machine's own accounts (SYSTEM, LOCAL SERVICE, NETWORK SERVICE,
+/// service and window manager accounts), whose apps everyone sees.
+/// </summary>
+public static class AppUsers
+{
+    /// <summary>The machine's own: Windows, services and the special keys.</summary>
+    public const int Machine = 0;
+
+    /// <summary>The number for an account's SID; <see cref="Machine"/> for anything but a person's account, local, domain
+    /// (S-1-5-21-) or Entra ID (S-1-12-1-).</summary>
+    public static int Of(string? sid)
+    {
+        if (sid is null || !(sid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase) || sid.StartsWith("S-1-12-1-", StringComparison.OrdinalIgnoreCase)))
+            return Machine;
+        Span<byte> hash = stackalloc byte[32];
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sid.ToUpperInvariant()), hash);
+        var number = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(hash) & int.MaxValue;
+        return number == Machine ? 1 : number;
+    }
+}

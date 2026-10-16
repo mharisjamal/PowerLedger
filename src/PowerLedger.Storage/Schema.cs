@@ -193,7 +193,9 @@ internal static class Schema
     /// An app_hours row holds an app's share of the hour's processor and graphics energy in samples_1h (cpu_wh, gpu_wh, at
     /// the pack, the bands' own scale), so for an hour the service attributed throughout, each column summed over the hour's
     /// rows is that hour row's figure; run_s is how long the app had a process running in the hour, front_s how long it held
-    /// the window in front. Never shared, never synced to a household.</summary>
+    /// the window in front. user_id is who ran it (review item 10): a number from the person's account (Core's AppUsers, a
+    /// hash of the SID), 0 for the machine's own accounts and the special keys; the App shows a person their own apps by
+    /// name and pools everyone else's under Other users. Never shared, never synced to a household.</summary>
     public const string V6 = """
         CREATE TABLE apps (
             id   INTEGER PRIMARY KEY,
@@ -203,12 +205,13 @@ internal static class Schema
         );
         CREATE TABLE app_hours (
             start_ms INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
             app_id   INTEGER NOT NULL,
             cpu_wh   REAL    NOT NULL,
             gpu_wh   REAL    NOT NULL,
             run_s    REAL    NOT NULL,
             front_s  REAL    NOT NULL,
-            PRIMARY KEY (start_ms, app_id)
+            PRIMARY KEY (start_ms, user_id, app_id)
         ) WITHOUT ROWID;
         """;
 }

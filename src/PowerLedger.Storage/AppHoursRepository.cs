@@ -43,15 +43,15 @@ public sealed class AppHoursRepository(SqliteDatabase db)
         foreach (var n in new[] { "$key", "$name", "$path" }) app.Parameters.Add(new SqliteParameter(n, null));
 
         using var insert = c.CreateCommand();
-        insert.CommandText = "INSERT INTO app_hours (start_ms, app_id, cpu_wh, gpu_wh, run_s, front_s) VALUES ($start, $app, $cpu, $gpu, $run, $front)";
-        foreach (var n in new[] { "$start", "$app", "$cpu", "$gpu", "$run", "$front" }) insert.Parameters.Add(new SqliteParameter(n, null));
+        insert.CommandText = "INSERT INTO app_hours (start_ms, user_id, app_id, cpu_wh, gpu_wh, run_s, front_s) VALUES ($start, $user, $app, $cpu, $gpu, $run, $front)";
+        foreach (var n in new[] { "$start", "$user", "$app", "$cpu", "$gpu", "$run", "$front" }) insert.Parameters.Add(new SqliteParameter(n, null));
         foreach (var row in rows)
         {
             app.Parameters[0].Value = row.Key;
             app.Parameters[1].Value = row.Name;
             app.Parameters[2].Value = (object?)row.Path ?? DBNull.Value;
             var id = (long)app.ExecuteScalar()!;
-            object[] values = [Rows.Ms(hourStart), id, row.CpuWh, row.GpuWh, row.RunSeconds, row.FrontSeconds];
+            object[] values = [Rows.Ms(hourStart), row.User, id, row.CpuWh, row.GpuWh, row.RunSeconds, row.FrontSeconds];
             for (var i = 0; i < values.Length; i++) insert.Parameters[i].Value = values[i];
             insert.ExecuteNonQuery();
         }
@@ -63,14 +63,14 @@ public sealed class AppHoursRepository(SqliteDatabase db)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT a.key, a.name, a.path, h.cpu_wh, h.gpu_wh, h.run_s, h.front_s FROM app_hours h JOIN apps a ON a.id = h.app_id " +
+        cmd.CommandText = "SELECT a.key, a.name, a.path, h.cpu_wh, h.gpu_wh, h.run_s, h.front_s, h.user_id FROM app_hours h JOIN apps a ON a.id = h.app_id " +
                           "WHERE h.start_ms = $start";
         Rows.Add(cmd, "$start", Rows.Ms(hourStart));
         using var r = cmd.ExecuteReader();
         var list = new List<AppHourRow>();
         while (r.Read())
         {
-            list.Add(new AppHourRow(r.GetString(0), r.GetString(1), Rows.NullableString(r, 2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6)));
+            list.Add(new AppHourRow(r.GetString(0), r.GetString(1), Rows.NullableString(r, 2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6), r.GetInt32(7)));
         }
         return list;
     }

@@ -104,6 +104,8 @@ public class ProcessesTests
         var image = source.Image(me.Pid, me.CreateTime).ShouldNotBeNull();
         image.Path.ShouldBe(Environment.ProcessPath, StringCompareShould.IgnoreCase);
         image.PackageFamily.ShouldBeNull();
+        using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+            image.UserSid.ShouldBe(identity.User?.Value);              // review item 10: the account it runs as
         source.Image(me.Pid, me.CreateTime + 1).ShouldBeNull();    // the id names another process now
     }
 

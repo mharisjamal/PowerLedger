@@ -9,7 +9,7 @@ internal sealed class FakeProcesses : IProcessSource
     private readonly Lock _gate = new();
     private ProcessorTimes _times = new(Idle: 1_000_000, Kernel: 1_000_000, User: 0, Dpc: 0, Interrupt: 0);
 
-    public sealed class Fake(uint pid, string name, uint session = 1, string? path = null, string? package = null, long created = 1)
+    public sealed class Fake(uint pid, string name, uint session = 1, string? path = null, string? package = null, long created = 1, string? sid = null)
     {
         public uint Pid { get; } = pid;
         public long Created { get; } = created;
@@ -17,6 +17,7 @@ internal sealed class FakeProcesses : IProcessSource
         public string Name { get; } = name;
         public string? Path { get; } = path;
         public string? Package { get; } = package;
+        public string? Sid { get; } = sid;
         public ulong CyclesPerRead { get; set; }
         public long TimePerRead { get; set; }
         public ulong Cycles { get; set; }
@@ -31,8 +32,6 @@ internal sealed class FakeProcesses : IProcessSource
 
     /// <summary>Drivers' interrupts and deferred calls each read.</summary>
     public long DriversPerRead { get; set; }
-
-    public uint? Console { get; set; } = 1;
 
     /// <summary>While set, Windows will not list the processes.</summary>
     public bool Failing { get; set; }
@@ -89,11 +88,9 @@ internal sealed class FakeProcesses : IProcessSource
         {
             Opens++;
             var p = Processes.FirstOrDefault(p => p.Pid == pid && p.Created == createTime && p.Running);
-            return p is null || (p.Path is null && p.Package is null) ? null : new ProcessImage(p.Path, p.Package);
+            return p is null || (p.Path is null && p.Package is null) ? null : new ProcessImage(p.Path, p.Package, p.Sid);
         }
     }
-
-    public uint? ConsoleSession() => Console;
 
     public string DisplayName(string path) => "Name of " + System.IO.Path.GetFileNameWithoutExtension(path);
 

@@ -15,9 +15,10 @@ namespace PowerLedger.Service;
 /// A look walks every thread on the machine, about 2 ms of the processor's time at 300 processes, so it is taken at most
 /// every <see cref="LookEvery"/>: every tick at the loop's unwatched pace, and every fifth while someone watches. The ticks in
 /// between are pooled and split by the look that ends them, over the same time; a gap, a write and a stop take a look at
-/// once. Apps are keyed by image path, Store package or one of the special keys (<see cref="AppKeys"/>): Windows' own
-/// processes and the kernel's are one app, another signed in user's are another, and a process is opened for its image
-/// once, when it is new. The hour in memory is written whole with each minute's readings, and an hour an earlier run wrote
+/// once. Apps are keyed by image path, Store package or one of the special keys (<see cref="AppKeys"/>), and tagged by the
+/// account that runs them (<see cref="AppUsers"/>), which the App reads to pool other people's: Windows' own processes and
+/// the kernel's are one app, the machine's, and a process is opened for its image and account once, when it is new. The
+/// hour in memory is written whole with each minute's readings, and an hour an earlier run wrote
 /// carries on from its rows. Never shared, never synced. Single-threaded: the loop's thread.
 /// </summary>
 /// <param name="lookEvery">How long the ticks pool at most before a look; <see cref="LookEvery"/> when left out, nought for
@@ -59,7 +60,6 @@ internal sealed class AppWatch(
     private long _looks;
     private long _ticks;
     private double _pooledSeconds;
-    private uint? _console;
     private DateTimeOffset? _hourNow;
 
     /// <summary>Looks taken, for the tests and the cost check.</summary>
@@ -236,7 +236,6 @@ internal sealed class AppWatch(
         work = default;
         if (!processes.Read(_listed, out var times)) return false;
         _looks++;
-        _console = processes.ConsoleSession() ?? _console;
         _live.Clear();
         ulong cycles = 0;
         long explained = 0;
@@ -275,9 +274,10 @@ internal sealed class AppWatch(
         return measured;
     }
 
-    /// <summary>What app a new process belongs to. The kernel's processes, and any image under the Windows folder, are
-    /// Windows'; a Store app is its package; anything else its image path. A process that cannot be opened goes by the name
-    /// Windows lists it with.</summary>
+    /// <summary>What app a new process belongs to, and who runs it (review item 10: tagged by account, not by session, so
+    /// a person over Remote Desktop has their own apps too). The kernel's processes, and any image under the Windows folder,
+    /// are Windows', which is the machine's; a Store app is its package; anything else its image path. A process that
+    /// cannot be opened goes by the name Windows lists it with.</summary>
     private Tracked Identify(ProcessCounts listed)
     {
         var process = new Tracked { Created = listed.CreateTime };
@@ -287,6 +287,7 @@ internal sealed class AppWatch(
             return process;
         }
         var image = processes.Image(listed.Pid, listed.CreateTime);
+        process.User = AppUsers.Of(image?.UserSid);
         if (image?.Path is { Length: > 0 } path)
         {
             var lower = path.ToLowerInvariant();
@@ -309,17 +310,14 @@ internal sealed class AppWatch(
         return process;
     }
 
-    /// <summary>The totals a process's figures go into this hour: its app's, or other users' while it runs in a session
-    /// that is neither the services' nor the one at the screen. Kept with the process until the hour or the session at the
-    /// screen changes, so a tick looks nothing up.</summary>
+    /// <summary>The totals a process's figures go into this hour: its app's, as run by its account (the App pools other
+    /// people's when it reads them). Kept with the process until the hour changes, so a tick looks nothing up.</summary>
     private AppTotals TotalsOf(Tracked process, AppHour hour)
     {
-        var other = process.Session != 0 && _console is { } console && process.Session != console;
-        if (process.Totals is null || process.Hour != hour || process.Other != other)
+        if (process.Totals is null || process.Hour != hour)
         {
-            process.Totals = hour.For(other ? AppKeys.OtherUsers : process.Key, other ? null : process.Path);
+            process.Totals = hour.For(process.User, process.Key, process.Path);
             process.Hour = hour;
-            process.Other = other;
         }
         return process.Totals;
     }
@@ -422,8 +420,8 @@ internal sealed class AppWatch(
         public long Seen;
         public ulong CycleDelta;
         public long TimeDelta;
+        public int User;
         public AppHour? Hour;
-        public bool Other;
         public AppTotals? Totals;
     }
 

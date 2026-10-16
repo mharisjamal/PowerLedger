@@ -293,6 +293,30 @@ public class AppQueriesTests
         range.CountedSince.ShouldBe(H0);
     }
 
+    /// <summary>Review item 10: a person sees their own apps and the machine's by name; everyone else's, whenever they ran
+    /// them, are one line, Other users, with no name or path of theirs, running as long as the longest of theirs each hour.</summary>
+    [Fact]
+    public void Other_peoples_apps_are_one_line_whenever_they_ran_them()
+    {
+        using var t = new TestDatabase();
+        new AppHoursRepository(t.Db).ReplaceHour(H0,
+        [
+            new AppHourRow(@"c:\mine.exe", "Mine", @"C:\Mine.exe", 3, 0, 3600, 600, User: 7),
+            new AppHourRow(@"c:\users\alice\secret.exe", "Alice's secret", @"C:\Users\alice\secret.exe", 2, 1, 1800, 900, User: 8),
+            new AppHourRow(@"c:\users\bob\b.exe", "Bob's", null, 1, 0, 3000, 0, User: 9),
+            new AppHourRow(AppKeys.Other, "Other apps", null, 0.5, 0, 600, 0, User: 9),
+            new AppHourRow(AppKeys.Windows, "Windows", null, 0.25, 0, 3600, 0),
+        ]);
+
+        var apps = new AppQueries(t.Db, viewer: 7).Read(H0, H0.AddHours(1)).Apps;
+
+        apps.Select(a => a.Key).ShouldBe([AppQueries.OtherUsersKey, @"c:\mine.exe", AppKeys.Windows]);
+        var others = apps[0];
+        (others.Name, others.Path, others.Wh, others.RunSeconds, others.FrontSeconds).ShouldBe(("Other users", null, 4.5, 3000.0, 900.0));
+        apps.ShouldNotContain(a => a.Name.Contains("Alice") || a.Name.Contains("Bob"));
+        new AppQueries(t.Db, viewer: 8).Read(H0, H0.AddHours(1)).Apps.Select(a => a.Name).ShouldContain("Alice's secret");
+    }
+
     [Fact]
     public void A_range_before_apps_were_counted_has_none_but_says_since_when()
     {

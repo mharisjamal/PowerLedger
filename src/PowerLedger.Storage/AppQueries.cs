@@ -46,10 +46,14 @@ public sealed record AppsRange(
 /// the hour, so a range is read in whole hours, each hour in the range its start falls in: in a zone half an hour off UTC
 /// the hour from 23:30 to 00:30 is the day before's, as a long report's hour rows are cut and its days grouped, and no
 /// hour is ever in two days. The hour under way, which has no hour row yet, is read from its minute rows, as the report
-/// reads it. Nothing here is ever written, shared or synced.
+/// reads it. Each person sees their own apps and the machine's by name; everyone else's, whenever they ran them, are
+/// pooled under Other users (review item 10). Nothing here is ever written, shared or synced.
 /// </summary>
-public sealed class AppQueries(SqliteDatabase db)
+/// <param name="viewer">Whose apps are shown by name (<see cref="AppUsers"/>); the account the App runs as when left out.</param>
+public sealed class AppQueries(SqliteDatabase db, int? viewer = null)
 {
+    private readonly int _viewer = viewer ?? CurrentUser();
+
     /// <summary>Windows' own processes, the kernel's among them.</summary>
     public const string WindowsKey = "::windows";
 
@@ -167,33 +171,70 @@ public sealed class AppQueries(SqliteDatabase db)
 
     /// <summary>
     /// Each app's sums over the hours, with its name and path from apps, and its energy in each span between two
-    /// <paramref name="cuts"/>, in one pass over the rows: grouped by the app and the span (the cuts a row's hour is past).
+    /// <paramref name="cuts"/>, in one pass over the rows: grouped by the app and the span (the cuts a row's hour is past),
+    /// every row of anyone but the viewer and the machine as one app, Other users, whose running time is the longest any of
+    /// theirs ran each hour.
     /// </summary>
-    private static (List<AppTotal> Totals, List<(DateTimeOffset Start, Dictionary<string, double> Wh)> Spans) Totals(
+    private (List<AppTotal> Totals, List<(DateTimeOffset Start, Dictionary<string, double> Wh)> Spans) Totals(
         SqliteConnection c, DateTimeOffset from, DateTimeOffset to, List<DateTimeOffset> cuts)
     {
+        const long OtherUsers = -1;
         var span = cuts.Count == 0 ? "0" : string.Join(" + ", cuts.Select((_, i) => $"(h.start_ms >= $cut{i})"));
         using var cmd = Command(c, from, to,
-            $"SELECT a.key, {span} AS span, a.name, a.path, TOTAL(h.cpu_wh), TOTAL(h.gpu_wh), TOTAL(h.run_s), TOTAL(h.front_s) " +
-            "FROM app_hours h JOIN apps a ON a.id = h.app_id WHERE h.start_ms >= $from AND h.start_ms < $to GROUP BY h.app_id, span");
+            $"SELECT CASE WHEN h.user_id IN (0, $viewer) THEN h.app_id ELSE {OtherUsers} END AS app, {span} AS span, " +
+            "TOTAL(h.cpu_wh), TOTAL(h.gpu_wh), TOTAL(h.run_s), TOTAL(h.front_s) " +
+            "FROM app_hours h WHERE h.start_ms >= $from AND h.start_ms < $to GROUP BY app, span");
+        Rows.Add(cmd, "$viewer", _viewer);
         for (var i = 0; i < cuts.Count; i++) Rows.Add(cmd, $"$cut{i}", Rows.Ms(cuts[i]));
         var spans = cuts.Prepend(from).Select(at => (Start: at, Wh: new Dictionary<string, double>(StringComparer.Ordinal))).ToList();
-        var apps = new Dictionary<string, (string Name, string? Path)>(StringComparer.Ordinal);
+        var apps = Apps(c);
+        var named = new Dictionary<string, (string Name, string? Path)>(StringComparer.Ordinal);
         var sums = new Dictionary<string, (double Cpu, double Gpu, double Run, double Front)>(StringComparer.Ordinal);
         using (var r = cmd.ExecuteReader())
         {
             while (r.Read())
             {
-                var key = r.GetString(0);
-                var (cpu, gpu) = (Finite(r.GetDouble(4)), Finite(r.GetDouble(5)));
-                apps[key] = (r.GetString(2), Rows.NullableString(r, 3));
+                var id = r.GetInt64(0);
+                var (key, name, path) = id == OtherUsers ? (OtherUsersKey, "Other users", (string?)null) : apps.GetValueOrDefault(id, (OtherKey, "Other apps", null));
+                var (cpu, gpu) = (Finite(r.GetDouble(2)), Finite(r.GetDouble(3)));
+                named[key] = (name, path);
                 var sum = sums.GetValueOrDefault(key);
-                sums[key] = (sum.Cpu + cpu, sum.Gpu + gpu, sum.Run + Finite(r.GetDouble(6)), sum.Front + Finite(r.GetDouble(7)));
-                spans[(int)r.GetInt64(1)].Wh[key] = cpu + gpu;
+                sums[key] = (sum.Cpu + cpu, sum.Gpu + gpu, sum.Run + Finite(r.GetDouble(4)), sum.Front + Finite(r.GetDouble(5)));
+                var wh = spans[(int)r.GetInt64(1)].Wh;
+                wh[key] = wh.GetValueOrDefault(key) + cpu + gpu;
             }
         }
-        var totals = sums.Select(s => new AppTotal(s.Key, apps[s.Key].Name, apps[s.Key].Path, s.Value.Cpu, s.Value.Gpu, s.Value.Run, s.Value.Front)).ToList();
+        if (sums.TryGetValue(OtherUsersKey, out var others)) sums[OtherUsersKey] = others with { Run = OthersRan(c, from, to) };
+        var totals = sums.Select(s => new AppTotal(s.Key, named[s.Key].Name, named[s.Key].Path, s.Value.Cpu, s.Value.Gpu, s.Value.Run, s.Value.Front)).ToList();
         return (totals, spans);
+    }
+
+    /// <summary>Every app's key, name and path by its number.</summary>
+    private static Dictionary<long, (string Key, string Name, string? Path)> Apps(SqliteConnection c)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id, key, name, path FROM apps";
+        using var r = cmd.ExecuteReader();
+        var apps = new Dictionary<long, (string Key, string Name, string? Path)>();
+        while (r.Read()) apps[r.GetInt64(0)] = (r.GetString(1), r.GetString(2), Rows.NullableString(r, 3));
+        return apps;
+    }
+
+    /// <summary>How long other people's apps ran: each hour the longest any of theirs did, added up.</summary>
+    private double OthersRan(SqliteConnection c, DateTimeOffset from, DateTimeOffset to)
+    {
+        using var cmd = Command(c, from, to,
+            "SELECT TOTAL(ran) FROM (SELECT MAX(run_s) AS ran FROM app_hours WHERE start_ms >= $from AND start_ms < $to AND user_id NOT IN (0, $viewer) GROUP BY start_ms)");
+        Rows.Add(cmd, "$viewer", _viewer);
+        return Finite(Convert.ToDouble(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The account the App runs as; the machine's where there is none to ask.</summary>
+    private static int CurrentUser()
+    {
+        if (!OperatingSystem.IsWindows()) return AppUsers.Machine;
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        return AppUsers.Of(identity.User?.Value);
     }
 
     /// <summary>The processor and graphics energy the hour's apps were given, hour by hour.</summary>

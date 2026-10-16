@@ -41,6 +41,8 @@ public class AppHoursRepositoryTests
         repo.ReplaceHour(Hour.AddHours(1), [Chrome]);
 
         repo.ReadHour(Hour).Single().Name.ShouldBe("Google Chrome");
+        repo.ReplaceHour(Hour, [Chrome, Chrome with { User = 42, CpuWh = 9 }]);              // review item 10: by who ran it
+        repo.ReadHour(Hour).Select(row => (row.User, row.CpuWh)).ShouldBe([(0, 1.25), (42, 9.0)], ignoreOrder: true);
         using var c = t.Db.Open();
         using var count = c.CreateCommand();
         count.CommandText = "SELECT COUNT(*) FROM apps";

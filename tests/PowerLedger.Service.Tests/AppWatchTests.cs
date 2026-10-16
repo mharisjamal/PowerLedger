@@ -109,21 +109,25 @@ public sealed class AppWatchTests : IDisposable
     private Dictionary<string, AppHourRow> Stored(DateTimeOffset hour)
         => new AppHoursRepository(_database.Db).ReadHour(hour).ToDictionary(row => row.Key);
 
-    /// <summary>Windows' own (the kernel, a service under the Windows folder, the registry), two apps of the user at the
-    /// screen (one a Store app), another user's app and a service of PowerLedger's own: 1000 cycles a read in all.</summary>
+    private const string Me = "S-1-5-21-1-2-3-1001";
+    private const string Someone = "S-1-5-21-1-2-3-1002";
+    private const string Notepad = @"c:\program files\notepad++\notepad++.exe";
+
+    /// <summary>Windows' own (the kernel, a service under the Windows folder, the registry), two of my apps (one a Store
+    /// app), someone else's app and a service of PowerLedger's own, run by SYSTEM: 1000 cycles a read in all.</summary>
     private void AddMachine()
     {
         _processes.Add(new FakeProcesses.Fake(4, "System", session: 0), 50, 50);
-        _processes.Add(new FakeProcesses.Fake(100, "svchost.exe", session: 0, path: @"C:\WINDOWS\System32\svchost.exe"), 50, 50);
+        _processes.Add(new FakeProcesses.Fake(100, "svchost.exe", session: 0, path: @"C:\WINDOWS\System32\svchost.exe", sid: "S-1-5-18"), 50, 50);
         _processes.Add(new FakeProcesses.Fake(120, "Registry", session: 0));
-        _processes.Add(new FakeProcesses.Fake(200, "chrome.exe", session: 1, path: ChromePath), 600, 600);
-        _processes.Add(new FakeProcesses.Fake(300, "CalculatorApp.exe", session: 1, path: CalculatorPath, package: CalculatorFamily), 200, 200);
-        _processes.Add(new FakeProcesses.Fake(400, "notepad++.exe", session: 2, path: @"C:\Program Files\Notepad++\notepad++.exe"), 100, 100);
-        _processes.Add(new FakeProcesses.Fake(500, "PowerLedger.Service.exe", session: 0, path: @"C:\Program Files\PowerLedger\Service\PowerLedger.Service.exe"));
+        _processes.Add(new FakeProcesses.Fake(200, "chrome.exe", session: 1, path: ChromePath, sid: Me), 600, 600);
+        _processes.Add(new FakeProcesses.Fake(300, "CalculatorApp.exe", session: 1, path: CalculatorPath, package: CalculatorFamily, sid: Me), 200, 200);
+        _processes.Add(new FakeProcesses.Fake(400, "notepad++.exe", session: 2, path: @"C:\Program Files\Notepad++\notepad++.exe", sid: Someone), 100, 100);
+        _processes.Add(new FakeProcesses.Fake(500, "PowerLedger.Service.exe", session: 0, path: @"C:\Program Files\PowerLedger\Service\PowerLedger.Service.exe", sid: "S-1-5-18"));
     }
 
     [Fact]
-    public void Each_app_takes_its_cycles_share_of_the_processor_and_windows_and_other_users_are_one_row_each()
+    public void Each_app_takes_its_cycles_share_of_the_processor_tagged_with_who_ran_it_and_windows_is_one_row()
     {
         AddMachine();
         using var watch = Watch();
@@ -132,13 +136,15 @@ public sealed class AppWatchTests : IDisposable
         watch.Write();
 
         var rows = Stored(Nine);
-        rows.Keys.ShouldBe([Chrome, Calculator, AppKeys.Windows, AppKeys.OtherUsers], ignoreOrder: true);   // PowerLedger used nothing
+        rows.Keys.ShouldBe([Chrome, Calculator, AppKeys.Windows, Notepad], ignoreOrder: true);   // PowerLedger used nothing
+        (rows[Chrome].User, rows[Calculator].User, rows[Notepad].User, rows[AppKeys.Windows].User)
+            .ShouldBe((AppUsers.Of(Me), AppUsers.Of(Me), AppUsers.Of(Someone), AppUsers.Machine));   // review items 8 and 10
         rows[Chrome].CpuWh.ShouldBe(0.6, 1e-12);
         (rows[Chrome].Name, rows[Chrome].Path, rows[Chrome].RunSeconds, rows[Chrome].FrontSeconds).ShouldBe(("Name of chrome", ChromePath, 1.0, 0.0));
         rows[Calculator].CpuWh.ShouldBe(0.2, 1e-12);
         (rows[Calculator].Name, rows[Calculator].Path).ShouldBe(("Name of CalculatorApp", CalculatorPath));
         rows[AppKeys.Windows].CpuWh.ShouldBe(0.1, 1e-12);
-        rows[AppKeys.OtherUsers].CpuWh.ShouldBe(0.1, 1e-12);
+        rows[Notepad].CpuWh.ShouldBe(0.1, 1e-12);
         rows.Values.Sum(row => row.CpuWh).ShouldBe(1, 1e-12);
     }
 
@@ -230,29 +236,15 @@ public sealed class AppWatchTests : IDisposable
         _processes.Add(new FakeProcesses.Fake(201, "chrome.exe", path: ChromePath), 0, 0);   // a second chrome process
         using var watch = Watch();
         watch.Start();
-        _front.AddRange([200, 400]);                                // chrome here, notepad++ in the other session
+        _front.AddRange([200, 400]);                                // my chrome, and someone's notepad++ in their session
         Tick(watch, Nine.AddSeconds(1));
         _front.Clear();
         Tick(watch, Nine.AddSeconds(2));
         watch.Write();
         var rows = Stored(Nine);
         (rows[Chrome].RunSeconds, rows[Chrome].FrontSeconds).ShouldBe((2.0, 1.0));
-        (rows[AppKeys.OtherUsers].RunSeconds, rows[AppKeys.OtherUsers].FrontSeconds).ShouldBe((2.0, 1.0));
+        (rows[Notepad].RunSeconds, rows[Notepad].FrontSeconds).ShouldBe((2.0, 1.0));
         rows[AppKeys.Windows].RunSeconds.ShouldBe(2);
-    }
-
-    [Fact]
-    public void The_console_changing_hands_makes_another_users_apps_theirs()
-    {
-        AddMachine();
-        using var watch = Watch();
-        watch.Start();
-        _processes.Console = 2;                                     // the other user is at the screen now
-        Tick(watch, Nine.AddSeconds(1));
-        watch.Write();
-        var rows = Stored(Nine);
-        rows[@"c:\program files\notepad++\notepad++.exe"].CpuWh.ShouldBe(0.1, 1e-12);
-        rows[AppKeys.OtherUsers].CpuWh.ShouldBe(0.8, 1e-12);        // chrome and the calculator, in session 1
     }
 
     [Fact]
