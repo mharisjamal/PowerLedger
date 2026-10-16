@@ -113,7 +113,7 @@ public sealed class AppHour
                 .ThenByDescending(app => app.RunSeconds)
                 .ThenBy(app => app.Key, StringComparer.Ordinal)
                 .ToList();
-            rows.AddRange(ranked.Take(Busiest).Select(app => Row(app, app.Name ??= name(app))));
+            rows.AddRange(ranked.Take(Busiest).Select(app => Row(app, app.Name ?? name(app))));
             double cpu = 0, gpu = 0, run = 0, front = 0;
             if (_apps.TryGetValue((user, AppKeys.Other), out var other)) (cpu, gpu, run, front) = (other.CpuWh, other.GpuWh, other.RunSeconds, other.FrontSeconds);
             foreach (var app in ranked.Skip(Busiest))

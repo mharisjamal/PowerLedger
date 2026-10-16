@@ -149,13 +149,12 @@ public sealed class AppWatchHardwareTests(ITestOutputHelper output) : IDisposabl
     public async Task With_this_PCs_own_sensors_and_processes_the_apps_add_up_to_the_readings()
     {
         var environment = new LoopEnvironment(
-            Sensors: _ => new MachineSensorSet(MachineSensors.Create(() => true, () => false)),
+            Sensors: _ => new MachineSensorSet(MachineSensors.Create(() => true, () => false, engineWork: true)),
             Inventory: HardwareInventory.Detect,
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
             SystemShuttingDown: () => false,
             DatabaseNotice: null,
-            Processes: static () => new WindowsProcesses(),
-            Engines: static () => new EngineCounters());
+            Processes: static () => new WindowsProcesses());
         var loop = new SamplingLoop(_database.Db, environment, new LoopCommands(), new LiveFeed(), new StatusBoard(),
             new MonitorBoard(MonitorCatalogue.Shipped, TimeProvider.System), TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<SamplingLoop>.Instance);
         var started = DateTimeOffset.UtcNow;

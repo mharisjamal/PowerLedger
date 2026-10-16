@@ -37,12 +37,10 @@ internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationS
 /// opened on the sensor thread at start. Left out, nothing is worked out by app.</param>
 /// <param name="Foreground">Fills a list with the process in front in each session whose App reported it lately (see
 /// <see cref="ServiceSignals.ForegroundProcesses"/>), asked once a tick. Left out, no app is ever in front.</param>
-/// <param name="Engines">Windows' GPU Engine counters for the energy by app, opened at start and read with its looks where
-/// the sensors do not read them. Left out, a card's watts then follow the processor's split.</param>
 internal sealed record LoopEnvironment(
     Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice,
     Func<bool>? Watched = null, Func<BatteryCharge?>? Battery = null, Func<bool>? SignedIn = null, Func<DateTimeOffset, DateTimeOffset?>? Hibernated = null,
-    Func<IProcessSource>? Processes = null, Action<List<uint>>? Foreground = null, Func<IEngineCounters>? Engines = null);
+    Func<IProcessSource>? Processes = null, Action<List<uint>>? Foreground = null);
 
 /// <summary>
 /// The service's heart (spec §3, §6, §7). Once a sample interval it reads the sensors, runs the model, feeds the
@@ -294,25 +292,16 @@ internal sealed class SamplingLoop : BackgroundService
         StartApps();
     }
 
-    /// <summary>Opens the processes and the GPU engine counters for the energy by app (Plan AE) and takes the first look.
-    /// Should Windows refuse the processes, the service runs on without it; should it refuse the counters, without them.</summary>
+    /// <summary>Opens the processes for the energy by app (Plan AE) and takes the first look. Should Windows refuse, the
+    /// service runs on without it.</summary>
     private void StartApps()
     {
         if (_environment.Processes is not { } open) return;
-        IEngineCounters? engines = null;
-        try
-        {
-            engines = _environment.Engines?.Invoke();
-        }
-        catch (Exception error)
-        {
-            _log.LogWarning(error, "The GPU engine counters cannot be read for the energy by app this run");
-        }
         IProcessSource? processes = null;
         try
         {
             processes = open();
-            var apps = new AppWatch(processes, new AppHoursRepository(_database), _environment.Foreground, engines: engines);
+            var apps = new AppWatch(processes, new AppHoursRepository(_database), _environment.Foreground);
             apps.Start();
             _apps = apps;
         }

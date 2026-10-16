@@ -29,78 +29,12 @@ public sealed class AppWatchTests : IDisposable
     private static Sample Sample(DateTimeOffset at, double load = 0.5, GraphicsWork? graphics = null, double? igpuW = null, double delta = 1)
         => Samples.At(at, delta, cpuLoad: load) with { Graphics = graphics, IGpuW = igpuW };
 
-    /// <summary>A watch that looks every tick, so each tick is split by its own work.</summary>
-    private AppWatch Watch(TimeSpan? lookEvery = null, IEngineCounters? engines = null) => new(_processes, new AppHoursRepository(_database.Db), front =>
+    /// <summary>A watch that looks every tick, so each tick is split by its own work, its names read as asked.</summary>
+    private AppWatch Watch(TimeSpan? lookEvery = null) => new(_processes, new AppHoursRepository(_database.Db), front =>
     {
         front.Clear();
         front.AddRange(_front);
-    }, lookEvery ?? TimeSpan.Zero, engines);
-
-    /// <summary>Engine counters that give the next window from a script, and count their reads.</summary>
-    private sealed class FakeEngines(Func<int, GraphicsWork?> script) : IEngineCounters
-    {
-        public int Reads { get; private set; }
-
-        public GraphicsWork? Read() => script(++Reads);
-    }
-
-    private static GraphicsWork OnCard(uint pid, long time) => new(new Dictionary<uint, GraphicsTime> { [pid] = new(time, time, 0, 0) });
-
-    [Fact]
-    public void Where_the_sensors_read_no_engine_counters_the_look_reads_them_and_the_cards_watts_follow_its_work()
-    {
-        AddMachine();
-        var engines = new FakeEngines(read => read == 1 ? null : OnCard(300, 100));   // the calculator renders on the card
-        using var watch = Watch(engines: engines);
-        watch.Start();
-        engines.Reads.ShouldBe(1);                                  // where the window starts
-        Tick(watch, Nine.AddSeconds(1), cpuW: 0, gpuW: 3600);       // the sample carries no engine work
-        watch.Write();
-        engines.Reads.ShouldBe(2);
-        Stored(Nine)[Calculator].GpuWh.ShouldBe(1, 1e-12);
-    }
-
-    [Fact]
-    public void Engine_work_the_sensors_already_read_is_used_and_the_counters_are_not_read_again()
-    {
-        AddMachine();
-        var engines = new FakeEngines(_ => OnCard(300, 100));
-        using var watch = Watch(engines: engines);
-        watch.Start();
-        Tick(watch, Nine.AddSeconds(1), cpuW: 0, gpuW: 3600, graphics: OnCard(200, 100));
-        watch.Write();
-        engines.Reads.ShouldBe(1);                                  // the start's alone
-        Stored(Nine)[Chrome].GpuWh.ShouldBe(1, 1e-12);
-    }
-
-    [Fact]
-    public void Counters_that_cannot_be_read_leave_the_cards_watts_to_follow_the_processor()
-    {
-        AddMachine();
-        var engines = new FakeEngines(read => read == 2 ? throw new InvalidOperationException("gone") : null);
-        using var watch = Watch(engines: engines);
-        watch.Start();
-        Tick(watch, Nine.AddSeconds(1), cpuW: 0, gpuW: 3600);
-        Tick(watch, Nine.AddSeconds(2), cpuW: 0, gpuW: 3600);
-        watch.Write();
-        var rows = Stored(Nine);
-        rows[Chrome].GpuWh.ShouldBe(1.2, 1e-12);
-        rows[Calculator].GpuWh.ShouldBe(0.4, 1e-12);
-    }
-
-    [Fact]
-    public void At_a_one_second_pace_the_counters_are_read_with_the_look_at_most_every_five_seconds()
-    {
-        AddMachine();
-        var engines = new FakeEngines(_ => OnCard(300, 100));
-        using var watch = Watch(AppWatch.LookEvery, engines);
-        watch.Start();
-        for (var s = 1; s <= 12; s++) Tick(watch, Nine.AddSeconds(s), cpuW: 0, gpuW: 3600);
-        engines.Reads.ShouldBe(3);                                  // the start's, then with the looks at 5 and 10 s
-        watch.Write();                                              // a write looks at once, but the counters wait
-        engines.Reads.ShouldBe(3);
-        Stored(Nine)[Calculator].GpuWh.ShouldBe(12, 1e-12);
-    }
+    }, lookEvery ?? TimeSpan.Zero, AppNames.Inline(_processes.DisplayName));
 
     private void Tick(AppWatch watch, DateTimeOffset at, double cpuW = 3600, double gpuW = 0, GraphicsWork? graphics = null, double? igpuW = null,
         double load = 0.5, double gapSeconds = 60)

@@ -89,6 +89,42 @@ public class EngineCountersTests
         new EngineCounters(() => throw new InvalidOperationException("not published"), () => [GeForce], published: () => false).Read().ShouldBeNull();
     }
 
+    /// <summary>Review item 1: the counters are a sensor source, read under the sensor watchdog every five seconds and held
+    /// between, and read no more once the registry names no card to split.</summary>
+    [Fact]
+    public void As_a_sensor_source_the_counters_are_read_every_five_seconds_and_no_more_once_there_is_no_card()
+    {
+        var now = TimeSpan.Zero;
+        var reads = 0;
+        var counters = new EngineCounters(() => Snapshot(++reads, (On(GeForce, 10), reads * 100L)), () => [GeForce, Iris]);
+        var source = new EngineCountersSource(counters, () => now);
+
+        source.Name.ShouldBe("gpu-engines");
+        source.Supported.ShouldBeTrue();
+        var first = new SampleDraft();
+        source.Contribute(first);
+        first.Graphics.ShouldBeNull();                              // one read is no window yet
+        now = TimeSpan.FromSeconds(1);
+        source.Contribute(new SampleDraft());
+        reads.ShouldBe(1);
+        now = TimeSpan.FromSeconds(5);
+        var second = new SampleDraft();
+        source.Contribute(second);
+        reads.ShouldBe(2);
+        second.Graphics.ShouldNotBeNull().ByProcess[10].CardLoad.ShouldBe(100);
+        now = TimeSpan.FromSeconds(6);
+        var held = new SampleDraft();
+        source.Contribute(held);
+        held.Graphics.ShouldBeSameAs(second.Graphics);
+
+        var noCardReads = 0;
+        var noCard = new EngineCountersSource(new EngineCounters(() => Snapshot(++noCardReads, (On(Iris, 20), 1)), () => [Iris]), () => now);
+        noCard.Contribute(new SampleDraft());
+        noCard.Supported.ShouldBeFalse();
+        noCard.Unavailable.ShouldNotBeNull();
+        noCardReads.ShouldBe(1);
+    }
+
     [Fact]
     public void The_registry_s_last_entry_for_a_LUID_wins_and_its_LUID_reads_as_the_counters_name_it()
     {
