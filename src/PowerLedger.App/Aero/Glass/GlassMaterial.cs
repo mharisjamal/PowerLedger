@@ -134,6 +134,10 @@ internal sealed class GlassMaterial : IDisposable
     /// <summary>The key of whether the engine's live backdrop draws.</summary>
     public const string LiveKey = "A.Glass.Live";
 
+    /// <summary>The key of whether the glass is the strict one (<see cref="Strict"/>), for the ink (GlassInk), whose held
+    /// white draws its steps whole too.</summary>
+    public const string StrictKey = "A.Glass.Strict";
+
     /// <summary>
     /// The tokens <paramref name="settings"/> give in <paramref name="theme"/>: every A.* colour, brush and number the
     /// glass draws with, and the shared keys the accent reaches. At the default settings each equals the palette's own but
@@ -219,6 +223,7 @@ internal sealed class GlassMaterial : IDisposable
         result["A.Glass.Frost"] = (double)palette["A.Glass.Frost"] * settings.Frost / DemoFrost;
         result[GlowKey] = Glow(settings.EdgeLight);
         result[LiveKey] = !settings.ReduceTransparency;
+        result[StrictKey] = strict;
         result[TextShadowKey] = TextShadow(colours["A.C.TextShadow"]);
 
         // The shared keys the accent reaches: Midnight's and Classic's accent, focus, CPU part and charts, so the dialogs

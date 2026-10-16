@@ -169,6 +169,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         var inside = new InsideGlassSource(this, outer);
         _source = inside;
         _source.Changed += OnSourceChanged;
+        _source.Repainted += ToneSoon;
         // Its tone is the outer content over the outer piece's own backdrop.
         _outerPiece = null;
         for (var i = 0; i < VisualTreeHelper.GetChildrenCount(outer); i++)
@@ -184,14 +185,15 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
 
     /// <summary>
     /// The tone of what the piece shows (Plan AD): the mean light of its backdrop after the recipe's brightness, as an
-    /// sRGB colour, or null while there is none (no picture yet, the glass off); <see cref="Tones"/> holds it in 8 by 8
-    /// cells across the piece. The look's ink follows them (GlassInk). The GPU path reads them on the GPU from the desktop
+    /// sRGB colour, or null while there is none (no picture yet, the glass off); <see cref="Tones"/> holds it in cells
+    /// about a line of text high across the piece. The look's ink follows them (GlassInk). The GPU path reads them on the GPU from the desktop
     /// copy as it draws; the CPU path, the wallpaper and a nested piece read them from the picture they already hold, at
     /// most ten times a second.
     /// </summary>
     internal Color? Tone { get; private set; }
 
-    /// <summary>The tone in 8 by 8 cells across the piece, in its device pixels; current while <see cref="Tone"/> is.</summary>
+    /// <summary>The tone in cells about a line of text high across the piece, in its device pixels; current while
+    /// <see cref="Tone"/> is.</summary>
     internal ToneGrid Tones { get; } = new();
 
     /// <summary>Raised on the UI thread when <see cref="Tone"/> or <see cref="Tones"/> changed.</summary>
@@ -206,12 +208,12 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         ToneChanged?.Invoke();
     }
 
-    /// <summary>New cells (three floats each, linear light) over <paramref name="region"/>, in the piece's device pixels:
-    /// the GPU path's read (GpuGlassWindow), or the picture's.</summary>
-    internal void SetTones(ReadOnlySpan<float> cells, Rect region)
+    /// <summary>New cells (<see cref="BackdropTone.Pack"/>), <paramref name="cols"/> by <paramref name="rows"/> over
+    /// <paramref name="region"/>, in the piece's device pixels: the GPU path's read (GpuGlassWindow), or the picture's.</summary>
+    internal void SetTones(ReadOnlySpan<uint> cells, int cols, int rows, Rect region)
     {
-        var changed = Tones.Set(cells, region);
-        var tone = BackdropTone.MeanOf(Tones.Cells);
+        var changed = Tones.Set(cells, cols, rows, region);
+        var tone = BackdropTone.MeanOf(Tones.Cells, Tones.Count);
         if (!changed && Tone == tone) return;
         Tone = tone;
         ToneChanged?.Invoke();
@@ -222,7 +224,9 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
 
     private DispatcherTimer? _toneTimer;
     private Rect? _toneBox;
-    private float[]? _toneCells;
+    private RectangleGeometry? _pictureClip;
+    private Size _arranged;
+    private uint[]? _toneCells;
 
     /// <summary>Reads the tone off the GPU path: at once when there is none yet, else once the moment has passed.</summary>
     private void ToneSoon()
@@ -245,6 +249,12 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         if (!_toneTimer.IsEnabled) _toneTimer.Start();
     }
 
+    /// <summary>How many times the piece read its tone off the GPU path, for the tests.</summary>
+    internal int ToneReads { get; private set; }
+
+    /// <summary>Whether no read waits for its moment, for the tests.</summary>
+    internal bool ToneIdle => _toneTimer is not { IsEnabled: true };
+
     /// <summary>The tone from the picture in hand: the CPU path's (its live pixels), the wallpaper's (a small copy made once
     /// per picture), or, for a nested piece, its finished glass over the outer piece's tone where it lies.</summary>
     private void MeasureTone()
@@ -255,7 +265,10 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
             ClearTone();
             return;
         }
-        var cells = _toneCells ??= new float[BackdropTone.Cells * 3];
+        ToneReads++;
+        var (cols, rows) = BackdropTone.GridFor(box.Width, box.Height);
+        if (_toneCells == null || _toneCells.Length < cols * rows) _toneCells = new uint[cols * rows];
+        var cells = _toneCells;
         if (_source is InsideGlassSource inside)
         {
             if (_outerPiece is not { Tone: { } outerTone } outer || outer.ScreenBox() is not { } outerBox)
@@ -263,20 +276,23 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
                 ClearTone();
                 return;
             }
-            var mean = inside.Mean;
-            double w = box.Width / BackdropTone.Side, h = box.Height / BackdropTone.Side;
-            for (var j = 0; j < BackdropTone.Side; j++)
+            // Its own finished glass (the outer content it bends, a navy blotch where there is one) over the outer piece's
+            // glass, cell by cell.
+            var (pixels, pw, ph) = (inside.Pixels, inside.Width, inside.Height);
+            double w = box.Width / cols, h = box.Height / rows;
+            for (var j = 0; j < rows; j++)
             {
-                for (var i = 0; i < BackdropTone.Side; i++)
+                for (var i = 0; i < cols; i++)
                 {
                     var area = new Rect(box.X - outerBox.X + i * w, box.Y - outerBox.Y + j * h, w, h);
                     var under = outer.Tones.Mean(area, out var r, out var g, out var b) ? BackdropTone.FromLinear(r, g, b) : outerTone;
-                    var (lr, lg, lb) = BackdropTone.Linear(mean is { } m ? Contrast.Over(m, under) : under);
-                    var c = (j * BackdropTone.Side + i) * 3;
-                    (cells[c], cells[c + 1], cells[c + 2]) = ((float)lr, (float)lg, (float)lb);
+                    var own = pixels.Length == pw * ph * 4 && pw > 0
+                        ? BackdropTone.MeanPremultiplied(pixels, pw, ph, pw * 4, new Int32Rect((int)(i * w), (int)(j * h), Math.Max(1, (int)Math.Ceiling(w)), Math.Max(1, (int)Math.Ceiling(h))))
+                        : inside.Mean ?? Colors.Transparent;
+                    cells[j * cols + i] = BackdropTone.Pack(Contrast.Over(own, under));
                 }
             }
-            SetTones(cells, new Rect(0, 0, box.Width, box.Height));
+            SetTones(cells, cols, rows, new Rect(0, 0, box.Width, box.Height));
             return;
         }
         if (_source?.Image is not BitmapSource image || _source.ScreenBounds is not { Width: > 0, Height: > 0 } bounds)
@@ -284,14 +300,14 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
             ClearTone();
             return;
         }
-        if (ToneCells(image, bounds, box, Brightness, Scale, _dpi, cells) is { } region) SetTones(cells, region);
+        if (ToneCells(image, bounds, box, Brightness, Scale, _dpi, cols, rows, cells) is { } region) SetTones(cells, cols, rows, region);
     }
 
     /// <summary>The tone of what the glass shows of <paramref name="image"/> (which lies at <paramref name="bounds"/> on the
     /// screen) over <paramref name="box"/> (screen pixels), in cells, bent as the glass bends it once its field is made
     /// (<see cref="BackdropTone.MeasureBent"/>); the region they cover in the box's own pixels, or null where the box
     /// misses the picture.</summary>
-    internal static unsafe Rect? ToneCells(BitmapSource image, Rect bounds, Rect box, double brightness, double scale, double dpi, Span<float> cells)
+    internal static unsafe Rect? ToneCells(BitmapSource image, Rect bounds, Rect box, double brightness, double scale, double dpi, int cols, int rows, Span<uint> cells)
     {
         var field = DisplacementField.Made((int)Math.Round(box.Width), (int)Math.Round(box.Height), dpi);
         if (image is WriteableBitmap { Format.BitsPerPixel: 32, IsFrozen: false } live)
@@ -300,7 +316,8 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
             try
             {
                 var pixels = new ReadOnlySpan<byte>((void*)live.BackBuffer, live.BackBufferStride * live.PixelHeight);
-                return BackdropTone.MeasureBent(pixels, live.PixelWidth, live.PixelHeight, live.BackBufferStride, bounds, box, brightness, field, scale, cells);
+                return BackdropTone.MeasureBent(pixels, live.PixelWidth, live.PixelHeight, live.BackBufferStride, bounds, box, brightness, field, scale, cols, rows,
+                    BackdropTone.CpuSamples, cells);
             }
             finally
             {
@@ -308,7 +325,8 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
             }
         }
         var small = SmallCopy.Of(image);
-        return BackdropTone.MeasureBent(small.Pixels, small.Width, small.Height, small.Width * 4, bounds, box, brightness, field, scale, cells);
+        return BackdropTone.MeasureBent(small.Pixels, small.Width, small.Height, small.Width * 4, bounds, box, brightness, field, scale, cols, rows,
+            BackdropTone.CpuSamples, cells);
     }
 
     /// <summary>A still picture (the wallpaper) at most 256 pixels wide, in BGRA, made once per picture.</summary>
@@ -374,6 +392,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
     protected override Size ArrangeOverride(Size finalSize)
     {
         _dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        _arranged = finalSize;
         var sigma = BlurDeviation * _dpi;
         // The blur reaches ceil(3 sigma) texels, each bilinear pair one further; two more keep the edge texels whole.
         _margin = Math.Min(LiquidGlassEffects.MaxBlurRadius, (int)Math.Ceiling(3 * sigma)) + 2;
@@ -406,6 +425,7 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         }
         _source = source;
         _source.Changed += OnSourceChanged;
+        _source.Repainted += ToneSoon;
         OnSourceChanged();
     }
 
@@ -446,13 +466,18 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         _window = window;
         _source = LiquidGlassSources.Acquire(window);
         _source.Changed += OnSourceChanged;
+        _source.Repainted += ToneSoon;
         OnSourceChanged();
     }
 
     private void Detach()
     {
         UseGpu(null);
-        if (_source != null) _source.Changed -= OnSourceChanged;
+        if (_source != null)
+        {
+            _source.Changed -= OnSourceChanged;
+            _source.Repainted -= ToneSoon;
+        }
         if (_window != null && _source != null) LiquidGlassSources.Release(_window);
         (_source as InsideGlassSource)?.Dispose();
         _source = null;
@@ -527,6 +552,17 @@ internal sealed class LiquidGlassBackdrop : FrameworkElement
         if (Canvas.GetTop(_picture) != top) Canvas.SetTop(_picture, top);
         if (_picture.Width != width) _picture.Width = width;
         if (_picture.Height != height) _picture.Height = height;
+        // The picture cut to the box and its margin on the picture itself: the canvas's own clip leaves the effects' input
+        // the whole picture's size where the picture is much larger than the piece (the window's, the wallpaper), and the
+        // passes then read the picture far outside the box (a white window under a bar showed in the bar).
+        var m = _margin / _dpi;
+        var seen = new Rect(-left, -top, _arranged.Width + 2 * m, _arranged.Height + 2 * m);
+        if (_pictureClip?.Rect != seen)
+        {
+            _pictureClip = new RectangleGeometry(seen);
+            _pictureClip.Freeze();
+            _picture.Clip = _pictureClip;
+        }
         // A map made for another size would move the wrong pixels: the piece waits for its own.
         var ready = _mapFor != null && _mapFor == _mapWanted;
         var visibility = ready ? Visibility.Visible : Visibility.Hidden;

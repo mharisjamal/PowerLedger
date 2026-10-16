@@ -52,6 +52,9 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
         LiquidGlassSources.ExcludeFromCapture = true;
         LiquidGlassSources.AllowScreenshots = false;
         LiquidGlassSources.GpuAllowed = false;   // the CPU path: LiquidGlassGpuTests try the GPU one
+        // At the display's pace whatever pace a busy test before this one left the process's glass (as slow as a frame a
+        // second): the scenes count frames and reads as the display paces them.
+        LiquidGlassGovernor.Reset();
         var desk = ScreenCapture.Show(new Border { Background = new SolidColorBrush(Desk) }, 100, 100, 800, 600);
         var glass = new LiquidGlassBackdrop { CornerRadius = new CornerRadius(0) };
         var window = ScreenCapture.Show(new Grid { Background = new SolidColorBrush(Ours), Children = { glass } }, 350, 300, 300, 200);
@@ -217,6 +220,53 @@ public class LiquidGlassCaptureTests(ITestOutputHelper output)
             GetWindowDisplayAffinity(scene.Handle, out affinity).ShouldBeTrue();
             affinity.ShouldBe(CaptureNative.WDA_EXCLUDEFROMCAPTURE);
             UiHarness.PumpUntil(() => scene.Glass.Kind == LiquidGlassSourceKind.Live, TimeSpan.FromSeconds(10), "the live picture again");
+            return 0;
+        }));
+
+    /// <summary>
+    /// Plan AD on the CPU path, from real frames: the desk turning white behind a piece that stands still reaches the
+    /// piece's tone (and so its ink) through the frames alone (the same picture, new pixels: no Changed), read at most ten
+    /// times a second while frames come, and not at all at rest. The same after a busy test left the process's glass at a
+    /// frame a second (the governor's pace is the process's).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void New_frames_behind_a_still_piece_carry_its_tone(bool afterABusyTest)
+        => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
+        {
+            if (afterABusyTest) LiquidGlassGovernor.Leave(LiquidGlassGovernor.Slowest);
+            using var scene = Show();
+            ((Border)scene.Desk.Content).Background = new SolidColorBrush(Color.FromRgb(0x10, 0x18, 0x40));
+            UiHarness.PumpUntil(() => scene.Glass.Kind == LiquidGlassSourceKind.Live && scene.Glass.Tone is { } t && Contrast.Luminance(t) < 0.05,
+                TimeSpan.FromSeconds(10), "the navy desk's tone");
+            var changes = 0;
+            scene.Source.Changed += () => changes++;
+            // At rest: no frames, no reads.
+            var atRest = LiquidGlassGpuTests.ReadsAtRest(() => scene.Glass.ToneIdle, () => scene.Glass.ToneReads, () => scene.Source.Subscriber!.Deliveries);
+            // The desk turns white behind the still piece.
+            ((Border)scene.Desk.Content).Background = Brushes.White;
+            UiHarness.PumpUntil(() => scene.Glass.Tone is { } t && Contrast.Luminance(t) > 0.8, TimeSpan.FromSeconds(5), "the tone to follow the white desk");
+            var followed = changes;
+            // A desk that keeps changing for a second, a frame every 30 ms or so: the tone read at most ten times a second.
+            UiHarness.PumpUntil(() => scene.Glass.ToneIdle, TimeSpan.FromSeconds(5), "the reads owed done");
+            var reads = scene.Glass.ToneReads;
+            var subscriber = scene.Source.Subscriber!;
+            var frames = subscriber.Deliveries;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            for (var i = 0; clock.Elapsed < TimeSpan.FromSeconds(1); i++)
+            {
+                ((Border)scene.Desk.Content).Background = new SolidColorBrush(i % 2 == 0 ? Color.FromRgb(0xF0, 0xF0, 0xF0) : Colors.White);
+                UiHarness.Pump(TimeSpan.FromMilliseconds(30));
+            }
+            long busy = scene.Glass.ToneReads - reads;
+            var delivered = subscriber.Deliveries - frames;
+            var most = (long)(clock.Elapsed / LiquidGlassBackdrop.ToneEvery) + 1;
+            output.WriteLine($"reads over a still second: {atRest}; Changed while the tone followed: {followed}; over {clock.Elapsed.TotalSeconds:0.00} s of changes: {delivered} frames, {busy} reads");
+            atRest.ShouldBe(0L);
+            followed.ShouldBe(0, "the same picture with new pixels");
+            delivered.ShouldBeGreaterThan(most, "frames came faster than the tone may be read");
+            busy.ShouldBeInRange(1, most);
             return 0;
         }));
 

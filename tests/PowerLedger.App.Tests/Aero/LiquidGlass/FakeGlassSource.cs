@@ -16,6 +16,13 @@ internal sealed class FakeGlassSource(ImageSource? image, Rect bounds, LiquidGla
 
     public event Action? Changed;
 
+    /// <summary>Never: a test hands a new picture, raised as <see cref="Changed"/>.</summary>
+    public event Action? Repainted
+    {
+        add { }
+        remove { }
+    }
+
     public void Raise() => Changed?.Invoke();
 
     /// <summary>A frozen 96 dpi BGRA picture of <paramref name="width"/> by <paramref name="height"/> from

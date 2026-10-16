@@ -62,10 +62,25 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
     /// <summary>The finished glass's mean colour and cover (Plan AD), taken as it is drawn, for the piece's ink.</summary>
     public Color? Mean { get; private set; }
 
+    /// <summary>The finished glass's premultiplied BGRA pixels (<see cref="Width"/> by <see cref="Height"/>, the piece's
+    /// device pixels), for the piece's tones cell by cell; empty before the first draw.</summary>
+    public byte[] Pixels { get; private set; } = [];
+
+    public int Width { get; private set; }
+
+    public int Height { get; private set; }
+
     /// <summary>The piece's own box: the picture is always the piece's, wherever its window is.</summary>
     public Rect ScreenBounds => _piece.ScreenBox() ?? Rect.Empty;
 
     public event Action? Changed;
+
+    /// <summary>Never: each drawing is a new picture, raised as <see cref="Changed"/>.</summary>
+    public event Action? Repainted
+    {
+        add { }
+        remove { }
+    }
 
     /// <summary>Draws the picture now if what it shows changed; true when it did.</summary>
     public bool Refresh()
@@ -132,6 +147,7 @@ internal sealed class InsideGlassSource : ILiquidGlassSource, IDisposable
         var bitmap = BitmapSource.Create(w, h, 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32, null, glass, w * 4);
         bitmap.Freeze();
         Mean = BackdropTone.MeanPremultiplied(glass, w, h, w * 4);
+        (Pixels, Width, Height) = (glass, w, h);
         Image = bitmap;
         Interlocked.Increment(ref Drawn);
         Changed?.Invoke();
