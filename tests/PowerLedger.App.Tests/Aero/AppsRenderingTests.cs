@@ -204,6 +204,34 @@ public class AppsRenderingTests
             page.Render("apps-no-tariff");
         });
 
+    /// <summary>Review item 16: a top app's name as long as a program's description runs is cut short with an ellipsis
+    /// inside the pane, its chevron whole beside it, in both layouts.</summary>
+    [Fact]
+    public void A_long_top_app_name_is_cut_short_inside_the_pane_with_its_chevron()
+        => OnUi(() =>
+        {
+            foreach (var width in new[] { Wide, Narrow })
+            {
+                using var saver = new FakeSaver();
+                var model = AeroFixtures.Dashboard(MidnightFixtures.NowScreen(), saver, new FakeAppHistory { Answer = _ => AppsFixtures.LongNamed() });
+                model.Show();
+                var view = new Aero.DashboardView { DataContext = model };
+                using var page = Page(view, width, Theme.Dark);
+                var at = width.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var line = (Button)view.FindName("TopApp");
+                var text = Find<TextBlock>(line)!;
+                text.Text.ShouldStartWith("Top app today: " + AppsFixtures.LongName, Case.Sensitive, at);
+                text.TextTrimming.ShouldBe(TextTrimming.CharacterEllipsis, at);
+                Written(text).ShouldBeGreaterThan(text.ActualWidth + 1, $"cut short {at}");
+                var pane = (GlassPanel)view.FindName("PParts");
+                var inside = pane.ActualWidth - pane.Padding.Right + 8;   // the line reaches 8 into the padding for its hover well
+                var chevron = Find<Icon>(line)!;
+                chevron.IsVisible.ShouldBeTrue(at);
+                chevron.TranslatePoint(new Point(chevron.ActualWidth, 0), pane).X.ShouldBeLessThanOrEqualTo(inside + 0.5, at);
+                line.TranslatePoint(new Point(line.ActualWidth, 0), pane).X.ShouldBeLessThanOrEqualTo(inside + 0.5, at);
+            }
+        });
+
     /// <summary>Reduced motion: an opened line's details are simply there, faded in briefly, with no travel; the chevron
     /// turns at once.</summary>
     [Fact]

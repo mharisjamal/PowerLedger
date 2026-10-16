@@ -251,7 +251,7 @@
                                         <RotateTransform Angle="-90" />
                                     </aero:Icon.RenderTransform>
                                 </aero:Icon>
-                                <TextBlock Text="{Binding TopApp}" Style="{StaticResource Sub}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding TopApp}" Style="{StaticResource Sub}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                             </DockPanel>
                         </Button>
                         <Grid Width="180" Height="180" HorizontalAlignment="Center">

@@ -27,7 +27,7 @@ internal static class MidnightFixtures
     /// so each trend says something of its own. The energy card is where a new install's is, on Since start, unless
     /// <paramref name="ui"/> has chosen otherwise; its other periods have figures of their own.
     /// </summary>
-    public static DashboardViewModel DashboardScreen(NowViewModel now, FakeUiSettings? ui = null)
+    public static DashboardViewModel DashboardScreen(NowViewModel now, FakeUiSettings? ui = null, IAppHistory? apps = null)
     {
         var day = new DateTimeOffset(Now.Date, TimeSpan.Zero);
         var history = new FakeRangeHistory
@@ -56,7 +56,7 @@ internal static class MidnightFixtures
         };
         var summary = new FakeHistory { Snapshot = Snapshots.Typical(Now, DaySeries(day)), First = Now.AddDays(-40) };
         return new DashboardViewModel(now, history, summary, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English, UiThreads.Inline, ui ?? new FakeUiSettings(), new FakeHardware(),
-            apps: new FakeAppHistory { Answer = _ => AppsFixtures.Day() });
+            apps: apps ?? new FakeAppHistory { Answer = _ => AppsFixtures.Day() });
     }
 
     /// <summary>

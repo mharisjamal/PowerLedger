@@ -400,10 +400,12 @@
                     <Button x:Name="TopApp" Style="{StaticResource M.Button.Quiet}" HorizontalAlignment="Left" Margin="-12,8,0,6" Click="TopAppClick"
                             Visibility="{Binding TopApp, Converter={StaticResource VisibleWhenText}}" AutomationProperties.Name="{Binding TopApp}"
                             AutomationProperties.HelpText="Opens History, where each app is listed" ToolTip="Each app in History">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding TopApp}" VerticalAlignment="Center" />
-                            <TextBlock Style="{StaticResource M.Text.Glyph}" Text="&#xE76C;" FontSize="10" Margin="7,1,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
-                        </StackPanel>
+                        <!-- Docked, so a long name is cut short with an ellipsis and the chevron stays whole (review item 16). -->
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource M.Text.Glyph}" Text="&#xE76C;" FontSize="10" Margin="7,1,0,0"
+                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                            <TextBlock Text="{Binding TopApp}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
                     </Button>
                 </StackPanel>
             </Border>

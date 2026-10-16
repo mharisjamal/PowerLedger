@@ -42,6 +42,16 @@ internal static class AppsFixtures
         new PricedWh(402, 14.07m), new PricedWh(268, 9.38m), new PricedWh(14, 0.49m), PricedWh.None, PricedWh.None,
         currency, false);
 
+    /// <summary>A name as long as a program's description may run (review item 16), on the day's top app.</summary>
+    public const string LongName = "Contoso Enterprise Workflow Automation Studio Professional Edition for Windows Desktop Engineering Teams";
+
+    /// <summary>The day, its top app named <see cref="LongName"/>.</summary>
+    public static AppsRange LongNamed()
+    {
+        var day = Day();
+        return day with { Apps = [day.Apps[0] with { Name = LongName }, .. day.Apps.Skip(1)] };
+    }
+
     /// <summary>The Apps page's ViewModel over <paramref name="answer"/> (the day, unless given), on Friday afternoon.</summary>
     public static AppsViewModel Screen(Func<DateRange, AppsRange?>? answer = null, FakeAppHistory? history = null)
     {

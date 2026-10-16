@@ -148,6 +148,24 @@ public class MidnightPageRenderingTests
                 RenderWhole(page.Host, page.Host.Background, $"midnight-dashboard-apps-{theme}.png");
             }
 
+            // Review item 16: a name as long as a program's description runs is cut short with an ellipsis, its chevron whole
+            // inside the card, in the short window's width too.
+            foreach (var width in new[] { 1010, ShortWidth })
+            {
+                using var styles = Midnight(Theme.Dark);
+                var model = MidnightFixtures.DashboardScreen(MidnightFixtures.NowScreen(), apps: new FakeAppHistory { Answer = _ => AppsFixtures.LongNamed() });
+                model.Show();
+                var view = new DashboardView { DataContext = model };
+                using var page = Page(view, width);
+                var line = (Button)view.FindName("TopApp");
+                var text = Find<TextBlock>(line, t => t.Text.StartsWith("Top app today: ", StringComparison.Ordinal))!;
+                text.TextTrimming.ShouldBe(TextTrimming.CharacterEllipsis);
+                if (width == ShortWidth) AeroPages.Written(text).ShouldBeGreaterThan(text.ActualWidth + 1, "cut short in the short window");
+                var card = AeroPages.Ancestor<Border>(line, b => b.Style == view.FindResource("M.Card"))!;
+                var chevron = Find<TextBlock>(line, t => t.Text == "")!;
+                chevron.TranslatePoint(new Point(chevron.ActualWidth, 0), card).X.ShouldBeLessThanOrEqualTo(card.ActualWidth - card.Padding.Right + 0.5, $"at {width}");
+            }
+
             using var saver = new FakeSaver();
             var shell = MidnightFixtures.Shell(saver);
             var window = MidnightFixtures.Window(shell, Theme.Dark);
