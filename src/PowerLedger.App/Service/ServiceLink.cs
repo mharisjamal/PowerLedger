@@ -200,11 +200,8 @@ internal sealed class LastInputIdleSource : IIdleSource
         return GetLastInputInfo(ref info) ? unchecked((uint)Environment.TickCount - info.Time) / 1000.0 : 0;
     }
 
-    public uint? ForegroundProcessId()
-    {
-        var window = GetForegroundWindow();
-        return window != 0 && GetWindowThreadProcessId(window, out var pid) != 0 && pid != 0 ? pid : null;
-    }
+    /// <summary>The window in front's process, or for a Store app's frame the app inside it (Plan AE review item 7).</summary>
+    public uint? ForegroundProcessId() => ForegroundApp.Now();
 
     [StructLayout(LayoutKind.Sequential)]
     private struct LastInputInfo
@@ -216,12 +213,6 @@ internal sealed class LastInputIdleSource : IIdleSource
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetLastInputInfo(ref LastInputInfo info);
-
-    [DllImport("user32.dll")]
-    private static extern nint GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
 }
 
 /// <summary>
