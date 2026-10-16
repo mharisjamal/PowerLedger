@@ -224,6 +224,7 @@
                                         <Setter TargetName="Chevron" Property="Visibility" Value="Hidden" />
                                         <Setter TargetName="Head" Property="IsHitTestVisible" Value="False" />
                                         <Setter TargetName="Head" Property="Focusable" Value="False" />
+                                        <Setter TargetName="Head" Property="CanExpand" Value="False" />
                                     </DataTrigger>
                                     <!-- Opened: the line lit as a well, its details gliding down into place and the chevron
                                          turning; under reduced motion only the fade is left. -->

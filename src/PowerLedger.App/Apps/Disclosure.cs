@@ -18,6 +18,13 @@ internal sealed class Disclosure : Button
 
     public bool IsExpanded { get => (bool)GetValue(IsExpandedProperty); set => SetValue(IsExpandedProperty, value); }
 
+    /// <summary>Whether the line opens at all (review item 17): a line that doesn't, the ledger's total, is text to a screen
+    /// reader, with nothing to press or open.</summary>
+    public static readonly DependencyProperty CanExpandProperty = DependencyProperty.Register(
+        nameof(CanExpand), typeof(bool), typeof(Disclosure), new PropertyMetadata(true));
+
+    public bool CanExpand { get => (bool)GetValue(CanExpandProperty); set => SetValue(CanExpandProperty, value); }
+
     /// <summary>Opens or closes it, as a click does.</summary>
     internal void Activate() => OnClick();
 
@@ -37,8 +44,17 @@ internal sealed class Disclosure : Button
     {
         public ExpandCollapseState ExpandCollapseState => State(owner.IsExpanded);
 
-        public override object GetPattern(PatternInterface patternInterface)
-            => patternInterface == PatternInterface.ExpandCollapse ? this : base.GetPattern(patternInterface);
+        public override object? GetPattern(PatternInterface patternInterface) => patternInterface switch
+        {
+            PatternInterface.ExpandCollapse => owner.CanExpand ? this : null,
+            PatternInterface.Invoke => owner.CanExpand ? base.GetPattern(patternInterface) : null,
+            _ => base.GetPattern(patternInterface),
+        };
+
+        protected override AutomationControlType GetAutomationControlTypeCore()
+            => owner.CanExpand ? AutomationControlType.Button : AutomationControlType.Text;
+
+        protected override string GetLocalizedControlTypeCore() => owner.CanExpand ? base.GetLocalizedControlTypeCore() : "text";
 
         public void Expand()
         {

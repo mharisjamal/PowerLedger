@@ -69,6 +69,12 @@ public class AppsRenderingTests
                         AutomationProperties.GetName(head).ShouldBe(row.Spoken, $"{row.Name} {at}");
                         AutomationProperties.GetHelpText(head).ShouldBe(row.Detail, $"{row.Name} {at}");
                         head.Focusable.ShouldBe(row.Kind != AppRowKind.Total, $"{row.Name} {at}");
+                        // Review item 17: the total is a line of text to a screen reader, nothing to press or open.
+                        var peer = UIElementAutomationPeer.CreatePeerForElement(head);
+                        var opens = row.Kind != AppRowKind.Total;
+                        (peer.GetPattern(PatternInterface.ExpandCollapse) is not null).ShouldBe(opens, $"{row.Name} {at}");
+                        (peer.GetPattern(PatternInterface.Invoke) is not null).ShouldBe(opens, $"{row.Name} {at}");
+                        peer.GetAutomationControlType().ShouldBe(opens ? AutomationControlType.Button : AutomationControlType.Text, $"{row.Name} {at}");
                         var bar = Find<ShareBar>(line, b => b.Name == "Bar").ShouldNotBeNull($"{row.Name} {at}");
                         bar.Visibility.ShouldBe(row.Kind is AppRowKind.Beside or AppRowKind.Total ? Visibility.Hidden : Visibility.Visible, $"{row.Name} {at}");
                         Find<Border>(line, b => b.Name == "Rule")!.IsVisible.ShouldBe(row.Name == "Screen", $"{row.Name} {at}");
