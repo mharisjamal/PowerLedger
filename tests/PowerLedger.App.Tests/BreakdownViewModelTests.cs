@@ -292,6 +292,28 @@ public class BreakdownViewModelTests
         model.AppsMessage.ShouldBeNull();
     }
 
+    /// <summary>Review item 9: the apps' table says what it leaves out, as the Apps page does: counted only from part way
+    /// through the range, while the bands above cover all of it; or, for a range wholly before, when counting began.</summary>
+    [Fact]
+    public void The_apps_table_says_from_when_apps_were_counted()
+    {
+        var since = new DateTimeOffset(2026, 9, 6, 9, 0, 0, TimeSpan.Zero);
+        var apps = new FakeAppHistory { Answer = _ => AppLedgerTests.Day() with { CountedSince = since } };
+        var model = new BreakdownViewModel(_link, _history, UiThreads.Inline, _clock, TimeZoneInfo.Utc, English, apps: apps);
+        model.Range.Choice = RangeChoice.SevenDays;
+        model.Show();
+
+        model.AppsNote.ShouldBe("Apps counted from 6 Sep.");
+
+        model.Range.Choice = RangeChoice.Today;
+        model.AppsNote.ShouldBeNull("counted all day");
+
+        apps.Answer = range => Storage.AppsRange.None(range.From, range.To, since, "USD");
+        model.Range.Choice = RangeChoice.LastMonth;
+        model.AppsMessage.ShouldBe("PowerLedger began counting apps on 6 Sep, after this range.");
+        model.AppsNote.ShouldBeNull();
+    }
+
     /// <summary>Aero shows the apps on a page of their own: while its window is open, History reads none.</summary>
     [Fact]
     public void While_reading_no_apps_none_are_read()

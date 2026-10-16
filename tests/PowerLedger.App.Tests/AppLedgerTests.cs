@@ -228,6 +228,39 @@ public class AppLedgerTests
         AppLedger.NameOf(Use(@"c:\a.exe", "A \u2014 B", 30)).ShouldBe("A - B");
     }
 
+    private static DateRange Range(DateTimeOffset from, DateTimeOffset to) => new(from, to, to, "Range", TimeSpan.FromHours(1));
+
+    /// <summary>Review item 9: what the figures leave out, said under them, for every look's apps.</summary>
+    [Fact]
+    public void A_range_apps_were_counted_in_part_of_says_from_when()
+    {
+        var now = new DateTimeOffset(2026, 10, 16, 14, 30, 0, TimeSpan.Zero);
+        string? Note(DateTimeOffset? since, DateRange range, bool partial = false)
+            => AppLedger.Note(Day() with { CountedSince = since, CostIsPartial = partial }, range, now, TimeZoneInfo.Utc, English);
+        var month = Range(new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero), now);
+
+        Note(new DateTimeOffset(2026, 10, 14, 9, 0, 0, TimeSpan.Zero), month).ShouldBe("Apps counted from 14 Oct.");
+        Note(new DateTimeOffset(2026, 10, 16, 0, 0, 0, TimeSpan.Zero), month).ShouldBe("Apps counted from today.");
+        Note(now.AddMinutes(-30), month).ShouldBe("Apps counted from 2:00 PM today.");
+        Note(new DateTimeOffset(2026, 9, 2, 0, 0, 0, TimeSpan.Zero), month).ShouldBeNull("counted throughout");
+        Note(null, month, partial: true).ShouldBe("Costs leave out energy priced in an earlier currency.");
+    }
+
+    /// <summary>Review item 9: a range wholly before PowerLedger counted apps says when counting began, not that apps show
+    /// in a few minutes, which they never will for it.</summary>
+    [Fact]
+    public void An_empty_range_says_whether_apps_will_show_or_were_counted_only_after_it()
+    {
+        var august = Range(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero));
+
+        AppLedger.Waiting(AppsRange.None(august.From, august.To, new DateTimeOffset(2026, 9, 6, 9, 0, 0, TimeSpan.Zero), "USD"), august, TimeZoneInfo.Utc, English)
+            .ShouldBe("PowerLedger began counting apps on 6 Sep, after this range.");
+        AppLedger.Waiting(AppsRange.None(august.From, august.To, null, "USD"), august, TimeZoneInfo.Utc, English)
+            .ShouldBe("Apps show here once PowerLedger has watched them for a few minutes.");
+        AppLedger.Waiting(AppsRange.None(august.From, august.To, new DateTimeOffset(2026, 8, 31, 23, 0, 0, TimeSpan.Zero), "USD"), august, TimeZoneInfo.Utc, English)
+            .ShouldBe("Apps show here once PowerLedger has watched them for a few minutes.");
+    }
+
     [Fact]
     public void No_line_reads_with_a_dash()
         => AppLedger.Rows(Day(rest: 200, asleep: 20, losses: 10, untraced: 40), English)

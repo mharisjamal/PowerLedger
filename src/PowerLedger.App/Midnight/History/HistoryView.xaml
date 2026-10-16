@@ -133,6 +133,9 @@
                     Visibility="{Binding HasApps, Converter={StaticResource VisibleWhen}}">
                 <StackPanel>
                     <TextBlock Style="{StaticResource M.Text.Heading}" Margin="0,0,0,12" Text="By app" />
+                    <!-- What the table leaves out (review item 9): apps counted only from part way through the range. -->
+                    <TextBlock Style="{StaticResource M.Text.Muted}" Margin="0,-6,0,12" TextWrapping="Wrap" Text="{Binding AppsNote}"
+                               Visibility="{Binding AppsNote, Converter={StaticResource VisibleWhenText}}" />
                     <Border Style="{StaticResource M.Table.Header}">
                         <Grid>
                             <Grid.ColumnDefinitions>

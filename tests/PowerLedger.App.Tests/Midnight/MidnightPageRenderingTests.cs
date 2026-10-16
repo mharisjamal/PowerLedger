@@ -109,6 +109,7 @@ public class MidnightPageRenderingTests
                 var table = Find<ItemsControl>(view, items => items.ItemsSource == model.Apps).ShouldNotBeNull(theme.ToString());
                 table.Items.Count.ShouldBe(model.Apps.Count, theme.ToString());
                 model.Apps.Count.ShouldBe(12, theme.ToString());
+                Find<TextBlock>(view, t => t.Text == "Apps counted from 9:00 AM today.").ShouldNotBeNull(theme.ToString()).IsVisible.ShouldBeTrue(theme.ToString());
                 foreach (var app in model.Apps)
                 {
                     var row = (FrameworkElement)table.ItemContainerGenerator.ContainerFromItem(app);
@@ -766,7 +767,8 @@ public class MidnightPageRenderingTests
         link.Connect(true);
         var history = new FakeRangeHistory { Answer = range => Reports.Typical(range) with { Series = Week(range) } };
         return new BreakdownViewModel(link, history, UiThreads.Inline, new FakeTimeProvider(Now), TimeZoneInfo.Utc, English,
-            apps: new FakeAppHistory { Answer = _ => AppsFixtures.Day() });
+            // Apps counted from 9:00 this morning, so the table says so (review item 9).
+            apps: new FakeAppHistory { Answer = _ => AppsFixtures.Day() with { CountedSince = new DateTimeOffset(2026, 9, 8, 9, 0, 0, TimeSpan.Zero) } });
     }
 
     private static IReadOnlyList<Aggregate> Week(DateRange range)

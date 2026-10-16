@@ -24,7 +24,6 @@ internal sealed class AppsViewModel : ObservableObject, IDisposable
     public static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(1);
 
     private const string Unreadable = "Apps can't be read right now. They come back when the service is running.";
-    private const string Waiting = "Apps show here once PowerLedger has watched them for a few minutes.";
 
     private readonly IAppHistory _history;
     private readonly UiThreads _threads;
@@ -155,10 +154,10 @@ internal sealed class AppsViewModel : ObservableObject, IDisposable
         if (_read is not { } read) return;
         var apps = read.Apps;
         Rows = apps is null ? [] : AppLedger.Rows(apps, _culture, _open);
-        Message = apps is null ? Unreadable : Rows.Count == 0 ? Waiting : null;
+        Message = apps is null ? Unreadable : Rows.Count == 0 ? AppLedger.Waiting(apps, read.Range, _zone, _culture) : null;
         HasCost = apps?.Currency is not null;
         Summary = Rows.Count == 0 || apps is null ? "" : SummaryOf(Rows[^1], apps.Currency, read.Period);
-        Note = apps is null || Rows.Count == 0 ? null : NoteOf(apps, read.Range);
+        Note = apps is null || Rows.Count == 0 ? null : AppLedger.Note(apps, read.Range, _clock.GetUtcNow(), _zone, _culture);
     }
 
     private static string SummaryOf(AppRow total, string? currency, AppsPeriod period)
@@ -170,22 +169,5 @@ internal sealed class AppsViewModel : ObservableObject, IDisposable
             _ => "today",
         };
         return currency is null ? $"{total.Energy} kWh so far {when}" : $"{total.Energy} kWh, {total.Cost} so far {when}";
-    }
-
-    /// <summary>"Apps counted from 14 Oct." when counting began inside the range, "from today" or "from 2:00 PM today"
-    /// when it began today; and that costs leave out energy priced in an earlier currency.</summary>
-    private string? NoteOf(AppsRange apps, DateRange range)
-    {
-        var notes = new List<string>();
-        if (apps.CountedSince is { } since && since > range.From)
-        {
-            var local = TimeZoneInfo.ConvertTime(since, _zone);
-            var day = Ranges.LocalDay(since, _zone);
-            notes.Add(day != Ranges.LocalDay(_clock.GetUtcNow(), _zone) ? $"Apps counted from {local.ToString("d MMM", _culture)}."
-                : since <= Ranges.Midnight(day, _zone) ? "Apps counted from today."
-                : $"Apps counted from {local.ToString("t", _culture)} today.");
-        }
-        if (apps.CostIsPartial) notes.Add("Costs leave out energy priced in an earlier currency.");
-        return notes.Count == 0 ? null : string.Join(" ", notes);
     }
 }

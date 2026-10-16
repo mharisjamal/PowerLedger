@@ -133,6 +133,34 @@ internal static class AppLedger
     public static AppUse? Top(AppsRange range)
         => HasApps(range) ? range.Apps.Where(a => !IsSpecial(a.Key) && Clean(a.Wh) > 0).MaxBy(a => a.Wh) : null;
 
+    /// <summary>
+    /// What a range's lines leave out, said under them in every look (review item 9): "Apps counted from 14 Oct." when
+    /// PowerLedger began counting apps inside the range, so the lines cover less of it than the bands do; "from today" or
+    /// "from 2:00 PM today" when it began today; and that costs leave out energy priced in an earlier currency. Null when
+    /// nothing is left out.
+    /// </summary>
+    public static string? Note(AppsRange apps, DateRange range, DateTimeOffset now, TimeZoneInfo zone, CultureInfo culture)
+    {
+        var notes = new List<string>();
+        if (apps.CountedSince is { } since && since > range.From)
+        {
+            var local = TimeZoneInfo.ConvertTime(since, zone);
+            var day = Ranges.LocalDay(since, zone);
+            notes.Add(day != Ranges.LocalDay(now, zone) ? $"Apps counted from {local.ToString("d MMM", culture)}."
+                : since <= Ranges.Midnight(day, zone) ? "Apps counted from today."
+                : $"Apps counted from {local.ToString("t", culture)} today.");
+        }
+        if (apps.CostIsPartial) notes.Add("Costs leave out energy priced in an earlier currency.");
+        return notes.Count == 0 ? null : string.Join(" ", notes);
+    }
+
+    /// <summary>Why a range has no lines (review item 9): apps not watched a few minutes yet, or, for a range that ended
+    /// before PowerLedger began counting them, when it began.</summary>
+    public static string Waiting(AppsRange apps, DateRange range, TimeZoneInfo zone, CultureInfo culture)
+        => apps.CountedSince is { } since && since >= range.To
+            ? $"PowerLedger began counting apps on {TimeZoneInfo.ConvertTime(since, zone).ToString("d MMM", culture)}, after this range."
+            : "Apps show here once PowerLedger has watched them for a few minutes.";
+
     /// <summary>The ledger's lines for <paramref name="range"/>, the line keyed <paramref name="open"/> opened; none
     /// while the range has too little to show (<see cref="HasApps"/>).</summary>
     public static IReadOnlyList<AppRow> Rows(AppsRange range, CultureInfo culture, string? open = null)

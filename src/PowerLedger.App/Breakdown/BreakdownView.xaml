@@ -151,6 +151,9 @@
                 </ItemsControl>
                 <TextBlock Style="{StaticResource Text.Muted}" Margin="0,10,0,0" TextWrapping="Wrap" Text="{Binding AppsMessage}"
                            Visibility="{Binding AppsMessage, Converter={StaticResource VisibleWhenText}}" />
+                <!-- What the ledger leaves out (review item 9): apps counted only from part way through the range. -->
+                <TextBlock Style="{StaticResource Text.Muted}" Margin="0,10,0,0" TextWrapping="Wrap" Text="{Binding AppsNote}"
+                           Visibility="{Binding AppsNote, Converter={StaticResource VisibleWhenText}}" />
                 <TextBlock Style="{StaticResource Text.Muted}" Margin="0,12,0,0" TextWrapping="Wrap"
                            Text="Each share is of everything this PC used: every app's processor and graphics energy, the screen and the rest of the PC. Apps are grouped by program, not by process. This list stays on this PC." />
             </StackPanel>

@@ -48,6 +48,7 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     private AppsRange? _appsRead;
     private IReadOnlyList<AppRow> _appRows = [];
     private string? _appsMessage;
+    private string? _appsNote;
     private bool _hasApps;
 
     /// <param name="saver">Where Save CSV asks to save; without one (Classic and Midnight, which don't offer it) the command
@@ -161,8 +162,13 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
     /// <summary>The range's apps as the Apps page's ledger lists them (<see cref="AppLedger.Rows"/>).</summary>
     public IReadOnlyList<AppRow> Apps { get => _appRows; private set => SetProperty(ref _appRows, value); }
 
-    /// <summary>Why the apps' table is empty: apps not watched a few minutes yet; null while it lists them.</summary>
+    /// <summary>Why the apps' table is empty: apps not watched a few minutes yet, or counted only after the range; null
+    /// while it lists them.</summary>
     public string? AppsMessage { get => _appsMessage; private set => SetProperty(ref _appsMessage, value); }
+
+    /// <summary>What the apps' table leaves out (review item 9, <see cref="AppLedger.Note"/>): "Apps counted from 6 Sep."
+    /// when counting began inside the range, whose bands above cover all of it; null when it leaves nothing out.</summary>
+    public string? AppsNote { get => _appsNote; private set => SetProperty(ref _appsNote, value); }
 
     /// <summary>Whether the apps' table shows: the range's apps were read, listed or waiting to be. Hidden when they
     /// couldn't be read, which the page's own message says.</summary>
@@ -243,7 +249,8 @@ internal sealed class BreakdownViewModel : ObservableObject, IDisposable
         var apps = ReadsApps ? _appsRead : null;
         Apps = apps is null ? [] : AppLedger.Rows(apps, _culture);
         HasApps = apps is not null;
-        AppsMessage = apps is not null && Apps.Count == 0 ? "Apps show here once PowerLedger has watched them for a few minutes." : null;
+        AppsMessage = apps is not null && Apps.Count == 0 && _range is { } empty ? AppLedger.Waiting(apps, empty, _zone, _culture) : null;
+        AppsNote = apps is not null && Apps.Count > 0 && _range is { } range ? AppLedger.Note(apps, range, _clock.GetUtcNow(), _zone, _culture) : null;
     }
 
     private void Rebuild()
