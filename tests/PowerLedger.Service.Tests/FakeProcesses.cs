@@ -9,7 +9,7 @@ internal sealed class FakeProcesses : IProcessSource
     private readonly Lock _gate = new();
     private ProcessorTimes _times = new(Idle: 1_000_000, Kernel: 1_000_000, User: 0, Dpc: 0, Interrupt: 0);
 
-    public sealed class Fake(uint pid, string name, uint session = 1, string? path = null, string? package = null, long created = 1, string? sid = null)
+    public sealed class Fake(uint pid, string name, uint session = 1, string? path = null, string? package = null, long created = 1, string? sid = null, uint parent = 0)
     {
         public uint Pid { get; } = pid;
         public long Created { get; } = created;
@@ -18,6 +18,7 @@ internal sealed class FakeProcesses : IProcessSource
         public string? Path { get; } = path;
         public string? Package { get; } = package;
         public string? Sid { get; } = sid;
+        public uint Parent { get; } = parent;
         public ulong CyclesPerRead { get; set; }
         public long TimePerRead { get; set; }
         public ulong Cycles { get; set; }
@@ -69,7 +70,7 @@ internal sealed class FakeProcesses : IProcessSource
                 p.Cycles += p.CyclesPerRead;
                 p.Time += p.TimePerRead;
                 busy += p.TimePerRead;
-                into.Add(new ProcessCounts(p.Pid, p.Created, p.Session, p.Cycles, p.Time, i));
+                into.Add(new ProcessCounts(p.Pid, p.Created, p.Session, p.Cycles, p.Time, i, p.Parent));
             }
             _times = _times with { Kernel = _times.Kernel + busy, Dpc = _times.Dpc + DriversPerRead };
             processors = _times;

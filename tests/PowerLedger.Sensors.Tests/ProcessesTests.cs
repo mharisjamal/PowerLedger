@@ -14,7 +14,7 @@ public class ProcessesTests
     private static byte[] Entries(ProcessLayout layout, long baseAddress)
     {
         var buffer = new byte[600];
-        void Entry(int at, int next, uint pid, uint session, ulong cycles, long create, long user, long kernel, string name)
+        void Entry(int at, int next, uint pid, uint session, ulong cycles, long create, long user, long kernel, string name, uint parent = 0)
         {
             var e = buffer.AsSpan(at);
             BinaryPrimitives.WriteUInt32LittleEndian(e, (uint)next);
@@ -29,16 +29,18 @@ public class ProcessesTests
             {
                 BinaryPrimitives.WriteInt64LittleEndian(e[layout.NameBuffer..], baseAddress + nameAt);
                 BinaryPrimitives.WriteUInt64LittleEndian(e[layout.Pid..], pid);
+                BinaryPrimitives.WriteUInt64LittleEndian(e[layout.Parent..], parent);
             }
             else
             {
                 BinaryPrimitives.WriteUInt32LittleEndian(e[layout.NameBuffer..], (uint)(baseAddress + nameAt));
                 BinaryPrimitives.WriteUInt32LittleEndian(e[layout.Pid..], pid);
+                BinaryPrimitives.WriteUInt32LittleEndian(e[layout.Parent..], parent);
             }
             BinaryPrimitives.WriteUInt32LittleEndian(e[layout.Session..], session);
         }
         Entry(0, 300, pid: 4, session: 0, cycles: 123_456_789_012, create: 0, user: 0, kernel: 9_000_000, name: "System");
-        Entry(300, 0, pid: 70_000, session: 2, cycles: 42, create: 133_000_000_000_000_000, user: 30, kernel: 12, name: "chrome.exe");
+        Entry(300, 0, pid: 70_000, session: 2, cycles: 42, create: 133_000_000_000_000_000, user: 30, kernel: 12, name: "chrome.exe", parent: 69_999);
         return buffer;
     }
 
@@ -57,7 +59,7 @@ public class ProcessesTests
         processes.ShouldBe(
         [
             new ProcessCounts(4, 0, 0, 123_456_789_012, 9_000_000, 0),
-            new ProcessCounts(70_000, 133_000_000_000_000_000, 2, 42, 42, 300),
+            new ProcessCounts(70_000, 133_000_000_000_000_000, 2, 42, 42, 300, ParentPid: 69_999),   // review item 6: who started it
         ]);
         WindowsProcesses.ImageName(buffer, layout, Base, 0).ShouldBe("System");
         WindowsProcesses.ImageName(buffer, layout, Base, 300).ShouldBe("chrome.exe");

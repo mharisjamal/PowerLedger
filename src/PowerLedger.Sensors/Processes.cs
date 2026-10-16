@@ -10,7 +10,7 @@ namespace PowerLedger.Sensors;
 /// <param name="Cycles">The processor cycles its threads have used so far.</param>
 /// <param name="Time">The kernel and user time its threads have used so far, in 100 ns units.</param>
 /// <param name="Name">Where its image name is, for <see cref="IProcessSource.ImageName"/> until the next read.</param>
-public readonly record struct ProcessCounts(uint Pid, long CreateTime, uint Session, ulong Cycles, long Time, int Name);
+public readonly record struct ProcessCounts(uint Pid, long CreateTime, uint Session, ulong Cycles, long Time, int Name, uint ParentPid = 0);
 
 /// <summary>Every logical processor's times added up since boot, in 100 ns units.</summary>
 public readonly record struct ProcessorTimes(long Idle, long Kernel, long User, long Dpc, long Interrupt)
@@ -54,6 +54,9 @@ internal readonly record struct ProcessLayout(int Cycles, int Create, int User, 
     public static ProcessLayout ThirtyTwoBit { get; } = new(24, 32, 40, 48, 56, 60, 68, 80, Wide: false);
 
     public static ProcessLayout Current => Environment.Is64BitProcess ? SixtyFourBit : ThirtyTwoBit;
+
+    /// <summary>Where the process that started it is (InheritedFromUniqueProcessId), just after its own id.</summary>
+    public int Parent => Pid + (Wide ? 8 : 4);
 
     /// <summary>The least an entry holds, up to its session id.</summary>
     public int Size => Session + 4;
@@ -151,10 +154,11 @@ public sealed unsafe class WindowsProcesses : IProcessSource
         {
             var entry = buffer[offset..];
             var pid = layout.Wide ? (uint)BinaryPrimitives.ReadUInt64LittleEndian(entry[layout.Pid..]) : BinaryPrimitives.ReadUInt32LittleEndian(entry[layout.Pid..]);
+            var parent = layout.Wide ? (uint)BinaryPrimitives.ReadUInt64LittleEndian(entry[layout.Parent..]) : BinaryPrimitives.ReadUInt32LittleEndian(entry[layout.Parent..]);
             into.Add(new ProcessCounts(
                 pid, BinaryPrimitives.ReadInt64LittleEndian(entry[layout.Create..]), BinaryPrimitives.ReadUInt32LittleEndian(entry[layout.Session..]),
                 BinaryPrimitives.ReadUInt64LittleEndian(entry[layout.Cycles..]),
-                BinaryPrimitives.ReadInt64LittleEndian(entry[layout.User..]) + BinaryPrimitives.ReadInt64LittleEndian(entry[layout.Kernel..]), offset));
+                BinaryPrimitives.ReadInt64LittleEndian(entry[layout.User..]) + BinaryPrimitives.ReadInt64LittleEndian(entry[layout.Kernel..]), offset, parent));
             var next = BinaryPrimitives.ReadUInt32LittleEndian(entry);
             if (next == 0) return;
             offset += (int)next;

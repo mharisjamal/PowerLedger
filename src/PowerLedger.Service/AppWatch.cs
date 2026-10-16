@@ -34,6 +34,7 @@ internal sealed class AppWatch(
     public static readonly TimeSpan LookEvery = TimeSpan.FromSeconds(5);
 
     private const int MostNames = 4096;
+    private const string WebView2 = "msedgewebview2.exe";
     private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
 
     /// <summary>The kernel's own processes, which have no image file: with the idle process, which is never an app, they
@@ -276,14 +277,24 @@ internal sealed class AppWatch(
 
     /// <summary>What app a new process belongs to, and who runs it (review item 10: tagged by account, not by session, so
     /// a person over Remote Desktop has their own apps too). The kernel's processes, and any image under the Windows folder,
-    /// are Windows', which is the machine's; a Store app is its package; anything else its image path. A process that
-    /// cannot be opened goes by the name Windows lists it with.</summary>
+    /// are Windows', which is the machine's; an app's WebView2 processes are the app's (review item 6); a Store app is its
+    /// package; anything else its image path. A process that cannot be opened goes by the name Windows lists it with.</summary>
     private Tracked Identify(ProcessCounts listed)
     {
         var process = new Tracked { Created = listed.CreateTime };
-        if (listed.Pid == 4 || (listed.Session == 0 && KernelProcesses.Contains(processes.ImageName(listed.Name))))
+        var name = processes.ImageName(listed.Name);
+        if (listed.Pid == 4 || (listed.Session == 0 && KernelProcesses.Contains(name)))
         {
             process.Key = AppKeys.Windows;
+            return process;
+        }
+        // A WebView2 process is its parent's, so its app's: the parent, started before it, is either the app or a WebView2
+        // process already given the app. One whose parent has gone, or whose parent's id now names a later process, stays
+        // WebView2's own.
+        if (name.Equals(WebView2, StringComparison.OrdinalIgnoreCase)
+            && _tracked.TryGetValue(listed.ParentPid, out var parent) && parent.Created <= listed.CreateTime)
+        {
+            (process.Key, process.Path, process.User) = (parent.Key, parent.Path, parent.User);
             return process;
         }
         var image = processes.Image(listed.Pid, listed.CreateTime);
@@ -306,7 +317,6 @@ internal sealed class AppWatch(
             process.Key = AppKeys.Package(package);
             return process;
         }
-        var name = processes.ImageName(listed.Name);
         process.Key = name.Length > 0 ? name.ToLowerInvariant() : AppKeys.Other;
         return process;
     }

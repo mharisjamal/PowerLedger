@@ -357,6 +357,26 @@ public sealed class AppWatchTests : IDisposable
         rows[@"c:\users\ann\appdata\local\discord\discord.exe"].CpuWh.ShouldBe(0.6, 1e-12);
     }
 
+    /// <summary>Review item 6: an app's WebView2 processes are the app's, through each one's parent up to the app that
+    /// started them; a WebView2 whose app has gone, or whose parent's id names a later process, stays WebView2.</summary>
+    [Fact]
+    public void An_apps_webview2_processes_are_the_apps()
+    {
+        const string WebView = @"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\130.0.2849.80\msedgewebview2.exe";
+        _processes.Add(new FakeProcesses.Fake(700, "ms-teams.exe", path: @"C:\Program Files\WindowsApps\MSTeams_24.1.0.0_x64__8wekyb3d8bbwe\ms-teams.exe",
+            package: "MSTeams_8wekyb3d8bbwe", sid: Me, created: 10), 100, 100);
+        _processes.Add(new FakeProcesses.Fake(701, "msedgewebview2.exe", path: WebView, sid: Me, created: 11, parent: 700), 200, 200);
+        _processes.Add(new FakeProcesses.Fake(702, "msedgewebview2.exe", path: WebView, sid: Me, created: 12, parent: 701), 300, 300);
+        _processes.Add(new FakeProcesses.Fake(800, "msedgewebview2.exe", path: WebView, sid: Me, created: 5, parent: 700), 400, 400);   // older than 700
+        using var watch = Watch();
+        watch.Start();
+        Tick(watch, Nine.AddSeconds(1));
+        watch.Write();
+        var rows = Stored(Nine);
+        rows["pkg:MSTeams_8wekyb3d8bbwe"].CpuWh.ShouldBe(0.6, 1e-12);
+        rows[@"c:\program files (x86)\microsoft\edgewebview\application\msedgewebview2.exe"].CpuWh.ShouldBe(0.4, 1e-12);
+    }
+
     [Fact]
     public void A_process_is_opened_once_for_its_image_however_long_it_runs()
     {
