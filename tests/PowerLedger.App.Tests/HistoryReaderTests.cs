@@ -133,14 +133,10 @@ public sealed class HistoryReaderTests : IDisposable
     [Fact]
     public void Todays_apps_are_read_from_the_app_rows()
     {
-        using (var c = _writer.Open())
-        {
-            using var cmd = c.CreateCommand();
-            cmd.CommandText = "INSERT INTO app_hours (start_ms, app_key, name, path, cpu_wh, gpu_wh, run_s, front_s) VALUES " +
-                $"({Now.AddMinutes(-30).ToUnixTimeMilliseconds()}, 'c:\\a.exe', 'A', 'C:\\A.exe', 3, 1, 1800, 900), " +
-                $"({Now.AddDays(-1).ToUnixTimeMilliseconds()}, 'c:\\b.exe', 'B', NULL, 9, 0, 3600, 0)";
-            cmd.ExecuteNonQuery();
-        }
+        // The rows as the service writes them, whatever the tables look like.
+        var rows = new AppHoursRepository(_writer);
+        rows.ReplaceHour(Now.AddMinutes(-30), [new PowerLedger.Core.AppHourRow(@"c:\a.exe", "A", @"C:\A.exe", 3, 1, 1800, 900)]);
+        rows.ReplaceHour(Now.AddDays(-1), [new PowerLedger.Core.AppHourRow(@"c:\b.exe", "B", null, 9, 0, 3600, 0)]);
 
         using var readOnly = new SqliteDatabase(_path, readOnly: true);
         var apps = new HistoryReader(readOnly).Apps(Ranges.Today(Now, TimeZoneInfo.Utc, System.Globalization.CultureInfo.InvariantCulture)).ShouldNotBeNull();

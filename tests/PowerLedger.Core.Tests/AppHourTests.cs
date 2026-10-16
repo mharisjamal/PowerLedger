@@ -68,6 +68,37 @@ public class AppHourTests
         rows.Sum(r => r.CpuWh).ShouldBe(Enumerable.Range(1, 30).Sum() + 0.5 + 2, 1e-9);
     }
 
+    /// <summary>Review item 10: each person's apps are kept and ranked apart, tagged with who ran them, so the App can show a
+    /// person their own and pool the others'; the special keys are the machine's.</summary>
+    [Fact]
+    public void Each_persons_apps_are_kept_and_ranked_apart_and_the_special_keys_are_the_machines()
+    {
+        var hour = new AppHour(Nine);
+        hour.For(1, App(1), null).CpuWh = 5;
+        hour.For(2, App(1), null).CpuWh = 3;                        // the same app, another person
+        hour.For(2, AppKeys.Idle, null).CpuWh = 1;                  // whoever asks, a special key is the machine's
+        for (var i = 0; i < 30; i++) hour.For(2, App(100 + i), null).CpuWh = 0.1 * (i + 1);
+
+        var rows = hour.Rows(Named);
+        rows.Where(r => r.Key == App(1)).Select(r => (r.User, r.CpuWh)).ShouldBe([(1, 5.0), (2, 3.0)], ignoreOrder: true);
+        rows.Single(r => r.Key == AppKeys.Idle).User.ShouldBe(AppUsers.Machine);
+        rows.Count(r => r.User == 2 && !AppKeys.IsSpecial(r.Key)).ShouldBe(AppHour.Busiest);
+        rows.Single(r => r.Key == AppKeys.Other).User.ShouldBe(2);   // person 2's apps past their busiest 25
+        new AppHour(Nine, rows).Rows(Named).ShouldBe(rows, ignoreOrder: true);
+    }
+
+    [Fact]
+    public void A_persons_account_is_a_steady_number_and_the_machines_own_accounts_are_nought()
+    {
+        var alice = AppUsers.Of("S-1-5-21-3623811015-3361044348-30300820-1013");
+        alice.ShouldBeGreaterThan(0);
+        AppUsers.Of("S-1-5-21-3623811015-3361044348-30300820-1013").ShouldBe(alice);
+        AppUsers.Of("S-1-5-21-3623811015-3361044348-30300820-1014").ShouldNotBe(alice);
+        AppUsers.Of("S-1-12-1-1234567890-1234567890-1234567890-1234567890").ShouldBeGreaterThan(0);   // an Entra ID account
+        foreach (var account in new[] { "S-1-5-18", "S-1-5-19", "S-1-5-20", "S-1-5-90-0-1", "S-1-5-96-0-1", "S-1-5-80-1-2-3-4-5", "", null })
+            AppUsers.Of(account).ShouldBe(AppUsers.Machine);
+    }
+
     [Fact]
     public void An_hour_already_stored_carries_on_from_its_rows()
     {

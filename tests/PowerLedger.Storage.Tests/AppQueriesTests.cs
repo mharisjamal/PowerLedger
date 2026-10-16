@@ -14,20 +14,11 @@ public class AppQueriesTests
 {
     private static readonly DateTimeOffset H0 = Fixtures.T0;   // 12:00 UTC on 8 Sep 2026
 
+    /// <summary>One app's row in an hour, added to the hour's rows already there, as the service writes it.</summary>
     private static void App(TestDatabase t, DateTimeOffset hour, string key, string name, double cpu, double gpu = 0, double run = 3600, double front = 0, string? path = null)
     {
-        using var c = t.Db.Open();
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO app_hours (start_ms, app_key, name, path, cpu_wh, gpu_wh, run_s, front_s) VALUES ($s, $k, $n, $p, $c, $g, $r, $f)";
-        cmd.Parameters.AddWithValue("$s", hour.ToUnixTimeMilliseconds());
-        cmd.Parameters.AddWithValue("$k", key);
-        cmd.Parameters.AddWithValue("$n", name);
-        cmd.Parameters.AddWithValue("$p", (object?)path ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$c", cpu);
-        cmd.Parameters.AddWithValue("$g", gpu);
-        cmd.Parameters.AddWithValue("$r", run);
-        cmd.Parameters.AddWithValue("$f", front);
-        cmd.ExecuteNonQuery();
+        var repo = new AppHoursRepository(t.Db);
+        repo.ReplaceHour(hour, [.. repo.ReadHour(hour).Where(row => row.Key != key), new AppHourRow(key, name, path, cpu, gpu, run, front)]);
     }
 
     /// <summary>An hour row as the hourly job folds one: the parts at the pack, the hour on throughout.</summary>
@@ -117,6 +108,22 @@ public class AppQueriesTests
         range.Rest.Wh.ShouldBe(15, 1e-9);
         range.Untraced.Wh.ShouldBe(8, 1e-9);
         (range.Apps.Sum(a => a.Wh) + range.Untraced.Wh).ShouldBe(10 + 2 + 20 + 4, 1e-9);
+    }
+
+    /// <summary>Review item 11: a minute the service writes while the page reads must not show as energy no app was given;
+    /// every read is of one moment of the database.</summary>
+    [Fact]
+    public void A_minute_written_while_the_page_reads_waits_for_the_next_read()
+    {
+        using var t = new TestDatabase();
+        var rows = new AggregateRepository(t.Db);
+        for (var m = 0; m < 10; m++) rows.UpsertMinute(Hour(H0.AddMinutes(m), 0.2, 0, 0.1, 0.1, on: 60));
+        App(t, H0, "a", "A", 2.0);                                              // every minute so far traced
+        using var reader = new SqliteDatabase(t.Path, readOnly: true);
+        var queries = new AppQueries(reader) { AfterAppRows = () => rows.UpsertMinute(Hour(H0.AddMinutes(10), 0.2, 0, 0.1, 0.1, on: 60)) };
+
+        queries.Read(H0, H0.AddHours(1)).Untraced.Wh.ShouldBe(0, 1e-9);
+        new AppQueries(reader).Read(H0, H0.AddHours(1)).Untraced.Wh.ShouldBe(0.2, 1e-9);    // the next read sees it
     }
 
     /// <summary>An hour whose apps were given a little more than its row holds (the hour under way, its apps a tick ahead
@@ -252,6 +259,26 @@ public class AppQueriesTests
         (after.Apps.Single().Wh, after.Screen.Wh, after.From).ShouldBe((6, 2, H0.AddHours(1)));
     }
 
+    /// <summary>Review item 12: in a zone half an hour off UTC, the day's first half hour falls in an hour that began the day
+    /// before. Until the day's first whole hour has rows, that hour under way stands in, so Today is never empty then.</summary>
+    [Fact]
+    public void In_a_day_s_first_half_hour_the_hour_under_way_stands_in()
+    {
+        using var t = new TestDatabase();
+        var rows = new AggregateRepository(t.Db);
+        for (var m = 0; m < 40; m++) rows.UpsertMinute(Hour(H0.AddMinutes(m), 0.1, 0, 0.05, 0.05, on: 60));
+        App(t, H0, "a", "A", 4);
+        var india = TimeSpan.FromHours(5.5);
+        var midnight = H0.AddMinutes(30).ToOffset(india);              // 18:00 local is 12:30 UTC; call it the day's start
+
+        var early = new AppQueries(t.Db).Read(midnight, H0.AddMinutes(40).ToOffset(india));
+        (early.Apps.Single().Wh, early.From).ShouldBe((4, H0));
+        early.Screen.Wh.ShouldBe(40 * 0.05, 1e-9);
+
+        App(t, H0.AddHours(1), "a", "A", 1);                            // the day's first whole hour has begun
+        new AppQueries(t.Db).Read(midnight, H0.AddMinutes(70).ToOffset(india)).Apps.Single().Wh.ShouldBe(1);
+    }
+
     [Fact]
     public void Hours_after_the_range_are_left_out()
     {
@@ -264,6 +291,30 @@ public class AppQueriesTests
 
         range.Apps.Single().Wh.ShouldBe(4);
         range.CountedSince.ShouldBe(H0);
+    }
+
+    /// <summary>Review item 10: a person sees their own apps and the machine's by name; everyone else's, whenever they ran
+    /// them, are one line, Other users, with no name or path of theirs, running as long as the longest of theirs each hour.</summary>
+    [Fact]
+    public void Other_peoples_apps_are_one_line_whenever_they_ran_them()
+    {
+        using var t = new TestDatabase();
+        new AppHoursRepository(t.Db).ReplaceHour(H0,
+        [
+            new AppHourRow(@"c:\mine.exe", "Mine", @"C:\Mine.exe", 3, 0, 3600, 600, User: 7),
+            new AppHourRow(@"c:\users\alice\secret.exe", "Alice's secret", @"C:\Users\alice\secret.exe", 2, 1, 1800, 900, User: 8),
+            new AppHourRow(@"c:\users\bob\b.exe", "Bob's", null, 1, 0, 3000, 0, User: 9),
+            new AppHourRow(AppKeys.Other, "Other apps", null, 0.5, 0, 600, 0, User: 9),
+            new AppHourRow(AppKeys.Windows, "Windows", null, 0.25, 0, 3600, 0),
+        ]);
+
+        var apps = new AppQueries(t.Db, viewer: 7).Read(H0, H0.AddHours(1)).Apps;
+
+        apps.Select(a => a.Key).ShouldBe([AppQueries.OtherUsersKey, @"c:\mine.exe", AppKeys.Windows]);
+        var others = apps[0];
+        (others.Name, others.Path, others.Wh, others.RunSeconds, others.FrontSeconds).ShouldBe(("Other users", null, 4.5, 3000.0, 900.0));
+        apps.ShouldNotContain(a => a.Name.Contains("Alice") || a.Name.Contains("Bob"));
+        new AppQueries(t.Db, viewer: 8).Read(H0, H0.AddHours(1)).Apps.Select(a => a.Name).ShouldContain("Alice's secret");
     }
 
     [Fact]

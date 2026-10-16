@@ -10,7 +10,7 @@ namespace PowerLedger.Sensors;
 /// <param name="Cycles">The processor cycles its threads have used so far.</param>
 /// <param name="Time">The kernel and user time its threads have used so far, in 100 ns units.</param>
 /// <param name="Name">Where its image name is, for <see cref="IProcessSource.ImageName"/> until the next read.</param>
-public readonly record struct ProcessCounts(uint Pid, long CreateTime, uint Session, ulong Cycles, long Time, int Name);
+public readonly record struct ProcessCounts(uint Pid, long CreateTime, uint Session, ulong Cycles, long Time, int Name, uint ParentPid = 0);
 
 /// <summary>Every logical processor's times added up since boot, in 100 ns units.</summary>
 public readonly record struct ProcessorTimes(long Idle, long Kernel, long User, long Dpc, long Interrupt)
@@ -22,8 +22,8 @@ public readonly record struct ProcessorTimes(long Idle, long Kernel, long User, 
     public long Drivers => Dpc + Interrupt;
 }
 
-/// <summary>A process's image path and Store package family; either may be missing.</summary>
-public sealed record ProcessImage(string? Path, string? PackageFamily);
+/// <summary>A process's image path and Store package family, and the SID of the account it runs as; any may be missing.</summary>
+public sealed record ProcessImage(string? Path, string? PackageFamily, string? UserSid = null);
 
 /// <summary>What the Apps page asks Windows about processes (Plan AE), so tests can stand in for it. Single-threaded.</summary>
 public interface IProcessSource : IDisposable
@@ -37,9 +37,6 @@ public interface IProcessSource : IDisposable
 
     /// <summary>The process's image and package, or null when it cannot be opened or the id names another process now.</summary>
     ProcessImage? Image(uint pid, long createTime);
-
-    /// <summary>The session at the screen; null while none is, as while users switch.</summary>
-    uint? ConsoleSession();
 
     /// <summary>What the App calls an image: its description, else its product name, else its file name.</summary>
     string DisplayName(string path);
@@ -57,6 +54,9 @@ internal readonly record struct ProcessLayout(int Cycles, int Create, int User, 
     public static ProcessLayout ThirtyTwoBit { get; } = new(24, 32, 40, 48, 56, 60, 68, 80, Wide: false);
 
     public static ProcessLayout Current => Environment.Is64BitProcess ? SixtyFourBit : ThirtyTwoBit;
+
+    /// <summary>Where the process that started it is (InheritedFromUniqueProcessId), just after its own id.</summary>
+    public int Parent => Pid + (Wide ? 8 : 4);
 
     /// <summary>The least an entry holds, up to its session id.</summary>
     public int Size => Session + 4;
@@ -82,11 +82,12 @@ public sealed unsafe class WindowsProcesses : IProcessSource
     private static readonly ProcessLayout Layout = ProcessLayout.Current;
 
     private readonly ushort _groups = Math.Max((ushort)1, GetActiveProcessorGroupCount());
-    private readonly byte* _processors = (byte*)NativeMemory.Alloc(ProcessorEntry * ProcessorsPerGroup);
+    private byte* _processors = (byte*)NativeMemory.Alloc(ProcessorEntry * ProcessorsPerGroup);
     private char[] _chars = new char[1024];
     private byte* _buffer;
     private int _size;
     private int _used;
+    private bool _disposed;
 
     public string WindowsFolder { get; } = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd('\\').ToLowerInvariant() + "\\";
 
@@ -94,7 +95,7 @@ public sealed unsafe class WindowsProcesses : IProcessSource
     {
         into.Clear();
         processors = default;
-        if (!QueryProcesses() || !QueryProcessors(out processors)) return false;
+        if (_disposed || !QueryProcesses() || !QueryProcessors(out processors)) return false;
         Parse(new ReadOnlySpan<byte>(_buffer, _used), Layout, into);
         return true;
     }
@@ -108,15 +109,13 @@ public sealed unsafe class WindowsProcesses : IProcessSource
         try
         {
             if (!GetProcessTimes(handle, out var created, out _, out _, out _) || created != createTime) return null;
-            return new ProcessImage(ImagePath(handle), PackageFamily(handle));
+            return new ProcessImage(ImagePath(handle), PackageFamily(handle), UserSid(handle));
         }
         finally
         {
             CloseHandle(handle);
         }
     }
-
-    public uint? ConsoleSession() => WTSGetActiveConsoleSessionId() is var session && session != uint.MaxValue ? session : null;
 
     public string DisplayName(string path)
     {
@@ -133,11 +132,16 @@ public sealed unsafe class WindowsProcesses : IProcessSource
         }
     }
 
+    /// <summary>Frees the buffers, once however often it is called (review item 15); a read after it answers nothing.</summary>
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         NativeMemory.Free(_buffer);
         _buffer = null;
+        _used = 0;
         NativeMemory.Free(_processors);
+        _processors = null;
     }
 
     /// <summary>Every entry in <paramref name="buffer"/>, each one's offset as its name; a list that runs past the buffer
@@ -150,10 +154,11 @@ public sealed unsafe class WindowsProcesses : IProcessSource
         {
             var entry = buffer[offset..];
             var pid = layout.Wide ? (uint)BinaryPrimitives.ReadUInt64LittleEndian(entry[layout.Pid..]) : BinaryPrimitives.ReadUInt32LittleEndian(entry[layout.Pid..]);
+            var parent = layout.Wide ? (uint)BinaryPrimitives.ReadUInt64LittleEndian(entry[layout.Parent..]) : BinaryPrimitives.ReadUInt32LittleEndian(entry[layout.Parent..]);
             into.Add(new ProcessCounts(
                 pid, BinaryPrimitives.ReadInt64LittleEndian(entry[layout.Create..]), BinaryPrimitives.ReadUInt32LittleEndian(entry[layout.Session..]),
                 BinaryPrimitives.ReadUInt64LittleEndian(entry[layout.Cycles..]),
-                BinaryPrimitives.ReadInt64LittleEndian(entry[layout.User..]) + BinaryPrimitives.ReadInt64LittleEndian(entry[layout.Kernel..]), offset));
+                BinaryPrimitives.ReadInt64LittleEndian(entry[layout.User..]) + BinaryPrimitives.ReadInt64LittleEndian(entry[layout.Kernel..]), offset, parent));
             var next = BinaryPrimitives.ReadUInt32LittleEndian(entry);
             if (next == 0) return;
             offset += (int)next;
@@ -236,6 +241,26 @@ public sealed unsafe class WindowsProcesses : IProcessSource
         }
     }
 
+    /// <summary>The SID of the account the process runs as, from its token; null when the token will not be opened, as a
+    /// protected process's may not be.</summary>
+    private static string? UserSid(nint handle)
+    {
+        const uint TokenQuery = 0x0008;
+        const int TokenUser = 1;
+        if (!OpenProcessToken(handle, TokenQuery, out var token)) return null;
+        try
+        {
+            var buffer = stackalloc byte[256];
+            if (!GetTokenInformation(token, TokenUser, buffer, 256, out _)) return null;
+            var sid = *(nint*)buffer;                               // TOKEN_USER: the SID's address first
+            return sid == 0 ? null : new System.Security.Principal.SecurityIdentifier(sid).Value;
+        }
+        finally
+        {
+            CloseHandle(token);
+        }
+    }
+
     private static string? PackageFamily(nint handle)
     {
         const int Room = 256;
@@ -300,6 +325,11 @@ public sealed unsafe class WindowsProcesses : IProcessSource
     [DllImport("kernel32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern int GetPackageFamilyName(nint process, ref uint length, char* name);
 
-    [DllImport("kernel32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern uint WTSGetActiveConsoleSessionId();
+    [DllImport("advapi32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(nint process, uint access, out nint token);
+
+    [DllImport("advapi32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(nint token, int informationClass, void* information, int length, out int returned);
 }

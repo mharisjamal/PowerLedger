@@ -16,7 +16,9 @@ public sealed class MigrationTests : IDisposable
         using var c = db.Open();
         Migrator.LatestVersion.ShouldBe(6);
         Migrator.CurrentVersion(c).ShouldBe(6);
-        Columns(c, "app_hours").ShouldBe(new[] { "start_ms", "app_key", "name", "path", "cpu_wh", "gpu_wh", "run_s", "front_s" });
+        // Review item 2: each app's key, name and path once, the hours naming it by number.
+        Columns(c, "apps").ShouldBe(new[] { "id", "key", "name", "path" });
+        Columns(c, "app_hours").ShouldBe(new[] { "start_ms", "user_id", "app_id", "cpu_wh", "gpu_wh", "run_s", "front_s" });
         Columns(c, "samples_raw").ShouldContain("asleep_w");
         Columns(c, "samples_1m").ShouldContain("asleep_wh");
         Columns(c, "samples_1h").ShouldContain("asleep_wh");

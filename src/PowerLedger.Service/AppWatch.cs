@@ -10,29 +10,29 @@ namespace PowerLedger.Service;
 /// the last look, and the ticks' processor and graphics energy over that time, exactly as the integrator booked it into
 /// the minute and hour rows, is split among the apps (<see cref="AppSplit"/>): the parts' resting draw to idle, tick by
 /// tick; drivers to Windows, busy time no running process explains to closed programs, the rest by each process's cycles;
-/// the graphics by each process's time on their engines, as the GPU load counters read it, by the sensors or, where they do
-/// not read them, here. So an hour's apps add up to its hour row's processor and graphics energy, gaps left out the same way.
+/// the graphics by each process's time on their engines, as the sensors read the GPU engine counters, under their watchdog
+/// (review item 1). So an hour's apps add up to its hour row's processor and graphics energy, gaps left out the same way.
 /// A look walks every thread on the machine, about 2 ms of the processor's time at 300 processes, so it is taken at most
 /// every <see cref="LookEvery"/>: every tick at the loop's unwatched pace, and every fifth while someone watches. The ticks in
 /// between are pooled and split by the look that ends them, over the same time; a gap, a write and a stop take a look at
-/// once. Apps are keyed by image path, Store package or one of the special keys (<see cref="AppKeys"/>): Windows' own
-/// processes and the kernel's are one app, another signed in user's are another, and a process is opened for its image
-/// once, when it is new. The hour in memory is written whole with each minute's readings, and an hour an earlier run wrote
-/// carries on from its rows. Never shared, never synced. Single-threaded: the loop's thread.
+/// once. Apps are keyed by image path, Store package or one of the special keys (<see cref="AppKeys"/>), and tagged by the
+/// account that runs them (<see cref="AppUsers"/>), which the App reads to pool other people's: Windows' own processes and
+/// the kernel's are one app, the machine's, and a process is opened for its image and account once, when it is new. The
+/// hour in memory is written whole with each minute's readings, and an hour an earlier run wrote carries on from its rows.
+/// An app's name is read from its image off the loop's thread (<see cref="AppNames"/>), so a slow disk never holds a tick.
+/// Never shared, never synced. Single-threaded: the loop's thread.
 /// </summary>
 /// <param name="lookEvery">How long the ticks pool at most before a look; <see cref="LookEvery"/> when left out, nought for
 /// a look every tick.</param>
-/// <param name="engines">Windows' GPU Engine counters, read with the looks, at most every <see cref="LookEvery"/>, on a PC
-/// whose sensors do not read them already (one whose every card NVIDIA's library reads), so a card's watts go by each
-/// process's time on its engines there too; the processor's split is followed only when they cannot be read.</param>
+/// <param name="names">Where the apps' names come from; read on a thread of their own when left out.</param>
 internal sealed class AppWatch(
-    IProcessSource processes, AppHoursRepository repository, Action<List<uint>>? foreground = null, TimeSpan? lookEvery = null, IEngineCounters? engines = null)
+    IProcessSource processes, AppHoursRepository repository, Action<List<uint>>? foreground = null, TimeSpan? lookEvery = null, AppNames? names = null)
     : IDisposable
 {
     /// <summary>The least time between two looks, the loop's unwatched pace.</summary>
     public static readonly TimeSpan LookEvery = TimeSpan.FromSeconds(5);
 
-    private const int MostNames = 4096;
+    private const string WebView2 = "msedgewebview2.exe";
     private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
 
     /// <summary>The kernel's own processes, which have no image file: with the idle process, which is never an app, they
@@ -45,32 +45,24 @@ internal sealed class AppWatch(
     private readonly Dictionary<uint, Tracked> _tracked = [];
     private readonly Dictionary<DateTimeOffset, AppHour> _hours = [];
     private readonly List<Pool> _pools = [];
-    private readonly Dictionary<string, string> _names = new(StringComparer.Ordinal);
+    private readonly AppNames _names = names ?? new AppNames(processes.DisplayName);
     private readonly List<uint> _front = [];
     private readonly RestingWatts _cpuRest = new();
     private readonly RestingWatts _gpuRest = new();
     private readonly RestingWatts _graphicsRest = new();
     private ProcessorTimes _processors;
     private GraphicsWork? _graphics;
-    private GraphicsWork? _engineWork;
-    private DateTimeOffset? _enginesReadAt;
-    private DateTimeOffset? _tickAt;
     private bool _looked;
     private long _looks;
     private long _ticks;
     private double _pooledSeconds;
-    private uint? _console;
     private DateTimeOffset? _hourNow;
 
     /// <summary>Looks taken, for the tests and the cost check.</summary>
     public long Looks => _looks;
 
-    /// <summary>Takes the first look, which the first tick's work is measured from, and the engine counters' first read.</summary>
-    public void Start()
-    {
-        Look(out _);
-        ReadEngines();
-    }
+    /// <summary>Takes the first look, which the first tick's work is measured from.</summary>
+    public void Start() => Look(out _);
 
     /// <summary>
     /// Books one tick: <paramref name="reading"/>'s processor and graphics energy, integrated with the gap threshold the
@@ -85,7 +77,6 @@ internal sealed class AppWatch(
         var rest = new RestWatts(_cpuRest.Watts, _gpuRest.Watts, _graphicsRest.Watts);
         Learn(reading, sample, seconds);
         _graphics = sample.Graphics;
-        _tickAt = reading.Timestamp;
         _ticks++;
         if (seconds > 0)
         {
@@ -139,7 +130,7 @@ internal sealed class AppWatch(
     private void Settle()
     {
         var looked = Look(out var work);
-        var engineWork = _graphics ?? OwnEngineWork();
+        var engineWork = _graphics;
         if (_pools.Count == 0) return;
         var (card, graphics) = Engines(engineWork);
         foreach (var pool in _pools)
@@ -177,30 +168,6 @@ internal sealed class AppWatch(
         _pooledSeconds = 0;
     }
 
-    /// <summary>The engines' work where the sensors read no load counters: the counters read with the look, but at most
-    /// once in <see cref="LookEvery"/> of the ticks' time, a look sooner, as a write's, keeping the last window.</summary>
-    private GraphicsWork? OwnEngineWork()
-    {
-        if (engines is null) return null;
-        if (_enginesReadAt is { } last && _tickAt is { } now && (now - last).TotalSeconds < _lookEverySeconds * 0.9) return _engineWork;
-        ReadEngines();
-        return _engineWork;
-    }
-
-    private void ReadEngines()
-    {
-        if (engines is null) return;
-        _enginesReadAt = _tickAt;
-        try
-        {
-            _engineWork = engines.Read();
-        }
-        catch (Exception error) when (error is not OutOfMemoryException)
-        {
-            _engineWork = null;                                     // the card's watts follow the processor's split meanwhile
-        }
-    }
-
     /// <summary>The tick's time in front, to the app of the process in front in each session, as the last look knows it.</summary>
     private void Front(AppHour hour, double seconds)
     {
@@ -236,7 +203,6 @@ internal sealed class AppWatch(
         work = default;
         if (!processes.Read(_listed, out var times)) return false;
         _looks++;
-        _console = processes.ConsoleSession() ?? _console;
         _live.Clear();
         ulong cycles = 0;
         long explained = 0;
@@ -275,28 +241,41 @@ internal sealed class AppWatch(
         return measured;
     }
 
-    /// <summary>What app a new process belongs to. The kernel's processes, and any image under the Windows folder, are
-    /// Windows'; a Store app is its package; anything else its image path. A process that cannot be opened goes by the name
-    /// Windows lists it with.</summary>
+    /// <summary>What app a new process belongs to, and who runs it (review item 10: tagged by account, not by session, so
+    /// a person over Remote Desktop has their own apps too). The kernel's processes, and any image under the Windows folder,
+    /// are Windows', which is the machine's; an app's WebView2 processes are the app's (review item 6); a Store app is its
+    /// package; anything else its image path. A process that cannot be opened goes by the name Windows lists it with.</summary>
     private Tracked Identify(ProcessCounts listed)
     {
         var process = new Tracked { Created = listed.CreateTime };
-        if (listed.Pid == 4 || (listed.Session == 0 && KernelProcesses.Contains(processes.ImageName(listed.Name))))
+        var name = processes.ImageName(listed.Name);
+        if (listed.Pid == 4 || (listed.Session == 0 && KernelProcesses.Contains(name)))
         {
             process.Key = AppKeys.Windows;
             return process;
         }
+        // A WebView2 process is its parent's, so its app's: the parent, started before it, is either the app or a WebView2
+        // process already given the app. One whose parent has gone, or whose parent's id now names a later process, stays
+        // WebView2's own.
+        if (name.Equals(WebView2, StringComparison.OrdinalIgnoreCase)
+            && _tracked.TryGetValue(listed.ParentPid, out var parent) && parent.Created <= listed.CreateTime)
+        {
+            (process.Key, process.Path, process.User) = (parent.Key, parent.Path, parent.User);
+            return process;
+        }
         var image = processes.Image(listed.Pid, listed.CreateTime);
+        process.User = AppUsers.Of(image?.UserSid);
         if (image?.Path is { Length: > 0 } path)
         {
-            var lower = path.ToLowerInvariant();
-            if (lower.StartsWith(processes.WindowsFolder, StringComparison.Ordinal))
+            if (AppKeys.IsWindows(path.ToLowerInvariant(), processes.WindowsFolder))
             {
                 process.Key = AppKeys.Windows;
+                process.User = AppUsers.Machine;
                 return process;
             }
             process.Path = path;
-            process.Key = image.PackageFamily is { Length: > 0 } family ? AppKeys.Package(family) : lower;
+            // One key across an app's updates, its version folders left out (review item 5).
+            process.Key = image.PackageFamily is { Length: > 0 } family ? AppKeys.Package(family) : AppKeys.ForPath(path);
             return process;
         }
         if (image?.PackageFamily is { Length: > 0 } package)
@@ -304,22 +283,18 @@ internal sealed class AppWatch(
             process.Key = AppKeys.Package(package);
             return process;
         }
-        var name = processes.ImageName(listed.Name);
         process.Key = name.Length > 0 ? name.ToLowerInvariant() : AppKeys.Other;
         return process;
     }
 
-    /// <summary>The totals a process's figures go into this hour: its app's, or other users' while it runs in a session
-    /// that is neither the services' nor the one at the screen. Kept with the process until the hour or the session at the
-    /// screen changes, so a tick looks nothing up.</summary>
+    /// <summary>The totals a process's figures go into this hour: its app's, as run by its account (the App pools other
+    /// people's when it reads them). Kept with the process until the hour changes, so a tick looks nothing up.</summary>
     private AppTotals TotalsOf(Tracked process, AppHour hour)
     {
-        var other = process.Session != 0 && _console is { } console && process.Session != console;
-        if (process.Totals is null || process.Hour != hour || process.Other != other)
+        if (process.Totals is null || process.Hour != hour)
         {
-            process.Totals = hour.For(other ? AppKeys.OtherUsers : process.Key, other ? null : process.Path);
+            process.Totals = hour.For(process.User, process.Key, process.Path);
             process.Hour = hour;
-            process.Other = other;
         }
         return process.Totals;
     }
@@ -385,18 +360,11 @@ internal sealed class AppWatch(
         return hour;
     }
 
-    /// <summary>An app's name for its row: its image's description where it has an image, a Store app's package name, or
-    /// what it is keyed by. Asked only for the rows written, once an image.</summary>
+    /// <summary>An app's name for its row: its image's description where it has an image, as read off the loop's thread,
+    /// its file name until then; a Store app's package name; or what it is keyed by.</summary>
     private string Name(AppTotals app)
     {
-        if (app.Path is { } path)
-        {
-            if (_names.TryGetValue(path, out var name)) return name;
-            name = processes.DisplayName(path);
-            if (_names.Count >= MostNames) _names.Clear();
-            _names[path] = name;
-            return name;
-        }
+        if (app.Path is { } path) return _names.For(path) ?? Path.GetFileNameWithoutExtension(path);
         if (app.Key.StartsWith(AppKeys.PackagePrefix, StringComparison.Ordinal))
         {
             var family = app.Key[AppKeys.PackagePrefix.Length..];
@@ -422,8 +390,8 @@ internal sealed class AppWatch(
         public long Seen;
         public ulong CycleDelta;
         public long TimeDelta;
+        public int User;
         public AppHour? Hour;
-        public bool Other;
         public AppTotals? Totals;
     }
 

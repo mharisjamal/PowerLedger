@@ -34,6 +34,9 @@ public sealed class EngineCounters : IEngineCounters
     private EngineSnapshot? _previous;
     private bool? _isPublished;
 
+    /// <summary>Whether the registry names a card among the adapters the counters show; null until it was asked.</summary>
+    public bool? HasCard { get; private set; }
+
     /// <summary>The GPU Engine counters and the DirectX registry.</summary>
     public EngineCounters()
         : this(new GpuEngines().Read, DirectXAdapters.Read, static () => GpuEngines.Published)
@@ -105,6 +108,7 @@ public sealed class EngineCounters : IEngineCounters
         }
         _cards = [.. DiscreteGpu.Candidates(adapters).Select(card => card.CounterLuid)];
         _processorGraphics = [.. GpuLoadSource.ProcessorGraphics(adapters).Select(graphics => graphics.CounterLuid)];
+        HasCard = _cards.Length > 0;
         foreach (var instance in snapshot.RunningTime.Keys)
         {
             if (GpuEngines.AdapterOf(instance) is { } luid) _asked.Add(luid);

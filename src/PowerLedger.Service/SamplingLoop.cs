@@ -37,12 +37,10 @@ internal sealed record LoopOptions(TimeSpan SensorTimeout, TimeSpan CalibrationS
 /// opened on the sensor thread at start. Left out, nothing is worked out by app.</param>
 /// <param name="Foreground">Fills a list with the process in front in each session whose App reported it lately (see
 /// <see cref="ServiceSignals.ForegroundProcesses"/>), asked once a tick. Left out, no app is ever in front.</param>
-/// <param name="Engines">Windows' GPU Engine counters for the energy by app, opened at start and read with its looks where
-/// the sensors do not read them. Left out, a card's watts then follow the processor's split.</param>
 internal sealed record LoopEnvironment(
     Func<CancellationToken, ISensorSet> Sensors, Func<InventoryFacts> Inventory, Func<TimeSpan> SystemUptime, Func<bool> SystemShuttingDown, string? DatabaseNotice,
     Func<bool>? Watched = null, Func<BatteryCharge?>? Battery = null, Func<bool>? SignedIn = null, Func<DateTimeOffset, DateTimeOffset?>? Hibernated = null,
-    Func<IProcessSource>? Processes = null, Action<List<uint>>? Foreground = null, Func<IEngineCounters>? Engines = null);
+    Func<IProcessSource>? Processes = null, Action<List<uint>>? Foreground = null);
 
 /// <summary>
 /// The service's heart (spec §3, §6, §7). Once a sample interval it reads the sensors, runs the model, feeds the
@@ -118,6 +116,7 @@ internal sealed class SamplingLoop : BackgroundService
     private int _failures;
     private AppWatch? _apps;
     private int _appFailures;
+    private int _appWriteFailures;
     private DateTimeOffset? _lastWake;
 
     public SamplingLoop(
@@ -293,25 +292,16 @@ internal sealed class SamplingLoop : BackgroundService
         StartApps();
     }
 
-    /// <summary>Opens the processes and the GPU engine counters for the energy by app (Plan AE) and takes the first look.
-    /// Should Windows refuse the processes, the service runs on without it; should it refuse the counters, without them.</summary>
+    /// <summary>Opens the processes for the energy by app (Plan AE) and takes the first look. Should Windows refuse, the
+    /// service runs on without it.</summary>
     private void StartApps()
     {
         if (_environment.Processes is not { } open) return;
-        IEngineCounters? engines = null;
-        try
-        {
-            engines = _environment.Engines?.Invoke();
-        }
-        catch (Exception error)
-        {
-            _log.LogWarning(error, "The GPU engine counters cannot be read for the energy by app this run");
-        }
         IProcessSource? processes = null;
         try
         {
             processes = open();
-            var apps = new AppWatch(processes, new AppHoursRepository(_database), _environment.Foreground, engines: engines);
+            var apps = new AppWatch(processes, new AppHoursRepository(_database), _environment.Foreground);
             apps.Start();
             _apps = apps;
         }
@@ -324,15 +314,16 @@ internal sealed class SamplingLoop : BackgroundService
 
     /// <summary>
     /// Books the tick's processor and graphics energy to the apps, with the gap threshold the rollups fold its minute with: a
-    /// tick the machine woke within is a gap whatever its length (<see cref="Wakes"/>), so an hour's apps add up to its hour
-    /// row. A failure here costs the apps that tick and never the reading, which is buffered already.
+    /// tick the machine woke within is a gap whatever its length (<see cref="Wakes"/>), the wake being the start of a resume
+    /// session as the rollups take it (review item 13), so an hour's apps add up to its hour row. A failure here costs the
+    /// apps that tick and never the reading, which is buffered already.
     /// </summary>
-    private void ObserveApps(Reading reading, Sample sample, bool spansSleep)
+    private void ObserveApps(Reading reading, Sample sample)
     {
         if (_apps is null) return;
         try
         {
-            var asleep = spansSleep || (_lastWake is { } woke && Wakes.Within(woke, reading));
+            var asleep = _lastWake is { } woke && Wakes.Within(woke, reading);
             _apps.Observe(reading, sample, asleep ? 0 : GapThreshold);
             _appFailures = 0;
         }
@@ -344,17 +335,21 @@ internal sealed class SamplingLoop : BackgroundService
     }
 
     /// <summary>Writes the hours of energy by app with the readings they were worked out from; what fails is written with
-    /// the next minute's.</summary>
+    /// the next minute's. A write failing minute after minute is logged at the 1st, 2nd, 4th, 8th failure and so on, as
+    /// a failing tick is (review item 14).</summary>
     private void WriteApps()
     {
         if (_apps is null) return;
         try
         {
             _apps.Write();
+            _appWriteFailures = 0;
         }
         catch (Exception error)
         {
-            _log.LogWarning(error, "Writing the energy by app failed");
+            _appWriteFailures++;
+            if ((_appWriteFailures & (_appWriteFailures - 1)) == 0)
+                _log.LogWarning(error, "Writing the energy by app failed ({Failures} in a row)", _appWriteFailures);
         }
     }
 
@@ -406,7 +401,7 @@ internal sealed class SamplingLoop : BackgroundService
             // Nor is a tick with the lid shut, whose panel draws nothing.
             if (!spansSleep && !result.Sample.PanelInactive) _calibration.Learner.Observe(result.Sample, parts.Cpu, parts.Gpu, parts.Display + monitorWatts.FromPc);
             _buffer.Add(reading);
-            ObserveApps(reading, result.Sample, spansSleep);
+            ObserveApps(reading, result.Sample);
             // What the time awake since a wake drew from the battery, until the battery is read again to learn the sleep.
             _sleep.Awake(now, reading.OnBattery, spansSleep ? 0 : EnergyIntegrator.Integrate(reading, GapThreshold).BatteryWh);
             var frame = Frames.From(reading, result.Sample);
@@ -586,8 +581,7 @@ internal sealed class SamplingLoop : BackgroundService
         if (_suspended) _sleep.Resumed(now);                 // first, as close to the wake as can be
         _worker.RefreshDisplay();
         _rebuildAt = now + RebuildAfterResume;
-        _sessions.Resume(now);
-        _lastWake = now;                                     // the session's start, which the rollups take the wake from
+        if (_sessions.Resume(now)) _lastWake = now;          // the session's start, which the rollups take the wake from
         _tickClock.MarkResumed();
         _suspended = false;
         _log.LogInformation("Resumed");

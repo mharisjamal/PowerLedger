@@ -43,20 +43,23 @@ public sealed class MachineSensors : IDisposable
     /// up. Leave out where there are no settings, which reads none.</param>
     /// <param name="note">Told the few lines worth a log: the energy meter's rails where they are not Intel's or AMD's usual
     /// ones, and the platform rail's verdict against the battery whenever it changes.</param>
+    /// <param name="engineWork">Whether each process's time on the graphics engines is wanted (the service's Apps page),
+    /// which reads the GPU Engine counters where the load counters do not (<see cref="EngineCountersSource"/>).</param>
     public static MachineSensors Create(
         Func<bool> displayOn, Func<bool> sessionLocked,
         Func<double?>? userIdleSeconds = null, ValidatorOptions? validatorOptions = null,
         Action<IReadOnlyList<MonitorFacts>>? monitorsDetected = null,
         Func<bool>? readPowerSupply = null,
         Func<NutTarget?>? nut = null,
-        Action<string>? note = null)
+        Action<string>? note = null,
+        bool engineWork = false)
     {
         var display = new DisplaySource(displayOn, monitorsDetected);
         var railCheck = PlatformRailCheck.Machine;
         List<ISensorSource> sources =
         [
             new EnergyMeterSource(railCheck, note),
-            .. NvidiaAndTheRest(),
+            .. NvidiaAndTheRest(engineWork),
             new BatterySource(),
             new UpsSource(),
             new NutSource(nut ?? (static () => null)),     // after the USB UPS, which it never overrides
@@ -71,13 +74,14 @@ public sealed class MachineSensors : IDisposable
     }
 
     /// <summary>The graphics sources for this machine, NVIDIA's built first, since what it reads decides what else is wanted.</summary>
-    private static IReadOnlyList<ISensorSource> NvidiaAndTheRest()
+    private static IReadOnlyList<ISensorSource> NvidiaAndTheRest(bool engineWork)
     {
         var nvidia = new NvidiaSource();
         return Graphics(
             nvidia, static () => new AmdSource(), static () => new IntelCardSource(), static () => new GpuLoadSource(),
             otherCards: static () => DiscreteGpu.ReadVideoControllers() is not { } controllers || DiscreteGpu.HasCardBesideNvidia(controllers),
-            nvidiaLoadsEveryCard: () => nvidia.LoadsEveryCard);
+            nvidiaLoadsEveryCard: () => nvidia.LoadsEveryCard,
+            engines: engineWork ? static () => new EngineCountersSource() : null);
     }
 
     /// <summary>
@@ -95,9 +99,11 @@ public sealed class MachineSensors : IDisposable
     /// </summary>
     /// <param name="otherCards">Whether the machine has a card NVML cannot read; no when left out.</param>
     /// <param name="nvidiaLoadsEveryCard">Whether NVML gives every card's utilisation; yes when left out.</param>
+    /// <param name="engines">Where the load counters are not built, the Apps page's own read of the engine counters, which
+    /// lists no adapter; none when left out.</param>
     internal static IReadOnlyList<ISensorSource> Graphics(
         ISensorSource nvidia, Func<ISensorSource> amd, Func<ISensorSource> arc, Func<ISensorSource> load,
-        Func<bool>? otherCards = null, Func<bool>? nvidiaLoadsEveryCard = null)
+        Func<bool>? otherCards = null, Func<bool>? nvidiaLoadsEveryCard = null, Func<ISensorSource>? engines = null)
     {
         List<ISensorSource> built = [nvidia];
         try
@@ -111,6 +117,10 @@ public sealed class MachineSensors : IDisposable
             else if (nvidiaLoadsEveryCard?.Invoke() == false)
             {
                 built.Add(load());
+            }
+            else if (engines is not null)
+            {
+                built.Add(engines());
             }
             return built;
         }

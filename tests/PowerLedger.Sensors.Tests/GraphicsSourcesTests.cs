@@ -26,6 +26,22 @@ public class GraphicsSourcesTests
         }
     }
 
+    /// <summary>Review item 1: where NVIDIA's library reads every card, the Apps page's own read of the engine counters is
+    /// the one other graphics source, in the set and so under its watchdog; where the load counters are built, they serve.</summary>
+    [Fact]
+    public void Where_nvidia_reads_every_card_the_apps_engine_counters_are_the_one_other_source()
+    {
+        var nvidia = new FakeSource("nvidia-gpu", _ => { });
+        var engines = new FakeSource("gpu-engines", _ => { });
+        static ISensorSource Unwanted() => throw new InvalidOperationException("not wanted here");
+
+        MachineSensors.Graphics(nvidia, Unwanted, Unwanted, Unwanted, otherCards: () => false, nvidiaLoadsEveryCard: () => true, engines: () => engines)
+            .ShouldBe([nvidia, engines]);
+        MachineSensors.Graphics(nvidia, Unwanted, Unwanted, () => new FakeSource("gpu-load", _ => { }), otherCards: () => false,
+                nvidiaLoadsEveryCard: () => false, engines: Unwanted)
+            .Select(source => source.Name).ShouldBe(["nvidia-gpu", "gpu-load"]);
+    }
+
     [Fact]
     public void Without_nvidia_the_amd_library_level_zero_and_the_load_counters_all_stand_in()
     {

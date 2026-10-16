@@ -29,78 +29,12 @@ public sealed class AppWatchTests : IDisposable
     private static Sample Sample(DateTimeOffset at, double load = 0.5, GraphicsWork? graphics = null, double? igpuW = null, double delta = 1)
         => Samples.At(at, delta, cpuLoad: load) with { Graphics = graphics, IGpuW = igpuW };
 
-    /// <summary>A watch that looks every tick, so each tick is split by its own work.</summary>
-    private AppWatch Watch(TimeSpan? lookEvery = null, IEngineCounters? engines = null) => new(_processes, new AppHoursRepository(_database.Db), front =>
+    /// <summary>A watch that looks every tick, so each tick is split by its own work, its names read as asked.</summary>
+    private AppWatch Watch(TimeSpan? lookEvery = null) => new(_processes, new AppHoursRepository(_database.Db), front =>
     {
         front.Clear();
         front.AddRange(_front);
-    }, lookEvery ?? TimeSpan.Zero, engines);
-
-    /// <summary>Engine counters that give the next window from a script, and count their reads.</summary>
-    private sealed class FakeEngines(Func<int, GraphicsWork?> script) : IEngineCounters
-    {
-        public int Reads { get; private set; }
-
-        public GraphicsWork? Read() => script(++Reads);
-    }
-
-    private static GraphicsWork OnCard(uint pid, long time) => new(new Dictionary<uint, GraphicsTime> { [pid] = new(time, time, 0, 0) });
-
-    [Fact]
-    public void Where_the_sensors_read_no_engine_counters_the_look_reads_them_and_the_cards_watts_follow_its_work()
-    {
-        AddMachine();
-        var engines = new FakeEngines(read => read == 1 ? null : OnCard(300, 100));   // the calculator renders on the card
-        using var watch = Watch(engines: engines);
-        watch.Start();
-        engines.Reads.ShouldBe(1);                                  // where the window starts
-        Tick(watch, Nine.AddSeconds(1), cpuW: 0, gpuW: 3600);       // the sample carries no engine work
-        watch.Write();
-        engines.Reads.ShouldBe(2);
-        Stored(Nine)[Calculator].GpuWh.ShouldBe(1, 1e-12);
-    }
-
-    [Fact]
-    public void Engine_work_the_sensors_already_read_is_used_and_the_counters_are_not_read_again()
-    {
-        AddMachine();
-        var engines = new FakeEngines(_ => OnCard(300, 100));
-        using var watch = Watch(engines: engines);
-        watch.Start();
-        Tick(watch, Nine.AddSeconds(1), cpuW: 0, gpuW: 3600, graphics: OnCard(200, 100));
-        watch.Write();
-        engines.Reads.ShouldBe(1);                                  // the start's alone
-        Stored(Nine)[Chrome].GpuWh.ShouldBe(1, 1e-12);
-    }
-
-    [Fact]
-    public void Counters_that_cannot_be_read_leave_the_cards_watts_to_follow_the_processor()
-    {
-        AddMachine();
-        var engines = new FakeEngines(read => read == 2 ? throw new InvalidOperationException("gone") : null);
-        using var watch = Watch(engines: engines);
-        watch.Start();
-        Tick(watch, Nine.AddSeconds(1), cpuW: 0, gpuW: 3600);
-        Tick(watch, Nine.AddSeconds(2), cpuW: 0, gpuW: 3600);
-        watch.Write();
-        var rows = Stored(Nine);
-        rows[Chrome].GpuWh.ShouldBe(1.2, 1e-12);
-        rows[Calculator].GpuWh.ShouldBe(0.4, 1e-12);
-    }
-
-    [Fact]
-    public void At_a_one_second_pace_the_counters_are_read_with_the_look_at_most_every_five_seconds()
-    {
-        AddMachine();
-        var engines = new FakeEngines(_ => OnCard(300, 100));
-        using var watch = Watch(AppWatch.LookEvery, engines);
-        watch.Start();
-        for (var s = 1; s <= 12; s++) Tick(watch, Nine.AddSeconds(s), cpuW: 0, gpuW: 3600);
-        engines.Reads.ShouldBe(3);                                  // the start's, then with the looks at 5 and 10 s
-        watch.Write();                                              // a write looks at once, but the counters wait
-        engines.Reads.ShouldBe(3);
-        Stored(Nine)[Calculator].GpuWh.ShouldBe(12, 1e-12);
-    }
+    }, lookEvery ?? TimeSpan.Zero, AppNames.Inline(_processes.DisplayName));
 
     private void Tick(AppWatch watch, DateTimeOffset at, double cpuW = 3600, double gpuW = 0, GraphicsWork? graphics = null, double? igpuW = null,
         double load = 0.5, double gapSeconds = 60)
@@ -109,21 +43,25 @@ public sealed class AppWatchTests : IDisposable
     private Dictionary<string, AppHourRow> Stored(DateTimeOffset hour)
         => new AppHoursRepository(_database.Db).ReadHour(hour).ToDictionary(row => row.Key);
 
-    /// <summary>Windows' own (the kernel, a service under the Windows folder, the registry), two apps of the user at the
-    /// screen (one a Store app), another user's app and a service of PowerLedger's own: 1000 cycles a read in all.</summary>
+    private const string Me = "S-1-5-21-1-2-3-1001";
+    private const string Someone = "S-1-5-21-1-2-3-1002";
+    private const string Notepad = @"c:\program files\notepad++\notepad++.exe";
+
+    /// <summary>Windows' own (the kernel, a service under the Windows folder, the registry), two of my apps (one a Store
+    /// app), someone else's app and a service of PowerLedger's own, run by SYSTEM: 1000 cycles a read in all.</summary>
     private void AddMachine()
     {
         _processes.Add(new FakeProcesses.Fake(4, "System", session: 0), 50, 50);
-        _processes.Add(new FakeProcesses.Fake(100, "svchost.exe", session: 0, path: @"C:\WINDOWS\System32\svchost.exe"), 50, 50);
+        _processes.Add(new FakeProcesses.Fake(100, "svchost.exe", session: 0, path: @"C:\WINDOWS\System32\svchost.exe", sid: "S-1-5-18"), 50, 50);
         _processes.Add(new FakeProcesses.Fake(120, "Registry", session: 0));
-        _processes.Add(new FakeProcesses.Fake(200, "chrome.exe", session: 1, path: ChromePath), 600, 600);
-        _processes.Add(new FakeProcesses.Fake(300, "CalculatorApp.exe", session: 1, path: CalculatorPath, package: CalculatorFamily), 200, 200);
-        _processes.Add(new FakeProcesses.Fake(400, "notepad++.exe", session: 2, path: @"C:\Program Files\Notepad++\notepad++.exe"), 100, 100);
-        _processes.Add(new FakeProcesses.Fake(500, "PowerLedger.Service.exe", session: 0, path: @"C:\Program Files\PowerLedger\Service\PowerLedger.Service.exe"));
+        _processes.Add(new FakeProcesses.Fake(200, "chrome.exe", session: 1, path: ChromePath, sid: Me), 600, 600);
+        _processes.Add(new FakeProcesses.Fake(300, "CalculatorApp.exe", session: 1, path: CalculatorPath, package: CalculatorFamily, sid: Me), 200, 200);
+        _processes.Add(new FakeProcesses.Fake(400, "notepad++.exe", session: 2, path: @"C:\Program Files\Notepad++\notepad++.exe", sid: Someone), 100, 100);
+        _processes.Add(new FakeProcesses.Fake(500, "PowerLedger.Service.exe", session: 0, path: @"C:\Program Files\PowerLedger\Service\PowerLedger.Service.exe", sid: "S-1-5-18"));
     }
 
     [Fact]
-    public void Each_app_takes_its_cycles_share_of_the_processor_and_windows_and_other_users_are_one_row_each()
+    public void Each_app_takes_its_cycles_share_of_the_processor_tagged_with_who_ran_it_and_windows_is_one_row()
     {
         AddMachine();
         using var watch = Watch();
@@ -132,13 +70,15 @@ public sealed class AppWatchTests : IDisposable
         watch.Write();
 
         var rows = Stored(Nine);
-        rows.Keys.ShouldBe([Chrome, Calculator, AppKeys.Windows, AppKeys.OtherUsers], ignoreOrder: true);   // PowerLedger used nothing
+        rows.Keys.ShouldBe([Chrome, Calculator, AppKeys.Windows, Notepad], ignoreOrder: true);   // PowerLedger used nothing
+        (rows[Chrome].User, rows[Calculator].User, rows[Notepad].User, rows[AppKeys.Windows].User)
+            .ShouldBe((AppUsers.Of(Me), AppUsers.Of(Me), AppUsers.Of(Someone), AppUsers.Machine));   // review items 8 and 10
         rows[Chrome].CpuWh.ShouldBe(0.6, 1e-12);
         (rows[Chrome].Name, rows[Chrome].Path, rows[Chrome].RunSeconds, rows[Chrome].FrontSeconds).ShouldBe(("Name of chrome", ChromePath, 1.0, 0.0));
         rows[Calculator].CpuWh.ShouldBe(0.2, 1e-12);
         (rows[Calculator].Name, rows[Calculator].Path).ShouldBe(("Name of CalculatorApp", CalculatorPath));
         rows[AppKeys.Windows].CpuWh.ShouldBe(0.1, 1e-12);
-        rows[AppKeys.OtherUsers].CpuWh.ShouldBe(0.1, 1e-12);
+        rows[Notepad].CpuWh.ShouldBe(0.1, 1e-12);
         rows.Values.Sum(row => row.CpuWh).ShouldBe(1, 1e-12);
     }
 
@@ -230,29 +170,15 @@ public sealed class AppWatchTests : IDisposable
         _processes.Add(new FakeProcesses.Fake(201, "chrome.exe", path: ChromePath), 0, 0);   // a second chrome process
         using var watch = Watch();
         watch.Start();
-        _front.AddRange([200, 400]);                                // chrome here, notepad++ in the other session
+        _front.AddRange([200, 400]);                                // my chrome, and someone's notepad++ in their session
         Tick(watch, Nine.AddSeconds(1));
         _front.Clear();
         Tick(watch, Nine.AddSeconds(2));
         watch.Write();
         var rows = Stored(Nine);
         (rows[Chrome].RunSeconds, rows[Chrome].FrontSeconds).ShouldBe((2.0, 1.0));
-        (rows[AppKeys.OtherUsers].RunSeconds, rows[AppKeys.OtherUsers].FrontSeconds).ShouldBe((2.0, 1.0));
+        (rows[Notepad].RunSeconds, rows[Notepad].FrontSeconds).ShouldBe((2.0, 1.0));
         rows[AppKeys.Windows].RunSeconds.ShouldBe(2);
-    }
-
-    [Fact]
-    public void The_console_changing_hands_makes_another_users_apps_theirs()
-    {
-        AddMachine();
-        using var watch = Watch();
-        watch.Start();
-        _processes.Console = 2;                                     // the other user is at the screen now
-        Tick(watch, Nine.AddSeconds(1));
-        watch.Write();
-        var rows = Stored(Nine);
-        rows[@"c:\program files\notepad++\notepad++.exe"].CpuWh.ShouldBe(0.1, 1e-12);
-        rows[AppKeys.OtherUsers].CpuWh.ShouldBe(0.8, 1e-12);        // chrome and the calculator, in session 1
     }
 
     [Fact]
@@ -346,6 +272,43 @@ public sealed class AppWatchTests : IDisposable
         rows.Keys.ShouldBe([@"d:\games\game.exe"]);
         rows[@"d:\games\game.exe"].CpuWh.ShouldBe(6, 1e-12);       // all six ticks, split by the work of their own time
         rows[@"d:\games\game.exe"].RunSeconds.ShouldBe(6);
+    }
+
+    /// <summary>Review item 5: two versions of one app running side by side, as while it updates, are one line; Windows'
+    /// own Defender, which lives outside the Windows folder, is Windows'.</summary>
+    [Fact]
+    public void An_app_is_one_line_across_its_versions_and_defender_is_windows()
+    {
+        _processes.Add(new FakeProcesses.Fake(200, "Discord.exe", path: @"C:\Users\Ann\AppData\Local\Discord\app-1.0.9001\Discord.exe", sid: Me), 300, 300);
+        _processes.Add(new FakeProcesses.Fake(201, "Discord.exe", path: @"C:\Users\Ann\AppData\Local\Discord\app-1.0.9002\Discord.exe", sid: Me), 300, 300);
+        _processes.Add(new FakeProcesses.Fake(300, "MsMpEng.exe", session: 0, path: @"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.24090.11-0\MsMpEng.exe", sid: "S-1-5-18"), 400, 400);
+        using var watch = Watch();
+        watch.Start();
+        Tick(watch, Nine.AddSeconds(1));
+        watch.Write();
+        var rows = Stored(Nine);
+        rows.Keys.ShouldBe([@"c:\users\ann\appdata\local\discord\discord.exe", AppKeys.Windows], ignoreOrder: true);
+        rows[@"c:\users\ann\appdata\local\discord\discord.exe"].CpuWh.ShouldBe(0.6, 1e-12);
+    }
+
+    /// <summary>Review item 6: an app's WebView2 processes are the app's, through each one's parent up to the app that
+    /// started them; a WebView2 whose app has gone, or whose parent's id names a later process, stays WebView2.</summary>
+    [Fact]
+    public void An_apps_webview2_processes_are_the_apps()
+    {
+        const string WebView = @"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\130.0.2849.80\msedgewebview2.exe";
+        _processes.Add(new FakeProcesses.Fake(700, "ms-teams.exe", path: @"C:\Program Files\WindowsApps\MSTeams_24.1.0.0_x64__8wekyb3d8bbwe\ms-teams.exe",
+            package: "MSTeams_8wekyb3d8bbwe", sid: Me, created: 10), 100, 100);
+        _processes.Add(new FakeProcesses.Fake(701, "msedgewebview2.exe", path: WebView, sid: Me, created: 11, parent: 700), 200, 200);
+        _processes.Add(new FakeProcesses.Fake(702, "msedgewebview2.exe", path: WebView, sid: Me, created: 12, parent: 701), 300, 300);
+        _processes.Add(new FakeProcesses.Fake(800, "msedgewebview2.exe", path: WebView, sid: Me, created: 5, parent: 700), 400, 400);   // older than 700
+        using var watch = Watch();
+        watch.Start();
+        Tick(watch, Nine.AddSeconds(1));
+        watch.Write();
+        var rows = Stored(Nine);
+        rows["pkg:MSTeams_8wekyb3d8bbwe"].CpuWh.ShouldBe(0.6, 1e-12);
+        rows[@"c:\program files (x86)\microsoft\edgewebview\application\msedgewebview2.exe"].CpuWh.ShouldBe(0.4, 1e-12);
     }
 
     [Fact]

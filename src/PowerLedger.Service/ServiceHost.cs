@@ -165,7 +165,8 @@ internal static class ServiceHost
                 monitorsDetected: found => monitors.Detected(found, retired),
                 readPowerSupply: PowerSupplySwitch(board, retired),
                 note: message => provider.GetRequiredService<ILogger<MachineSensorSet>>().LogInformation("{Note}", message),
-                nut: new NutSwitch(board, nutSecret.Password, retired).Current)),
+                nut: new NutSwitch(board, nutSecret.Password, retired).Current,
+                engineWork: true)),
             Inventory: HardwareInventory.Detect,
             SystemUptime: () => TimeSpan.FromMilliseconds(Environment.TickCount64),
             SystemShuttingDown: () => shutdown.SystemShuttingDown,
@@ -175,7 +176,6 @@ internal static class ServiceHost
             SignedIn: SleepKinds.SomeoneSignedIn,
             Hibernated: SleepKinds.Hibernated,
             Processes: static () => new WindowsProcesses(),
-            Foreground: signals.ForegroundProcesses,
-            Engines: static () => new EngineCounters());
+            Foreground: signals.ForegroundProcesses);
     }
 }

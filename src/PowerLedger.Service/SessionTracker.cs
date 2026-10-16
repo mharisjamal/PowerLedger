@@ -35,8 +35,16 @@ internal sealed class SessionTracker(SessionRepository sessions)
         Current = null;
     }
 
-    /// <summary>Opens the session a resume starts. A no-op when one is already open, as when a resume arrives without its suspend.</summary>
-    public void Resume(DateTimeOffset now) => Current ??= sessions.Open(SessionReason.Resume, now);
+    /// <summary>Opens the session a resume starts. A no-op when one is already open, as when a resume arrives without its
+    /// suspend.</summary>
+    /// <returns>True when it opened one: only then is <paramref name="now"/> a wake, for the rollups (<see cref="Wakes"/>)
+    /// and for the energy by app alike (review item 13).</returns>
+    public bool Resume(DateTimeOffset now)
+    {
+        if (Current is not null) return false;
+        Current = sessions.Open(SessionReason.Resume, now);
+        return true;
+    }
 
     /// <summary>A crashed session ends at its last tick, which cannot fall before the session began or after now.</summary>
     private static DateTimeOffset Clamp(DateTimeOffset? lastTick, DateTimeOffset start, DateTimeOffset now)
