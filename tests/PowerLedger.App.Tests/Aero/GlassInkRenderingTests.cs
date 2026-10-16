@@ -172,6 +172,34 @@ public class GlassInkRenderingTests(ITestOutputHelper output)
             }
         });
 
+    /// <summary>A mid grey behind (too dark for the dark ink, too bright for the look's 60 % step): the white ink is laid
+    /// held, every step as dense as it must be, and the quietest line reads at 3:1.</summary>
+    [Fact]
+    public void Over_a_mid_grey_the_white_ink_is_held()
+        => UiHarness.OnUi(() =>
+        {
+            var words = Block("Held");
+            words.Sub.SetResourceReference(TextBlock.ForegroundProperty, "A.B.Text3");
+            var scene = Show((_, _) => (112, 112, 112), words.Block);
+            using var motion = AeroMotion.Force(true);
+            try
+            {
+                var tone = Contrast.Luminance(MidnightHost.AllOf<LiquidGlassBackdrop>(scene.Window).Single().Tone!.Value);
+                output.WriteLine($"the glass's tone: luminance {tone:0.000}");
+                tone.ShouldBeInRange(GlassInk.HeldFrom, GlassInk.ToLight);
+                scene.Pane.Ink.Laid.ShouldBe(false, "the white ink laid, held");
+                ((SolidColorBrush)words.Sub.Foreground).Color.ShouldBe(GlassInk.Family(dark: false, strict: false)["A.C.Text3"]);
+                var (title, sub, icon, _) = Measure(scene, "grey", words)[0];
+                title.ShouldBeGreaterThanOrEqualTo(4);
+                sub.ShouldBeGreaterThanOrEqualTo(3, "the quietest step");
+                icon.ShouldBeGreaterThanOrEqualTo(3);
+            }
+            finally
+            {
+                Close(scene);
+            }
+        });
+
     /// <summary>A pane over the edge of a white window, half over a black desktop: the pane takes the dark ink of its mean,
     /// and the words over the black side take the look's white again, so both sides read.</summary>
     [Fact]
@@ -288,11 +316,13 @@ public class GlassInkRenderingTests(ITestOutputHelper output)
                 }, TimeSpan.FromSeconds(2), "the pane back on the look's own ink");
                 seen.ShouldContain(c => c != dark && c != Colors.White, "eased, not switched");
                 words.Title.Foreground.ShouldBeSameAs(scene.Window.FindResource("A.B.Text"));
-                // The same grey from the white side: the white ink holds too.
+                // The same grey from the white side: the white ink holds too, held (its quieter steps denser: the look's
+                // own 60 % step reads under 3:1 there).
                 scene.Source.Image = FakeGlassSource.Picture(W, H, (_, _) => (band, band, band));
                 scene.Source.Raise();
                 UiHarness.Pump(TimeSpan.FromMilliseconds(400));
-                scene.Pane.Ink.Laid.ShouldBeNull("held in the band");
+                scene.Pane.Ink.Laid.ShouldBe(false, "white held in the band");
+                ((SolidColorBrush)words.Title.Foreground).Color.ShouldBe(Colors.White);
             }
             finally
             {

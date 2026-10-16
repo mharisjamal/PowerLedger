@@ -65,6 +65,8 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
 
     public Rect ScreenBounds { get; private set; }
 
+    public event Action? Repainted;
+
     public event Action? Changed;
 
     /// <summary>The CPU path's share of the capture, or null (the GPU path, the wallpaper, disposed), for the tests.</summary>
@@ -269,6 +271,7 @@ internal sealed class WindowGlassSource : ILiquidGlassSource, IDisposable
         Image = _bitmap;
         ScreenBounds = bounds;
         if (changed) Changed?.Invoke();
+        else Repainted?.Invoke();
     }
 
     private void ShowWallpaper()

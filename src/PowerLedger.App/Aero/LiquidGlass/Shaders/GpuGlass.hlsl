@@ -12,7 +12,7 @@
 //            done here, so one map serves a piece at any size.
 //   Compare  whether any texel of a rectangle differs between two textures: a frame whose change is only our own window
 //            repainting (left out of capture, so the pixels are the same) is dropped without drawing.
-//   Tone     the mean light each piece shows (its moves too), in 8 by 8 cells, for the ink its text takes.
+//   Tone     the light each piece shows (its moves too), in cells 8 pixels a side, for the ink its text takes.
 // Compiled by scripts/liquid-glass/compile-shaders.ps1 to GpuGlass.<entry>.cso (vs_4_0, ps_4_0, cs_5_0).
 
 Texture2D<float4> Desktop : register(t0);   // Bright: the desktop (8 bit sRGB, or scRGB half floats on an HDR monitor)
@@ -165,29 +165,29 @@ cbuffer Tone : register(b2)
     int2 ToneSize;         // the box's width and height (what the moves mirror into)
     int2 ToneOrigin;       // the region read, in the box's pixels: its top left
     int2 ToneExtent;       // and its width and height
-    int ToneSlot;          // which piece's 64 cells of Tones to write (a kilobyte each)
+    int2 ToneCells;        // the cells across and down the region
+    int ToneFirst;         // the piece's first cell in Tones (a word a cell)
     float ToneBrightness;  // brightness(k), as Bright applies it
     float ToneSdrWhite;    // as SdrWhite
-    float TonePad;
+    float3 TonePad;
 };
 
-groupshared float3 ToneSums[256];
-
-// Tone (Plan AD): the mean light of what a piece's glass shows in 8 by 8 cells, for the ink its text takes
-// (BackdropTone, GlassInk). One group a piece, 32 by 32 pixels sampled across its region (each thread a 2 by 2 block of
-// them), each read where the piece's move map takes it, mirrored into the box, as Down reads it (the blur left out),
-// brightened as Bright does, in linear light; each cell (2 by 2 threads, 16 samples) writes its mean's red, green and
-// blue, then a 1 that says it was written.
-[numthreads(16, 16, 1)]
-void Tone(uint3 t : SV_GroupThreadID, uint i : SV_GroupIndex)
+// Tone (Plan AD): the light of what a piece's glass shows, in cells about 8 pixels a side, for the ink its text takes
+// (BackdropTone, GlassInk). A thread a cell, 2 by 2 samples across it, each read where the piece's move map takes it,
+// mirrored into the box, as Down reads it (the blur left out), brightened as Bright does; their mean in linear light,
+// written as an opaque 8 bit sRGB colour in one word (blue lowest, then green, red, and 255: a clear word is unwritten).
+[numthreads(8, 8, 1)]
+void Tone(uint3 id : SV_DispatchThreadID)
 {
+    if (any(int2(id.xy) >= ToneCells)) return;
     uint w, h;
     Desktop.GetDimensions(w, h);
+    float2 cell = float2(ToneExtent) / float2(ToneCells);
     float3 sum = 0;
     for (uint k = 0; k < 4; k++)
     {
-        float2 cell = float2(t.xy * 2 + uint2(k & 1, k >> 1)) + 0.5;
-        int2 p = ToneOrigin + int2(cell * float2(ToneExtent) / 32);
+        float2 at = (float2(id.xy) + (float2(k & 1, k >> 1) + 0.5) / 2) * cell;
+        int2 p = min(ToneOrigin + int2(at), ToneOrigin + ToneExtent - 1);
         float2 m = Moves.Load(int3(p, 0));
         int2 s = int2(MirrorPoint(p.x + 0.5 + m.x, ToneSize.x), MirrorPoint(p.y + 0.5 + m.y, ToneSize.y));
         int2 q = clamp(ToneBox + s, int2(0, 0), int2(w, h) - 1);
@@ -195,13 +195,6 @@ void Tone(uint3 t : SV_GroupThreadID, uint i : SV_GroupIndex)
         if (ToneSdrWhite > 0) c = ToSrgb(saturate(c / ToneSdrWhite));
         sum += ToLinear(min(c * ToneBrightness, 1));
     }
-    ToneSums[i] = sum;
-    GroupMemoryBarrierWithGroupSync();
-    if (((t.x | t.y) & 1) == 0)
-    {
-        float3 cell = ToneSums[i] + ToneSums[i + 1] + ToneSums[i + 16] + ToneSums[i + 17];
-        uint at = ToneSlot * 1024 + ((t.y >> 1) * 8 + (t.x >> 1)) * 16;
-        Tones.Store3(at, asuint(cell / 16));
-        Tones.Store(at + 12, 1);
-    }
+    uint3 code = uint3(round(ToSrgb(saturate(sum / 4)) * 255));
+    Tones.Store((ToneFirst + id.y * ToneCells.x + id.x) * 4, 0xFF000000u | (code.r << 16) | (code.g << 8) | code.b);
 }

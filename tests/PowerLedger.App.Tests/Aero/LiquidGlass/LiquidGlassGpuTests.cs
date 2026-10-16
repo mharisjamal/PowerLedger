@@ -42,6 +42,9 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
         LiquidGlassSources.ExcludeFromCapture = true;
         LiquidGlassSources.AllowScreenshots = false;
         LiquidGlassSources.GpuAllowed = true;
+        // At the display's pace whatever pace a busy test before this one left the process's glass (as slow as a frame a
+        // second): the scenes count frames and reads as the display paces them.
+        LiquidGlassGovernor.Reset();
         var image = new Image { Source = picture, Stretch = Stretch.Fill };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
         var desk = ScreenCapture.Show(new Border { Background = Brushes.Black, Child = image }, 0, 0, 10, 10);
@@ -685,12 +688,16 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
 
     /// <summary>
     /// Plan AD: on the GPU path the piece's tone is read on the GPU from the desktop copy as its glass is drawn: a white
-    /// window behind gives a white tone, a black one a black tone, and a still desktop asks for no more reads.
+    /// window behind gives a white tone, a black one a black tone, and a still desktop asks for no more reads. The same
+    /// after a busy test left the process's glass at a frame a second (the governor's pace is the process's).
     /// </summary>
-    [Fact]
-    public void On_the_gpu_the_piece_reads_the_tone_of_what_is_behind_it()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void On_the_gpu_the_piece_reads_the_tone_of_what_is_behind_it(bool afterABusyTest)
         => UiHarness.OnUi(() => ScreenCapture.Aware(() =>
         {
+            if (afterABusyTest) LiquidGlassGovernor.Leave(LiquidGlassGovernor.Slowest);
             var white = FakeGlassSource.Picture(400, 300, (_, _) => (255, 255, 255));
             using var scene = Show(white, 300, 200, 300, 200);
             UiHarness.PumpUntil(() => scene.Glass.OnGpu && Gpu(scene).Frames > 0, TimeSpan.FromSeconds(20), "a frame on the GPU path");
@@ -707,26 +714,45 @@ public class LiquidGlassGpuTests(ITestOutputHelper output)
             var desk = FakeGlassSource.Picture(400, 300, (x, _) => x < 200 ? ((byte)255, (byte)255, (byte)255) : ((byte)0, (byte)0, (byte)0));
             var deskPixels = new byte[400 * 300 * 4];
             desk.CopyPixels(deskPixels, 400 * 4, 0);
-            var expected = new float[BackdropTone.Cells * 3];
+            var (cols, rows) = BackdropTone.GridFor(300, 200);
+            var expected = new uint[cols * rows];
             BackdropTone.MeasureBent(deskPixels, 400, 300, 400 * 4, new Rect(0, 0, 400, 300), new Rect(0, 0, 300, 200), LiquidGlassRecipe.Brightness,
-                DisplacementField.Shared(300, 200, dpi), LiquidGlassRecipe.Scale, expected).ShouldBe(new Rect(0, 0, 300, 200));
-            double Off() => Enumerable.Range(0, BackdropTone.Cells).Max(c => Math.Abs(scene.Glass.Tones.Cells[c * 3 + 1] - expected[c * 3 + 1]));
+                DisplacementField.Shared(300, 200, dpi), LiquidGlassRecipe.Scale, cols, rows, BackdropTone.GpuSamples, expected).ShouldBe(new Rect(0, 0, 300, 200));
+            // A few cells on a sharp edge may read a pixel apart; the cells on the whole agree.
+            double Off() => scene.Glass.Tones.Count != cols * rows ? 1
+                : Enumerable.Range(0, cols * rows).Select(c => Math.Abs(BackdropTone.Luminance(scene.Glass.Tones.Cells[c]) - BackdropTone.Luminance(expected[c]))).OrderBy(d => d).ElementAt(cols * rows * 99 / 100);
             UiHarness.PumpUntil(() => scene.Glass.Tone != null && Off() < 0.02, TimeSpan.FromSeconds(5), "the cells the glass shows");
+            output.WriteLine($"cells {cols} by {rows}, the GPU's off the CPU's by {Off():0.0000} or less in 99 of 100");
             scene.Glass.Tones.Region.ShouldBe(new Rect(0, 0, 300, 200), "the cells cover the whole piece");
-            expected.Where((_, k) => k % 3 == 1).ShouldContain(v => v > 0.9f, "white cells");
-            expected.Where((_, k) => k % 3 == 1).ShouldContain(v => v < 0.05f, "black cells");
+            expected.ShouldContain(c => BackdropTone.Luminance(c) > 0.9, "white cells");
+            expected.ShouldContain(c => BackdropTone.Luminance(c) < 0.05, "black cells");
             ((Border)scene.Desk.Content).Child = new Border { Background = Brushes.Black };
             UiHarness.PumpUntil(() => scene.Glass.Tone is { } t && Contrast.Luminance(t) < 0.01, TimeSpan.FromSeconds(5), "a black tone");
             ((Border)scene.Desk.Content).Child = new Border { Background = new SolidColorBrush(Color.FromRgb(0x40, 0x80, 0xC0)) };
             UiHarness.PumpUntil(() => scene.Glass.Tone is { } t && Math.Abs(t.B - Math.Min(255, 0xC0 * 1.1)) <= 3 && Math.Abs(t.R - 0x40 * 1.1) <= 3, TimeSpan.FromSeconds(5),
                 "the blue's tone, brightened as the glass is");
-            UiHarness.Pump(TimeSpan.FromMilliseconds(500));
-            var reads = Gpu(scene).ToneReads;
-            UiHarness.Pump(TimeSpan.FromSeconds(1));
-            output.WriteLine($"tone {scene.Glass.Tone}; reads at rest over 1 s: {Gpu(scene).ToneReads - reads}");
-            (Gpu(scene).ToneReads - reads).ShouldBe(0, "nothing read at rest");
+            var atRest = ReadsAtRest(() => Gpu(scene).ToneIdle, () => Gpu(scene).ToneReads, () => Gpu(scene).Frames);
+            output.WriteLine($"tone {scene.Glass.Tone}; reads over a still second: {atRest}");
+            atRest.ShouldBe(0L, "nothing read at rest");
             return 0;
         }));
+
+    /// <summary>
+    /// The tone reads over a second in which the desktop stood still, once no read was owed (<paramref name="idle"/>): a
+    /// second in which a change reached the glass anyway (<paramref name="frames"/> moved: a frame of the last change late,
+    /// or another window's) is no rest, and the next is looked at. Null when none of five was still.
+    /// </summary>
+    internal static long? ReadsAtRest(Func<bool> idle, Func<long> reads, Func<long> frames)
+    {
+        for (var look = 0; look < 5; look++)
+        {
+            UiHarness.PumpUntil(idle, TimeSpan.FromSeconds(5), "the reads owed done");
+            var (readsBefore, framesBefore) = (reads(), frames());
+            UiHarness.Pump(TimeSpan.FromSeconds(1));
+            if (frames() == framesBefore) return reads() - readsBefore;
+        }
+        return null;
+    }
 
     /// <summary>
     /// A still desktop: the capture thread waits for Windows' next frame a quarter of a second at a time, not one display

@@ -140,6 +140,7 @@
     <Color x:Key="A.C.GlassTintBottom">#00FFFFFF</Color>
     <sys:Double x:Key="A.Glass.Glow">0.7</sys:Double>
     <sys:Boolean x:Key="A.Glass.Live">True</sys:Boolean>
+    <sys:Boolean x:Key="A.Glass.Strict">False</sys:Boolean>
     <Color x:Key="A.C.TextShadow">#47000A28</Color>
     <x:Null x:Key="A.Glass.TextShadow" />
     <Color x:Key="A.C.AccentGlass">#DBD9F25A</Color>

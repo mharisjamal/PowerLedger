@@ -76,12 +76,20 @@ internal static class ScreenCapture
             // A run that died on the screen: its windows went with it, and the screen is ours.
         }
         var before = SetThreadDpiAwarenessContext(PerMonitorAwareV2);
+        // The capture thread runs below normal by design (the glass gives way to the person's own work), and a PC with
+        // every core taken by threads of normal priority (another test run, a build) gives it no turn for seconds, but for
+        // Windows' boost of a starved thread every few. Holding the screen, the process runs a class higher, so that thread
+        // shares the cores as a normal one would: the tests measure the glass, not the PC's load.
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        var priority = process.PriorityClass;
+        process.PriorityClass = System.Diagnostics.ProcessPriorityClass.AboveNormal;
         try
         {
             return work();
         }
         finally
         {
+            process.PriorityClass = priority;
             SetThreadDpiAwarenessContext(before);
             Screen.ReleaseMutex();
         }

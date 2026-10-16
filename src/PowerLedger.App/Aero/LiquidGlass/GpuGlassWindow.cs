@@ -419,12 +419,13 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
     // ---- Tones (Plan AD) ----
 
     private static readonly long ToneTicks = (long)(System.Diagnostics.Stopwatch.Frequency * LiquidGlassBackdrop.ToneEvery.TotalSeconds);
-    private const int ToneFloats = BackdropTone.Cells * 3;
-    private readonly float[] _toneCells = new float[GpuGlassRenderer.MaxTones * ToneFloats], _toneCellsShown = new float[GpuGlassRenderer.MaxTones * ToneFloats];
-    private readonly Rect[] _toneRegions = new Rect[GpuGlassRenderer.MaxTones], _toneRegionsShown = new Rect[GpuGlassRenderer.MaxTones];
+    // Each read's cells, the read's own (capture thread), the handed over (under the gate) and the shown (UI thread); they
+    // grow to the window's cells and stay.
+    private uint[] _toneRead = [], _toneCells = [], _toneCellsShown = [];
+    private readonly ToneLayout[] _toneReadLayouts = new ToneLayout[GpuGlassRenderer.MaxTones], _toneLayouts = new ToneLayout[GpuGlassRenderer.MaxTones],
+        _toneLayoutsShown = new ToneLayout[GpuGlassRenderer.MaxTones];
     private readonly int[] _toneIds = new int[GpuGlassRenderer.MaxTones], _toneIdsShown = new int[GpuGlassRenderer.MaxTones];
-    private readonly float[] _toneRead = new float[GpuGlassRenderer.MaxTones * ToneFloats];
-    private readonly Rect[] _toneReadRegions = new Rect[GpuGlassRenderer.MaxTones];
+    private int _toneCellCount;
     private readonly object _toneGate = new();
     private int _toneCount;
     private long _toneAt;
@@ -436,6 +437,9 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
 
     /// <summary>How many times this window's tones were read, for the tests.</summary>
     internal long ToneReads => Interlocked.Read(ref _toneReads);
+
+    /// <summary>Whether no read is owed, waiting for its moment, or on its way to the pieces, for the tests.</summary>
+    internal bool ToneIdle => !_toneOwed && !_toneLaterQueued && !_tonePublishQueued;
 
     /// <summary>Under the GPU lock (the capture thread, or the UI thread's DrawNow): each piece's tone read on the GPU and
     /// handed to the UI thread; or, read too lately, a read asked for once the moment has passed.</summary>
@@ -452,15 +456,30 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         _toneOwed = false;
         _toneAt = now;
         var jobs = Volatile.Read(ref _jobs);
-        var count = renderer.Tones(jobs, _toneRead, _toneReadRegions);
+        // Room for every piece's cells, grown once.
+        var need = 0;
+        foreach (var job in jobs)
+        {
+            var (cols, rows) = BackdropTone.GridFor(job.Box.Width, job.Box.Height);
+            need += cols * rows;
+        }
+        need = Math.Min(need, GpuGlassRenderer.MaxToneCells);
+        if (_toneRead.Length < need) _toneRead = new uint[need];
+        var count = renderer.Tones(jobs, _toneRead, _toneReadLayouts);
         if (count == 0) return;
         Interlocked.Increment(ref _toneReads);
+        var used = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (_toneReadLayouts[i].Read) used = Math.Max(used, _toneReadLayouts[i].First + _toneReadLayouts[i].Cols * _toneReadLayouts[i].Rows);
+        }
         lock (_toneGate)
         {
+            if (_toneCells.Length < used) _toneCells = new uint[_toneRead.Length];
             for (var i = 0; i < count; i++) _toneIds[i] = jobs[i].Id;
-            Array.Copy(_toneRead, _toneCells, count * ToneFloats);
-            Array.Copy(_toneReadRegions, _toneRegions, count);
-            _toneCount = count;
+            Array.Copy(_toneRead, _toneCells, used);
+            Array.Copy(_toneReadLayouts, _toneLayouts, count);
+            (_toneCount, _toneCellCount) = (count, used);
         }
         if (_tonePublishQueued) return;
         _tonePublishQueued = true;
@@ -476,16 +495,19 @@ internal sealed class GpuGlassWindow : IGpuGlassConsumer, IDisposable
         lock (_toneGate)
         {
             count = _toneCount;
+            if (_toneCellsShown.Length < _toneCellCount) _toneCellsShown = new uint[_toneCells.Length];
             Array.Copy(_toneIds, _toneIdsShown, count);
-            Array.Copy(_toneCells, _toneCellsShown, count * ToneFloats);
-            Array.Copy(_toneRegions, _toneRegionsShown, count);
+            Array.Copy(_toneCells, _toneCellsShown, _toneCellCount);
+            Array.Copy(_toneLayouts, _toneLayoutsShown, count);
         }
         foreach (var p in _pieces.Values)
         {
             for (var i = 0; i < count; i++)
             {
                 if (_toneIdsShown[i] != p.Id) continue;
-                if (!_toneRegionsShown[i].IsEmpty && p.Element.OnGpu) p.Element.SetTones(new ReadOnlySpan<float>(_toneCellsShown, i * ToneFloats, ToneFloats), _toneRegionsShown[i]);
+                var layout = _toneLayoutsShown[i];
+                if (layout.Read && p.Element.OnGpu)
+                    p.Element.SetTones(new ReadOnlySpan<uint>(_toneCellsShown, layout.First, layout.Cols * layout.Rows), layout.Cols, layout.Rows, layout.Region);
                 break;
             }
         }

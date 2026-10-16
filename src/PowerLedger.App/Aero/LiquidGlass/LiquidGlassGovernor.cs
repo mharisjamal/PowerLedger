@@ -103,6 +103,17 @@ internal static class LiquidGlassGovernor
         }
     }
 
+    /// <summary>For a test: the pace as a busy test before it leaves the process, <paramref name="interval"/> between
+    /// frames, just sampled.</summary>
+    internal static void Leave(TimeSpan interval)
+    {
+        lock (Gate)
+        {
+            _interval = interval;
+            (_started, _sampledAt) = (true, Clock.Elapsed);
+        }
+    }
+
     private static TimeSpan RefreshPeriod()
     {
         var info = new DwmTimingInfo { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<DwmTimingInfo>() };

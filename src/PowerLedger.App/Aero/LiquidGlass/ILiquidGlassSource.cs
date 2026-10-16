@@ -36,6 +36,10 @@ internal interface ILiquidGlassSource
     /// <summary>Where <see cref="Image"/> lies on the virtual screen, in physical pixels.</summary>
     Rect ScreenBounds { get; }
 
-    /// <summary>New pixels, new bounds or a new kind; raised on the UI thread.</summary>
+    /// <summary>A new picture, new bounds or a new kind; raised on the UI thread.</summary>
     event Action? Changed;
+
+    /// <summary>New pixels in the same picture (the CPU path's live frames, written into its bitmap): the glass draws them
+    /// by itself; raised on the UI thread so a piece reads its tone again (at most ten times a second).</summary>
+    event Action? Repainted;
 }
