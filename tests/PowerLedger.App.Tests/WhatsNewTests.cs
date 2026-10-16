@@ -75,11 +75,24 @@ public class WhatsNewTests
             "Optional data sharing: help improve the estimates by sharing anonymous readings; ask in Settings → Privacy.",
         ]);
 
+    /// <summary>0.12.0: the Apps page and text that stays readable on any background.</summary>
+    [Fact]
+    public void The_0_12_0_points_match_exactly_and_come_first()
+    {
+        WhatsNew.Releases[0].Version.ShouldBe("0.12.0", "newest first");
+        PointsOf("0.12.0").ShouldBe([
+            "New Apps page: see what each program on your PC used and cost today, this week or this month, sorted from most to least and kept only on your PC.",
+            "The Dashboard shows today's top app; select it to see every app.",
+            "Aero's text and icons now turn dark over bright windows and wallpapers and stay white over dark ones, even within one pane, so every word stays readable.",
+        ]);
+        WhatsNew.Since("0.11.0", "0.12.0").ShouldBe(PointsOf("0.12.0"));
+    }
+
     /// <summary>0.11.0: Plan AC, truer readings and a lighter PowerLedger.</summary>
     [Fact]
-    public void The_0_11_0_points_match_exactly_and_come_first()
+    public void The_0_11_0_points_match_exactly()
     {
-        WhatsNew.Releases[0].Version.ShouldBe("0.11.0", "newest first");
+        WhatsNew.Releases[1].Version.ShouldBe("0.11.0");
         PointsOf("0.11.0").ShouldBe([
             "Plugged in laptops read truer, usually 10 to 20% higher: PowerLedger now learns how the rest of your laptop rises with the processor.",
             "Sleep counts: what your PC uses asleep is learned from your laptop's battery and shown as Asleep (estimated). Hibernating, or shutting down with Fast Startup, counts as nothing.",
@@ -97,7 +110,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_10_points_match_exactly()
     {
-        WhatsNew.Releases[1].Version.ShouldBe("0.10.10");
+        WhatsNew.Releases[2].Version.ShouldBe("0.10.10");
         PointsOf("0.10.10").ShouldBe([
             "Aero's glass keeps up with the window: drag or resize it and the glass moves in the same frame, at your display's refresh rate.",
             "The glass shows your desktop right away when you bring PowerLedger back after minimising everything.",
@@ -109,7 +122,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_9_points_match_exactly()
     {
-        WhatsNew.Releases[2].Version.ShouldBe("0.10.9");
+        WhatsNew.Releases[3].Version.ShouldBe("0.10.9");
         PointsOf("0.10.9").ShouldBe([
             "Aero is real liquid glass: the background ripples and bends through every panel, with a soft glowing edge.",
             "Aero's Dashboard and Settings are laid out as the new design: fourteen glass bars by day, week or month, a ring for where the power goes, and a glass card for each style.",
@@ -122,7 +135,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_8_points_match_exactly()
     {
-        WhatsNew.Releases[3].Version.ShouldBe("0.10.8");
+        WhatsNew.Releases[4].Version.ShouldBe("0.10.8");
         PointsOf("0.10.8").ShouldBe([
             "Aero has a side scrollbar that lights up when your pointer comes near.",
             "Aero's glass edges are softer by default (Edge light 10%).",
@@ -134,7 +147,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_7_points_match_exactly()
     {
-        WhatsNew.Releases[4].Version.ShouldBe("0.10.7");
+        WhatsNew.Releases[5].Version.ShouldBe("0.10.7");
         PointsOf("0.10.7").ShouldBe([
             "Aero is now by request: press Request Aero in Settings, Look, and send your request ID to the PowerLedger owner. Earlier invite codes no longer work.",
         ]);
@@ -146,7 +159,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_6_points_match_exactly()
     {
-        WhatsNew.Releases[5].Version.ShouldBe("0.10.6");
+        WhatsNew.Releases[6].Version.ShouldBe("0.10.6");
         PointsOf("0.10.6").ShouldBe([
             "Aero's pills, buttons and panels have the demo's thin glass edges.",
             "Every glass style now shows what is really behind PowerLedger.",
@@ -159,7 +172,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_5_points_match_exactly()
     {
-        WhatsNew.Releases[6].Version.ShouldBe("0.10.5");
+        WhatsNew.Releases[7].Version.ShouldBe("0.10.5");
         PointsOf("0.10.5").ShouldBe([
             "More is measured on workstations and servers: Windows power meters, a UPS on another computer (Network UPS Tools), Intel Arc card power and server power readings.",
             "Aero Settings has the network UPS section too.",
@@ -171,7 +184,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_4_points_match_exactly()
     {
-        WhatsNew.Releases[7].Version.ShouldBe("0.10.4");
+        WhatsNew.Releases[8].Version.ShouldBe("0.10.4");
         PointsOf("0.10.4").ShouldBe([
             "Aero has no frame around it any more, and its glass has thin, clean edges.",
             "Clear shows whatever is behind PowerLedger, live: your desktop and your other windows.",
@@ -184,7 +197,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_3_points_match_exactly()
     {
-        WhatsNew.Releases[8].Version.ShouldBe("0.10.3");
+        WhatsNew.Releases[9].Version.ShouldBe("0.10.3");
         PointsOf("0.10.3").ShouldBe([
             "Aero is now invite only. Enter your invite code in Settings, Look, to turn it on; everyone else uses Midnight.",
             "Aero looks like its film: the glass glows with the Windows 11 bloom. Settings, Glass, Behind the glass has Aero bloom, My desktop or Plain.",
@@ -198,7 +211,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_2_points_match_exactly()
     {
-        WhatsNew.Releases[9].Version.ShouldBe("0.10.2");
+        WhatsNew.Releases[10].Version.ShouldBe("0.10.2");
         PointsOf("0.10.2").ShouldBe([
             "Aero's sidebar and panels stay clear glass over dark parts of your wallpaper too.",
         ]);
@@ -209,7 +222,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_1_points_match_exactly()
     {
-        WhatsNew.Releases[10].Version.ShouldBe("0.10.1");
+        WhatsNew.Releases[11].Version.ShouldBe("0.10.1");
         PointsOf("0.10.1").ShouldBe([
             "Aero floats on your desktop: only the glass is the window, and your desktop shows clearly between the panels.",
             "Brighter glass, closer to the demo. Increase contrast in Settings keeps the darker, easier to read glass.",
@@ -222,7 +235,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_10_0_points_match_exactly()
     {
-        WhatsNew.Releases[11].Version.ShouldBe("0.10.0");
+        WhatsNew.Releases[12].Version.ShouldBe("0.10.0");
         PointsOf("0.10.0").ShouldBe([
             "Aero, a new Liquid Glass look, is now the default, with a short tour the first time it opens. Switch look brings back Midnight or Classic.",
             "Settings has a Glass section: Clear, Tinted, Dark or your own colour, plus Reduce transparency and Increase contrast.",
@@ -237,7 +250,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_4_points_match_exactly()
     {
-        WhatsNew.Releases[12].Version.ShouldBe("0.9.4");
+        WhatsNew.Releases[13].Version.ShouldBe("0.9.4");
         PointsOf("0.9.4").ShouldBe(["Where the power went names each part: your processor, graphics card, monitors, and memory and drives."]);
         WhatsNew.Since("0.9.3", "0.9.4").ShouldBe(PointsOf("0.9.4"));
     }
@@ -246,7 +259,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_3_points_match_exactly()
     {
-        WhatsNew.Releases[13].Version.ShouldBe("0.9.3");
+        WhatsNew.Releases[14].Version.ShouldBe("0.9.3");
         PointsOf("0.9.3").ShouldBe(["Check now downloads a new version again and offers Restart to update, and the Midnight sidebar shows the version you have."]);
         WhatsNew.Since("0.9.2", "0.9.3").ShouldBe(PointsOf("0.9.3"));
     }
@@ -255,7 +268,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_2_points_match_exactly()
     {
-        WhatsNew.Releases[14].Version.ShouldBe("0.9.2");
+        WhatsNew.Releases[15].Version.ShouldBe("0.9.2");
         PointsOf("0.9.2").ShouldBe(["Check now installs a new version straight away, and PowerLedger looks for new versions every 15 minutes."]);
         WhatsNew.Since("0.9.1", "0.9.2").ShouldBe(PointsOf("0.9.2"));
     }
@@ -264,7 +277,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_1_points_match_exactly()
     {
-        WhatsNew.Releases[15].Version.ShouldBe("0.9.1");
+        WhatsNew.Releases[16].Version.ShouldBe("0.9.1");
         PointsOf("0.9.1").ShouldBe(["The Energy used card starts on Since start, and its button switches it to Today, This week or This month."]);
         WhatsNew.Since("0.9.0", "0.9.1").ShouldBe(PointsOf("0.9.1"));
     }
@@ -273,7 +286,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_9_0_points_match_exactly()
     {
-        WhatsNew.Releases[16].Version.ShouldBe("0.9.0");
+        WhatsNew.Releases[17].Version.ShouldBe("0.9.0");
         PointsOf("0.9.0").ShouldBe(
         [
             "PowerLedger now keeps itself up to date: new versions install on their own, and it reopens afterwards.",
@@ -286,7 +299,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_8_1_points_match_exactly()
     {
-        WhatsNew.Releases[17].Version.ShouldBe("0.8.1");
+        WhatsNew.Releases[18].Version.ShouldBe("0.8.1");
         PointsOf("0.8.1").ShouldBe(
         [
             "Every graphics card counts now, older NVIDIA cards such as the Quadro 6000 included, and a PC with several cards adds them all up.",
@@ -300,7 +313,7 @@ public class WhatsNewTests
     [Fact]
     public void The_0_8_0_points_match_exactly()
     {
-        WhatsNew.Releases[18].Version.ShouldBe("0.8.0");
+        WhatsNew.Releases[19].Version.ShouldBe("0.8.0");
         PointsOf("0.8.0").ShouldBe(
         [
             "A new look: a dashboard with your power, today's energy and idle waste at a glance. Prefer the classic look? Switch back any time in Settings → Preferences.",

@@ -146,6 +146,14 @@ history already stored on it. Nothing new is collected for it and nothing about 
 covers it because it sends nothing. The carbon estimate uses the CO₂ per kWh figure in Settings; to name where that
 figure comes from, it reads the country or region set in Windows, on the PC, and sends it nowhere.
 
+## Apps
+
+The Apps page shows how much energy each program on the PC used. To work it out, the PowerLedger service notes, on
+the PC, which programs run, how much processor and graphics time each takes, and which one has the window in front.
+It keeps one line per program per hour, for 400 days, in the history on the PC. None of it is ever sent: it is not in
+data sharing, not synced to a household, and not attached to feedback. Programs another account on the PC ran are
+shown to you only as "Other users", without their names.
+
 ## Changes
 
 When what a switch sends changes, the consent version goes up. PowerLedger then sends nothing until you have chosen
