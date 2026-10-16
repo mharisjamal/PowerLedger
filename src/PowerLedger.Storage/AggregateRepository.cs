@@ -28,6 +28,14 @@ public sealed class AggregateRepository(SqliteDatabase db)
     /// <summary>Hour rows with from ≤ start &lt; to, oldest first. Starts come back with a zero offset.</summary>
     public List<Aggregate> ReadHours(DateTimeOffset from, DateTimeOffset to) => Read(HourTable, from, to);
 
+    /// <summary>Minute rows, as <see cref="ReadMinutes(DateTimeOffset, DateTimeOffset)"/>, on <paramref name="c"/> in whatever
+    /// transaction it is in.</summary>
+    internal static List<Aggregate> ReadMinutes(SqliteConnection c, DateTimeOffset from, DateTimeOffset to) => Read(c, MinuteTable, from, to);
+
+    /// <summary>Hour rows, as <see cref="ReadHours(DateTimeOffset, DateTimeOffset)"/>, on <paramref name="c"/> in whatever
+    /// transaction it is in.</summary>
+    internal static List<Aggregate> ReadHours(SqliteConnection c, DateTimeOffset from, DateTimeOffset to) => Read(c, HourTable, from, to);
+
     /// <summary>Start of the newest minute row, or null when there are none.</summary>
     public DateTimeOffset? LastMinuteStart() => LastStart(MinuteTable);
 
@@ -97,6 +105,11 @@ public sealed class AggregateRepository(SqliteDatabase db)
     private List<Aggregate> Read(string table, DateTimeOffset from, DateTimeOffset to)
     {
         using var c = db.Open();
+        return Read(c, table, from, to);
+    }
+
+    private static List<Aggregate> Read(SqliteConnection c, string table, DateTimeOffset from, DateTimeOffset to)
+    {
         var upgraded = HasColumn(c, table, "asleep_wh");
         using var cmd = c.CreateCommand();
         cmd.CommandText = $"SELECT {Columns}{(upgraded ? ", " + Version5 : "")} FROM {table} WHERE start_ms >= $from AND start_ms < $to ORDER BY start_ms";

@@ -119,6 +119,22 @@ public class AppQueriesTests
         (range.Apps.Sum(a => a.Wh) + range.Untraced.Wh).ShouldBe(10 + 2 + 20 + 4, 1e-9);
     }
 
+    /// <summary>Review item 11: a minute the service writes while the page reads must not show as energy no app was given;
+    /// every read is of one moment of the database.</summary>
+    [Fact]
+    public void A_minute_written_while_the_page_reads_waits_for_the_next_read()
+    {
+        using var t = new TestDatabase();
+        var rows = new AggregateRepository(t.Db);
+        for (var m = 0; m < 10; m++) rows.UpsertMinute(Hour(H0.AddMinutes(m), 0.2, 0, 0.1, 0.1, on: 60));
+        App(t, H0, "a", "A", 2.0);                                              // every minute so far traced
+        using var reader = new SqliteDatabase(t.Path, readOnly: true);
+        var queries = new AppQueries(reader) { AfterAppRows = () => rows.UpsertMinute(Hour(H0.AddMinutes(10), 0.2, 0, 0.1, 0.1, on: 60)) };
+
+        queries.Read(H0, H0.AddHours(1)).Untraced.Wh.ShouldBe(0, 1e-9);
+        new AppQueries(reader).Read(H0, H0.AddHours(1)).Untraced.Wh.ShouldBe(0.2, 1e-9);    // the next read sees it
+    }
+
     /// <summary>An hour whose apps were given a little more than its row holds (the hour under way, its apps a tick ahead
     /// of its last minute) traces nothing less than nothing.</summary>
     [Fact]

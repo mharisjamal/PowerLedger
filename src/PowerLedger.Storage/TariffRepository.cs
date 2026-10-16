@@ -21,6 +21,12 @@ public sealed class TariffRepository(SqliteDatabase db)
     public List<Tariff> All()
     {
         using var c = db.Open();
+        return All(c);
+    }
+
+    /// <summary>Every tariff, oldest first, read on <paramref name="c"/> in whatever transaction it is in.</summary>
+    internal static List<Tariff> All(Microsoft.Data.Sqlite.SqliteConnection c)
+    {
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT effective_from_ms, price_micro, currency FROM tariffs ORDER BY effective_from_ms, id";
         using var r = cmd.ExecuteReader();

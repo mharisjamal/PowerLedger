@@ -67,31 +67,31 @@ public sealed class AppQueries(SqliteDatabase db)
 
     private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
 
+    /// <summary>Test seam: called between reading the app rows and the hour rows, where the service may write a minute.</summary>
+    internal Action? AfterAppRows { get; init; }
+
     /// <summary>The apps and the hour rows' lines for <paramref name="from"/> to <paramref name="to"/>, most energy
-    /// first. A database the service has not upgraded to version 6 yet reads as one with no apps.</summary>
+    /// first. Everything is read on one connection in one read transaction, so of one moment of the database: a minute the
+    /// service writes meanwhile is never counted as energy no app was given (review item 11). A database the service has not
+    /// upgraded to version 6 yet reads as one with no apps.</summary>
     public AppsRange Read(DateTimeOffset from, DateTimeOffset to)
     {
         var hourFrom = Ceiling(from, Hour);
         var hourTo = Ceiling(to, Hour);
-        var tariffs = new TariffRepository(db).All();
+        using var c = db.Open();
+        using var snapshot = c.BeginTransaction(deferred: true);
+        var tariffs = TariffRepository.All(c);
         var schedule = new TariffSchedule(tariffs);
-        List<AppTotal> totals;
-        Dictionary<DateTimeOffset, double> traced;
-        List<(DateTimeOffset Start, Dictionary<string, double> Wh)> spans;
-        DateTimeOffset start;
-        DateTimeOffset? counted;
-        using (var c = db.Open())
-        {
-            counted = HasTable(c) ? First(c) : null;
-            if (counted is not { } first) return AppsRange.None(hourFrom, hourTo, null, schedule.Currency);
-            start = first > hourFrom ? first : hourFrom;
-            if (start >= hourTo) return AppsRange.None(hourFrom, hourTo, first, schedule.Currency);
-            // Summed in the database, not row by row here: a year holds some 260,000 app rows. The hours are cut where a
-            // tariff takes effect, so each span is priced at one tariff.
-            var cuts = tariffs.Select(t => t.EffectiveFrom).Where(at => at > start && at < hourTo).Distinct().Order().ToList();
-            (totals, spans) = Totals(c, start, hourTo, cuts);
-            traced = Traced(c, start, hourTo);
-        }
+        var counted = HasTable(c) ? First(c) : null;
+        if (counted is not { } first) return AppsRange.None(hourFrom, hourTo, null, schedule.Currency);
+        var start = first > hourFrom ? first : hourFrom;
+        if (start >= hourTo) return AppsRange.None(hourFrom, hourTo, first, schedule.Currency);
+        // Summed in the database, not row by row here: a year holds some 260,000 app rows. The hours are cut where a tariff
+        // takes effect, so each span is priced at one tariff.
+        var cuts = tariffs.Select(t => t.EffectiveFrom).Where(at => at > start && at < hourTo).Distinct().Order().ToList();
+        var (totals, spans) = Totals(c, start, hourTo, cuts);
+        var traced = Traced(c, start, hourTo);
+        AfterAppRows?.Invoke();
 
         var partial = false;
         PricedWh Priced(IEnumerable<(DateTimeOffset Start, double Wh)> slices)
@@ -109,10 +109,9 @@ public sealed class AppQueries(SqliteDatabase db)
             .OrderByDescending(a => a.Wh).ThenBy(a => a.Key, StringComparer.Ordinal).ToList();
 
         // The hour rows of the same hours, and the hour under way from its minutes.
-        var repo = new AggregateRepository(db);
-        var folded = repo.ReadHours(start, hourTo);
+        var folded = AggregateRepository.ReadHours(c, start, hourTo);
         var tailFrom = folded.Count > 0 ? folded[^1].Start + Hour : Max(start, hourTo - ReportQueries.MinuteResolutionLimit);
-        var minutes = tailFrom < hourTo ? repo.ReadMinutes(tailFrom, hourTo) : [];
+        var minutes = tailFrom < hourTo ? AggregateRepository.ReadMinutes(c, tailFrom, hourTo) : [];
         var sized = folded.Select(r => (Row: r, Length: Hour)).Concat(minutes.Select(r => (Row: r, Length: TimeSpan.FromMinutes(1)))).ToList();
 
         var untraced = sized.GroupBy(s => Floor(s.Row.Start, Hour))
