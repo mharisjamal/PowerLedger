@@ -14,20 +14,11 @@ public class AppQueriesTests
 {
     private static readonly DateTimeOffset H0 = Fixtures.T0;   // 12:00 UTC on 8 Sep 2026
 
+    /// <summary>One app's row in an hour, added to the hour's rows already there, as the service writes it.</summary>
     private static void App(TestDatabase t, DateTimeOffset hour, string key, string name, double cpu, double gpu = 0, double run = 3600, double front = 0, string? path = null)
     {
-        using var c = t.Db.Open();
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO app_hours (start_ms, app_key, name, path, cpu_wh, gpu_wh, run_s, front_s) VALUES ($s, $k, $n, $p, $c, $g, $r, $f)";
-        cmd.Parameters.AddWithValue("$s", hour.ToUnixTimeMilliseconds());
-        cmd.Parameters.AddWithValue("$k", key);
-        cmd.Parameters.AddWithValue("$n", name);
-        cmd.Parameters.AddWithValue("$p", (object?)path ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$c", cpu);
-        cmd.Parameters.AddWithValue("$g", gpu);
-        cmd.Parameters.AddWithValue("$r", run);
-        cmd.Parameters.AddWithValue("$f", front);
-        cmd.ExecuteNonQuery();
+        var repo = new AppHoursRepository(t.Db);
+        repo.ReplaceHour(hour, [.. repo.ReadHour(hour).Where(row => row.Key != key), new AppHourRow(key, name, path, cpu, gpu, run, front)]);
     }
 
     /// <summary>An hour row as the hourly job folds one: the parts at the pack, the hour on throughout.</summary>

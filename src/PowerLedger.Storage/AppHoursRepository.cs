@@ -4,9 +4,11 @@ using PowerLedger.Core;
 namespace PowerLedger.Storage;
 
 /// <summary>
-/// The service's writes to app_hours (storage version 6, Plan AE): the energy each app used, hour by hour. The service
-/// keeps the hour it is in and writes it whole with each minute's readings, so a write replaces every row of the hour: the
-/// hour's busiest apps can change as it goes on. Never shared, never synced to a household, never in an export.
+/// The service's writes to app_hours and apps (storage version 6, Plan AE): the energy each app used, hour by hour, each
+/// app's key, name and path kept once in apps and its hours naming it by number (review item 2). The service keeps the
+/// hour it is in and writes it whole with each minute's readings, so a write replaces every row of the hour: the hour's
+/// busiest apps can change as it goes on. An app's name is the newest written. Never shared, never synced to a household,
+/// never in an export.
 /// </summary>
 public sealed class AppHoursRepository(SqliteDatabase db)
 {
@@ -14,7 +16,8 @@ public sealed class AppHoursRepository(SqliteDatabase db)
     public static readonly TimeSpan Retention = TimeSpan.FromDays(400);
 
     /// <summary>Replaces every row of the hour starting at <paramref name="hourStart"/> with <paramref name="rows"/>, in one
-    /// transaction. A row with a figure that is no number is refused before anything is written.</summary>
+    /// transaction, each app's name and path written as given. A row with a figure that is no number is refused before
+    /// anything is written.</summary>
     public void ReplaceHour(DateTimeOffset hourStart, IReadOnlyList<AppHourRow> rows)
     {
         foreach (var row in rows)
@@ -33,15 +36,23 @@ public sealed class AppHoursRepository(SqliteDatabase db)
             delete.ExecuteNonQuery();
         }
 
+        // Each app once: added, or its name and path brought up to date, and its number given back.
+        using var app = c.CreateCommand();
+        app.CommandText = "INSERT INTO apps (key, name, path) VALUES ($key, $name, $path) " +
+                          "ON CONFLICT (key) DO UPDATE SET name = excluded.name, path = excluded.path RETURNING id";
+        foreach (var n in new[] { "$key", "$name", "$path" }) app.Parameters.Add(new SqliteParameter(n, null));
+
         using var insert = c.CreateCommand();
-        insert.CommandText = "INSERT INTO app_hours (start_ms, app_key, name, path, cpu_wh, gpu_wh, run_s, front_s) " +
-                             "VALUES ($start, $key, $name, $path, $cpu, $gpu, $run, $front)";
-        var names = new[] { "$start", "$key", "$name", "$path", "$cpu", "$gpu", "$run", "$front" };
-        foreach (var n in names) insert.Parameters.Add(new SqliteParameter(n, null));
+        insert.CommandText = "INSERT INTO app_hours (start_ms, app_id, cpu_wh, gpu_wh, run_s, front_s) VALUES ($start, $app, $cpu, $gpu, $run, $front)";
+        foreach (var n in new[] { "$start", "$app", "$cpu", "$gpu", "$run", "$front" }) insert.Parameters.Add(new SqliteParameter(n, null));
         foreach (var row in rows)
         {
-            object?[] values = [Rows.Ms(hourStart), row.Key, row.Name, row.Path, row.CpuWh, row.GpuWh, row.RunSeconds, row.FrontSeconds];
-            for (var i = 0; i < values.Length; i++) insert.Parameters[i].Value = values[i] ?? DBNull.Value;
+            app.Parameters[0].Value = row.Key;
+            app.Parameters[1].Value = row.Name;
+            app.Parameters[2].Value = (object?)row.Path ?? DBNull.Value;
+            var id = (long)app.ExecuteScalar()!;
+            object[] values = [Rows.Ms(hourStart), id, row.CpuWh, row.GpuWh, row.RunSeconds, row.FrontSeconds];
+            for (var i = 0; i < values.Length; i++) insert.Parameters[i].Value = values[i];
             insert.ExecuteNonQuery();
         }
         tx.Commit();
@@ -52,7 +63,8 @@ public sealed class AppHoursRepository(SqliteDatabase db)
     {
         using var c = db.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT app_key, name, path, cpu_wh, gpu_wh, run_s, front_s FROM app_hours WHERE start_ms = $start";
+        cmd.CommandText = "SELECT a.key, a.name, a.path, h.cpu_wh, h.gpu_wh, h.run_s, h.front_s FROM app_hours h JOIN apps a ON a.id = h.app_id " +
+                          "WHERE h.start_ms = $start";
         Rows.Add(cmd, "$start", Rows.Ms(hourStart));
         using var r = cmd.ExecuteReader();
         var list = new List<AppHourRow>();
@@ -63,13 +75,20 @@ public sealed class AppHoursRepository(SqliteDatabase db)
         return list;
     }
 
-    /// <summary>Deletes the rows of hours that started before the cutoff and returns how many went.</summary>
+    /// <summary>Deletes the rows of hours that started before the cutoff, and the apps no hour names any more, and returns
+    /// how many hour rows went.</summary>
     public int PurgeBefore(DateTimeOffset cutoff)
     {
         using var c = db.Open();
+        using var tx = c.BeginTransaction();
         using var cmd = c.CreateCommand();
         cmd.CommandText = "DELETE FROM app_hours WHERE start_ms < $cutoff";
         Rows.Add(cmd, "$cutoff", Rows.Ms(cutoff));
-        return cmd.ExecuteNonQuery();
+        var deleted = cmd.ExecuteNonQuery();
+        using var apps = c.CreateCommand();
+        apps.CommandText = "DELETE FROM apps WHERE id NOT IN (SELECT DISTINCT app_id FROM app_hours)";
+        apps.ExecuteNonQuery();
+        tx.Commit();
+        return deleted;
     }
 }

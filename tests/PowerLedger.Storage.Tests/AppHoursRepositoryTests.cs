@@ -30,6 +30,23 @@ public class AppHoursRepositoryTests
         repo.ReadHour(Hour.AddHours(1)).ShouldBe([Windows]);
     }
 
+    /// <summary>Review item 2: an app's key, name and path are kept once, the hours naming it by number, and a name read
+    /// later is every hour's name.</summary>
+    [Fact]
+    public void An_app_is_kept_once_and_its_newest_name_is_every_hours()
+    {
+        using var t = new TestDatabase();
+        var repo = new AppHoursRepository(t.Db);
+        repo.ReplaceHour(Hour, [Chrome with { Name = "chrome" }]);
+        repo.ReplaceHour(Hour.AddHours(1), [Chrome]);
+
+        repo.ReadHour(Hour).Single().Name.ShouldBe("Google Chrome");
+        using var c = t.Db.Open();
+        using var count = c.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM apps";
+        count.ExecuteScalar().ShouldBe(1L);
+    }
+
     [Fact]
     public void A_row_with_a_figure_that_is_no_number_is_refused_and_the_hour_is_left_as_it_was()
     {

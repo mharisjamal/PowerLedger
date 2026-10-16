@@ -183,26 +183,32 @@ internal static class Schema
         WHERE on_s > 0 AND battery_s > 0;
         """;
 
-    /// <summary>V6 (Plan AE, the Apps page): the energy each app used, per hour. A row holds an app's share of the hour's
-    /// processor and graphics energy in samples_1h (cpu_wh, gpu_wh, at the pack, the bands' own scale), so for an hour the
-    /// service attributed throughout, each column summed over every key is that hour row's figure. Keys: an app's image path
-    /// in lower case, "pkg:" and a Store package family, or one of "::windows" (Windows' own processes, and drivers'
+    /// <summary>V6 (Plan AE, the Apps page): the energy each app used, per hour. Each app is a row of apps, once (review
+    /// item 2: an hour's rows name it by number, not by its path twice over). Its key is its image path in lower case without
+    /// version folders, "pkg:" and a Store package family, or one of "::windows" (Windows' own processes, and drivers'
     /// interrupts and deferred calls), "::idle" (the processor and graphics at rest, split by no app), "::closed" (busy time
     /// no running process explains: programs that ended, or started and ended, between two looks), "::otherusers" (another
-    /// signed in user's apps) and "::other" (apps past the hour's busiest 25, and any time no look could split). Name is what the App
-    /// shows; path, where there is one, is the image the App takes the icon from. run_s is how long the app had a process
-    /// running in the hour, front_s how long it held the window in front. Never shared, never synced to a household.</summary>
+    /// signed in user's apps) and "::other" (apps past the hour's busiest 25, and any time no look could split). Name is what
+    /// the App shows, the newest the service read; path, where there is one, is the image the App takes the icon from.
+    /// An app_hours row holds an app's share of the hour's processor and graphics energy in samples_1h (cpu_wh, gpu_wh, at
+    /// the pack, the bands' own scale), so for an hour the service attributed throughout, each column summed over the hour's
+    /// rows is that hour row's figure; run_s is how long the app had a process running in the hour, front_s how long it held
+    /// the window in front. Never shared, never synced to a household.</summary>
     public const string V6 = """
+        CREATE TABLE apps (
+            id   INTEGER PRIMARY KEY,
+            key  TEXT    NOT NULL UNIQUE,
+            name TEXT    NOT NULL,
+            path TEXT
+        );
         CREATE TABLE app_hours (
             start_ms INTEGER NOT NULL,
-            app_key  TEXT    NOT NULL,
-            name     TEXT    NOT NULL,
-            path     TEXT,
+            app_id   INTEGER NOT NULL,
             cpu_wh   REAL    NOT NULL,
             gpu_wh   REAL    NOT NULL,
             run_s    REAL    NOT NULL,
             front_s  REAL    NOT NULL,
-            PRIMARY KEY (start_ms, app_key)
+            PRIMARY KEY (start_ms, app_id)
         ) WITHOUT ROWID;
         """;
 }
