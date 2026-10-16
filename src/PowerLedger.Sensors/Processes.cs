@@ -82,11 +82,12 @@ public sealed unsafe class WindowsProcesses : IProcessSource
     private static readonly ProcessLayout Layout = ProcessLayout.Current;
 
     private readonly ushort _groups = Math.Max((ushort)1, GetActiveProcessorGroupCount());
-    private readonly byte* _processors = (byte*)NativeMemory.Alloc(ProcessorEntry * ProcessorsPerGroup);
+    private byte* _processors = (byte*)NativeMemory.Alloc(ProcessorEntry * ProcessorsPerGroup);
     private char[] _chars = new char[1024];
     private byte* _buffer;
     private int _size;
     private int _used;
+    private bool _disposed;
 
     public string WindowsFolder { get; } = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd('\\').ToLowerInvariant() + "\\";
 
@@ -94,7 +95,7 @@ public sealed unsafe class WindowsProcesses : IProcessSource
     {
         into.Clear();
         processors = default;
-        if (!QueryProcesses() || !QueryProcessors(out processors)) return false;
+        if (_disposed || !QueryProcesses() || !QueryProcessors(out processors)) return false;
         Parse(new ReadOnlySpan<byte>(_buffer, _used), Layout, into);
         return true;
     }
@@ -133,11 +134,16 @@ public sealed unsafe class WindowsProcesses : IProcessSource
         }
     }
 
+    /// <summary>Frees the buffers, once however often it is called (review item 15); a read after it answers nothing.</summary>
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         NativeMemory.Free(_buffer);
         _buffer = null;
+        _used = 0;
         NativeMemory.Free(_processors);
+        _processors = null;
     }
 
     /// <summary>Every entry in <paramref name="buffer"/>, each one's offset as its name; a list that runs past the buffer

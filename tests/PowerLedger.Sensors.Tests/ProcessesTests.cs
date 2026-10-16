@@ -107,6 +107,19 @@ public class ProcessesTests
         source.Image(me.Pid, me.CreateTime + 1).ShouldBeNull();    // the id names another process now
     }
 
+    /// <summary>Review item 15: a second dispose must not free the buffers again, and a read after one answers nothing.</summary>
+    [Fact]
+    public void Disposing_twice_frees_nothing_twice_and_a_read_after_answers_nothing()
+    {
+        var source = new WindowsProcesses();
+        List<ProcessCounts> processes = [];
+        source.Read(processes, out _).ShouldBeTrue();
+        source.Dispose();
+        source.Dispose();
+        source.Read(processes, out _).ShouldBeFalse();
+        processes.ShouldBeEmpty();
+    }
+
     [Fact]
     public void An_image_is_named_by_its_description_or_else_its_file_name()
     {
