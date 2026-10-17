@@ -50,12 +50,16 @@ internal sealed class AppWatch(
     private readonly RestingWatts _cpuRest = new();
     private readonly RestingWatts _gpuRest = new();
     private readonly RestingWatts _graphicsRest = new();
+    private readonly QuietRates _quiet = new();
+    private readonly Dictionary<(int User, string Key), Group> _groups = [];
+    private readonly Dictionary<(int User, string Key), double> _quietWork = [];
     private ProcessorTimes _processors;
     private GraphicsWork? _graphics;
     private bool _looked;
     private long _looks;
     private long _ticks;
     private double _pooledSeconds;
+    private bool _poolQuiet = true;
     private DateTimeOffset? _hourNow;
 
     /// <summary>Looks taken, for the tests and the cost check.</summary>
@@ -75,7 +79,7 @@ internal sealed class AppWatch(
         var energy = EnergyIntegrator.Integrate(reading, gapSeconds);
         var seconds = energy.OnSeconds;
         var rest = new RestWatts(_cpuRest.Watts, _gpuRest.Watts, _graphicsRest.Watts);
-        Learn(reading, sample, seconds);
+        if (seconds > 0) _poolQuiet &= Learn(reading, sample, seconds);
         _graphics = sample.Graphics;
         _ticks++;
         if (seconds > 0)
@@ -131,8 +135,14 @@ internal sealed class AppWatch(
     {
         var looked = Look(out var work);
         var engineWork = _graphics;
-        if (_pools.Count == 0) return;
+        if (_pools.Count == 0)
+        {
+            _poolQuiet = true;
+            return;
+        }
         var (card, graphics) = Engines(engineWork);
+        var excess = looked ? Excess(work) : null;
+        if (looked && _poolQuiet) LearnQuiet(work);
         foreach (var pool in _pools)
         {
             var hour = pool.Hour;
@@ -144,14 +154,35 @@ internal sealed class AppWatch(
             var energy = new TickEnergy(pool.Working, pool.Card, pool.Seconds, pool.Graphics > 0 ? pool.Graphics * 3600 / pool.Seconds : null);
             var split = AppSplit.Of(energy, default, work, card, graphics);
             Add(hour, AppKeys.Idle, split.IdleCpuWh, split.IdleGpuWh);
-            Add(hour, AppKeys.Windows, split.KernelCpuWh, split.KernelGpuWh);
-            Add(hour, AppKeys.Closed, split.ClosedCpuWh, split.ClosedGpuWh);
-            foreach (var process in _live)
+            if (excess is { } above && split.ProcessorWh > 0)
             {
-                var app = TotalsOf(process, hour);
-                app.CpuWh += process.CycleDelta * split.CpuWhPerCycle;
-                app.GpuWh += process.CycleDelta * split.GpuWhPerCycle;
-                app.Run(_looks, pool.Seconds);
+                // Power above rest goes to work above rest (Plan AF): the processor's working part by each app's work above
+                // its quiet rate, and the drivers' and closed programs' by theirs.
+                var processorWh = split.ProcessorWh;
+                Add(hour, AppKeys.Windows, processorWh * above.Drivers / above.Total, split.KernelGpuWh);
+                Add(hour, AppKeys.Closed, split.GraphicsClosedCpuWh + (processorWh * above.Closed / above.Total), split.ClosedGpuWh);
+                foreach (var group in _groups.Values)
+                {
+                    if (group.Weight > 0) TotalsOf(group.Process, hour).CpuWh += processorWh * group.Weight / above.Total;
+                }
+                foreach (var process in _live)
+                {
+                    var app = TotalsOf(process, hour);
+                    app.GpuWh += process.CycleDelta * split.GpuWhPerCycle;
+                    app.Run(_looks, pool.Seconds);
+                }
+            }
+            else
+            {
+                Add(hour, AppKeys.Windows, split.KernelCpuWh, split.KernelGpuWh);
+                Add(hour, AppKeys.Closed, split.ClosedCpuWh, split.ClosedGpuWh);
+                foreach (var process in _live)
+                {
+                    var app = TotalsOf(process, hour);
+                    app.CpuWh += process.CycleDelta * split.CpuWhPerCycle;
+                    app.GpuWh += process.CycleDelta * split.GpuWhPerCycle;
+                    app.Run(_looks, pool.Seconds);
+                }
             }
             if (engineWork?.ByProcess is { } byProcess && (split.CpuWhPerGraphicsTime > 0 || split.GpuWhPerCardTime > 0))
             {
@@ -166,6 +197,47 @@ internal sealed class AppWatch(
         }
         _pools.Clear();
         _pooledSeconds = 0;
+        _poolQuiet = true;
+    }
+
+    /// <summary>
+    /// The window's work above rest (Plan AF): each app's cycles above its quiet rate over the window, and the drivers' and
+    /// closed programs' busy time above theirs, in cycles at the window's own cycles to busy time; null when nothing worked
+    /// above rest, which leaves the split by all the work.
+    /// </summary>
+    private Above? Excess(ProcessorWork work)
+    {
+        _groups.Clear();
+        foreach (var process in _live)
+        {
+            var id = (process.User, process.Key);
+            if (!_groups.TryGetValue(id, out var group)) _groups[id] = group = new Group(process);
+            group.Cycles += process.CycleDelta;
+        }
+        var seconds = _pooledSeconds;
+        double total = 0;
+        foreach (var (id, group) in _groups)
+        {
+            group.Weight = QuietRates.Excess(group.Cycles, _quiet.RateOf(id), seconds);
+            total += group.Weight;
+        }
+        var (drivers, closed) = AppSplit.Unexplained(work);
+        var cyclesPerTime = work.Explained > 0 ? work.Cycles / (double)work.Explained : 0;
+        var driversWeight = QuietRates.Excess(drivers, _quiet.RateOf(DriversKey), seconds) * cyclesPerTime;
+        var closedWeight = QuietRates.Excess(closed, _quiet.RateOf(ClosedKey), seconds) * cyclesPerTime;
+        total += driversWeight + closedWeight;
+        return total > 0 ? new Above(driversWeight, closedWeight, total) : null;
+    }
+
+    /// <summary>Learns each app's, the drivers' and closed programs' quiet rates from a window at rest throughout.</summary>
+    private void LearnQuiet(ProcessorWork work)
+    {
+        _quietWork.Clear();
+        foreach (var (id, group) in _groups) _quietWork[id] = group.Cycles;
+        var (drivers, closed) = AppSplit.Unexplained(work);
+        _quietWork[DriversKey] = drivers;
+        _quietWork[ClosedKey] = closed;
+        _quiet.Learn(_quietWork, _pooledSeconds);
     }
 
     /// <summary>The tick's time in front, to the app of the process in front in each session, as the last look knows it.</summary>
@@ -327,13 +399,14 @@ internal sealed class AppWatch(
 
     /// <summary>The parts' resting draw, learned from the ticks the machine did nothing: the processor and every graphics
     /// under <see cref="RestingWatts.QuietLoad"/>, a load nobody read counting as none.</summary>
-    private void Learn(Reading reading, Sample sample, double seconds)
+    private bool Learn(Reading reading, Sample sample, double seconds)
     {
-        if (seconds <= 0) return;
+        if (seconds <= 0) return false;
         var atRest = Quiet(sample.CpuLoad) && Quiet(sample.DGpuLoad) && Quiet(sample.DGpuBusyLoad);
         _cpuRest.Observe(reading.Timestamp, reading.Components.Cpu, seconds, atRest);
         _gpuRest.Observe(reading.Timestamp, reading.Components.Gpu, seconds, atRest);
         if (sample.IGpuW is { } graphics) _graphicsRest.Observe(reading.Timestamp, graphics, seconds, atRest);
+        return atRest;
 
         static bool Quiet(double? load) => load is not { } l || (double.IsFinite(l) && l < RestingWatts.QuietLoad);
     }
@@ -405,4 +478,18 @@ internal sealed class AppWatch(
         public double Card;
         public double Seconds;
     }
+
+    private static readonly (int User, string Key) DriversKey = (AppUsers.Machine, "::drivers");
+    private static readonly (int User, string Key) ClosedKey = (AppUsers.Machine, AppKeys.Closed);
+
+    /// <summary>One app's processes in a look: their cycles together and their weight in the split by work above rest.</summary>
+    private sealed class Group(Tracked process)
+    {
+        public Tracked Process { get; } = process;
+        public ulong Cycles;
+        public double Weight;
+    }
+
+    /// <summary>The drivers' and closed programs' weights in the split by work above rest, and every weight together.</summary>
+    private readonly record struct Above(double Drivers, double Closed, double Total);
 }

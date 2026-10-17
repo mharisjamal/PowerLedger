@@ -123,6 +123,54 @@ public sealed class AppWatchTests : IDisposable
         rows.Values.Sum(row => row.CpuWh).ShouldBe((120 * 2 + 10) / 3600.0, 1e-12);
     }
 
+    /// <summary>Plan AF: power above rest goes to work above rest. What the processor draws at rest already holds the quiet
+    /// work of the apps running then, so a busy loop is given all the power above rest, and the apps doing just what they
+    /// do at rest none of it, though their cycles now run at the loop's clock speed.</summary>
+    [Fact]
+    public void A_busy_loop_is_given_the_power_above_rest_and_apps_doing_their_quiet_work_none_of_it()
+    {
+        _processes.Add(new FakeProcesses.Fake(200, "chrome.exe", path: ChromePath, sid: Me), 100, 100);
+        _processes.Add(new FakeProcesses.Fake(100, "svchost.exe", session: 0, path: @"C:\WINDOWS\System32\svchost.exe", sid: "S-1-5-18"), 50, 50);
+        using var watch = Watch();
+        watch.Start();
+        for (var s = 1; s <= 120; s++) Tick(watch, Nine.AddSeconds(s), cpuW: 2, load: 0.01);
+        watch.Write();
+        var quiet = Stored(Nine);
+
+        _processes.Add(new FakeProcesses.Fake(300, "spin.exe", path: @"D:\spin.exe", sid: Me), 1000, 1000);
+        for (var s = 121; s <= 130; s++) Tick(watch, Nine.AddSeconds(s), cpuW: 12, load: 0.2);
+        watch.Write();
+        var rows = Stored(Nine);
+
+        rows[@"d:\spin.exe"].CpuWh.ShouldBe(10 * 10 / 3600.0, 1e-12);                   // ten seconds of the 10 W above rest
+        (rows[Chrome].CpuWh - quiet[Chrome].CpuWh).ShouldBe(0, 1e-12);
+        (rows[AppKeys.Windows].CpuWh - quiet[AppKeys.Windows].CpuWh).ShouldBe(0, 1e-12);
+        (rows[AppKeys.Idle].CpuWh - quiet[AppKeys.Idle].CpuWh).ShouldBe(10 * 2 / 3600.0, 1e-12);
+        rows.Values.Sum(row => row.CpuWh).ShouldBe(((120 * 2) + (10 * 12)) / 3600.0, 1e-12);
+    }
+
+    /// <summary>Plan AF: an app working above its quiet rate is given its share of the power above rest by that excess.</summary>
+    [Fact]
+    public void An_app_working_above_its_quiet_rate_shares_the_power_above_rest_by_its_excess()
+    {
+        var chrome = _processes.Add(new FakeProcesses.Fake(200, "chrome.exe", path: ChromePath, sid: Me), 100, 100);
+        using var watch = Watch();
+        watch.Start();
+        for (var s = 1; s <= 120; s++) Tick(watch, Nine.AddSeconds(s), cpuW: 2, load: 0.01);
+        watch.Write();
+        var quiet = Stored(Nine);
+
+        chrome.CyclesPerRead = 400;                                 // 300 above its quiet 100
+        chrome.TimePerRead = 400;
+        _processes.Add(new FakeProcesses.Fake(300, "spin.exe", path: @"D:\spin.exe", sid: Me), 900, 900);
+        Tick(watch, Nine.AddSeconds(121), cpuW: 14, load: 0.2);
+        watch.Write();
+        var rows = Stored(Nine);
+
+        (rows[Chrome].CpuWh - quiet[Chrome].CpuWh).ShouldBe(12 * 0.25 / 3600.0, 1e-12);
+        rows[@"d:\spin.exe"].CpuWh.ShouldBe(12 * 0.75 / 3600.0, 1e-12);
+    }
+
     [Fact]
     public void A_cards_working_energy_goes_by_time_on_its_engines_or_else_follows_the_processor()
     {

@@ -45,8 +45,12 @@ public readonly record struct AppSplit(
     double ClosedCpuWh, double ClosedGpuWh,
     double CpuWhPerCycle, double GpuWhPerCycle,
     double CpuWhPerGraphicsTime, bool GraphicsByLoadEngines,
-    double GpuWhPerCardTime, bool CardByLoadEngines)
+    double GpuWhPerCardTime, bool CardByLoadEngines,
+    double ProcessorWh = 0, double GraphicsClosedCpuWh = 0)
 {
+    // ProcessorWh: the working part split by busy time and cycles (nought when nothing ran, which went to idle), for a
+    // split by work above rest instead (Plan AF, QuietRates). GraphicsClosedCpuWh: the part of ClosedCpuWh that is closed
+    // programs' time on the processor's graphics, which that split leaves as it is.
     /// <summary>A tick with no energy to split, as a gap is.</summary>
     public static AppSplit Nothing => default;
 
@@ -70,6 +74,7 @@ public readonly record struct AppSplit(
             ? Math.Min(working, Positive(igpu - Positive(rest.IGpu)) * hours)
             : 0;
         var closedCpu = graphicsTime > 0 ? graphicsWh * graphicsDead / graphicsTime : 0;
+        var graphicsClosed = closedCpu;
         var processorWh = working - graphicsWh;
         if (shares.None)
         {
@@ -78,7 +83,10 @@ public readonly record struct AppSplit(
         else
         {
             closedCpu += processorWh * shares.Closed;
-            split = split with { KernelCpuWh = processorWh * shares.Kernel, CpuWhPerCycle = PerCycle(processorWh * shares.Live, processor.Cycles) };
+            split = split with
+            {
+                KernelCpuWh = processorWh * shares.Kernel, CpuWhPerCycle = PerCycle(processorWh * shares.Live, processor.Cycles), ProcessorWh = processorWh,
+            };
         }
         split = split with
         {
@@ -86,6 +94,7 @@ public readonly record struct AppSplit(
             ClosedCpuWh = closedCpu,
             CpuWhPerGraphicsTime = graphicsWh > 0 ? graphicsWh / graphicsTime : 0,
             GraphicsByLoadEngines = graphicsByLoad,
+            GraphicsClosedCpuWh = graphicsClosed,
         };
 
         // The cards: their rest, then the working part by time on their engines, or by the processor's split.
@@ -107,6 +116,15 @@ public readonly record struct AppSplit(
             ClosedGpuWh = active * shares.Closed,
             GpuWhPerCycle = PerCycle(active * shares.Live, processor.Cycles),
         };
+    }
+
+    /// <summary>The busy time no running process explains, as the split divides it: the drivers' interrupts and deferred
+    /// calls, and closed programs', in 100 ns units.</summary>
+    public static (double Drivers, double Closed) Unexplained(ProcessorWork work)
+    {
+        var unexplained = Math.Max(0, Math.Max(0, (double)work.Busy) - Math.Max(0, work.Explained));
+        var drivers = Math.Min(unexplained, Math.Max(0, work.Kernel));
+        return (drivers, unexplained - drivers);
     }
 
     /// <summary>Energy per cycle; the running processes' share is nought whenever no cycles were counted.</summary>
