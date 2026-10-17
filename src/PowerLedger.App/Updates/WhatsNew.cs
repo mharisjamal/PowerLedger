@@ -8,6 +8,10 @@ internal static class WhatsNew
     /// <summary>Newest first: <see cref="Since"/> relies on this order.</summary>
     public static IReadOnlyList<(string Version, IReadOnlyList<string> Points)> Releases { get; } =
     [
+        ("0.12.1",
+        [
+            "The Apps page now gives a busy app the power it adds, so the busiest app no longer reads about 15% low and apps quietly running in the background no longer take a share of it.",
+        ]),
         ("0.12.0",
         [
             "New Apps page: see what each program on your PC used and cost today, this week or this month, sorted from most to least and kept only on your PC.",
